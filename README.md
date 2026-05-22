@@ -48,6 +48,7 @@ cd equalify-iris
 npm install
 
 cp .env.example .env          # fill in GitHub OAuth + a model provider key
+# then edit .env to set IRIS_UPSTREAM_REPO to your target test repo (this is where issues will be filed for modifications)
 cp config.example.yaml config.yaml
 
 # load env and run
@@ -82,7 +83,7 @@ from the environment at startup; changes require a restart.
 
 - **Storage** (§10.2): local filesystem + a single SQLite file by default. `agents/` is a git
   checkout modified only by `git pull` from upstream.
-- **Model providers** (§10.3): each agent declares a *capability* (`vision`,
+- **Model providers** (§10.3): each agent declares a _capability_ (`vision`,
   `structured_output`, `text`); the deployment maps capabilities to a provider + concrete
   model. v1 ships **OpenRouter** and **Amazon Bedrock** adapters. Adding a provider is a small
   adapter implementing the `ModelProvider` interface in `src/providers/types.ts`. Models are
@@ -100,21 +101,21 @@ from the environment at startup; changes require a restart.
 All endpoints are under `/v1` and (except auth and health) require
 `Authorization: Bearer <github_token>`.
 
-| Method & path | Purpose |
-| --- | --- |
-| `GET  /v1/health` | Liveness probe |
-| `GET  /v1/auth/github/start` | Begin OAuth (web clients) |
-| `GET  /v1/auth/github/callback` | OAuth callback → returns access token |
-| `POST /v1/auth/github/device` | Begin device flow (CLI clients) |
-| `POST /v1/auth/github/device/poll` | Poll device flow (send `{ "device_code": ... }`) |
-| `GET  /v1/me` | Current GitHub user + config |
-| `GET  /v1/sessions` | List the caller's sessions |
-| `POST /v1/sessions` | Create a session, upload images (`multipart/form-data`) |
-| `GET  /v1/sessions/{id}` | Poll status; preview pending PRs when ready |
-| `GET  /v1/sessions/{id}/output` | Fetch the HTML when ready |
-| `POST /v1/sessions/{id}/feedback` | Submit feedback, trigger a re-run |
-| `POST /v1/sessions/{id}/close` | Accept output, open PRs, clean tmp (`?skip_prs=true` to skip) |
-| `GET  /v1/sessions/{id}/logs` | Fetch the run log (ndjson) |
+| Method & path                        | Purpose                                                                 |
+| ------------------------------------ | ----------------------------------------------------------------------- |
+| `GET  /v1/health`                    | Liveness probe                                                          |
+| `GET  /v1/auth/github/start`         | Begin OAuth (web clients)                                               |
+| `GET  /v1/auth/github/callback`      | OAuth callback → returns access token                                   |
+| `POST /v1/auth/github/device`        | Begin device flow (CLI clients)                                         |
+| `POST /v1/auth/github/device/poll`   | Poll device flow (send `{ "device_code": ... }`)                        |
+| `GET  /v1/me`                        | Current GitHub user + config                                            |
+| `GET  /v1/sessions`                  | List the caller's sessions                                              |
+| `POST /v1/sessions`                  | Create a session, upload images (`multipart/form-data`)                 |
+| `GET  /v1/sessions/{id}`             | Poll status; preview pending PRs when ready                             |
+| `GET  /v1/sessions/{id}/output`      | Fetch the HTML when ready                                               |
+| `POST /v1/sessions/{id}/feedback`    | Submit feedback, trigger a re-run                                       |
+| `POST /v1/sessions/{id}/close`       | Accept output, open PRs, clean tmp (`?skip_prs=true` to skip)           |
+| `GET  /v1/sessions/{id}/logs`        | Fetch the run log (ndjson)                                              |
 | `GET  /v1/sessions/{id}/diagnostics` | Timing/health summary (phase + per-call durations, in-flight/hung call) |
 
 Full copy-pasteable bash/curl walkthrough of every endpoint: **[docs/API.md](docs/API.md)**.
@@ -167,7 +168,7 @@ A few places where the PRD left a decision open, and where v1 intentionally stop
   scope.
 - **Feedback re-runs (§7.12).** Re-runs are logged separately (a `feedback_rerun` event) and the
   prior `output.html` is snapshotted to `sessions/<id>/history/` so it can be reverted to. A
-  revert *endpoint* is out of v1 API scope (not in §9); the data is preserved to enable it.
+  revert _endpoint_ is out of v1 API scope (not in §9); the data is preserved to enable it.
 - **PR contents (§7.13).** The PRD calls for committing test fixtures (input image, produced
   output, lint pass) alongside the agent. We deviate to keep the agent library code-only:
   a new-agent PR commits **only the agent file**, and puts the produced sample output (in a
@@ -178,7 +179,7 @@ A few places where the PRD left a decision open, and where v1 intentionally stop
 Intentionally **not** built in v1 (the PRD frames each as optional / alternative / out of scope):
 PostgreSQL and S3 backends (§10.2 — "supported alternative," SQLite + local FS is the v1
 reference), the per-user config endpoint (§9.1 — "not specified in v1"), automated detection of
-agent-*updates* (§7.13 names no producer; the close flow opens update PRs if a
+agent-_updates_ (§7.13 names no producer; the close flow opens update PRs if a
 `agent-updates.md` JSON file is present), and webhooks (§9.4 — out of scope, API structured to
 add them later). The only endpoint beyond the PRD is `GET /v1/health`, a standard liveness probe.
 
