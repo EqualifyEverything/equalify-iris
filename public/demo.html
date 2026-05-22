@@ -197,6 +197,27 @@
     // Spell a code out so screen readers announce each character clearly,
     // e.g. "WXYZ-1234" -> "W X Y Z dash 1 2 3 4".
     const spellCode = (code) => code.split('').map((c) => (c === '-' ? 'dash' : c)).join(' ');
+    // Copy text to the clipboard. Prefers the async Clipboard API (needs a
+    // secure context: HTTPS or localhost); falls back to execCommand('copy'),
+    // which also works over plain HTTP.
+    async function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '0';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (!ok) throw new Error('copy command failed');
+    }
 
     async function api(path, opts = {}) {
       const headers = Object.assign({}, opts.headers);
@@ -261,10 +282,10 @@
     $('copy-code').addEventListener('click', async () => {
       if (!currentUserCode) return;
       try {
-        await navigator.clipboard.writeText(currentUserCode);
+        await copyText(currentUserCode);
         $('copy-status').textContent = 'Code copied to your clipboard.';
       } catch {
-        $('copy-status').textContent = 'Copy is unavailable here — please select the code above and copy it manually.';
+        $('copy-status').textContent = 'Copy failed — please select the code above and copy it manually.';
       }
     });
 
