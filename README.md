@@ -78,7 +78,10 @@ from the environment at startup; changes require a restart.
 - **Model providers** (§10.3): each agent declares a *capability* (`vision`,
   `structured_output`, `text`); the deployment maps capabilities to a provider + concrete
   model. v1 ships **OpenRouter** and **Amazon Bedrock** adapters. Adding a provider is a small
-  adapter implementing the `ModelProvider` interface in `src/providers/types.ts`.
+  adapter implementing the `ModelProvider` interface in `src/providers/types.ts`. Models are
+  set per provider (`default_model` + `per_capability`), and can be overridden **per agent** via
+  `providers.per_agent` — either a string (provider only) or `{ provider, model }`. Resolution
+  falls back: per-agent model → provider `per_capability` → provider `default_model`.
 - **GitHub** (§9.1): OAuth is the only auth mechanism. The token that authenticates a request
   is the same token used to open PRs on `/close`, so `repo` scope is required. By default the
   service uses a **bundled OAuth App via the device flow** — no per-operator app setup, no

@@ -25,7 +25,10 @@ export interface IrisConfig {
   };
   providers: {
     default: string;
-    per_agent?: Record<string, string>;
+    // Per-agent override. A string is shorthand for a provider name (model then
+    // comes from that provider's per_capability/default_model). The object form
+    // also allows pinning a specific model for that agent.
+    per_agent?: Record<string, string | { provider?: string; model?: string }>;
     openrouter?: ProviderBlock;
     bedrock?: ProviderBlock;
     [key: string]: unknown;

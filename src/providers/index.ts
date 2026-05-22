@@ -36,12 +36,23 @@ export class ProviderRouter {
     return provider;
   }
 
-  // Resolve the provider name for an agent: per-agent override, else default.
-  private providerNameFor(agentName: string): string {
-    return this.cfg.per_agent?.[agentName] ?? this.cfg.default;
+  // Normalize a per_agent entry (string shorthand or object) to its parts.
+  private agentOverride(agentName: string): { provider?: string; model?: string } {
+    const entry = this.cfg.per_agent?.[agentName];
+    if (entry == null) return {};
+    return typeof entry === "string" ? { provider: entry } : entry;
   }
 
-  private modelFor(providerName: string, capability: Capability): string {
+  // Resolve the provider name for an agent: per-agent override, else default.
+  private providerNameFor(agentName: string): string {
+    return this.agentOverride(agentName).provider ?? this.cfg.default;
+  }
+
+  // Resolve the concrete model with fallbacks: per-agent model override ->
+  // provider's per_capability model -> provider's default_model.
+  private modelFor(agentName: string, providerName: string, capability: Capability): string {
+    const override = this.agentOverride(agentName).model;
+    if (override) return override;
     const block = this.cfg[providerName] as ProviderBlock | undefined;
     if (!block) throw new Error(`provider "${providerName}" is not configured`);
     return block.per_capability?.[capability] ?? block.default_model;
@@ -57,7 +68,7 @@ export class ProviderRouter {
   ): Promise<CompletionResult> {
     const providerName = this.providerNameFor(agentName);
     const provider = this.build(providerName);
-    const model = this.modelFor(providerName, capability);
+    const model = this.modelFor(agentName, providerName, capability);
     return provider.complete({ capability, messages, model, images: opts.images, schema: opts.schema });
   }
 }

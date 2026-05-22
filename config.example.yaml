@@ -41,8 +41,16 @@ github:
 # the deployment decides which provider serves it.
 providers:
   default: openrouter
+  # Per-agent overrides. Two forms:
+  #   <agent>: <provider>                      # route this agent to a provider
+  #   <agent>: { provider: ..., model: ... }   # also pin a specific model
+  # Model resolution falls back: per-agent model -> provider per_capability ->
+  # provider default_model. Agent names are the file stem (e.g. table, heading,
+  # image_analysis for the triage agent, reader, copy_editor).
   per_agent:
     image_analysis: openrouter
+    # table: { model: anthropic/claude-opus-4.7 }   # stronger model, same provider
+    # reader: { provider: bedrock, model: us.anthropic.claude-haiku-4-5-20251001-v1:0 }
 
   openrouter:
     api_key: ${OPENROUTER_API_KEY}
