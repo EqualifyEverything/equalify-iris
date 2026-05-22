@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { randomBytes } from "node:crypto";
 import type { IrisConfig } from "../config.ts";
-import { authorizeUrl, exchangeCode, startDeviceFlow, pollDeviceFlow } from "../auth/github.ts";
+import { authorizeUrl, exchangeCode } from "../auth/github.ts";
 import { sendError } from "./errors.ts";
 
 export function authRouter(cfg: IrisConfig): Router {
@@ -16,12 +16,10 @@ export function authRouter(cfg: IrisConfig): Router {
     for (const [s, exp] of states) if (exp < now) states.delete(s);
   };
 
-  // Web flow: redirect to the GitHub consent screen (requests `repo` scope).
-  // Unlike the device flow, the web flow's code exchange needs the client
-  // secret, so both are required here.
+  // GitHub App user-to-server web flow: redirect to GitHub App authorization.
   r.get("/github/start", (_req, res) => {
     if (!cfg.github.client_id || !cfg.github.client_secret) {
-      sendError(res, 500, "github_not_configured", "Web OAuth flow requires both client_id and client_secret. Use the device flow if only a client_id is configured.");
+      sendError(res, 500, "github_not_configured", "GitHub App user-to-server OAuth requires both client_id and client_secret.");
       return;
     }
     const state = randomBytes(16).toString("hex");
@@ -29,7 +27,7 @@ export function authRouter(cfg: IrisConfig): Router {
     res.redirect(authorizeUrl(cfg.github.client_id, callbackUrl, state, cfg.github.oauth_base_url));
   });
 
-  // Web flow: exchange the code for a token and return it to the client.
+  // GitHub App OAuth callback: exchange code for user-to-server token.
   r.get("/github/callback", async (req, res) => {
     cleanStates();
     const code = req.query.code as string | undefined;
@@ -44,54 +42,19 @@ export function authRouter(cfg: IrisConfig): Router {
     }
     states.delete(state);
     if (!cfg.github.client_secret) {
-      sendError(res, 500, "github_not_configured", "Web OAuth flow requires client_secret");
+      sendError(res, 500, "github_not_configured", "GitHub App user-to-server OAuth requires client_secret");
       return;
     }
     try {
       const token = await exchangeCode(cfg.github.client_id, cfg.github.client_secret, code, callbackUrl, cfg.github.oauth_base_url);
-      res.json({ access_token: token, token_type: "bearer" });
+      // Redirect back to the demo page with token in query parameter.
+      // Frontend will extract token from URL, store in sessionStorage, and clean up URL.
+      const demoUrl = new URL(cfg.server.base_url);
+      demoUrl.pathname = "/";
+      demoUrl.searchParams.set("token", token);
+      res.redirect(demoUrl.toString());
     } catch (e) {
       sendError(res, 400, "oauth_failed", (e as Error).message);
-    }
-  });
-
-  // Device flow (CLI): begin and return the user code + verification URI.
-  r.post("/github/device", async (_req, res) => {
-    if (!cfg.github.client_id) {
-      sendError(res, 500, "github_not_configured", "GITHUB_CLIENT_ID is not set");
-      return;
-    }
-    try {
-      const d = await startDeviceFlow(cfg.github.client_id, cfg.github.oauth_base_url);
-      res.json({
-        device_code: d.device_code,
-        user_code: d.user_code,
-        verification_uri: d.verification_uri,
-        expires_in: d.expires_in,
-        interval: d.interval,
-      });
-    } catch (e) {
-      sendError(res, 502, "oauth_failed", (e as Error).message);
-    }
-  });
-
-  // Device flow (CLI): poll for approval; returns the token once approved.
-  r.post("/github/device/poll", async (req, res) => {
-    const deviceCode = (req.body as { device_code?: string } | undefined)?.device_code;
-    if (!deviceCode) {
-      sendError(res, 400, "invalid_request", "Missing device_code");
-      return;
-    }
-    try {
-      const result = await pollDeviceFlow(cfg.github.client_id, deviceCode, cfg.github.oauth_base_url);
-      if (result.status === "approved") {
-        res.json({ access_token: result.access_token, token_type: "bearer" });
-      } else {
-        // 202: still pending (authorization_pending / slow_down / etc.)
-        res.status(202).json({ status: "pending", error: result.error });
-      }
-    } catch (e) {
-      sendError(res, 502, "oauth_failed", (e as Error).message);
     }
   });
 

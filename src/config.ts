@@ -16,12 +16,15 @@ export interface IrisConfig {
   server: { port: number; base_url: string };
   storage: { data_dir: string; agents_dir: string; database: string };
   github: {
-    client_id: string;
-    client_secret: string;
+    client_id: string;        // GitHub App client ID for user-to-server OAuth flow
+    client_secret: string;    // GitHub App client secret
     upstream_repo: string;
     // Overridable for GitHub Enterprise (and for testing). Defaults below.
     api_base_url: string; // e.g. https://api.github.com
     oauth_base_url: string; // e.g. https://github.com
+    app_id?: string;          // GitHub App ID (optional, for future app-to-server auth)
+    private_key?: string;     // GitHub App private key (optional, for future app-to-server auth)
+    private_key_path?: string; // GitHub App private key file path (optional)
   };
   providers: {
     default: string;
@@ -50,16 +53,9 @@ function expandEnv(value: unknown): unknown {
   return value;
 }
 
-// Bundled OAuth App client_id for the device flow (PRD §9.1). This is the
-// single place to embed Equalify's registered "Equalify Iris" OAuth App so the
-// default deployment needs no per-operator app setup — the same pattern the
-// GitHub CLI uses. The client_id is NOT a secret (it is sent openly in every
-// OAuth flow); the client secret is never bundled and is only needed for the
-// web redirect flow. A deployment can override this via config/env.
-//
-// Equalify's "Equalify Iris" OAuth App client_id. Non-secret; ships embedded so
-// the default device-flow deployment needs no per-operator app setup. Override
-// via config/env to point at your own app.
+// Default GitHub App client_id for user-to-server OAuth flow (web redirect auth).
+// This is Equalify's registered GitHub App. Non-secret; can be embedded.
+// Override via config/env to point at your own app.
 const DEFAULT_CLIENT_ID = "Ov23liGG4MfEn0DM4vTA";
 
 let cached: IrisConfig | null = null;
@@ -75,9 +71,16 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   // GitHub host defaults (overridable for GitHub Enterprise / testing).
   parsed.github.api_base_url = parsed.github.api_base_url || "https://api.github.com";
   parsed.github.oauth_base_url = parsed.github.oauth_base_url || "https://github.com";
-  // Fall back to the bundled OAuth App so the default device-flow deployment
-  // works with no per-operator app setup (PRD §9.1).
+  // Fall back to the bundled GitHub App for user-to-server OAuth flow.
   parsed.github.client_id = parsed.github.client_id || DEFAULT_CLIENT_ID;
+  // Load private key from file if path is provided.
+  if (parsed.github.private_key_path && !parsed.github.private_key) {
+    try {
+      parsed.github.private_key = readFileSync(resolve(parsed.github.private_key_path), "utf8");
+    } catch (e) {
+      console.warn(`Failed to load GitHub App private key from ${parsed.github.private_key_path}:`, (e as Error).message);
+    }
+  }
   cached = parsed;
   return parsed;
 }

@@ -1,11 +1,9 @@
-// GitHub OAuth helpers (PRD §9.1). GitHub is the only auth mechanism; the same
-// token authenticates requests and opens PRs on /close, so `repo` scope is
-// requested and required.
-//
-// Base URLs are passed in (not hardcoded) so a deployment can target GitHub
-// Enterprise, and so the suite can drive the flow against a mock host.
+// GitHub App user-to-server authentication helpers.
+// Users authorize the GitHub App and receive a user-to-server token.
+// This token authenticates API requests and is scoped to the app's permissions.
+// Base URLs are passed in (not hardcoded) for GitHub Enterprise and testing.
 
-const SCOPE = "repo";
+const SCOPE = ""; // GitHub App authorization does not use scopes; permissions are configured on the app.
 
 export interface GitHubUser {
   id: number;
@@ -18,13 +16,14 @@ export function authorizeUrl(
   state: string,
   oauthBase: string,
 ): string {
-  const params = new URLSearchParams({
+  const params: Record<string, string> = {
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: SCOPE,
     state,
-  });
-  return `${oauthBase}/login/oauth/authorize?${params.toString()}`;
+  };
+  if (SCOPE) params.scope = SCOPE; // GitHub App does not use scopes
+  const qs = new URLSearchParams(params).toString();
+  return `${oauthBase}/login/oauth/authorize?${qs}`;
 }
 
 // Exchange an OAuth code (web flow) for an access token.

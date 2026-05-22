@@ -178,7 +178,6 @@
     const API = '/v1';
     let token = sessionStorage.getItem('iris_token') || null;
     let sessionId = null;
-    let currentUserCode = null;
     let currentBlobUrl = null;
 
     const $ = (id) => document.getElementById(id);
@@ -188,9 +187,22 @@
     const live = (msg) => { $('live').textContent = msg; };
     const setError = (msg) => { $('error').textContent = msg || ''; };
     const focusHeading = (id) => { $(id).focus(); };
-    // Spell a code out so screen readers announce each character clearly,
-    // e.g. "WXYZ-1234" -> "W X Y Z dash 1 2 3 4".
-    const spellCode = (code) => code.split('').map((c) => (c === '-' ? 'dash' : c)).join(' ');
+
+    // Check for token in URL on page load (from OAuth callback redirect).
+    window.addEventListener('load', () => {
+      const params = new URLSearchParams(window.location.search);
+      const urlToken = params.get('token');
+      if (urlToken && !token) {
+        token = urlToken;
+        sessionStorage.setItem('iris_token', token);
+        // Clean up URL to remove token parameter.
+        window.history.replaceState({}, document.title, window.location.pathname);
+        onSignedIn();
+      } else if (token) {
+        onSignedIn();
+      }
+    });
+
     // Copy text to the clipboard. Prefers the async Clipboard API (needs a
     // secure context: HTTPS or localhost); falls back to execCommand('copy'),
     // which also works over plain HTTP.
@@ -223,61 +235,13 @@
       catch { return res.statusText; }
     }
 
-    // ----- Step 1: GitHub device flow -----
-    $('signin-btn').addEventListener('click', startDeviceFlow);
-    async function startDeviceFlow() {
+    // ----- Step 1: GitHub App web redirect auth -----
+    $('signin-btn').addEventListener('click', startGitHubAuth);
+    async function startGitHubAuth() {
       setError('');
-      $('signin-btn').disabled = true;
-      try {
-        const res = await fetch(API + '/auth/github/device', { method: 'POST' });
-        if (!res.ok) throw new Error(await errMessage(res));
-        const d = await res.json();
-        currentUserCode = d.user_code;
-        const codeEl = $('user-code');
-        codeEl.textContent = d.user_code;            // shown to sighted users
-        codeEl.setAttribute('aria-label', spellCode(d.user_code)); // read clearly aloud
-        $('verify-link').href = d.verification_uri;
-        $('copy-status').textContent = '';
-        show('device-instructions');
-        $('signin-btn').textContent = 'Get a new code';
-        $('signin-btn').disabled = false;
-        // Move focus to the new instructions so screen-reader users land on the
-        // code and steps instead of being left on the button with no feedback.
-        focusHeading('device-h');
-        show('auth-spinner');
-        $('auth-status').textContent = 'Waiting for you to authorize on GitHub…';
-        pollDevice(d.device_code, (d.interval || 5));
-      } catch (e) {
-        setError('Could not start sign-in: ' + e.message);
-        $('signin-btn').disabled = false;
-      }
+      // Redirect to the auth endpoint, which will redirect to GitHub App authorize.
+      window.location.href = API + '/auth/github/start';
     }
-    function pollDevice(deviceCode, interval) {
-      const tick = async () => {
-        try {
-          const res = await fetch(API + '/auth/github/device/poll', {
-            method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ device_code: deviceCode }),
-          });
-          if (res.status === 200) {
-            const d = await res.json();
-            token = d.access_token;
-            sessionStorage.setItem('iris_token', token);
-            await onSignedIn();
-            return;
-          }
-          setTimeout(tick, interval * 1000); // still pending
-        } catch (e) {
-          setTimeout(tick, interval * 1000);
-        }
-      };
-      setTimeout(tick, interval * 1000);
-    }
-    $('copy-code').addEventListener('click', async () => {
-      if (!currentUserCode) return;
-      try {
-        await copyText(currentUserCode);
-        $('copy-status').textContent = 'Code copied to your clipboard.';
       } catch {
         $('copy-status').textContent = 'Copy failed — please select the code above and copy it manually.';
       }

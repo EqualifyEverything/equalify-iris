@@ -11,15 +11,16 @@ import { runPipeline } from "../pipeline/orchestrator.ts";
 import type { AuthedRequest } from "../auth/middleware.ts";
 import { sendError } from "./errors.ts";
 import { gatherNewAgents, gatherAgentUpdates } from "../github/contributions.ts";
-import { ensureFork, openPr, parseRepo, type PrFile } from "../github/pr.ts";
+import { createIssue } from "../github/issue.ts";
+import { parseRepo } from "../github/pr.ts";
 import { summarizeRun } from "../diagnostics.ts";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
 const ALLOWED_EXT = /\.(png|jpe?g|tiff?|webp)$/i;
-const PR_BODY_OUTPUT_CAP = 50000; // GitHub PR bodies cap at ~65k chars
+const ISSUE_BODY_OUTPUT_CAP = 10000; // Issue bodies cap at ~65k chars, but keep samples reasonable
 
-// One-line axe-core summary for the PR description (from sessions/<id>/lint.json).
+// One-line axe-core summary for the issue description (from sessions/<id>/lint.json).
 function summarizeLint(lintPath: string): string {
   if (!existsSync(lintPath)) return "(no report)";
   try {
@@ -30,13 +31,6 @@ function summarizeLint(lintPath: string): string {
   } catch {
     return "(unreadable report)";
   }
-}
-
-// A collapsible <details> block embedding text in a fenced code block, capped.
-function prDetails(summary: string, text: string): string {
-  const capped =
-    text.length > PR_BODY_OUTPUT_CAP ? text.slice(0, PR_BODY_OUTPUT_CAP) + "\n… (truncated)" : text;
-  return `<details><summary>${summary}</summary>\n\n\`\`\`html\n${capped}\n\`\`\`\n\n</details>`;
 }
 
 function sessionSummary(s: SessionRecord) {
@@ -244,23 +238,18 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       return;
     }
 
-    const skipPrs = String(req.query.skip_prs ?? "") === "true";
-    const prsOpened: { kind: string; agent_name: string; pr_url: string; branch: string }[] = [];
+    const skipIssues = String(req.query.skip_issues ?? "") === "true";
+    const issuesOpened: { kind: string; agent_name: string; issue_url: string; issue_number: number }[] = [];
 
-    if (!skipPrs) {
+    if (!skipIssues) {
       const newAgents = gatherNewAgents(paths, s.session_id);
       const updates = gatherAgentUpdates(paths, s.session_id);
       if (newAgents.length || updates.length) {
         try {
           const octokit = new Octokit({ auth: req.token, baseUrl: cfg.github.api_base_url });
           const upstream = parseRepo(cfg.github.upstream_repo);
-          const forkUrl = await ensureFork(octokit, upstream);
-          store.setFork(s.github_user_id, forkUrl);
-          const forkOwner = (await octokit.users.getAuthenticated()).data.login;
 
-          // Lean PR: only the agent file is committed (the agent library stays
-          // code-only). The produced output and the axe-core lint result go in
-          // the PR description for the reviewer, not as committed fixtures.
+          // Output and lint summary to include in issue descriptions.
           const outputHtml = existsSync(paths.sessionOutput(s.session_id))
             ? readFileSync(paths.sessionOutput(s.session_id), "utf8")
             : "";
@@ -268,24 +257,15 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
 
           for (const a of newAgents) {
             try {
-              const files: PrFile[] = [{ path: `agents/${a.file}`, content: a.content }];
-              const opened = await openPr(octokit, {
-                upstream,
-                forkOwner,
-                branchPrefix: "new-agent",
-                nameForBranch: a.agent_name,
-                files,
-                title: `Add ${a.agent_name} content agent`,
-                body:
-                  `Session-built agent contributed from an Equalify Iris session.\n\n` +
-                  `**Content type**: ${a.agent_name}\n` +
-                  `**Why existing agents didn't cover it**: ${a.summary}\n` +
-                  `**Triggered by**: ${a.triggered_by || "(unknown)"}\n` +
-                  `**Accessibility lint**: ${lintLine}\n\n` +
-                  prDetails("Sample output produced by this agent", outputHtml) +
-                  `\n\n_Opened automatically on session close (PRD §7.13)._`,
+              const opened = await createIssue(octokit, upstream, {
+                type: "new_agent",
+                agentName: a.agent_name,
+                summary: a.summary,
+                outputHtml,
+                triggeredBy: a.triggered_by || undefined,
+                lintResult: lintLine,
               });
-              prsOpened.push({ kind: "new_agent", agent_name: a.agent_name, ...opened });
+              issuesOpened.push({ kind: "new_agent", agent_name: a.agent_name, ...opened });
             } catch (e) {
               appendFileSync(paths.sessionPrs(s.session_id), `- FAILED new_agent ${a.agent_name}: ${(e as Error).message}\n`);
             }
@@ -293,41 +273,37 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
 
           for (const u of updates) {
             try {
-              const opened = await openPr(octokit, {
-                upstream,
-                forkOwner,
-                branchPrefix: "agent-update",
-                nameForBranch: u.agent_name.replace(/\.md$/, ""),
-                files: [
-                  { path: `agents/${u.agent_name.endsWith(".md") ? u.agent_name : u.agent_name + ".md"}`, content: u.content },
-                ],
-                title: `Update ${u.agent_name}`,
-                body: `Proposed update from an Equalify Iris session.\n\n${u.summary}\n\n\`\`\`diff\n${u.diff_preview}\n\`\`\``,
+              const opened = await createIssue(octokit, upstream, {
+                type: "agent_update",
+                agentName: u.agent_name,
+                summary: u.summary,
+                diffPreview: u.diff_preview,
+                outputHtml: undefined,
               });
-              prsOpened.push({ kind: "agent_update", agent_name: u.agent_name, ...opened });
+              issuesOpened.push({ kind: "agent_update", agent_name: u.agent_name, ...opened });
             } catch (e) {
               appendFileSync(paths.sessionPrs(s.session_id), `- FAILED agent_update ${u.agent_name}: ${(e as Error).message}\n`);
             }
           }
         } catch (e) {
-          sendError(res, 502, "pr_failed", `Failed to open PRs: ${(e as Error).message}`);
+          sendError(res, 502, "issue_failed", `Failed to open issues: ${(e as Error).message}`);
           return;
         }
       }
     }
 
-    // Record opened PRs, then delete tmp/<session-id> entirely (§8.2).
-    if (prsOpened.length) {
+    // Record opened issues, then delete tmp/<session-id> entirely (§8.2).
+    if (issuesOpened.length) {
       appendFileSync(
         paths.sessionPrs(s.session_id),
-        prsOpened.map((p) => `- [${p.kind}] ${p.agent_name}: ${p.pr_url} (${p.branch})`).join("\n") + "\n",
+        issuesOpened.map((i) => `- [${i.kind}] ${i.agent_name}: ${i.issue_url} (#${i.issue_number})`).join("\n") + "\n",
       );
     }
     const tmp = paths.tmpDir(s.session_id);
     if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
 
     store.updateSession(s.session_id, { status: "closed" });
-    res.json({ session_id: s.session_id, status: "closed", prs_opened: prsOpened });
+    res.json({ session_id: s.session_id, status: "closed", issues_opened: issuesOpened });
   });
 
   return r;
