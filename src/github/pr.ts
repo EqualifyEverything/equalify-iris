@@ -44,7 +44,7 @@ export async function ensureFork(octokit: Octokit, upstream: RepoRef): Promise<s
 }
 
 // A file to commit to the PR branch. Text content is given as a string; binary
-// content (e.g. a fixture image) as a Buffer.
+// content (e.g. an image asset) as a Buffer.
 export interface PrFile {
   path: string; // path within the repo, e.g. agents/foo.md
   content: string | Buffer;
@@ -55,7 +55,7 @@ interface OpenPrArgs {
   forkOwner: string;
   branchPrefix: string;
   nameForBranch: string; // used in branch name + hashing
-  files: PrFile[]; // agent file plus any test fixtures (§7.13)
+  files: PrFile[]; // files to commit on the branch (e.g. the agent file)
   title: string;
   body: string;
 }

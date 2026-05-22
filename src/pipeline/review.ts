@@ -18,7 +18,7 @@ export interface ReviewResult {
   fragments: Fragment[];
   iterationsCompleted: number;
   unresolved: ReviewIssue[];
-  lint: LintResult; // final axe-core result, persisted as a PR fixture (§7.13)
+  lint: LintResult; // final axe-core result, summarized into the PR description (§7.13)
 }
 
 const READER_SYSTEM = `You are the Reader Agent (PRD §7.8). You review assembled accessible HTML for reading-order

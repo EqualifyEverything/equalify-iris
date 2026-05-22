@@ -47,21 +47,6 @@ export function gatherNewAgents(paths: Paths, sessionId: string): NewAgentContri
     });
 }
 
-// Resolve the on-disk path + bytes of a triggering input image by its display
-// name (input files are stored with an order prefix, e.g. "0001__page-001.png").
-export function readInputImage(
-  paths: Paths,
-  sessionId: string,
-  imageName: string,
-): { name: string; content: Buffer } | null {
-  if (!imageName) return null;
-  const dir = paths.sessionInput(sessionId);
-  if (!existsSync(dir)) return null;
-  const file = readdirSync(dir).find((f) => f.endsWith(`__${imageName}`));
-  if (!file) return null;
-  return { name: imageName, content: readFileSync(join(dir, file)) };
-}
-
 // Gather proposed updates to existing agents (PRD §7.13). v1 has no automated
 // producer for these; the close flow honors agent-updates.md if a deployment or
 // future pipeline step writes one.

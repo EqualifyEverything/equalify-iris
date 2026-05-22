@@ -10,12 +10,33 @@ import { Paths } from "../store/paths.ts";
 import { runPipeline } from "../pipeline/orchestrator.ts";
 import type { AuthedRequest } from "../auth/middleware.ts";
 import { sendError } from "./errors.ts";
-import { gatherNewAgents, gatherAgentUpdates, readInputImage } from "../github/contributions.ts";
+import { gatherNewAgents, gatherAgentUpdates } from "../github/contributions.ts";
 import { ensureFork, openPr, parseRepo, type PrFile } from "../github/pr.ts";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
 const ALLOWED_EXT = /\.(png|jpe?g|tiff?|webp)$/i;
+const PR_BODY_OUTPUT_CAP = 50000; // GitHub PR bodies cap at ~65k chars
+
+// One-line axe-core summary for the PR description (from sessions/<id>/lint.json).
+function summarizeLint(lintPath: string): string {
+  if (!existsSync(lintPath)) return "(no report)";
+  try {
+    const lint = JSON.parse(readFileSync(lintPath, "utf8")) as { ok?: boolean; violations?: unknown[]; error?: string };
+    const n = lint.violations?.length ?? 0;
+    if (lint.error) return `could not run (${lint.error})`;
+    return lint.ok ? `passed — 0 violations` : `${n} violation${n === 1 ? "" : "s"}`;
+  } catch {
+    return "(unreadable report)";
+  }
+}
+
+// A collapsible <details> block embedding text in a fenced code block, capped.
+function prDetails(summary: string, text: string): string {
+  const capped =
+    text.length > PR_BODY_OUTPUT_CAP ? text.slice(0, PR_BODY_OUTPUT_CAP) + "\n… (truncated)" : text;
+  return `<details><summary>${summary}</summary>\n\n\`\`\`html\n${capped}\n\`\`\`\n\n</details>`;
+}
 
 function sessionSummary(s: SessionRecord) {
   return {
@@ -222,27 +243,17 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
           store.setFork(s.github_user_id, forkUrl);
           const forkOwner = (await octokit.users.getAuthenticated()).data.login;
 
-          // Test fixtures shared by all new-agent PRs: the produced output and
-          // the accessibility lint pass (PRD §7.13).
+          // Lean PR: only the agent file is committed (the agent library stays
+          // code-only). The produced output and the axe-core lint result go in
+          // the PR description for the reviewer, not as committed fixtures.
           const outputHtml = existsSync(paths.sessionOutput(s.session_id))
             ? readFileSync(paths.sessionOutput(s.session_id), "utf8")
             : "";
-          const lintReport = existsSync(paths.sessionLint(s.session_id))
-            ? readFileSync(paths.sessionLint(s.session_id), "utf8")
-            : "{}";
+          const lintLine = summarizeLint(paths.sessionLint(s.session_id));
 
           for (const a of newAgents) {
             try {
-              // PR includes the agent file plus test fixtures: input image,
-              // produced output, and the accessibility lint pass (§7.13).
               const files: PrFile[] = [{ path: `agents/${a.file}`, content: a.content }];
-              const triggerImage = readInputImage(paths, s.session_id, a.triggered_by);
-              if (triggerImage) {
-                files.push({ path: `fixtures/${a.agent_name}/${triggerImage.name}`, content: triggerImage.content });
-              }
-              files.push({ path: `fixtures/${a.agent_name}/output.html`, content: outputHtml });
-              files.push({ path: `fixtures/${a.agent_name}/axe-report.json`, content: lintReport });
-
               const opened = await openPr(octokit, {
                 upstream,
                 forkOwner,
@@ -252,10 +263,12 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
                 title: `Add ${a.agent_name} content agent`,
                 body:
                   `Session-built agent contributed from an Equalify Iris session.\n\n` +
-                  `**Content type**: ${a.agent_name}\n**Why existing agents didn't cover it**: ${a.summary}\n` +
-                  `**Triggered by**: ${a.triggered_by || "(unknown)"}\n\n` +
-                  `Test fixtures are included under \`fixtures/${a.agent_name}/\` (input image, produced output, axe-core report).\n\n` +
-                  `_Opened automatically on session close (PRD §7.13)._`,
+                  `**Content type**: ${a.agent_name}\n` +
+                  `**Why existing agents didn't cover it**: ${a.summary}\n` +
+                  `**Triggered by**: ${a.triggered_by || "(unknown)"}\n` +
+                  `**Accessibility lint**: ${lintLine}\n\n` +
+                  prDetails("Sample output produced by this agent", outputHtml) +
+                  `\n\n_Opened automatically on session close (PRD §7.13)._`,
               });
               prsOpened.push({ kind: "new_agent", agent_name: a.agent_name, ...opened });
             } catch (e) {

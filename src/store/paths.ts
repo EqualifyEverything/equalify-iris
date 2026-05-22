@@ -43,7 +43,7 @@ export class Paths {
   sessionUnresolved(id: string): string {
     return join(this.sessionDir(id), "unresolved.md");
   }
-  // Final axe-core result, kept as a PR test fixture on close (§7.13).
+  // Final axe-core result, summarized into the PR description on close (§7.13).
   sessionLint(id: string): string {
     return join(this.sessionDir(id), "lint.json");
   }

@@ -160,9 +160,12 @@ A few places where the PRD left a decision open, and where v1 intentionally stop
 - **Feedback re-runs (§7.12).** Re-runs are logged separately (a `feedback_rerun` event) and the
   prior `output.html` is snapshotted to `sessions/<id>/history/` so it can be reverted to. A
   revert *endpoint* is out of v1 API scope (not in §9); the data is preserved to enable it.
-- **PR test fixtures (§7.13).** New-agent PRs include the agent file plus fixtures under
-  `fixtures/<agent>/`: the triggering input image, the produced `output.html`, and the
-  `axe-report.json` accessibility lint pass.
+- **PR contents (§7.13).** The PRD calls for committing test fixtures (input image, produced
+  output, lint pass) alongside the agent. We deviate to keep the agent library code-only:
+  a new-agent PR commits **only the agent file**, and puts the produced sample output (in a
+  collapsible block) and the axe-core lint result in the **PR description** instead. The
+  produced HTML isn't a deterministic regression artifact anyway, so the description serves the
+  reviewer without cluttering the tree with per-agent fixture directories.
 
 Intentionally **not** built in v1 (the PRD frames each as optional / alternative / out of scope):
 PostgreSQL and S3 backends (§10.2 — "supported alternative," SQLite + local FS is the v1

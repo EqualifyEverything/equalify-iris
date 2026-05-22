@@ -92,7 +92,7 @@ export async function runPipeline(args: {
     );
 
     writeFileSync(paths.sessionOutput(sessionId), review.html);
-    // Final accessibility lint result, used as a PR test fixture on close (§7.13).
+    // Final accessibility lint result, summarized into the PR description on close (§7.13).
     writeFileSync(paths.sessionLint(sessionId), JSON.stringify(review.lint, null, 2));
     if (review.unresolved.length) {
       writeFileSync(
