@@ -6,9 +6,7 @@ import type { Store } from "../store/db.ts";
 import { Paths } from "../store/paths.ts";
 import { RunLog } from "../store/runlog.ts";
 import type { InputImage, PipelineContext } from "./context.ts";
-import { runTriage } from "./triage.ts";
 import { runExtraction } from "./extraction.ts";
-import { runReconciliation } from "./reconciliation.ts";
 import { runAssembly } from "./assembly.ts";
 import { runReview } from "./review.ts";
 
@@ -60,8 +58,8 @@ export async function runPipeline(args: {
   };
 
   try {
-    store.updateSession(sessionId, { status: "running", phase: "triage", error: null });
-    log.event("phase", { phase: "triage" });
+    store.updateSession(sessionId, { status: "running", phase: "extraction", error: null });
+    log.event("phase", { phase: "extraction" });
 
     // Feedback re-runs are logged separately and preserve the prior output so it
     // can be reverted to (PRD §7.12). The previous output.html is snapshotted to
@@ -81,23 +79,14 @@ export async function runPipeline(args: {
 
     log.event("run_start", { images: images.length, feedback: args.feedback ?? null });
 
-    const triage = await runTriage(ctx);
-
-    setPhase("extraction");
-    const { fragments, noContent } = await runExtraction(ctx, triage);
-
-    setPhase("reconciliation");
-    const reconciled = await runReconciliation(ctx, fragments);
+    // Single coherent extraction: one accessible-HTML pass per page.
+    const { fragments } = await runExtraction(ctx);
 
     setPhase("assembly");
-    const assembled = await runAssembly(ctx, reconciled);
+    const assembled = await runAssembly(ctx, fragments);
 
     setPhase("review");
-    const review = await runReview(
-      ctx,
-      { html: assembled.html, fragments: reconciled, lint: assembled.lint },
-      noContent,
-    );
+    const review = await runReview(ctx, { body: assembled.body, lint: assembled.lint });
 
     writeFileSync(paths.sessionOutput(sessionId), review.html);
     // Final accessibility lint result, summarized into the PR description on close (§7.13).
@@ -107,7 +96,7 @@ export async function runPipeline(args: {
         paths.sessionUnresolved(sessionId),
         `# Unresolved issues at iteration cap\n\n` +
           review.unresolved
-            .map((i) => `- **[${i.severity}]** ${i.issue}\n  - source: ${i.source}\n  - suggested: ${i.suggested_action}`)
+            .map((i) => `- **[${i.severity}]** ${i.issue}\n  - suggested: ${i.suggested_action}`)
             .join("\n"),
       );
     }

@@ -88,32 +88,11 @@ const or = createServer(async (req, res) => {
     sys = JSON.parse(body).messages.find((x) => x.role === "system")?.content ?? "";
   } catch {}
   let content = "{}";
-  if (sys.includes("Image Analysis Agent"))
-    // Reference an unknown content type so the Builder Agent + PR path runs too.
-    content = JSON.stringify({
-      content_types: ["heading", "paragraph", "scientificNotation"],
-      fragment_indicators: {},
-      agent_calls: ["heading.md", "paragraph.md", "scientificNotation.md"],
-      notes: [],
-    });
+  if (sys.includes("convert an ENTIRE document page"))
+    content = JSON.stringify({ html: "<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>", log: "" });
   else if (sys.includes("Reader Agent")) content = JSON.stringify({ issues: [] });
-  else if (sys.includes("Builder Agent"))
-    // Return a content-agent markdown file (not JSON). Includes "specialist" so
-    // its later extraction call hits the generic branch below.
-    return json(res, 200, {
-      choices: [
-        {
-          message: {
-            content:
-              "# ScientificNotation Agent\n## Purpose\nConvert inline scientific notation.\n## Required capability\nvision\n## System prompt\nYou are a specialist that converts scientific notation to accessible MathML. No styling.\n## Output contract\n@source-wrapped fragment plus a fragment log entry.",
-          },
-        },
-      ],
-    });
-  else if (sys.includes("Heading Agent") || sys.includes("convert headings"))
-    content = JSON.stringify({ no_content: false, fragments: [{ html: "<h1>Quarterly Report</h1>", fragment_edges: [], log: "" }] });
-  else if (sys.includes("specialist"))
-    content = JSON.stringify({ no_content: false, fragments: [{ html: "<p>Revenue grew this quarter.</p>", fragment_edges: [], log: "" }] });
+  else if (sys.includes("Copy Editor Agent"))
+    content = JSON.stringify({ html: "<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>" });
   json(res, 200, { choices: [{ message: { content } }] });
 });
 

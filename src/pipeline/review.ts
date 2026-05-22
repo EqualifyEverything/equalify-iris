@@ -1,84 +1,77 @@
 import { extractJson } from "../util/json.ts";
 import { feedbackPreamble, loadImage, type PipelineContext } from "./context.ts";
-import { renderFragment, type Fragment } from "./fragment.ts";
-import { runAssembly } from "./assembly.ts";
+import { wrapDocument } from "./assembly.ts";
+import { runAxe, type LintResult } from "./lint.ts";
 import { flatten } from "./flatten.ts";
-import type { LintResult } from "./lint.ts";
-import type { NoContentSignal } from "./extraction.ts";
 
 export interface ReviewIssue {
   issue: string;
-  source: string;
   severity: "low" | "medium" | "high";
   suggested_action: string;
 }
 
 export interface ReviewResult {
-  html: string;
-  fragments: Fragment[];
+  html: string; // full document
+  body: string;
   iterationsCompleted: number;
   unresolved: ReviewIssue[];
-  lint: LintResult; // final axe-core result, summarized into the PR description (§7.13)
+  lint: LintResult;
 }
 
-const READER_SYSTEM = `You are the Reader Agent (PRD §7.8). You review assembled accessible HTML for reading-order
-issues, semantic inconsistencies, and missed accessibility requirements. You do NOT see source
-images — you read the document the way a screen-reader user consumes it.
+const READER_SYSTEM = `You are the Reader Agent. You review accessible HTML for reading-order problems, semantic
+inconsistencies, duplicated/redundant content, and missed WCAG 2.2 AA requirements. You do NOT
+see source images — you read the document the way a screen-reader user would.
 
-You get two views of the same chunk: the HTML (structural reference) and a flattened text-only
-view (what a screen reader announces, in order). Cross-check them. Also cross-check the listed
-no-content signals and @suspected-continuation markers for likely triage/reconciliation misses.
+You get two views of the same content: the HTML (structural reference) and a flattened
+text-only view (what a screen reader announces, in order). Cross-check them, and also consider
+the axe-core lint results provided.
 
-Flag each issue against the @source reference of the offending block. Respond with ONLY JSON:
-{ "issues": [ { "issue": "...", "source": "page-005.png#region-heading-2",
-  "severity": "low|medium|high", "suggested_action": "..." } ] }
+Respond with ONLY JSON:
+{ "issues": [ { "issue": "...", "severity": "low|medium|high", "suggested_action": "..." } ] }
 Return {"issues": []} when the document is clean.`;
 
-const COPY_EDITOR_SYSTEM = `You are the Copy Editor Agent (PRD §7.9). Given a flagged HTML block, its source image, the
-issue list, and surrounding HTML for context, propose a corrected, accessible replacement for
-the block. Do not modify anything outside the block. Respond with ONLY JSON:
-{ "html": "<corrected accessible HTML for this block, no provenance comments>" }`;
+const EDITOR_SYSTEM = `You are the Copy Editor Agent. You are given an accessible HTML document (body content only),
+a list of issues found by the reviewer, and the source page image(s). Return a corrected
+version of the FULL body that resolves every issue you can.
 
-const CHUNK_BUDGET = 24000; // chars; ~comfortable fraction of context (§7.8)
+You may do whatever it takes to fix the issues: remove duplicated or redundant content
+(e.g. the same content rendered as both a form and a table — keep the best single
+representation), reorder blocks, fix heading hierarchy, correct labels and table headers, etc.
+Preserve all genuine content and transcribed text; do not invent content. Output ONLY the
+corrected body (no <html>/<head>/<body> wrapper).
+
+Respond with ONLY JSON: { "html": "<corrected body content>" }`;
+
+const CHUNK_BUDGET = 24000;
 const CHUNK_OVERLAP = 2000;
 
-function chunk(html: string): string[] {
-  if (html.length <= CHUNK_BUDGET) return [html];
-  const chunks: string[] = [];
+function chunk(s: string): string[] {
+  if (s.length <= CHUNK_BUDGET) return [s];
+  const out: string[] = [];
   let start = 0;
-  while (start < html.length) {
-    chunks.push(html.slice(start, start + CHUNK_BUDGET));
+  while (start < s.length) {
+    out.push(s.slice(start, start + CHUNK_BUDGET));
     start += CHUNK_BUDGET - CHUNK_OVERLAP;
   }
-  return chunks;
+  return out;
 }
 
-async function runReader(
-  ctx: PipelineContext,
-  html: string,
-  extras: { noContent: NoContentSignal[]; lint: LintResult; fragments: Fragment[] },
-): Promise<ReviewIssue[]> {
-  const suspected = extras.fragments
-    .filter((f) => f.suspectedContinuation)
-    .map((f) => `${f.image}#${f.region}`);
-  const signalsBlock =
-    `# no-content signals\n${extras.noContent.map((s) => `- ${s.agent} found nothing on ${s.image}`).join("\n") || "- none"}\n\n` +
-    `# @suspected-continuation markers\n${suspected.map((s) => `- ${s}`).join("\n") || "- none"}\n\n` +
-    `# axe-core lint\n${extras.lint.violations.map((v) => `- ${v.id} (${v.impact}): ${v.description} [${v.nodes} nodes]`).join("\n") || (extras.lint.error ? `- (lint note: ${extras.lint.error})` : "- no violations")}`;
+function lintSummary(lint: LintResult): string {
+  if (lint.error) return `axe-core could not run (${lint.error})`;
+  if (lint.ok) return "axe-core: no violations";
+  return lint.violations.map((v) => `- ${v.id} (${v.impact}): ${v.description} [${v.nodes} nodes]`).join("\n");
+}
 
+async function runReader(ctx: PipelineContext, body: string, lint: LintResult): Promise<ReviewIssue[]> {
   const issues: ReviewIssue[] = [];
-  for (const c of chunk(html)) {
+  for (const c of chunk(body)) {
     const user =
-      `## HTML chunk\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## Cross-check inputs\n${signalsBlock}` +
+      `## HTML\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint)}` +
       feedbackPreamble(ctx);
-    const res = await ctx.router.complete(
-      "reader",
-      "text",
-      [
-        { role: "system", content: READER_SYSTEM },
-        { role: "user", content: user },
-      ],
-    );
+    const res = await ctx.router.complete("reader", "text", [
+      { role: "system", content: READER_SYSTEM },
+      { role: "user", content: user },
+    ]);
     ctx.log.agentCall({
       agent: { name: "reader", file: "reader.md", content: READER_SYSTEM, capabilities: ["text"], sha: null, sessionBuilt: false },
       phase: "review",
@@ -90,113 +83,69 @@ async function runReader(
   return issues;
 }
 
-// Match a Reader issue's @source reference to a fragment.
-function fragmentForSource(fragments: Fragment[], source: string): Fragment | undefined {
-  const region = source.includes("#") ? source.split("#")[1] : source;
-  return (
-    fragments.find((f) => `${f.image}#${f.region}` === source) ??
-    fragments.find((f) => f.region === region) ??
-    fragments.find((f) => region && f.region.includes(region)) ??
-    fragments.find((f) => source.startsWith(f.image))
-  );
-}
-
-async function runCopyEditor(
-  ctx: PipelineContext,
-  fragment: Fragment,
-  issues: ReviewIssue[],
-  surroundingHtml: string,
-): Promise<string | null> {
-  // Fetch the relevant source image(s) for the flagged block (§7.9).
-  const imageNames = fragment.image.split("+");
-  const images = imageNames
-    .map((n) => ctx.images.find((im) => im.name === n))
-    .filter((x) => x != null)
-    .map((x) => loadImage(x!));
-
+// Document-level correction: the editor sees the whole body + all issues + the
+// source images and returns a corrected document, so it can fix structural
+// problems (dedup, reorder, heading hierarchy) that per-block editing cannot.
+async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue[]): Promise<string> {
+  const images = ctx.images.map(loadImage);
   const user =
-    `## Flagged block (${fragment.image}#${fragment.region})\n${fragment.innerHtml}\n\n` +
-    `## Issues\n${issues.map((i) => `- [${i.severity}] ${i.issue} — ${i.suggested_action}`).join("\n")}\n\n` +
-    `## Surrounding HTML (context, read-only)\n${surroundingHtml.slice(0, 4000)}` +
+    `## Current document (body content)\n${body}\n\n` +
+    `## Issues to fix\n${issues.map((i) => `- [${i.severity}] ${i.issue} — ${i.suggested_action}`).join("\n")}\n\n` +
+    `The source page image(s) are attached in order. Return the complete corrected body.` +
     feedbackPreamble(ctx);
-
   const res = await ctx.router.complete(
     "copy_editor",
     images.length ? "vision" : "text",
     [
-      { role: "system", content: COPY_EDITOR_SYSTEM },
+      { role: "system", content: EDITOR_SYSTEM },
       { role: "user", content: user },
     ],
     { images },
   );
   ctx.log.agentCall({
-    agent: { name: "copy_editor", file: "copy_editor.md", content: COPY_EDITOR_SYSTEM, capabilities: ["vision"], sha: null, sessionBuilt: false },
+    agent: { name: "copy_editor", file: "copy_editor.md", content: EDITOR_SYSTEM, capabilities: ["vision"], sha: null, sessionBuilt: false },
     phase: "review",
-    image: fragment.image,
     output: res.text,
   });
   const parsed = extractJson<{ html?: string }>(res.text);
-  return parsed?.html ?? null;
+  // If the editor returns nothing usable, keep the current body unchanged.
+  return parsed?.html?.trim() || body;
 }
 
-// PRD §7.11 review loop: Reader -> Copy Editor -> Assembler -> Reader, bounded
-// by max_review_iterations. The Assembler step is the fragment mutation +
-// re-assembly + re-lint performed inline here (PRD §7.10).
+// Reader -> Editor -> re-verify, looping until the Reader reports zero issues or
+// the iteration cap is reached. The loop only stops clean when the Reader has
+// actually re-confirmed it, so reported issues are verified-fixed, not assumed.
 export async function runReview(
   ctx: PipelineContext,
-  initial: { html: string; fragments: Fragment[]; lint: LintResult },
-  noContent: NoContentSignal[],
+  initial: { body: string; lint: LintResult },
 ): Promise<ReviewResult> {
-  let { html, fragments, lint } = initial;
+  let body = initial.body;
+  let lint = initial.lint;
   let iterations = 0;
   let lastIssues: ReviewIssue[] = [];
 
-  while (iterations < ctx.maxReviewIterations) {
-    const issues = await runReader(ctx, html, { noContent, lint, fragments });
+  while (iterations <= ctx.maxReviewIterations) {
+    const issues = await runReader(ctx, body, lint);
     lastIssues = issues;
-    ctx.log.event("reader", { iteration: iterations + 1, issues: issues.length });
+    ctx.log.event("reader", { iteration: iterations, issues: issues.length });
     if (issues.length === 0) {
-      return { html, fragments, iterationsCompleted: iterations, unresolved: [], lint };
+      return { html: wrapDocument(body), body, iterationsCompleted: iterations, unresolved: [], lint };
     }
+    if (iterations === ctx.maxReviewIterations) break; // cap reached, issues remain
 
     iterations++;
-
-    // Copy Editor + Assembler: produce and apply corrections per flagged block.
-    const byFragment = new Map<Fragment, ReviewIssue[]>();
-    for (const issue of issues) {
-      const f = fragmentForSource(fragments, issue.source);
-      if (!f) continue;
-      const list = byFragment.get(f) ?? [];
-      list.push(issue);
-      byFragment.set(f, list);
-    }
-
-    for (const [fragment, fIssues] of byFragment) {
-      const surrounding = fragments.map(renderFragment).join("\n\n");
-      const replacement = await runCopyEditor(ctx, fragment, fIssues, surrounding);
-      if (replacement) {
-        // Assembler applies the change, preserving provenance (§7.10).
-        fragment.innerHtml = replacement;
-        fragment.copyEdited = true;
-      }
-    }
-
-    const reassembled = await runAssembly(ctx, fragments);
-    html = reassembled.html;
-    lint = reassembled.lint;
-    ctx.log.event("assembler", { iteration: iterations });
+    body = await runEditor(ctx, body, issues);
+    lint = await runAxe(wrapDocument(body));
+    ctx.log.event("editor", { iteration: iterations });
   }
 
-  // Iteration cap reached with issues remaining (§7.11): rebuild with an
-  // @unresolved block appended.
-  const finalAssembly = await runAssembly(ctx, fragments, {
-    unresolved: lastIssues.map((i) => `${i.issue} (source: ${i.source}, severity: ${i.severity})`),
-  });
+  // Cap reached with issues remaining (§7.11): record them as a comment.
+  const unresolvedLines = lastIssues.map((i) => `${i.issue} (severity: ${i.severity})`);
   return {
-    html: finalAssembly.html,
-    fragments,
+    html: wrapDocument(body, { unresolved: unresolvedLines }),
+    body,
     iterationsCompleted: iterations,
     unresolved: lastIssues,
-    lint: finalAssembly.lint,
+    lint,
   };
 }
