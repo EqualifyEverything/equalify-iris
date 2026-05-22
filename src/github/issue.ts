@@ -1,4 +1,4 @@
-import { Octokit } from "@octokit/rest";
+import { Octokit } from '@octokit/rest';
 
 export interface RepoRef {
   owner: string;
@@ -6,7 +6,7 @@ export interface RepoRef {
 }
 
 export interface IssueCreateOptions {
-  type: "new_agent" | "agent_update";
+  type: 'new_agent' | 'agent_update';
   agentName: string;
   summary: string;
   outputHtml?: string;
@@ -34,16 +34,18 @@ export async function createIssue(
   let title: string;
   let body: string;
 
-  if (type === "new_agent") {
+  if (type === 'new_agent') {
     title = `Add ${agentName} content agent`;
     body =
       `## Proposed New Agent\n\n` +
       `**Agent**: ${agentName}\n` +
       `**Why**: ${summary}\n` +
-      (triggeredBy ? `**Triggered by**: ${triggeredBy}\n` : "") +
-      (lintResult ? `**Accessibility lint**: ${lintResult}\n` : "") +
+      (triggeredBy ? `**Triggered by**: ${triggeredBy}\n` : '') +
+      (lintResult ? `**Accessibility lint**: ${lintResult}\n` : '') +
       `\n---\n\n` +
-      (outputHtml ? `### Sample output from this agent\n\n\`\`\`html\n${outputHtml.slice(0, 500)}${outputHtml.length > 500 ? "\n...(truncated)" : ""}\n\`\`\`` : `No sample output available.`) +
+      (outputHtml
+        ? `### Sample output from this agent\n\n\`\`\`html\n${outputHtml.slice(0, 500)}${outputHtml.length > 500 ? '\n...(truncated)' : ''}\n\`\`\``
+        : `No sample output available.`) +
       `\n\n_Opened automatically from an Equalify Iris session._`;
   } else {
     // agent_update
@@ -52,7 +54,7 @@ export async function createIssue(
       `## Proposed Agent Update\n\n` +
       `**Agent**: ${agentName}\n` +
       `**Changes**: ${summary}\n\n` +
-      (diffPreview ? `\`\`\`diff\n${diffPreview}\n\`\`\`\n` : "") +
+      (diffPreview ? `\`\`\`diff\n${diffPreview}\n\`\`\`\n` : '') +
       `\n_Opened automatically from an Equalify Iris session._`;
   }
 
