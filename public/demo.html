@@ -90,6 +90,7 @@
   <main id="main">
     <!-- live regions -->
     <div id="error" role="alert" aria-live="assertive"></div>
+    <div id="live" class="visually-hidden" role="status" aria-live="polite"></div>
 
     <!-- Step 1: sign in -->
     <section id="auth-section" aria-labelledby="step1-h">
@@ -101,13 +102,24 @@
         <span id="whoami" class="status"></span>
       </div>
       <div id="device-instructions" hidden>
-        <p>Your one-time code:</p>
-        <p><span id="user-code" class="code">––––</span></p>
-        <p>
-          <a id="verify-link" href="#" target="_blank" rel="noopener">Open GitHub to enter the code (opens a new tab)</a>,
-          authorize the app, then return here.
+        <h3 id="device-h" tabindex="-1">Enter this code on GitHub to finish signing in</h3>
+        <ol>
+          <li>
+            <span id="code-intro">Your one-time code is</span>
+            <strong id="user-code" class="code">––––</strong>
+            <button id="copy-code" type="button" class="secondary">Copy code</button>
+            <span id="copy-status" role="status" aria-live="polite"></span>
+          </li>
+          <li>
+            <a id="verify-link" href="#" target="_blank" rel="noopener">Open the GitHub device page in a new browser tab</a>,
+            enter the code, and choose “Authorize”.
+          </li>
+          <li>Return to this tab — you’ll be signed in automatically. There’s nothing else to do here.</li>
+        </ol>
+        <p class="status">
+          <span class="spinner" id="auth-spinner" aria-hidden="true" hidden></span>
+          <span id="auth-status" role="status" aria-live="polite"></span>
         </p>
-        <p class="status" id="auth-waiting"><span class="spinner" aria-hidden="true"></span> Waiting for you to authorize on GitHub…</p>
       </div>
     </section>
 
@@ -178,13 +190,18 @@
     const API = '/v1';
     let token = sessionStorage.getItem('iris_token') || null;
     let sessionId = null;
+    let currentUserCode = null;
 
     const $ = (id) => document.getElementById(id);
     const show = (id) => { $(id).hidden = false; };
     const hide = (id) => { $(id).hidden = true; };
     const announce = (msg) => { $('status-live').textContent = msg; };
+    const live = (msg) => { $('live').textContent = msg; };
     const setError = (msg) => { $('error').textContent = msg || ''; };
     const focusHeading = (id) => { $(id).focus(); };
+    // Spell a code out so screen readers announce each character clearly,
+    // e.g. "WXYZ-1234" -> "W X Y Z dash 1 2 3 4".
+    const spellCode = (code) => code.split('').map((c) => (c === '-' ? 'dash' : c)).join(' ');
 
     async function api(path, opts = {}) {
       const headers = Object.assign({}, opts.headers);
@@ -205,11 +222,20 @@
         const res = await fetch(API + '/auth/github/device', { method: 'POST' });
         if (!res.ok) throw new Error(await errMessage(res));
         const d = await res.json();
-        $('user-code').textContent = d.user_code;
+        currentUserCode = d.user_code;
+        const codeEl = $('user-code');
+        codeEl.textContent = d.user_code;            // shown to sighted users
+        codeEl.setAttribute('aria-label', spellCode(d.user_code)); // read clearly aloud
         $('verify-link').href = d.verification_uri;
+        $('copy-status').textContent = '';
         show('device-instructions');
         $('signin-btn').textContent = 'Get a new code';
         $('signin-btn').disabled = false;
+        // Move focus to the new instructions so screen-reader users land on the
+        // code and steps instead of being left on the button with no feedback.
+        focusHeading('device-h');
+        show('auth-spinner');
+        $('auth-status').textContent = 'Waiting for you to authorize on GitHub…';
         pollDevice(d.device_code, (d.interval || 5));
       } catch (e) {
         setError('Could not start sign-in: ' + e.message);
@@ -237,11 +263,24 @@
       };
       setTimeout(tick, interval * 1000);
     }
+    $('copy-code').addEventListener('click', async () => {
+      if (!currentUserCode) return;
+      try {
+        await navigator.clipboard.writeText(currentUserCode);
+        $('copy-status').textContent = 'Code copied to your clipboard.';
+      } catch {
+        $('copy-status').textContent = 'Copy is unavailable here — please select the code above and copy it manually.';
+      }
+    });
+
     async function onSignedIn() {
       const res = await api('/me');
       if (!res.ok) { token = null; sessionStorage.removeItem('iris_token'); setError('Sign-in failed. Please try again.'); return; }
       const me = await res.json();
       $('whoami').textContent = 'Signed in as ' + me.github_login;
+      $('auth-status').textContent = '';
+      hide('auth-spinner');
+      live('Signed in as ' + me.github_login + '. Continue to step 2 to upload your document pages.');
       hide('auth-section');
       show('upload-section');
       focusHeading('step2-h');
