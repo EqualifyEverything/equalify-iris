@@ -47,6 +47,18 @@ function expandEnv(value: unknown): unknown {
   return value;
 }
 
+// Bundled OAuth App client_id for the device flow (PRD §9.1). This is the
+// single place to embed Equalify's registered "Equalify Iris" OAuth App so the
+// default deployment needs no per-operator app setup — the same pattern the
+// GitHub CLI uses. The client_id is NOT a secret (it is sent openly in every
+// OAuth flow); the client secret is never bundled and is only needed for the
+// web redirect flow. A deployment can override this via config/env.
+//
+// Paste the org app's client_id here once the app exists. While empty, the
+// device-flow endpoints report github_not_configured until an operator supplies
+// their own client_id.
+const DEFAULT_CLIENT_ID = "";
+
 let cached: IrisConfig | null = null;
 
 export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): IrisConfig {
@@ -60,6 +72,9 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   // GitHub host defaults (overridable for GitHub Enterprise / testing).
   parsed.github.api_base_url = parsed.github.api_base_url || "https://api.github.com";
   parsed.github.oauth_base_url = parsed.github.oauth_base_url || "https://github.com";
+  // Fall back to the bundled OAuth App so the default device-flow deployment
+  // works with no per-operator app setup (PRD §9.1).
+  parsed.github.client_id = parsed.github.client_id || DEFAULT_CLIENT_ID;
   cached = parsed;
   return parsed;
 }

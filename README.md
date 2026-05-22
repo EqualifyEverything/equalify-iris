@@ -80,7 +80,10 @@ from the environment at startup; changes require a restart.
   model. v1 ships **OpenRouter** and **Amazon Bedrock** adapters. Adding a provider is a small
   adapter implementing the `ModelProvider` interface in `src/providers/types.ts`.
 - **GitHub** (§9.1): OAuth is the only auth mechanism. The token that authenticates a request
-  is the same token used to open PRs on `/close`, so `repo` scope is required.
+  is the same token used to open PRs on `/close`, so `repo` scope is required. By default the
+  service uses a **bundled OAuth App via the device flow** — no per-operator app setup, no
+  secret (the same approach the `gh` CLI uses). Set `github.client_id` only to point at your
+  own OAuth App; `client_secret` is needed only if you enable the web redirect flow.
 
 ## API
 

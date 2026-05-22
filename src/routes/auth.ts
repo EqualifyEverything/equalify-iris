@@ -17,9 +17,11 @@ export function authRouter(cfg: IrisConfig): Router {
   };
 
   // Web flow: redirect to the GitHub consent screen (requests `repo` scope).
+  // Unlike the device flow, the web flow's code exchange needs the client
+  // secret, so both are required here.
   r.get("/github/start", (_req, res) => {
-    if (!cfg.github.client_id) {
-      sendError(res, 500, "github_not_configured", "GITHUB_CLIENT_ID is not set");
+    if (!cfg.github.client_id || !cfg.github.client_secret) {
+      sendError(res, 500, "github_not_configured", "Web OAuth flow requires both client_id and client_secret. Use the device flow if only a client_id is configured.");
       return;
     }
     const state = randomBytes(16).toString("hex");
@@ -41,6 +43,10 @@ export function authRouter(cfg: IrisConfig): Router {
       return;
     }
     states.delete(state);
+    if (!cfg.github.client_secret) {
+      sendError(res, 500, "github_not_configured", "Web OAuth flow requires client_secret");
+      return;
+    }
     try {
       const token = await exchangeCode(cfg.github.client_id, cfg.github.client_secret, code, callbackUrl, cfg.github.oauth_base_url);
       res.json({ access_token: token, token_type: "bearer" });

@@ -19,8 +19,9 @@ curl -s "$BASE/health"
 
 ## 1. Authenticate (get a token)
 
-GitHub OAuth is the only auth mechanism, and the same token opens PRs on close, so the OAuth
-app must request `repo` scope.
+GitHub OAuth is the only auth mechanism, and the same token opens PRs on close, so the consent
+screen requests `repo` scope. By default the service uses a **bundled OAuth App** — you don't
+create or configure anything; just run the device flow below and approve in your browser.
 
 ### CLI / bash — device flow (recommended for terminals)
 

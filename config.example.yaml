@@ -22,7 +22,12 @@ storage:
 # GitHub OAuth is the only auth mechanism (PRD §9.1). The same token opens
 # PRs on /close, so `repo` scope is required.
 github:
+  # Leave blank to use the bundled "Equalify Iris" OAuth App via the device flow
+  # (no per-operator app setup needed — like the GitHub CLI). Set it only to
+  # point at your own OAuth App. The client_id is not a secret.
   client_id: ${GITHUB_CLIENT_ID}
+  # Only required for the WEB redirect flow (/auth/github/start + /callback). The
+  # device flow (CLI/Postman) needs no secret. Never commit a real secret.
   client_secret: ${GITHUB_CLIENT_SECRET}
   # The upstream agent library repo. Its origin is the PR target (PRD §7.13).
   upstream_repo: ${IRIS_UPSTREAM_REPO}
