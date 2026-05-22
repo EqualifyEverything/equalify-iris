@@ -68,11 +68,11 @@ Check it's alive:
 curl http://localhost:8080/v1/health
 ```
 
-Or just open the **accessible browser demo** for a no-API walkthrough (sign in with GitHub →
-upload page images → convert → preview/download the accessible HTML):
+Or just open the **accessible browser app** at the root for a no-API walkthrough (sign in with
+GitHub → upload page images → convert → view the accessible HTML):
 
 ```
-http://localhost:8080/demo
+http://localhost:8080/
 ```
 
 ## Configuration

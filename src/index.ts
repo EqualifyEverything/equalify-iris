@@ -25,13 +25,15 @@ app.use(express.json({ limit: "2mb" }));
 // Liveness probe (unauthenticated) — confirms the service is up.
 app.get("/v1/health", (_req, res) => res.json({ status: "ok", service: "equalify-iris" }));
 
-// Accessible browser demo (unauthenticated page; it drives the /v1 API itself).
-// no-store so an iterating deployment never serves a stale copy of the page.
+// The browser app is the front door, served at the root (unauthenticated; it
+// drives the /v1 API itself). no-store so a deploy never serves a stale page.
 const demoFile = fileURLToPath(new URL("../public/demo.html", import.meta.url));
-app.get("/demo", (_req, res) => {
+app.get("/", (_req, res) => {
   res.set("Cache-Control", "no-store");
   res.sendFile(demoFile);
 });
+// Keep the old /demo path working for any shared links.
+app.get("/demo", (_req, res) => res.redirect(302, "/"));
 
 // Auth endpoints are unauthenticated by definition (§9.1).
 app.use("/v1/auth", authRouter(cfg));
