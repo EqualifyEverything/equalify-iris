@@ -44,7 +44,7 @@
     p { margin: .5rem 0; }
     label { display: block; font-weight: 600; margin: 1rem 0 .35rem; }
     .hint { color: var(--muted); font-weight: 400; font-size: .95rem; margin: 0 0 .35rem; }
-    input[type=file], input[type=number], textarea {
+    input[type=file], input[type=number], input[type=text], textarea {
       font: inherit; width: 100%; max-width: 32rem; padding: .55rem .65rem;
       border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg);
     }
@@ -133,7 +133,7 @@
         <input id="iterations" name="iterations" type="number" min="1" max="5" value="1" aria-describedby="iter-hint">
 
         <div class="row">
-          <button id="convert-btn" type="submit">Convert to accessible HTML</button>
+          <button id="convert-btn" type="submit" disabled>Convert to accessible HTML</button>
         </div>
       </form>
     </section>
@@ -160,7 +160,7 @@
       <form id="feedback-form">
         <label for="feedback-text">Not quite right? Tell Iris what to fix</label>
         <p class="hint" id="fb-hint">Iris will re-run the conversion with your feedback applied (for example: “Keep footnotes separate from body text”).</p>
-        <textarea id="feedback-text" aria-describedby="fb-hint"></textarea>
+        <input id="feedback-text" type="text" aria-describedby="fb-hint">
         <div class="row">
           <button id="feedback-btn" type="submit" class="secondary">Re-run with this feedback</button>
         </div>
@@ -297,10 +297,16 @@
       live('Signed in as ' + me.github_login + '. Continue to step 2 to upload your document pages.');
       hide('auth-section');
       show('upload-section');
+      updateConvertButton();
       focusHeading('step2-h');
     }
 
     // ----- Step 2: upload -----
+    function updateConvertButton() {
+      $('convert-btn').disabled = $('images').files.length === 0;
+    }
+    $('images').addEventListener('change', updateConvertButton);
+
     $('upload-form').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       setError('');
@@ -325,7 +331,8 @@
       } catch (e) {
         setError('Upload failed: ' + e.message);
       } finally {
-        btn.disabled = false; btn.removeAttribute('aria-busy');
+        btn.removeAttribute('aria-busy');
+        updateConvertButton();
       }
     });
 
@@ -396,6 +403,7 @@
     $('restart-btn').addEventListener('click', () => {
       sessionId = null; setError('');
       $('upload-form').reset();
+      updateConvertButton();
       hide('result-section'); show('upload-section'); focusHeading('step2-h');
     });
 
