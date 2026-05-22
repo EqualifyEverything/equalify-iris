@@ -108,22 +108,6 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID" | jq
   "updated_at": "..."
 }
 ```
-When `status` is `ready_for_review`, the response also includes a `pending_prs` preview of what
-`/close` will open:
-```json
-{
-  "status": "ready_for_review",
-  "phase": "done",
-  "pending_prs": {
-    "new_agents": [
-      { "agent_name": "scientificNotation",
-        "summary": "Convert inline scientific notation.",
-        "triggered_by": "page-007.png" }
-    ],
-    "agent_updates": []
-  }
-}
-```
 A simple wait loop:
 ```bash
 until [ "$(curl -s -H "$AUTH" "$BASE/sessions/$SID" | jq -r .status)" = "ready_for_review" ]; do
@@ -205,29 +189,25 @@ curl -s -H "$AUTH" "$BASE/sessions?status=ready_for_review"
 ```
 Paginate by passing `cursor=<next_cursor>`.
 
-## 9. Close the session (finalize + open PRs)
+## 9. Close the session (finalize + clean up)
 
-Locks the output, opens a GitHub PR for each session-built agent (and each proposed update),
-and deletes `tmp/<id>/`. Requires `status` = `ready_for_review` (else `409`).
+Locks the output and deletes `tmp/<id>/`. Requires `status` = `ready_for_review` (else `409`).
+Contributions are handled automatically during the run (see below), so close does not open PRs.
 
 ```bash
 curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/close"
 ```
 ```json
-{
-  "session_id": "ses_...",
-  "status": "closed",
-  "prs_opened": [
-    { "kind": "new_agent", "agent_name": "scientificNotation",
-      "pr_url": "https://github.com/example/iris/pull/142",
-      "branch": "new-agent/scientificNotation-a3f9" }
-  ]
-}
+{ "session_id": "ses_...", "status": "closed" }
 ```
-Skip contributing the session-built agents (finalize without any PRs):
-```bash
-curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/close?skip_prs=true"
-```
+
+## Contributions (automatic)
+
+When the extractor encounters content a dedicated specialist agent would handle better than the
+general pass, Iris drafts that agent and **automatically files a labeled GitHub issue**
+(`iris-agent-suggestion`) on the upstream repo containing the agent code + context. This is
+server-side and requires a configured service token (`IRIS_GITHUB_TOKEN`); it never publishes
+under end users' identities, and it is a no-op when no token is set. There is no PR/fork flow.
 
 ## Errors (PRD §9.3)
 

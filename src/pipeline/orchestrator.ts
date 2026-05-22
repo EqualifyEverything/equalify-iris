@@ -9,6 +9,7 @@ import type { InputImage, PipelineContext } from "./context.ts";
 import { runExtraction } from "./extraction.ts";
 import { runAssembly } from "./assembly.ts";
 import { runReview } from "./review.ts";
+import { runContribution } from "./contribute.ts";
 
 // Input files are stored as "<0001>__<original-name>" so submitted order
 // (significant per PRD §9.2) survives, independent of filename.
@@ -80,7 +81,7 @@ export async function runPipeline(args: {
     log.event("run_start", { images: images.length, feedback: args.feedback ?? null });
 
     // Single coherent extraction: one accessible-HTML pass per page.
-    const { fragments } = await runExtraction(ctx);
+    const { fragments, suggestions } = await runExtraction(ctx);
 
     setPhase("assembly");
     const assembled = await runAssembly(ctx, fragments);
@@ -107,6 +108,10 @@ export async function runPipeline(args: {
       iterations_completed: review.iterationsCompleted,
     });
     log.event("run_complete", { iterations: review.iterationsCompleted, unresolved: review.unresolved.length });
+
+    // After the user has their output, auto-file agent-suggestion issues
+    // (no-op unless a service token is configured). Never blocks the result.
+    await runContribution(ctx, suggestions);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     store.updateSession(sessionId, { status: "failed", error: message });

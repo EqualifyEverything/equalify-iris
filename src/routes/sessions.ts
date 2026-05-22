@@ -1,18 +1,15 @@
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
 import multer from "multer";
-import { writeFileSync, readFileSync, existsSync, rmSync, appendFileSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { ulid } from "ulid";
-import { Octokit } from "@octokit/rest";
 import type { IrisConfig } from "../config.ts";
 import type { Store, SessionRecord } from "../store/db.ts";
 import { Paths } from "../store/paths.ts";
 import { runPipeline } from "../pipeline/orchestrator.ts";
 import type { AuthedRequest } from "../auth/middleware.ts";
 import { sendError } from "./errors.ts";
-import { gatherNewAgents, gatherAgentUpdates } from "../github/contributions.ts";
-import { ensureFork, openPr, parseRepo, type PrFile } from "../github/pr.ts";
 import { summarizeRun } from "../diagnostics.ts";
 import { rasterizePdf, PdfTooLargeError, MAX_PDF_PAGES } from "../util/pdf.ts";
 
@@ -32,28 +29,8 @@ function uploadImages(req: Request, res: Response, next: NextFunction): void {
 const IMAGE_EXT = /\.(png|jpe?g|tiff?|webp)$/i;
 const PDF_EXT = /\.pdf$/i;
 const MAX_TOTAL_PAGES = MAX_PDF_PAGES; // overall cap across all uploaded files
-const PR_BODY_OUTPUT_CAP = 50000; // GitHub PR bodies cap at ~65k chars
 
 // One-line axe-core summary for the PR description (from sessions/<id>/lint.json).
-function summarizeLint(lintPath: string): string {
-  if (!existsSync(lintPath)) return "(no report)";
-  try {
-    const lint = JSON.parse(readFileSync(lintPath, "utf8")) as { ok?: boolean; violations?: unknown[]; error?: string };
-    const n = lint.violations?.length ?? 0;
-    if (lint.error) return `could not run (${lint.error})`;
-    return lint.ok ? `passed — 0 violations` : `${n} violation${n === 1 ? "" : "s"}`;
-  } catch {
-    return "(unreadable report)";
-  }
-}
-
-// A collapsible <details> block embedding text in a fenced code block, capped.
-function prDetails(summary: string, text: string): string {
-  const capped =
-    text.length > PR_BODY_OUTPUT_CAP ? text.slice(0, PR_BODY_OUTPUT_CAP) + "\n… (truncated)" : text;
-  return `<details><summary>${summary}</summary>\n\n\`\`\`html\n${capped}\n\`\`\`\n\n</details>`;
-}
-
 function sessionSummary(s: SessionRecord) {
   return {
     session_id: s.session_id,
@@ -168,7 +145,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     });
   });
 
-  // GET /v1/sessions/{id} — status, plus pending_prs preview when ready.
+  // GET /v1/sessions/{id} — status.
   r.get("/:id", (req: AuthedRequest, res) => {
     const s = ownedSession(store, req.params.id, req.user!.github_user_id);
     if (!s) {
@@ -186,22 +163,6 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       updated_at: s.updated_at,
     };
     if (s.status === "failed" && s.error) body.error = s.error;
-    if (s.status === "ready_for_review") {
-      const newAgents = gatherNewAgents(paths, s.session_id);
-      const updates = gatherAgentUpdates(paths, s.session_id);
-      body.pending_prs = {
-        new_agents: newAgents.map((a) => ({
-          agent_name: a.agent_name,
-          summary: a.summary,
-          triggered_by: a.triggered_by,
-        })),
-        agent_updates: updates.map((u) => ({
-          agent_name: u.agent_name,
-          summary: u.summary,
-          diff_preview: u.diff_preview,
-        })),
-      };
-    }
     res.json(body);
   });
 
@@ -265,7 +226,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 400, "invalid_request", "feedback (string) is required");
       return;
     }
-    store.updateSession(s.session_id, { status: "running", phase: "triage" });
+    store.updateSession(s.session_id, { status: "running", phase: "extraction" });
     void runPipeline({
       cfg,
       store,
@@ -273,11 +234,13 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       maxReviewIterations: s.iterations_max,
       feedback,
     });
-    res.status(202).json({ session_id: s.session_id, status: "running", phase: "triage" });
+    res.status(202).json({ session_id: s.session_id, status: "running", phase: "extraction" });
   });
 
-  // POST /v1/sessions/{id}/close — finalize, open PRs, clean tmp (§7.13, §9.2).
-  r.post("/:id/close", async (req: AuthedRequest, res) => {
+  // POST /v1/sessions/{id}/close — finalize the session and clean tmp (§9.2).
+  // Agent contributions are auto-filed as GitHub issues during the run (see
+  // pipeline/contribute.ts), so close no longer opens PRs.
+  r.post("/:id/close", (req: AuthedRequest, res) => {
     const s = ownedSession(store, req.params.id, req.user!.github_user_id);
     if (!s) {
       sendError(res, 404, "session_not_found", "No such session");
@@ -287,91 +250,10 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 409, "invalid_state", "Session is not ready_for_review");
       return;
     }
-
-    const skipPrs = String(req.query.skip_prs ?? "") === "true";
-    const prsOpened: { kind: string; agent_name: string; pr_url: string; branch: string }[] = [];
-
-    if (!skipPrs) {
-      const newAgents = gatherNewAgents(paths, s.session_id);
-      const updates = gatherAgentUpdates(paths, s.session_id);
-      if (newAgents.length || updates.length) {
-        try {
-          const octokit = new Octokit({ auth: req.token, baseUrl: cfg.github.api_base_url });
-          const upstream = parseRepo(cfg.github.upstream_repo);
-          const forkUrl = await ensureFork(octokit, upstream);
-          store.setFork(s.github_user_id, forkUrl);
-          const forkOwner = (await octokit.users.getAuthenticated()).data.login;
-
-          // Lean PR: only the agent file is committed (the agent library stays
-          // code-only). The produced output and the axe-core lint result go in
-          // the PR description for the reviewer, not as committed fixtures.
-          const outputHtml = existsSync(paths.sessionOutput(s.session_id))
-            ? readFileSync(paths.sessionOutput(s.session_id), "utf8")
-            : "";
-          const lintLine = summarizeLint(paths.sessionLint(s.session_id));
-
-          for (const a of newAgents) {
-            try {
-              const files: PrFile[] = [{ path: `agents/${a.file}`, content: a.content }];
-              const opened = await openPr(octokit, {
-                upstream,
-                forkOwner,
-                branchPrefix: "new-agent",
-                nameForBranch: a.agent_name,
-                files,
-                title: `Add ${a.agent_name} content agent`,
-                body:
-                  `Session-built agent contributed from an Equalify Iris session.\n\n` +
-                  `**Content type**: ${a.agent_name}\n` +
-                  `**Why existing agents didn't cover it**: ${a.summary}\n` +
-                  `**Triggered by**: ${a.triggered_by || "(unknown)"}\n` +
-                  `**Accessibility lint**: ${lintLine}\n\n` +
-                  prDetails("Sample output produced by this agent", outputHtml) +
-                  `\n\n_Opened automatically on session close (PRD §7.13)._`,
-              });
-              prsOpened.push({ kind: "new_agent", agent_name: a.agent_name, ...opened });
-            } catch (e) {
-              appendFileSync(paths.sessionPrs(s.session_id), `- FAILED new_agent ${a.agent_name}: ${(e as Error).message}\n`);
-            }
-          }
-
-          for (const u of updates) {
-            try {
-              const opened = await openPr(octokit, {
-                upstream,
-                forkOwner,
-                branchPrefix: "agent-update",
-                nameForBranch: u.agent_name.replace(/\.md$/, ""),
-                files: [
-                  { path: `agents/${u.agent_name.endsWith(".md") ? u.agent_name : u.agent_name + ".md"}`, content: u.content },
-                ],
-                title: `Update ${u.agent_name}`,
-                body: `Proposed update from an Equalify Iris session.\n\n${u.summary}\n\n\`\`\`diff\n${u.diff_preview}\n\`\`\``,
-              });
-              prsOpened.push({ kind: "agent_update", agent_name: u.agent_name, ...opened });
-            } catch (e) {
-              appendFileSync(paths.sessionPrs(s.session_id), `- FAILED agent_update ${u.agent_name}: ${(e as Error).message}\n`);
-            }
-          }
-        } catch (e) {
-          sendError(res, 502, "pr_failed", `Failed to open PRs: ${(e as Error).message}`);
-          return;
-        }
-      }
-    }
-
-    // Record opened PRs, then delete tmp/<session-id> entirely (§8.2).
-    if (prsOpened.length) {
-      appendFileSync(
-        paths.sessionPrs(s.session_id),
-        prsOpened.map((p) => `- [${p.kind}] ${p.agent_name}: ${p.pr_url} (${p.branch})`).join("\n") + "\n",
-      );
-    }
     const tmp = paths.tmpDir(s.session_id);
     if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
-
     store.updateSession(s.session_id, { status: "closed" });
-    res.json({ session_id: s.session_id, status: "closed", prs_opened: prsOpened });
+    res.json({ session_id: s.session_id, status: "closed" });
   });
 
   return r;

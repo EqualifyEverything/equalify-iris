@@ -25,12 +25,19 @@ paragraphs, lists, tables with <caption>/<thead>/<th scope>, forms with
 text faithfully and do not invent content. If content is cut off at a page edge, note it in
 the "log" field.
 
+If — and only if — this page contains a content type that a DEDICATED specialist agent would
+handle clearly better than this general pass (something beyond the common types: paragraph,
+heading, list, table, form field, image, quote, caption, footnote), include a
+"suggested_agent". Suggest sparingly; omit it (or null) otherwise.
+
 Respond with ONLY this JSON:
 { "html": "<accessible HTML for the whole page — body content only, no duplication>",
-  "log": "notes, e.g. content cut off at an edge" }`;
+  "log": "notes, e.g. content cut off at an edge",
+  "suggested_agent": { "name": "lowerCamelCase", "reason": "why a specialist is warranted" } }`;
 
 export interface ExtractionResult {
   fragments: Fragment[];
+  suggestions: { name: string; reason: string; image: string }[];
 }
 
 function stripFences(t: string): string {
@@ -41,6 +48,7 @@ function stripFences(t: string): string {
 // One fragment per page, in submitted order.
 export async function runExtraction(ctx: PipelineContext): Promise<ExtractionResult> {
   const fragments: Fragment[] = [];
+  const suggestions: ExtractionResult["suggestions"] = [];
   for (const img of ctx.images) {
     const user =
       `Convert this document page image (filename: ${img.name}, page ${img.order} of ${ctx.images.length}) ` +
@@ -60,7 +68,7 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
       image: img.name,
       output: res.text,
     });
-    const parsed = extractJson<{ html?: string; log?: string }>(res.text);
+    const parsed = extractJson<{ html?: string; log?: string; suggested_agent?: { name?: string; reason?: string } }>(res.text);
     fragments.push({
       image: img.name,
       order: img.order,
@@ -70,11 +78,13 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
       edges: [],
       log: parsed?.log ?? "",
     });
+    const sa = parsed?.suggested_agent;
+    if (sa?.name) suggestions.push({ name: sa.name, reason: sa.reason ?? "", image: img.name });
   }
 
   writeFileSync(
     join(ctx.paths.sessionFragments(ctx.sessionId), "fragments.json"),
     JSON.stringify(fragments, null, 2),
   );
-  return { fragments };
+  return { fragments, suggestions };
 }

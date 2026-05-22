@@ -88,10 +88,6 @@ export class Store {
     return this.db.prepare(`SELECT * FROM users WHERE github_user_id = ?`).get(id) as UserRecord | undefined;
   }
 
-  setFork(id: number, forkRepo: string): void {
-    this.db.prepare(`UPDATE users SET fork_repo = ? WHERE github_user_id = ?`).run(forkRepo, id);
-  }
-
   // --- sessions ---
 
   createSession(s: {
