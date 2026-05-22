@@ -133,7 +133,7 @@
         <input id="iterations" name="iterations" type="number" min="1" max="5" value="1" aria-describedby="iter-hint">
 
         <div class="row">
-          <button id="convert-btn" type="submit">Convert to accessible HTML</button>
+          <button id="convert-btn" type="submit" disabled>Convert to accessible HTML</button>
         </div>
       </form>
     </section>
@@ -297,10 +297,16 @@
       live('Signed in as ' + me.github_login + '. Continue to step 2 to upload your document pages.');
       hide('auth-section');
       show('upload-section');
+      updateConvertButton();
       focusHeading('step2-h');
     }
 
     // ----- Step 2: upload -----
+    function updateConvertButton() {
+      $('convert-btn').disabled = $('images').files.length === 0;
+    }
+    $('images').addEventListener('change', updateConvertButton);
+
     $('upload-form').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       setError('');
@@ -325,7 +331,8 @@
       } catch (e) {
         setError('Upload failed: ' + e.message);
       } finally {
-        btn.disabled = false; btn.removeAttribute('aria-busy');
+        btn.removeAttribute('aria-busy');
+        updateConvertButton();
       }
     });
 
@@ -396,6 +403,7 @@
     $('restart-btn').addEventListener('click', () => {
       sessionId = null; setError('');
       $('upload-form').reset();
+      updateConvertButton();
       hide('result-section'); show('upload-section'); focusHeading('step2-h');
     });
 
