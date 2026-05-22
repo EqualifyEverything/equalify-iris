@@ -46,7 +46,9 @@ async function draftAgent(ctx: PipelineContext, s: Suggestion): Promise<string> 
 // labeled GitHub issue with the code + context. No-op when no service token is
 // configured (so we never publish under end users' identities).
 export async function runContribution(ctx: PipelineContext, suggestions: Suggestion[]): Promise<void> {
-  const token = ctx.cfg.github.issue_token;
+  // Attribute issues to the logged-in user by default; a configured service
+  // token overrides that (e.g. to file everything under a bot account).
+  const token = ctx.cfg.github.issue_token || ctx.githubToken;
   if (!token || suggestions.length === 0) return;
 
   const seen = new Set<string>();

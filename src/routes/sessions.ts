@@ -135,7 +135,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     });
 
     // Kick off the pipeline asynchronously; clients poll GET /v1/sessions/{id}.
-    void runPipeline({ cfg, store, sessionId, maxReviewIterations: maxIter });
+    void runPipeline({ cfg, store, sessionId, maxReviewIterations: maxIter, githubToken: req.token });
 
     res.status(201).json({
       session_id: record.session_id,
@@ -233,6 +233,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sessionId: s.session_id,
       maxReviewIterations: s.iterations_max,
       feedback,
+      githubToken: req.token,
     });
     res.status(202).json({ session_id: s.session_id, status: "running", phase: "extraction" });
   });

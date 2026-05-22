@@ -33,6 +33,7 @@ export async function runPipeline(args: {
   sessionId: string;
   maxReviewIterations: number;
   feedback?: string;
+  githubToken?: string;
 }): Promise<void> {
   const { cfg, store, sessionId } = args;
   const paths = new Paths(cfg);
@@ -56,6 +57,7 @@ export async function runPipeline(args: {
     images,
     feedback: args.feedback,
     maxReviewIterations: args.maxReviewIterations,
+    githubToken: args.githubToken,
   };
 
   try {
