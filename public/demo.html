@@ -242,10 +242,6 @@
       // Redirect to the auth endpoint, which will redirect to GitHub App authorize.
       window.location.href = API + '/auth/github/start';
     }
-      } catch {
-        $('copy-status').textContent = 'Copy failed — please select the code above and copy it manually.';
-      }
-    });
 
     async function onSignedIn() {
       const res = await api('/me');

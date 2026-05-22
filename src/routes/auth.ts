@@ -66,7 +66,7 @@ export function authRouter(cfg: IrisConfig): Router {
       // Redirect back to the demo page with token in query parameter.
       // Frontend will extract token from URL, store in sessionStorage, and clean up URL.
       const demoUrl = new URL(cfg.server.base_url);
-      demoUrl.pathname = '/';
+      demoUrl.pathname = '/demo';
       demoUrl.searchParams.set('token', token);
       res.redirect(demoUrl.toString());
     } catch (e) {
