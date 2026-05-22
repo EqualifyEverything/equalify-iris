@@ -1,6 +1,7 @@
 import express from "express";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.ts";
 import { Store } from "./store/db.ts";
 import { makeAuthMiddleware } from "./auth/middleware.ts";
@@ -20,6 +21,10 @@ app.use(express.json({ limit: "2mb" }));
 
 // Liveness probe (unauthenticated) — confirms the service is up.
 app.get("/v1/health", (_req, res) => res.json({ status: "ok", service: "equalify-iris" }));
+
+// Accessible browser demo (unauthenticated page; it drives the /v1 API itself).
+const demoFile = fileURLToPath(new URL("../public/demo.html", import.meta.url));
+app.get("/demo", (_req, res) => res.sendFile(demoFile));
 
 // Auth endpoints are unauthenticated by definition (§9.1).
 app.use("/v1/auth", authRouter(cfg));

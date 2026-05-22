@@ -68,6 +68,13 @@ Check it's alive:
 curl http://localhost:8080/v1/health
 ```
 
+Or just open the **accessible browser demo** for a no-API walkthrough (sign in with GitHub →
+upload page images → convert → preview/download the accessible HTML):
+
+```
+http://localhost:8080/demo
+```
+
 ## Configuration
 
 Deployment is configured in `config.yaml` (PRD §10.3). `${ENV_VAR}` references are expanded

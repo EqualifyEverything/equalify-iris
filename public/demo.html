@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Equalify Iris — Try it</title>
+  <style>
+    :root {
+      --fg: #14161a;
+      --bg: #ffffff;
+      --muted: #4a4f57;
+      --accent: #0b4f9c;     /* >= 4.5:1 on white */
+      --accent-fg: #ffffff;
+      --border: #6b7280;
+      --ok: #156534;
+      --err: #a31515;
+      --panel: #f3f5f8;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #f2f4f8; --bg: #14161a; --muted: #c2c8d2; --accent: #7db4ff;
+        --accent-fg: #08182e; --border: #8a93a3; --ok: #6ee7a0; --err: #ff9a9a; --panel: #1d2128;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font: 1.05rem/1.6 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      color: var(--fg); background: var(--bg);
+    }
+    .skip-link {
+      position: absolute; left: -999px; top: 0; background: var(--accent); color: var(--accent-fg);
+      padding: .6rem 1rem; z-index: 10;
+    }
+    .skip-link:focus { left: 0; }
+    header, main, footer { max-width: 60rem; margin: 0 auto; padding: 0 1.25rem; }
+    header { padding-top: 2rem; }
+    h1 { font-size: 2rem; margin: 0 0 .25rem; }
+    .tagline { color: var(--muted); margin: 0 0 1.5rem; font-size: 1.15rem; }
+    main { padding-bottom: 3rem; }
+    section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+      padding: 1.25rem 1.5rem; margin: 1.25rem 0; }
+    h2 { font-size: 1.3rem; margin: 0 0 .75rem; }
+    h2:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+    p { margin: .5rem 0; }
+    label { display: block; font-weight: 600; margin: 1rem 0 .35rem; }
+    .hint { color: var(--muted); font-weight: 400; font-size: .95rem; margin: 0 0 .35rem; }
+    input[type=file], input[type=number], textarea {
+      font: inherit; width: 100%; max-width: 32rem; padding: .55rem .65rem;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg);
+    }
+    textarea { min-height: 5rem; }
+    button {
+      font: inherit; font-weight: 600; cursor: pointer; border: 1px solid transparent;
+      border-radius: 8px; padding: .6rem 1.1rem; background: var(--accent); color: var(--accent-fg);
+    }
+    button.secondary { background: transparent; color: var(--accent); border-color: var(--accent); }
+    button[disabled] { opacity: .55; cursor: not-allowed; }
+    a { color: var(--accent); }
+    :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+    .code {
+      display: inline-block; font: 700 1.6rem ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .12em; background: var(--bg); border: 2px dashed var(--accent);
+      padding: .4rem .8rem; border-radius: 8px;
+    }
+    .row { display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; margin-top: 1rem; }
+    .status { font-weight: 600; }
+    #error:not(:empty) {
+      background: var(--err); color: #fff; padding: .75rem 1rem; border-radius: 8px; margin: 1rem 0;
+    }
+    .built { border-left: 4px solid var(--accent); padding-left: .9rem; }
+    iframe { width: 100%; height: 32rem; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+    pre { overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      padding: 1rem; max-height: 24rem; }
+    .spinner { display: inline-block; width: 1rem; height: 1rem; border: 3px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+    footer { border-top: 1px solid var(--border); padding-top: 1.25rem; padding-bottom: 2rem; color: var(--muted); }
+    .visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header>
+    <h1>Equalify Iris</h1>
+    <p class="tagline">Turn images of document pages into a single accessible HTML file.</p>
+  </header>
+
+  <main id="main">
+    <!-- live regions -->
+    <div id="error" role="alert" aria-live="assertive"></div>
+
+    <!-- Step 1: sign in -->
+    <section id="auth-section" aria-labelledby="step1-h">
+      <h2 id="step1-h" tabindex="-1">Step 1 — Sign in with GitHub</h2>
+      <p>Iris uses your GitHub account to sign in. No password is stored. We’ll show you a
+        short code to enter on GitHub.</p>
+      <div class="row">
+        <button id="signin-btn" type="button">Sign in with GitHub</button>
+        <span id="whoami" class="status"></span>
+      </div>
+      <div id="device-instructions" hidden>
+        <p>Your one-time code:</p>
+        <p><span id="user-code" class="code">––––</span></p>
+        <p>
+          <a id="verify-link" href="#" target="_blank" rel="noopener">Open GitHub to enter the code (opens a new tab)</a>,
+          authorize the app, then return here.
+        </p>
+        <p class="status" id="auth-waiting"><span class="spinner" aria-hidden="true"></span> Waiting for you to authorize on GitHub…</p>
+      </div>
+    </section>
+
+    <!-- Step 2: upload -->
+    <section id="upload-section" aria-labelledby="step2-h" hidden>
+      <h2 id="step2-h" tabindex="-1">Step 2 — Upload your document pages</h2>
+      <form id="upload-form">
+        <label for="images">Document page images</label>
+        <p class="hint" id="images-hint">Choose one or more images (PNG, JPEG, TIFF, or WebP), in reading order. The first file is page 1.</p>
+        <input id="images" name="images" type="file" accept="image/png,image/jpeg,image/tiff,image/webp" multiple aria-describedby="images-hint" required>
+
+        <label for="iterations">Review passes (optional)</label>
+        <p class="hint" id="iter-hint">How many times the reviewer may refine the result. Higher is more thorough but slower. Default 3.</p>
+        <input id="iterations" name="iterations" type="number" min="1" max="5" value="3" aria-describedby="iter-hint">
+
+        <div class="row">
+          <button id="convert-btn" type="submit">Convert to accessible HTML</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Step 3: progress -->
+    <section id="status-section" aria-labelledby="step3-h" hidden>
+      <h2 id="step3-h" tabindex="-1">Step 3 — Converting</h2>
+      <p id="status-live" class="status" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span> Starting…</p>
+      <p class="hint">Iris is reading each page, extracting content by type, stitching pages together, and reviewing the result for accessibility. This can take a minute or two.</p>
+    </section>
+
+    <!-- Step 4: result -->
+    <section id="result-section" aria-labelledby="step4-h" hidden>
+      <h2 id="step4-h" tabindex="-1">Your accessible HTML</h2>
+      <p id="built-agents" class="built" hidden></p>
+      <div class="row">
+        <button id="download-btn" type="button">Download HTML</button>
+        <button id="toggle-source" type="button" class="secondary" aria-expanded="false" aria-controls="result-source-wrap">View source</button>
+        <button id="restart-btn" type="button" class="secondary">Convert another document</button>
+      </div>
+
+      <h3>Preview</h3>
+      <iframe id="result-frame" title="Rendered preview of the generated accessible HTML" sandbox></iframe>
+
+      <div id="result-source-wrap" hidden>
+        <h3>HTML source</h3>
+        <pre><code id="result-source"></code></pre>
+      </div>
+
+      <form id="feedback-form">
+        <label for="feedback-text">Not quite right? Tell Iris what to fix</label>
+        <p class="hint" id="fb-hint">Iris will re-run the conversion with your feedback applied (for example: “Keep footnotes separate from body text”).</p>
+        <textarea id="feedback-text" aria-describedby="fb-hint"></textarea>
+        <div class="row">
+          <button id="feedback-btn" type="submit" class="secondary">Re-run with this feedback</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <footer>
+    <h2 class="visually-hidden">About</h2>
+    <p><strong>Equalify Iris is Open Source.</strong> Sustainability is key to sustaining its growth.
+      With that in mind, we hope you use and alter the codebase.</p>
+    <p>Iris is built by <strong>Equalify Inc</strong> (<a href="https://equalify.app/">https://equalify.app/</a>).
+      Continued support and development are paid for when you hire us to host or support any instance.
+      Please consider hiring us.</p>
+  </footer>
+
+  <script>
+    const API = '/v1';
+    let token = sessionStorage.getItem('iris_token') || null;
+    let sessionId = null;
+
+    const $ = (id) => document.getElementById(id);
+    const show = (id) => { $(id).hidden = false; };
+    const hide = (id) => { $(id).hidden = true; };
+    const announce = (msg) => { $('status-live').textContent = msg; };
+    const setError = (msg) => { $('error').textContent = msg || ''; };
+    const focusHeading = (id) => { $(id).focus(); };
+
+    async function api(path, opts = {}) {
+      const headers = Object.assign({}, opts.headers);
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      return fetch(API + path, Object.assign({}, opts, { headers }));
+    }
+    async function errMessage(res) {
+      try { const j = await res.json(); return (j.error && j.error.message) || res.statusText; }
+      catch { return res.statusText; }
+    }
+
+    // ----- Step 1: GitHub device flow -----
+    $('signin-btn').addEventListener('click', startDeviceFlow);
+    async function startDeviceFlow() {
+      setError('');
+      $('signin-btn').disabled = true;
+      try {
+        const res = await fetch(API + '/auth/github/device', { method: 'POST' });
+        if (!res.ok) throw new Error(await errMessage(res));
+        const d = await res.json();
+        $('user-code').textContent = d.user_code;
+        $('verify-link').href = d.verification_uri;
+        show('device-instructions');
+        $('signin-btn').textContent = 'Get a new code';
+        $('signin-btn').disabled = false;
+        pollDevice(d.device_code, (d.interval || 5));
+      } catch (e) {
+        setError('Could not start sign-in: ' + e.message);
+        $('signin-btn').disabled = false;
+      }
+    }
+    function pollDevice(deviceCode, interval) {
+      const tick = async () => {
+        try {
+          const res = await fetch(API + '/auth/github/device/poll', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ device_code: deviceCode }),
+          });
+          if (res.status === 200) {
+            const d = await res.json();
+            token = d.access_token;
+            sessionStorage.setItem('iris_token', token);
+            await onSignedIn();
+            return;
+          }
+          setTimeout(tick, interval * 1000); // still pending
+        } catch (e) {
+          setTimeout(tick, interval * 1000);
+        }
+      };
+      setTimeout(tick, interval * 1000);
+    }
+    async function onSignedIn() {
+      const res = await api('/me');
+      if (!res.ok) { token = null; sessionStorage.removeItem('iris_token'); setError('Sign-in failed. Please try again.'); return; }
+      const me = await res.json();
+      $('whoami').textContent = 'Signed in as ' + me.github_login;
+      hide('auth-section');
+      show('upload-section');
+      focusHeading('step2-h');
+    }
+
+    // ----- Step 2: upload -----
+    $('upload-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      setError('');
+      const files = $('images').files;
+      if (!files.length) { setError('Please choose at least one image.'); return; }
+      const fd = new FormData();
+      for (const f of files) fd.append('images', f);
+      const iters = $('iterations').value;
+      if (iters) fd.append('config', JSON.stringify({ max_review_iterations: Number(iters) }));
+      const btn = $('convert-btn');
+      btn.disabled = true; btn.setAttribute('aria-busy', 'true');
+      try {
+        const res = await api('/sessions', { method: 'POST', body: fd });
+        if (!res.ok) throw new Error(await errMessage(res));
+        const d = await res.json();
+        sessionId = d.session_id;
+        hide('upload-section'); show('status-section'); focusHeading('step3-h');
+        announce('Starting… ' + d.image_count + ' page(s) uploaded.');
+        pollStatus();
+      } catch (e) {
+        setError('Upload failed: ' + e.message);
+      } finally {
+        btn.disabled = false; btn.removeAttribute('aria-busy');
+      }
+    });
+
+    // ----- Step 3: poll status -----
+    const PHASE_LABEL = {
+      triage: 'reading each page', extraction: 'extracting content',
+      reconciliation: 'stitching pages together', assembly: 'assembling the document',
+      review: 'reviewing for accessibility', done: 'finishing up',
+    };
+    async function pollStatus() {
+      try {
+        const res = await api('/sessions/' + sessionId);
+        const d = await res.json();
+        if (d.status === 'queued' || d.status === 'running') {
+          announce('Working — ' + (PHASE_LABEL[d.phase] || d.phase || d.status) + '…');
+          setTimeout(pollStatus, 2500);
+        } else if (d.status === 'ready_for_review') {
+          announce('Done! Your accessible HTML is ready.');
+          await showResult(d);
+        } else if (d.status === 'failed') {
+          setError('Conversion failed: ' + (d.error || 'unknown error') + '. You can try again.');
+          hide('status-section'); show('upload-section'); focusHeading('step2-h');
+        }
+      } catch (e) {
+        setTimeout(pollStatus, 3000);
+      }
+    }
+
+    // ----- Step 4: result -----
+    async function showResult(d) {
+      const res = await api('/sessions/' + sessionId + '/output');
+      const html = await res.text();
+      $('result-frame').srcdoc = html;
+      $('result-source').textContent = html;
+      $('download-btn').onclick = () => {
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'accessible.html'; a.click();
+        URL.revokeObjectURL(url);
+      };
+      const built = (d.pending_prs && d.pending_prs.new_agents) || [];
+      if (built.length) {
+        $('built-agents').textContent = 'Iris taught itself ' + built.length +
+          ' new agent(s) for content it had not seen before: ' + built.map(a => a.agent_name).join(', ') + '.';
+        show('built-agents');
+      }
+      hide('status-section'); show('result-section'); focusHeading('step4-h');
+    }
+
+    $('toggle-source').addEventListener('click', () => {
+      const wrap = $('result-source-wrap');
+      const willShow = wrap.hidden;
+      wrap.hidden = !willShow;
+      $('toggle-source').setAttribute('aria-expanded', String(willShow));
+      $('toggle-source').textContent = willShow ? 'Hide source' : 'View source';
+    });
+
+    $('restart-btn').addEventListener('click', () => {
+      sessionId = null; setError('');
+      $('upload-form').reset();
+      hide('result-section'); show('upload-section'); focusHeading('step2-h');
+    });
+
+    $('feedback-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      setError('');
+      const fb = $('feedback-text').value.trim();
+      if (!fb) { setError('Please enter some feedback first.'); return; }
+      try {
+        const res = await api('/sessions/' + sessionId + '/feedback', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ feedback: fb }),
+        });
+        if (!res.ok) throw new Error(await errMessage(res));
+        $('feedback-text').value = '';
+        hide('result-section'); show('status-section'); focusHeading('step3-h');
+        announce('Re-running with your feedback…');
+        pollStatus();
+      } catch (e) {
+        setError('Could not submit feedback: ' + e.message);
+      }
+    });
+
+    // If a token is already stored, skip straight to upload.
+    (async function init() {
+      if (!token) return;
+      const res = await api('/me');
+      if (res.ok) await onSignedIn();
+      else { token = null; sessionStorage.removeItem('iris_token'); }
+    })();
+  </script>
+</body>
+</html>
