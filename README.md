@@ -91,8 +91,7 @@ from the environment at startup; changes require a restart.
   set per provider (`default_model` + `per_capability`), and can be overridden **per agent** via
   `providers.per_agent` — either a string (provider only) or `{ provider, model }`. Resolution
   falls back: per-agent model → provider `per_capability` → provider `default_model`.
-- **GitHub** (§9.1): OAuth is the only auth mechanism. The token that authenticates a request
-  is the same token used to open PRs on `/close`, so `repo` scope is required. By default the
+- **GitHub** (§9.1): OAuth is the auth mechanism — a user *is* their GitHub account. By default the
   service uses a **bundled OAuth App via the device flow** — no per-operator app setup, no
   secret (the same approach the `gh` CLI uses). Set `github.client_id` only to point at your
   own OAuth App; `client_secret` is needed only if you enable the web redirect flow.
@@ -111,11 +110,11 @@ All endpoints are under `/v1` and (except auth and health) require
 | `POST /v1/auth/github/device/poll` | Poll device flow (send `{ "device_code": ... }`) |
 | `GET  /v1/me` | Current GitHub user + config |
 | `GET  /v1/sessions` | List the caller's sessions |
-| `POST /v1/sessions` | Create a session, upload images (`multipart/form-data`) |
-| `GET  /v1/sessions/{id}` | Poll status; preview pending PRs when ready |
+| `POST /v1/sessions` | Create a session, upload images and/or PDFs (`multipart/form-data`) |
+| `GET  /v1/sessions/{id}` | Poll status |
 | `GET  /v1/sessions/{id}/output` | Fetch the HTML when ready |
 | `POST /v1/sessions/{id}/feedback` | Submit feedback, trigger a re-run |
-| `POST /v1/sessions/{id}/close` | Accept output, open PRs, clean tmp (`?skip_prs=true` to skip) |
+| `POST /v1/sessions/{id}/close` | Finalize the session and clean tmp |
 | `GET  /v1/sessions/{id}/logs` | Fetch the run log (ndjson) |
 | `GET  /v1/sessions/{id}/diagnostics` | Timing/health summary (phase + per-call durations, in-flight/hung call) |
 
@@ -146,7 +145,7 @@ src/
   agents/loader.ts       # loads agent .md files, pins git SHA (§7.3)
   pipeline/              # triage, extraction, builder, reconciliation, assembly, review
   auth/                  # GitHub OAuth + device flow + bearer middleware
-  github/                # fork + PR contribution workflow (§7.13)
+  github/                # auto-files labeled agent-suggestion issues
   store/                 # node:sqlite metadata store + on-disk session layout (§8.1)
   routes/                # /v1 endpoints
   index.ts               # server entry point
@@ -170,12 +169,12 @@ A few places where the PRD left a decision open, and where v1 intentionally stop
 - **Feedback re-runs (§7.12).** Re-runs are logged separately (a `feedback_rerun` event) and the
   prior `output.html` is snapshotted to `sessions/<id>/history/` so it can be reverted to. A
   revert *endpoint* is out of v1 API scope (not in §9); the data is preserved to enable it.
-- **PR contents (§7.13).** The PRD calls for committing test fixtures (input image, produced
-  output, lint pass) alongside the agent. We deviate to keep the agent library code-only:
-  a new-agent PR commits **only the agent file**, and puts the produced sample output (in a
-  collapsible block) and the axe-core lint result in the **PR description** instead. The
-  produced HTML isn't a deterministic regression artifact anyway, so the description serves the
-  reviewer without cluttering the tree with per-agent fixture directories.
+- **Contributions are issues, not PRs (deviation from §7.13).** Instead of the PRD's
+  fork+PR-on-close flow, when the extractor flags content a specialist agent would handle
+  better, Iris drafts that agent and **automatically files a labeled GitHub issue**
+  (`iris-agent-suggestion`) with the agent code + context. It uses a deployment **service
+  token** (`IRIS_GITHUB_TOKEN`) — never end users' identities — and is a no-op when unset.
+  Simpler to triage, and nothing is published under a user's name without consent.
 
 Intentionally **not** built in v1 (the PRD frames each as optional / alternative / out of scope):
 PostgreSQL and S3 backends (§10.2 — "supported alternative," SQLite + local FS is the v1

@@ -95,6 +95,8 @@
     <!-- Step 1: sign in -->
     <section id="auth-section" aria-labelledby="step1-h">
       <h2 id="step1-h" tabindex="-1">Sign in</h2>
+      <p class="hint">Sign in with GitHub to convert documents. If Iris meets content that warrants a new
+        agent, it may open a public “agent suggestion” issue on the project repo under your account.</p>
       <div class="row">
         <button id="signin-btn" type="button">Sign in with GitHub</button>
         <span id="whoami" class="status"></span>
@@ -150,6 +152,7 @@
       <p>Your document was converted to accessible HTML.</p>
       <div class="row">
         <button id="view-btn" type="button">View converted document</button>
+        <button id="download-btn" type="button" class="secondary">Download HTML</button>
         <button id="restart-btn" type="button" class="secondary">Convert another document</button>
       </div>
       <p class="hint">Opens in a new browser tab.</p>
@@ -178,6 +181,7 @@
     const API = '/v1';
     let token = sessionStorage.getItem('iris_token') || null;
     let sessionId = null;
+    let sourceBase = 'document';
     let currentUserCode = null;
     let currentBlobUrl = null;
 
@@ -302,6 +306,8 @@
       setError('');
       const files = $('images').files;
       if (!files.length) { setError('Please choose at least one image.'); return; }
+      // Output download name mirrors the uploaded file.
+      sourceBase = (files[0].name.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9._-]/g, '_')) || 'document';
       const fd = new FormData();
       for (const f of files) fd.append('images', f);
       const iters = $('iterations').value;
@@ -372,6 +378,12 @@
       if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
       currentBlobUrl = URL.createObjectURL(blob);
       $('view-btn').onclick = () => window.open(currentBlobUrl, '_blank');
+      $('download-btn').onclick = () => {
+        const a = document.createElement('a');
+        a.href = currentBlobUrl;
+        a.download = sourceBase + '_converted.html';
+        document.body.appendChild(a); a.click(); a.remove();
+      };
       const built = (d.pending_prs && d.pending_prs.new_agents) || [];
       if (built.length) {
         $('built-agents').textContent = 'Iris taught itself ' + built.length +

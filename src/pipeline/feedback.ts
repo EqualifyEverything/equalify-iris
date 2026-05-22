@@ -2,10 +2,20 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { extractJson } from "../util/json.ts";
 import { loadAgent, type AgentSpec } from "../agents/loader.ts";
-import type { AgentUpdateContribution } from "../github/contributions.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import type { FixtureCase } from "./regression.ts";
+
+// Previously imported from github/contributions.ts, which was removed when the
+// contribution model moved from close-time PRs to issues filed during the run.
+// The feedback loop still records proposed library-agent updates in this shape
+// (in agent-updates.md, gated by regression fixtures) for maintainer review.
+export interface AgentUpdateContribution {
+  agent_name: string; // e.g. "page.md"
+  summary: string;
+  diff_preview: string;
+  content: string; // full updated agent file content
+}
 
 const FEEDBACK_AGENT = "feedback";
 

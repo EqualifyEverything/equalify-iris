@@ -118,15 +118,18 @@ for i in $(seq 1 60); do
   sleep 0.5
 done
 [ "$status" = "ready_for_review" ] && pass "pipeline finished (phase=$(echo "$s" | jq -r .phase))" || fail "poll" "stuck at $status"
-# Single-pass extraction builds no agents, so the preview should be empty.
-echo "$s" | jq -e '.pending_prs.new_agents | length == 0' >/dev/null \
-  && pass "pending_prs empty (single-pass builds no agents)" || fail "pending_prs" "$s"
 
 echo "==> 7. GET /v1/sessions/{id}/output"
 out=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/output")
 echo "$out" | grep -q '<main>' && echo "$out" | grep -q 'Quarterly Report' \
   && ! echo "$out" | grep -q '@source' \
   && pass "clean HTML output (no provenance comments)" || fail "output" "$out"
+# filename mirrors the uploaded file (first part: page-001.png)
+hdr=$(curl -s -D - -o /dev/null "${AUTH[@]}" "$BASE/sessions/$SID/output")
+echo "$hdr" | grep -qi 'content-disposition:.*page-001_converted.html' \
+  && pass "download filename mirrors input (page-001_converted.html)" || fail "filename" "$hdr"
+echo "$out" | grep -q '<title>page-001</title>' \
+  && pass "output title mirrors input" || fail "title" "$(echo "$out" | grep -i '<title>')"
 
 echo "==> 8. GET /v1/sessions/{id}/logs (ndjson)"
 logs=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/logs")
@@ -160,15 +163,9 @@ list=$(curl -s "${AUTH[@]}" "$BASE/sessions")
 echo "$list" | jq -e --arg sid "$SID" '.sessions | map(.session_id) | index($sid) != null' >/dev/null \
   && pass "session appears in list" || fail "list" "$list"
 
-echo "==> 12. POST /v1/sessions/{id}/close (opens PR for a session-built agent)"
-# Single-pass extraction doesn't build agents, so seed one into the session tmp
-# dir to still exercise the fork+PR contribution workflow on close.
-mkdir -p "$DATA/tmp/$SID/agents"
-printf '# Demo Agent\n## Purpose\nTest agent.\n## Required capability\nvision\n## System prompt\nx\n## Output contract\nx\n' > "$DATA/tmp/$SID/agents/demoAgent.md"
+echo "==> 12. POST /v1/sessions/{id}/close (finalize + clean tmp; no PRs)"
 close=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/close")
 echo "$close" | jq -e '.status=="closed"' >/dev/null && pass "session closed" || fail "close" "$close"
-echo "$close" | jq -e '.prs_opened | length >= 1' >/dev/null \
-  && pass "PR opened: $(echo "$close" | jq -r '.prs_opened[0].pr_url')" || fail "prs" "$close"
 [ ! -d "$DATA/tmp/$SID" ] && pass "tmp/ cleaned on close" || fail "tmp cleanup" "tmp dir still present"
 
 echo "==> 13. close again => 409 invalid_state"

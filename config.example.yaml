@@ -36,6 +36,10 @@ github:
   # to public GitHub when omitted.
   api_base_url: ${GITHUB_API_BASE_URL}
   oauth_base_url: ${GITHUB_OAUTH_BASE_URL}
+  # Optional override for who authors auto-filed agent-suggestion issues. Blank
+  # (default): filed as the logged-in user. Set to a service-account PAT to file
+  # everything under that bot account instead.
+  issue_token: ${IRIS_GITHUB_TOKEN}
 
 # LLM provider abstraction (PRD §10.3). Each agent declares a capability;
 # the deployment decides which provider serves it.

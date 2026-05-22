@@ -21,6 +21,9 @@ export interface PipelineContext {
   images: InputImage[];
   feedback?: string; // present on feedback re-runs (PRD §7.12)
   maxReviewIterations: number;
+  // The logged-in user's GitHub token — used to file agent-suggestion issues
+  // attributed to them (unless a service token override is configured).
+  githubToken?: string;
 }
 
 const MEDIA_TYPES: Record<string, string> = {

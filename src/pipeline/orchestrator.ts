@@ -11,6 +11,7 @@ import { runAssembly, assembleBody, wrapDocument } from "./assembly.ts";
 import { runReview, type ReviewResult } from "./review.ts";
 import { runAxe } from "./lint.ts";
 import { proposeAgentUpdatesFromFeedback } from "./feedback.ts";
+import { runContribution } from "./contribute.ts";
 import type { Fragment } from "./fragment.ts";
 
 // Input files are stored as "<0001>__<original-name>" so submitted order
@@ -35,6 +36,7 @@ export async function runPipeline(args: {
   sessionId: string;
   maxReviewIterations: number;
   feedback?: string;
+  githubToken?: string;
 }): Promise<void> {
   const { cfg, store, sessionId } = args;
   const paths = new Paths(cfg);
@@ -58,6 +60,7 @@ export async function runPipeline(args: {
     images,
     feedback: args.feedback,
     maxReviewIterations: args.maxReviewIterations,
+    githubToken: args.githubToken,
   };
 
   try {
@@ -91,6 +94,9 @@ export async function runPipeline(args: {
     let fragments: Fragment[];
     let beforeBody = "";
     let review: ReviewResult;
+    // Specialist-agent suggestions are produced by the full extraction pass only;
+    // an iterative feedback re-run reuses the prior fragments and makes none.
+    let suggestions: { name: string; reason: string; image: string }[] = [];
 
     if (iterative) {
       log.event("run_start", { images: images.length, feedback: args.feedback ?? null, mode: "feedback_iterative" });
@@ -112,6 +118,7 @@ export async function runPipeline(args: {
       // Single coherent extraction: one accessible-HTML pass per page.
       const extraction = await runExtraction(ctx);
       fragments = extraction.fragments;
+      suggestions = extraction.suggestions;
 
       setPhase("assembly");
       const assembled = await runAssembly(ctx, fragments);
@@ -143,8 +150,8 @@ export async function runPipeline(args: {
 
     // Feedback -> agent training (PRD §7.12/§7.13): turn the document-level
     // correction this feedback run produced into a proposed improvement to the
-    // page agent (an update PR for the library agent, gated by its regression
-    // fixtures; or in-place training if a session-built page agent is in use).
+    // page agent, recorded (gated by its regression fixtures) for review; or
+    // in-place training if a session-built page agent is in use.
     if (args.feedback) {
       await proposeAgentUpdatesFromFeedback(ctx, {
         agentFile: "page.md",
@@ -164,6 +171,10 @@ export async function runPipeline(args: {
       unresolved: review.unresolved.length,
       mode: iterative ? "feedback_iterative" : "full",
     });
+
+    // After the user has their output, auto-file agent-suggestion issues
+    // (no-op unless a token is available). Never blocks the result.
+    await runContribution(ctx, suggestions);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     store.updateSession(sessionId, { status: "failed", error: message });

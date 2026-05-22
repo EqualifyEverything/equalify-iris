@@ -22,6 +22,9 @@ export interface IrisConfig {
     // Overridable for GitHub Enterprise (and for testing). Defaults below.
     api_base_url: string; // e.g. https://api.github.com
     oauth_base_url: string; // e.g. https://github.com
+    // Service token (PAT) used to auto-file agent-suggestion issues on the
+    // upstream repo. When empty, issue filing is disabled (safe no-op).
+    issue_token?: string;
   };
   providers: {
     default: string;

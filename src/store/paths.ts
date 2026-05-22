@@ -34,6 +34,10 @@ export class Paths {
   sessionOutput(id: string): string {
     return join(this.sessionDir(id), "output.html");
   }
+  // Base name of the primary uploaded file, for the output title/filename.
+  sessionSourceName(id: string): string {
+    return join(this.sessionDir(id), "source-name.txt");
+  }
   sessionLog(id: string): string {
     return join(this.sessionDir(id), "log.jsonl");
   }
