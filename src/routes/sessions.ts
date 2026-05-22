@@ -12,6 +12,7 @@ import type { AuthedRequest } from "../auth/middleware.ts";
 import { sendError } from "./errors.ts";
 import { summarizeRun } from "../diagnostics.ts";
 import { rasterizePdf, PdfTooLargeError, MAX_PDF_PAGES } from "../util/pdf.ts";
+import { outputBasenameFromUploads, convertedHtmlFilename } from "../util/outputNames.ts";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -121,6 +122,9 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
 
     const sessionId = `ses_${ulid()}`;
     paths.initSession(sessionId);
+    // Remember the source basename so the output title + download filename
+    // mirror the upload (e.g. report.pdf -> report_converted.html).
+    writeFileSync(paths.sessionSourceName(sessionId), outputBasenameFromUploads(files));
     // Persist page images with an order prefix so submitted order survives (§9.2).
     pages.forEach((p, i) => {
       const order = String(i + 1).padStart(4, "0");
@@ -182,7 +186,16 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 409, "invalid_state", "Output not available");
       return;
     }
-    res.type("text/html").send(readFileSync(outPath, "utf8"));
+    // Title + download filename mirror the uploaded file's name.
+    const base = existsSync(paths.sessionSourceName(s.session_id))
+      ? readFileSync(paths.sessionSourceName(s.session_id), "utf8").trim() || "document"
+      : "document";
+    const html = readFileSync(outPath, "utf8").replace(
+      /<title>[^<]*<\/title>/,
+      `<title>${base.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</title>`,
+    );
+    res.setHeader("Content-Disposition", `inline; filename="${convertedHtmlFilename(base)}"`);
+    res.type("text/html").send(html);
   });
 
   // GET /v1/sessions/{id}/logs — the run log as ndjson.

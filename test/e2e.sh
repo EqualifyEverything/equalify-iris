@@ -124,6 +124,12 @@ out=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/output")
 echo "$out" | grep -q '<main>' && echo "$out" | grep -q 'Quarterly Report' \
   && ! echo "$out" | grep -q '@source' \
   && pass "clean HTML output (no provenance comments)" || fail "output" "$out"
+# filename mirrors the uploaded file (first part: page-001.png)
+hdr=$(curl -s -D - -o /dev/null "${AUTH[@]}" "$BASE/sessions/$SID/output")
+echo "$hdr" | grep -qi 'content-disposition:.*page-001_converted.html' \
+  && pass "download filename mirrors input (page-001_converted.html)" || fail "filename" "$hdr"
+echo "$out" | grep -q '<title>page-001</title>' \
+  && pass "output title mirrors input" || fail "title" "$(echo "$out" | grep -i '<title>')"
 
 echo "==> 8. GET /v1/sessions/{id}/logs (ndjson)"
 logs=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/logs")
