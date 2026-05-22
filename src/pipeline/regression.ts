@@ -44,11 +44,11 @@ function pruneFixtures(dir: string): void {
 // PRD §7.12 (auto-capture on accept): when a session is accepted (closed), save a
 // regression fixture for each agent that produced accepted output — the
 // triggering source image plus the agent's accepted HTML for it. File-only; no
-// model calls. Reconciled (cross-image) fragments are skipped (no single source).
+// model calls.
 export function captureFixtures(paths: Paths, sessionId: string, fragments: Fragment[]): void {
   const byAgent = new Map<string, Fragment[]>();
   for (const f of fragments) {
-    if (f.reconciled || !f.agent) continue;
+    if (!f.agent) continue;
     const list = byAgent.get(f.agent) ?? [];
     list.push(f);
     byAgent.set(f.agent, list);
