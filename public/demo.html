@@ -127,8 +127,8 @@
         <input id="images" name="images" type="file" accept="image/png,image/jpeg,image/tiff,image/webp" multiple aria-describedby="images-hint" required>
 
         <label for="iterations">Review passes</label>
-        <p class="hint" id="iter-hint">1–5; higher is more thorough but slower. Default 3.</p>
-        <input id="iterations" name="iterations" type="number" min="1" max="5" value="3" aria-describedby="iter-hint">
+        <p class="hint" id="iter-hint">1 is fast; higher is more thorough but much slower (each pass re-runs the reviewer). 1–5.</p>
+        <input id="iterations" name="iterations" type="number" min="1" max="5" value="1" aria-describedby="iter-hint">
 
         <div class="row">
           <button id="convert-btn" type="submit">Convert to accessible HTML</button>
