@@ -44,7 +44,7 @@
     p { margin: .5rem 0; }
     label { display: block; font-weight: 600; margin: 1rem 0 .35rem; }
     .hint { color: var(--muted); font-weight: 400; font-size: .95rem; margin: 0 0 .35rem; }
-    input[type=file], input[type=number], textarea {
+    input[type=file], input[type=number], input[type=text], textarea {
       font: inherit; width: 100%; max-width: 32rem; padding: .55rem .65rem;
       border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg);
     }
@@ -160,7 +160,7 @@
       <form id="feedback-form">
         <label for="feedback-text">Not quite right? Tell Iris what to fix</label>
         <p class="hint" id="fb-hint">Iris will re-run the conversion with your feedback applied (for example: “Keep footnotes separate from body text”).</p>
-        <textarea id="feedback-text" aria-describedby="fb-hint"></textarea>
+        <input id="feedback-text" type="text" aria-describedby="fb-hint">
         <div class="row">
           <button id="feedback-btn" type="submit" class="secondary">Re-run with this feedback</button>
         </div>
