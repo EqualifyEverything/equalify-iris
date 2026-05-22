@@ -147,19 +147,12 @@
     <section id="result-section" aria-labelledby="step4-h" hidden>
       <h2 id="step4-h" tabindex="-1">Your accessible HTML</h2>
       <p id="built-agents" class="built" hidden></p>
+      <p>Your document was converted to accessible HTML.</p>
       <div class="row">
-        <button id="download-btn" type="button">Download HTML</button>
-        <button id="toggle-source" type="button" class="secondary" aria-expanded="false" aria-controls="result-source-wrap">View source</button>
+        <button id="view-btn" type="button">View converted document</button>
         <button id="restart-btn" type="button" class="secondary">Convert another document</button>
       </div>
-
-      <h3>Preview</h3>
-      <iframe id="result-frame" title="Rendered preview of the generated accessible HTML" sandbox></iframe>
-
-      <div id="result-source-wrap" hidden>
-        <h3>HTML source</h3>
-        <pre><code id="result-source"></code></pre>
-      </div>
+      <p class="hint">Opens in a new browser tab.</p>
 
       <form id="feedback-form">
         <label for="feedback-text">Not quite right? Tell Iris what to fix</label>
@@ -186,6 +179,7 @@
     let token = sessionStorage.getItem('iris_token') || null;
     let sessionId = null;
     let currentUserCode = null;
+    let currentBlobUrl = null;
 
     const $ = (id) => document.getElementById(id);
     const show = (id) => { $(id).hidden = false; };
@@ -371,15 +365,13 @@
     async function showResult(d) {
       const res = await api('/sessions/' + sessionId + '/output');
       const html = await res.text();
-      $('result-frame').srcdoc = html;
-      $('result-source').textContent = html;
-      $('download-btn').onclick = () => {
-        const blob = new Blob([html], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = 'accessible.html'; a.click();
-        URL.revokeObjectURL(url);
-      };
+      // Build a local blob URL so "View converted document" can open the
+      // rendered HTML in a new tab without the /output endpoint needing to be
+      // reachable unauthenticated.
+      const blob = new Blob([html], { type: 'text/html' });
+      if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+      currentBlobUrl = URL.createObjectURL(blob);
+      $('view-btn').onclick = () => window.open(currentBlobUrl, '_blank');
       const built = (d.pending_prs && d.pending_prs.new_agents) || [];
       if (built.length) {
         $('built-agents').textContent = 'Iris taught itself ' + built.length +
@@ -388,14 +380,6 @@
       }
       hide('status-section'); show('result-section'); focusHeading('step4-h');
     }
-
-    $('toggle-source').addEventListener('click', () => {
-      const wrap = $('result-source-wrap');
-      const willShow = wrap.hidden;
-      wrap.hidden = !willShow;
-      $('toggle-source').setAttribute('aria-expanded', String(willShow));
-      $('toggle-source').textContent = willShow ? 'Hide source' : 'View source';
-    });
 
     $('restart-btn').addEventListener('click', () => {
       sessionId = null; setError('');
