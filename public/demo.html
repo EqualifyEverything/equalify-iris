@@ -315,22 +315,35 @@
       review: 'reviewing for accessibility', done: 'finishing up',
     };
     async function pollStatus() {
+      let d = null;
       try {
         const res = await api('/sessions/' + sessionId);
-        const d = await res.json();
-        if (d.status === 'queued' || d.status === 'running') {
-          announce('Working — ' + (PHASE_LABEL[d.phase] || d.phase || d.status) + '…');
-          setTimeout(pollStatus, 2500);
-        } else if (d.status === 'ready_for_review') {
-          announce('Done! Your accessible HTML is ready.');
-          await showResult(d);
-        } else if (d.status === 'failed') {
-          setError('Conversion failed: ' + (d.error || 'unknown error') + '. You can try again.');
-          hide('status-section'); show('upload-section'); focusHeading('step2-h');
-        }
+        if (res.ok) d = await res.json();
       } catch (e) {
-        setTimeout(pollStatus, 3000);
+        // transient network error — fall through and keep polling
       }
+
+      if (d && d.status === 'ready_for_review') {
+        announce('Done! Your accessible HTML is ready.');
+        try {
+          await showResult(d);
+        } catch (e) {
+          setError('The conversion finished, but the result could not be displayed: ' + e.message);
+        }
+        return; // terminal — stop polling
+      }
+      if (d && d.status === 'failed') {
+        setError('Conversion failed: ' + (d.error || 'unknown error') + '. You can try again.');
+        hide('status-section'); show('upload-section'); focusHeading('step2-h');
+        return; // terminal — stop polling
+      }
+
+      // queued / running / a transient error / an unexpected shape: keep going
+      // so a single hiccup never strands the user on the spinner.
+      if (d && (d.phase || d.status)) {
+        announce('Working — ' + (PHASE_LABEL[d.phase] || d.phase || d.status) + '…');
+      }
+      setTimeout(pollStatus, 2500);
     }
 
     // ----- Step 4: result -----

@@ -23,8 +23,12 @@ app.use(express.json({ limit: "2mb" }));
 app.get("/v1/health", (_req, res) => res.json({ status: "ok", service: "equalify-iris" }));
 
 // Accessible browser demo (unauthenticated page; it drives the /v1 API itself).
+// no-store so an iterating deployment never serves a stale copy of the page.
 const demoFile = fileURLToPath(new URL("../public/demo.html", import.meta.url));
-app.get("/demo", (_req, res) => res.sendFile(demoFile));
+app.get("/demo", (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.sendFile(demoFile);
+});
 
 // Auth endpoints are unauthenticated by definition (§9.1).
 app.use("/v1/auth", authRouter(cfg));
