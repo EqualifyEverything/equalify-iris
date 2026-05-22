@@ -1,0 +1,9 @@
+[project]
+name = "equalify-iris"
+version = "0.1.0"
+description = "Image-to-accessible-HTML parsing service API"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+equalify-iris = "equalify_iris.__main__:main"

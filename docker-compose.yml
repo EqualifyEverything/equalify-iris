@@ -1,0 +1,22 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      IRIS_HOST: 0.0.0.0
+      IRIS_PORT: 8000
+      IRIS_DATA_DIR: /app/data
+      IRIS_AGENTS_DIR: /app/agents
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://127.0.0.1:8000/v1/auth/github/callback}
+      IRIS_UPSTREAM_REPO: ${IRIS_UPSTREAM_REPO:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_DEFAULT_MODEL: ${OPENROUTER_DEFAULT_MODEL:-anthropic/claude-3.5-sonnet}
+      OPENROUTER_VISION_MODEL: ${OPENROUTER_VISION_MODEL:-anthropic/claude-3.5-sonnet}
+      OPENROUTER_STRUCTURED_MODEL: ${OPENROUTER_STRUCTURED_MODEL:-anthropic/claude-3.5-sonnet}
+      OPENROUTER_TEXT_MODEL: ${OPENROUTER_TEXT_MODEL:-anthropic/claude-3.5-sonnet}
+    volumes:
+      - ./data:/app/data
+      - ./agents:/app/agents
