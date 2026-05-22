@@ -85,7 +85,9 @@ export SID=$(echo "$create" | jq -r .session_id)
 ```json
 { "session_id": "ses_01HXYZ...", "status": "queued", "image_count": 2, "created_at": "..." }
 ```
-Accepted image types: PNG, JPEG, TIFF, WebP.
+Accepted file types: PNG, JPEG, TIFF, WebP, **and PDF**. A PDF is rasterized server-side into
+one image per page (in page order) and processed like any other page sequence. Total pages
+(across all parts) are capped per deployment.
 
 ## 4. Poll status
 

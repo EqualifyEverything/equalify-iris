@@ -122,9 +122,9 @@
     <section id="upload-section" aria-labelledby="step2-h" hidden>
       <h2 id="step2-h" tabindex="-1">Upload your pages</h2>
       <form id="upload-form">
-        <label for="images">Page images</label>
-        <p class="hint" id="images-hint">PNG, JPEG, TIFF, or WebP — in reading order (first file = page 1).</p>
-        <input id="images" name="images" type="file" accept="image/png,image/jpeg,image/tiff,image/webp" multiple aria-describedby="images-hint" required>
+        <label for="images">Pages (images or PDF)</label>
+        <p class="hint" id="images-hint">A PDF, or images (PNG, JPEG, TIFF, WebP) in reading order. A PDF is split into one page per image.</p>
+        <input id="images" name="images" type="file" accept="image/png,image/jpeg,image/tiff,image/webp,application/pdf" multiple aria-describedby="images-hint" required>
 
         <label for="iterations">Review passes</label>
         <p class="hint" id="iter-hint">1 is fast; higher is more thorough but much slower (each pass re-runs the reviewer). 1–5.</p>

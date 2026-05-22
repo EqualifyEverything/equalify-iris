@@ -2,9 +2,10 @@
 # workstations are first-class targets (PRD §10.4).
 FROM node:24-slim
 
-# git is required: agents/ is a git checkout (SHA pinning, PRD §7.3) and the
-# contribution workflow inspects it.
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+# git: agents/ is a git checkout (SHA pinning, PRD §7.3) and the contribution
+# workflow inspects it. poppler-utils: pdftoppm/pdfinfo for rasterizing uploaded
+# PDFs into per-page images.
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

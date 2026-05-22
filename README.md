@@ -40,7 +40,9 @@ user pulls the updated `agents/` library (PRD §7.13).
 
 Requires **Node.js 24+** (the service runs TypeScript directly via Node's built-in type
 stripping and uses the built-in `node:sqlite`), and a **git** checkout of the agent library
-(this repo's `agents/` directory works).
+(this repo's `agents/` directory works). For **PDF uploads**, install **poppler-utils**
+(`pdftoppm`/`pdfinfo`) — `brew install poppler` on macOS, `apt-get install poppler-utils` on
+Debian/Ubuntu. (The Docker image includes it.)
 
 ```bash
 git clone https://github.com/EqualifyEverything/equalify-iris

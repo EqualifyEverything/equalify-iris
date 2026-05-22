@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request, Response, NextFunction } from "express";
 import multer from "multer";
 import { writeFileSync, readFileSync, existsSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -13,10 +14,24 @@ import { sendError } from "./errors.ts";
 import { gatherNewAgents, gatherAgentUpdates } from "../github/contributions.ts";
 import { ensureFork, openPr, parseRepo, type PrFile } from "../github/pr.ts";
 import { summarizeRun } from "../diagnostics.ts";
+import { rasterizePdf, PdfTooLargeError, MAX_PDF_PAGES } from "../util/pdf.ts";
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-const ALLOWED_EXT = /\.(png|jpe?g|tiff?|webp)$/i;
+// Wrap multer so its errors (e.g. file too large) become clean 400s.
+function uploadImages(req: Request, res: Response, next: NextFunction): void {
+  upload.array("images")(req, res, (err: unknown) => {
+    if (err) {
+      sendError(res, 400, "invalid_request", `Upload failed: ${(err as Error).message}`);
+      return;
+    }
+    next();
+  });
+}
+
+const IMAGE_EXT = /\.(png|jpe?g|tiff?|webp)$/i;
+const PDF_EXT = /\.pdf$/i;
+const MAX_TOTAL_PAGES = MAX_PDF_PAGES; // overall cap across all uploaded files
 const PR_BODY_OUTPUT_CAP = 50000; // GitHub PR bodies cap at ~65k chars
 
 // One-line axe-core summary for the PR description (from sessions/<id>/lint.json).
@@ -72,16 +87,17 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     res.json({ sessions: page.map(sessionSummary), next_cursor: next });
   });
 
-  // POST /v1/sessions — create a session, store images in submitted order.
-  r.post("/", upload.array("images"), (req: AuthedRequest, res) => {
+  // POST /v1/sessions — create a session. Accepts images and/or PDFs; PDFs are
+  // rasterized to one image per page, expanded in submitted order (§9.2).
+  r.post("/", uploadImages, async (req: AuthedRequest, res) => {
     const files = (req.files as Express.Multer.File[] | undefined) ?? [];
     if (files.length === 0) {
-      sendError(res, 400, "invalid_request", "At least one image part named 'images' is required");
+      sendError(res, 400, "invalid_request", "At least one file part named 'images' is required (image or PDF)");
       return;
     }
     for (const f of files) {
-      if (!ALLOWED_EXT.test(f.originalname)) {
-        sendError(res, 400, "invalid_request", `Unsupported image type: ${f.originalname}`);
+      if (!IMAGE_EXT.test(f.originalname) && !PDF_EXT.test(f.originalname)) {
+        sendError(res, 400, "invalid_request", `Unsupported file type: ${f.originalname} (allowed: PNG, JPEG, TIFF, WebP, PDF)`);
         return;
       }
     }
@@ -98,18 +114,46 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       }
     }
 
+    // Expand uploads into ordered page images (PDF -> one PNG per page).
+    const pages: { name: string; buffer: Buffer }[] = [];
+    try {
+      for (const f of files) {
+        if (PDF_EXT.test(f.originalname)) {
+          pages.push(...(await rasterizePdf(f.buffer, f.originalname)));
+        } else {
+          pages.push({ name: f.originalname, buffer: f.buffer });
+        }
+      }
+    } catch (e) {
+      if (e instanceof PdfTooLargeError) {
+        sendError(res, 400, "invalid_request", e.message);
+      } else {
+        sendError(res, 422, "pdf_conversion_failed", `Could not process a PDF: ${(e as Error).message}`);
+      }
+      return;
+    }
+
+    if (pages.length === 0) {
+      sendError(res, 400, "invalid_request", "No pages found in the uploaded files");
+      return;
+    }
+    if (pages.length > MAX_TOTAL_PAGES) {
+      sendError(res, 400, "invalid_request", `Too many pages (${pages.length}); the maximum is ${MAX_TOTAL_PAGES}.`);
+      return;
+    }
+
     const sessionId = `ses_${ulid()}`;
     paths.initSession(sessionId);
-    // Persist images with an order prefix so submitted order survives (§9.2).
-    files.forEach((f, i) => {
+    // Persist page images with an order prefix so submitted order survives (§9.2).
+    pages.forEach((p, i) => {
       const order = String(i + 1).padStart(4, "0");
-      writeFileSync(join(paths.sessionInput(sessionId), `${order}__${f.originalname}`), f.buffer);
+      writeFileSync(join(paths.sessionInput(sessionId), `${order}__${p.name}`), p.buffer);
     });
 
     const record = store.createSession({
       session_id: sessionId,
       github_user_id: req.user!.github_user_id,
-      image_count: files.length,
+      image_count: pages.length,
       iterations_max: maxIter,
     });
 
