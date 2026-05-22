@@ -157,7 +157,39 @@ Then poll status again as in step 4.
 curl -s -H "$AUTH" "$BASE/sessions/$SID/logs"
 ```
 `application/x-ndjson` — one JSON object per line (agent calls with git-SHA / inline-content
-version pinning, no-content signals, phase transitions).
+version pinning, model-call timing, no-content signals, phase transitions).
+
+## 7b. Diagnostics (timing / hang detection)
+
+A machine-readable health summary distilled from the run log — built for maintainers, human
+or AI, to spot what's slow or stuck.
+
+```bash
+curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
+```
+```json
+{
+  "session_id": "ses_...",
+  "status": "running",
+  "phase": "extraction",
+  "started_at": "2026-05-22T16:25:01Z",
+  "elapsed_ms": 92000,
+  "in_flight": {
+    "agent": "table", "model": "us.anthropic.claude-sonnet-4-6",
+    "provider": "bedrock", "capability": "vision",
+    "since": "2026-05-22T16:26:12Z", "waiting_ms": 41000
+  },
+  "phase_durations_ms": { "triage": 8200, "extraction": 60100 },
+  "model_calls": { "count": 7, "failed": 0, "total_ms": 51000, "avg_ms": 7285, "max_ms": 14300 },
+  "by_agent": { "image_analysis": { "count": 1, "total_ms": 8200, "max_ms": 8200 } },
+  "slowest_calls": [ { "agent": "table", "model": "...", "capability": "vision", "duration_ms": 14300, "ok": true } ],
+  "errors": []
+}
+```
+
+The key field for **"is it hung?"** is `in_flight`: a non-null value with a large `waiting_ms`
+means a model call started and hasn't returned (the likely culprit). `slowest_calls` and
+`phase_durations_ms` show where time goes; `errors` lists failed calls.
 
 ## 8. List sessions
 

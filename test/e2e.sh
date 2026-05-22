@@ -132,6 +132,12 @@ logs=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/logs")
 echo "$logs" | head -1 | jq -e '.type' >/dev/null \
   && pass "run log is ndjson ($(echo "$logs" | wc -l | tr -d ' ') lines)" || fail "logs" "$logs"
 
+echo "==> 8b. GET /v1/sessions/{id}/diagnostics"
+diag=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/diagnostics")
+echo "$diag" | jq -e '.model_calls.count >= 1 and .in_flight == null and (.phase_durations_ms | length >= 1)' >/dev/null \
+  && pass "diagnostics: $(echo "$diag" | jq -r '.model_calls.count') model calls timed, in_flight=null, phases=$(echo "$diag" | jq -r '.phase_durations_ms|keys|length')" \
+  || fail "diagnostics" "$diag"
+
 echo "==> 9. POST /v1/sessions/{id}/feedback (re-run)"
 fb=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/feedback" -H 'content-type: application/json' \
   -d '{"feedback":"Keep headings distinct from body text."}')

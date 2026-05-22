@@ -38,8 +38,15 @@ export async function runPipeline(args: {
   const { cfg, store, sessionId } = args;
   const paths = new Paths(cfg);
   const log = new RunLog(paths.sessionLog(sessionId));
-  const router = new ProviderRouter(cfg);
+  // Route every model call's timing into the run log for diagnostics.
+  const router = new ProviderRouter(cfg, (type, data) => log.event(type, data));
   const images = enumerateInputs(paths, sessionId);
+
+  // Update the session phase and record a phase marker for timing diagnostics.
+  const setPhase = (phase: Parameters<typeof store.updateSession>[1]["phase"]) => {
+    store.updateSession(sessionId, { phase });
+    log.event("phase", { phase });
+  };
 
   const ctx: PipelineContext = {
     sessionId,
@@ -54,6 +61,7 @@ export async function runPipeline(args: {
 
   try {
     store.updateSession(sessionId, { status: "running", phase: "triage", error: null });
+    log.event("phase", { phase: "triage" });
 
     // Feedback re-runs are logged separately and preserve the prior output so it
     // can be reverted to (PRD §7.12). The previous output.html is snapshotted to
@@ -75,16 +83,16 @@ export async function runPipeline(args: {
 
     const triage = await runTriage(ctx);
 
-    store.updateSession(sessionId, { phase: "extraction" });
+    setPhase("extraction");
     const { fragments, noContent } = await runExtraction(ctx, triage);
 
-    store.updateSession(sessionId, { phase: "reconciliation" });
+    setPhase("reconciliation");
     const reconciled = await runReconciliation(ctx, fragments);
 
-    store.updateSession(sessionId, { phase: "assembly" });
+    setPhase("assembly");
     const assembled = await runAssembly(ctx, reconciled);
 
-    store.updateSession(sessionId, { phase: "review" });
+    setPhase("review");
     const review = await runReview(
       ctx,
       { html: assembled.html, fragments: reconciled, lint: assembled.lint },

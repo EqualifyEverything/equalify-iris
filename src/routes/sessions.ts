@@ -12,6 +12,7 @@ import type { AuthedRequest } from "../auth/middleware.ts";
 import { sendError } from "./errors.ts";
 import { gatherNewAgents, gatherAgentUpdates } from "../github/contributions.ts";
 import { ensureFork, openPr, parseRepo, type PrFile } from "../github/pr.ts";
+import { summarizeRun } from "../diagnostics.ts";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -188,6 +189,20 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     }
     const logPath = paths.sessionLog(s.session_id);
     res.type("application/x-ndjson").send(existsSync(logPath) ? readFileSync(logPath, "utf8") : "");
+  });
+
+  // GET /v1/sessions/{id}/diagnostics — machine-readable timing/health summary
+  // for maintainers (human or AI): phase + per-call durations, the slowest
+  // calls, and any in-flight call (the likely culprit when a run seems hung).
+  r.get("/:id/diagnostics", (req: AuthedRequest, res) => {
+    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+    if (!s) {
+      sendError(res, 404, "session_not_found", "No such session");
+      return;
+    }
+    const logPath = paths.sessionLog(s.session_id);
+    const text = existsSync(logPath) ? readFileSync(logPath, "utf8") : "";
+    res.json(summarizeRun(text, { sessionId: s.session_id, status: s.status, phase: s.phase, now: Date.now() }));
   });
 
   // POST /v1/sessions/{id}/feedback — re-run within the same session (§7.12).

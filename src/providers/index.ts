@@ -8,12 +8,16 @@ export type { Image, Message, CompletionResult } from "./types.ts";
 // The router maps (agent, capability) -> concrete provider + model using the
 // deployment config (PRD §10.3). Providers are constructed lazily so a
 // deployment only needs credentials for the providers it actually references.
+export type TelemetryFn = (type: string, data: Record<string, unknown>) => void;
+
 export class ProviderRouter {
   private cfg: IrisConfig["providers"];
   private cache = new Map<string, ModelProvider>();
+  private onEvent?: TelemetryFn;
 
-  constructor(cfg: IrisConfig) {
+  constructor(cfg: IrisConfig, onEvent?: TelemetryFn) {
     this.cfg = cfg.providers;
+    this.onEvent = onEvent;
   }
 
   private build(name: string): ModelProvider {
@@ -69,6 +73,19 @@ export class ProviderRouter {
     const providerName = this.providerNameFor(agentName);
     const provider = this.build(providerName);
     const model = this.modelFor(agentName, providerName, capability);
-    return provider.complete({ capability, messages, model, images: opts.images, schema: opts.schema });
+
+    // Emit a start marker BEFORE the call so a hung/in-flight call is visible
+    // in diagnostics (a start with no matching end), and time the call.
+    const meta = { agent: agentName, capability, model, provider: providerName };
+    this.onEvent?.("model_call_start", meta);
+    const startedAt = Date.now();
+    try {
+      const result = await provider.complete({ capability, messages, model, images: opts.images, schema: opts.schema });
+      this.onEvent?.("model_call", { ...meta, duration_ms: Date.now() - startedAt, ok: true });
+      return result;
+    } catch (e) {
+      this.onEvent?.("model_call", { ...meta, duration_ms: Date.now() - startedAt, ok: false, error: (e as Error).message });
+      throw e;
+    }
   }
 }
