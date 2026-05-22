@@ -17,10 +17,14 @@ export async function runAssembly(
   const ordered = [...fragments].sort((a, b) => a.order - b.order);
   const body = ordered.map(renderFragment).join("\n\n");
 
+  // Unresolved issues are recorded as a provenance COMMENT (like @source /
+  // @reconciled), not visible content — so they don't show up in the rendered
+  // output users see (PRD §7.11). The full list also persists in unresolved.md
+  // and is available via the API. `--` is collapsed so it can't close the comment.
   const unresolvedBlock = opts.unresolved?.length
-    ? `\n\n<!-- @unresolved -->\n<aside aria-label="Unresolved issues">\n<h2>Unresolved issues</h2>\n<ul>\n${opts.unresolved
-        .map((u) => `  <li>${escapeHtml(u)}</li>`)
-        .join("\n")}\n</ul>\n</aside>`
+    ? `\n\n<!-- @unresolved\n${opts.unresolved
+        .map((u) => `  - ${u.replace(/--+/g, "—")}`)
+        .join("\n")}\n-->`
     : "";
 
   const html = `<!DOCTYPE html>
@@ -40,8 +44,4 @@ ${body}${unresolvedBlock}
   const lint = await runAxe(html);
   ctx.log.event("assembly", { fragments: ordered.length, lint_ok: lint.ok, violations: lint.violations.length });
   return { html, lint };
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
