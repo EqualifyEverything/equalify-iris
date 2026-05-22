@@ -32,9 +32,11 @@ The pipeline runs in five phases (PRD §6):
    Editor proposes fixes against the source image; the Assembler applies them. Loops up to
    `max_review_iterations` (default 3).
 
-Agents built during a session are ephemeral. The **only** way one becomes permanent is the
-GitHub PR workflow on session close: Iris opens a PR upstream, a maintainer merges it, and the
-user pulls the updated `agents/` library (PRD §7.13).
+When Iris meets content a specialist agent would handle better than the general pass, it drafts
+that agent and **automatically files a labeled `iris-agent-suggestion` GitHub issue** (with the
+agent code + context) on the upstream repo, attributed to the logged-in user. Maintainers
+triage those issues; merged agents become part of the shared `agents/` library. (This replaces
+the PRD's fork+PR-on-close flow — see Implementation notes.)
 
 ## Quick start
 
@@ -178,12 +180,18 @@ A few places where the PRD left a decision open, and where v1 intentionally stop
 
 Intentionally **not** built in v1 (the PRD frames each as optional / alternative / out of scope):
 PostgreSQL and S3 backends (§10.2 — "supported alternative," SQLite + local FS is the v1
-reference), the per-user config endpoint (§9.1 — "not specified in v1"), automated detection of
-agent-*updates* (§7.13 names no producer; the close flow opens update PRs if a
-`agent-updates.md` JSON file is present), and webhooks (§9.4 — out of scope, API structured to
-add them later). The only endpoint beyond the PRD is `GET /v1/health`, a standard liveness probe.
+reference), the per-user config endpoint (§9.1 — "not specified in v1"), and webhooks (§9.4 —
+out of scope). The only endpoint beyond the PRD is `GET /v1/health`, a standard liveness probe.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md). Found an
+accessibility barrier — in the app or in the HTML it produces? Please open an
+[Accessibility issue](.github/ISSUE_TEMPLATE/accessibility.yml); those are our top priority.
 
 ## License
 
-MIT. See the Sustainability notice above — and please consider hiring Equalify to host or
-support your instance.
+**[GNU AGPL-3.0-or-later](LICENSE).** Iris is copyleft: if you modify it and run it as a
+network service, you must make your modified source available to its users (AGPL §13). The
+hosted and self-hosted versions are functionally identical — see the Sustainability notice
+above, and please consider hiring Equalify to host or support your instance.

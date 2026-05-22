@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Equalify (hosting & support)
+    url: https://equalify.app/
+    about: Iris is built and stewarded by Equalify Inc. For commercial hosting or support, get in touch.
+  - name: Try the hosted demo
+    url: https://iris.equalify.foundation/
+    about: Convert document images/PDFs to accessible HTML in your browser.
