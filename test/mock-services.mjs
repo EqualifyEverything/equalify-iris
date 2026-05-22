@@ -89,10 +89,19 @@ const or = createServer(async (req, res) => {
   } catch {}
   let content = "{}";
   if (sys.includes("convert an ENTIRE document page"))
-    content = JSON.stringify({ html: "<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>", log: "" });
+    content = JSON.stringify({
+      html:
+        '<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n' +
+        '<form><label for="revenue">Revenue</label><input type="text" id="revenue" name="revenue"></form>',
+      log: "",
+    });
   else if (sys.includes("Reader Agent")) content = JSON.stringify({ issues: [] });
   else if (sys.includes("Copy Editor Agent"))
-    content = JSON.stringify({ html: "<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>" });
+    content = JSON.stringify({
+      html:
+        '<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n' +
+        '<form><label for="revenue">Revenue</label><input type="text" id="revenue" name="revenue"></form>',
+    });
   json(res, 200, { choices: [{ message: { content } }] });
 });
 

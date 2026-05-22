@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { IrisConfig } from "../config.ts";
+import { convertedHtmlFilename, filledPdfFilename } from "../util/outputNames.ts";
 
 // Resolves the on-disk layout described in PRD §8.1.
 export class Paths {
@@ -25,8 +26,19 @@ export class Paths {
   sessionFragments(id: string): string {
     return join(this.sessionDir(id), "fragments");
   }
-  sessionOutput(id: string): string {
+  sessionConvertedOutput(id: string, basename: string): string {
+    return join(this.sessionDir(id), convertedHtmlFilename(basename));
+  }
+  sessionFilledOutput(id: string, basename: string): string {
+    return join(this.sessionDir(id), filledPdfFilename(basename));
+  }
+  /** Legacy fallback for sessions created before output naming (issue #7). */
+  sessionLegacyOutput(id: string): string {
     return join(this.sessionDir(id), "output.html");
+  }
+  sessionOutput(id: string, basename?: string | null): string {
+    if (basename) return this.sessionConvertedOutput(id, basename);
+    return this.sessionLegacyOutput(id);
   }
   sessionLog(id: string): string {
     return join(this.sessionDir(id), "log.jsonl");

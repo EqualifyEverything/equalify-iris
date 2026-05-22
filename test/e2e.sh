@@ -101,12 +101,12 @@ echo "==> 5. POST /v1/sessions (upload 2 images)"
 png=/tmp/iris-e2e-page.png
 printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC' | base64 -d > "$png"
 create=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
-  -F "images=@$png;filename=page-001.png" \
-  -F "images=@$png;filename=page-002.png" \
+  -F "images=@$png;filename=Form123.png" \
+  -F "images=@$png;filename=Form123-page2.png" \
   -F 'config={"max_review_iterations":1}')
 SID=$(echo "$create" | jq -r '.session_id')
-echo "$create" | jq -e '.status=="queued" and .image_count==2' >/dev/null \
-  && pass "session created: $SID" || fail "create" "$create"
+echo "$create" | jq -e '.status=="queued" and .image_count==2 and .outputs.converted_html=="Form123_converted.html"' >/dev/null \
+  && pass "session created: $SID (outputs preserve basename)" || fail "create" "$create"
 
 echo "==> 6. poll GET /v1/sessions/{id} until ready_for_review"
 status=""
@@ -127,6 +127,15 @@ out=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/output")
 echo "$out" | grep -q '<main>' && echo "$out" | grep -q 'Quarterly Report' \
   && ! echo "$out" | grep -q '@source' \
   && pass "clean HTML output (no provenance comments)" || fail "output" "$out"
+[ -f "$DATA/sessions/$SID/Form123_converted.html" ] \
+  && pass "converted HTML saved as Form123_converted.html" \
+  || fail "converted file" "Form123_converted.html missing on disk"
+
+echo "==> 7b. GET /v1/sessions/{id}/output/filled"
+filled=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/$SID/output/filled")
+[ "$filled" = "200" ] && [ -f "$DATA/sessions/$SID/Form123_filled.pdf" ] \
+  && pass "fillable PDF saved as Form123_filled.pdf" \
+  || fail "filled pdf" "HTTP $filled or file missing"
 
 echo "==> 8. GET /v1/sessions/{id}/logs (ndjson)"
 logs=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/logs")

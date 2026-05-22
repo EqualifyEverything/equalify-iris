@@ -83,8 +83,12 @@ echo "$create"
 export SID=$(echo "$create" | jq -r .session_id)
 ```
 ```json
-{ "session_id": "ses_01HXYZ...", "status": "queued", "image_count": 2, "created_at": "..." }
+{ "session_id": "ses_01HXYZ...", "status": "queued", "image_count": 2, "created_at": "...",
+  "outputs": { "converted_html": "Form123_converted.html", "filled_pdf": null } }
 ```
+Output filenames preserve the uploaded basename (issue #7): `Form123.pdf` →
+`Form123_converted.html` and, when the document contains form controls,
+`Form123_filled.pdf`.
 Accepted file types: PNG, JPEG, TIFF, WebP, **and PDF**. A PDF is rasterized server-side into
 one image per page (in page order) and processed like any other page sequence. Total pages
 (across all parts) are capped per deployment.
@@ -134,10 +138,18 @@ done
 ## 5. Fetch the HTML output
 
 ```bash
-curl -s -H "$AUTH" "$BASE/sessions/$SID/output" -o output.html
+curl -s -H "$AUTH" "$BASE/sessions/$SID/output" -o Form123_converted.html
 ```
-`text/html` with provenance comments intact (`@source`, `@agent`, `@fragment`, `@reconciled`).
+`text/html` with `Content-Disposition: attachment; filename="<basename>_converted.html"`.
 Returns `409` while the session is still running.
+
+## 5b. Fetch the fillable PDF (when produced)
+
+```bash
+curl -s -H "$AUTH" "$BASE/sessions/$SID/output/filled" -o Form123_filled.pdf
+```
+`application/pdf` when the converted HTML includes form controls. Returns `404` if no
+fillable PDF was generated.
 
 ## 6. Submit feedback (re-run)
 
