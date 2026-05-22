@@ -21,6 +21,7 @@ class Config:
     github_scope: str
     upstream_repo: str | None
     default_max_review_iterations: int
+    provider_default: str | None
     provider_per_agent: dict[str, str]
     openrouter_api_key: str | None
     openrouter_default_model: str
@@ -29,6 +30,11 @@ class Config:
     openrouter_structured_model: str
     openrouter_site_url: str | None
     openrouter_app_name: str | None
+    bedrock_region: str | None
+    bedrock_default_model: str | None
+    bedrock_text_model: str | None
+    bedrock_vision_model: str | None
+    bedrock_structured_model: str | None
 
     @classmethod
     def from_env(cls, host: str | None = None, port: int | None = None) -> "Config":
@@ -59,6 +65,7 @@ class Config:
             github_scope="repo",
             upstream_repo=os.getenv("IRIS_UPSTREAM_REPO") or _git_origin(agents_dir),
             default_max_review_iterations=int(os.getenv("IRIS_DEFAULT_MAX_REVIEW_ITERATIONS", "3")),
+            provider_default=os.getenv("IRIS_PROVIDER_DEFAULT") or None,
             provider_per_agent=_parse_provider_per_agent(os.getenv("IRIS_PROVIDER_PER_AGENT", "")),
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY") or None,
             openrouter_default_model=os.getenv("OPENROUTER_DEFAULT_MODEL", "anthropic/claude-3.5-sonnet"),
@@ -67,6 +74,11 @@ class Config:
             openrouter_structured_model=os.getenv("OPENROUTER_STRUCTURED_MODEL", os.getenv("OPENROUTER_DEFAULT_MODEL", "anthropic/claude-3.5-sonnet")),
             openrouter_site_url=os.getenv("OPENROUTER_SITE_URL") or None,
             openrouter_app_name=os.getenv("OPENROUTER_APP_NAME", "Equalify Iris"),
+            bedrock_region=os.getenv("BEDROCK_REGION") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or None,
+            bedrock_default_model=os.getenv("BEDROCK_DEFAULT_MODEL") or None,
+            bedrock_text_model=os.getenv("BEDROCK_TEXT_MODEL") or os.getenv("BEDROCK_DEFAULT_MODEL") or None,
+            bedrock_vision_model=os.getenv("BEDROCK_VISION_MODEL") or os.getenv("BEDROCK_DEFAULT_MODEL") or None,
+            bedrock_structured_model=os.getenv("BEDROCK_STRUCTURED_MODEL") or os.getenv("BEDROCK_DEFAULT_MODEL") or None,
         )
 
 

@@ -15,12 +15,18 @@ export GITHUB_CLIENT_ID=...
 export GITHUB_CLIENT_SECRET=...
 export GITHUB_REDIRECT_URI=http://127.0.0.1:8000/v1/auth/github/callback
 
-export OPENROUTER_API_KEY=...
-export OPENROUTER_DEFAULT_MODEL=anthropic/claude-3.5-sonnet
-export OPENROUTER_VISION_MODEL=anthropic/claude-3.5-sonnet
-export OPENROUTER_STRUCTURED_MODEL=anthropic/claude-3.5-sonnet
-export OPENROUTER_TEXT_MODEL=anthropic/claude-3.5-sonnet
+export IRIS_PROVIDER_DEFAULT=bedrock
+export BEDROCK_REGION=us-east-1
+export BEDROCK_DEFAULT_MODEL=anthropic.claude-3-5-sonnet-20241022-v2:0
 ```
+
+Bedrock uses the standard AWS credential chain. For example:
+
+```bash
+export AWS_PROFILE=your-profile
+```
+
+Or use `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optionally `AWS_SESSION_TOKEN`.
 
 Start the API:
 

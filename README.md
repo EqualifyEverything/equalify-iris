@@ -10,7 +10,11 @@ Iris is built by **Equalify Inc** ([https://equalify.app/](https://equalify.app/
 
 ## Running the API
 
-This implementation uses only the Python standard library.
+Install dependencies:
+
+```bash
+python3 -m pip install -e .
+```
 
 ```bash
 python3 -m equalify_iris
@@ -42,7 +46,19 @@ export IRIS_UPSTREAM_REPO=https://github.com/example/accessible-html-agents
 export IRIS_DEFAULT_MAX_REVIEW_ITERATIONS=3
 ```
 
-Model calls use OpenRouter in this build:
+Model calls can use Bedrock or OpenRouter.
+
+Bedrock:
+
+```bash
+export IRIS_PROVIDER_DEFAULT=bedrock
+export BEDROCK_REGION=us-east-1
+export BEDROCK_DEFAULT_MODEL=anthropic.claude-3-5-sonnet-20241022-v2:0
+```
+
+Use the standard AWS credential chain for Bedrock: `AWS_PROFILE`, `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, SSO, or instance credentials. Your AWS account must have model access enabled in Bedrock for the configured model and region.
+
+OpenRouter:
 
 ```bash
 export OPENROUTER_API_KEY=...

@@ -133,8 +133,74 @@ class OpenRouterProvider:
         return CompletionResult(content=content, raw=raw)
 
 
+class BedrockProvider:
+    name = "bedrock"
+    capabilities = ("text", "vision", "structured_output")
+
+    def __init__(
+        self,
+        region: str,
+        default_model: str,
+        per_capability: dict[str, str | None] | None = None,
+        client: Any | None = None,
+    ) -> None:
+        self.region = region
+        self.default_model = default_model
+        self.per_capability = per_capability or {}
+        self._client = client
+
+    def complete(self, request: CompletionRequest) -> CompletionResult:
+        model_id = self.per_capability.get(request.capability) or self.default_model
+        bedrock_messages, system = _bedrock_messages(request.messages, request.images or [], request.schema)
+        converse_request: dict[str, Any] = {
+            "modelId": model_id,
+            "messages": bedrock_messages,
+            "inferenceConfig": {
+                "temperature": 0,
+                "maxTokens": request.max_tokens or 4096,
+            },
+        }
+        if system:
+            converse_request["system"] = [{"text": system}]
+
+        try:
+            response = self._bedrock_client().converse(**converse_request)
+        except Exception as exc:
+            raise ProviderCallError(self.name, "Bedrock Converse call failed.", {"error": str(exc)})
+
+        content = _bedrock_content(response)
+        return CompletionResult(content=content, raw=_json_safe(response))
+
+    def _bedrock_client(self) -> Any:
+        if self._client is not None:
+            return self._client
+
+        try:
+            import boto3  # type: ignore[import-not-found]
+        except ImportError:
+            raise ProviderCallError(
+                self.name,
+                "boto3 is required for Bedrock. Install dependencies with `python3 -m pip install boto3`.",
+            )
+
+        self._client = boto3.client("bedrock-runtime", region_name=self.region)
+        return self._client
+
+
 def provider_registry_from_config(config: "Config") -> ProviderRegistry:
     providers: list[ModelProvider] = []
+    if config.bedrock_region and config.bedrock_default_model:
+        providers.append(
+            BedrockProvider(
+                region=config.bedrock_region,
+                default_model=config.bedrock_default_model,
+                per_capability={
+                    "text": config.bedrock_text_model,
+                    "vision": config.bedrock_vision_model,
+                    "structured_output": config.bedrock_structured_model,
+                },
+            )
+        )
     if config.openrouter_api_key:
         providers.append(
             OpenRouterProvider(
@@ -149,6 +215,8 @@ def provider_registry_from_config(config: "Config") -> ProviderRegistry:
                 app_name=config.openrouter_app_name,
             )
         )
+    if config.provider_default:
+        providers = sorted(providers, key=lambda provider: provider.name != config.provider_default)
     return ProviderRegistry(providers=providers, per_agent=config.provider_per_agent)
 
 
@@ -229,3 +297,88 @@ def _error_details(exc: urllib.error.HTTPError) -> dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {"body": raw}
     except Exception:
         return {"status": exc.code}
+
+
+def _bedrock_messages(
+    messages: list[dict[str, Any]],
+    images: list[ImageInput],
+    schema: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    system_parts: list[str] = []
+    bedrock_messages: list[dict[str, Any]] = []
+
+    for message in messages:
+        role = str(message.get("role", "user"))
+        content = str(message.get("content", ""))
+        if role == "system":
+            system_parts.append(content)
+            continue
+        bedrock_role = "assistant" if role == "assistant" else "user"
+        bedrock_messages.append({"role": bedrock_role, "content": [{"text": content}]})
+
+    if not bedrock_messages:
+        bedrock_messages.append({"role": "user", "content": [{"text": ""}]})
+
+    if schema is not None:
+        schema_instruction = (
+            "Return JSON only. The JSON must conform to this JSON Schema:\n"
+            + json.dumps(schema, indent=2, sort_keys=True)
+        )
+        bedrock_messages[-1]["content"].append({"text": schema_instruction})
+
+    for image in images:
+        bedrock_messages[-1]["content"].append(_bedrock_image_block(image))
+
+    system = "\n\n".join(part for part in system_parts if part.strip()) or None
+    return bedrock_messages, system
+
+
+def _bedrock_image_block(image: ImageInput) -> dict[str, Any]:
+    format_name = _bedrock_image_format(image.mime_type, image.filename)
+    if not format_name:
+        raise ProviderCallError("bedrock", f"Unsupported Bedrock image type for {image.filename}.")
+    return {
+        "image": {
+            "format": format_name,
+            "source": {"bytes": image.data},
+        }
+    }
+
+
+def _bedrock_image_format(mime_type: str, filename: str) -> str | None:
+    normalized = mime_type.lower()
+    if normalized == "image/jpeg":
+        return "jpeg"
+    if normalized == "image/png":
+        return "png"
+    if normalized == "image/gif":
+        return "gif"
+    if normalized == "image/webp":
+        return "webp"
+
+    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if suffix in {"jpg", "jpeg"}:
+        return "jpeg"
+    if suffix in {"png", "gif", "webp"}:
+        return suffix
+    return None
+
+
+def _bedrock_content(response: dict[str, Any]) -> str:
+    content = response.get("output", {}).get("message", {}).get("content", [])
+    if not isinstance(content, list):
+        raise ProviderCallError("bedrock", "Bedrock response did not include message content.", response)
+    text = "\n".join(str(block.get("text", "")) for block in content if isinstance(block, dict) and "text" in block)
+    if not text:
+        raise ProviderCallError("bedrock", "Bedrock response contained no text output.", response)
+    return text
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, bytes):
+        return f"<{len(value)} bytes>"
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    return value

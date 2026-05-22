@@ -95,7 +95,7 @@ The API creates `sessions/<session-id>/`, `tmp/<session-id>/`, stores the origin
 
 If no model provider is configured, the API still accepts the session but the pipeline marks it `failed` with `provider_not_configured` in `log.jsonl`.
 
-With `OPENROUTER_API_KEY` configured, the pipeline runs triage, content extraction, reconciliation, assembly, and review through the configured OpenRouter models.
+With Bedrock or OpenRouter configured, the pipeline runs triage, content extraction, reconciliation, assembly, and review through the configured provider.
 
 ### `GET /v1/sessions/{session_id}`
 

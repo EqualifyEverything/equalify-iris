@@ -24,7 +24,7 @@ This document maps the current implementation to `prd.md`.
 | 9.3 Errors | Uses the standard `{ "error": { "code", "message", "details" } }` envelope. |
 | 9.4 Asynchrony | Session creation and feedback start background pipeline runs. Clients poll session detail. |
 | 10.2 Storage | Uses local filesystem artifacts and SQLite metadata by default. |
-| 10.3 Model providers | Provides the model-provider interface and an OpenRouter adapter for `text`, `vision`, and `structured_output` capabilities. |
+| 10.3 Model providers | Provides the model-provider interface, Bedrock adapter, and OpenRouter adapter for `text`, `vision`, and `structured_output` capabilities. |
 | 10.4 Packaging | Includes Dockerfile and `docker-compose.yml` for local single-machine deployment. |
 | 12 Sustainability | README includes the required sustainability notice above install and usage instructions. |
 | Appendix A / initial agents | Provides the v1 initial agent markdown files in `agents/`. |
@@ -37,16 +37,19 @@ Required:
 export GITHUB_CLIENT_ID=...
 export GITHUB_CLIENT_SECRET=...
 export GITHUB_REDIRECT_URI=http://127.0.0.1:8000/v1/auth/github/callback
-export OPENROUTER_API_KEY=...
+export IRIS_PROVIDER_DEFAULT=bedrock
+export BEDROCK_REGION=us-east-1
+export BEDROCK_DEFAULT_MODEL=anthropic.claude-3-5-sonnet-20241022-v2:0
 ```
 
-Optional model selection:
+Bedrock uses the standard AWS credential chain. You can set `AWS_PROFILE`, or direct AWS credential environment variables.
+
+OpenRouter can be used instead:
 
 ```bash
+export IRIS_PROVIDER_DEFAULT=openrouter
+export OPENROUTER_API_KEY=...
 export OPENROUTER_DEFAULT_MODEL=anthropic/claude-3.5-sonnet
-export OPENROUTER_VISION_MODEL=anthropic/claude-3.5-sonnet
-export OPENROUTER_STRUCTURED_MODEL=anthropic/claude-3.5-sonnet
-export OPENROUTER_TEXT_MODEL=anthropic/claude-3.5-sonnet
 ```
 
 The pipeline fails a session with `provider_not_configured` when no provider is configured, which keeps production tests from silently passing without model execution.

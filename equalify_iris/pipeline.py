@@ -879,9 +879,7 @@ def _apply_replacements(document: str, replacements: list[dict[str, str]]) -> st
         replacement_html = replacement["html_fragment"].strip()
         if not replacement_html:
             continue
-        updated, count = pattern.subn(replacement_html, updated, count=1)
-        if count == 0:
-            updated = updated.replace("</main>", replacement_html + "\n</main>")
+        updated, _count = pattern.subn(replacement_html, updated, count=1)
     return updated
 
 
