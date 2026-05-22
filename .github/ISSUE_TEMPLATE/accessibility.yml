@@ -1,0 +1,141 @@
+name: Accessibility issue
+description: Report an accessibility barrier in the Iris app/demo or in the HTML it produces.
+title: "[a11y]: <short description of the issue>"
+labels: ["accessibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an accessibility issue. Reports like yours help keep Equalify Iris — and the HTML it generates — usable by everyone.
+
+        Share as much as you're comfortable with; partial reports are still useful. If you use assistive technology, feel free to describe what you experienced in your own words.
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did you find this?
+      description: |
+        - **The app / demo interface** — the Equalify Iris web UI itself.
+        - **The converted HTML output** — the accessible HTML Iris produced from a document.
+      options:
+        - The app / demo interface
+        - The converted HTML output
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A brief description of the accessibility barrier you encountered.
+      placeholder: "Example: A converted form's radio group has no <fieldset>/<legend>, so my screen reader doesn't announce what the options belong to."
+    validations:
+      required: true
+
+  - type: textarea
+    id: source
+    attributes:
+      label: Source document (for converted-output issues)
+      description: If this is about converted HTML, what kind of document was it (form, table, multi-column page, scanned PDF, etc.)? Attaching the source page image/PDF or the produced HTML helps a lot.
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce the issue? A screen recording or screenshot is optional but very helpful.
+      placeholder: |
+        1. Go to https://iris.equalify.foundation/
+        2. Upload …
+        3. Tab to … / open the converted document and …
+        4. Observe that …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity (revised during triage as needed)
+      description: |
+        How much does this affect your ability to use Iris or its output?
+        - **Critical:** Blocks a core task entirely.
+        - **High:** Significant difficulty, but a workaround exists.
+        - **Medium:** Annoyance or inconsistent experience.
+        - **Low:** Minor issue with minimal impact.
+      options:
+        - Critical
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and version
+      placeholder: "macOS 14.5, Windows 11, iOS 17, Android 14, Ubuntu 22.04"
+    validations:
+      required: false
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: "Chrome 124, Firefox 125, Safari 17.4, Edge 124"
+    validations:
+      required: false
+
+  - type: input
+    id: assistive-tech
+    attributes:
+      label: Assistive technology and version
+      description: If assistive technology was used, please tell us which one(s) and which version(s).
+      placeholder: "VoiceOver (macOS 14.5), NVDA 2024.1, JAWS 2024, TalkBack on Android 14"
+    validations:
+      required: false
+
+  - type: textarea
+    id: wcag
+    attributes:
+      label: Related WCAG criteria (optional)
+      description: |
+        If you know which [WCAG 2.2](https://www.w3.org/TR/WCAG22/) success criteria this relates to, please share. Don't worry if you're not sure — we'll figure it out during triage.
+      placeholder: "1.3.1 Info and Relationships, 2.4.7 Focus Visible, 4.1.2 Name, Role, Value"
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Anything else we should know? Screenshots, recordings, related issues, or workarounds you've tried.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: code-of-conduct
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our [Code of Conduct](../blob/main/CODE_OF_CONDUCT.md).
+      options:
+        - label: I agree to follow this project's Code of Conduct.
+          required: true

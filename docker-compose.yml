@@ -1,0 +1,26 @@
+# Reference single-machine deployment (PRD §10.4): SQLite + local filesystem +
+# one configured model provider is enough for a single-user deployment.
+#
+#   docker compose up
+#
+# Set the referenced variables in a .env file (see .env.example) first.
+
+services:
+  iris:
+    build: .
+    image: equalify-iris:latest
+    ports:
+      - "8080:8080"
+    environment:
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      IRIS_UPSTREAM_REPO: ${IRIS_UPSTREAM_REPO}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      # For Bedrock instead, supply the standard AWS credential env vars.
+    volumes:
+      # Persist sessions/, tmp/, and the SQLite DB across restarts.
+      - ./data:/app/data
+      # The agent library is a git checkout modified only by `git pull` (§8.1).
+      - ./agents:/app/agents
+      # Override the default env-driven config with your own if desired.
+      # - ./config.yaml:/app/config.yaml:ro
