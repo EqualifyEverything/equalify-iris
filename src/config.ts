@@ -54,10 +54,10 @@ function expandEnv(value: unknown): unknown {
 // OAuth flow); the client secret is never bundled and is only needed for the
 // web redirect flow. A deployment can override this via config/env.
 //
-// Paste the org app's client_id here once the app exists. While empty, the
-// device-flow endpoints report github_not_configured until an operator supplies
-// their own client_id.
-const DEFAULT_CLIENT_ID = "";
+// Equalify's "Equalify Iris" OAuth App client_id. Non-secret; ships embedded so
+// the default device-flow deployment needs no per-operator app setup. Override
+// via config/env to point at your own app.
+const DEFAULT_CLIENT_ID = "Ov23liGG4MfEn0DM4vTA";
 
 let cached: IrisConfig | null = null;
 
