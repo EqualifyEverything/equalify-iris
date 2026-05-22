@@ -1,0 +1,60 @@
+# Equalify Iris deployment configuration (PRD §10.3).
+#
+# ${ENV_VAR} references are expanded from the process environment at startup.
+# Changes require a restart in v1 (hot-reload is out of scope).
+
+server:
+  port: 8080
+  # Public base URL of this deployment. Used to build the GitHub OAuth
+  # callback URL and surfaced in device-flow instructions.
+  base_url: http://localhost:8080
+
+storage:
+  # Root directory for sessions/, tmp/, and the agents/ git checkout.
+  data_dir: ./data
+  # Path to the agent library git checkout. Modified ONLY by `git pull`
+  # from upstream (PRD §8.1).
+  agents_dir: ./agents
+  # Session metadata store. SQLite by default; a postgres URL is a supported
+  # alternative for multi-instance deployments (not implemented in v1).
+  database: ./data/iris.sqlite
+
+# GitHub OAuth is the only auth mechanism (PRD §9.1). The same token opens
+# PRs on /close, so `repo` scope is required.
+github:
+  client_id: ${GITHUB_CLIENT_ID}
+  client_secret: ${GITHUB_CLIENT_SECRET}
+  # The upstream agent library repo. Its origin is the PR target (PRD §7.13).
+  upstream_repo: ${IRIS_UPSTREAM_REPO}
+  # GitHub host base URLs. Override for GitHub Enterprise (e.g.
+  # https://github.example.com/api/v3 and https://github.example.com). Defaults
+  # to public GitHub when omitted.
+  api_base_url: ${GITHUB_API_BASE_URL}
+  oauth_base_url: ${GITHUB_OAUTH_BASE_URL}
+
+# LLM provider abstraction (PRD §10.3). Each agent declares a capability;
+# the deployment decides which provider serves it.
+providers:
+  default: openrouter
+  per_agent:
+    image_analysis: openrouter
+
+  openrouter:
+    api_key: ${OPENROUTER_API_KEY}
+    base_url: https://openrouter.ai/api/v1
+    default_model: anthropic/claude-opus-4.7
+    per_capability:
+      vision: anthropic/claude-opus-4.7
+      structured_output: anthropic/claude-opus-4.7
+      text: anthropic/claude-opus-4.7
+
+  bedrock:
+    region: us-east-2
+    default_model: anthropic.claude-opus-4-7-v1
+    per_capability:
+      vision: anthropic.claude-opus-4-7-v1
+      structured_output: anthropic.claude-opus-4-7-v1
+      text: anthropic.claude-opus-4-7-v1
+
+defaults:
+  max_review_iterations: 3

@@ -1,0 +1,306 @@
+import { Router } from "express";
+import multer from "multer";
+import { writeFileSync, readFileSync, existsSync, rmSync, appendFileSync } from "node:fs";
+import { join } from "node:path";
+import { ulid } from "ulid";
+import { Octokit } from "@octokit/rest";
+import type { IrisConfig } from "../config.ts";
+import type { Store, SessionRecord } from "../store/db.ts";
+import { Paths } from "../store/paths.ts";
+import { runPipeline } from "../pipeline/orchestrator.ts";
+import type { AuthedRequest } from "../auth/middleware.ts";
+import { sendError } from "./errors.ts";
+import { gatherNewAgents, gatherAgentUpdates, readInputImage } from "../github/contributions.ts";
+import { ensureFork, openPr, parseRepo, type PrFile } from "../github/pr.ts";
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+const ALLOWED_EXT = /\.(png|jpe?g|tiff?|webp)$/i;
+
+function sessionSummary(s: SessionRecord) {
+  return {
+    session_id: s.session_id,
+    status: s.status,
+    image_count: s.image_count,
+    created_at: s.created_at,
+    updated_at: s.updated_at,
+  };
+}
+
+// Owned-by-caller lookup. Returns undefined (caller sends 404) when missing or
+// owned by another user, so a token cannot probe others' sessions (§9.1).
+function ownedSession(store: Store, id: string, userId: number): SessionRecord | undefined {
+  const s = store.getSession(id);
+  if (!s || s.github_user_id !== userId) return undefined;
+  return s;
+}
+
+export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
+  const r = Router();
+  const paths = new Paths(cfg);
+
+  // GET /v1/sessions — list this user's sessions, newest first.
+  r.get("/", (req: AuthedRequest, res) => {
+    const limit = Math.min(parseInt(String(req.query.limit ?? "20"), 10) || 20, 100);
+    const status = req.query.status ? String(req.query.status) : undefined;
+    const cursor = req.query.cursor ? String(req.query.cursor) : undefined;
+    const rows = store.listSessions(req.user!.github_user_id, { limit: limit + 1, status, cursor });
+    const page = rows.slice(0, limit);
+    const next = rows.length > limit ? page[page.length - 1].created_at : null;
+    res.json({ sessions: page.map(sessionSummary), next_cursor: next });
+  });
+
+  // POST /v1/sessions — create a session, store images in submitted order.
+  r.post("/", upload.array("images"), (req: AuthedRequest, res) => {
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (files.length === 0) {
+      sendError(res, 400, "invalid_request", "At least one image part named 'images' is required");
+      return;
+    }
+    for (const f of files) {
+      if (!ALLOWED_EXT.test(f.originalname)) {
+        sendError(res, 400, "invalid_request", `Unsupported image type: ${f.originalname}`);
+        return;
+      }
+    }
+
+    let maxIter = req.user!.max_review_iterations;
+    const configPart = (req.body as { config?: string } | undefined)?.config;
+    if (configPart) {
+      try {
+        const parsed = JSON.parse(configPart) as { max_review_iterations?: number };
+        if (typeof parsed.max_review_iterations === "number") maxIter = parsed.max_review_iterations;
+      } catch {
+        sendError(res, 400, "invalid_request", "config part is not valid JSON");
+        return;
+      }
+    }
+
+    const sessionId = `ses_${ulid()}`;
+    paths.initSession(sessionId);
+    // Persist images with an order prefix so submitted order survives (§9.2).
+    files.forEach((f, i) => {
+      const order = String(i + 1).padStart(4, "0");
+      writeFileSync(join(paths.sessionInput(sessionId), `${order}__${f.originalname}`), f.buffer);
+    });
+
+    const record = store.createSession({
+      session_id: sessionId,
+      github_user_id: req.user!.github_user_id,
+      image_count: files.length,
+      iterations_max: maxIter,
+    });
+
+    // Kick off the pipeline asynchronously; clients poll GET /v1/sessions/{id}.
+    void runPipeline({ cfg, store, sessionId, maxReviewIterations: maxIter });
+
+    res.status(201).json({
+      session_id: record.session_id,
+      status: record.status,
+      image_count: record.image_count,
+      created_at: record.created_at,
+    });
+  });
+
+  // GET /v1/sessions/{id} — status, plus pending_prs preview when ready.
+  r.get("/:id", (req: AuthedRequest, res) => {
+    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+    if (!s) {
+      sendError(res, 404, "session_not_found", "No such session");
+      return;
+    }
+    const body: Record<string, unknown> = {
+      session_id: s.session_id,
+      status: s.status,
+      phase: s.phase,
+      iterations_completed: s.iterations_completed,
+      iterations_max: s.iterations_max,
+      image_count: s.image_count,
+      created_at: s.created_at,
+      updated_at: s.updated_at,
+    };
+    if (s.status === "failed" && s.error) body.error = s.error;
+    if (s.status === "ready_for_review") {
+      const newAgents = gatherNewAgents(paths, s.session_id);
+      const updates = gatherAgentUpdates(paths, s.session_id);
+      body.pending_prs = {
+        new_agents: newAgents.map((a) => ({
+          agent_name: a.agent_name,
+          summary: a.summary,
+          triggered_by: a.triggered_by,
+        })),
+        agent_updates: updates.map((u) => ({
+          agent_name: u.agent_name,
+          summary: u.summary,
+          diff_preview: u.diff_preview,
+        })),
+      };
+    }
+    res.json(body);
+  });
+
+  // GET /v1/sessions/{id}/output — the HTML document.
+  r.get("/:id/output", (req: AuthedRequest, res) => {
+    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+    if (!s) {
+      sendError(res, 404, "session_not_found", "No such session");
+      return;
+    }
+    if (s.status !== "ready_for_review" && s.status !== "closed") {
+      sendError(res, 409, "invalid_state", "Output not available until session is ready_for_review");
+      return;
+    }
+    const outPath = paths.sessionOutput(s.session_id);
+    if (!existsSync(outPath)) {
+      sendError(res, 409, "invalid_state", "Output not available");
+      return;
+    }
+    res.type("text/html").send(readFileSync(outPath, "utf8"));
+  });
+
+  // GET /v1/sessions/{id}/logs — the run log as ndjson.
+  r.get("/:id/logs", (req: AuthedRequest, res) => {
+    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+    if (!s) {
+      sendError(res, 404, "session_not_found", "No such session");
+      return;
+    }
+    const logPath = paths.sessionLog(s.session_id);
+    res.type("application/x-ndjson").send(existsSync(logPath) ? readFileSync(logPath, "utf8") : "");
+  });
+
+  // POST /v1/sessions/{id}/feedback — re-run within the same session (§7.12).
+  r.post("/:id/feedback", (req: AuthedRequest, res) => {
+    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+    if (!s) {
+      sendError(res, 404, "session_not_found", "No such session");
+      return;
+    }
+    if (s.status !== "ready_for_review") {
+      sendError(res, 409, "invalid_state", "Feedback can only be submitted when ready_for_review");
+      return;
+    }
+    const feedback = (req.body as { feedback?: string } | undefined)?.feedback;
+    if (!feedback || typeof feedback !== "string") {
+      sendError(res, 400, "invalid_request", "feedback (string) is required");
+      return;
+    }
+    store.updateSession(s.session_id, { status: "running", phase: "triage" });
+    void runPipeline({
+      cfg,
+      store,
+      sessionId: s.session_id,
+      maxReviewIterations: s.iterations_max,
+      feedback,
+    });
+    res.status(202).json({ session_id: s.session_id, status: "running", phase: "triage" });
+  });
+
+  // POST /v1/sessions/{id}/close — finalize, open PRs, clean tmp (§7.13, §9.2).
+  r.post("/:id/close", async (req: AuthedRequest, res) => {
+    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+    if (!s) {
+      sendError(res, 404, "session_not_found", "No such session");
+      return;
+    }
+    if (s.status !== "ready_for_review") {
+      sendError(res, 409, "invalid_state", "Session is not ready_for_review");
+      return;
+    }
+
+    const skipPrs = String(req.query.skip_prs ?? "") === "true";
+    const prsOpened: { kind: string; agent_name: string; pr_url: string; branch: string }[] = [];
+
+    if (!skipPrs) {
+      const newAgents = gatherNewAgents(paths, s.session_id);
+      const updates = gatherAgentUpdates(paths, s.session_id);
+      if (newAgents.length || updates.length) {
+        try {
+          const octokit = new Octokit({ auth: req.token, baseUrl: cfg.github.api_base_url });
+          const upstream = parseRepo(cfg.github.upstream_repo);
+          const forkUrl = await ensureFork(octokit, upstream);
+          store.setFork(s.github_user_id, forkUrl);
+          const forkOwner = (await octokit.users.getAuthenticated()).data.login;
+
+          // Test fixtures shared by all new-agent PRs: the produced output and
+          // the accessibility lint pass (PRD §7.13).
+          const outputHtml = existsSync(paths.sessionOutput(s.session_id))
+            ? readFileSync(paths.sessionOutput(s.session_id), "utf8")
+            : "";
+          const lintReport = existsSync(paths.sessionLint(s.session_id))
+            ? readFileSync(paths.sessionLint(s.session_id), "utf8")
+            : "{}";
+
+          for (const a of newAgents) {
+            try {
+              // PR includes the agent file plus test fixtures: input image,
+              // produced output, and the accessibility lint pass (§7.13).
+              const files: PrFile[] = [{ path: `agents/${a.file}`, content: a.content }];
+              const triggerImage = readInputImage(paths, s.session_id, a.triggered_by);
+              if (triggerImage) {
+                files.push({ path: `fixtures/${a.agent_name}/${triggerImage.name}`, content: triggerImage.content });
+              }
+              files.push({ path: `fixtures/${a.agent_name}/output.html`, content: outputHtml });
+              files.push({ path: `fixtures/${a.agent_name}/axe-report.json`, content: lintReport });
+
+              const opened = await openPr(octokit, {
+                upstream,
+                forkOwner,
+                branchPrefix: "new-agent",
+                nameForBranch: a.agent_name,
+                files,
+                title: `Add ${a.agent_name} content agent`,
+                body:
+                  `Session-built agent contributed from an Equalify Iris session.\n\n` +
+                  `**Content type**: ${a.agent_name}\n**Why existing agents didn't cover it**: ${a.summary}\n` +
+                  `**Triggered by**: ${a.triggered_by || "(unknown)"}\n\n` +
+                  `Test fixtures are included under \`fixtures/${a.agent_name}/\` (input image, produced output, axe-core report).\n\n` +
+                  `_Opened automatically on session close (PRD §7.13)._`,
+              });
+              prsOpened.push({ kind: "new_agent", agent_name: a.agent_name, ...opened });
+            } catch (e) {
+              appendFileSync(paths.sessionPrs(s.session_id), `- FAILED new_agent ${a.agent_name}: ${(e as Error).message}\n`);
+            }
+          }
+
+          for (const u of updates) {
+            try {
+              const opened = await openPr(octokit, {
+                upstream,
+                forkOwner,
+                branchPrefix: "agent-update",
+                nameForBranch: u.agent_name.replace(/\.md$/, ""),
+                files: [
+                  { path: `agents/${u.agent_name.endsWith(".md") ? u.agent_name : u.agent_name + ".md"}`, content: u.content },
+                ],
+                title: `Update ${u.agent_name}`,
+                body: `Proposed update from an Equalify Iris session.\n\n${u.summary}\n\n\`\`\`diff\n${u.diff_preview}\n\`\`\``,
+              });
+              prsOpened.push({ kind: "agent_update", agent_name: u.agent_name, ...opened });
+            } catch (e) {
+              appendFileSync(paths.sessionPrs(s.session_id), `- FAILED agent_update ${u.agent_name}: ${(e as Error).message}\n`);
+            }
+          }
+        } catch (e) {
+          sendError(res, 502, "pr_failed", `Failed to open PRs: ${(e as Error).message}`);
+          return;
+        }
+      }
+    }
+
+    // Record opened PRs, then delete tmp/<session-id> entirely (§8.2).
+    if (prsOpened.length) {
+      appendFileSync(
+        paths.sessionPrs(s.session_id),
+        prsOpened.map((p) => `- [${p.kind}] ${p.agent_name}: ${p.pr_url} (${p.branch})`).join("\n") + "\n",
+      );
+    }
+    const tmp = paths.tmpDir(s.session_id);
+    if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+
+    store.updateSession(s.session_id, { status: "closed" });
+    res.json({ session_id: s.session_id, status: "closed", prs_opened: prsOpened });
+  });
+
+  return r;
+}

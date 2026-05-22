@@ -1,0 +1,65 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { parse } from "yaml";
+
+export type Capability = "text" | "vision" | "structured_output";
+
+export interface ProviderBlock {
+  api_key?: string;
+  base_url?: string;
+  region?: string;
+  default_model: string;
+  per_capability?: Partial<Record<Capability, string>>;
+}
+
+export interface IrisConfig {
+  server: { port: number; base_url: string };
+  storage: { data_dir: string; agents_dir: string; database: string };
+  github: {
+    client_id: string;
+    client_secret: string;
+    upstream_repo: string;
+    // Overridable for GitHub Enterprise (and for testing). Defaults below.
+    api_base_url: string; // e.g. https://api.github.com
+    oauth_base_url: string; // e.g. https://github.com
+  };
+  providers: {
+    default: string;
+    per_agent?: Record<string, string>;
+    openrouter?: ProviderBlock;
+    bedrock?: ProviderBlock;
+    [key: string]: unknown;
+  };
+  defaults: { max_review_iterations: number };
+}
+
+// Recursively expand ${ENV_VAR} references against process.env.
+function expandEnv(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.replace(/\$\{([A-Z0-9_]+)\}/g, (_, name: string) => process.env[name] ?? "");
+  }
+  if (Array.isArray(value)) return value.map(expandEnv);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = expandEnv(v);
+    return out;
+  }
+  return value;
+}
+
+let cached: IrisConfig | null = null;
+
+export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): IrisConfig {
+  if (cached) return cached;
+  const raw = readFileSync(resolve(path), "utf8");
+  const parsed = expandEnv(parse(raw)) as IrisConfig;
+  // Resolve filesystem paths to absolutes so the service is CWD-independent.
+  parsed.storage.data_dir = resolve(parsed.storage.data_dir);
+  parsed.storage.agents_dir = resolve(parsed.storage.agents_dir);
+  parsed.storage.database = resolve(parsed.storage.database);
+  // GitHub host defaults (overridable for GitHub Enterprise / testing).
+  parsed.github.api_base_url = parsed.github.api_base_url || "https://api.github.com";
+  parsed.github.oauth_base_url = parsed.github.oauth_base_url || "https://github.com";
+  cached = parsed;
+  return parsed;
+}
