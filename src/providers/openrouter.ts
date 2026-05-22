@@ -1,6 +1,9 @@
 import type { Capability, ProviderBlock } from "../config.ts";
 import type { CompletionRequest, CompletionResult, ModelProvider } from "./types.ts";
 
+// Fail a model call that stalls beyond this so it can't hang a session forever.
+const REQUEST_TIMEOUT_MS = 120_000;
+
 // OpenRouter adapter (PRD §10.3). Speaks the OpenAI-compatible chat
 // completions API that OpenRouter exposes, including image content parts.
 export class OpenRouterProvider implements ModelProvider {
@@ -41,14 +44,23 @@ export class OpenRouterProvider implements ModelProvider {
       };
     }
 
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
+    // Abort a stalled call so it fails fast instead of hanging the session.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`openrouter ${res.status}: ${text}`);

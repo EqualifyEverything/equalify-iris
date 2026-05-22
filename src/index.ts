@@ -16,6 +16,9 @@ mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
 mkdirSync(join(cfg.storage.data_dir, "tmp"), { recursive: true });
 
 const store = new Store(cfg.storage.database);
+// Clear sessions orphaned by a previous shutdown (their in-process run is gone).
+const stale = store.failStaleSessions();
+if (stale > 0) console.log(`Marked ${stale} interrupted session(s) as failed on startup.`);
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 

@@ -111,6 +111,20 @@ export class Store {
     return this.getSession(s.session_id)!;
   }
 
+  // Sessions run in-process; after a restart any still-"running"/"queued" rows
+  // are orphaned (the process that drove them is gone). Mark them failed so
+  // clients stop polling a run that will never finish. Single-instance only.
+  failStaleSessions(): number {
+    const now = new Date().toISOString();
+    const res = this.db
+      .prepare(
+        `UPDATE sessions SET status = 'failed', error = 'interrupted (server restarted)', updated_at = ?
+         WHERE status IN ('running','queued')`,
+      )
+      .run(now);
+    return Number(res.changes);
+  }
+
   getSession(id: string): SessionRecord | undefined {
     return this.db.prepare(`SELECT * FROM sessions WHERE session_id = ?`).get(id) as SessionRecord | undefined;
   }

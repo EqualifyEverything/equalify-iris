@@ -5,6 +5,9 @@ import {
 import type { Capability, ProviderBlock } from "../config.ts";
 import type { CompletionRequest, CompletionResult, ModelProvider } from "./types.ts";
 
+// Fail a model call that stalls beyond this so it can't hang a session forever.
+const REQUEST_TIMEOUT_MS = 120_000;
+
 // Amazon Bedrock adapter (PRD §10.3). Uses the Anthropic Messages format
 // that Bedrock's Claude models accept. Credentials come from the standard
 // AWS credential chain (env vars, shared profile, or IAM role).
@@ -57,7 +60,17 @@ export class BedrockProvider implements ModelProvider {
       accept: "application/json",
       body: JSON.stringify(payload),
     });
-    const response = await this.client.send(command);
+    // Abort a stalled call so it fails fast instead of hanging forever (the SDK
+    // has no default request timeout). Without this a stuck call strands the
+    // whole session in "running".
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let response;
+    try {
+      response = await this.client.send(command, { abortSignal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
     const decoded = JSON.parse(new TextDecoder().decode(response.body)) as {
       content: { type: string; text?: string }[];
     };
