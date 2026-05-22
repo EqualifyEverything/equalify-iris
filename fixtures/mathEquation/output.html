@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Accessible document</title>
+</head>
+<body>
+<main>
+<!-- @source: equations.png#region-heading-1 -->
+<!-- @agent: heading.md -->
+<h2>Appendix B: Key Equations</h2>
+<!-- @end-source -->
+
+<!-- @source: equations.png#region-mathEquation-1 -->
+<!-- @agent: mathEquation.md (copy-edited) -->
+<section aria-labelledby="eq-heading-appendix-b">
+
+  <h2 id="eq-heading-appendix-b">Appendix B: Key Equations</h2>
+
+  <dl>
+
+    <dt id="eq-label-quadratic">Quadratic formula</dt>
+    <dd aria-labelledby="eq-label-quadratic">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block"
+            role="img"
+            aria-label="x equals negative b plus or minus the square root of b squared minus 4 a c, all over 2 a">
+        <mrow>
+          <mi>x</mi>
+          <mo>=</mo>
+          <mfrac>
+            <mrow>
+              <mo>&#x2212;</mo>
+              <mi>b</mi>
+              <mo>&#x00B1;</mo>
+              <msqrt>
+                <mrow>
+                  <msup>
+                    <mi>b</mi>
+                    <mn>2</mn>
+                  </msup>
+                  <mo>&#x2212;</mo>
+                  <mn>4</mn>
+                  <mi>a</mi>
+                  <mi>c</mi>
+                </mrow>
+              </msqrt>
+            </mrow>
+            <mrow>
+              <mn>2</mn>
+              <mi>a</mi>
+            </mrow>
+          </mfrac>
+        </mrow>
+      </math>
+      <details>
+        <summary>Plain-text version</summary>
+        <p>x = ( -b &#x00B1; &#x221A;(b&#x00B2; - 4ac) ) / 2a</p>
+      </details>
+    </dd>
+
+    <dt id="eq-label-mass-energy">Mass&#x2013;energy equivalence</dt>
+    <dd aria-labelledby="eq-label-mass-energy">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block"
+            role="img"
+            aria-label="E equals m c squared">
+        <mrow>
+          <mi>E</mi>
+          <mo>=</mo>
+          <mi>m</mi>
+          <msup>
+            <mi>c</mi>
+            <mn>2</mn>
+          </msup>
+        </mrow>
+      </math>
+      <details>
+        <summary>Plain-text version</summary>
+        <p>E = mc&#x00B2;</p>
+      </details>
+    </dd>
+
+    <dt id="eq-label-gaussian">Gaussian integral</dt>
+    <dd aria-labelledby="eq-label-gaussian">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block"
+            role="img"
+            aria-label="the integral from negative infinity to positive infinity of e to the power of negative x squared, d x, equals the square root of pi">
+        <mrow>
+          <msubsup>
+            <mo>&#x222B;</mo>
+            <mrow>
+              <mo>&#x2212;</mo>
+              <mi>&#x221E;</mi>
+            </mrow>
+            <mrow>
+              <mo>+</mo>
+              <mi>&#x221E;</mi>
+            </mrow>
+          </msubsup>
+          <msup>
+            <mi>e</mi>
+            <mrow>
+              <mo>&#x2212;</mo>
+              <msup>
+                <mi>x</mi>
+                <mn>2</mn>
+              </msup>
+            </mrow>
+          </msup>
+          <mspace width="0.2em"/>
+          <mi>d</mi>
+          <mi>x</mi>
+          <mo>=</mo>
+          <msqrt>
+            <mi>&#x03C0;</mi>
+          </msqrt>
+        </mrow>
+      </math>
+      <details>
+        <summary>Plain-text version</summary>
+        <p>&#x222B; (from -&#x221E; to +&#x221E;) e^(-x&#x00B2;) dx = &#x221A;&#x03C0;</p>
+      </details>
+    </dd>
+
+    <dt id="eq-label-euler">Euler&#x2019;s identity</dt>
+    <dd aria-labelledby="eq-label-euler">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block"
+            role="img"
+            aria-label="e to the power of i pi, plus 1, equals 0">
+        <mrow>
+          <msup>
+            <mi>e</mi>
+            <mrow>
+              <mi>i</mi>
+              <mi>&#x03C0;</mi>
+            </mrow>
+          </msup>
+          <mo>+</mo>
+          <mn>1</mn>
+          <mo>=</mo>
+          <mn>0</mn>
+        </mrow>
+      </math>
+      <details>
+        <summary>Plain-text version</summary>
+        <p>e^(i&#x03C0;) + 1 = 0</p>
+      </details>
+    </dd>
+
+    <dt id="eq-label-basel">Summation (Basel problem)</dt>
+    <dd aria-labelledby="eq-label-basel">
+      <math xmlns="http://www.w3.org/1998/Math/MathML" display="block"
+            role="img"
+            aria-label="the sum from n equals 1 to infinity of 1 over n squared equals pi squared over 6">
+        <mrow>
+          <munderover>
+            <mo>&#x2211;</mo>
+            <mrow>
+              <mi>n</mi>
+              <mo>=</mo>
+              <mn>1</mn>
+            </mrow>
+            <mi>&#x221E;</mi>
+          </munderover>
+          <mfrac>
+            <mn>1</mn>
+            <msup>
+              <mi>n</mi>
+              <mn>2</mn>
+            </msup>
+          </mfrac>
+          <mo>=</mo>
+          <mfrac>
+            <msup>
+              <mi>&#x03C0;</mi>
+              <mn>2</mn>
+            </msup>
+            <mn>6</mn>
+          </mfrac>
+        </mrow>
+      </math>
+      <details>
+        <summary>Plain-text version</summary>
+        <p>&#x2211; (n=1 to &#x221E;) 1/n&#x00B2; = &#x03C0;&#x00B2; / 6</p>
+      </details>
+    </dd>
+
+  </dl>
+
+</section>
+<!-- @end-source -->
+
+<!-- @unresolved -->
+<aside aria-label="Unresolved issues">
+<h2>Unresolved issues</h2>
+<ul>
+  <li>Duplicate heading: 'Appendix B: Key Equations' appears twice in immediate succession (lines 8 and 14). The first is an orphaned &lt;h2&gt; outside the &lt;section&gt;, the second is the section's labeled heading. This creates redundancy and confusion in the heading outline. (source: equations.png#region-heading-1 and equations.png#region-mathEquation-1, severity: medium)</li>
+  <li>Math elements render their raw Unicode/entity character streams in screen-reader view (e.g., 'x = − b ± b 2 − 4 a c 2 a'), fragmenting readability. While aria-label attributes are present on &lt;math&gt; elements, assistive technologies may prioritize the rendered MathML content tree over the label, causing users to hear individual symbols rather than the complete equation description. (source: equations.png#region-mathEquation-1, severity: medium)</li>
+</ul>
+</aside>
+</main>
+</body>
+</html>
