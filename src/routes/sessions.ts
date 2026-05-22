@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
 import multer from "multer";
-import { writeFileSync, readFileSync, existsSync, rmSync, appendFileSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, rmSync, appendFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { ulid } from "ulid";
 import { Octokit } from "@octokit/rest";
@@ -17,7 +17,7 @@ import { summarizeRun } from "../diagnostics.ts";
 import { rasterizePdf, PdfTooLargeError, MAX_PDF_PAGES } from "../util/pdf.ts";
 import {
   convertedHtmlFilename,
-  outputBasenameFromUploads,
+  outputBasenameFromInputName,
 } from "../util/outputNames.ts";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -59,20 +59,13 @@ function prDetails(summary: string, text: string): string {
 }
 
 function sessionSummary(s: SessionRecord) {
-  const base: Record<string, unknown> = {
+  return {
     session_id: s.session_id,
     status: s.status,
     image_count: s.image_count,
     created_at: s.created_at,
     updated_at: s.updated_at,
   };
-  if (s.converted_filename) {
-    base.outputs = {
-      converted_html: s.converted_filename,
-      filled_pdf: s.filled_filename,
-    };
-  }
-  return base;
 }
 
 // Owned-by-caller lookup. Returns undefined (caller sends 404) when missing or
@@ -81,6 +74,15 @@ function ownedSession(store: Store, id: string, userId: number): SessionRecord |
   const s = store.getSession(id);
   if (!s || s.github_user_id !== userId) return undefined;
   return s;
+}
+
+function outputBasenameForSession(paths: Paths, sessionId: string): string {
+  const first = readdirSync(paths.sessionInput(sessionId))
+    .filter((f) => f.includes("__"))
+    .sort()[0];
+  if (!first) return "document";
+  const [, ...rest] = first.split("__");
+  return outputBasenameFromInputName(rest.join("__"));
 }
 
 export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
@@ -154,8 +156,6 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     }
 
     const sessionId = `ses_${ulid()}`;
-    const outputBasename = outputBasenameFromUploads(files);
-    const convertedFilename = convertedHtmlFilename(outputBasename);
     paths.initSession(sessionId);
     // Persist page images with an order prefix so submitted order survives (§9.2).
     pages.forEach((p, i) => {
@@ -168,8 +168,6 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       github_user_id: req.user!.github_user_id,
       image_count: pages.length,
       iterations_max: maxIter,
-      output_basename: outputBasename,
-      converted_filename: convertedFilename,
     });
 
     // Kick off the pipeline asynchronously; clients poll GET /v1/sessions/{id}.
@@ -180,10 +178,6 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       status: record.status,
       image_count: record.image_count,
       created_at: record.created_at,
-      outputs: {
-        converted_html: convertedFilename,
-        filled_pdf: null,
-      },
     });
   });
 
@@ -205,12 +199,6 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       updated_at: s.updated_at,
     };
     if (s.status === "failed" && s.error) body.error = s.error;
-    if (s.converted_filename) {
-      body.outputs = {
-        converted_html: s.converted_filename,
-        filled_pdf: s.filled_filename,
-      };
-    }
     if (s.status === "ready_for_review") {
       const newAgents = gatherNewAgents(paths, s.session_id);
       const updates = gatherAgentUpdates(paths, s.session_id);
@@ -230,32 +218,6 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     res.json(body);
   });
 
-  // GET /v1/sessions/{id}/output/filled — fillable PDF when the document has form controls.
-  r.get("/:id/output/filled", (req: AuthedRequest, res) => {
-    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
-    if (!s) {
-      sendError(res, 404, "session_not_found", "No such session");
-      return;
-    }
-    if (s.status !== "ready_for_review" && s.status !== "closed") {
-      sendError(res, 409, "invalid_state", "Output not available until session is ready_for_review");
-      return;
-    }
-    if (!s.output_basename || !s.filled_filename) {
-      sendError(res, 404, "output_not_found", "No fillable PDF was produced for this session");
-      return;
-    }
-    const pdfPath = paths.sessionFilledOutput(s.session_id, s.output_basename);
-    if (!existsSync(pdfPath)) {
-      sendError(res, 409, "invalid_state", "Fillable PDF not available");
-      return;
-    }
-    res
-      .type("application/pdf")
-      .set("Content-Disposition", `attachment; filename="${s.filled_filename}"`)
-      .send(readFileSync(pdfPath));
-  });
-
   // GET /v1/sessions/{id}/output — the converted HTML document.
   r.get("/:id/output", (req: AuthedRequest, res) => {
     const s = ownedSession(store, req.params.id, req.user!.github_user_id);
@@ -267,12 +229,13 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 409, "invalid_state", "Output not available until session is ready_for_review");
       return;
     }
-    const outPath = paths.sessionOutput(s.session_id, s.output_basename);
+    const outputBasename = outputBasenameForSession(paths, s.session_id);
+    const outPath = paths.sessionOutput(s.session_id, outputBasename);
     if (!existsSync(outPath)) {
       sendError(res, 409, "invalid_state", "Output not available");
       return;
     }
-    const filename = s.converted_filename ?? "output.html";
+    const filename = convertedHtmlFilename(outputBasename);
     res
       .type("text/html")
       .set("Content-Disposition", `attachment; filename="${filename}"`)
@@ -360,8 +323,9 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
           // Lean PR: only the agent file is committed (the agent library stays
           // code-only). The produced output and the axe-core lint result go in
           // the PR description for the reviewer, not as committed fixtures.
-          const outputHtml = existsSync(paths.sessionOutput(s.session_id, s.output_basename))
-            ? readFileSync(paths.sessionOutput(s.session_id, s.output_basename), "utf8")
+          const outputBasename = outputBasenameForSession(paths, s.session_id);
+          const outputHtml = existsSync(paths.sessionOutput(s.session_id, outputBasename))
+            ? readFileSync(paths.sessionOutput(s.session_id, outputBasename), "utf8")
             : "";
           const lintLine = summarizeLint(paths.sessionLint(s.session_id));
 

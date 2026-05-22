@@ -150,11 +150,9 @@
       <p>Your document was converted to accessible HTML.</p>
       <div class="row">
         <button id="view-btn" type="button">View converted document</button>
-        <button id="download-html-btn" type="button" class="secondary" hidden>Download HTML</button>
-        <button id="download-pdf-btn" type="button" class="secondary" hidden>Download fillable PDF</button>
         <button id="restart-btn" type="button" class="secondary">Convert another document</button>
       </div>
-      <p class="hint" id="output-names" hidden></p>
+      <p class="hint">Opens in a new browser tab.</p>
 
       <form id="feedback-form">
         <label for="feedback-text">Not quite right? Tell Iris what to fix</label>
@@ -182,7 +180,6 @@
     let sessionId = null;
     let currentUserCode = null;
     let currentBlobUrl = null;
-    let currentOutputs = null;
 
     const $ = (id) => document.getElementById(id);
     const show = (id) => { $(id).hidden = false; };
@@ -366,50 +363,15 @@
 
     // ----- Step 4: result -----
     async function showResult(d) {
-      currentOutputs = d.outputs || null;
       const res = await api('/sessions/' + sessionId + '/output');
       const html = await res.text();
+      // Build a local blob URL so "View converted document" can open the
+      // rendered HTML in a new tab without the /output endpoint needing to be
+      // reachable unauthenticated.
       const blob = new Blob([html], { type: 'text/html' });
       if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
       currentBlobUrl = URL.createObjectURL(blob);
       $('view-btn').onclick = () => window.open(currentBlobUrl, '_blank');
-
-      const htmlName = currentOutputs && currentOutputs.converted_html;
-      const pdfName = currentOutputs && currentOutputs.filled_pdf;
-      if (htmlName) {
-        $('output-names').textContent = 'Saved as ' + htmlName + (pdfName ? ' and ' + pdfName + '.' : '.');
-        show('output-names');
-        $('download-html-btn').hidden = false;
-        $('download-html-btn').onclick = async () => {
-          const r = await api('/sessions/' + sessionId + '/output');
-          const text = await r.text();
-          const b = new Blob([text], { type: 'text/html' });
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(b);
-          a.download = htmlName;
-          a.click();
-          URL.revokeObjectURL(a.href);
-        };
-      } else {
-        hide('output-names');
-        $('download-html-btn').hidden = true;
-      }
-      if (pdfName) {
-        $('download-pdf-btn').hidden = false;
-        $('download-pdf-btn').onclick = async () => {
-          const r = await api('/sessions/' + sessionId + '/output/filled');
-          if (!r.ok) { setError('Could not download fillable PDF.'); return; }
-          const buf = await r.arrayBuffer();
-          const b = new Blob([buf], { type: 'application/pdf' });
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(b);
-          a.download = pdfName;
-          a.click();
-          URL.revokeObjectURL(a.href);
-        };
-      } else {
-        $('download-pdf-btn').hidden = true;
-      }
       const built = (d.pending_prs && d.pending_prs.new_agents) || [];
       if (built.length) {
         $('built-agents').textContent = 'Iris taught itself ' + built.length +

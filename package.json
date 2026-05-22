@@ -10,8 +10,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env --experimental-sqlite src/index.ts",
     "dev": "node --env-file-if-exists=.env --experimental-sqlite --watch src/index.ts",
-    "typecheck": "tsc --noEmit",
-    "test:names": "node test/outputNames.test.mjs"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.682.0",
@@ -20,7 +19,6 @@
     "express": "^4.21.1",
     "jsdom": "^25.0.1",
     "multer": "^2.1.1",
-    "pdf-lib": "^1.17.1",
     "ulid": "^2.3.0",
     "yaml": "^2.6.0"
   },

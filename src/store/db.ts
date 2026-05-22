@@ -22,9 +22,6 @@ export interface SessionRecord {
   iterations_completed: number;
   iterations_max: number;
   image_count: number;
-  output_basename: string | null;
-  converted_filename: string | null;
-  filled_filename: string | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -60,15 +57,6 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(github_user_id, created_at DESC);
     `);
-    this.ensureColumn("sessions", "output_basename", "TEXT");
-    this.ensureColumn("sessions", "converted_filename", "TEXT");
-    this.ensureColumn("sessions", "filled_filename", "TEXT");
-  }
-
-  private ensureColumn(table: string, column: string, type: string): void {
-    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    if (cols.some((c) => c.name === column)) return;
-    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
 
   // --- users ---
@@ -111,27 +99,15 @@ export class Store {
     github_user_id: number;
     image_count: number;
     iterations_max: number;
-    output_basename: string;
-    converted_filename: string;
   }): SessionRecord {
     const now = new Date().toISOString();
     this.db
       .prepare(
         `INSERT INTO sessions
-         (session_id, github_user_id, status, phase, iterations_completed, iterations_max, image_count,
-          output_basename, converted_filename, filled_filename, error, created_at, updated_at)
-         VALUES (?, ?, 'queued', 'triage', 0, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+         (session_id, github_user_id, status, phase, iterations_completed, iterations_max, image_count, error, created_at, updated_at)
+         VALUES (?, ?, 'queued', 'triage', 0, ?, ?, NULL, ?, ?)`,
       )
-      .run(
-        s.session_id,
-        s.github_user_id,
-        s.iterations_max,
-        s.image_count,
-        s.output_basename,
-        s.converted_filename,
-        now,
-        now,
-      );
+      .run(s.session_id, s.github_user_id, s.iterations_max, s.image_count, now, now);
     return this.getSession(s.session_id)!;
   }
 
