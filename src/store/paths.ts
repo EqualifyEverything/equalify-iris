@@ -25,6 +25,12 @@ export class Paths {
   sessionFragments(id: string): string {
     return join(this.sessionDir(id), "fragments");
   }
+  // The final reviewed fragments (+ no-content signals) that produced output.html.
+  // Persisted so a feedback re-run can refine the existing document iteratively
+  // instead of regenerating it from the source images (PRD §7.12).
+  sessionFinalFragments(id: string): string {
+    return join(this.sessionFragments(id), "final.json");
+  }
   sessionOutput(id: string): string {
     return join(this.sessionDir(id), "output.html");
   }
@@ -50,6 +56,17 @@ export class Paths {
   // Snapshots of prior outputs before feedback re-runs overwrite them (§7.12).
   sessionHistory(id: string): string {
     return join(this.sessionDir(id), "history");
+  }
+
+  // Per-agent regression fixtures (triggering image + accepted output), captured
+  // on accept and re-checked before any agent update/merge so an agent cannot be
+  // changed in a way that breaks a use it already handled. Lives under data_dir
+  // (per-instance, not committed — the agent library stays code-only).
+  fixturesDir(): string {
+    return join(this.cfg.storage.data_dir, "fixtures");
+  }
+  agentFixtures(agentName: string): string {
+    return join(this.fixturesDir(), agentName.replace(/\.md$/, ""));
   }
 
   tmpDir(id: string): string {

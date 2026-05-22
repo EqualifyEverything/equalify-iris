@@ -41,8 +41,16 @@ export function loadImage(img: InputImage): Image {
 }
 
 // PRD §7.12: feedback is injected as a top-level instruction available to every
-// downstream agent in the run.
+// downstream agent in the run. It is phrased as a required change so that, on an
+// iterative feedback re-run, the Reader surfaces it as an issue (sourced to the
+// affected block) and the Copy Editor applies it — rather than the round no-opping
+// when the document is otherwise accessibility-clean.
 export function feedbackPreamble(ctx: PipelineContext): string {
   if (!ctx.feedback) return "";
-  return `\n\n## User feedback (top-level instruction — applies to this whole run)\n${ctx.feedback}\n`;
+  return (
+    `\n\n## User feedback (top-level instruction — applies to this whole run)\n` +
+    `${ctx.feedback}\n\n` +
+    `Treat this feedback as a REQUIRED change. Wherever it applies, flag the affected ` +
+    `block(s) by their @source reference and make the change in your output.\n`
+  );
 }

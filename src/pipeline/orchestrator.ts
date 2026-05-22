@@ -1,4 +1,4 @@
-import { readdirSync, writeFileSync, existsSync, copyFileSync, mkdirSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { IrisConfig } from "../config.ts";
 import { ProviderRouter } from "../providers/index.ts";
@@ -7,8 +7,11 @@ import { Paths } from "../store/paths.ts";
 import { RunLog } from "../store/runlog.ts";
 import type { InputImage, PipelineContext } from "./context.ts";
 import { runExtraction } from "./extraction.ts";
-import { runAssembly } from "./assembly.ts";
-import { runReview } from "./review.ts";
+import { runAssembly, assembleBody, wrapDocument } from "./assembly.ts";
+import { runReview, type ReviewResult } from "./review.ts";
+import { runAxe } from "./lint.ts";
+import { proposeAgentUpdatesFromFeedback } from "./feedback.ts";
+import type { Fragment } from "./fragment.ts";
 
 // Input files are stored as "<0001>__<original-name>" so submitted order
 // (significant per PRD §9.2) survives, independent of filename.
@@ -77,16 +80,45 @@ export async function runPipeline(args: {
       }
     }
 
-    log.event("run_start", { images: images.length, feedback: args.feedback ?? null });
+    // Iterative feedback (PRD §7.12): when feedback arrives and a prior run's
+    // final state exists, refine the EXISTING reviewed document — re-lint the saved
+    // body and run the feedback-aware Reader/Editor loop on it — instead of
+    // regenerating it from the source images. This builds on the current output and
+    // converges across rounds. First runs (no saved state) run the full pipeline.
+    const finalFragmentsPath = paths.sessionFinalFragments(sessionId);
+    const iterative = Boolean(args.feedback) && existsSync(finalFragmentsPath);
 
-    // Single coherent extraction: one accessible-HTML pass per page.
-    const { fragments } = await runExtraction(ctx);
+    let fragments: Fragment[];
+    let beforeBody = "";
+    let review: ReviewResult;
 
-    setPhase("assembly");
-    const assembled = await runAssembly(ctx, fragments);
+    if (iterative) {
+      log.event("run_start", { images: images.length, feedback: args.feedback ?? null, mode: "feedback_iterative" });
+      const saved = JSON.parse(readFileSync(finalFragmentsPath, "utf8")) as {
+        fragments?: Fragment[];
+        body?: string;
+      };
+      fragments = saved.fragments ?? [];
+      beforeBody = (saved.body ?? assembleBody(fragments)).trim();
 
-    setPhase("review");
-    const review = await runReview(ctx, { body: assembled.body, lint: assembled.lint });
+      setPhase("review");
+      // Re-lint the existing reviewed body (no model call), then let the
+      // feedback-aware review loop refine it in place.
+      const lint = await runAxe(wrapDocument(beforeBody));
+      review = await runReview(ctx, { body: beforeBody, lint });
+    } else {
+      log.event("run_start", { images: images.length, feedback: args.feedback ?? null, mode: "full" });
+
+      // Single coherent extraction: one accessible-HTML pass per page.
+      const extraction = await runExtraction(ctx);
+      fragments = extraction.fragments;
+
+      setPhase("assembly");
+      const assembled = await runAssembly(ctx, fragments);
+
+      setPhase("review");
+      review = await runReview(ctx, { body: assembled.body, lint: assembled.lint });
+    }
 
     writeFileSync(paths.sessionOutput(sessionId), review.html);
     // Final accessibility lint result, summarized into the PR description on close (§7.13).
@@ -101,12 +133,37 @@ export async function runPipeline(args: {
       );
     }
 
+    // Persist the final state so the next feedback round can refine the reviewed
+    // body iteratively, and so regression fixtures (the page agent's per-page
+    // output keyed to its source image) can be captured on accept (close handler).
+    writeFileSync(
+      finalFragmentsPath,
+      JSON.stringify({ fragments, body: review.body }, null, 2),
+    );
+
+    // Feedback -> agent training (PRD §7.12/§7.13): turn the document-level
+    // correction this feedback run produced into a proposed improvement to the
+    // page agent (an update PR for the library agent, gated by its regression
+    // fixtures; or in-place training if a session-built page agent is in use).
+    if (args.feedback) {
+      await proposeAgentUpdatesFromFeedback(ctx, {
+        agentFile: "page.md",
+        before: beforeBody,
+        after: review.body,
+        feedback: args.feedback,
+      });
+    }
+
     store.updateSession(sessionId, {
       status: "ready_for_review",
       phase: "done",
       iterations_completed: review.iterationsCompleted,
     });
-    log.event("run_complete", { iterations: review.iterationsCompleted, unresolved: review.unresolved.length });
+    log.event("run_complete", {
+      iterations: review.iterationsCompleted,
+      unresolved: review.unresolved.length,
+      mode: iterative ? "feedback_iterative" : "full",
+    });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     store.updateSession(sessionId, { status: "failed", error: message });

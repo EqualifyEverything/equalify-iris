@@ -8,8 +8,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "start": "node --env-file-if-exists=.env --experimental-sqlite src/index.ts",
-    "dev": "node --env-file-if-exists=.env --experimental-sqlite --watch src/index.ts",
+    "start": "node --use-system-ca --env-file-if-exists=.env --experimental-sqlite src/index.ts",
+    "dev": "node --use-system-ca --env-file-if-exists=.env --experimental-sqlite --watch src/index.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

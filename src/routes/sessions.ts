@@ -15,6 +15,8 @@ import { gatherNewAgents, gatherAgentUpdates } from "../github/contributions.ts"
 import { ensureFork, openPr, parseRepo, type PrFile } from "../github/pr.ts";
 import { summarizeRun } from "../diagnostics.ts";
 import { rasterizePdf, PdfTooLargeError, MAX_PDF_PAGES } from "../util/pdf.ts";
+import { captureFixtures } from "../pipeline/regression.ts";
+import type { Fragment } from "../pipeline/fragment.ts";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -265,7 +267,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 400, "invalid_request", "feedback (string) is required");
       return;
     }
-    store.updateSession(s.session_id, { status: "running", phase: "triage" });
+    store.updateSession(s.session_id, { status: "running", phase: "extraction" });
     void runPipeline({
       cfg,
       store,
@@ -273,7 +275,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       maxReviewIterations: s.iterations_max,
       feedback,
     });
-    res.status(202).json({ session_id: s.session_id, status: "running", phase: "triage" });
+    res.status(202).json({ session_id: s.session_id, status: "running", phase: "extraction" });
   });
 
   // POST /v1/sessions/{id}/close — finalize, open PRs, clean tmp (§7.13, §9.2).
@@ -367,6 +369,19 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
         prsOpened.map((p) => `- [${p.kind}] ${p.agent_name}: ${p.pr_url} (${p.branch})`).join("\n") + "\n",
       );
     }
+    // Auto-capture regression fixtures from the accepted output (PRD §7.12): the
+    // triggering image + accepted HTML per agent, used to gate future updates so
+    // an agent can't later be changed in a way that breaks a use it handled here.
+    try {
+      const finalPath = paths.sessionFinalFragments(s.session_id);
+      if (existsSync(finalPath)) {
+        const saved = JSON.parse(readFileSync(finalPath, "utf8")) as { fragments?: Fragment[] };
+        captureFixtures(paths, s.session_id, saved.fragments ?? []);
+      }
+    } catch {
+      // fixture capture is best-effort; never block accepting a session
+    }
+
     const tmp = paths.tmpDir(s.session_id);
     if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
 
