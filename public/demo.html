@@ -188,6 +188,8 @@
     let sourceBase = 'document';
     let currentUserCode = null;
     let currentBlobUrl = null;
+    let conversionWakeLock = null;
+    let conversionActive = false;
 
     const $ = (id) => document.getElementById(id);
     const show = (id) => { $(id).hidden = false; };
@@ -230,6 +232,29 @@
       try { const j = await res.json(); return (j.error && j.error.message) || res.statusText; }
       catch { return res.statusText; }
     }
+    async function acquireConversionWakeLock() {
+      if (!('wakeLock' in navigator) || document.visibilityState !== 'visible' || conversionWakeLock) return;
+      try {
+        conversionWakeLock = await navigator.wakeLock.request('screen');
+        conversionWakeLock.addEventListener('release', () => { conversionWakeLock = null; });
+      } catch {
+        // Wake Lock is best-effort: unsupported browsers or denied requests should not block conversion.
+      }
+    }
+    async function startConversionWakeLock() {
+      conversionActive = true;
+      await acquireConversionWakeLock();
+    }
+    async function stopConversionWakeLock() {
+      conversionActive = false;
+      if (!conversionWakeLock) return;
+      const lock = conversionWakeLock;
+      conversionWakeLock = null;
+      try { await lock.release(); } catch {}
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (conversionActive && document.visibilityState === 'visible') void acquireConversionWakeLock();
+    });
 
     // ----- Step 1: GitHub device flow -----
     $('signin-btn').addEventListener('click', startDeviceFlow);
@@ -318,6 +343,7 @@
       setError('');
       const files = $('images').files;
       if (!files.length) { setError('Please choose at least one image.'); return; }
+      await startConversionWakeLock();
       // Output download name mirrors the uploaded file.
       sourceBase = (files[0].name.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9._-]/g, '_')) || 'document';
       const fd = new FormData();
@@ -335,6 +361,7 @@
         announce('Starting… ' + d.image_count + ' page(s) uploaded.');
         pollStatus();
       } catch (e) {
+        await stopConversionWakeLock();
         setError('Upload failed: ' + e.message);
       } finally {
         btn.removeAttribute('aria-busy');
@@ -359,6 +386,7 @@
 
       if (d && d.status === 'ready_for_review') {
         announce('Done! Your accessible HTML is ready.');
+        await stopConversionWakeLock();
         try {
           await showResult(d);
         } catch (e) {
@@ -367,6 +395,7 @@
         return; // terminal — stop polling
       }
       if (d && d.status === 'failed') {
+        await stopConversionWakeLock();
         setError('Conversion failed: ' + (d.error || 'unknown error') + '. You can try again.');
         hide('status-section'); show('upload-section'); focusHeading('step2-h');
         return; // terminal — stop polling
@@ -428,6 +457,7 @@
       setError('');
       const fb = $('feedback-text').value.trim();
       if (!fb) { setError('Please enter some feedback first.'); return; }
+      await startConversionWakeLock();
       try {
         const res = await api('/sessions/' + sessionId + '/feedback', {
           method: 'POST', headers: { 'content-type': 'application/json' },
@@ -439,6 +469,7 @@
         announce('Re-running with your feedback…');
         pollStatus();
       } catch (e) {
+        await stopConversionWakeLock();
         setError('Could not submit feedback: ' + e.message);
       }
     });
