@@ -10,7 +10,7 @@ import { runExtraction } from "./extraction.ts";
 import { runAssembly, assembleBody, wrapDocument } from "./assembly.ts";
 import { runReview, type ReviewResult } from "./review.ts";
 import { runAxe } from "./lint.ts";
-import { proposeAgentUpdatesFromFeedback } from "./feedback.ts";
+import { learnFromFeedback, proposeAgentUpdatesFromFeedback } from "./feedback.ts";
 import { runContribution } from "./contribute.ts";
 import type { Fragment } from "./fragment.ts";
 
@@ -153,12 +153,12 @@ export async function runPipeline(args: {
     // page agent, recorded (gated by its regression fixtures) for review; or
     // in-place training if a session-built page agent is in use.
     if (args.feedback) {
-      await proposeAgentUpdatesFromFeedback(ctx, {
-        agentFile: "page.md",
-        before: beforeBody,
-        after: review.body,
-        feedback: args.feedback,
-      });
+      const learnArgs = { agentFile: "page.md", before: beforeBody, after: review.body, feedback: args.feedback };
+      // Primary: record a corroborated, generalized lesson to the agent's example
+      // bank (injected into future runs). Secondary: a well-corroborated, higher-
+      // impact lesson may also be proposed as a gated prompt change (issue).
+      await learnFromFeedback(ctx, learnArgs);
+      await proposeAgentUpdatesFromFeedback(ctx, learnArgs);
     }
 
     store.updateSession(sessionId, {
