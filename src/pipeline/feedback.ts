@@ -117,7 +117,7 @@ const MAX_GATE_FIXTURES = 3;
 // An updated agent must still reproduce at least this fraction of the words in a
 // fixture's accepted output (by screen-reader-flattened text); below it, the
 // change is treated as a content regression.
-const MIN_CONTENT_COVERAGE = 0.85;
+export const MIN_CONTENT_COVERAGE = 0.85;
 // Skip the coverage check for very short outputs, where one dropped word swings
 // the ratio — rely on the model verdict alone there.
 const MIN_COVERAGE_WORDS = 8;
@@ -129,11 +129,14 @@ export interface RegressionResult {
 
 // Fraction of the accepted output's distinct words that still appear in the
 // candidate output (screen-reader-flattened, punctuation-insensitive). Returns
-// null when the accepted text is too short to judge reliably.
-function contentCoverage(acceptedHtml: string, candidateHtml: string): number | null {
+// null when the accepted text is too short to judge reliably. Structural role
+// markers that flatten() injects ([Heading 2], [List item], …) are stripped so a
+// structure-only change is not mistaken for dropped content.
+export function contentCoverage(acceptedHtml: string, candidateHtml: string): number | null {
   const words = (html: string): Set<string> =>
     new Set(
       flatten(html)
+        .replace(/\[[^\]]*\]/g, " ")
         .toLowerCase()
         .replace(/[^a-z0-9\s]/g, " ")
         .split(/\s+/)
