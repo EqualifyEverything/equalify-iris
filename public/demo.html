@@ -194,6 +194,9 @@
     // Tracks the last polled phase so step changes are announced to screen readers
     // once, instead of re-announcing the same status on every poll (issue #18).
     let lastPhase = null;
+    // Screen Wake Lock sentinel + whether a conversion is currently active (#16).
+    let wakeLock = null;
+    let converting = false;
 
     const $ = (id) => document.getElementById(id);
     const show = (id) => { $(id).hidden = false; };
@@ -202,6 +205,23 @@
     const live = (msg) => { $('live').textContent = msg; };
     const setError = (msg) => { $('error').textContent = msg || ''; };
     const focusHeading = (id) => { $(id).focus(); };
+    // Best-effort Screen Wake Lock: keep the screen awake while a conversion is in
+    // progress (issue #16). The browser auto-releases it when the tab is hidden, so
+    // we re-acquire on visibilitychange. No-op where unsupported or not permitted.
+    async function keepAwake() {
+      if (!('wakeLock' in navigator) || wakeLock) return;
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      } catch { wakeLock = null; }
+    }
+    function releaseAwake() {
+      try { if (wakeLock) wakeLock.release(); } catch {}
+      wakeLock = null;
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (converting && document.visibilityState === 'visible') keepAwake();
+    });
     // Spell a code out so screen readers announce each character clearly,
     // e.g. "WXYZ-1234" -> "W X Y Z dash 1 2 3 4".
     const spellCode = (code) => code.split('').map((c) => (c === '-' ? 'dash' : c)).join(' ');
@@ -342,6 +362,7 @@
         beginConverting('Converting your document.');
         pollStatus();
       } catch (e) {
+        converting = false; releaseAwake();
         setError('Upload failed: ' + e.message);
       } finally {
         btn.removeAttribute('aria-busy');
@@ -360,6 +381,8 @@
     // status chatter (issue #18).
     function beginConverting(lead) {
       lastPhase = null;
+      converting = true;
+      keepAwake();
       $('status-live').setAttribute('aria-busy', 'true');
       live((lead || 'Converting your document.') +
         ' This can take a few minutes — you can leave this page and come back; the conversion keeps running in the background.');
@@ -374,6 +397,7 @@
       }
 
       if (d && d.status === 'ready_for_review') {
+        converting = false; releaseAwake();
         $('status-live').setAttribute('aria-busy', 'false');
         announce('Done! Your accessible HTML is ready.');
         live('Conversion complete — your accessible HTML is ready.');
@@ -385,6 +409,7 @@
         return; // terminal — stop polling
       }
       if (d && d.status === 'failed') {
+        converting = false; releaseAwake();
         setError('Conversion failed: ' + (d.error || 'unknown error') + '. You can try again.');
         hide('status-section'); show('upload-section'); focusHeading('step2-h');
         return; // terminal — stop polling
@@ -464,6 +489,7 @@
         beginConverting('Re-running the conversion with your feedback.');
         pollStatus();
       } catch (e) {
+        converting = false; releaseAwake();
         setError('Could not submit feedback: ' + e.message);
       }
     });
