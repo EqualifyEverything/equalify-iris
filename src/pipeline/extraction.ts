@@ -5,6 +5,7 @@ import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { verifyAgentOutput } from "./feedback.ts";
+import { examplesForPrompt } from "./memory.ts";
 import type { Fragment } from "./fragment.ts";
 
 const PAGE_AGENT = "page";
@@ -78,10 +79,15 @@ interface PageRender {
   suggestion?: { name: string; reason: string };
 }
 
-async function renderPage(ctx: PipelineContext, agent: AgentSpec, img: InputImage): Promise<PageRender> {
+async function renderPage(
+  ctx: PipelineContext,
+  agent: AgentSpec,
+  img: InputImage,
+  lessons: string,
+): Promise<PageRender> {
   const user =
     `Convert this document page image (filename: ${img.name}, page ${img.order} of ${ctx.images.length}) ` +
-    `to accessible HTML.\n\n${ACCESSIBILITY_REQUIREMENTS}${feedbackPreamble(ctx)}`;
+    `to accessible HTML.\n\n${ACCESSIBILITY_REQUIREMENTS}${feedbackPreamble(ctx)}${lessons}`;
   const res = await ctx.router.complete(
     PAGE_AGENT,
     "vision",
@@ -138,11 +144,15 @@ async function correctPage(
 // warrants a specialist agent, collected as `suggestions` for the contribution step.
 export async function runExtraction(ctx: PipelineContext): Promise<ExtractionResult> {
   const pageAgent = loadPageAgent(ctx);
+  // Inject corroborated lessons learned from past feedback into the page agent
+  // prompt (#1), so it improves without rewriting agents/page.md.
+  const lessons = examplesForPrompt(ctx.paths, pageAgent.file);
+  if (lessons) ctx.log.event("page_lessons_injected", { chars: lessons.length });
   const fragments: Fragment[] = [];
   const suggestions: ExtractionResult["suggestions"] = [];
 
   for (const img of ctx.images) {
-    const { html, log, suggestion } = await renderPage(ctx, pageAgent, img);
+    const { html, log, suggestion } = await renderPage(ctx, pageAgent, img, lessons);
     let innerHtml = html;
     let logNote = log;
 
