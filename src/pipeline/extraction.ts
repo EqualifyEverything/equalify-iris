@@ -5,6 +5,7 @@ import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { verifyAgentOutput } from "./feedback.ts";
+import { STANDARD as STANDARD_AGENTS } from "./contribute.ts";
 import type { Fragment } from "./fragment.ts";
 
 const PAGE_AGENT = "page";
@@ -131,11 +132,109 @@ async function correctPage(
   return corrected || null;
 }
 
+// Merge instruction for splicing a specialist fragment into the page output.
+const MERGE_SYSTEM = `You merge a higher-fidelity HTML fragment, produced by a specialist agent, into an
+existing accessible HTML page. Replace the page's weaker representation of that SAME content
+with the specialist fragment and change nothing else — keep all other content, order,
+headings, and structure exactly, and never leave both representations (no duplication).
+Output body content only (no <html>/<head>/<body> wrapper).
+Respond with ONLY this JSON: { "html": "<merged body content>" }`;
+
+// Run a library specialist agent against the whole page image, asking it to
+// extract only the content its contract covers. Returns its HTML fragment, or
+// null when it finds nothing.
+async function runSpecialist(ctx: PipelineContext, agent: AgentSpec, img: InputImage): Promise<string | null> {
+  const system = `${agent.content}\n\n${ACCESSIBILITY_REQUIREMENTS}`;
+  const user =
+    `Extract ONLY the content your contract covers from this page image (filename: ${img.name}). ` +
+    `If none is present, return {"no_content": true}. Otherwise respond with ONLY this JSON: ` +
+    `{ "no_content": false, "html": "<your accessible HTML fragment>" }`;
+  const capability = agent.capabilities.includes("vision") ? "vision" : "text";
+  const res = await ctx.router.complete(
+    agent.name,
+    capability,
+    [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    { images: [loadImage(img)] },
+  );
+  ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
+  const parsed = extractJson<{ no_content?: boolean; html?: string }>(res.text);
+  if (!parsed || parsed.no_content || !parsed.html?.trim()) return null;
+  return parsed.html.trim();
+}
+
+// Splice a specialist fragment into the page body, replacing the page's own
+// (weaker) representation of that content. Returns the merged body, or null on
+// failure (caller keeps the original page output).
+async function mergeSpecialist(
+  ctx: PipelineContext,
+  img: InputImage,
+  pageHtml: string,
+  specialistName: string,
+  reason: string,
+  fragment: string,
+): Promise<string | null> {
+  const user =
+    `## Current page (body HTML)\n\`\`\`html\n${pageHtml}\n\`\`\`\n\n` +
+    `## Specialist (${specialistName}) fragment for the ${reason || "flagged"} content on this page\n` +
+    `\`\`\`html\n${fragment}\n\`\`\`\n\n` +
+    `Replace the page's existing representation of that content with this specialist fragment; ` +
+    `keep everything else unchanged.`;
+  const res = await ctx.router.complete(PAGE_AGENT, "text", [
+    { role: "system", content: MERGE_SYSTEM },
+    { role: "user", content: user },
+  ]);
+  ctx.log.agentCall({
+    agent: { name: PAGE_AGENT, file: "page.md", content: MERGE_SYSTEM, capabilities: ["text"], sha: null, sessionBuilt: false },
+    phase: "extraction",
+    image: img.name,
+    output: res.text,
+  });
+  const parsed = extractJson<{ html?: string }>(res.text);
+  return parsed?.html?.trim() || null;
+}
+
+// If a page flagged a content type that an EXISTING library agent handles, run
+// that specialist on the page and merge its higher-fidelity fragment into the
+// page output. Non-blocking: any failure leaves the page output unchanged.
+// dispatched=true means a library specialist ran (so the suggestion is already
+// covered and should not be re-filed as a new-agent issue).
+async function dispatchSpecialist(
+  ctx: PipelineContext,
+  img: InputImage,
+  pageHtml: string,
+  suggestion: { name: string; reason: string },
+): Promise<{ html: string; dispatched: boolean }> {
+  const logical = suggestion.name.replace(/\.md$/, "");
+  if (STANDARD_AGENTS.has(logical)) return { html: pageHtml, dispatched: false };
+  const specialist = loadAgent(logical, {
+    agentsDir: ctx.paths.agentsDir,
+    tmpAgentsDir: ctx.paths.tmpAgentsDir(ctx.sessionId),
+  });
+  if (!specialist) return { html: pageHtml, dispatched: false };
+  try {
+    const fragment = await runSpecialist(ctx, specialist, img);
+    if (!fragment) {
+      ctx.log.event("specialist_no_content", { agent: specialist.file, image: img.name });
+      return { html: pageHtml, dispatched: true };
+    }
+    const merged = await mergeSpecialist(ctx, img, pageHtml, specialist.name, suggestion.reason, fragment);
+    ctx.log.event("specialist_dispatched", { agent: specialist.file, image: img.name, merged: Boolean(merged) });
+    return { html: merged ?? pageHtml, dispatched: true };
+  } catch (e) {
+    ctx.log.event("specialist_dispatch_failed", { agent: specialist.file, image: img.name, error: (e as Error).message });
+    return { html: pageHtml, dispatched: true };
+  }
+}
+
 // One fragment per page, in submitted order. Each page is verified for source
 // fidelity at build time (PRD §7.5/§7.12); a page that fails gets one self-
 // correction pass. Verification is non-blocking — a run never fails because the
-// Feedback Agent is unavailable or unsure. Pages may also flag a content type that
-// warrants a specialist agent, collected as `suggestions` for the contribution step.
+// Feedback Agent is unavailable or unsure. When a page flags a content type that an
+// existing library agent handles, that specialist is dispatched and merged in;
+// otherwise the suggestion is collected for the contribution step.
 export async function runExtraction(ctx: PipelineContext): Promise<ExtractionResult> {
   const pageAgent = loadPageAgent(ctx);
   const fragments: Fragment[] = [];
@@ -145,6 +244,19 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
     const { html, log, suggestion } = await renderPage(ctx, pageAgent, img);
     let innerHtml = html;
     let logNote = log;
+    let dispatched = false;
+
+    // Specialist dispatch: if the page flagged a content type that an existing
+    // library agent handles (e.g. a chart), run that agent and merge its
+    // higher-fidelity fragment into the page BEFORE the fidelity check.
+    if (suggestion?.name) {
+      const result = await dispatchSpecialist(ctx, img, innerHtml, suggestion);
+      dispatched = result.dispatched;
+      if (result.html !== innerHtml) {
+        innerHtml = result.html;
+        logNote = logNote ? `${logNote}; merged ${suggestion.name}` : `merged ${suggestion.name}`;
+      }
+    }
 
     const verdict = await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml }]);
     if (!verdict.ok && verdict.problems.length) {
@@ -170,7 +282,9 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
       log: logNote,
     });
 
-    if (suggestion?.name) suggestions.push({ name: suggestion.name, reason: suggestion.reason, image: img.name });
+    // Only flag genuinely-new content types for contribution; a dispatched
+    // library specialist already covers this one.
+    if (suggestion?.name && !dispatched) suggestions.push({ name: suggestion.name, reason: suggestion.reason, image: img.name });
   }
 
   writeFileSync(

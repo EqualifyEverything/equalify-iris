@@ -3,8 +3,9 @@ import { loadImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { createAgentIssue } from "../github/issue.ts";
 
-// Content types already covered by the standard library — never suggest these.
-const STANDARD = new Set([
+// Content types already covered by the standard library — never suggest these,
+// and never dispatch the generic page extraction to them (see extraction.ts).
+export const STANDARD = new Set([
   "paragraph", "heading", "list", "table", "formField", "image", "quote", "caption", "footnote",
 ]);
 
