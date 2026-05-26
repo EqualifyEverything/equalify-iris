@@ -4,6 +4,8 @@ import { extractJson } from "../util/json.ts";
 import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { loadImage, type InputImage, type PipelineContext } from "./context.ts";
+import { flatten } from "./flatten.ts";
+import { createAgentUpdateIssue } from "../github/issue.ts";
 import type { FixtureCase } from "./regression.ts";
 
 // Previously imported from github/contributions.ts, which was removed when the
@@ -112,10 +114,37 @@ export async function verifyAgentOutput(
 // ---------------------------------------------------------------------------
 
 const MAX_GATE_FIXTURES = 3;
+// An updated agent must still reproduce at least this fraction of the words in a
+// fixture's accepted output (by screen-reader-flattened text); below it, the
+// change is treated as a content regression.
+const MIN_CONTENT_COVERAGE = 0.85;
+// Skip the coverage check for very short outputs, where one dropped word swings
+// the ratio — rely on the model verdict alone there.
+const MIN_COVERAGE_WORDS = 8;
 
 export interface RegressionResult {
   passed: boolean;
   failures: string[];
+}
+
+// Fraction of the accepted output's distinct words that still appear in the
+// candidate output (screen-reader-flattened, punctuation-insensitive). Returns
+// null when the accepted text is too short to judge reliably.
+function contentCoverage(acceptedHtml: string, candidateHtml: string): number | null {
+  const words = (html: string): Set<string> =>
+    new Set(
+      flatten(html)
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length > 1),
+    );
+  const accepted = words(acceptedHtml);
+  if (accepted.size < MIN_COVERAGE_WORDS) return null;
+  const candidate = words(candidateHtml);
+  let hit = 0;
+  for (const w of accepted) if (candidate.has(w)) hit++;
+  return hit / accepted.size;
 }
 
 // Re-run an agent (given its current/updated content) on a fixture image, used by
@@ -194,6 +223,16 @@ export async function regressionGate(
       failures.push(`${c.image_file}: updated agent produced no output`);
       continue;
     }
+    // Content-preservation check: the updated agent must still reproduce the
+    // content it produced when this fixture was accepted (PRD §7.12). Compare the
+    // screen-reader-flattened text of the new output against the accepted output;
+    // a large drop means the change regressed a use we already shipped.
+    const candidateHtml = blocks.map((b) => b.html).join("\n\n");
+    const coverage = contentCoverage(c.accepted_html, candidateHtml);
+    if (coverage !== null && coverage < MIN_CONTENT_COVERAGE) {
+      failures.push(`${c.image_file}: only ${(coverage * 100).toFixed(0)}% of the accepted content remained`);
+      continue;
+    }
     const verdict = await verifyAgentOutput(ctx, updatedAgent, img, blocks);
     if (!verdict.ok) failures.push(`${c.image_file}: ${verdict.problems.join("; ") || "failed verification"}`);
   }
@@ -209,10 +248,11 @@ export async function regressionGate(
 
 // On a feedback re-run, turn the document-level correction (the prior reviewed
 // body vs. this run's reviewed body) into an improved version of the agent that
-// produced the document — the page agent in the single-pass pipeline. A library
-// agent becomes an update PR (via agent-updates.md, opened on close), gated on its
-// regression fixtures so the change can't break a use it already handled; a
-// session-built agent is trained in place so its new-agent PR carries the fix.
+// produced the document — the page agent in the single-pass pipeline. For a
+// library agent the proposal is gated on its regression fixtures and then filed
+// as a GitHub issue (the contribution model uses issues, not close-time PRs),
+// while also being recorded in agent-updates.md; a session-built agent is trained
+// in place so its new-agent contribution carries the fix.
 export async function proposeAgentUpdatesFromFeedback(
   ctx: PipelineContext,
   args: { agentFile: string; before: string; after: string; feedback: string },
@@ -291,5 +331,28 @@ export async function proposeAgentUpdatesFromFeedback(
   writeFileSync(path, JSON.stringify([...merged.values()], null, 2));
 
   ctx.log.event("agent_updates_proposed", { agents: [proposal.agent_name], count: 1 });
+
+  // Surface the proposal where maintainers act on it: file a GitHub issue (the
+  // contribution model uses issues, not close-time PRs). Attributed to the
+  // logged-in user unless a service token override is configured. No-op without a
+  // token, so local runs still keep the proposal in agent-updates.md.
+  const token = ctx.cfg.github.issue_token || ctx.githubToken;
+  if (token) {
+    try {
+      const url = await createAgentUpdateIssue(token, ctx.cfg.github.upstream_repo, ctx.cfg.github.api_base_url, {
+        agentName: proposal.agent_name,
+        agentMarkdown: proposal.content,
+        summary: proposal.summary,
+        diffPreview: proposal.diff_preview,
+        sessionId: ctx.sessionId,
+      });
+      ctx.log.event("agent_update_issue", { agent: proposal.agent_name, url: url ?? "(duplicate — skipped)" });
+    } catch (e) {
+      ctx.log.event("agent_update_issue_failed", { agent: proposal.agent_name, error: (e as Error).message });
+    }
+  } else {
+    ctx.log.event("agent_update_issue_skipped", { agent: proposal.agent_name, reason: "no github token" });
+  }
+
   return [proposal];
 }
