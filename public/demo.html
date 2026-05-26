@@ -145,7 +145,10 @@
     <!-- Step 3: progress -->
     <section id="status-section" aria-labelledby="step3-h" hidden>
       <h2 id="step3-h" tabindex="-1">Converting…</h2>
-      <p id="status-live" class="status" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span> Starting…</p>
+      <!-- Visible status only (NOT a live region): it updates on every poll, so
+           announcing it would repeat. Screen-reader announcements go through the
+           dedicated #live region, fired once per step change (issue #18). -->
+      <p id="status-live" class="status" aria-busy="true"><span class="spinner" aria-hidden="true"></span> <span id="status-text">Starting…</span></p>
       <p class="hint">This can take a minute or two.</p>
     </section>
 
@@ -188,14 +191,37 @@
     let sourceBase = 'document';
     let currentUserCode = null;
     let currentBlobUrl = null;
+    // Tracks the last polled phase so step changes are announced to screen readers
+    // once, instead of re-announcing the same status on every poll (issue #18).
+    let lastPhase = null;
+    // Screen Wake Lock sentinel + whether a conversion is currently active (#16).
+    let wakeLock = null;
+    let converting = false;
 
     const $ = (id) => document.getElementById(id);
     const show = (id) => { $(id).hidden = false; };
     const hide = (id) => { $(id).hidden = true; };
-    const announce = (msg) => { $('status-live').textContent = msg; };
+    const announce = (msg) => { $('status-text').textContent = msg; };
     const live = (msg) => { $('live').textContent = msg; };
     const setError = (msg) => { $('error').textContent = msg || ''; };
     const focusHeading = (id) => { $(id).focus(); };
+    // Best-effort Screen Wake Lock: keep the screen awake while a conversion is in
+    // progress (issue #16). The browser auto-releases it when the tab is hidden, so
+    // we re-acquire on visibilitychange. No-op where unsupported or not permitted.
+    async function keepAwake() {
+      if (!('wakeLock' in navigator) || wakeLock) return;
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      } catch { wakeLock = null; }
+    }
+    function releaseAwake() {
+      try { if (wakeLock) wakeLock.release(); } catch {}
+      wakeLock = null;
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (converting && document.visibilityState === 'visible') keepAwake();
+    });
     // Spell a code out so screen readers announce each character clearly,
     // e.g. "WXYZ-1234" -> "W X Y Z dash 1 2 3 4".
     const spellCode = (code) => code.split('').map((c) => (c === '-' ? 'dash' : c)).join(' ');
@@ -333,8 +359,10 @@
         sessionId = d.session_id;
         hide('upload-section'); show('status-section'); focusHeading('step3-h');
         announce('Starting… ' + d.image_count + ' page(s) uploaded.');
+        beginConverting('Converting your document.');
         pollStatus();
       } catch (e) {
+        converting = false; releaseAwake();
         setError('Upload failed: ' + e.message);
       } finally {
         btn.removeAttribute('aria-busy');
@@ -348,6 +376,17 @@
       reconciliation: 'stitching pages together', assembly: 'assembling the document',
       review: 'reviewing for accessibility', done: 'finishing up',
     };
+    // One-time announcement when conversion starts: tells screen-reader users it
+    // runs in the background so they can leave and come back, without the repeated
+    // status chatter (issue #18).
+    function beginConverting(lead) {
+      lastPhase = null;
+      converting = true;
+      keepAwake();
+      $('status-live').setAttribute('aria-busy', 'true');
+      live((lead || 'Converting your document.') +
+        ' This can take a few minutes — you can leave this page and come back; the conversion keeps running in the background.');
+    }
     async function pollStatus() {
       let d = null;
       try {
@@ -358,7 +397,10 @@
       }
 
       if (d && d.status === 'ready_for_review') {
+        converting = false; releaseAwake();
+        $('status-live').setAttribute('aria-busy', 'false');
         announce('Done! Your accessible HTML is ready.');
+        live('Conversion complete — your accessible HTML is ready.');
         try {
           await showResult(d);
         } catch (e) {
@@ -367,6 +409,7 @@
         return; // terminal — stop polling
       }
       if (d && d.status === 'failed') {
+        converting = false; releaseAwake();
         setError('Conversion failed: ' + (d.error || 'unknown error') + '. You can try again.');
         hide('status-section'); show('upload-section'); focusHeading('step2-h');
         return; // terminal — stop polling
@@ -375,7 +418,13 @@
       // queued / running / a transient error / an unexpected shape: keep going
       // so a single hiccup never strands the user on the spinner.
       if (d && (d.phase || d.status)) {
-        announce('Working — ' + (PHASE_LABEL[d.phase] || d.phase || d.status) + '…');
+        const phase = d.phase || d.status;
+        const label = PHASE_LABEL[phase] || phase;
+        announce('Working — ' + label + '…'); // visible only — not a live region, so it never re-announces
+        if (phase !== lastPhase) {              // announce a step change to screen readers exactly once
+          lastPhase = phase;
+          live(label.charAt(0).toUpperCase() + label.slice(1) + '.');
+        }
       }
       setTimeout(pollStatus, 2500);
     }
@@ -437,8 +486,10 @@
         $('feedback-text').value = '';
         hide('result-section'); show('status-section'); focusHeading('step3-h');
         announce('Re-running with your feedback…');
+        beginConverting('Re-running the conversion with your feedback.');
         pollStatus();
       } catch (e) {
+        converting = false; releaseAwake();
         setError('Could not submit feedback: ' + e.message);
       }
     });
