@@ -104,6 +104,10 @@ from the environment at startup; changes require a restart.
   set per provider (`default_model` + `per_capability`), and can be overridden **per agent** via
   `providers.per_agent` — either a string (provider only) or `{ provider, model }`. Resolution
   falls back: per-agent model → provider `per_capability` → provider `default_model`.
+  Each provider also takes `max_tokens` (default 32000), the per-call **output** ceiling. A
+  response that stops at the ceiling is a **failed** call, not a short one: it arrives as a 200
+  with HTML cut mid-tag, which would otherwise be assembled into the deliverable as if it were
+  genuine content. Both adapters reject it and the error names the knob to raise.
 - **GitHub** (§9.1): OAuth is the auth mechanism — a user *is* their GitHub account. By default the
   service uses a **bundled OAuth App via the device flow** — no per-operator app setup, no
   secret (the same approach the `gh` CLI uses). Set `github.client_id` only to point at your
@@ -227,6 +231,12 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   editor-rewritten body looks like once it no longer matches the source excerpts — so narrowing
   wrongly can leave a real issue unfixed at the iteration cap, while broadening wrongly costs no
   more than the behavior this optimization replaced.
+- **Provider retries are not symmetric in code, but are in behavior.** OpenRouter retries by hand
+  (3 attempts, exponential backoff) because `fetch()` has no retry strategy. Bedrock has no retry
+  loop *on purpose*: the AWS SDK already applies its `standard` strategy — also 3 attempts with
+  exponential backoff — to throttling, 5xx, and node network errors, while failing fast on 4xx.
+  Verified empirically against a stubbed request handler (3 wire attempts for 503/429/ECONNRESET,
+  1 for a 400). Adding a loop around it would give Bedrock 9 attempts to OpenRouter's 3.
 - **Feedback re-runs (§7.12).** Re-runs are logged separately (a `feedback_rerun` event) and the
   prior `output.html` is snapshotted to `sessions/<id>/history/` so it can be reverted to. A
   revert *endpoint* is out of v1 API scope (not in §9); the data is preserved to enable it.

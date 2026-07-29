@@ -83,7 +83,16 @@ const gh = createServer(async (req, res) => {
 // ---- Mock OpenRouter (OpenAI-compatible chat completions) ----
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// When set, every completion returns a TRUNCATED response (see below). Toggled at
+// runtime via POST /__truncate so one mock process can serve both a normal run and
+// a truncation run — the mock boots once for the whole e2e.
+let truncateNext = false;
+
 const or = createServer(async (req, res) => {
+  if (req.method === "POST" && new URL(req.url, "http://x").pathname === "/__truncate") {
+    truncateNext = !truncateNext;
+    return json(res, 200, { truncate: truncateNext });
+  }
   const body = await readBody(req);
   let sys = "";
   let user = "";
@@ -151,6 +160,16 @@ const or = createServer(async (req, res) => {
         `<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n` +
         `<p>Page marker 1.</p>\n<p>Page marker 2.</p>\n<p>Page marker 3.</p>\n` +
         `<p>Editor saw ${attached} image(s).</p>`,
+    });
+  }
+  // Truncation: a 200 carrying PARTIAL content plus finish_reason "length" —
+  // exactly what a model returns when it stops at the output ceiling. The payload
+  // is deliberately plausible-looking JSON cut mid-tag, which is what makes this
+  // dangerous: without the provider-level guard it would be assembled into the
+  // deliverable as if it were genuine content.
+  if (truncateNext) {
+    return json(res, 200, {
+      choices: [{ message: { content: '{"html":"<table><tr><td>cut off mid' }, finish_reason: "length" }],
     });
   }
   json(res, 200, { choices: [{ message: { content } }] });
