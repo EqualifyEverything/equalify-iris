@@ -73,6 +73,16 @@ export class Paths {
     return join(this.fixturesDir(), agentName.replace(/\.md$/, ""));
   }
 
+  // Per-agent "memory": the example bank of generalized corrections learned from
+  // user feedback, injected into the agent's prompt at run time instead of
+  // rewriting the agent file. Lives under data_dir (per-instance, not committed).
+  memoryDir(): string {
+    return join(this.cfg.storage.data_dir, "memory");
+  }
+  agentMemory(agentName: string): string {
+    return join(this.memoryDir(), `${agentName.replace(/\.md$/, "")}.json`);
+  }
+
   tmpDir(id: string): string {
     return join(this.cfg.storage.data_dir, "tmp", id);
   }

@@ -3,6 +3,7 @@ import { feedbackPreamble, loadImage, type PipelineContext } from "./context.ts"
 import { wrapDocument } from "./assembly.ts";
 import { runAxe, type LintResult } from "./lint.ts";
 import { flatten } from "./flatten.ts";
+import { examplesForPrompt } from "./memory.ts";
 
 export interface ReviewIssue {
   issue: string;
@@ -67,7 +68,8 @@ async function runReader(ctx: PipelineContext, body: string, lint: LintResult): 
   for (const c of chunk(body)) {
     const user =
       `## HTML\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint)}` +
-      feedbackPreamble(ctx);
+      feedbackPreamble(ctx) +
+      examplesForPrompt(ctx.paths, "page.md", ["a11y_policy"]);
     const res = await ctx.router.complete("reader", "text", [
       { role: "system", content: READER_SYSTEM },
       { role: "user", content: user },
