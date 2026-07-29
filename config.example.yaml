@@ -55,6 +55,11 @@ providers:
     image_analysis: openrouter
     # table: { model: anthropic/claude-opus-4.7 }   # stronger model, same provider
     # reader: { provider: bedrock, model: us.anthropic.claude-haiku-4-5-20251001-v1:0 }
+    # Run the Feedback Agent (VERIFY/CLASSIFY/TRAIN) on a DIFFERENT or stronger
+    # model than the page agent, so verification doesn't share the generator's
+    # blind spots (recommended):
+    # feedback: { model: anthropic/claude-opus-4.7 }
+    # page: { model: anthropic/claude-sonnet-4.5 }
 
   openrouter:
     api_key: ${OPENROUTER_API_KEY}

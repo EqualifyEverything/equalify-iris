@@ -4,6 +4,9 @@ import { extractJson } from "../util/json.ts";
 import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { loadImage, type InputImage, type PipelineContext } from "./context.ts";
+import { flatten } from "./flatten.ts";
+import { createAgentUpdateIssue } from "../github/issue.ts";
+import { recordExample, type LessonKind } from "./memory.ts";
 import type { FixtureCase } from "./regression.ts";
 
 // Previously imported from github/contributions.ts, which was removed when the
@@ -29,6 +32,13 @@ interface VerifyOutput {
   faithful?: boolean;
   accessible?: boolean;
   problems?: string[];
+}
+
+interface ClassifyOutput {
+  kind?: string;
+  instruction?: string;
+  before?: string;
+  after?: string;
 }
 
 export interface VerifyVerdict {
@@ -112,10 +122,44 @@ export async function verifyAgentOutput(
 // ---------------------------------------------------------------------------
 
 const MAX_GATE_FIXTURES = 3;
+// An updated agent must still reproduce at least this fraction of the words in a
+// fixture's accepted output (by screen-reader-flattened text); below it, the
+// change is treated as a content regression.
+export const MIN_CONTENT_COVERAGE = 0.85;
+// Skip the coverage check for very short outputs, where one dropped word swings
+// the ratio — rely on the model verdict alone there.
+const MIN_COVERAGE_WORDS = 8;
+// A proposed prompt change may not drop the agent's mean fixture coverage by more
+// than this versus the current prompt (the holds-or-improves eval gate, #3).
+const EVAL_REGRESSION_EPS = 0.02;
 
 export interface RegressionResult {
   passed: boolean;
   failures: string[];
+  meanCoverage: number | null; // mean content coverage of the candidate over fixtures
+}
+
+// Fraction of the accepted output's distinct words that still appear in the
+// candidate output (screen-reader-flattened, punctuation-insensitive). Returns
+// null when the accepted text is too short to judge reliably. Structural role
+// markers that flatten() injects ([Heading 2], [List item], …) are stripped so a
+// structure-only change is not mistaken for dropped content.
+export function contentCoverage(acceptedHtml: string, candidateHtml: string): number | null {
+  const words = (html: string): Set<string> =>
+    new Set(
+      flatten(html)
+        .replace(/\[[^\]]*\]/g, " ")
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length > 1),
+    );
+  const accepted = words(acceptedHtml);
+  if (accepted.size < MIN_COVERAGE_WORDS) return null;
+  const candidate = words(candidateHtml);
+  let hit = 0;
+  for (const w of accepted) if (candidate.has(w)) hit++;
+  return hit / accepted.size;
 }
 
 // Re-run an agent (given its current/updated content) on a fixture image, used by
@@ -179,6 +223,7 @@ export async function regressionGate(
   };
 
   const failures: string[] = [];
+  const coverages: number[] = [];
   for (const caseFile of caseFiles) {
     let c: FixtureCase;
     try {
@@ -192,6 +237,18 @@ export async function regressionGate(
     const blocks = await reRunAgentOnImage(ctx, updatedAgent, img);
     if (blocks.length === 0) {
       failures.push(`${c.image_file}: updated agent produced no output`);
+      coverages.push(0);
+      continue;
+    }
+    // Content-preservation check: the updated agent must still reproduce the
+    // content it produced when this fixture was accepted (PRD §7.12). Compare the
+    // screen-reader-flattened text of the new output against the accepted output;
+    // a large drop means the change regressed a use we already shipped.
+    const candidateHtml = blocks.map((b) => b.html).join("\n\n");
+    const coverage = contentCoverage(c.accepted_html, candidateHtml);
+    if (coverage !== null) coverages.push(coverage);
+    if (coverage !== null && coverage < MIN_CONTENT_COVERAGE) {
+      failures.push(`${c.image_file}: only ${(coverage * 100).toFixed(0)}% of the accepted content remained`);
       continue;
     }
     const verdict = await verifyAgentOutput(ctx, updatedAgent, img, blocks);
@@ -199,8 +256,43 @@ export async function regressionGate(
   }
 
   const passed = failures.length === 0;
-  ctx.log.event("regression_gate", { agent: file, cases: caseFiles.length, passed, failures: failures.length });
-  return { passed, failures };
+  const meanCoverage = coverages.length ? coverages.reduce((a, b) => a + b, 0) / coverages.length : null;
+  ctx.log.event("regression_gate", { agent: file, cases: caseFiles.length, passed, failures: failures.length, meanCoverage });
+  return { passed, failures, meanCoverage };
+}
+
+// Mean content coverage of an agent's content across its regression fixtures,
+// reused as a lightweight eval set (#3). Returns null when there are no fixtures.
+export async function evalAgent(ctx: PipelineContext, agentFile: string, content: string): Promise<number | null> {
+  const dir = ctx.paths.agentFixtures(agentFile);
+  if (!existsSync(dir)) return null;
+  const caseFiles = readdirSync(dir).filter((f) => f.endsWith(".json")).sort().reverse().slice(0, MAX_GATE_FIXTURES);
+  if (caseFiles.length === 0) return null;
+  const file = agentFile.endsWith(".md") ? agentFile : `${agentFile}.md`;
+  const agent: AgentSpec = {
+    name: file.replace(/\.md$/, ""),
+    file,
+    content,
+    capabilities: /\bvision\b/i.test(content) ? ["vision"] : ["text"],
+    sha: null,
+    sessionBuilt: false,
+  };
+  const scores: number[] = [];
+  for (const caseFile of caseFiles) {
+    let c: FixtureCase;
+    try {
+      c = JSON.parse(readFileSync(join(dir, caseFile), "utf8")) as FixtureCase;
+    } catch {
+      continue;
+    }
+    const imgPath = join(dir, c.image_file);
+    if (!existsSync(imgPath)) continue;
+    const img: InputImage = { name: c.source_image, order: 0, path: imgPath };
+    const blocks = await reRunAgentOnImage(ctx, agent, img);
+    const cov = contentCoverage(c.accepted_html, blocks.map((b) => b.html).join("\n\n"));
+    scores.push(cov !== null ? cov : blocks.length ? 1 : 0);
+  }
+  return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -209,10 +301,11 @@ export async function regressionGate(
 
 // On a feedback re-run, turn the document-level correction (the prior reviewed
 // body vs. this run's reviewed body) into an improved version of the agent that
-// produced the document — the page agent in the single-pass pipeline. A library
-// agent becomes an update PR (via agent-updates.md, opened on close), gated on its
-// regression fixtures so the change can't break a use it already handled; a
-// session-built agent is trained in place so its new-agent PR carries the fix.
+// produced the document — the page agent in the single-pass pipeline. For a
+// library agent the proposal is gated on its regression fixtures and then filed
+// as a GitHub issue (the contribution model uses issues, not close-time PRs),
+// while also being recorded in agent-updates.md; a session-built agent is trained
+// in place so its new-agent contribution carries the fix.
 export async function proposeAgentUpdatesFromFeedback(
   ctx: PipelineContext,
   args: { agentFile: string; before: string; after: string; feedback: string },
@@ -267,6 +360,19 @@ export async function proposeAgentUpdatesFromFeedback(
     return [];
   }
 
+  // Eval gate (#3): the proposed prompt must hold-or-improve the agent's mean
+  // coverage over its fixtures versus the current prompt — not just pass the floor.
+  const currentScore = await evalAgent(ctx, target.file, target.content);
+  if (currentScore !== null && gate.meanCoverage !== null && gate.meanCoverage < currentScore - EVAL_REGRESSION_EPS) {
+    ctx.log.event("agent_update_blocked", {
+      agent: target.file,
+      reason: "eval_regression",
+      current: Number(currentScore.toFixed(3)),
+      candidate: Number(gate.meanCoverage.toFixed(3)),
+    });
+    return [];
+  }
+
   const proposal: AgentUpdateContribution = {
     agent_name: target.file,
     summary: parsed.summary?.trim() || `Improved ${target.name} from user feedback.`,
@@ -291,5 +397,72 @@ export async function proposeAgentUpdatesFromFeedback(
   writeFileSync(path, JSON.stringify([...merged.values()], null, 2));
 
   ctx.log.event("agent_updates_proposed", { agents: [proposal.agent_name], count: 1 });
+
+  // Surface the proposal where maintainers act on it: file a GitHub issue (the
+  // contribution model uses issues, not close-time PRs). Attributed to the
+  // logged-in user unless a service token override is configured. No-op without a
+  // token, so local runs still keep the proposal in agent-updates.md.
+  const token = ctx.cfg.github.issue_token || ctx.githubToken;
+  if (token) {
+    try {
+      const url = await createAgentUpdateIssue(token, ctx.cfg.github.upstream_repo, ctx.cfg.github.api_base_url, {
+        agentName: proposal.agent_name,
+        agentMarkdown: proposal.content,
+        summary: proposal.summary,
+        diffPreview: proposal.diff_preview,
+        sessionId: ctx.sessionId,
+      });
+      ctx.log.event("agent_update_issue", { agent: proposal.agent_name, url: url ?? "(duplicate — skipped)" });
+    } catch (e) {
+      ctx.log.event("agent_update_issue_failed", { agent: proposal.agent_name, error: (e as Error).message });
+    }
+  } else {
+    ctx.log.event("agent_update_issue_skipped", { agent: proposal.agent_name, reason: "no github token" });
+  }
+
   return [proposal];
+}
+
+// Primary, low-rot learning path (#1/#2/#4/#5): classify a feedback correction and,
+// when it's a generalizable or accessibility lesson (not a one-off specific to this
+// document), distill it into a reusable instruction + localized before/after example
+// and record it to the agent's example bank (memory.ts). Recorded lessons are
+// corroborated across sessions and injected into the agent's prompt at run time —
+// the agent file itself stays stable.
+export async function learnFromFeedback(
+  ctx: PipelineContext,
+  args: { agentFile: string; before: string; after: string; feedback: string },
+): Promise<void> {
+  const fb = loadFeedbackAgent(ctx);
+  if (!fb || !args.feedback.trim()) return;
+  if (args.before.trim() === args.after.trim()) return; // nothing changed this run
+
+  const correction = diffPreview(args.before, args.after);
+  const user =
+    `TASK: classify\n\n` +
+    `## User feedback\n${args.feedback}\n\n` +
+    `## How the document changed this run (diff)\n\`\`\`diff\n${correction}\n\`\`\``;
+  const res = await ctx.router.complete(FEEDBACK_AGENT, "text", [
+    { role: "system", content: fb.content },
+    { role: "user", content: user },
+  ]);
+  ctx.log.agentCall({ agent: fb, phase: "review", output: res.text });
+
+  const parsed = extractJson<ClassifyOutput>(res.text);
+  const raw = parsed?.kind;
+  if (!parsed || !parsed.instruction?.trim() || (raw !== "generalizable" && raw !== "a11y_policy")) {
+    ctx.log.event("feedback_classified", { kind: raw ?? "unknown", recorded: false });
+    return;
+  }
+  const kind: LessonKind = raw;
+  const entry = recordExample(ctx.paths, {
+    agent: args.agentFile,
+    kind,
+    instruction: parsed.instruction.trim(),
+    before: (parsed.before ?? "").trim(),
+    after: (parsed.after ?? "").trim(),
+    feedback: args.feedback.trim(),
+    session: ctx.sessionId,
+  });
+  ctx.log.event("feedback_learned", { agent: entry.agent, kind: entry.kind, count: entry.count, instruction: entry.instruction });
 }
