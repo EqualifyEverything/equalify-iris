@@ -59,6 +59,7 @@ providers:
       text: mock-model
 defaults:
   max_review_iterations: 1
+  extraction_concurrency: 4
 YAML
 
 echo "==> starting mock services"
@@ -96,16 +97,19 @@ me=$(curl -s "${AUTH[@]}" "$BASE/me")
 echo "$me" | jq -e '.github_login=="iris-tester" and .defaults.max_review_iterations==1' >/dev/null \
   && pass "identity resolved ($(echo "$me" | jq -r .github_login))" || fail "me" "$me"
 
-echo "==> 5. POST /v1/sessions (upload 2 images)"
-# minimal valid 1x1 PNGs
+echo "==> 5. POST /v1/sessions (upload 3 images)"
+# minimal valid 1x1 PNGs. Three pages, with extraction_concurrency=4 above, so
+# all pages are extracted concurrently — which is what step 7's ordering
+# assertion exercises.
 png=/tmp/iris-e2e-page.png
 printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC' | base64 -d > "$png"
 create=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
   -F "images=@$png;filename=page-001.png" \
   -F "images=@$png;filename=page-002.png" \
+  -F "images=@$png;filename=page-003.png" \
   -F 'config={"max_review_iterations":1}')
 SID=$(echo "$create" | jq -r '.session_id')
-echo "$create" | jq -e '.status=="queued" and .image_count==2' >/dev/null \
+echo "$create" | jq -e '.status=="queued" and .image_count==3' >/dev/null \
   && pass "session created: $SID" || fail "create" "$create"
 
 echo "==> 6. poll GET /v1/sessions/{id} until ready_for_review"
@@ -130,6 +134,24 @@ echo "$hdr" | grep -qi 'content-disposition:.*page-001_converted.html' \
   && pass "download filename mirrors input (page-001_converted.html)" || fail "filename" "$hdr"
 echo "$out" | grep -q '<title>page-001</title>' \
   && pass "output title mirrors input" || fail "title" "$(echo "$out" | grep -i '<title>')"
+# Pages are extracted in PARALLEL, and the mock deliberately answers
+# slowest-first (page 1 is delayed the longest), so completion order is the
+# reverse of document order. Two independent checks that parallelism did not
+# reorder the document:
+#   a) the delivered HTML reads 1,2,3 (assembleBody also sorts by .order, so this
+#      is the belt-and-braces check the user actually sees), and
+#   b) fragments.json — the raw mapWithConcurrency output, unsorted — is already
+#      in document order, which is the property the helper guarantees.
+markers=$(echo "$out" | grep -o 'Page marker [0-9]*' | grep -o '[0-9]*' | tr '\n' ',')
+[ "$markers" = "1,2,3," ] \
+  && pass "pages assembled in document order despite reverse completion order ($markers)" \
+  || fail "page order" "expected 1,2,3, got '$markers'"
+frag="$DATA/sessions/$SID/fragments/fragments.json"
+fragorder=$(jq -r '[.[].order] | @csv' "$frag")
+fragmarks=$(jq -r '[.[].innerHtml | capture("Page marker (?<n>[0-9]+)").n] | @csv' "$frag")
+[ "$fragorder" = '1,2,3' ] && [ "$fragmarks" = '"1","2","3"' ] \
+  && pass "fragments.json in submitted order pre-sort (order=$fragorder)" \
+  || fail "fragment order" "order=$fragorder markers=$fragmarks"
 
 echo "==> 8. GET /v1/sessions/{id}/logs (ndjson)"
 logs=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/logs")

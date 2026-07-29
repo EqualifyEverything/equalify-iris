@@ -176,6 +176,8 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
     "provider": "bedrock", "capability": "vision",
     "since": "2026-05-22T16:26:12Z", "waiting_ms": 41000
   },
+  "in_flight_count": 3,
+  "concurrency_factor": 3.8,
   "phase_durations_ms": { "extraction": 60100, "review": 24000 },
   "model_calls": { "count": 7, "failed": 0, "total_ms": 51000, "avg_ms": 7285, "max_ms": 14300 },
   "by_agent": { "page": { "count": 2, "total_ms": 28200, "max_ms": 15100 } },
@@ -185,8 +187,13 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
 ```
 
 The key field for **"is it hung?"** is `in_flight`: a non-null value with a large `waiting_ms`
-means a model call started and hasn't returned (the likely culprit). `slowest_calls` and
-`phase_durations_ms` show where time goes; `errors` lists failed calls.
+means a model call started and hasn't returned (the likely culprit). Because pages are
+extracted in parallel, several calls can be open at once — `in_flight` reports the
+**longest-waiting** one and `in_flight_count` how many are open in total. `concurrency_factor`
+is total model-call time ÷ wall-clock elapsed: ~1 means calls ran serially, and roughly
+`extraction_concurrency` during a parallel extraction phase — a value near 1 on a multi-page run
+means parallelism isn't happening. `slowest_calls` and `phase_durations_ms` show where time goes;
+`errors` lists failed calls.
 
 ## 8. List sessions
 

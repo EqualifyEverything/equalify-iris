@@ -92,3 +92,12 @@ providers:
 
 defaults:
   max_review_iterations: 3
+  # How many pages to extract in parallel within a single run. Pages are
+  # independent (one vision pass each), so this is a pure speed knob: a 25-page
+  # document costs up to ~5 sequential model calls per page, and extracting
+  # pages serially is the dominant source of end-to-end latency.
+  #
+  # Raise it if your provider's rate limits allow; lower it (or set 1 for fully
+  # serial) if you hit 429s — note the Bedrock adapter does not retry yet, so a
+  # rate-limit burst there fails the run. Clamped to 1..16; omit for the default.
+  extraction_concurrency: 5

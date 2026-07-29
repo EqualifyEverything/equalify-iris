@@ -23,7 +23,10 @@ The pipeline as **implemented today** runs in three phases:
 1. **Extraction** — for each page image, the `page` agent (`agents/page.md`) converts the whole
    page to an accessible HTML fragment in one vision call. The output is then verified, and
    corrected if the verifier objects. If the page agent names a content type a specialist would
-   handle better, that specialist is dispatched and its output merged.
+   handle better, that specialist is dispatched and its output merged. Pages are independent, so
+   they are extracted **in parallel** — up to `defaults.extraction_concurrency` at a time
+   (default 5, clamped to 1..16). Fragments keep submitted document order regardless of which
+   page finishes first; lower it if your provider rate-limits you, or set `1` for fully serial.
 2. **Assembly** — fragments are joined in page order into a minimal accessible document shell
    (`<html lang>`, `<title>`, `<main>`) and validated with axe-core.
 3. **Review** — the Reader reads the document in chunks as two views (HTML + a flattened

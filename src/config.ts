@@ -36,8 +36,23 @@ export interface IrisConfig {
     bedrock?: ProviderBlock;
     [key: string]: unknown;
   };
-  defaults: { max_review_iterations: number };
+  defaults: {
+    max_review_iterations: number;
+    // How many pages to extract in parallel within one run. Pages are
+    // independent (one vision call each), so this is a pure speed knob; it is
+    // capped to keep a burst of concurrent calls from tripping provider rate
+    // limits. Normalized by loadConfig, so it is always a valid integer.
+    extraction_concurrency: number;
+  };
 }
+
+// Pages extracted in parallel when the deployment doesn't say. Modest on
+// purpose: the Bedrock adapter has no retry yet, so a rate-limit burst there
+// fails a run rather than backing off.
+export const DEFAULT_EXTRACTION_CONCURRENCY = 5;
+// Upper bound. Past this, added parallelism buys little (provider-side rate
+// limits dominate) and each in-flight call holds a base64 page image in memory.
+export const MAX_EXTRACTION_CONCURRENCY = 16;
 
 // Recursively expand ${ENV_VAR} references against process.env, recording which
 // variables resolved to nothing. An unset variable still expands to "" (a config
@@ -101,6 +116,21 @@ function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void
   throw new Error(`Invalid config ${path}:\n  - ${problems.join("\n  - ")}\n${hint}`);
 }
 
+// Coerce a configured extraction_concurrency into a usable integer: missing or
+// non-numeric falls back to the default, and anything valid is clamped to
+// [1, MAX_EXTRACTION_CONCURRENCY]. Exported for tests.
+export function normalizeConcurrency(value: unknown): number {
+  // "Not specified" must mean the default, not 1. Guard null/""/whitespace up
+  // front: YAML parses a valueless `extraction_concurrency:` as null, and
+  // Number(null) is 0 — which is finite, so it would otherwise clamp to 1 and
+  // silently disable parallelism.
+  if (value === null || value === undefined) return DEFAULT_EXTRACTION_CONCURRENCY;
+  if (typeof value === "string" && value.trim() === "") return DEFAULT_EXTRACTION_CONCURRENCY;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_EXTRACTION_CONCURRENCY;
+  return Math.min(MAX_EXTRACTION_CONCURRENCY, Math.max(1, Math.floor(n)));
+}
+
 // Bundled OAuth App client_id for the device flow (PRD §9.1). This is the
 // single place to embed Equalify's registered "Equalify Iris" OAuth App so the
 // default deployment needs no per-operator app setup — the same pattern the
@@ -130,6 +160,13 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   // GitHub host defaults (overridable for GitHub Enterprise / testing).
   parsed.github.api_base_url = parsed.github.api_base_url || "https://api.github.com";
   parsed.github.oauth_base_url = parsed.github.oauth_base_url || "https://github.com";
+  // Normalize the extraction concurrency knob once, here, so every consumer can
+  // trust it: absent/garbage -> default, out-of-range -> clamped. A deployment
+  // that sets 0 or a negative value means "don't parallelize" -> 1.
+  parsed.defaults = parsed.defaults ?? ({} as IrisConfig["defaults"]);
+  parsed.defaults.extraction_concurrency = normalizeConcurrency(
+    parsed.defaults.extraction_concurrency,
+  );
   // Fall back to the bundled OAuth App so the default device-flow deployment
   // works with no per-operator app setup (PRD §9.1).
   parsed.github.client_id = parsed.github.client_id || DEFAULT_CLIENT_ID;

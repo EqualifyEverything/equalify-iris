@@ -81,16 +81,35 @@ const gh = createServer(async (req, res) => {
 });
 
 // ---- Mock OpenRouter (OpenAI-compatible chat completions) ----
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 const or = createServer(async (req, res) => {
   const body = await readBody(req);
   let sys = "";
+  let user = "";
   try {
-    sys = JSON.parse(body).messages.find((x) => x.role === "system")?.content ?? "";
+    const msgs = JSON.parse(body).messages;
+    sys = msgs.find((x) => x.role === "system")?.content ?? "";
+    const u = msgs.find((x) => x.role === "user")?.content;
+    // Vision requests send content as an array of parts.
+    user = typeof u === "string" ? u : (u ?? []).map((p) => p.text ?? "").join(" ");
   } catch {}
   let content = "{}";
-  if (sys.includes("convert an ENTIRE document page"))
-    content = JSON.stringify({ html: "<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>", log: "" });
-  else if (sys.includes("Reader Agent")) content = JSON.stringify({ issues: [] });
+  if (sys.includes("convert an ENTIRE document page")) {
+    // Echo the page number back so the assembled document proves page ORDER was
+    // preserved. Pages are extracted in parallel, so respond SLOWEST-FIRST:
+    // page 1 is delayed the longest, meaning completion order is the reverse of
+    // document order. If ordering were driven by completion, the output would
+    // come out backwards and the e2e ordering assertion would catch it.
+    const m = user.match(/page (\d+) of (\d+)/);
+    const page = m ? Number(m[1]) : 1;
+    const total = m ? Number(m[2]) : 1;
+    await sleep(Math.max(0, (total - page + 1) * 120));
+    content = JSON.stringify({
+      html: `<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n<p>Page marker ${page}.</p>`,
+      log: "",
+    });
+  } else if (sys.includes("Reader Agent")) content = JSON.stringify({ issues: [] });
   else if (sys.includes("Copy Editor Agent"))
     content = JSON.stringify({ html: "<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>" });
   json(res, 200, { choices: [{ message: { content } }] });

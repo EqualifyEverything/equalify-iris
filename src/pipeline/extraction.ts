@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { extractJson } from "../util/json.ts";
+import { mapWithConcurrency } from "../util/concurrency.ts";
 import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
@@ -235,54 +236,55 @@ async function dispatchSpecialist(
   }
 }
 
-// One fragment per page, in submitted order. Each page is verified for source
-// fidelity at build time (PRD §7.5/§7.12); a page that fails gets one self-
-// correction pass. Verification is non-blocking — a run never fails because the
-// Feedback Agent is unavailable or unsure. When a page flags a content type that an
-// existing library agent handles, that specialist is dispatched and merged in;
-// otherwise the suggestion is collected for the contribution step.
-export async function runExtraction(ctx: PipelineContext): Promise<ExtractionResult> {
-  const pageAgent = loadPageAgent(ctx);
-  // Inject corroborated lessons learned from past feedback into the page agent
-  // prompt (#1), so it improves without rewriting agents/page.md.
-  const lessons = examplesForPrompt(ctx.paths, pageAgent.file);
-  if (lessons) ctx.log.event("page_lessons_injected", { chars: lessons.length });
-  const fragments: Fragment[] = [];
-  const suggestions: ExtractionResult["suggestions"] = [];
+interface PageOutcome {
+  fragment: Fragment;
+  // A genuinely-new content type to file for contribution, if any. A suggestion
+  // already covered by a dispatched library specialist is not reported.
+  suggestion?: { name: string; reason: string; image: string };
+}
 
-  for (const img of ctx.images) {
-    const { html, log, suggestion } = await renderPage(ctx, pageAgent, img, lessons);
-    let innerHtml = html;
-    let logNote = log;
-    let dispatched = false;
+// Everything one page needs: render -> optional specialist merge -> verify ->
+// optional self-correction. Pages share no mutable state, so this is safe to run
+// concurrently for several pages at once (see runExtraction).
+async function extractPage(
+  ctx: PipelineContext,
+  pageAgent: AgentSpec,
+  img: InputImage,
+  lessons: string,
+): Promise<PageOutcome> {
+  const { html, log, suggestion } = await renderPage(ctx, pageAgent, img, lessons);
+  let innerHtml = html;
+  let logNote = log;
+  let dispatched = false;
 
-    // Specialist dispatch: if the page flagged a content type that an existing
-    // library agent handles (e.g. a chart), run that agent and merge its
-    // higher-fidelity fragment into the page BEFORE the fidelity check.
-    if (suggestion?.name) {
-      const result = await dispatchSpecialist(ctx, img, innerHtml, suggestion);
-      dispatched = result.dispatched;
-      if (result.html !== innerHtml) {
-        innerHtml = result.html;
-        logNote = logNote ? `${logNote}; merged ${suggestion.name}` : `merged ${suggestion.name}`;
-      }
+  // Specialist dispatch: if the page flagged a content type that an existing
+  // library agent handles (e.g. a chart), run that agent and merge its
+  // higher-fidelity fragment into the page BEFORE the fidelity check.
+  if (suggestion?.name) {
+    const result = await dispatchSpecialist(ctx, img, innerHtml, suggestion);
+    dispatched = result.dispatched;
+    if (result.html !== innerHtml) {
+      innerHtml = result.html;
+      logNote = logNote ? `${logNote}; merged ${suggestion.name}` : `merged ${suggestion.name}`;
     }
+  }
 
-    const verdict = await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml }]);
-    if (!verdict.ok && verdict.problems.length) {
-      ctx.log.event("page_verify_failed", { image: img.name, problems: verdict.problems });
-      const corrected = await correctPage(ctx, pageAgent, img, innerHtml, verdict.problems);
-      if (corrected && corrected !== innerHtml.trim()) {
-        innerHtml = corrected;
-        logNote = logNote
-          ? `${logNote}; self-corrected after fidelity check`
-          : "self-corrected after fidelity check";
-      }
-    } else {
-      ctx.log.event("page_verify_ok", { image: img.name });
+  const verdict = await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml }]);
+  if (!verdict.ok && verdict.problems.length) {
+    ctx.log.event("page_verify_failed", { image: img.name, problems: verdict.problems });
+    const corrected = await correctPage(ctx, pageAgent, img, innerHtml, verdict.problems);
+    if (corrected && corrected !== innerHtml.trim()) {
+      innerHtml = corrected;
+      logNote = logNote
+        ? `${logNote}; self-corrected after fidelity check`
+        : "self-corrected after fidelity check";
     }
+  } else {
+    ctx.log.event("page_verify_ok", { image: img.name });
+  }
 
-    fragments.push({
+  return {
+    fragment: {
       image: img.name,
       order: img.order,
       agent: pageAgent.file,
@@ -290,12 +292,45 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
       innerHtml,
       edges: [],
       log: logNote,
-    });
+    },
+    suggestion:
+      suggestion?.name && !dispatched
+        ? { name: suggestion.name, reason: suggestion.reason, image: img.name }
+        : undefined,
+  };
+}
 
-    // Only flag genuinely-new content types for contribution; a dispatched
-    // library specialist already covers this one.
-    if (suggestion?.name && !dispatched) suggestions.push({ name: suggestion.name, reason: suggestion.reason, image: img.name });
-  }
+// One fragment per page, in submitted order. Each page is verified for source
+// fidelity at build time (PRD §7.5/§7.12); a page that fails gets one self-
+// correction pass. Verification is non-blocking — a run never fails because the
+// Feedback Agent is unavailable or unsure. When a page flags a content type that an
+// existing library agent handles, that specialist is dispatched and merged in;
+// otherwise the suggestion is collected for the contribution step.
+//
+// Pages are extracted CONCURRENTLY (defaults.extraction_concurrency), which is
+// the dominant latency term for a multi-page document: each page costs up to
+// several sequential model calls, and pages are fully independent. Document order
+// is preserved by mapWithConcurrency returning results in input order — never
+// rely on completion order here.
+export async function runExtraction(ctx: PipelineContext): Promise<ExtractionResult> {
+  const pageAgent = loadPageAgent(ctx);
+  // Inject corroborated lessons learned from past feedback into the page agent
+  // prompt (#1), so it improves without rewriting agents/page.md.
+  const lessons = examplesForPrompt(ctx.paths, pageAgent.file);
+  if (lessons) ctx.log.event("page_lessons_injected", { chars: lessons.length });
+
+  const limit = ctx.extractionConcurrency;
+  ctx.log.event("extraction_start", { pages: ctx.images.length, concurrency: limit });
+
+  const outcomes = await mapWithConcurrency(ctx.images, limit, (img) =>
+    extractPage(ctx, pageAgent, img, lessons),
+  );
+
+  // Results come back in input order, so fragments are already in page order.
+  const fragments = outcomes.map((o) => o.fragment);
+  const suggestions = outcomes
+    .map((o) => o.suggestion)
+    .filter((s): s is NonNullable<typeof s> => s !== undefined);
 
   writeFileSync(
     join(ctx.paths.sessionFragments(ctx.sessionId), "fragments.json"),

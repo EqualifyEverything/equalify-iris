@@ -21,6 +21,9 @@ export interface PipelineContext {
   images: InputImage[];
   feedback?: string; // present on feedback re-runs (PRD §7.12)
   maxReviewIterations: number;
+  // Pages extracted in parallel in this run. Always a valid integer >= 1
+  // (normalized by loadConfig), so consumers need no fallback.
+  extractionConcurrency: number;
   // The logged-in user's GitHub token — used to file agent-suggestion issues
   // attributed to them (unless a service token override is configured).
   githubToken?: string;
