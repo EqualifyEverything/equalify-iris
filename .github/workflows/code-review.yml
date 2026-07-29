@@ -199,7 +199,9 @@ jobs:
             echo "## End-to-end — \`./test/e2e.sh\`"
             echo '```'
           } >> "$OUT"
-          if ./test/e2e.sh 2>&1 | tail -120 >> "$OUT"; then
+          # Tee rather than redirect: on failure the output has to reach the job
+          # log too, or a CI-only e2e failure is undebuggable from the run page.
+          if ./test/e2e.sh 2>&1 | tee /tmp/e2e-output.txt | tail -120 >> "$OUT"; then
             E2E=pass
           else
             E2E=fail
@@ -209,6 +211,14 @@ jobs:
             { echo; echo "<details><summary>iris server log (e2e)</summary>"; echo; echo '```'; } >> "$OUT"
             tail -120 /tmp/iris-e2e.log >> "$OUT"
             { echo '```'; echo; echo "</details>"; } >> "$OUT"
+          fi
+          if [ "$E2E" = fail ]; then
+            echo "::group::e2e output (failed)"
+            tail -80 /tmp/e2e-output.txt || true
+            echo "::endgroup::"
+            echo "::group::iris server log (e2e)"
+            tail -80 /tmp/iris-e2e.log 2>/dev/null || echo "(no server log)"
+            echo "::endgroup::"
           fi
 
           # Summary goes to three places: the context file (for the reviewer), the
