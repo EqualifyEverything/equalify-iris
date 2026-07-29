@@ -6,11 +6,11 @@ import type { Store } from "../store/db.ts";
 import { Paths } from "../store/paths.ts";
 import { RunLog } from "../store/runlog.ts";
 import type { InputImage, PipelineContext } from "./context.ts";
-import { runExtraction } from "./extraction.ts";
+import { runExtraction, reExtractPages } from "./extraction.ts";
 import { runAssembly, assembleBody, wrapDocument } from "./assembly.ts";
 import { runReview, type ReviewResult } from "./review.ts";
 import { runAxe } from "./lint.ts";
-import { learnFromFeedback, proposeAgentUpdatesFromFeedback } from "./feedback.ts";
+import { learnFromFeedback, proposeAgentUpdatesFromFeedback, scopeFeedback } from "./feedback.ts";
 import { runContribution } from "./contribute.ts";
 import type { Fragment } from "./fragment.ts";
 
@@ -85,36 +85,64 @@ export async function runPipeline(args: {
     }
 
     // Iterative feedback (PRD §7.12): when feedback arrives and a prior run's
-    // final state exists, refine the EXISTING reviewed document — re-lint the saved
-    // body and run the feedback-aware Reader/Editor loop on it — instead of
-    // regenerating it from the source images. This builds on the current output and
-    // converges across rounds. First runs (no saved state) run the full pipeline.
+    // final state exists, build on that state instead of regenerating the document
+    // from scratch, so rounds converge. First runs (no saved state) run the full
+    // pipeline.
     const finalFragmentsPath = paths.sessionFinalFragments(sessionId);
     const iterative = Boolean(args.feedback) && existsSync(finalFragmentsPath);
 
     let fragments: Fragment[];
     let beforeBody = "";
     let review: ReviewResult;
-    // Specialist-agent suggestions are produced by the full extraction pass only;
-    // an iterative feedback re-run reuses the prior fragments and makes none.
+    // Specialist-agent suggestions come from a pass that actually looks at the
+    // source images: a full extraction, or a targeted feedback re-extraction.
     let suggestions: { name: string; reason: string; image: string }[] = [];
+    let mode: string;
 
     if (iterative) {
-      log.event("run_start", { images: images.length, feedback: args.feedback ?? null, mode: "feedback_iterative" });
       const saved = JSON.parse(readFileSync(finalFragmentsPath, "utf8")) as {
         fragments?: Fragment[];
         body?: string;
       };
-      fragments = saved.fragments ?? [];
-      beforeBody = (saved.body ?? assembleBody(fragments)).trim();
+      const priorFragments = saved.fragments ?? [];
+      beforeBody = (saved.body ?? assembleBody(priorFragments)).trim();
 
-      setPhase("review");
-      // Re-lint the existing reviewed body (no model call), then let the
-      // feedback-aware review loop refine it in place.
-      const lint = await runAxe(wrapDocument(beforeBody));
-      review = await runReview(ctx, { body: beforeBody, lint });
+      // Route the feedback: content-level complaints ("you misread the table on
+      // page 3") are unfixable by the review loop, which only ever sees the
+      // assembled HTML — those pages must go back to the page agent WITH the
+      // source image. Document-level feedback (tone, ordering, a11y policy) stays
+      // on the cheap review-only path. Scoping resolves to "document" whenever it
+      // is unsure, so this only ever adds work when there is evidence for it.
+      const scope = await scopeFeedback(ctx, priorFragments);
+      log.event("feedback_scoped", { target: scope.target, pages: scope.pages, reason: scope.reason });
+
+      if (scope.target === "extraction") {
+        mode = "feedback_reextract";
+        log.event("run_start", { images: images.length, feedback: args.feedback ?? null, mode });
+
+        const extraction = await reExtractPages(ctx, priorFragments, scope.pages);
+        fragments = extraction.fragments;
+        suggestions = extraction.suggestions;
+
+        setPhase("assembly");
+        const assembled = await runAssembly(ctx, fragments);
+
+        setPhase("review");
+        review = await runReview(ctx, { body: assembled.body, lint: assembled.lint });
+      } else {
+        mode = "feedback_iterative";
+        log.event("run_start", { images: images.length, feedback: args.feedback ?? null, mode });
+        fragments = priorFragments;
+
+        setPhase("review");
+        // Re-lint the existing reviewed body (no model call), then let the
+        // feedback-aware review loop refine it in place.
+        const lint = await runAxe(wrapDocument(beforeBody));
+        review = await runReview(ctx, { body: beforeBody, lint });
+      }
     } else {
-      log.event("run_start", { images: images.length, feedback: args.feedback ?? null, mode: "full" });
+      mode = "full";
+      log.event("run_start", { images: images.length, feedback: args.feedback ?? null, mode });
 
       // Single coherent extraction: one accessible-HTML pass per page.
       const extraction = await runExtraction(ctx);
@@ -170,7 +198,7 @@ export async function runPipeline(args: {
     log.event("run_complete", {
       iterations: review.iterationsCompleted,
       unresolved: review.unresolved.length,
-      mode: iterative ? "feedback_iterative" : "full",
+      mode,
     });
 
     // After the user has their output, auto-file agent-suggestion issues
