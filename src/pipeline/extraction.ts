@@ -353,7 +353,8 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
 // leaving every other page's prior fragment untouched.
 //
 // This is the path for feedback the review loop structurally cannot serve: the
-// Reader and Copy Editor only ever see the assembled HTML, so "you misread the
+// Reader only ever sees the assembled HTML (by design, §7.8), so a misreading of
+// the source raises no issue and the loop has nothing to act on. "You misread the
 // table on page 3" can only be fixed by putting page 3's IMAGE back in front of
 // the page agent. Each targeted page goes through the same
 // render -> verify -> correct path as a first run, with its previous output shown

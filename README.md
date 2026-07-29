@@ -30,9 +30,10 @@ The pipeline as **implemented today** runs in three phases:
 2. **Assembly** — fragments are joined in page order into a minimal accessible document shell
    (`<html lang>`, `<title>`, `<main>`) and validated with axe-core.
 3. **Review** — the Reader reads the document in chunks as two views (HTML + a flattened
-   screen-reader view) and flags reading-order / semantic / accessibility issues; the Copy
-   Editor proposes fixes against the source images; fixes are applied and the document
-   re-linted. Loops up to `max_review_iterations` (default 3).
+   screen-reader view) and flags reading-order / semantic / accessibility issues, attributing
+   each to the source page(s) it appears on; the Copy Editor proposes fixes against **just those
+   pages'** source images; fixes are applied and the document re-linted. Loops up to
+   `max_review_iterations` (default 3).
 
 > **The PRD (§6) specifies five phases** — Triage → Extraction → Reconciliation → Assembly →
 > Review. **Triage, Reconciliation, and the Builder Agent's session-scoped drafting are not
@@ -159,7 +160,8 @@ src/
     orchestrator.ts      # runs the phases, persists results, drives learning
     extraction.ts        # per-page vision pass (+ verify, correct, specialist merge)
     assembly.ts          # joins fragments into the document shell
-    review.ts            # reader -> copy editor -> re-lint loop
+    review.ts            # reader -> copy editor -> re-lint loop (scoped image payload)
+    pageindex.ts         # page-number index shared by the reader + feedback scoping
     lint.ts              # axe-core in jsdom (color-contrast disabled, see §4)
     flatten.ts           # screen-reader text view, used by reader + coverage
     feedback.ts          # verify / scope / classify / train + regression gate
@@ -197,9 +199,12 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
   response fields and the `skip_prs` parameter are **not** part of the API.
   By default the issue is filed with the logged-in user's token; set `IRIS_GITHUB_TOKEN` to file
   everything under a service account instead.
-- **Review issues carry no `source` field (§7.8).** Issues are
-  `{ issue, severity, suggested_action }`. The two-view (HTML + flattened) reader cross-check is
-  implemented as specified; per-issue source attribution is not.
+- **Review issues are attributed by page, not by `@source` region (§7.8/§7.9).** The PRD's issue
+  format references `@source` region ids from the per-region fan-out, which extraction no longer
+  produces and which are stripped from the deliverable anyway (§7.4 v1.1). Issues instead carry
+  `pages: number[]` — the source pages the Reader matched the offending content to, from an index
+  of page-number + extracted-HTML excerpt. Attribution is what scopes the Copy Editor's image
+  payload (below); the two-view (HTML + flattened) cross-check is implemented as specified.
 
 Places where the PRD left a decision open, and where v1 intentionally stops:
 
@@ -213,14 +218,20 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
 - **Color-contrast lint.** Output is content-only with no styling (§4), so axe-core's
   `color-contrast` rule is disabled — it cannot be assessed without rendering and is out of
   scope.
+- **Copy Editor image payload (§7.9).** The editor gets only the images for the pages the Reader
+  attributed issues to (logged per round as `editor_images`). Attaching every page's image on
+  every round is the dominant per-round cost of the review loop — on a 25-page document that is
+  25 base64 PNGs × up to `max_review_iterations`. If no issue in a round carries an attribution,
+  every image is attached: an editor with no view of the source cannot fix a fidelity problem at
+  all, so the fallback is deliberately the expensive direction rather than the wrong one.
 - **Feedback re-runs (§7.12).** Re-runs are logged separately (a `feedback_rerun` event) and the
   prior `output.html` is snapshotted to `sessions/<id>/history/` so it can be reverted to. A
   revert *endpoint* is out of v1 API scope (not in §9); the data is preserved to enable it.
 
-  A re-run is **routed** first (`feedback_scoped` event). The Reader and Copy Editor only ever
-  see the assembled HTML, so feedback about what was *read off a page* ("the revenue figure on
-  page 2 is wrong") cannot be fixed by the review loop at all. The Feedback Agent's SCOPE task
-  decides which case applies:
+  A re-run is **routed** first (`feedback_scoped` event). The Reader only ever sees the assembled
+  HTML (by design, §7.8), so feedback about what was *read off a page* ("the revenue figure on
+  page 2 is wrong") raises no issue for the loop to act on and cannot be fixed there. The Feedback
+  Agent's SCOPE task decides which case applies:
   - **`document`** — tone, wording, ordering, or an accessibility rule: re-lint the saved body
     and run the feedback-aware review loop on it. No source images, no re-extraction.
   - **`extraction`** — source-fidelity: the named pages go back to the page agent *with their

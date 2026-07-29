@@ -5,6 +5,7 @@ import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { flatten } from "./flatten.ts";
+import { knownPages, pageIndex } from "./pageindex.ts";
 import { createAgentUpdateIssue } from "../github/issue.ts";
 import { recordExample, type LessonKind } from "./memory.ts";
 import type { FixtureCase } from "./regression.ts";
@@ -129,17 +130,15 @@ export interface FeedbackScope {
   reason: string;
 }
 
-// Cap how much of each page's HTML is shown to the scoping call. Enough to
-// recognize which page the feedback is about, without resending the document.
-const SCOPE_EXCERPT_CHARS = 400;
 // A feedback message that supposedly targets more than this share of a document's
 // pages is treated as document-level: re-extracting nearly everything costs about
 // as much as a fresh run and is rarely what a targeted correction means.
 const MAX_REEXTRACT_FRACTION = 0.5;
 
 // Ask the Feedback Agent (SCOPE task) whether feedback is about what was read off
-// the source pages — which the review loop CANNOT fix, because the Reader and Copy
-// Editor only ever see the assembled HTML — or about the assembled document.
+// the source pages — which the review loop CANNOT fix, because the Reader only ever
+// sees the assembled HTML (by design, §7.8) and so raises no issue for a misreading
+// it cannot detect — or about the assembled document.
 //
 // Non-blocking and biased toward the cheap path: any doubt (agent unavailable,
 // unparseable answer, no pages identified) resolves to "document", which is the
@@ -157,13 +156,7 @@ export async function scopeFeedback(
     return { target: "document", pages: [], reason: "feedback agent unavailable" };
   }
 
-  const pageList = [...fragments]
-    .sort((a, b) => a.order - b.order)
-    .map((f) => {
-      const excerpt = f.innerHtml.replace(/\s+/g, " ").trim().slice(0, SCOPE_EXCERPT_CHARS);
-      return `### Page ${f.order}\n${excerpt}`;
-    })
-    .join("\n\n");
+  const pageList = pageIndex(fragments);
 
   const user =
     `TASK: scope\n\n` +
@@ -184,14 +177,7 @@ export async function scopeFeedback(
 
   // Keep only page numbers that actually exist in this document; a hallucinated
   // page would otherwise silently re-extract nothing or throw downstream.
-  const known = new Set(fragments.map((f) => f.order));
-  const pages = [
-    ...new Set(
-      (Array.isArray(parsed.pages) ? parsed.pages : [])
-        .map((p) => (typeof p === "number" ? p : Number(p)))
-        .filter((p) => Number.isInteger(p) && known.has(p)),
-    ),
-  ].sort((a, b) => a - b);
+  const pages = knownPages(parsed.pages, fragments);
 
   // Source-level feedback that could not be localized: re-extracting the whole
   // document is too blunt (and too expensive) a response, and the review loop at

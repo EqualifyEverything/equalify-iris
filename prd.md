@@ -295,6 +295,19 @@ These comments travel with the fragment through Reconciliation, Assembly, and th
 - If no issues remain, document is returned to user.
 - If issues exist, they pass to the Copy Editor.
 
+**Amended (v1.1): source attribution is by page number, not by `@source` region reference.** The `@source` region ids this section assumed are a product of the per-region fan-out that §7.4's v1.1 amendment stripped from the deliverable and that extraction no longer produces — there are no region ids to reference. Attribution is still required, because it is what lets the Copy Editor fetch the right image (§7.9); it is expressed as the source **pages** an issue appears on:
+
+```json
+{
+  "issue": "Heading level skipped — H2 follows H4",
+  "pages": [5],
+  "severity": "high",
+  "suggested_action": "review heading hierarchy across surrounding blocks"
+}
+```
+
+The Reader is given an index of the document's pages (page number + an excerpt of the HTML extracted from each) and matches offending content against it. It is instructed to name only pages it has evidence for and to return an empty list rather than guess, so `pages` may be empty — see §7.9 for what that means downstream.
+
 ### 7.9 Copy Editor Agent
 
 **Purpose**: Given a flagged HTML block plus its source image, propose a corrected HTML block.
@@ -302,6 +315,10 @@ These comments travel with the fragment through Reconciliation, Assembly, and th
 **Behavior**:
 - Inputs: the problem block(s), the relevant source image(s), the issue list, the surrounding HTML (for context, read-only).
 - Output: proposed replacement HTML for each flagged block. Does not modify the document directly.
+
+**Amended (v1.1): "the relevant source image(s)" is enforced, and is the pages the Reader attributed the issues to (§7.8 v1.1).** Sending the whole document's images is the naive reading of this section and is the dominant per-round cost of the review loop — every page's image, re-uploaded on every one of up to `max_review_iterations` rounds. The editor receives only the union of the attributed pages.
+
+When no issue in a round carries an attribution, every image is attached. That is the expensive direction on purpose: an editor with no view of the source cannot fix a fidelity problem at all, which is the only reason it gets images. A round in which *some* issues are attributed narrows to those pages — an issue whose content matched no page excerpt is characteristically structural (duplication, reading order, heading levels) and is corrected from the HTML.
 
 ### 7.10 Assembler Agent
 
@@ -318,7 +335,7 @@ These comments travel with the fragment through Reconciliation, Assembly, and th
 - Default `max_review_iterations = 3`.
 - Each iteration: Reader → Copy Editor → Assembler → Reader.
 - Loop exits when Reader returns no issues, or when iteration cap is reached.
-- If iteration cap is reached with issues remaining, the document is still returned but with an `@unresolved` block at the end listing remaining issues and their `@source` references.
+- If iteration cap is reached with issues remaining, the document is still returned but with an `@unresolved` block at the end listing remaining issues and their source references (the attributed page numbers — see §7.8 v1.1 — where the Reader could attribute them).
 
 ### 7.12 User Feedback Re-Run
 

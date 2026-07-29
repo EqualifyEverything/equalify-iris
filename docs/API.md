@@ -150,13 +150,14 @@ than regenerating it, and is routed by what the feedback is about (visible in th
 
 | Scope | What runs | Typical feedback |
 | --- | --- | --- |
-| `document` | Re-lint the saved body, then the feedback-aware review loop. No source images. | tone, wording, ordering, an accessibility rule |
+| `document` | Re-lint the saved body, then the feedback-aware review loop. No re-extraction. | tone, wording, ordering, an accessibility rule |
 | `extraction` | The named pages go back to the page agent **with their source image**, then reassemble + review. Other pages keep their prior fragments. | "the revenue figure on page 2 is wrong", missed or misread content |
 
-The second case exists because the Reader and Copy Editor never see the source images, so
-source-fidelity feedback is not something the review loop can fix. Routing is biased toward the
-cheaper `document` path: if the pages can't be localized, or the feedback claims more than half
-the document, it falls back rather than re-extracting broadly.
+The second case exists because the **Reader** never sees the source images (by design, §7.8 — it
+reads the way a screen-reader user does), so a misreading of the source is invisible to it: no
+issue is raised, and the loop has nothing to act on. Routing is biased toward the cheaper
+`document` path: if the pages can't be localized, or the feedback claims more than half the
+document, it falls back rather than re-extracting broadly.
 
 ## 7. Run log
 
@@ -165,6 +166,15 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/logs"
 ```
 `application/x-ndjson` — one JSON object per line (agent calls with git-SHA / inline-content
 version pinning, model-call timing, no-content signals, phase transitions).
+
+Useful events to grep for:
+
+| `type` | Meaning |
+| --- | --- |
+| `feedback_scoped` | How a feedback re-run was routed (`document` vs `extraction`, and which pages) |
+| `reextract_start` / `reextract_complete` | Which pages went back to the page agent |
+| `editor_images` | How many source images the Copy Editor received this round (`attached` of `of`, plus `pages`). `attached == of` on a multi-page document means the Reader attributed nothing, so the round fell back to sending everything. |
+| `reader` / `editor` | Per-iteration review-loop progress (issue counts) |
 
 ## 7b. Diagnostics (timing / hang detection)
 

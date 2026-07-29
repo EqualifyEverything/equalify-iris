@@ -87,12 +87,15 @@ const or = createServer(async (req, res) => {
   const body = await readBody(req);
   let sys = "";
   let user = "";
+  let imageParts = 0;
   try {
     const msgs = JSON.parse(body).messages;
     sys = msgs.find((x) => x.role === "system")?.content ?? "";
     const u = msgs.find((x) => x.role === "user")?.content;
-    // Vision requests send content as an array of parts.
+    // Vision requests send content as an array of parts: one text part plus one
+    // image_url part per attached image.
     user = typeof u === "string" ? u : (u ?? []).map((p) => p.text ?? "").join(" ");
+    if (Array.isArray(u)) imageParts = u.filter((p) => p.type === "image_url").length;
   } catch {}
   let content = "{}";
   // Feedback Agent, TASK: scope — route feedback to extraction or the review loop.
@@ -122,9 +125,34 @@ const or = createServer(async (req, res) => {
         `<p>Page marker ${page}.${revised ? " Revised." : ""}</p>`,
       log: "",
     });
-  } else if (sys.includes("Reader Agent")) content = JSON.stringify({ issues: [] });
-  else if (sys.includes("Copy Editor Agent"))
-    content = JSON.stringify({ html: "<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>" });
+  } else if (sys.includes("Reader Agent")) {
+    // Normally clean. When the run carries feedback asking for a copy-edit pass,
+    // report ONE issue attributed to page 2 — that drives the editor and lets the
+    // e2e prove only page 2's image was attached. Issues are reported on every
+    // round (the mock document never changes), so the loop runs to its cap.
+    content = user.includes("headings need a copy-edit pass")
+      ? JSON.stringify({
+          issues: [
+            {
+              issue: "The revenue table on page 2 has no column headers.",
+              pages: [2],
+              severity: "high",
+              suggested_action: "add <th scope=\"col\"> to the table",
+            },
+          ],
+        })
+      : JSON.stringify({ issues: [] });
+  } else if (sys.includes("Copy Editor Agent")) {
+    // Echo how many page images were attached so the e2e can assert the payload
+    // was scoped to the attributed page rather than the whole document.
+    const attached = imageParts;
+    content = JSON.stringify({
+      html:
+        `<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n` +
+        `<p>Page marker 1.</p>\n<p>Page marker 2.</p>\n<p>Page marker 3.</p>\n` +
+        `<p>Editor saw ${attached} image(s).</p>`,
+    });
+  }
   json(res, 200, { choices: [{ message: { content } }] });
 });
 
