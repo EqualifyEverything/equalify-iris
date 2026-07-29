@@ -2,13 +2,15 @@ name: Code Review
 
 # Automated PR review by Claude, hosted on AWS Bedrock.
 #
-# Requires two repo settings:
+# Requires two repo settings (both configured in this account already):
 #   - secret  AWS_BEDROCK_ROLE_ARN  — IAM role this repo may assume via OIDC,
 #     with bedrock:InvokeModel / InvokeModelWithResponseStream on the review model.
+#     Currently role/equalify-iris-gha-bedrock-review in account 380610849750,
+#     trust scoped to this repo's pull_request + refs/heads/* subjects.
 #   - variable BEDROCK_REVIEW_MODEL (optional) — Bedrock inference-profile ID to
-#     review with. Defaults below. NOTE: this is the bedrock-runtime InvokeModel
-#     namespace (dated, version-suffixed, "us." cross-region prefix) — NOT the
-#     first-party alias namespace used by src/providers/bedrock.ts config.
+#     review with; defaults below. Set to us.anthropic.claude-opus-5, a
+#     cross-region profile routing to us-east-1/us-east-2/us-west-2 (the IAM
+#     policy grants all three, or InvokeModel fails when it routes off-region).
 #
 # There is deliberately no `issue_comment` trigger here: @claude mentions are
 # handled by the hosted Claude GitHub App, and duplicating it would double-post.
@@ -274,7 +276,7 @@ jobs:
           # Turn caps drop reviews mid-investigation; wall-clock is what we pay for.
           claude_args: >-
             --allowedTools Bash(*),Read(*),Glob,Grep
-            --model ${{ vars.BEDROCK_REVIEW_MODEL || 'us.anthropic.claude-sonnet-4-5-20250929-v1:0' }}
+            --model ${{ vars.BEDROCK_REVIEW_MODEL || 'us.anthropic.claude-opus-5' }}
           prompt: |
             You are a skeptical code reviewer for **Equalify Iris**, reviewing PR #${{ steps.ctx.outputs.pr_number }}
             (head ${{ steps.ctx.outputs.head_sha }}) in ${{ github.repository }}.
