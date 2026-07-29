@@ -71,6 +71,11 @@ providers:
     api_key: ${OPENROUTER_API_KEY}
     base_url: https://openrouter.ai/api/v1
     default_model: anthropic/claude-opus-4.7
+    # Output-token ceiling per call. A dense page (a full-page table or form) is
+    # the binding case; hit the ceiling and the model stops mid-tag. Iris now
+    # FAILS such a call rather than passing the fragment downstream, so if you see
+    # "hit the ... output ceiling", raise this. Omit for the default (32000).
+    max_tokens: 32000
     per_capability:
       vision: anthropic/claude-opus-4.7
       structured_output: anthropic/claude-opus-4.7
@@ -85,6 +90,10 @@ providers:
   bedrock:
     region: us-east-1
     default_model: us.anthropic.claude-opus-4-7
+    # See the note on openrouter.max_tokens above. Retries are handled by the AWS
+    # SDK's own `standard` strategy (3 attempts, exponential backoff, throttling +
+    # 5xx + network errors), so there is no retry knob here.
+    max_tokens: 32000
     per_capability:
       vision: us.anthropic.claude-opus-4-7
       structured_output: us.anthropic.claude-opus-4-7

@@ -1,4 +1,5 @@
-import type { Capability, ProviderBlock } from "../config.ts";
+import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
+import { TruncatedResponseError } from "./types.ts";
 import type { CompletionRequest, CompletionResult, ModelProvider } from "./types.ts";
 
 // Fail a model call that stalls beyond this so it can't hang a session forever.
@@ -37,11 +38,15 @@ export class OpenRouterProvider implements ModelProvider {
 
   private apiKey: string;
   private baseUrl: string;
+  private maxTokens: number;
 
   constructor(cfg: ProviderBlock) {
     if (!cfg.api_key) throw new Error("openrouter: api_key is not configured");
     this.apiKey = cfg.api_key;
     this.baseUrl = cfg.base_url ?? "https://openrouter.ai/api/v1";
+    // loadConfig normalizes this, but a directly-constructed provider (tests,
+    // embedders) may pass a raw block — so fall back rather than send undefined.
+    this.maxTokens = cfg.max_tokens ?? DEFAULT_MAX_TOKENS;
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
@@ -61,7 +66,11 @@ export class OpenRouterProvider implements ModelProvider {
       return { role: m.role, content: m.content };
     });
 
-    const body: Record<string, unknown> = { model: req.model, messages };
+    // An explicit ceiling, matching Bedrock. Left unset, the limit is whatever
+    // default the upstream model happens to apply — which differs per model and is
+    // silent when reached, so the same document could truncate on one model and
+    // not another with nothing in the config to explain it.
+    const body: Record<string, unknown> = { model: req.model, messages, max_tokens: this.maxTokens };
     if (req.capability === "structured_output" && req.schema) {
       body.response_format = {
         type: "json_schema",
@@ -97,13 +106,17 @@ export class OpenRouterProvider implements ModelProvider {
           throw new Error(`openrouter ${res.status}: ${text}`);
         }
         const json = (await res.json()) as {
-          choices: { message: { content: string } }[];
+          choices: { message: { content: string }; finish_reason?: string }[];
         };
-        return {
-          text: json.choices[0]?.message?.content ?? "",
-          model: req.model,
-          provider: this.name,
-        };
+        const text = json.choices[0]?.message?.content ?? "";
+        // Same truncation guard as Bedrock: "length" means the model stopped at the
+        // ceiling, not at the end of its answer. Thrown from inside the retry loop
+        // deliberately — it is not transient, so isTransientNetworkError() rejects
+        // it and the loop exits rather than re-billing the same truncation twice.
+        if (json.choices[0]?.finish_reason === "length") {
+          throw new TruncatedResponseError(this.name, req.model, this.maxTokens, text.length);
+        }
+        return { text, model: req.model, provider: this.name };
       } catch (e) {
         lastError = e;
         if (attempt < MAX_ATTEMPTS && isTransientNetworkError(e)) {

@@ -241,6 +241,36 @@ echo "$out4" | grep -q '@unresolved' && echo "$out4" | grep -q 'page 2' \
   && pass "unresolved issues record their source page" \
   || fail "unresolved attribution" "$(echo "$out4" | grep -A3 '@unresolved')"
 
+echo "==> 9d. a truncated model response fails the run instead of shipping partial HTML"
+# A response that stops at the output-token ceiling arrives as a 200 with partial
+# content — nothing downstream can distinguish it from a complete answer, and HTML
+# cut mid-tag still parses well enough to be assembled and delivered as if it were
+# real content. On a SEPARATE session so the main one stays intact.
+curl -s -X POST "http://localhost:$OR_PORT/__truncate" >/dev/null
+trunc=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
+  -F "images=@$png;filename=trunc-001.png" -F 'config={"max_review_iterations":1}')
+TSID=$(echo "$trunc" | jq -r '.session_id')
+tstatus=""
+for i in $(seq 1 60); do
+  tstatus=$(curl -s "${AUTH[@]}" "$BASE/sessions/$TSID" | jq -r '.status')
+  { [ "$tstatus" = "failed" ] || [ "$tstatus" = "ready_for_review" ]; } && break
+  sleep 0.5
+done
+curl -s -X POST "http://localhost:$OR_PORT/__truncate" >/dev/null   # back to normal
+[ "$tstatus" = "failed" ] \
+  && pass "truncated response failed the run (not delivered as content)" \
+  || fail "truncation" "expected status=failed, got '$tstatus'"
+# The error must name the ceiling and the knob to raise — an operator seeing this
+# has no other clue why a page came back short.
+terr=$(curl -s "${AUTH[@]}" "$BASE/sessions/$TSID" | jq -r '.error')
+echo "$terr" | grep -q 'output ceiling' && echo "$terr" | grep -q 'max_tokens' \
+  && pass "the failure explains the ceiling and names max_tokens" \
+  || fail "truncation error" "$terr"
+# And the partial HTML must not be retrievable as output.
+tout=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/$TSID/output")
+[ "$tout" = "409" ] && pass "no output served for the truncated run (409)" \
+  || fail "truncation output" "expected 409, got $tout"
+
 echo "==> 10. ownership isolation (other endpoints reject unknown id)"
 code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/ses_doesnotexist")
 [ "$code" = "404" ] && pass "unknown session => 404" || fail "isolation" "got $code"

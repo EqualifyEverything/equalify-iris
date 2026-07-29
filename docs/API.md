@@ -259,6 +259,20 @@ All errors share one shape:
 Common codes: `unauthorized` (401), `session_not_found` (404), `invalid_state` (409),
 `invalid_request` (400).
 
+A run that fails reports why in the `error` field of `GET /v1/sessions/{id}`. One worth
+recognizing:
+
+```
+openrouter: response hit the 32000-token output ceiling and was truncated
+(31998 chars returned). Raise providers.openrouter.max_tokens.
+```
+
+The model stopped at the output ceiling rather than at the end of its answer, so the HTML it
+returned is cut mid-tag. Iris **fails the run** instead of assembling the fragment — a truncated
+page still parses, so it would otherwise be delivered as though the missing content were never in
+the source. Raise `max_tokens` on that provider block and re-run. Dense full-page tables and
+forms are the usual trigger.
+
 ## Prove it works
 
 ```bash

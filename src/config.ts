@@ -10,6 +10,10 @@ export interface ProviderBlock {
   region?: string;
   default_model: string;
   per_capability?: Partial<Record<Capability, string>>;
+  // Output-token ceiling for this provider's calls. A dense page of accessible
+  // HTML is the binding case: hit the ceiling and the model stops mid-tag.
+  // Normalized by loadConfig, so providers can trust it.
+  max_tokens?: number;
 }
 
 export interface IrisConfig {
@@ -46,13 +50,24 @@ export interface IrisConfig {
   };
 }
 
-// Pages extracted in parallel when the deployment doesn't say. Modest on
-// purpose: the Bedrock adapter has no retry yet, so a rate-limit burst there
-// fails a run rather than backing off.
+// Pages extracted in parallel when the deployment doesn't say. Modest on purpose:
+// a burst of concurrent calls is the most likely way to trip a provider's rate
+// limit, and while both adapters retry throttling responses (OpenRouter by hand,
+// Bedrock via the AWS SDK's standard strategy), backing off repeatedly is slower
+// than not being throttled in the first place.
 export const DEFAULT_EXTRACTION_CONCURRENCY = 5;
 // Upper bound. Past this, added parallelism buys little (provider-side rate
 // limits dominate) and each in-flight call holds a base64 page image in memory.
 export const MAX_EXTRACTION_CONCURRENCY = 16;
+
+// Output-token ceiling when a provider block doesn't set one. 8192 was the old
+// hardcoded Bedrock value and is comfortably too small for a dense page: a
+// full-page table or form of accessible HTML can exceed it, and the model then
+// stops mid-tag. Raised to a value current Claude models all accept, because the
+// failure it prevents (silently truncated HTML flowing downstream as if valid) is
+// far worse than the cost of a ceiling that is rarely reached — output is billed
+// per token emitted, not per token allowed.
+export const DEFAULT_MAX_TOKENS = 32_000;
 
 // Recursively expand ${ENV_VAR} references against process.env, recording which
 // variables resolved to nothing. An unset variable still expands to "" (a config
@@ -116,6 +131,22 @@ function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void
   throw new Error(`Invalid config ${path}:\n  - ${problems.join("\n  - ")}\n${hint}`);
 }
 
+// Coerce a configured max_tokens into a usable integer. Same "absent means the
+// default, not zero" trap as normalizeConcurrency: YAML parses a valueless
+// `max_tokens:` as null, and Number(null) is 0 — which would cap every call at
+// zero output tokens and make every response empty. There is no upper clamp; the
+// provider rejects a value its model won't accept, and that error names the real
+// limit better than a guess compiled in here would. Exported for tests.
+export function normalizeMaxTokens(value: unknown): number {
+  if (value === null || value === undefined) return DEFAULT_MAX_TOKENS;
+  if (typeof value === "string" && value.trim() === "") return DEFAULT_MAX_TOKENS;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_TOKENS;
+  // A configured 0 or negative is meaningless for an output ceiling (and would
+  // silently empty every response), so treat it as "unset" rather than obeying it.
+  return n < 1 ? DEFAULT_MAX_TOKENS : Math.floor(n);
+}
+
 // Coerce a configured extraction_concurrency into a usable integer: missing or
 // non-numeric falls back to the default, and anything valid is clamped to
 // [1, MAX_EXTRACTION_CONCURRENCY]. Exported for tests.
@@ -167,6 +198,17 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   parsed.defaults.extraction_concurrency = normalizeConcurrency(
     parsed.defaults.extraction_concurrency,
   );
+  // Same treatment for each provider's output ceiling, so an adapter can read
+  // block.max_tokens directly and never has to re-derive a default. Applied to
+  // every provider block present, not just the referenced ones: validateConfig
+  // deliberately skips unreferenced providers, but normalizing is free and keeps
+  // the invariant "if the block exists, its max_tokens is a valid integer".
+  for (const [key, block] of Object.entries(parsed.providers)) {
+    if (key === "default" || key === "per_agent") continue;
+    if (!block || typeof block !== "object") continue;
+    const b = block as ProviderBlock;
+    b.max_tokens = normalizeMaxTokens(b.max_tokens);
+  }
   // Fall back to the bundled OAuth App so the default device-flow deployment
   // works with no per-operator app setup (PRD §9.1).
   parsed.github.client_id = parsed.github.client_id || DEFAULT_CLIENT_ID;
