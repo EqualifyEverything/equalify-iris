@@ -19,8 +19,11 @@ storage:
   # alternative for multi-instance deployments (not implemented in v1).
   database: ./data/iris.sqlite
 
-# GitHub OAuth is the only auth mechanism (PRD §9.1). The same token opens
-# PRs on /close, so `repo` scope is required.
+# GitHub OAuth is the only auth mechanism (PRD §9.1). The token is used to
+# identify the user and, unless `issue_token` is set below, to file
+# agent-suggestion issues on their behalf — so `repo` scope is requested.
+# Nothing here opens pull requests: contributions are filed as issues
+# (deviation from PRD §7.13 — see README "Implementation notes").
 github:
   # Leave blank to use the bundled "Equalify Iris" OAuth App via the device flow
   # (no per-operator app setup needed — like the GitHub CLI). Set it only to
@@ -29,7 +32,7 @@ github:
   # Only required for the WEB redirect flow (/auth/github/start + /callback). The
   # device flow (CLI/Postman) needs no secret. Never commit a real secret.
   client_secret: ${GITHUB_CLIENT_SECRET}
-  # The upstream agent library repo. Its origin is the PR target (PRD §7.13).
+  # The upstream agent library repo — where agent-suggestion issues are filed.
   upstream_repo: ${IRIS_UPSTREAM_REPO}
   # GitHub host base URLs. Override for GitHub Enterprise (e.g.
   # https://github.example.com/api/v3 and https://github.example.com). Defaults
@@ -49,18 +52,21 @@ providers:
   #   <agent>: <provider>                      # route this agent to a provider
   #   <agent>: { provider: ..., model: ... }   # also pin a specific model
   # Model resolution falls back: per-agent model -> provider per_capability ->
-  # provider default_model. Agent names are the file stem (e.g. table, heading,
-  # image_analysis for the triage agent, reader, copy_editor).
-  per_agent:
-    image_analysis: openrouter
-    # table: { model: anthropic/claude-opus-4.7 }   # stronger model, same provider
+  # provider default_model. Agent names are the file stem. The agents actually
+  # dispatched today are: page (extraction), reader + copy_editor (review),
+  # feedback (verify/classify/train), builder (drafts suggested agents), plus any
+  # specialist in agents/ that the page agent names.
+  per_agent: {}
+    # page: { model: anthropic/claude-sonnet-4.6 }   # cheaper/faster extraction
+    # table: { model: anthropic/claude-opus-4.7 }    # stronger model, same provider
     # reader: { provider: bedrock, model: us.anthropic.claude-haiku-4-5-20251001-v1:0 }
     # Run the Feedback Agent (VERIFY/CLASSIFY/TRAIN) on a DIFFERENT or stronger
     # model than the page agent, so verification doesn't share the generator's
     # blind spots (recommended):
     # feedback: { model: anthropic/claude-opus-4.7 }
-    # page: { model: anthropic/claude-sonnet-4.5 }
 
+  # OpenRouter model IDs are `vendor/model` slugs (dot-versioned). Full list:
+  # https://openrouter.ai/models
   openrouter:
     api_key: ${OPENROUTER_API_KEY}
     base_url: https://openrouter.ai/api/v1
@@ -70,13 +76,19 @@ providers:
       structured_output: anthropic/claude-opus-4.7
       text: anthropic/claude-opus-4.7
 
+  # Bedrock model IDs are hyphen-versioned and need a region prefix: current
+  # Claude models are cross-region-inference only, so the bare `anthropic.*` form
+  # is rejected for on-demand use — use `us.` (or `global.`). Confirm what your
+  # account/region has enabled with:
+  #   aws bedrock list-inference-profiles --region us-east-1 \
+  #     --query 'inferenceProfileSummaries[].inferenceProfileId'
   bedrock:
-    region: us-east-2
-    default_model: anthropic.claude-opus-4-7-v1
+    region: us-east-1
+    default_model: us.anthropic.claude-opus-4-7
     per_capability:
-      vision: anthropic.claude-opus-4-7-v1
-      structured_output: anthropic.claude-opus-4-7-v1
-      text: anthropic.claude-opus-4-7-v1
+      vision: us.anthropic.claude-opus-4-7
+      structured_output: us.anthropic.claude-opus-4-7
+      text: us.anthropic.claude-opus-4-7
 
 defaults:
   max_review_iterations: 3

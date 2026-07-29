@@ -52,7 +52,7 @@ The pipeline runs in five phases:
 1. **Triage** — per-image analysis produces notes.
 2. **Extraction** — content agents convert their assigned regions to accessible HTML.
 3. **Reconciliation** — fragments spanning image boundaries are stitched.
-4. **Assembly** — content blocks combine into a single HTML document with source-provenance comments.
+4. **Assembly** — content blocks combine into a single HTML document; in-pipeline provenance comments are stripped from the deliverable (§7.4, v1.1) and recorded in the run log.
 5. **Review** — reader / copy editor / assembler loop refines the document until clean or until max iterations reached.
 
 After phase 5, the document is returned to the user, who may submit feedback (re-running phases 1–5 with feedback injected) or accept the result and optionally submit any newly built agents as a PR.
@@ -189,7 +189,9 @@ order: 3
 <!-- @end-source -->
 ```
 
-These comments are not stripped from the final HTML; they preserve provenance for the Reader and Copy Editor and let users re-run targeted fixes without re-processing the whole document.
+These comments travel with the fragment through Reconciliation, Assembly, and the review loop: they preserve provenance for the Reader and Copy Editor and let users re-run targeted fixes without re-processing the whole document.
+
+**Amended (v1.1): provenance comments are stripped from the delivered HTML.** An earlier revision of this section required them to survive into the final document. They do not. The deliverable is a document handed to end users — often published as-is — and pipeline internals do not belong in it: every consumer would have to strip them, and `@source` references to page images are meaningless outside the session that produced them. Provenance is retained where it is actually useful, in the run log (`GET /v1/sessions/{id}/logs`), which records the agent, its pinned git SHA, and the source image for every fragment. Anything the *user* must see stays in the document: the `@unresolved` block (§7.11) is emitted as before.
 
 **Initial agent set (v1)**:
 - `paragraph.md`
@@ -261,7 +263,7 @@ These comments are not stripped from the final HTML; they preserve provenance fo
 
 **Behavior**:
 - Wraps the content in a minimal accessible document shell: `<html lang>`, `<head>` with `<title>`, `<body>` with `<main>`.
-- Preserves all `@source`, `@agent`, `@fragment`, and `@reconciled` comments.
+- Strips the `@source`, `@agent`, `@fragment`, and `@reconciled` provenance comments — they served the pipeline up to this point and are not part of the deliverable (see the v1.1 amendment in §7.4). Provenance is recorded in the run log instead.
 - Validates the document parses and basic accessibility lint passes (axe-core in headless mode).
 - Lint failures are surfaced to the Reader as input.
 
@@ -307,7 +309,7 @@ These comments are not stripped from the final HTML; they preserve provenance fo
 
 **Behavior**:
 - Replaces flagged blocks with proposed blocks.
-- Preserves provenance comments (updates `@agent` to reflect copy-edit pass).
+- Preserves in-pipeline provenance comments (updates `@agent` to reflect the copy-edit pass); these are stripped from the delivered document per the v1.1 amendment in §7.4.
 - Re-runs axe-core lint.
 - Passes the document back to the Reader for re-verification.
 
@@ -570,7 +572,7 @@ Response `200 OK`:
 
 Retrieve the current HTML output. Available when `status` is `ready_for_review` or `closed`.
 
-Response `200 OK`: `Content-Type: text/html` (the document, with provenance comments intact).
+Response `200 OK`: `Content-Type: text/html` (clean content-only HTML; provenance comments are stripped — see the v1.1 amendment in §7.4).
 
 Response `409 Conflict` if the session is still running.
 

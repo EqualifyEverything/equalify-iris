@@ -19,9 +19,11 @@ curl -s "$BASE/health"
 
 ## 1. Authenticate (get a token)
 
-GitHub OAuth is the only auth mechanism, and the same token opens PRs on close, so the consent
-screen requests `repo` scope. By default the service uses a **bundled OAuth App** — you don't
-create or configure anything; just run the device flow below and approve in your browser.
+GitHub OAuth is the only auth mechanism. The consent screen requests `repo` scope because the
+same token is used to file agent-suggestion issues on your behalf (unless the deployment sets a
+service token — see [Contributions](#contributions-automatic)). Nothing opens pull requests. By
+default the service uses a **bundled OAuth App** — you don't create or configure anything; just
+run the device flow below and approve in your browser.
 
 ### CLI / bash — device flow (recommended for terminals)
 
@@ -67,7 +69,9 @@ curl -s -H "$AUTH" "$BASE/me"
   "defaults": { "max_review_iterations": 3 }
 }
 ```
-`fork_repo` is `null` until the first `/close` (the fork is created lazily).
+`fork_repo` is **always** `null`: contributions are filed as issues, so no fork is ever created.
+The field is a vestige of the PRD's fork+PR flow and is retained only for response-shape
+stability.
 
 ## 3. Create a session (upload images)
 
@@ -120,8 +124,11 @@ done
 ```bash
 curl -s -H "$AUTH" "$BASE/sessions/$SID/output" -o output.html
 ```
-`text/html` with provenance comments intact (`@source`, `@agent`, `@fragment`, `@reconciled`).
-Returns `409` while the session is still running.
+`text/html` — clean, content-only accessible HTML. Provenance comments (`@source`, `@agent`,
+`@fragment`) are **not** included, a deliberate deviation from PRD §7.4; provenance lives in the
+run log instead (step 7). An `<!-- @unresolved -->` comment listing outstanding issues is
+appended if the review loop hit its iteration cap. Returns `409` while the session is still
+running.
 
 ## 6. Submit feedback (re-run)
 
@@ -133,9 +140,13 @@ instruction to every agent (PRD §7.12). The prior output is snapshotted to
 curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/feedback" \
   -H 'content-type: application/json' \
   -d '{"feedback":"The footnote on page 4 was inlined as body text. Keep footnotes distinct."}'
-# 202 {"session_id":"ses_...","status":"running","phase":"triage"}
+# 202 {"session_id":"ses_...","status":"running","phase":"extraction"}
 ```
 Then poll status again as in step 4.
+
+Note: a re-run on a session that already produced output refines the **existing document** —
+it re-runs review, not extraction. Feedback about content the page agent misread from the source
+image is a known gap ([#30](https://github.com/EqualifyEverything/equalify-iris/issues/30)).
 
 ## 7. Run log
 
@@ -165,9 +176,9 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
     "provider": "bedrock", "capability": "vision",
     "since": "2026-05-22T16:26:12Z", "waiting_ms": 41000
   },
-  "phase_durations_ms": { "triage": 8200, "extraction": 60100 },
+  "phase_durations_ms": { "extraction": 60100, "review": 24000 },
   "model_calls": { "count": 7, "failed": 0, "total_ms": 51000, "avg_ms": 7285, "max_ms": 14300 },
-  "by_agent": { "image_analysis": { "count": 1, "total_ms": 8200, "max_ms": 8200 } },
+  "by_agent": { "page": { "count": 2, "total_ms": 28200, "max_ms": 15100 } },
   "slowest_calls": [ { "agent": "table", "model": "...", "capability": "vision", "duration_ms": 14300, "ok": true } ],
   "errors": []
 }
@@ -205,9 +216,12 @@ curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/close"
 
 When the extractor encounters content a dedicated specialist agent would handle better than the
 general pass, Iris drafts that agent and **automatically files a labeled GitHub issue**
-(`iris-agent-suggestion`) on the upstream repo containing the agent code + context. This is
-server-side and requires a configured service token (`IRIS_GITHUB_TOKEN`); it never publishes
-under end users' identities, and it is a no-op when no token is set. There is no PR/fork flow.
+(`iris-agent-suggestion`) on the upstream repo containing the agent code + context. This happens
+server-side during the run — there is no PR/fork flow (deviation from PRD §7.13), so `/close`
+returns no `prs_opened` and requests accept no `skip_prs`.
+
+By default the issue is filed with **the logged-in user's token**. Set `IRIS_GITHUB_TOKEN` to a
+service-account PAT to file everything under a bot account instead.
 
 ## Errors (PRD §9.3)
 
@@ -216,7 +230,7 @@ All errors share one shape:
 { "error": { "code": "invalid_state", "message": "Human-readable description", "details": {} } }
 ```
 Common codes: `unauthorized` (401), `session_not_found` (404), `invalid_state` (409),
-`invalid_request` (400), `pr_failed` (502).
+`invalid_request` (400).
 
 ## Prove it works
 

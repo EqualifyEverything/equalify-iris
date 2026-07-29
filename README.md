@@ -18,25 +18,32 @@ iterative reader/copy-editor review loop.
 
 ## How it works
 
-The pipeline runs in five phases (PRD §6):
+The pipeline as **implemented today** runs in three phases:
 
-1. **Triage** — the Image Analysis Agent analyzes each image and writes a notes file listing
-   content types, fragment edges, and which content agents to call.
-2. **Extraction** — the listed content agents convert their regions to accessible HTML
-   fragments. If no agent exists for a content type, the **Builder Agent** drafts one for the
-   session.
-3. **Reconciliation** — fragments cut off at image boundaries are conservatively stitched.
-4. **Assembly** — fragments are combined into one accessible document shell, provenance
-   comments preserved, and validated with axe-core.
-5. **Review** — the Reader flags reading-order / semantic / accessibility issues; the Copy
-   Editor proposes fixes against the source image; the Assembler applies them. Loops up to
-   `max_review_iterations` (default 3).
+1. **Extraction** — for each page image, the `page` agent (`agents/page.md`) converts the whole
+   page to an accessible HTML fragment in one vision call. The output is then verified, and
+   corrected if the verifier objects. If the page agent names a content type a specialist would
+   handle better, that specialist is dispatched and its output merged.
+2. **Assembly** — fragments are joined in page order into a minimal accessible document shell
+   (`<html lang>`, `<title>`, `<main>`) and validated with axe-core.
+3. **Review** — the Reader reads the document in chunks as two views (HTML + a flattened
+   screen-reader view) and flags reading-order / semantic / accessibility issues; the Copy
+   Editor proposes fixes against the source images; fixes are applied and the document
+   re-linted. Loops up to `max_review_iterations` (default 3).
+
+> **The PRD (§6) specifies five phases** — Triage → Extraction → Reconciliation → Assembly →
+> Review. **Triage, Reconciliation, and the Builder Agent's session-scoped drafting are not
+> implemented.** Extraction runs one general page agent instead of triage-then-fan-out, because
+> the fan-out produced duplicated output for nested structures like forms. Reconciliation is
+> currently unreachable: `extraction.ts` emits no fragment edge data, which is the input
+> reconciliation would need. Treat the three phases above — not the PRD's five — as the
+> description of what runs. See [Implementation notes](#implementation-notes--prd-coverage).
 
 When Iris meets content a specialist agent would handle better than the general pass, it drafts
 that agent and **automatically files a labeled `iris-agent-suggestion` GitHub issue** (with the
-agent code + context) on the upstream repo, attributed to the logged-in user. Maintainers
-triage those issues; merged agents become part of the shared `agents/` library. (This replaces
-the PRD's fork+PR-on-close flow — see Implementation notes.)
+agent code + context) on the upstream repo. Maintainers triage those issues; merged agents
+become part of the shared `agents/` library. (This replaces the PRD's fork+PR-on-close flow —
+see Implementation notes.)
 
 ## Quick start
 
@@ -145,7 +152,17 @@ src/
   config.ts              # config loader (${ENV} expansion)
   providers/             # ModelProvider interface + openrouter & bedrock adapters
   agents/loader.ts       # loads agent .md files, pins git SHA (§7.3)
-  pipeline/              # triage, extraction, builder, reconciliation, assembly, review
+  pipeline/
+    orchestrator.ts      # runs the phases, persists results, drives learning
+    extraction.ts        # per-page vision pass (+ verify, correct, specialist merge)
+    assembly.ts          # joins fragments into the document shell
+    review.ts            # reader -> copy editor -> re-lint loop
+    lint.ts              # axe-core in jsdom (color-contrast disabled, see §4)
+    flatten.ts           # screen-reader text view, used by reader + coverage
+    feedback.ts          # verify / classify / train + regression gate
+    memory.ts            # per-agent example bank of learned corrections
+    regression.ts        # fixture capture + pruning on close
+    contribute.ts        # drafts suggested agents, files issues
   auth/                  # GitHub OAuth + device flow + bearer middleware
   github/                # auto-files labeled agent-suggestion issues
   store/                 # node:sqlite metadata store + on-disk session layout (§8.1)
@@ -156,7 +173,32 @@ data/                    # sessions/, tmp/, and the SQLite DB (created at runtim
 
 ## Implementation notes & PRD coverage
 
-A few places where the PRD left a decision open, and where v1 intentionally stops:
+Where v1 **diverges from the PRD** (read these before assuming a PRD section describes the
+code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/issues/30)):
+
+- **Three phases, not five (§6).** Triage and Reconciliation are not implemented, and the
+  Builder Agent does not draft session-scoped agents into `tmp/<id>/agents/`. Extraction is a
+  single general page agent rather than triage → per-region fan-out; the fan-out was removed
+  because it duplicated output for nested structures like forms. Reconciliation additionally
+  cannot run until extraction emits fragment edge data (it currently emits none).
+- **No provenance comments in the output (§7.4/§7.7).** The PRD specifies `@source` / `@agent` /
+  `@fragment` wrappers preserved into the final HTML. Iris delivers clean content-only HTML
+  instead: the comments leak pipeline internals into a document meant to be handed to end users,
+  and every consumer would have to strip them. Provenance is recorded in the run log
+  (`GET /v1/sessions/{id}/logs`) rather than in the deliverable. `@unresolved` **is** emitted
+  when the review loop hits its iteration cap with issues outstanding (§7.11).
+- **Contributions are issues, not PRs (§7.13/§9.2).** Instead of fork+PR-on-close, when the
+  extractor flags content a specialist would handle better, Iris drafts that agent and files a
+  labeled `iris-agent-suggestion` GitHub issue with the agent code + context. Simpler to triage,
+  and it needs no write access to a fork. Consequently the PRD's `pending_prs` and `prs_opened`
+  response fields and the `skip_prs` parameter are **not** part of the API.
+  By default the issue is filed with the logged-in user's token; set `IRIS_GITHUB_TOKEN` to file
+  everything under a service account instead.
+- **Review issues carry no `source` field (§7.8).** Issues are
+  `{ issue, severity, suggested_action }`. The two-view (HTML + flattened) reader cross-check is
+  implemented as specified; per-issue source attribution is not.
+
+Places where the PRD left a decision open, and where v1 intentionally stops:
 
 - **`runs/<run-id>` vs `sessions/<session-id>`.** The PRD references both (§7.3/§7.5 vs §8.1).
   This implementation treats the run id as the session id and writes the log, `new-agents.md`,
@@ -171,13 +213,6 @@ A few places where the PRD left a decision open, and where v1 intentionally stop
 - **Feedback re-runs (§7.12).** Re-runs are logged separately (a `feedback_rerun` event) and the
   prior `output.html` is snapshotted to `sessions/<id>/history/` so it can be reverted to. A
   revert *endpoint* is out of v1 API scope (not in §9); the data is preserved to enable it.
-- **Contributions are issues, not PRs (deviation from §7.13).** Instead of the PRD's
-  fork+PR-on-close flow, when the extractor flags content a specialist agent would handle
-  better, Iris drafts that agent and **automatically files a labeled GitHub issue**
-  (`iris-agent-suggestion`) with the agent code + context. It uses a deployment **service
-  token** (`IRIS_GITHUB_TOKEN`) — never end users' identities — and is a no-op when unset.
-  Simpler to triage, and nothing is published under a user's name without consent.
-
 Intentionally **not** built in v1 (the PRD frames each as optional / alternative / out of scope):
 PostgreSQL and S3 backends (§10.2 — "supported alternative," SQLite + local FS is the v1
 reference), the per-user config endpoint (§9.1 — "not specified in v1"), and webhooks (§9.4 —
