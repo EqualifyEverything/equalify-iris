@@ -60,6 +60,7 @@ export async function runPipeline(args: {
     images,
     feedback: args.feedback,
     maxReviewIterations: args.maxReviewIterations,
+    extractionConcurrency: cfg.defaults.extraction_concurrency,
     githubToken: args.githubToken,
   };
 

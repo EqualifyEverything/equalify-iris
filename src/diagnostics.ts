@@ -24,6 +24,8 @@ export interface Diagnostics {
   last_event_at: string | null;
   elapsed_ms: number;
   // Non-null only while a model call is outstanding (likely culprit if hung).
+  // When extraction runs pages in parallel, several calls can be open at once;
+  // this reports the longest-waiting one.
   in_flight: null | {
     agent: string;
     model: string;
@@ -32,8 +34,22 @@ export interface Diagnostics {
     since: string;
     waiting_ms: number;
   };
+  // How many model calls are outstanding (0 unless running). > 1 means pages are
+  // being extracted in parallel.
+  in_flight_count: number;
   phase_durations_ms: Record<string, number>;
-  model_calls: { count: number; failed: number; total_ms: number; avg_ms: number; max_ms: number };
+  // `total_ms` is the SUM of call durations, which exceeds wall-clock time when
+  // calls overlap — that is the point of `concurrency_factor`
+  // (total_ms / elapsed_ms, rounded to 2dp): ~1 means effectively serial, ~N
+  // means N calls were typically in flight. Use elapsed_ms for wall-clock.
+  model_calls: {
+    count: number;
+    failed: number;
+    total_ms: number;
+    avg_ms: number;
+    max_ms: number;
+    concurrency_factor: number;
+  };
   by_agent: Record<string, { count: number; total_ms: number; max_ms: number }>;
   slowest_calls: { agent: string; model: string; capability: string; duration_ms: number; ok: boolean }[];
   errors: { ts: string | null; type: string; message: string }[];
@@ -68,23 +84,42 @@ export function summarizeRun(
   const terminal = events.find((e) => e.type === "run_complete" || e.type === "run_failed");
   const endRef = running ? nowIso : terminal?.ts ?? lastEventAt ?? nowIso;
 
-  // In-flight detection: pipeline is sequential, so at most one call is open.
-  let openCall: LogEvent | null = null;
+  // In-flight detection. Extraction runs several pages concurrently, so more
+  // than one call can be open at once and start/end events interleave. Match
+  // them by identity (agent+model+capability) rather than position: each end
+  // event closes the OLDEST matching open start, which is the same pairing a
+  // FIFO queue would produce. `in_flight` reports the longest-waiting open call
+  // — the best single answer to "what is this run stuck on?" — and
+  // `in_flight_count` shows how many are outstanding.
+  const openCalls: LogEvent[] = [];
+  const callKey = (e: LogEvent): string =>
+    `${e.agent ?? "?"}|${e.model ?? "?"}|${e.capability ?? "?"}`;
   for (const e of events) {
-    if (e.type === "model_call_start") openCall = e;
-    else if (e.type === "model_call") openCall = null;
+    if (e.type === "model_call_start") {
+      openCalls.push(e);
+    } else if (e.type === "model_call") {
+      const i = openCalls.findIndex((o) => callKey(o) === callKey(e));
+      // Fall back to dropping the oldest open call if no identity match: an end
+      // event always closes something, and leaving it open would report a
+      // phantom hang.
+      openCalls.splice(i === -1 ? 0 : i, 1);
+    }
   }
+  // Longest-waiting first (oldest start timestamp).
+  openCalls.sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? ""));
+  const oldest = openCalls[0];
   const inFlight =
-    running && openCall
+    running && oldest
       ? {
-          agent: openCall.agent ?? "?",
-          model: openCall.model ?? "?",
-          provider: openCall.provider ?? "?",
-          capability: openCall.capability ?? "?",
-          since: openCall.ts ?? nowIso,
-          waiting_ms: ms(openCall.ts, nowIso),
+          agent: oldest.agent ?? "?",
+          model: oldest.model ?? "?",
+          provider: oldest.provider ?? "?",
+          capability: oldest.capability ?? "?",
+          since: oldest.ts ?? nowIso,
+          waiting_ms: ms(oldest.ts, nowIso),
         }
       : null;
+  const inFlightCount = running ? openCalls.length : 0;
 
   // Completed model calls (the `model_call` end events carry duration_ms).
   const calls = events.filter((e) => e.type === "model_call");
@@ -126,14 +161,17 @@ export function summarizeRun(
     .filter((e) => e.type === "run_failed" || e.ok === false)
     .map((e) => ({ ts: e.ts ?? null, type: e.type ?? "error", message: e.error ?? "unknown" }));
 
+  const elapsed = ms(startedAt ?? undefined, endRef);
+
   return {
     session_id: ctx.sessionId,
     status: ctx.status,
     phase: ctx.phase,
     started_at: startedAt,
     last_event_at: lastEventAt,
-    elapsed_ms: ms(startedAt ?? undefined, endRef),
+    elapsed_ms: elapsed,
     in_flight: inFlight,
+    in_flight_count: inFlightCount,
     phase_durations_ms: phaseDurations,
     model_calls: {
       count: calls.length,
@@ -141,6 +179,7 @@ export function summarizeRun(
       total_ms: total,
       avg_ms: calls.length ? Math.round(total / calls.length) : 0,
       max_ms: durations.length ? Math.max(...durations) : 0,
+      concurrency_factor: elapsed > 0 ? Math.round((total / elapsed) * 100) / 100 : 0,
     },
     by_agent: byAgent,
     slowest_calls: slowest,
