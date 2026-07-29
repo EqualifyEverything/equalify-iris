@@ -301,7 +301,8 @@ jobs:
             Read/Glob/Grep on the checkout only to inspect files the diff touches but the
             context did not include (e.g. the other side of a changed interface).
 
-            `CLAUDE.md` in this repo is empty — the conventions below are the whole of it.
+            This repo has no `CLAUDE.md` or `REVIEW.md` — the conventions below are the whole of
+            it. Do not waste turns looking for them.
 
             ## What Iris is
 
@@ -359,8 +360,11 @@ jobs:
                or e2e failing, that is blocking. Say which one and quote the relevant output.
 
             7. **Missing tests.** New pipeline behaviour, new routes, or a fixed bug with no
-               corresponding assertion in `test/feedback.test.ts`, `test/memory.test.ts`, or
-               `test/e2e.sh`.
+               corresponding assertion. Unit tests live in `test/*.test.ts` (all of them are
+               registered explicitly in the `test` script in `package.json` — a new test file
+               that is not added there never runs, which is itself worth flagging); endpoint
+               behaviour is covered by `test/e2e.sh` against the mocks in
+               `test/mock-services.mjs`.
 
             8. **The PR's own contract.** `.github/pull_request_template.md` asks the author to
                confirm `npm run typecheck`, `./test/e2e.sh`, axe-core 0 violations on the demo,
