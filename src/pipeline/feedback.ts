@@ -118,6 +118,99 @@ export async function verifyAgentOutput(
 }
 
 // ---------------------------------------------------------------------------
+// Feedback routing (PRD §7.12): does this feedback need the source images?
+// ---------------------------------------------------------------------------
+
+export interface FeedbackScope {
+  target: "extraction" | "document";
+  // 1-based page orders to re-extract. Only meaningful when target is
+  // "extraction"; empty means "source-level, but we could not localize it".
+  pages: number[];
+  reason: string;
+}
+
+// Cap how much of each page's HTML is shown to the scoping call. Enough to
+// recognize which page the feedback is about, without resending the document.
+const SCOPE_EXCERPT_CHARS = 400;
+// A feedback message that supposedly targets more than this share of a document's
+// pages is treated as document-level: re-extracting nearly everything costs about
+// as much as a fresh run and is rarely what a targeted correction means.
+const MAX_REEXTRACT_FRACTION = 0.5;
+
+// Ask the Feedback Agent (SCOPE task) whether feedback is about what was read off
+// the source pages — which the review loop CANNOT fix, because the Reader and Copy
+// Editor only ever see the assembled HTML — or about the assembled document.
+//
+// Non-blocking and biased toward the cheap path: any doubt (agent unavailable,
+// unparseable answer, no pages identified) resolves to "document", which is the
+// pre-existing behavior. A wrong "document" answer costs a round of review; a
+// wrong "extraction" answer costs a full vision pass per page.
+export async function scopeFeedback(
+  ctx: PipelineContext,
+  fragments: { order: number; innerHtml: string }[],
+): Promise<FeedbackScope> {
+  const feedback = ctx.feedback?.trim();
+  if (!feedback) return { target: "document", pages: [], reason: "no feedback" };
+
+  const fb = loadFeedbackAgent(ctx);
+  if (!fb || fragments.length === 0) {
+    return { target: "document", pages: [], reason: "feedback agent unavailable" };
+  }
+
+  const pageList = [...fragments]
+    .sort((a, b) => a.order - b.order)
+    .map((f) => {
+      const excerpt = f.innerHtml.replace(/\s+/g, " ").trim().slice(0, SCOPE_EXCERPT_CHARS);
+      return `### Page ${f.order}\n${excerpt}`;
+    })
+    .join("\n\n");
+
+  const user =
+    `TASK: scope\n\n` +
+    `## User feedback\n${feedback}\n\n` +
+    `## Pages in this document (extracted HTML, truncated)\n${pageList}`;
+
+  const res = await ctx.router.complete(FEEDBACK_AGENT, "text", [
+    { role: "system", content: fb.content },
+    { role: "user", content: user },
+  ]);
+  ctx.log.agentCall({ agent: fb, phase: "extraction", output: res.text });
+
+  const parsed = extractJson<{ target?: string; pages?: unknown; reason?: string }>(res.text);
+  const reason = parsed?.reason?.trim() || "no reason given";
+  if (parsed?.target !== "extraction") {
+    return { target: "document", pages: [], reason };
+  }
+
+  // Keep only page numbers that actually exist in this document; a hallucinated
+  // page would otherwise silently re-extract nothing or throw downstream.
+  const known = new Set(fragments.map((f) => f.order));
+  const pages = [
+    ...new Set(
+      (Array.isArray(parsed.pages) ? parsed.pages : [])
+        .map((p) => (typeof p === "number" ? p : Number(p)))
+        .filter((p) => Number.isInteger(p) && known.has(p)),
+    ),
+  ].sort((a, b) => a - b);
+
+  // Source-level feedback that could not be localized: re-extracting the whole
+  // document is too blunt (and too expensive) a response, and the review loop at
+  // least applies the wording. Fall back rather than guess.
+  if (pages.length === 0) {
+    return { target: "document", pages: [], reason: `${reason} (no pages identified)` };
+  }
+  if (pages.length > Math.max(1, Math.floor(fragments.length * MAX_REEXTRACT_FRACTION))) {
+    return {
+      target: "document",
+      pages: [],
+      reason: `${reason} (${pages.length}/${fragments.length} pages — too broad to re-extract)`,
+    };
+  }
+
+  return { target: "extraction", pages, reason };
+}
+
+// ---------------------------------------------------------------------------
 // Regression gate (PRD §7.12): protect existing uses when an agent is updated
 // ---------------------------------------------------------------------------
 

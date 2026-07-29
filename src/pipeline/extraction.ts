@@ -86,10 +86,19 @@ async function renderPage(
   agent: AgentSpec,
   img: InputImage,
   lessons: string,
+  // On a feedback re-extraction, the HTML this page produced last time. Shown so
+  // the agent corrects what the feedback names and carries everything else over,
+  // rather than re-deriving the page from scratch and drifting elsewhere.
+  previous?: string,
 ): Promise<PageRender> {
+  const priorSection = previous
+    ? `\n\n## Your previous output for this page\n\`\`\`html\n${previous}\n\`\`\`\n` +
+      `Apply the user feedback above to this page. Keep everything the feedback does NOT ` +
+      `concern exactly as it was, and re-check the affected content against the source image.\n`
+    : "";
   const user =
     `Convert this document page image (filename: ${img.name}, page ${img.order} of ${ctx.images.length}) ` +
-    `to accessible HTML.\n\n${ACCESSIBILITY_REQUIREMENTS}${feedbackPreamble(ctx)}${lessons}`;
+    `to accessible HTML.\n\n${ACCESSIBILITY_REQUIREMENTS}${feedbackPreamble(ctx)}${lessons}${priorSection}`;
   const res = await ctx.router.complete(
     PAGE_AGENT,
     "vision",
@@ -251,8 +260,9 @@ async function extractPage(
   pageAgent: AgentSpec,
   img: InputImage,
   lessons: string,
+  previous?: string,
 ): Promise<PageOutcome> {
-  const { html, log, suggestion } = await renderPage(ctx, pageAgent, img, lessons);
+  const { html, log, suggestion } = await renderPage(ctx, pageAgent, img, lessons, previous);
   let innerHtml = html;
   let logNote = log;
   let dispatched = false;
@@ -336,5 +346,60 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
     join(ctx.paths.sessionFragments(ctx.sessionId), "fragments.json"),
     JSON.stringify(fragments, null, 2),
   );
+  return { fragments, suggestions };
+}
+
+// Re-extract only the pages a piece of feedback actually concerns (PRD §7.12),
+// leaving every other page's prior fragment untouched.
+//
+// This is the path for feedback the review loop structurally cannot serve: the
+// Reader and Copy Editor only ever see the assembled HTML, so "you misread the
+// table on page 3" can only be fixed by putting page 3's IMAGE back in front of
+// the page agent. Each targeted page goes through the same
+// render -> verify -> correct path as a first run, with its previous output shown
+// so untouched content carries over.
+//
+// Returns fragments for the WHOLE document in page order — re-extracted pages
+// replaced, the rest as they were.
+export async function reExtractPages(
+  ctx: PipelineContext,
+  priorFragments: Fragment[],
+  pages: number[],
+): Promise<ExtractionResult> {
+  const targets = new Set(pages);
+  const pageAgent = loadPageAgent(ctx);
+  const lessons = examplesForPrompt(ctx.paths, pageAgent.file);
+  if (lessons) ctx.log.event("page_lessons_injected", { chars: lessons.length });
+
+  // Only re-extract a targeted page we still have BOTH the source image and a
+  // prior fragment for.
+  const priorByOrder = new Map(priorFragments.map((f) => [f.order, f]));
+  const toRun = ctx.images.filter((img) => targets.has(img.order) && priorByOrder.has(img.order));
+  const missing = [...targets].filter((p) => !toRun.some((img) => img.order === p));
+  if (missing.length) ctx.log.event("reextract_skipped", { pages: missing, reason: "no source image or prior fragment" });
+
+  ctx.log.event("reextract_start", {
+    pages: toRun.map((i) => i.order),
+    of: priorFragments.length,
+    concurrency: ctx.extractionConcurrency,
+  });
+
+  const outcomes = await mapWithConcurrency(toRun, ctx.extractionConcurrency, (img) =>
+    extractPage(ctx, pageAgent, img, lessons, priorByOrder.get(img.order)?.innerHtml),
+  );
+
+  const replaced = new Map(outcomes.map((o) => [o.fragment.order, o.fragment]));
+  const fragments = [...priorFragments]
+    .sort((a, b) => a.order - b.order)
+    .map((f) => replaced.get(f.order) ?? f);
+  const suggestions = outcomes
+    .map((o) => o.suggestion)
+    .filter((s): s is NonNullable<typeof s> => s !== undefined);
+
+  writeFileSync(
+    join(ctx.paths.sessionFragments(ctx.sessionId), "fragments.json"),
+    JSON.stringify(fragments, null, 2),
+  );
+  ctx.log.event("reextract_complete", { pages: [...replaced.keys()].sort((a, b) => a - b) });
   return { fragments, suggestions };
 }

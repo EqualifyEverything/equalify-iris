@@ -164,17 +164,56 @@ echo "$diag" | jq -e '.model_calls.count >= 1 and .in_flight == null and (.phase
   && pass "diagnostics: $(echo "$diag" | jq -r '.model_calls.count') model calls timed, in_flight=null, phases=$(echo "$diag" | jq -r '.phase_durations_ms|keys|length')" \
   || fail "diagnostics" "$diag"
 
-echo "==> 9. POST /v1/sessions/{id}/feedback (re-run)"
+# Waits for the session to return to ready_for_review after a feedback re-run.
+await_ready() {
+  for i in $(seq 1 60); do
+    status=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID" | jq -r '.status')
+    [ "$status" = "ready_for_review" ] && return 0
+    [ "$status" = "failed" ] && fail "$1" "run failed: $(curl -s "${AUTH[@]}" "$BASE/sessions/$SID" | jq -r .error)"
+    sleep 0.5
+  done
+  fail "$1" "stuck at $status"
+}
+# Reads the last-logged value of a field from a given run-log event type. The logs
+# endpoint is ndjson, so filter line-by-line rather than slurping one document.
+log_field() {
+  curl -s "${AUTH[@]}" "$BASE/sessions/$SID/logs" \
+    | jq -c --arg t "$1" 'select(.type==$t)' | tail -1 | jq -r --arg f "$2" ".[\$f] // \"none\""
+}
+
+echo "==> 9. POST /v1/sessions/{id}/feedback (document-level => review only)"
 fb=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/feedback" -H 'content-type: application/json' \
   -d '{"feedback":"Keep headings distinct from body text."}')
 echo "$fb" | jq -e '.status=="running"' >/dev/null && pass "feedback re-run accepted" || fail "feedback" "$fb"
-for i in $(seq 1 60); do
-  status=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID" | jq -r '.status')
-  [ "$status" = "ready_for_review" ] && break
-  [ "$status" = "failed" ] && fail "re-run" "failed"
-  sleep 0.5
-done
-[ "$status" = "ready_for_review" ] && pass "re-run finished" || fail "re-run poll" "$status"
+await_ready "re-run"
+# Document-level feedback must NOT re-extract: no page should be marked Revised.
+target=$(log_field feedback_scoped target)
+[ "$target" = "document" ] && pass "feedback scoped to document (no re-extraction)" \
+  || fail "scope" "expected target=document, got '$target'"
+out2=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/output")
+! echo "$out2" | grep -q 'Revised' \
+  && pass "no page re-extracted for document-level feedback" \
+  || fail "scope" "a page was re-extracted: $(echo "$out2" | grep -o 'Page marker [0-9]*[^<]*')"
+
+echo "==> 9b. POST /v1/sessions/{id}/feedback (source-level => re-extract page 2)"
+# Content-level feedback the review loop structurally cannot fix: the Reader and
+# Copy Editor never see the source images, so page 2 must go back to the page
+# agent WITH its image attached (#30 Tier 3).
+fb=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/feedback" -H 'content-type: application/json' \
+  -d '{"feedback":"The revenue figure was misread on page 2 — check it against the source."}')
+echo "$fb" | jq -e '.status=="running"' >/dev/null && pass "source-level feedback accepted" || fail "feedback" "$fb"
+await_ready "re-extract re-run"
+target=$(log_field feedback_scoped target)
+[ "$target" = "extraction" ] && pass "feedback scoped to extraction" \
+  || fail "scope" "expected target=extraction, got '$target'"
+out3=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/output")
+# Exactly page 2 revised, and the document is still in order with all 3 pages.
+revised=$(echo "$out3" | grep -o 'Page marker [0-9]*\. Revised\.' | grep -o '[0-9]*' | tr '\n' ',')
+[ "$revised" = "2," ] && pass "only page 2 was re-extracted (revised=$revised)" \
+  || fail "re-extract" "expected only page 2 revised, got '$revised'"
+markers3=$(echo "$out3" | grep -o 'Page marker [0-9]*' | grep -o '[0-9]*' | tr '\n' ',')
+[ "$markers3" = "1,2,3," ] && pass "all 3 pages still present, in order, after re-extraction" \
+  || fail "re-extract order" "expected 1,2,3, got '$markers3'"
 
 echo "==> 10. ownership isolation (other endpoints reject unknown id)"
 code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/ses_doesnotexist")

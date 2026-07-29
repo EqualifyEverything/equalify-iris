@@ -144,9 +144,19 @@ curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/feedback" \
 ```
 Then poll status again as in step 4.
 
-Note: a re-run on a session that already produced output refines the **existing document** —
-it re-runs review, not extraction. Feedback about content the page agent misread from the source
-image is a known gap ([#30](https://github.com/EqualifyEverything/equalify-iris/issues/30)).
+A re-run on a session that already produced output builds on the **existing document** rather
+than regenerating it, and is routed by what the feedback is about (visible in the run log as a
+`feedback_scoped` event):
+
+| Scope | What runs | Typical feedback |
+| --- | --- | --- |
+| `document` | Re-lint the saved body, then the feedback-aware review loop. No source images. | tone, wording, ordering, an accessibility rule |
+| `extraction` | The named pages go back to the page agent **with their source image**, then reassemble + review. Other pages keep their prior fragments. | "the revenue figure on page 2 is wrong", missed or misread content |
+
+The second case exists because the Reader and Copy Editor never see the source images, so
+source-fidelity feedback is not something the review loop can fix. Routing is biased toward the
+cheaper `document` path: if the pages can't be localized, or the feedback claims more than half
+the document, it falls back rather than re-extracting broadly.
 
 ## 7. Run log
 

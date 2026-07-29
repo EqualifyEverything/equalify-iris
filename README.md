@@ -162,7 +162,7 @@ src/
     review.ts            # reader -> copy editor -> re-lint loop
     lint.ts              # axe-core in jsdom (color-contrast disabled, see §4)
     flatten.ts           # screen-reader text view, used by reader + coverage
-    feedback.ts          # verify / classify / train + regression gate
+    feedback.ts          # verify / scope / classify / train + regression gate
     memory.ts            # per-agent example bank of learned corrections
     regression.ts        # fixture capture + pruning on close
     contribute.ts        # drafts suggested agents, files issues
@@ -216,6 +216,21 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
 - **Feedback re-runs (§7.12).** Re-runs are logged separately (a `feedback_rerun` event) and the
   prior `output.html` is snapshotted to `sessions/<id>/history/` so it can be reverted to. A
   revert *endpoint* is out of v1 API scope (not in §9); the data is preserved to enable it.
+
+  A re-run is **routed** first (`feedback_scoped` event). The Reader and Copy Editor only ever
+  see the assembled HTML, so feedback about what was *read off a page* ("the revenue figure on
+  page 2 is wrong") cannot be fixed by the review loop at all. The Feedback Agent's SCOPE task
+  decides which case applies:
+  - **`document`** — tone, wording, ordering, or an accessibility rule: re-lint the saved body
+    and run the feedback-aware review loop on it. No source images, no re-extraction.
+  - **`extraction`** — source-fidelity: the named pages go back to the page agent *with their
+    source image and their previous output* attached, then the document is reassembled and
+    reviewed. Untargeted pages keep their prior fragments byte-for-byte.
+
+  Routing is deliberately biased toward the cheap path: an unavailable agent, an unparseable
+  answer, pages it cannot localize, or a claim spanning more than half the document all fall
+  back to `document`. A wrong `document` answer costs one review round; a wrong `extraction`
+  answer costs a vision call per page.
 Intentionally **not** built in v1 (the PRD frames each as optional / alternative / out of scope):
 PostgreSQL and S3 backends (§10.2 — "supported alternative," SQLite + local FS is the v1
 reference), the per-user config endpoint (§9.1 — "not specified in v1"), and webhooks (§9.4 —

@@ -95,7 +95,15 @@ const or = createServer(async (req, res) => {
     user = typeof u === "string" ? u : (u ?? []).map((p) => p.text ?? "").join(" ");
   } catch {}
   let content = "{}";
-  if (sys.includes("convert an ENTIRE document page")) {
+  // Feedback Agent, TASK: scope — route feedback to extraction or the review loop.
+  // Keyed off the feedback text so the e2e can drive either path: a message naming
+  // a page and a misread is source-level, anything else is document-level.
+  if (user.includes("TASK: scope")) {
+    const m = user.match(/misread on page (\d+)/i);
+    content = m
+      ? JSON.stringify({ target: "extraction", pages: [Number(m[1])], reason: "source misread" })
+      : JSON.stringify({ target: "document", pages: [], reason: "document-level wording" });
+  } else if (sys.includes("convert an ENTIRE document page")) {
     // Echo the page number back so the assembled document proves page ORDER was
     // preserved. Pages are extracted in parallel, so respond SLOWEST-FIRST:
     // page 1 is delayed the longest, meaning completion order is the reverse of
@@ -105,8 +113,13 @@ const or = createServer(async (req, res) => {
     const page = m ? Number(m[1]) : 1;
     const total = m ? Number(m[2]) : 1;
     await sleep(Math.max(0, (total - page + 1) * 120));
+    // A re-extraction prompt carries the page's previous output. Mark the result
+    // so the e2e can prove that ONLY the targeted page was re-extracted.
+    const revised = user.includes("## Your previous output for this page");
     content = JSON.stringify({
-      html: `<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n<p>Page marker ${page}.</p>`,
+      html:
+        `<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n` +
+        `<p>Page marker ${page}.${revised ? " Revised." : ""}</p>`,
       log: "",
     });
   } else if (sys.includes("Reader Agent")) content = JSON.stringify({ issues: [] });
