@@ -1,0 +1,32 @@
+# Normalize line endings: store text as LF in the repo and check it out as LF on
+# every platform (including Windows), so working trees match the repo and Git
+# stops reporting "LF will be replaced by CRLF" / whole-file diffs.
+* text=auto eol=lf
+
+# Be explicit for the text types in this repo.
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.html text eol=lf
+*.css  text eol=lf
+*.sh   text eol=lf
+*.sql  text eol=lf
+
+# Binary assets: never normalize.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.tif  binary
+*.tiff binary
+*.pdf  binary
+*.ico  binary
+*.woff binary
+*.woff2 binary
