@@ -16,12 +16,27 @@ OR_PORT=9302
 PORT=8099
 DATA=/tmp/iris-e2e
 CFG=/tmp/iris-e2e-config.yaml
+LOG=/tmp/iris-e2e.log
 BASE="http://localhost:$PORT/v1"
+
+# Seconds to wait for Iris to answer /health. Generous because a cold CI runner
+# type-strips every .ts source with no warm cache; locally this takes ~1s.
+BOOT_TIMEOUT=${BOOT_TIMEOUT:-45}
 
 command -v jq >/dev/null || { echo "jq is required"; exit 1; }
 
 pass() { echo "  ✓ $1"; }
-fail() { echo "  ✗ $1"; echo "    $2"; cleanup; exit 1; }
+fail() { echo "  ✗ $1"; echo "    $2"; dump_server_log; cleanup; exit 1; }
+
+# Any failure here is far easier to diagnose with the server's own output, and on
+# CI this script's stdout is often the only artifact — so print it on every
+# failure rather than leaving it in a temp file nobody retrieves.
+dump_server_log() {
+  [ -f "$LOG" ] || return 0
+  echo "    ── last 40 lines of $LOG ──"
+  tail -40 "$LOG" | sed 's/^/    /'
+  echo "    ── end server log ──"
+}
 
 PIDS=()
 cleanup() {
@@ -67,17 +82,37 @@ MOCK_GH_PORT=$GH_PORT MOCK_OR_PORT=$OR_PORT node test/mock-services.mjs &
 PIDS+=($!)
 
 echo "==> starting Iris"
-IRIS_CONFIG="$CFG" node --experimental-sqlite src/index.ts > /tmp/iris-e2e.log 2>&1 &
-PIDS+=($!)
+IRIS_CONFIG="$CFG" node --experimental-sqlite src/index.ts > "$LOG" 2>&1 &
+IRIS_PID=$!
+PIDS+=("$IRIS_PID")
 
-# wait for health
-for i in $(seq 1 30); do
-  if curl -sf "$BASE/health" >/dev/null 2>&1; then break; fi
+# Wait for health, distinguishing the three ways this can go wrong: the process
+# died (report its log immediately rather than polling a corpse for 45s), it is
+# still booting (keep waiting), or it never answered in time (report how long we
+# waited and whether it was even alive — a bare "no ok" is undiagnosable, which
+# is exactly what happened on the one CI failure that motivated this).
+boot_start=$SECONDS
+booted=""
+while [ $((SECONDS - boot_start)) -lt "$BOOT_TIMEOUT" ]; do
+  if curl -sf "$BASE/health" >/dev/null 2>&1; then booted=1; break; fi
+  if ! kill -0 "$IRIS_PID" 2>/dev/null; then
+    echo "  ✗ Iris exited during startup after $((SECONDS - boot_start))s"
+    dump_server_log
+    cleanup
+    exit 1
+  fi
   sleep 0.3
 done
+boot_elapsed=$((SECONDS - boot_start))
 
 echo "==> 1. GET /v1/health"
-curl -sf "$BASE/health" | jq -e '.status=="ok"' >/dev/null && pass "health ok" || fail "health" "no ok"
+if [ -z "$booted" ]; then
+  fail "health" "no response within ${BOOT_TIMEOUT}s (process still running: \
+$(kill -0 "$IRIS_PID" 2>/dev/null && echo yes || echo no)). \
+Raise BOOT_TIMEOUT if this runner is just slow."
+fi
+curl -sf "$BASE/health" | jq -e '.status=="ok"' >/dev/null \
+  && pass "health ok (booted in ${boot_elapsed}s)" || fail "health" "no ok"
 
 echo "==> 2. auth gating (no token => 401)"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/me")
