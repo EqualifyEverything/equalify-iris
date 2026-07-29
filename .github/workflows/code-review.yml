@@ -55,7 +55,13 @@ jobs:
        ((github.event.action == 'ready_for_review' || github.event.pull_request.draft == false) &&
         github.event.pull_request.head.repo.full_name == github.repository))
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 30, not 15. The model needs ~6-13 min on a normal PR, but the job spends up
+    # to ~3 min before it on `bun install` inside claude-code-action (unpredictable:
+    # measured at 1.5s and at 139s on two runs 3h apart, 140 uncached packages).
+    # At 15 min a large PR review (PR #38) was cancelled mid-investigation while
+    # the run before it finished with 35s to spare — that was luck, not headroom.
+    # The real cap on the model is `timeout-minutes` on the Claude step below.
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
@@ -142,6 +148,19 @@ jobs:
           OUT=/tmp/review-context.md
           MAX_LINES_PER_FILE=800
           MAX_BYTES_PER_FILE=120000
+          # Include whole-file source only for files whose changed lines are at
+          # least this share of the file (new files are 100%), or which are small
+          # enough that including them costs nothing. See the loop below.
+          #
+          # 15% is calibrated against PR #38, the one that timed out: it keeps every
+          # touched src/ and test/ file in full (the lowest was sessions.ts at 19%)
+          # while dropping prd.md, demo.html, README.md and docs/API.md, which
+          # together contributed 104KB for 56 changed lines. That lands the context
+          # at ~131KB — the same size as the review before it, which finished.
+          # Raising this trims more but starts dropping real code; lower it and the
+          # docs come back.
+          MIN_CHANGED_PCT=15
+          ALWAYS_INCLUDE_UNDER_BYTES=8000
 
           {
             echo "# Review context"
@@ -234,7 +253,12 @@ jobs:
             echo "::warning::One or more checks failed — see the run summary. The review continues so Claude reports it on the PR."
           fi
 
-          git fetch origin "$BASE_REF" --depth=0 || true
+          # No --depth flag: `--depth=0` is invalid ("fatal: depth 0 is not a
+          # positive number"), so this fetch silently no-op'd behind the `|| true`.
+          # checkout above uses fetch-depth: 0, so full history is already present
+          # and the merge-base below resolves either way — but a real fetch here
+          # keeps it correct if the base branch moved since checkout.
+          git fetch origin "$BASE_REF" || true
           MERGE_BASE=$(git merge-base "origin/$BASE_REF" HEAD)
           {
             echo
@@ -248,9 +272,19 @@ jobs:
             git diff "$MERGE_BASE"...HEAD
             echo '```'
             echo
-            echo "## Full source of added/modified files"
+            echo "## Full source of new / substantially-rewritten files"
+            echo
+            echo "Files changed by less than ${MIN_CHANGED_PCT}% of their lines are omitted here —"
+            echo "their hunks are in the diff above, and the reviewer can Read them on demand."
           } >> "$OUT"
 
+          # Whole-file source is included only where the diff alone is hard to
+          # judge: new files, and files substantially rewritten. Dumping every
+          # touched file made review context 235KB on PR #38 vs 132KB on the PR
+          # before it, and the review was cancelled mid-investigation. 104KB of
+          # that was four files changed by 56 lines between them — prd.md alone
+          # contributed 51KB for a 10-line edit. Big context is not free: it is
+          # slower to stream and it buries the 5% that matters.
           git diff --name-only --diff-filter=AM "$MERGE_BASE"...HEAD | while read -r f; do
             [ -f "$f" ] || continue
             if file --mime "$f" | grep -q 'charset=binary'; then
@@ -260,6 +294,22 @@ jobs:
             BYTES=$(wc -c < "$f" | tr -d ' ')
             if [ "$BYTES" -gt "$MAX_BYTES_PER_FILE" ]; then
               printf '\n### %s\n\n_(%s bytes — too large, see diff above)_\n' "$f" "$BYTES" >> "$OUT"
+              continue
+            fi
+            # Ratio of changed (added+deleted) lines to current file length.
+            # numstat prints "-\t-" for binaries, already filtered above.
+            CHANGED=$(git diff --numstat "$MERGE_BASE"...HEAD -- "$f" | awk '{print $1 + $2}')
+            LINES=$(wc -l < "$f" | tr -d ' ')
+            # Guard LINES=0: a file with no trailing newline reports 0 and would
+            # divide by zero. Treat it as fully changed — it is tiny either way.
+            if [ "${LINES:-0}" -eq 0 ]; then
+              PCT=100
+            else
+              PCT=$(( ${CHANGED:-0} * 100 / LINES ))
+            fi
+            if [ "$PCT" -lt "$MIN_CHANGED_PCT" ] && [ "$BYTES" -gt "$ALWAYS_INCLUDE_UNDER_BYTES" ]; then
+              printf '\n### %s\n\n_(%s%% of %s lines changed — diff above is sufficient; Read the file if you need more)_\n' \
+                "$f" "$PCT" "$LINES" >> "$OUT"
               continue
             fi
             printf '\n### %s\n\n```\n' "$f" >> "$OUT"
@@ -285,7 +335,18 @@ jobs:
           aws-region: us-east-2
 
       - name: Claude review
+        id: claude
         if: steps.guard.outputs.already_reviewed != 'true'
+        # Bound the model separately from the job. A step timeout fails only this
+        # step, so `Fallback review` below still runs and the PR always gets a
+        # verdict; when the *job* hits its cap instead, every remaining step is
+        # cancelled and the PR gets nothing (this is exactly how PR #38 ended up
+        # with zero reviews after 12 minutes of Opus).
+        #
+        # 22 < 30 leaves ~8 min of slack for the action's own `bun install` (up to
+        # ~3 min) plus the fallback. Keep that gap if you change either number.
+        timeout-minutes: 22
+        continue-on-error: true
         uses: anthropics/claude-code-action@v1
         env:
           PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
@@ -296,7 +357,7 @@ jobs:
           # review at end of session, which races with the single explicit
           # `gh pr review` the prompt below asks for and double-submits.
           #
-          # No --max-turns either: timeout-minutes on the job is the budget.
+          # No --max-turns either: the step timeout above is the budget.
           # Turn caps drop reviews mid-investigation; wall-clock is what we pay for.
           claude_args: >-
             --allowedTools Bash(*),Read(*),Glob,Grep
@@ -307,12 +368,33 @@ jobs:
 
             Read `/tmp/review-context.md` FIRST — it already contains the PR metadata, the
             install/typecheck/unit/e2e output (see its "Check summary" section), the full diff,
-            and the full source of every added or modified file. Do not re-run the checks. Use
-            Read/Glob/Grep on the checkout only to inspect files the diff touches but the
-            context did not include (e.g. the other side of a changed interface).
+            and the full source of files that are new or substantially rewritten. Lightly-touched
+            files appear as diff only; Read them from the checkout if the hunk is not
+            self-explanatory. Do not re-run the checks. Otherwise use Read/Glob/Grep only to
+            inspect what the diff touches but the context omitted (e.g. the other side of a
+            changed interface).
 
             This repo has no `CLAUDE.md` or `REVIEW.md` — the conventions below are the whole of
             it. Do not waste turns looking for them.
+
+            ## Time budget — read this before you start
+
+            You have **~20 minutes of wall clock**. You will be killed at that point, so
+            manage the budget yourself:
+
+            - **Append every finding to `/tmp/review-findings.md` as soon as you confirm it**,
+              before moving on. If you are cut off, that file is posted to the PR automatically,
+              so an interrupted review still delivers what it found. A finding you are holding
+              in your head is a finding that gets lost.
+            - Spend the first ~10 minutes on the "Must flag" list, in order. It is ranked by
+              what actually breaks Iris.
+            - Then check the clock (`date`). If more than ~13 minutes have passed, stop
+              investigating and post.
+            - Depth beats coverage: three verified blocking issues are worth more than twelve
+              speculative ones. But do not stall on one ambiguous line — record what you know,
+              say it is unverified, and move on.
+            - Post the review yourself with `gh pr review` when done. Do not run to the wire
+              hoping to finish; a posted partial review beats a perfect unposted one.
 
             ## What Iris is
 
@@ -412,7 +494,72 @@ jobs:
 
             Do not push commits, do not edit files, do not comment on the PR by any other means.
 
-      - name: Verify claude[bot] review was posted
+      - name: Fallback review if Claude was cut off
+        # Runs when the model step failed or timed out (it is continue-on-error,
+        # so the job is still green here). Two jobs:
+        #   1. Post whatever findings reached /tmp/review-findings.md, so 20 min of
+        #      review is not thrown away — as happened on PR #38, which got zero
+        #      reviews after a 12-minute cancellation.
+        #   2. Post the check summary regardless, so a failing build is reported on
+        #      the PR even when the model never got that far.
+        # Posted as a review (not a comment) so the Verify step below is satisfied
+        # and branch protection sees a verdict.
+        if: >-
+          steps.guard.outputs.already_reviewed != 'true' &&
+          !contains(steps.ctx.outputs.changed_workflow, 'code-review.yml') &&
+          steps.claude.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.ctx.outputs.head_sha }}
+          OUTCOME: ${{ steps.claude.outcome }}
+        run: |
+          set -euo pipefail
+          # The model may have posted its review and then failed on a later turn.
+          # Don't double-post: re-check the same per-commit condition as the guard.
+          COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
+            --jq ".[] | select(.user.login==\"claude[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
+            | wc -l | tr -d ' ')
+          if [ "${COUNT:-0}" -gt 0 ]; then
+            echo "Claude already posted a review for $HEAD_SHA despite outcome=$OUTCOME — nothing to do."
+            exit 0
+          fi
+
+          BODY=/tmp/fallback-review.md
+          {
+            printf '## Automated review did not complete\n\n'
+            printf 'The review step ended with outcome `%s` (likely the 22-minute step timeout).\n' "$OUTCOME"
+          } > "$BODY"
+
+          if [ -s /tmp/review-findings.md ]; then
+            {
+              printf 'Findings recorded before it was cut off are below — **this list is incomplete**,\n'
+              printf 'and nothing here has been through a final consistency pass.\n\n'
+              printf -- '---\n\n'
+              # Bound it: the scratch file is model-authored and unbounded in size.
+              head -c 60000 /tmp/review-findings.md
+            } >> "$BODY"
+          else
+            printf 'No partial findings were recorded, so this PR has **not been reviewed**.\n' >> "$BODY"
+          fi
+
+          # $SUMMARY is not available across steps; re-read it from the context file.
+          if [ -f /tmp/review-context.md ]; then
+            {
+              printf '\n\n---\n\n'
+              sed -n '/^## Check summary/,$p' /tmp/review-context.md | head -20
+            } >> "$BODY"
+          fi
+
+          printf '\n\nRe-run a full review with: `gh workflow run code-review.yml -f pr_number=%s`\n' "$PR_NUMBER" >> "$BODY"
+          printf '\nAccessibility impact: not assessed — automated review was interrupted.\n' >> "$BODY"
+
+          # --request-changes, not --comment: an incomplete review must not read as
+          # a pass. A human can approve over it.
+          gh pr review "$PR_NUMBER" --request-changes --body-file "$BODY"
+          echo "::warning::Claude review was cut off (outcome=$OUTCOME); posted a partial/fallback review instead."
+
+      - name: Verify a review was posted
         # Not run on the PR that introduces this file: claude-code-action refuses
         # to execute until an identical copy exists on the default branch, so it
         # self-skips and there is no review to verify. Everything before this step
@@ -428,11 +575,16 @@ jobs:
           set -euo pipefail
           # The action can exit 0 without ever calling `gh pr review`, leaving the
           # PR unreviewed and this check green. Fail loudly instead.
+          #
+          # Accept the fallback step's author too: it posts as github-actions[bot]
+          # (the GITHUB_TOKEN identity), not claude[bot], and a fallback review is
+          # still a verdict on the PR. Matching only claude[bot] here would fail
+          # the job immediately after the fallback successfully posted.
           COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
-            --jq ".[] | select(.user.login==\"claude[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
+            --jq ".[] | select(.user.login==\"claude[bot]\" or .user.login==\"github-actions[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
             | wc -l | tr -d ' ')
           if [ "${COUNT:-0}" -eq 0 ]; then
-            echo "::error::No claude[bot] review posted for $HEAD_SHA. Re-run with: gh workflow run code-review.yml -f pr_number=$PR_NUMBER"
+            echo "::error::No review posted for $HEAD_SHA. Re-run with: gh workflow run code-review.yml -f pr_number=$PR_NUMBER"
             exit 1
           fi
-          echo "claude[bot] review exists for $HEAD_SHA"
+          echo "review exists for $HEAD_SHA"
