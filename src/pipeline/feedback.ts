@@ -204,13 +204,13 @@ export async function regressionGate(
   updatedContent: string,
 ): Promise<RegressionResult> {
   const dir = ctx.paths.agentFixtures(agentFile);
-  if (!existsSync(dir)) return { passed: true, failures: [] };
+  if (!existsSync(dir)) return { passed: true, failures: [], meanCoverage: null };
   const caseFiles = readdirSync(dir)
     .filter((f) => f.endsWith(".json"))
     .sort()
     .reverse()
     .slice(0, MAX_GATE_FIXTURES);
-  if (caseFiles.length === 0) return { passed: true, failures: [] };
+  if (caseFiles.length === 0) return { passed: true, failures: [], meanCoverage: null };
 
   const file = agentFile.endsWith(".md") ? agentFile : `${agentFile}.md`;
   const updatedAgent: AgentSpec = {
