@@ -87,6 +87,16 @@ jobs:
             HEAD_SHA="${{ github.event.pull_request.head.sha }}"
             BASE_REF="${{ github.event.pull_request.base.ref }}"
           fi
+          # Does this PR modify the review workflow itself? If so the action will
+          # self-skip (it requires an identical copy on the default branch), and
+          # the verify step at the end must not treat that as a failure.
+          if gh pr diff "$PR_NUMBER" --name-only | grep -qx '.github/workflows/code-review.yml'; then
+            echo "changed_workflow=code-review.yml" >> "$GITHUB_OUTPUT"
+            echo "This PR modifies code-review.yml — the action will self-skip until it is on the default branch."
+          else
+            echo "changed_workflow=none" >> "$GITHUB_OUTPUT"
+          fi
+
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HEAD_SHA"   >> "$GITHUB_OUTPUT"
           echo "base_ref=$BASE_REF"   >> "$GITHUB_OUTPUT"
@@ -201,14 +211,18 @@ jobs:
             { echo '```'; echo; echo "</details>"; } >> "$OUT"
           fi
 
-          {
-            echo
-            echo "## Check summary"
-            echo "- npm ci: $INSTALL"
-            echo "- typecheck: $TYPECHECK"
-            echo "- unit (\`npm test\`): $UNIT"
-            echo "- e2e (\`./test/e2e.sh\`): $E2E"
-          } >> "$OUT"
+          # Summary goes to three places: the context file (for the reviewer), the
+          # job log and the run summary (for humans). Without the latter two, a
+          # check failing in CI would be visible only to the model while this step
+          # still reported success.
+          SUMMARY=$(printf '## Check summary\n- npm ci: %s\n- typecheck: %s\n- unit (`npm test`): %s\n- e2e (`./test/e2e.sh`): %s\n' \
+            "$INSTALL" "$TYPECHECK" "$UNIT" "$E2E")
+          { echo; echo "$SUMMARY"; } >> "$OUT"
+          echo "$SUMMARY"
+          echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$INSTALL$TYPECHECK$UNIT$E2E" != "passpasspasspass" ]; then
+            echo "::warning::One or more checks failed — see the run summary. The review continues so Claude reports it on the PR."
+          fi
 
           git fetch origin "$BASE_REF" --depth=0 || true
           MERGE_BASE=$(git merge-base "origin/$BASE_REF" HEAD)
@@ -385,7 +399,13 @@ jobs:
             Do not push commits, do not edit files, do not comment on the PR by any other means.
 
       - name: Verify claude[bot] review was posted
-        if: steps.guard.outputs.already_reviewed != 'true'
+        # Not run on the PR that introduces this file: claude-code-action refuses
+        # to execute until an identical copy exists on the default branch, so it
+        # self-skips and there is no review to verify. Everything before this step
+        # still exercises the real path (OIDC, context build, model access).
+        if: >-
+          steps.guard.outputs.already_reviewed != 'true' &&
+          !contains(steps.ctx.outputs.changed_workflow, 'code-review.yml')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
