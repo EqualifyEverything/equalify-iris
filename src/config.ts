@@ -39,18 +39,66 @@ export interface IrisConfig {
   defaults: { max_review_iterations: number };
 }
 
-// Recursively expand ${ENV_VAR} references against process.env.
-function expandEnv(value: unknown): unknown {
+// Recursively expand ${ENV_VAR} references against process.env, recording which
+// variables resolved to nothing. An unset variable still expands to "" (a config
+// may legitimately reference a provider it doesn't use), but the names are kept
+// so validateConfig can name the likely cause of an empty required field.
+function expandEnv(value: unknown, unset: Set<string>): unknown {
   if (typeof value === "string") {
-    return value.replace(/\$\{([A-Z0-9_]+)\}/g, (_, name: string) => process.env[name] ?? "");
+    return value.replace(/\$\{([A-Z0-9_]+)\}/g, (_, name: string) => {
+      const found = process.env[name];
+      if (found === undefined || found === "") {
+        unset.add(name);
+        return "";
+      }
+      return found;
+    });
   }
-  if (Array.isArray(value)) return value.map(expandEnv);
+  if (Array.isArray(value)) return value.map((v) => expandEnv(v, unset));
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) out[k] = expandEnv(v);
+    for (const [k, v] of Object.entries(value)) out[k] = expandEnv(v, unset);
     return out;
   }
   return value;
+}
+
+// Fail at startup on config that cannot work, instead of surfacing it as a
+// confusing mid-pipeline error (an unset ${OPENROUTER_API_KEY} used to expand to
+// "" and reappear later as a 401 partway through a run).
+//
+// Only providers this deployment can actually reach are checked — `default` plus
+// anything named in `per_agent` — so a config that carries an unused second
+// provider block stays valid without its credentials.
+function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void {
+  const problems: string[] = [];
+
+  if (!cfg.providers?.default) problems.push("providers.default is not set");
+
+  const referenced = new Set<string>([cfg.providers.default]);
+  for (const entry of Object.values(cfg.providers.per_agent ?? {})) {
+    const name = typeof entry === "string" ? entry : entry?.provider;
+    if (name) referenced.add(name);
+  }
+
+  for (const name of referenced) {
+    if (!name) continue;
+    const block = cfg.providers[name] as ProviderBlock | undefined;
+    if (!block) {
+      problems.push(`providers.${name} is referenced but has no configuration block`);
+      continue;
+    }
+    if (!block.default_model) problems.push(`providers.${name}.default_model is not set`);
+    // Bedrock authenticates through the standard AWS credential chain, so there
+    // is no key in config to check.
+    if (name === "openrouter" && !block.api_key) {
+      problems.push(`providers.openrouter.api_key is empty (set OPENROUTER_API_KEY)`);
+    }
+  }
+
+  if (problems.length === 0) return;
+  const hint = unset.size > 0 ? ` Unset environment variables: ${[...unset].sort().join(", ")}.` : "";
+  throw new Error(`Invalid config ${path}:\n  - ${problems.join("\n  - ")}\n${hint}`);
 }
 
 // Bundled OAuth App client_id for the device flow (PRD §9.1). This is the
@@ -65,12 +113,16 @@ function expandEnv(value: unknown): unknown {
 // via config/env to point at your own app.
 const DEFAULT_CLIENT_ID = "Ov23liGG4MfEn0DM4vTA";
 
-let cached: IrisConfig | null = null;
+let cached: { path: string; config: IrisConfig } | null = null;
 
 export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): IrisConfig {
-  if (cached) return cached;
-  const raw = readFileSync(resolve(path), "utf8");
-  const parsed = expandEnv(parse(raw)) as IrisConfig;
+  const resolved = resolve(path);
+  // Cache per resolved path: a caller passing a different config file must get
+  // that file, not whichever one happened to load first.
+  if (cached && cached.path === resolved) return cached.config;
+  const raw = readFileSync(resolved, "utf8");
+  const unset = new Set<string>();
+  const parsed = expandEnv(parse(raw), unset) as IrisConfig;
   // Resolve filesystem paths to absolutes so the service is CWD-independent.
   parsed.storage.data_dir = resolve(parsed.storage.data_dir);
   parsed.storage.agents_dir = resolve(parsed.storage.agents_dir);
@@ -81,6 +133,7 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   // Fall back to the bundled OAuth App so the default device-flow deployment
   // works with no per-operator app setup (PRD §9.1).
   parsed.github.client_id = parsed.github.client_id || DEFAULT_CLIENT_ID;
-  cached = parsed;
+  validateConfig(parsed, unset, path);
+  cached = { path: resolved, config: parsed };
   return parsed;
 }
