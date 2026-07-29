@@ -107,6 +107,22 @@ defaults:
   # pages serially is the dominant source of end-to-end latency.
   #
   # Raise it if your provider's rate limits allow; lower it (or set 1 for fully
-  # serial) if you hit 429s — note the Bedrock adapter does not retry yet, so a
-  # rate-limit burst there fails the run. Clamped to 1..16; omit for the default.
+  # serial) if you hit 429s. Both adapters retry throttling responses (OpenRouter
+  # by hand, Bedrock via the AWS SDK's standard strategy), but backing off is
+  # slower than not being throttled. Clamped to 1..16; omit for the default.
   extraction_concurrency: 5
+  # How many pipeline runs execute at once ACROSS sessions. This is the knob that
+  # bounds what the machine as a whole is doing: each run holds a jsdom+axe
+  # instance and up to extraction_concurrency model calls, so peak in-flight calls
+  # are the PRODUCT of the two (the default 2 x 5 = 10).
+  #
+  # Uploads over the cap WAIT — a session sits in `status: "queued"` until a slot
+  # frees, and the wait is recorded in its run log (`run_queued` / `run_dequeued`
+  # with `waited_ms`). Nothing is rejected: the upload has already been received
+  # and written to disk, so refusing it would throw away work the user has already
+  # paid for. Order is strictly FIFO and the cap is global, not per user.
+  #
+  # This is the knob to raise first on a bigger box. Clamped to 1..32; omit for
+  # the default. Needing more than a handful means you want multiple instances and
+  # a shared Postgres store, which v1 does not implement.
+  max_concurrent_runs: 2

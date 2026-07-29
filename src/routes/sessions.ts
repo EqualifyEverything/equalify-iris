@@ -15,6 +15,8 @@ import { rasterizePdf, PdfTooLargeError, MAX_PDF_PAGES } from "../util/pdf.ts";
 import { outputBasenameFromUploads, convertedHtmlFilename } from "../util/outputNames.ts";
 import { captureFixtures } from "../pipeline/regression.ts";
 import type { Fragment } from "../pipeline/fragment.ts";
+import { RunQueue } from "../util/queue.ts";
+import { RunLog } from "../store/runlog.ts";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -55,6 +57,50 @@ function ownedSession(store: Store, id: string, userId: number): SessionRecord |
 export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   const r = Router();
   const paths = new Paths(cfg);
+
+  // One queue for the whole process, bounding how many pipelines run at once
+  // across all sessions (see util/queue.ts for why global rather than per-user,
+  // and why waiting rather than rejecting).
+  const queue = new RunQueue(cfg.defaults.max_concurrent_runs);
+
+  // Submit a run to the queue instead of starting it immediately.
+  //
+  // The queue wait is recorded in the session's own run log, at both ends: a
+  // `run_queued` event when it is admitted and a `run_dequeued` event carrying
+  // `waited_ms` when it actually starts. Without those, a session sitting in
+  // `queued` behind someone else's 25-page PDF is indistinguishable from a hung
+  // one — the operator sees a status that never changes and a log with nothing
+  // in it. Logging is best-effort: a run must never fail to start because its
+  // log could not be appended to.
+  // Returns whether the run got a slot immediately, so the caller can report the
+  // session's real state rather than assuming it started.
+  const enqueueRun = (args: Parameters<typeof runPipeline>[0]): boolean => {
+    const submittedAt = Date.now();
+    const log = new RunLog(paths.sessionLog(args.sessionId));
+    const stats = queue.stats();
+    try {
+      log.event("run_queued", { running: stats.running, waiting: stats.waiting, limit: stats.limit });
+    } catch {
+      // ignore — observability must not block the run
+    }
+    let startedImmediately = false;
+    // `void` is safe: RunQueue.submit() always resolves, even when the task
+    // throws (see its docblock), so this cannot become an unhandled rejection.
+    // submit() pumps synchronously, so onStart has already fired by the time
+    // this returns if a slot was free.
+    void queue.submit(
+      () => runPipeline(args),
+      () => {
+        startedImmediately = true;
+        try {
+          log.event("run_dequeued", { waited_ms: Date.now() - submittedAt });
+        } catch {
+          // ignore
+        }
+      },
+    );
+    return startedImmediately;
+  };
 
   // GET /v1/sessions — list this user's sessions, newest first.
   r.get("/", (req: AuthedRequest, res) => {
@@ -140,8 +186,10 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       iterations_max: maxIter,
     });
 
-    // Kick off the pipeline asynchronously; clients poll GET /v1/sessions/{id}.
-    void runPipeline({ cfg, store, sessionId, maxReviewIterations: maxIter, githubToken: req.token });
+    // Queue the pipeline; clients poll GET /v1/sessions/{id}. The session stays
+    // in the `queued` status it was created with until a slot frees up, so a
+    // client polling sees queued -> running -> ready_for_review.
+    enqueueRun({ cfg, store, sessionId, maxReviewIterations: maxIter, githubToken: req.token });
 
     res.status(201).json({
       session_id: record.session_id,
@@ -241,8 +289,12 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 400, "invalid_request", "feedback (string) is required");
       return;
     }
-    store.updateSession(s.session_id, { status: "running", phase: "extraction" });
-    void runPipeline({
+    // Mark it non-terminal before enqueueing, both so a second feedback POST
+    // hits the ready_for_review guard above and so a client polling a waiting
+    // re-run sees `queued` rather than a stale `ready_for_review` alongside a
+    // 202 that promised a new run.
+    store.updateSession(s.session_id, { status: "queued", phase: "triage", error: null });
+    const started = enqueueRun({
       cfg,
       store,
       sessionId: s.session_id,
@@ -250,7 +302,13 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       feedback,
       githubToken: req.token,
     });
-    res.status(202).json({ session_id: s.session_id, status: "running", phase: "extraction" });
+    // Report what actually happened. Under the run cap a re-run waits, and
+    // saying "running" then would make a queued session look hung.
+    res.status(202).json(
+      started
+        ? { session_id: s.session_id, status: "running", phase: "extraction" }
+        : { session_id: s.session_id, status: "queued", phase: "triage" },
+    );
   });
 
   // POST /v1/sessions/{id}/close — finalize the session and clean tmp (§9.2).

@@ -47,6 +47,12 @@ export interface IrisConfig {
     // capped to keep a burst of concurrent calls from tripping provider rate
     // limits. Normalized by loadConfig, so it is always a valid integer.
     extraction_concurrency: number;
+    // How many pipeline runs execute at once ACROSS sessions. Unlike
+    // extraction_concurrency (within one run), this bounds what the machine as a
+    // whole is doing: each run holds jsdom+axe and up to extraction_concurrency
+    // model calls, so the real peak is the product of the two. Runs over the cap
+    // wait in `queued`; they are not rejected. Normalized by loadConfig.
+    max_concurrent_runs: number;
   };
 }
 
@@ -59,6 +65,20 @@ export const DEFAULT_EXTRACTION_CONCURRENCY = 5;
 // Upper bound. Past this, added parallelism buys little (provider-side rate
 // limits dominate) and each in-flight call holds a base64 page image in memory.
 export const MAX_EXTRACTION_CONCURRENCY = 16;
+
+// Pipeline runs allowed to execute simultaneously when the deployment doesn't
+// say. Deliberately small: 2 concurrent runs on a default config already means
+// up to 10 in-flight vision calls (2 × DEFAULT_EXTRACTION_CONCURRENCY) plus two
+// live jsdom+axe instances, on a machine that per PRD §10.1 may be a laptop.
+// The knob to reach for first on a bigger box is this one, not the extraction
+// concurrency — waiting is cheap and visible (`status: "queued"`), whereas
+// over-subscribing degrades every run at once.
+export const DEFAULT_MAX_CONCURRENT_RUNS = 2;
+// Upper bound. This is a cap on how much of the machine one deployment will
+// commit, not a statement about what a provider will serve; an operator who
+// genuinely needs more concurrency than this wants multiple instances and a
+// shared Postgres store (§10.2), which v1 does not implement.
+export const MAX_CONCURRENT_RUNS_CEILING = 32;
 
 // Output-token ceiling when a provider block doesn't set one. 8192 was the old
 // hardcoded Bedrock value and is comfortably too small for a dense page: a
@@ -147,6 +167,20 @@ export function normalizeMaxTokens(value: unknown): number {
   return n < 1 ? DEFAULT_MAX_TOKENS : Math.floor(n);
 }
 
+// Coerce a configured max_concurrent_runs into a usable integer. Same
+// "absent means the default, not zero" trap as the other two normalizers, but
+// with a worse consequence if it slipped through: a limit of 0 would leave the
+// queue accepting every session and starting none, so uploads would sit in
+// `queued` forever with nothing logged to say why. Clamped to
+// [1, MAX_CONCURRENT_RUNS_CEILING]. Exported for tests.
+export function normalizeMaxConcurrentRuns(value: unknown): number {
+  if (value === null || value === undefined) return DEFAULT_MAX_CONCURRENT_RUNS;
+  if (typeof value === "string" && value.trim() === "") return DEFAULT_MAX_CONCURRENT_RUNS;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_CONCURRENT_RUNS;
+  return Math.min(MAX_CONCURRENT_RUNS_CEILING, Math.max(1, Math.floor(n)));
+}
+
 // Coerce a configured extraction_concurrency into a usable integer: missing or
 // non-numeric falls back to the default, and anything valid is clamped to
 // [1, MAX_EXTRACTION_CONCURRENCY]. Exported for tests.
@@ -197,6 +231,11 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   parsed.defaults = parsed.defaults ?? ({} as IrisConfig["defaults"]);
   parsed.defaults.extraction_concurrency = normalizeConcurrency(
     parsed.defaults.extraction_concurrency,
+  );
+  // Same treatment for the cross-session run cap, so the queue can be built
+  // straight from config with no fallback at the construction site.
+  parsed.defaults.max_concurrent_runs = normalizeMaxConcurrentRuns(
+    parsed.defaults.max_concurrent_runs,
   );
   // Same treatment for each provider's output ceiling, so an adapter can read
   // block.max_tokens directly and never has to re-derive a default. Applied to

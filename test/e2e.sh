@@ -75,6 +75,10 @@ providers:
 defaults:
   max_review_iterations: 1
   extraction_concurrency: 4
+  # One run at a time across sessions, so step 9e can observe the queue: a second
+  # upload submitted while the first is running must WAIT in \`queued\` rather than
+  # starting a second unthrottled pipeline.
+  max_concurrent_runs: 1
 YAML
 
 echo "==> starting mock services"
@@ -305,6 +309,80 @@ echo "$terr" | grep -q 'output ceiling' && echo "$terr" | grep -q 'max_tokens' \
 tout=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/$TSID/output")
 [ "$tout" = "409" ] && pass "no output served for the truncated run (409)" \
   || fail "truncation output" "expected 409, got $tout"
+
+echo "==> 9e. a second upload WAITS in the run queue instead of starting a second pipeline"
+# max_concurrent_runs=1 in the config above. Uploads used to `void runPipeline(...)`
+# straight out of the handler, so two simultaneous uploads meant two unthrottled
+# pipelines — two jsdom+axe instances and 2 x extraction_concurrency model calls in
+# flight, on a machine PRD §10.1 says may be a laptop.
+#
+# No race here: the create handler enqueues synchronously and runPipeline sets
+# status=running before returning to the queue, so by the time the FIRST 201 lands
+# its run is already occupying the only slot. The second upload therefore must be
+# waiting, not running.
+qa=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
+  -F "images=@$png;filename=queue-a-001.png" \
+  -F "images=@$png;filename=queue-a-002.png" \
+  -F "images=@$png;filename=queue-a-003.png" \
+  -F 'config={"max_review_iterations":1}')
+QA=$(echo "$qa" | jq -r '.session_id')
+
+# A feedback re-run is subject to the same cap, and its 202 must say what actually
+# happened. Reporting "running" for a run still sitting in the queue would make a
+# waiting session look hung to the only client that can see it.
+fbq=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/feedback" -H 'content-type: application/json' \
+  -d '{"feedback":"Tighten the wording throughout."}')
+echo "$fbq" | jq -e '.status=="queued"' >/dev/null \
+  && pass "a feedback re-run at the cap reports queued, not running" \
+  || fail "feedback queueing" "expected status=queued, got $fbq"
+# And the STORED row must agree. A row saying "running" for a run still in the
+# queue is what the polling client actually sees, so it is the one that matters —
+# the 202 body is read once, the status endpoint is read every two seconds.
+fbst=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID" | jq -r '.status')
+[ "$fbst" = "queued" ] \
+  && pass "the queued re-run's stored status is queued too" \
+  || fail "feedback queueing" "GET /sessions/\$SID says '$fbst', expected queued"
+
+qb=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
+  -F "images=@$png;filename=queue-b-001.png" -F 'config={"max_review_iterations":1}')
+QB=$(echo "$qb" | jq -r '.session_id')
+sa=$(curl -s "${AUTH[@]}" "$BASE/sessions/$QA" | jq -r '.status')
+sb=$(curl -s "${AUTH[@]}" "$BASE/sessions/$QB" | jq -r '.status')
+[ "$sa" = "running" ] && [ "$sb" = "queued" ] \
+  && pass "second upload held at the cap (A=$sa, B=$sb)" \
+  || fail "run queue" "expected A=running B=queued, got A=$sa B=$sb"
+
+# Waiting must not mean dropped: both runs finish, in order.
+await_session_ready() {
+  for i in $(seq 1 120); do
+    st=$(curl -s "${AUTH[@]}" "$BASE/sessions/$1" | jq -r '.status')
+    [ "$st" = "ready_for_review" ] && return 0
+    [ "$st" = "failed" ] && fail "$2" "run failed: $(curl -s "${AUTH[@]}" "$BASE/sessions/$1" | jq -r .error)"
+    sleep 0.5
+  done
+  fail "$2" "stuck at $st"
+}
+await_session_ready "$QA" "queued run A"
+await_session_ready "$QB" "queued run B"
+# SID's queued feedback re-run too, so step 12 can still close it.
+await_session_ready "$SID" "queued feedback re-run"
+pass "all three queued runs completed (nothing dropped at the cap)"
+
+# The wait is recorded in the waiting session's own run log — otherwise a session
+# sitting behind someone else's 25-page PDF is indistinguishable from a hung one.
+qlog=$(curl -s "${AUTH[@]}" "$BASE/sessions/$QB/logs")
+qwait=$(echo "$qlog" | jq -c 'select(.type=="run_dequeued")' | tail -1 | jq -r '.waited_ms // -1')
+qrunning=$(echo "$qlog" | jq -c 'select(.type=="run_queued")' | tail -1 | jq -r '.running // -1')
+[ "$qwait" -gt 0 ] && [ "$qrunning" = "1" ] \
+  && pass "the wait is visible in the run log (waited_ms=$qwait, running=$qrunning at submit)" \
+  || fail "queue logging" "expected waited_ms>0 and running=1, got waited_ms=$qwait running=$qrunning"
+
+# Only the flagged page's image reached the editor earlier; here the point is that
+# the queue did not corrupt either document. B is single-page and must be complete.
+qbout=$(curl -s "${AUTH[@]}" "$BASE/sessions/$QB/output")
+echo "$qbout" | grep -q 'Page marker 1' \
+  && pass "the queued run produced a complete document" \
+  || fail "queued output" "$qbout"
 
 echo "==> 10. ownership isolation (other endpoints reject unknown id)"
 code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/ses_doesnotexist")
