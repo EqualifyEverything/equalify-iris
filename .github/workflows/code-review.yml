@@ -1,0 +1,438 @@
+name: Code Review
+
+# Automated PR review by Claude, hosted on AWS Bedrock.
+#
+# Requires two repo settings (both configured in this account already):
+#   - secret  AWS_BEDROCK_ROLE_ARN  — IAM role this repo may assume via OIDC,
+#     with bedrock:InvokeModel / InvokeModelWithResponseStream on the review model.
+#     Currently role/equalify-iris-gha-bedrock-review in account 380610849750,
+#     trust scoped to this repo's pull_request + refs/heads/* subjects.
+#   - variable BEDROCK_REVIEW_MODEL (optional) — Bedrock inference-profile ID to
+#     review with; defaults below. Set to us.anthropic.claude-opus-5, a
+#     cross-region profile routing to us-east-1/us-east-2/us-west-2 (the IAM
+#     policy grants all three, or InvokeModel fails when it routes off-region).
+#
+# There is deliberately no `issue_comment` trigger here: @claude mentions are
+# handled by the hosted Claude GitHub App, and duplicating it would double-post.
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+    # Only skip files that cannot affect behaviour. Note that `agents/*.md` and
+    # `docs/**` are NOT ignored: agent markdown files are executable prompts
+    # (loaded and sent to the model at runtime), and the API docs are part of
+    # the contract, so both are in scope for review.
+    paths-ignore:
+      - 'LICENSE'
+      - 'CODE_OF_CONDUCT.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/pull_request_template.md'
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review'
+        required: true
+
+concurrency:
+  group: code-review-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Skip drafts and dependabot. `workflow_dispatch` and `ready_for_review`
+    # bypass the draft check (the former is a manual ask, the latter means the
+    # PR just stopped being a draft).
+    #
+    # Fork PRs are also skipped: `pull_request` from a fork gets no secrets, so
+    # the OIDC role assumption would fail with a confusing error. A maintainer
+    # reviews a fork PR by dispatching manually:
+    #   gh workflow run code-review.yml -f pr_number=<n>
+    # Note that doing so runs the fork's code (npm ci, tests) in a job that holds
+    # the Bedrock role — read the diff before dispatching.
+    if: >-
+      github.actor != 'dependabot[bot]' &&
+      (github.event_name == 'workflow_dispatch' ||
+       ((github.event.action == 'ready_for_review' || github.event.pull_request.draft == false) &&
+        github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve PR + head sha
+        id: ctx
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # On a manual run, checkout@v4 gave us the default branch — move to
+            # the PR head so the diff and file reads below are the PR's code.
+            PR_NUMBER="${{ inputs.pr_number }}"
+            META=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER")
+            HEAD_SHA=$(echo "$META" | jq -r .head.sha)
+            BASE_REF=$(echo "$META" | jq -r .base.ref)
+            git fetch origin "pull/$PR_NUMBER/head:pr-$PR_NUMBER"
+            git checkout "pr-$PR_NUMBER"
+          else
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            BASE_REF="${{ github.event.pull_request.base.ref }}"
+          fi
+          # Does this PR modify the review workflow itself? If so the action will
+          # self-skip (it requires an identical copy on the default branch), and
+          # the verify step at the end must not treat that as a failure.
+          if gh pr diff "$PR_NUMBER" --name-only | grep -qx '.github/workflows/code-review.yml'; then
+            echo "changed_workflow=code-review.yml" >> "$GITHUB_OUTPUT"
+            echo "This PR modifies code-review.yml — the action will self-skip until it is on the default branch."
+          else
+            echo "changed_workflow=none" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA"   >> "$GITHUB_OUTPUT"
+          echo "base_ref=$BASE_REF"   >> "$GITHUB_OUTPUT"
+
+      - name: Skip if a claude review already exists for this commit
+        id: guard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.ctx.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          # Per-commit idempotency: if claude[bot] already reviewed this exact
+          # sha, don't post again. A new push (new sha) is reviewed as normal.
+          # --paginate emits one id per match across all pages; count lines
+          # rather than summing per-page lengths.
+          COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
+            --jq ".[] | select(.user.login==\"claude[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
+            | wc -l | tr -d ' ')
+          if [ "${COUNT:-0}" -gt 0 ]; then
+            echo "already_reviewed=true" >> "$GITHUB_OUTPUT"
+            echo "A claude[bot] review already exists for $HEAD_SHA — skipping."
+          else
+            echo "already_reviewed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v7
+        if: steps.guard.outputs.already_reviewed != 'true'
+        with:
+          # Must match .nvmrc: Iris runs .ts sources directly and depends on
+          # --experimental-sqlite / --env-file-if-exists.
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Build review context
+        if: steps.guard.outputs.already_reviewed != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
+          BASE_REF: ${{ steps.ctx.outputs.base_ref }}
+        run: |
+          set -euo pipefail
+          OUT=/tmp/review-context.md
+          MAX_LINES_PER_FILE=800
+          MAX_BYTES_PER_FILE=120000
+
+          {
+            echo "# Review context"
+            echo
+            echo "## PR metadata"
+            echo '```json'
+            gh pr view "$PR_NUMBER" --json number,title,author,body,baseRefName,headRefName
+            echo '```'
+          } > "$OUT"
+
+          # Every check below records pass/fail into the context instead of
+          # aborting the step — a red build is exactly what the reviewer needs to
+          # see, so it must never prevent the review from being posted.
+          {
+            echo
+            echo "## Install — \`npm ci\`"
+            echo '```'
+          } >> "$OUT"
+          if npm ci 2>&1 | tail -40 >> "$OUT"; then
+            INSTALL=pass
+          else
+            INSTALL=fail
+          fi
+          { echo '```'; echo; echo "Result: **$INSTALL**"; } >> "$OUT"
+
+          {
+            echo
+            echo "## Typecheck — \`npm run typecheck\`"
+            echo '```'
+          } >> "$OUT"
+          if npm run typecheck 2>&1 | tail -80 >> "$OUT"; then
+            TYPECHECK=pass
+          else
+            TYPECHECK=fail
+          fi
+          { echo '```'; echo; echo "Result: **$TYPECHECK**"; } >> "$OUT"
+
+          {
+            echo
+            echo "## Unit tests — \`npm test\`"
+            echo '```'
+          } >> "$OUT"
+          if npm test 2>&1 | tail -120 >> "$OUT"; then
+            UNIT=pass
+          else
+            UNIT=fail
+          fi
+          { echo '```'; echo; echo "Result: **$UNIT**"; } >> "$OUT"
+
+          # End-to-end suite: boots mock GitHub + mock OpenRouter and drives every
+          # /v1 endpoint with curl. Needs jq (preinstalled on ubuntu-latest) and
+          # binds fixed ports 8099/9301/9302 — fine on a dedicated runner.
+          {
+            echo
+            echo "## End-to-end — \`./test/e2e.sh\`"
+            echo '```'
+          } >> "$OUT"
+          # Tee rather than redirect: on failure the output has to reach the job
+          # log too, or a CI-only e2e failure is undebuggable from the run page.
+          if ./test/e2e.sh 2>&1 | tee /tmp/e2e-output.txt | tail -120 >> "$OUT"; then
+            E2E=pass
+          else
+            E2E=fail
+          fi
+          { echo '```'; echo; echo "Result: **$E2E**"; } >> "$OUT"
+          if [ -f /tmp/iris-e2e.log ]; then
+            { echo; echo "<details><summary>iris server log (e2e)</summary>"; echo; echo '```'; } >> "$OUT"
+            tail -120 /tmp/iris-e2e.log >> "$OUT"
+            { echo '```'; echo; echo "</details>"; } >> "$OUT"
+          fi
+          if [ "$E2E" = fail ]; then
+            echo "::group::e2e output (failed)"
+            tail -80 /tmp/e2e-output.txt || true
+            echo "::endgroup::"
+            echo "::group::iris server log (e2e)"
+            tail -80 /tmp/iris-e2e.log 2>/dev/null || echo "(no server log)"
+            echo "::endgroup::"
+          fi
+
+          # Summary goes to three places: the context file (for the reviewer), the
+          # job log and the run summary (for humans). Without the latter two, a
+          # check failing in CI would be visible only to the model while this step
+          # still reported success.
+          SUMMARY=$(printf '## Check summary\n- npm ci: %s\n- typecheck: %s\n- unit (`npm test`): %s\n- e2e (`./test/e2e.sh`): %s\n' \
+            "$INSTALL" "$TYPECHECK" "$UNIT" "$E2E")
+          { echo; echo "$SUMMARY"; } >> "$OUT"
+          echo "$SUMMARY"
+          echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$INSTALL$TYPECHECK$UNIT$E2E" != "passpasspasspass" ]; then
+            echo "::warning::One or more checks failed — see the run summary. The review continues so Claude reports it on the PR."
+          fi
+
+          git fetch origin "$BASE_REF" --depth=0 || true
+          MERGE_BASE=$(git merge-base "origin/$BASE_REF" HEAD)
+          {
+            echo
+            echo "## Changed files (merge-base \`$MERGE_BASE\`)"
+            echo '```'
+            git diff --name-status "$MERGE_BASE"...HEAD
+            echo '```'
+            echo
+            echo "## Full diff"
+            echo '```diff'
+            git diff "$MERGE_BASE"...HEAD
+            echo '```'
+            echo
+            echo "## Full source of added/modified files"
+          } >> "$OUT"
+
+          git diff --name-only --diff-filter=AM "$MERGE_BASE"...HEAD | while read -r f; do
+            [ -f "$f" ] || continue
+            if file --mime "$f" | grep -q 'charset=binary'; then
+              printf '\n### %s\n\n_(binary — skipped)_\n' "$f" >> "$OUT"
+              continue
+            fi
+            BYTES=$(wc -c < "$f" | tr -d ' ')
+            if [ "$BYTES" -gt "$MAX_BYTES_PER_FILE" ]; then
+              printf '\n### %s\n\n_(%s bytes — too large, see diff above)_\n' "$f" "$BYTES" >> "$OUT"
+              continue
+            fi
+            printf '\n### %s\n\n```\n' "$f" >> "$OUT"
+            head -n "$MAX_LINES_PER_FILE" "$f" >> "$OUT"
+            printf '\n```\n' >> "$OUT"
+          done
+
+          {
+            echo
+            echo "## Agent library (agents/*.md are executable prompts)"
+            echo '```'
+            ls -1 agents/
+            echo '```'
+          } >> "$OUT"
+
+          echo "context: $(wc -c < "$OUT" | tr -d ' ') bytes"
+
+      - name: Configure AWS credentials (OIDC)
+        if: steps.guard.outputs.already_reviewed != 'true'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_BEDROCK_ROLE_ARN }}
+          aws-region: us-east-2
+
+      - name: Claude review
+        if: steps.guard.outputs.already_reviewed != 'true'
+        uses: anthropics/claude-code-action@v1
+        env:
+          PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
+        with:
+          use_bedrock: "true"
+          allowed_bots: "claude"
+          # display_report intentionally left unset: it auto-posts an aggregated
+          # review at end of session, which races with the single explicit
+          # `gh pr review` the prompt below asks for and double-submits.
+          #
+          # No --max-turns either: timeout-minutes on the job is the budget.
+          # Turn caps drop reviews mid-investigation; wall-clock is what we pay for.
+          claude_args: >-
+            --allowedTools Bash(*),Read(*),Glob,Grep
+            --model ${{ vars.BEDROCK_REVIEW_MODEL || 'us.anthropic.claude-opus-5' }}
+          prompt: |
+            You are a skeptical code reviewer for **Equalify Iris**, reviewing PR #${{ steps.ctx.outputs.pr_number }}
+            (head ${{ steps.ctx.outputs.head_sha }}) in ${{ github.repository }}.
+
+            Read `/tmp/review-context.md` FIRST — it already contains the PR metadata, the
+            install/typecheck/unit/e2e output (see its "Check summary" section), the full diff,
+            and the full source of every added or modified file. Do not re-run the checks. Use
+            Read/Glob/Grep on the checkout only to inspect files the diff touches but the
+            context did not include (e.g. the other side of a changed interface).
+
+            This repo has no `CLAUDE.md` or `REVIEW.md` — the conventions below are the whole of
+            it. Do not waste turns looking for them.
+
+            ## What Iris is
+
+            Iris converts page images (scanned PDFs, screenshots) into accessible HTML. A
+            session uploads images, an orchestrated pipeline extracts content with per-content-type
+            "agents" (`agents/*.md` — markdown files that ARE executable prompts, loaded at
+            runtime and sent to the model), lints the result with axe-core in jsdom, iterates on
+            review feedback, and serves the HTML back. Node 24 runs the TypeScript sources
+            directly (`--experimental-sqlite`, no build step); `tsc --noEmit` is the only type
+            gate. State lives in SQLite plus per-session directories on disk. Model calls go
+            through a `ModelProvider` abstraction (`src/providers/`) with Bedrock and OpenRouter
+            adapters. The project is AGPL-3.0-or-later.
+
+            ## Must flag (blocking)
+
+            1. **Accessibility correctness of the output.** This is the product. Flag anything
+               that could regress semantic HTML, heading hierarchy, reading order, table
+               headers/scope, form labels, alt text, `<main>`/`<title>` fidelity, or the
+               axe-core-clean guarantee. Two specific traps the e2e suite guards and a change
+               can silently break: provenance comments (`@source`) leaking into delivered HTML,
+               and the `content-disposition` output filename mirroring the uploaded page name.
+               Injected CSS/styling in agent output is also a defect — agents are required to
+               emit unstyled semantic HTML.
+
+            2. **Upstream side effects.** `src/github/issue.ts` writes to a *third-party* repo
+               from two paths: `createAgentIssue` (label `iris-agent-suggestion`) and
+               `createAgentUpdateIssue` (label `iris-agent-update`). Both dedupe by title and
+               both swallow search/label failures. Flag any change that widens what gets filed,
+               weakens the dedupe, files under the wrong identity, or turns a swallowed error
+               into a hard failure (or vice-versa) without saying so. Pay particular attention
+               to *whose* token is used — `src/pipeline/contribute.ts` currently falls back to
+               the end user's OAuth token when no service token is configured, which is a real
+               tension with the stated intent of never publishing under end users' identities.
+               Any change in that area needs to be deliberate.
+
+            3. **Auth, tokens, and secrets.** Device-flow handling (`src/auth/`), bearer-token
+               validation, per-session ownership checks on every `/v1/sessions/:id` route, and
+               anything that could log, persist, or echo a GitHub token, an API key, or a user's
+               uploaded content. Cross-session data access is a security bug, not a nit.
+
+            4. **Provider / model routing and cost.** Model resolution falls back per-agent →
+               provider `per_capability` → provider `default_model`. Flag changes that make an
+               unbounded number of model calls, remove concurrency limits
+               (`src/util/concurrency.ts`), drop request timeouts, silently change which model a
+               capability resolves to, or make a provider adapter diverge from the
+               `ModelProvider` contract in `src/providers/types.ts`.
+
+            5. **Correctness and regressions generally.** Logic bugs, unhandled rejections in
+               the pipeline (a throw in a phase must fail the session cleanly, not wedge it),
+               SQLite migration/schema changes that are not backward compatible, session/`tmp/`
+               directory leaks (closing a session must clean its tmp dir), and path handling in
+               `src/store/paths.ts` that could escape the data dir.
+
+            6. **Failing checks.** If the "Check summary" shows install, typecheck, unit tests,
+               or e2e failing, that is blocking. Say which one and quote the relevant output.
+
+            7. **Missing tests.** New pipeline behaviour, new routes, or a fixed bug with no
+               corresponding assertion. Unit tests live in `test/*.test.ts` (all of them are
+               registered explicitly in the `test` script in `package.json` — a new test file
+               that is not added there never runs, which is itself worth flagging); endpoint
+               behaviour is covered by `test/e2e.sh` against the mocks in
+               `test/mock-services.mjs`.
+
+            8. **The PR's own contract.** `.github/pull_request_template.md` asks the author to
+               confirm `npm run typecheck`, `./test/e2e.sh`, axe-core 0 violations on the demo,
+               no unjustified new runtime dependencies, and AGPL-3.0-or-later licensing. Flag
+               unjustified new runtime dependencies (the dependency footprint is deliberately
+               small) and any code copied in under an incompatible licence.
+
+            ## Should flag (non-blocking, mention briefly)
+
+            - Agent markdown edits that loosen the output contract, drop the accessibility
+              requirements, or change a pinned git SHA without explanation.
+            - Docs (`README.md`, `docs/API.md`, `prd.md`) that now contradict the code, and
+              `config.example.yaml` missing a newly-required config key.
+            - Error responses that leak internals, or run-log events that lose the information
+              needed to debug a failed session.
+
+            ## Do NOT flag
+
+            - Style, formatting, or naming preferences. There is no linter or formatter in this
+              repo on purpose; match the surrounding code and move on.
+            - "You could also do X" alternatives when the existing approach is correct.
+            - Pre-existing issues the PR does not touch.
+            - Anything already handled correctly in the diff. Verify before claiming.
+
+            ## Output
+
+            Post **exactly ONE** review with `gh pr review ${{ steps.ctx.outputs.pr_number }}`:
+
+            - `--request-changes` if any check in the summary failed, or you found a blocking issue.
+            - `--approve` if it is clean.
+            - Reference concrete `path:line` locations. Quote the code you are objecting to.
+            - Be concise. No praise sections, no restating the diff.
+            - End the body with a single line: `Accessibility impact: <one sentence>` — what this
+              change does to the accessibility of Iris's output, or "none" if it cannot affect it.
+
+            Do not push commits, do not edit files, do not comment on the PR by any other means.
+
+      - name: Verify claude[bot] review was posted
+        # Not run on the PR that introduces this file: claude-code-action refuses
+        # to execute until an identical copy exists on the default branch, so it
+        # self-skips and there is no review to verify. Everything before this step
+        # still exercises the real path (OIDC, context build, model access).
+        if: >-
+          steps.guard.outputs.already_reviewed != 'true' &&
+          !contains(steps.ctx.outputs.changed_workflow, 'code-review.yml')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.ctx.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          # The action can exit 0 without ever calling `gh pr review`, leaving the
+          # PR unreviewed and this check green. Fail loudly instead.
+          COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
+            --jq ".[] | select(.user.login==\"claude[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
+            | wc -l | tr -d ' ')
+          if [ "${COUNT:-0}" -eq 0 ]; then
+            echo "::error::No claude[bot] review posted for $HEAD_SHA. Re-run with: gh workflow run code-review.yml -f pr_number=$PR_NUMBER"
+            exit 1
+          fi
+          echo "claude[bot] review exists for $HEAD_SHA"
