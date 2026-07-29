@@ -128,7 +128,7 @@ export async function runPipeline(args: {
         const assembled = await runAssembly(ctx, fragments);
 
         setPhase("review");
-        review = await runReview(ctx, { body: assembled.body, lint: assembled.lint });
+        review = await runReview(ctx, { body: assembled.body, lint: assembled.lint, pages: fragments });
       } else {
         mode = "feedback_iterative";
         log.event("run_start", { images: images.length, feedback: args.feedback ?? null, mode });
@@ -138,7 +138,7 @@ export async function runPipeline(args: {
         // Re-lint the existing reviewed body (no model call), then let the
         // feedback-aware review loop refine it in place.
         const lint = await runAxe(wrapDocument(beforeBody));
-        review = await runReview(ctx, { body: beforeBody, lint });
+        review = await runReview(ctx, { body: beforeBody, lint, pages: fragments });
       }
     } else {
       mode = "full";
@@ -153,7 +153,7 @@ export async function runPipeline(args: {
       const assembled = await runAssembly(ctx, fragments);
 
       setPhase("review");
-      review = await runReview(ctx, { body: assembled.body, lint: assembled.lint });
+      review = await runReview(ctx, { body: assembled.body, lint: assembled.lint, pages: fragments });
     }
 
     writeFileSync(paths.sessionOutput(sessionId), review.html);
@@ -164,7 +164,11 @@ export async function runPipeline(args: {
         paths.sessionUnresolved(sessionId),
         `# Unresolved issues at iteration cap\n\n` +
           review.unresolved
-            .map((i) => `- **[${i.severity}]** ${i.issue}\n  - suggested: ${i.suggested_action}`)
+            .map(
+              (i) =>
+                `- **[${i.severity}]**${i.pages?.length ? ` (page ${i.pages.join(", ")})` : ""} ${i.issue}` +
+                `\n  - suggested: ${i.suggested_action}`,
+            )
             .join("\n"),
       );
     }

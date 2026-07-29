@@ -196,9 +196,9 @@ out2=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/output")
   || fail "scope" "a page was re-extracted: $(echo "$out2" | grep -o 'Page marker [0-9]*[^<]*')"
 
 echo "==> 9b. POST /v1/sessions/{id}/feedback (source-level => re-extract page 2)"
-# Content-level feedback the review loop structurally cannot fix: the Reader and
-# Copy Editor never see the source images, so page 2 must go back to the page
-# agent WITH its image attached (#30 Tier 3).
+# Content-level feedback the review loop structurally cannot fix: the Reader never
+# sees the source images, so a misreading raises no issue at all — page 2 must go
+# back to the page agent WITH its image attached (#30 Tier 3).
 fb=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/feedback" -H 'content-type: application/json' \
   -d '{"feedback":"The revenue figure was misread on page 2 — check it against the source."}')
 echo "$fb" | jq -e '.status=="running"' >/dev/null && pass "source-level feedback accepted" || fail "feedback" "$fb"
@@ -214,6 +214,32 @@ revised=$(echo "$out3" | grep -o 'Page marker [0-9]*\. Revised\.' | grep -o '[0-
 markers3=$(echo "$out3" | grep -o 'Page marker [0-9]*' | grep -o '[0-9]*' | tr '\n' ',')
 [ "$markers3" = "1,2,3," ] && pass "all 3 pages still present, in order, after re-extraction" \
   || fail "re-extract order" "expected 1,2,3, got '$markers3'"
+
+echo "==> 9c. POST /v1/sessions/{id}/feedback (copy-edit round => only the flagged page's image)"
+# The Copy Editor attaches source images as base64 on EVERY review round. The mock
+# Reader reports one issue attributed to page 2, so the editor must receive 1 of 3
+# images. Asserted twice, independently: from the run log, and from the editor's own
+# output (the mock echoes how many image parts it actually received).
+fb=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/feedback" -H 'content-type: application/json' \
+  -d '{"feedback":"The headings need a copy-edit pass."}')
+echo "$fb" | jq -e '.status=="running"' >/dev/null && pass "copy-edit feedback accepted" || fail "feedback" "$fb"
+await_ready "copy-edit re-run"
+target=$(log_field feedback_scoped target)
+[ "$target" = "document" ] && pass "copy-edit feedback stayed on the document path" \
+  || fail "scope" "expected target=document, got '$target'"
+attached=$(log_field editor_images attached)
+of=$(log_field editor_images of)
+[ "$attached" = "1" ] && [ "$of" = "3" ] \
+  && pass "editor image payload scoped to the flagged page ($attached of $of)" \
+  || fail "editor images" "expected 1 of 3, got $attached of $of"
+out4=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/output")
+echo "$out4" | grep -q 'Editor saw 1 image(s)' \
+  && pass "the editor actually received 1 image, not all 3" \
+  || fail "editor images" "$(echo "$out4" | grep -o 'Editor saw [0-9]* image(s)')"
+# Issues left at the iteration cap carry the page the Reader attributed them to.
+echo "$out4" | grep -q '@unresolved' && echo "$out4" | grep -q 'page 2' \
+  && pass "unresolved issues record their source page" \
+  || fail "unresolved attribution" "$(echo "$out4" | grep -A3 '@unresolved')"
 
 echo "==> 10. ownership isolation (other endpoints reject unknown id)"
 code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/ses_doesnotexist")
