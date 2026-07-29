@@ -27,6 +27,8 @@ The pipeline as **implemented today** runs in three phases:
    they are extracted **in parallel** — up to `defaults.extraction_concurrency` at a time
    (default 5, clamped to 1..16). Fragments keep submitted document order regardless of which
    page finishes first; lower it if your provider rate-limits you, or set `1` for fully serial.
+   Across sessions, `defaults.max_concurrent_runs` (default 2, clamped to 1..32) bounds how many
+   runs execute at once; further uploads wait in `status: "queued"` rather than being rejected.
 2. **Assembly** — fragments are joined in page order into a minimal accessible document shell
    (`<html lang>`, `<title>`, `<main>`) and validated with axe-core.
 3. **Review** — the Reader reads the document in chunks as two views (HTML + a flattened
@@ -108,6 +110,15 @@ from the environment at startup; changes require a restart.
   response that stops at the ceiling is a **failed** call, not a short one: it arrives as a 200
   with HTML cut mid-tag, which would otherwise be assembled into the deliverable as if it were
   genuine content. Both adapters reject it and the error names the knob to raise.
+- **Concurrency** (§9.4): two independent knobs under `defaults`.
+  `extraction_concurrency` is *within* a run (pages in parallel);
+  `max_concurrent_runs` is *across* sessions. Peak in-flight model calls is the product of the
+  two, so the second is the one that bounds what the machine is doing — each run also holds a
+  jsdom+axe instance. Uploads beyond the cap **wait**, in FIFO order, in `status: "queued"`; the
+  wait appears in the session's run log as `run_queued` / `run_dequeued` (`waited_ms`). Nothing
+  is rejected — the upload is already received and on disk, so a 429 would discard work the user
+  has already paid for. The cap is global rather than per user because the resources it protects
+  (memory, jsdom, the provider's rate limit) are global.
 - **GitHub** (§9.1): OAuth is the auth mechanism — a user *is* their GitHub account. By default the
   service uses a **bundled OAuth App via the device flow** — no per-operator app setup, no
   secret (the same approach the `gh` CLI uses). Set `github.client_id` only to point at your
@@ -172,6 +183,7 @@ src/
     memory.ts            # per-agent example bank of learned corrections
     regression.ts        # fixture capture + pruning on close
     contribute.ts        # drafts suggested agents, files issues
+  util/queue.ts          # bounded FIFO run queue (cross-session concurrency cap)
   auth/                  # GitHub OAuth + device flow + bearer middleware
   github/                # auto-files labeled agent-suggestion issues
   store/                 # node:sqlite metadata store + on-disk session layout (§8.1)
@@ -231,6 +243,16 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   editor-rewritten body looks like once it no longer matches the source excerpts — so narrowing
   wrongly can leave a real issue unfixed at the iteration cap, while broadening wrongly costs no
   more than the behavior this optimization replaced.
+- **Runs are queued, and the queue is in-process (§9.4).** A bounded FIFO queue
+  (`src/util/queue.ts`) caps concurrent pipelines at `defaults.max_concurrent_runs`; sessions over
+  the cap wait in `queued`. Two things this deliberately does *not* do. It does not persist: the
+  queue lives in the process, so a restart loses waiting runs — they are marked `failed`
+  ("interrupted (server restarted)") by the same `failStaleSessions()` sweep that already handled
+  interrupted `running` sessions, which is why that sweep covers `queued` too. And it does not
+  bound upload memory: multer parses the whole body before any handler runs, so by the time the
+  queue sees a session its images are already buffered in RAM (ceiling: multer's own
+  `limits.fileSize` × part count) and any PDF is already rasterized to full-page 150-DPI PNGs.
+  Both are consequences of the single-instance, single-process design the store declares.
 - **Provider retries are not symmetric in code, but are in behavior.** OpenRouter retries by hand
   (3 attempts, exponential backoff) because `fetch()` has no retry strategy. Bedrock has no retry
   loop *on purpose*: the AWS SDK already applies its `standard` strategy — also 3 attempts with

@@ -93,6 +93,13 @@ Accepted file types: PNG, JPEG, TIFF, WebP, **and PDF**. A PDF is rasterized ser
 one image per page (in page order) and processed like any other page sequence. Total pages
 (across all parts) are capped per deployment.
 
+`status` is `queued` on creation and becomes `running` when the pipeline actually starts. Those are
+usually the same instant, but a deployment runs at most `defaults.max_concurrent_runs` pipelines at
+once (default 2): beyond that, the session **waits in `queued`** — in FIFO order, for as long as it
+takes — rather than being rejected. Nothing is lost; the upload is already stored. If a session sits
+in `queued`, check its run log for `run_queued` / `run_dequeued` to see the wait rather than
+assuming a hang.
+
 ## 4. Poll status
 
 The pipeline runs asynchronously; poll until `status` is `ready_for_review` (or `failed`).
@@ -142,7 +149,10 @@ curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/feedback" \
   -d '{"feedback":"The footnote on page 4 was inlined as body text. Keep footnotes distinct."}'
 # 202 {"session_id":"ses_...","status":"running","phase":"extraction"}
 ```
-Then poll status again as in step 4.
+Then poll status again as in step 4. A re-run is subject to the same `max_concurrent_runs` cap as a
+new upload, so the 202 may instead report `{"status":"queued","phase":"triage"}` — accepted, waiting
+for a slot. Either way the session is no longer `ready_for_review`, so a second feedback POST gets a
+`409` until this run finishes.
 
 A re-run on a session that already produced output builds on the **existing document** rather
 than regenerating it, and is routed by what the feedback is about (visible in the run log as a
@@ -171,6 +181,7 @@ Useful events to grep for:
 
 | `type` | Meaning |
 | --- | --- |
+| `run_queued` / `run_dequeued` | The run's wait for a concurrency slot: how busy the queue was when it was admitted (`running` of `limit`, plus `waiting`), and `waited_ms` when it actually started. A large `waited_ms` means the deployment is saturated, not that this run is slow. |
 | `feedback_scoped` | How a feedback re-run was routed (`document` vs `extraction`, and which pages) |
 | `reextract_start` / `reextract_complete` | Which pages went back to the page agent |
 | `editor_images` | How many source images the Copy Editor received this round (`attached` of `of`, plus `pages`). `attached == of` on a multi-page document means at least one issue in that round carried no page attribution, so the round fell back to sending everything. |

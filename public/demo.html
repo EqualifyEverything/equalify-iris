@@ -373,7 +373,8 @@
 
     // ----- Step 3: poll status -----
     const PHASE_LABEL = {
-      triage: 'reading each page', extraction: 'extracting content',
+      queued: 'waiting for a free slot', triage: 'reading each page',
+      extraction: 'extracting content',
       reconciliation: 'stitching pages together', assembly: 'assembling the document',
       review: 'reviewing for accessibility', done: 'finishing up',
     };
@@ -419,7 +420,13 @@
       // queued / running / a transient error / an unexpected shape: keep going
       // so a single hiccup never strands the user on the spinner.
       if (d && (d.phase || d.status)) {
-        const phase = d.phase || d.status;
+        // A session waiting for a concurrency slot is still `queued` and still
+        // carries its initial phase, so reporting the phase here would claim work
+        // that hasn't begun ("reading each page" before anything was read). Say
+        // what is actually happening instead — waiting is not a failure, and a
+        // user who is told they are in a queue waits differently than one who
+        // thinks a step has stalled.
+        const phase = d.status === 'queued' ? 'queued' : (d.phase || d.status);
         const label = PHASE_LABEL[phase] || phase;
         announce('Working — ' + label + '…'); // visible only — not a live region, so it never re-announces
         if (phase !== lastPhase) {              // announce a step change to screen readers exactly once
