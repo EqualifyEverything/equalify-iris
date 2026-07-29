@@ -316,9 +316,9 @@ The Reader is given an index of the document's pages (page number + an excerpt o
 - Inputs: the problem block(s), the relevant source image(s), the issue list, the surrounding HTML (for context, read-only).
 - Output: proposed replacement HTML for each flagged block. Does not modify the document directly.
 
-**Amended (v1.1): "the relevant source image(s)" is enforced, and is the pages the Reader attributed the issues to (§7.8 v1.1).** Sending the whole document's images is the naive reading of this section and is the dominant per-round cost of the review loop — every page's image, re-uploaded on every one of up to `max_review_iterations` rounds. The editor receives only the union of the attributed pages.
+**Amended (v1.1): "the relevant source image(s)" is enforced, and is the pages the Reader attributed the issues to (§7.8 v1.1).** Sending the whole document's images is the naive reading of this section and is the dominant per-round cost of the review loop — every page's image, re-uploaded on every one of up to `max_review_iterations` rounds. When every issue in a round is attributed, the editor receives only the union of those pages.
 
-When no issue in a round carries an attribution, every image is attached. That is the expensive direction on purpose: an editor with no view of the source cannot fix a fidelity problem at all, which is the only reason it gets images. A round in which *some* issues are attributed narrows to those pages — an issue whose content matched no page excerpt is characteristically structural (duplication, reading order, heading levels) and is corrected from the HTML.
+Narrowing requires *full* attribution: if any issue in the round could not be attributed, every image is attached. That is the expensive direction on purpose. An unattributed issue is usually structural (duplication, reading order, heading levels) and correctable from the HTML alone — but it is also what an editor-rewritten body looks like once it has drifted too far from the source excerpts to match, and that drift is worst in the late rounds where the iteration budget is thinnest. Narrowing wrongly can leave an issue at the cap having never been shown its own page; broadening wrongly costs no more than the unoptimized behavior this replaces.
 
 ### 7.10 Assembler Agent
 

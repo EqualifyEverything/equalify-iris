@@ -218,12 +218,15 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
 - **Color-contrast lint.** Output is content-only with no styling (§4), so axe-core's
   `color-contrast` rule is disabled — it cannot be assessed without rendering and is out of
   scope.
-- **Copy Editor image payload (§7.9).** The editor gets only the images for the pages the Reader
-  attributed issues to (logged per round as `editor_images`). Attaching every page's image on
-  every round is the dominant per-round cost of the review loop — on a 25-page document that is
-  25 base64 PNGs × up to `max_review_iterations`. If no issue in a round carries an attribution,
-  every image is attached: an editor with no view of the source cannot fix a fidelity problem at
-  all, so the fallback is deliberately the expensive direction rather than the wrong one.
+- **Copy Editor image payload (§7.9).** When every issue in a round is attributed to a page, the
+  editor gets only those pages' images (logged per round as `editor_images`). Attaching every
+  page's image on every round is the dominant per-round cost of the review loop — on a 25-page
+  document that is 25 base64 PNGs × up to `max_review_iterations`. Narrowing requires *full*
+  attribution: one unattributed issue re-broadens the round to every image. An unattributed issue
+  is usually structural and fixable from the HTML alone, but it is also what a heavily
+  editor-rewritten body looks like once it no longer matches the source excerpts — so narrowing
+  wrongly can leave a real issue unfixed at the iteration cap, while broadening wrongly costs no
+  more than the behavior this optimization replaced.
 - **Feedback re-runs (§7.12).** Re-runs are logged separately (a `feedback_rerun` event) and the
   prior `output.html` is snapshotted to `sessions/<id>/history/` so it can be reverted to. A
   revert *endpoint* is out of v1 API scope (not in §9); the data is preserved to enable it.

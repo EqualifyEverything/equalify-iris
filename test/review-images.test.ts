@@ -144,19 +144,31 @@ test("a missing pages field is treated as unattributed", () => {
   assert.deepEqual(selected.map((i) => i.order), [1, 2]);
 });
 
-test("a partly-attributed round narrows to the pages that were attributed", () => {
+test("one unattributed issue re-broadens the whole round", () => {
   const images = [img(1), img(2), img(3)];
   // Mixed round: one issue is tied to page 2, the other could not be localized.
-  // An issue whose content matched no source excerpt is characteristically
-  // structural (dedup, reading order, heading levels) — fixable from the HTML, not
-  // from a page image — so it does not re-broaden the payload. And the loop
-  // self-heals: once the attributed issues are fixed, the leftover becomes the
-  // ONLY issue, nothing is attributed, and the next round attaches every image.
+  // Narrowing to [2] would be the cheaper guess, and usually harmless — an
+  // unattributed issue is typically structural and fixable from the HTML. But it is
+  // also what an editor-rewritten body looks like once it has drifted from the
+  // source excerpts, and that drift is worst in the late rounds where the iteration
+  // budget is thinnest. At the cap the issue would reach @unresolved having never
+  // been shown its page. Broadening costs at most the pre-optimization payload.
   const selected = imagesForIssues(images, [
     { issue: "table headers", severity: "high", suggested_action: "add th", pages: [2] },
     { issue: "duplicated content", severity: "medium", suggested_action: "dedupe" },
   ]);
-  assert.deepEqual(selected.map((i) => i.order), [2]);
+  assert.deepEqual(selected.map((i) => i.order), [1, 2, 3]);
+});
+
+test("an empty pages array counts as unattributed, not as a narrow selection", () => {
+  // `pages: []` is what runReader produces when knownPages() drops every number the
+  // model claimed — an attribution attempt that failed, not an attribution to
+  // nothing. It must behave like a missing field.
+  const selected = imagesForIssues([img(1), img(2)], [
+    { issue: "a", severity: "low", suggested_action: "x", pages: [] },
+    { issue: "b", severity: "low", suggested_action: "y", pages: [2] },
+  ]);
+  assert.deepEqual(selected.map((i) => i.order), [1, 2]);
 });
 
 test("attributions that match no available image fall back rather than sending none", () => {

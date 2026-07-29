@@ -173,7 +173,7 @@ Useful events to grep for:
 | --- | --- |
 | `feedback_scoped` | How a feedback re-run was routed (`document` vs `extraction`, and which pages) |
 | `reextract_start` / `reextract_complete` | Which pages went back to the page agent |
-| `editor_images` | How many source images the Copy Editor received this round (`attached` of `of`, plus `pages`). `attached == of` on a multi-page document means the Reader attributed nothing, so the round fell back to sending everything. |
+| `editor_images` | How many source images the Copy Editor received this round (`attached` of `of`, plus `pages`). `attached == of` on a multi-page document means at least one issue in that round carried no page attribution, so the round fell back to sending everything. |
 | `reader` / `editor` | Per-iteration review-loop progress (issue counts) |
 
 ## 7b. Diagnostics (timing / hang detection)

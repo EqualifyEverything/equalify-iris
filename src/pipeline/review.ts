@@ -116,18 +116,29 @@ async function runReader(
 }
 
 // Which source images the Copy Editor needs this round: the union of the pages the
-// Reader attributed its issues to.
+// Reader attributed its issues to — but ONLY when it attributed every issue.
 //
-// Falls back to EVERY image only when NOTHING was attributed. A document that
-// silently loses its images loses the only way to fix a source-fidelity problem,
-// which is what images are for here — so the fallback is expensive, never wrong.
+// One unattributed issue re-broadens the whole round to every image. This follows
+// the same asymmetric-cost bias as the rest of the pipeline: narrowing wrongly can
+// leave an issue permanently unfixable, while broadening wrongly costs no more than
+// the behaviour this optimization replaced.
 //
-// A partly-attributed round narrows to what was attributed. An issue whose content
-// matched no source excerpt is characteristically structural (duplication, reading
-// order, heading levels) and is fixed from the HTML, not from a page image. The
-// loop also self-heals: once the attributed issues are resolved, an unattributed
-// leftover becomes the only issue and the next round attaches everything.
+// The tempting alternative — narrow to whatever WAS attributed and let the loop
+// recover later — is worse than it looks. An unattributed issue is usually
+// structural (duplication, reading order, heading levels) and fixable from the HTML
+// alone, but it is also what you get when the editor has rewritten the body far
+// enough that the Reader can no longer match it to a source excerpt. That drift
+// grows every round, so a genuine content issue can go unattributed in exactly the
+// late rounds where the iteration budget is thinnest. Recovery costs a full
+// iteration (the leftover must become the ONLY issue before images come back), and
+// at the cap it never happens — the issue is written to @unresolved having never
+// been shown its own page.
+//
+// The cost of being generous is bounded: a chronically unattributable structural
+// issue pins the document to all-images, which is precisely the status quo. The
+// savings case — every issue attributed — is the common one and is preserved.
 export function imagesForIssues(images: InputImage[], issues: ReviewIssue[]): InputImage[] {
+  if (issues.some((i) => !i.pages?.length)) return images;
   const wanted = new Set(issues.flatMap((i) => i.pages ?? []));
   if (wanted.size === 0) return images;
   const selected = images.filter((img) => wanted.has(img.order));
