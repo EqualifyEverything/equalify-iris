@@ -243,6 +243,12 @@ created in the same millisecond tie on it, and paging on a non-unique key skips 
 repeats rows at page boundaries. Treat it as opaque; the shape is documented so a paging
 bug is readable in a request log, not so clients can construct one.
 
+"Verbatim" means the *value*, not the URL: **percent-encode it when you build the query
+string** (`%7C` for the `|`). A raw `|` is not a legal query character per RFC 3986 — curl,
+browsers and Express all accept it, but a strict URI type (`java.net.URI`) or a strict proxy
+will reject the request, and the error will not point back here. Use whatever your client
+calls `--data-urlencode`; the examples below do.
+
 `next_cursor` is `null` on the last page — including when that page is full. Stop when it
 is `null` rather than when a page comes back short.
 

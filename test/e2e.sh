@@ -469,6 +469,36 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" --get \
   --data-urlencode "cursor=$realc" "$BASE/sessions?limit=1")
 [ "$code" = "200" ] && pass "the endpoint's own next_cursor is accepted (200)" \
   || fail "pagination" "the API rejected its own cursor '$realc' with $code"
+# ...and it survives percent-encoding, which is how a correct client sends it: a raw
+# `|` is not a legal query character per RFC 3986, so a strict URI type or proxy will
+# encode it (or refuse). Sent as a literal %7C rather than via --data-urlencode, to
+# prove the server decodes it rather than only tolerating the raw form.
+enc=${realc//|/%7C}
+code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions?limit=1&cursor=$enc")
+[ "$code" = "200" ] && pass "a percent-encoded cursor (%7C) is accepted (200)" \
+  || fail "pagination" "the API rejected its own percent-encoded cursor '$enc' with $code"
+# A rejected cursor is echoed so the 400 is diagnosable, but truncated. Asserting
+# BOUNDEDNESS rather than a length threshold: a 10x longer input must not produce a
+# longer message, which is the actual property (the reflected value is unbounded
+# client input). The length is still reported, so the client can see it was the input
+# and not the truncation that was wrong.
+# Both inputs are 4-digit lengths (1000 and 9000) so the messages must come out
+# EXACTLY equal: the only part that varies with the input is the reported length, and
+# "(1000 chars)" and "(9000 chars)" are the same width. Comparing 500 to 5000 instead
+# leaves a legitimate one-character difference and makes the assertion look broken.
+# (Plain variables, not an associative array — macOS ships bash 3.2.)
+msglens=""
+for n in 1000 9000; do
+  long=$(printf 'x%.0s' $(seq 1 "$n"))
+  msg=$(curl -s "${AUTH[@]}" --get --data-urlencode "cursor=$long" "$BASE/sessions" | jq -r '.error.message')
+  echo "$msg" | grep -q "($n chars)" \
+    || fail "pagination" "a $n-char cursor's 400 should report its length, got: $msg"
+  msglens="$msglens ${#msg}"
+done
+set -- $msglens
+[ "$1" = "$2" ] \
+  && pass "an overlong cursor's 400 echo is bounded ($1 chars for both a 1000- and a 9000-char input)" \
+  || fail "pagination" "the echoed cursor is not bounded: $1 vs $2 chars"
 
 echo "==> 12. POST /v1/sessions/{id}/close (finalize + clean tmp; no PRs)"
 close=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/close")

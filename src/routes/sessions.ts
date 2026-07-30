@@ -121,12 +121,18 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     const raw = req.query.cursor ? String(req.query.cursor) : undefined;
     const cursor = raw ? parseCursor(raw) : undefined;
     if (raw && !cursor) {
+      // Echo the offending value — a 400 that doesn't say what it rejected is
+      // undiagnosable from a client log — but truncated. The reflected input is
+      // whatever the client sent, and a query string can be kilobytes; there is no
+      // legible cursor longer than this, so a longer one is already the answer.
+      const shown = raw.length > 80 ? `${raw.slice(0, 80)}… (${raw.length} chars)` : raw;
       sendError(
         res,
         400,
         "invalid_request",
-        `Invalid cursor: ${raw}. Pass a next_cursor value from a previous response verbatim ` +
-          `(<created_at>|<session_id>, where created_at is UTC ISO-8601 with milliseconds).`,
+        `Invalid cursor: ${shown}. Pass a next_cursor value from a previous response verbatim ` +
+          `(<created_at>|<session_id>, where created_at is UTC ISO-8601 with milliseconds), ` +
+          `percent-encoded in the query string.`,
       );
       return;
     }
