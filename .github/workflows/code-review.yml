@@ -120,11 +120,21 @@ jobs:
           set -euo pipefail
           # Per-commit idempotency: if claude[bot] already reviewed this exact
           # sha, don't post again. A new push (new sha) is reviewed as normal.
-          # --paginate emits one id per match across all pages; count lines
-          # rather than summing per-page lengths.
+          #
+          # Excluding the workflow-review marker is load-bearing, not tidiness.
+          # .github/workflows/workflow-review.yml posts as claude[bot] on the same
+          # commit_id, and this guard gates EVERY step below it — including npm ci,
+          # typecheck, unit and e2e. Counting that review would mean a re-run or
+          # workflow_dispatch of this workflow on the same sha silently skips the whole
+          # suite and reports success, because a *different* workflow had posted about
+          # the CI config. The marker is the first line workflow-review.yml mandates for
+          # its output; keep the two in sync.
+          MARKER='Scope: CI/workflow security review'
           COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
-            --jq ".[] | select(.user.login==\"claude[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
-            | wc -l | tr -d ' ')
+            | jq --arg m "$MARKER" --arg sha "$HEAD_SHA" \
+                '[.[] | select(.user.login=="claude[bot]") | select(.commit_id==$sha)
+                      | select(((.body // "") | startswith($m)) | not)] | length' \
+            | awk '{s+=$1} END {print s+0}')
           if [ "${COUNT:-0}" -gt 0 ]; then
             echo "already_reviewed=true" >> "$GITHUB_OUTPUT"
             echo "A claude[bot] review already exists for $HEAD_SHA — skipping."

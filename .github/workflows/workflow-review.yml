@@ -117,8 +117,8 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     # Arithmetic, since the review prompt tells the reviewer to check it:
-    #   context build   — up to 6 min (polling for the sibling Code Review run; it
-    #                     normally concludes in ~3, and there is no npm ci or test
+    #   context build   — up to 6 min (polling for the sibling Code Review run's
+    #                     *build* step, which lands in ~2; there is no npm ci or test
     #                     suite here, so the rest of the build is seconds)
     #   Claude step     — capped at 14, `bun install` inside it eats up to ~3,
     #                     leaving the model ~11 for a single-file review
@@ -192,10 +192,23 @@ jobs:
           #
           # It starts at the same time as this job and takes ~2 min to reach the
           # summary, so poll rather than expecting it to be ready.
-          # Bounded at 18 x 20s = 6 minutes. The sibling reaches its summary in ~2 min
-          # (npm ci + tsc + unit + e2e) and its Claude step self-skips in ~30s, so the
-          # whole run concludes in ~3 min; 6 is headroom, not an expectation. This bound
-          # is part of the job's timeout arithmetic — see `timeout-minutes` on the job.
+          #
+          # Wait for the sibling's `Build review context` STEP, not for the whole run.
+          # The run's own conclusion is useless as a signal here: the sibling's Claude
+          # step self-skips only for changes to code-review.yml. A PR touching just
+          # workflow-review.yml gets a full 6-13 min review over there, so the run
+          # concludes at ~9-20 min — measured at 8 min on this PR's own head, against
+          # what used to be a 6-minute bound, i.e. the old form could not succeed for
+          # the commonest case. The checks themselves are done ~2 min in either way.
+          #
+          # Reading a still-running job's log is fine: GET /actions/jobs/{id}/logs
+          # serves partial output for an in_progress job (verified — it returned all
+          # four summary lines while the sibling's Claude step was still running).
+          # `gh run view --log` cannot do this; it refuses until the run completes.
+          #
+          # Bounded at 18 x 20s = 6 minutes against a ~2 min expectation, so 3x
+          # headroom. This bound is part of the job's timeout arithmetic — see
+          # `timeout-minutes` on the job.
           # Fail fast on a missing `actions: read` scope instead of polling for 6
           # minutes and then reporting "unavailable". This is a permissions
           # misconfiguration in *this* file, not a property of the PR, so it must be
@@ -239,8 +252,15 @@ jobs:
           # Posting first and going red afterwards gets both.
           echo "scope_ok=$SCOPE_OK" >> "$GITHUB_OUTPUT"
 
+          # SIBLING_STATUS tracks what we learned about the sibling's CHECKS, not the
+          # run's overall conclusion, which may still be minutes away:
+          #   missing  — never found a run, or its build step never finished in time
+          #   done     — the build step completed; its log should hold the summary
+          #   skipped  — the sibling short-circuited (see the `guard` step in
+          #              code-review.yml), so the checks genuinely never ran
           SIBLING_STATUS=missing
           SIBLING_RUN=""
+          SIBLING_JOB=""
           if [ "$SCOPE_OK" = yes ]; then
             for _ in $(seq 1 18); do
               SIBLING_RUN=$(gh api \
@@ -248,39 +268,74 @@ jobs:
                 --jq '[.workflow_runs[] | select(.name=="Code Review")] | sort_by(.run_number) | last | .id' \
                 2>/dev/null || echo null)
               if [ "${SIBLING_RUN:-null}" != "null" ] && [ -n "${SIBLING_RUN:-}" ]; then
-                CONCLUSION=$(gh api "repos/${{ github.repository }}/actions/runs/$SIBLING_RUN" \
-                  --jq '.conclusion // "pending"' 2>/dev/null || echo pending)
-                if [ "$CONCLUSION" != "pending" ] && [ "$CONCLUSION" != "null" ]; then
-                  SIBLING_STATUS="$CONCLUSION"
-                  break
-                fi
+                # One line per job: id, then the conclusion of `Build review context`
+                # ("null" while pending/running, absent → "none" if the step was
+                # skipped by the guard and so never appears).
+                JOBS=$(gh api "repos/${{ github.repository }}/actions/runs/$SIBLING_RUN/jobs" \
+                  --jq '.jobs[] | "\(.id) \([.steps[] | select(.name=="Build review context") | .conclusion // "pending"] | first // "none")"' \
+                  2>/dev/null || echo "")
+                while read -r JID JCONC; do
+                  [ -n "${JID:-}" ] || continue
+                  case "${JCONC:-}" in
+                    success|failure)
+                      # `failure` still gets read: code-review.yml's build step writes
+                      # the summary before anything that can fail after it, and a
+                      # partial summary beats none.
+                      SIBLING_JOB="$JID"; SIBLING_STATUS=done ;;
+                    skipped|none)
+                      # Only believe "skipped" once the job itself is finished —
+                      # `none` is also what a job that has not started yet looks like.
+                      JSTATUS=$(gh api "repos/${{ github.repository }}/actions/jobs/$JID" \
+                        --jq '.status' 2>/dev/null || echo unknown)
+                      if [ "$JSTATUS" = completed ]; then
+                        SIBLING_JOB="$JID"; SIBLING_STATUS=skipped
+                      fi ;;
+                  esac
+                  [ "$SIBLING_STATUS" = missing ] || break
+                # Herestring, not a pipe: `$JOBS | while read` would put the loop in a
+                # subshell and every assignment above would be discarded, leaving
+                # SIBLING_STATUS=missing forever. Not a heredoc either — its terminator
+                # has to sit at column 0 of the generated script, which a future
+                # re-indent of this YAML block would silently break.
+                done <<< "$JOBS"
+                # `break` above only left the `while`; this leaves the retry loop.
+                [ "$SIBLING_STATUS" = missing ] || break
               fi
               sleep 20
             done
             if [ "$SIBLING_STATUS" = missing ]; then
-              echo "::warning::Sibling 'Code Review' run for $HEAD_SHA did not conclude within 6 minutes; the review will proceed without check results."
+              echo "::warning::Sibling 'Code Review' run for $HEAD_SHA did not reach its 'Build review context' step within 6 minutes; the review will proceed without check results."
+            elif [ "$SIBLING_STATUS" = skipped ]; then
+              echo "::warning::Sibling 'Code Review' run $SIBLING_RUN skipped its checks for $HEAD_SHA (a review already existed for this sha); no check results to report."
             fi
           fi
 
-          # Pull the four Result lines out of the sibling job log. Pipe-safe: grep reads
-          # its input to completion, so there is no SIGPIPE here (the trap that broke
-          # PR #39 was `producer | head -N`). `|| true` because grep exits 1 when the
-          # pattern is absent, which `set -e` would otherwise treat as fatal.
+          # Pull the four Result lines out of the sibling JOB log. `/actions/jobs/{id}/logs`
+          # rather than `gh run view --log`: the latter refuses until the whole run is
+          # complete, which is the wrong thing to wait for (see above), while the job
+          # endpoint serves partial output for an in_progress job. Verified against a
+          # live run whose Claude step was still going: all four lines present.
+          #
+          # Pipe-safe: grep reads its input to completion, so there is no SIGPIPE here
+          # (the trap that broke PR #39 was `producer | head -N`). `|| true` because grep
+          # exits 1 when the pattern is absent, which `set -e` would otherwise treat as
+          # fatal.
           #
           # This needs `actions: read` — see the permissions block. Distinguish "log
           # unreadable" from "log read but pattern absent": the first is a config bug in
           # this file, the second means code-review.yml changed its summary format and
           # the grep below has to be updated to match.
           : > /tmp/sibling-summary.txt
-          if [ "$SIBLING_STATUS" != missing ] && [ -n "$SIBLING_RUN" ]; then
-            if gh run view "$SIBLING_RUN" --log > /tmp/sibling-log.txt 2>/dev/null; then
+          if [ "$SIBLING_STATUS" = done ] && [ -n "$SIBLING_JOB" ]; then
+            if gh api "repos/${{ github.repository }}/actions/jobs/$SIBLING_JOB/logs" \
+                 > /tmp/sibling-log.txt 2>/dev/null; then
               grep -oE '(npm ci|typecheck|unit \(`npm test`\)|e2e \(`\./test/e2e\.sh`\)): (pass|fail)' \
                 /tmp/sibling-log.txt > /tmp/sibling-summary.txt || true
               if [ ! -s /tmp/sibling-summary.txt ]; then
-                echo "::warning::Read the sibling run log but found no check-summary lines. code-review.yml's 'Check summary' format has probably changed — update the grep in this step to match."
+                echo "::warning::Read the sibling job log but found no check-summary lines. code-review.yml's 'Check summary' format has probably changed — update the grep in this step to match."
               fi
             else
-              echo "::error::Could not download the sibling run log (needs 'actions: read'). Check summary will be unavailable."
+              echo "::error::Could not download the sibling job log (needs 'actions: read'). Check summary will be unavailable."
             fi
           fi
 
@@ -290,20 +345,33 @@ jobs:
             echo
             if [ -s /tmp/sibling-summary.txt ]; then
               echo "Run: https://github.com/${{ github.repository }}/actions/runs/$SIBLING_RUN"
-              echo "(run conclusion: \`$SIBLING_STATUS\`)"
               echo
               echo "These ran against **this PR's head**, in a job with no OIDC role:"
               echo '```'
               sort -u /tmp/sibling-summary.txt
               echo '```'
+              echo
+              echo "That run may still be in progress — these lines are read from its build"
+              echo "step, which finishes long before its own review does. The four checks above"
+              echo "are complete regardless."
               if grep -q ': fail' /tmp/sibling-summary.txt; then
                 echo
                 echo "**At least one check FAILED.** That is blocking — say which, and post"
                 echo "\`--request-changes\`. Read the run log linked above for the detail."
               fi
             else
-              echo "**Not available.** The sibling run was \`$SIBLING_STATUS\` and no check"
-              echo "summary could be read from it."
+              # Name the specific reason: "skipped" is a property of the sibling run
+              # (it already had a review for this sha), "missing" means we gave up
+              # waiting. A human reading the PR needs to know which.
+              case "$SIBLING_STATUS" in
+                skipped)
+                  echo "**Not available.** The sibling \`Code Review\` run skipped its checks for"
+                  echo "this commit because a review already existed for the same sha, so"
+                  echo "\`npm ci\`, \`typecheck\`, \`npm test\` and \`./test/e2e.sh\` did not run." ;;
+                *)
+                  echo "**Not available.** The sibling \`Code Review\` run did not reach its check"
+                  echo "summary within the time this job waited for it." ;;
+              esac
               echo
               echo "Treat the PR's correctness as **unverified**: do not claim the tests pass, and"
               echo "if the diff touches anything whose behaviour you cannot judge by reading it,"
@@ -561,11 +629,20 @@ jobs:
             - `--approve` if it is clean.
             - Quote the YAML or shell you are objecting to, with `path:line`.
             - Be concise. No praise sections, no restating the diff.
-            - Open the body with a single line: `Scope: CI/workflow security review — checks
-              from the sibling Code Review run; no code was executed in this job.` so nobody
-              mistakes this for the full review. If your Check summary section said **Not
-              available**, write `Scope: CI/workflow security review — checks UNAVAILABLE, PR
-              correctness unverified.` instead.
+            - Open the body with this EXACT line, character for character, as the very first
+              line:
+
+                  Scope: CI/workflow security review
+
+              It must appear verbatim. The `Verify` step at the end of this job greps for it
+              to confirm that *this* workflow posted a review, as opposed to the general
+              `Code Review` reviewer, which posts under the same bot identity on the same
+              commit. If you reword it, this job cannot tell the two apart and will report a
+              missing review as present.
+            - Then, on the next line, state what your checks showed: `Checks: from the sibling
+              Code Review run; no code was executed in this job.` — or, if your Check summary
+              section said **Not available**, `Checks: UNAVAILABLE — PR correctness
+              unverified.`
             - End the body with a single line: `Executes PR code: no` — or `yes` plus the
               location, if you found that it would.
 
@@ -592,14 +669,26 @@ jobs:
         run: |
           set -euo pipefail
           # It may have posted and then failed on a later turn. Don't double-post.
-          # Both identities: the model posts as claude[bot], this step posts as
-          # github-actions[bot] (the GITHUB_TOKEN identity). Matching only claude[bot]
-          # would let a re-run on the same head sha stack a second fallback review.
+          #
+          # Count by MARKER, not by bot identity. Both this workflow and code-review.yml
+          # post as claude[bot] (model) or github-actions[bot] (fallback), and for a PR
+          # touching only workflow-review.yml the sibling Code Review run posts a full
+          # review at this same commit_id — it self-skips only for changes to *itself*.
+          # An identity match therefore sees that foreign review, concludes "already
+          # posted", and exits 0 having posted nothing: a timeout here would go silent
+          # with a green job, which is the exact failure this workflow exists to close.
+          # The marker is the mandated first line of the prompt's output format.
+          MARKER='Scope: CI/workflow security review'
+          # `jq` in a pipe, not `gh api --jq`: --jq takes only a filter, no --arg, so the
+          # marker would have to be spliced into the filter string. `--paginate` without
+          # `--jq` emits one JSON array per page; jq reads them as a stream and prints one
+          # count per page, so awk sums them.
           COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
-            --jq ".[] | select(.user.login==\"claude[bot]\" or .user.login==\"github-actions[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
-            | wc -l | tr -d ' ')
+            | jq --arg m "$MARKER" --arg sha "$HEAD_SHA" \
+                '[.[] | select(.commit_id==$sha) | select((.body // "") | startswith($m))] | length' \
+            | awk '{s+=$1} END {print s+0}')
           if [ "${COUNT:-0}" -gt 0 ]; then
-            echo "Claude already posted a review for $HEAD_SHA despite outcome=$OUTCOME — nothing to do."
+            echo "A workflow-security review already exists for $HEAD_SHA despite outcome=$OUTCOME — nothing to do."
             exit 0
           fi
 
@@ -676,13 +765,22 @@ jobs:
         run: |
           set -euo pipefail
           # The action can exit 0 without ever calling `gh pr review`. Fail loudly.
-          # github-actions[bot] is accepted because the fallback step posts under the
-          # GITHUB_TOKEN identity, and a fallback review is still a verdict.
+          #
+          # Match on the marker, not on the bot identity. Identity cannot distinguish
+          # this job's review from the sibling `Code Review` one: both post as
+          # claude[bot] (model) or github-actions[bot] (fallback), at the same commit_id.
+          # For a PR touching only workflow-review.yml the sibling posts a real review —
+          # it self-skips only on changes to *itself* — so an identity match would report
+          # "review exists" and exit green even if this job posted nothing at all.
+          # The marker is the first line the prompt mandates, and the fallback body opens
+          # with it too; keep all three in sync.
+          MARKER='Scope: CI/workflow security review'
           COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
-            --jq ".[] | select(.user.login==\"claude[bot]\" or .user.login==\"github-actions[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
-            | wc -l | tr -d ' ')
+            | jq --arg m "$MARKER" --arg sha "$HEAD_SHA" \
+                '[.[] | select(.commit_id==$sha) | select((.body // "") | startswith($m))] | length' \
+            | awk '{s+=$1} END {print s+0}')
           if [ "${COUNT:-0}" -eq 0 ]; then
-            echo "::error::No workflow review posted for $HEAD_SHA."
+            echo "::error::No workflow review posted for $HEAD_SHA (no review body starting with '$MARKER')."
             exit 1
           fi
           # A missing `actions: read` degrades every review to "checks UNAVAILABLE".
