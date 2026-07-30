@@ -251,6 +251,145 @@ test("a cursor whose timestamp is not a date is rejected, not compared as a stri
   assert.equal(parseCursor("not-a-date|ses_a"), null);
 });
 
+test("a timestamp that PARSES but is not this column's format is rejected", () => {
+  // The interesting class, and the one a plain Date.parse check waves through.
+  // The value is bound into a STRING comparison, so the only question is whether
+  // it is comparable to the stored `toISOString()` values — and every string
+  // below sorts ABOVE "2026-…", which means "match every row, return page one":
+  // exactly the bug the compound cursor exists to fix, just reached by a
+  // different route.
+  //
+  // The last two are the ones that matter in practice. They are not adversarial —
+  // they are legitimate ISO-8601 for the same instant, and they are what a client
+  // that reformats a timestamp (drops the milliseconds, or renders in local time)
+  // actually sends.
+  for (const raw of [
+    "9999",
+    "Dec 2026",
+    "Jan 1 2026",
+    "2026-05-22T18:00:00Z", // valid ISO-8601, no milliseconds
+    "2026-05-22T19:00:00.000+01:00", // same instant, offset instead of Z
+  ]) {
+    assert.ok(!Number.isNaN(Date.parse(raw)), `precondition: ${raw} parses as a date`);
+    assert.ok(raw > "2026-05-22T18:00:00.000Z", `precondition: ${raw} string-sorts above stored values`);
+    assert.equal(parseCursor(raw), null, `${raw} should be rejected`);
+    assert.equal(parseCursor(`${raw}|ses_a`), null, `${raw} should be rejected with an id too`);
+  }
+  // And what the endpoint actually issues still passes, in both forms.
+  assert.deepEqual(parseCursor("2026-05-22T18:00:00.000Z"), {
+    created_at: "2026-05-22T18:00:00.000Z",
+    session_id: "",
+  });
+  assert.deepEqual(parseCursor("2026-05-22T18:00:00.000Z|ses_a"), {
+    created_at: "2026-05-22T18:00:00.000Z",
+    session_id: "ses_a",
+  });
+});
+
+test("every timestamp the store writes round-trips through parseCursor", () => {
+  // The validator has to accept exactly what createSession produces — checking a
+  // format by hand is how you reject your own cursors. Sample real rows rather
+  // than asserting against a hand-written pattern.
+  withStore((store) => {
+    for (let i = 0; i < 5; i++) {
+      store.createSession({ session_id: `ses_${i}`, github_user_id: USER, image_count: 1, iterations_max: 3 });
+    }
+    const rows = store.listSessions(USER, { limit: 10 });
+    assert.equal(rows.length, 5);
+    for (const r of rows) {
+      const c = { created_at: r.created_at, session_id: r.session_id };
+      assert.deepEqual(parseCursor(encodeCursor(c)), c, `store wrote a cursor it would reject: ${r.created_at}`);
+    }
+  });
+});
+
+test("a nonsense limit cannot produce a short page with a cursor", () => {
+  // `parseInt("-5") || 20` is -5 (negative numbers are truthy), and a negative
+  // limit is destructive twice: SQLite reads `LIMIT -4` as NO limit, and
+  // `slice(0, -5)` trims rows off the END of the page while still leaving an
+  // extra row held back — a short page that claims there is more, about rows the
+  // client was never shown.
+  withStore((store) => {
+    seed(store, Array.from({ length: 8 }, (_, i) => ({ id: `ses_${i}`, ts: T(i) })));
+    const rows = store.listSessions(USER, { limit: 100 });
+    for (const bad of [-5, 0, NaN, 0.4]) {
+      const { page, next } = pageSessions(rows, bad);
+      assert.equal(page.length, 1, `limit ${bad} should floor to a 1-row page, got ${page.length}`);
+      assert.notEqual(next, null, `limit ${bad}: 7 rows remain, so there must be a cursor`);
+    }
+    // A sane limit is untouched.
+    assert.equal(pageSessions(rows, 3).page.length, 3);
+  });
+});
+
+test("a negative limit cannot make the query unbounded", () => {
+  // SQLite reads a negative LIMIT as NO limit, so this is the difference between
+  // returning one row and reading the user's whole session table. Clamping only in
+  // the route would leave the query itself unbounded by arithmetic upstream of it,
+  // and the symptom — a full scan per list request — is invisible in the response.
+  withStore((store) => {
+    seed(store, Array.from({ length: 8 }, (_, i) => ({ id: `ses_${i}`, ts: T(i) })));
+    for (const bad of [-4, -1, 0, NaN]) {
+      const rows = store.listSessions(USER, { limit: bad });
+      assert.equal(rows.length, 1, `limit ${bad} returned ${rows.length} rows (expected a floor of 1)`);
+    }
+    assert.equal(store.listSessions(USER, { limit: 3 }).length, 3, "a sane limit is untouched");
+  });
+});
+
+// --- schema ---
+
+function indexes(store: Store): string[] {
+  return (store as unknown as { db: { prepare(s: string): { all(): { name: string }[] } } }).db
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%' ORDER BY name`)
+    .all()
+    .map((r) => r.name);
+}
+
+test("the keyset index is created and the prefix index it supersedes is dropped", () => {
+  withStore((store) => {
+    // The old (github_user_id, created_at DESC) index is a strict PREFIX of the
+    // keyset one, and nothing orders on that pair alone any more, so keeping it
+    // only costs a b-tree write per session insert.
+    assert.deepEqual(indexes(store), ["idx_sessions_user_page"]);
+  });
+});
+
+test("an existing database is migrated off the two-column index", () => {
+  // The half that matters. `CREATE INDEX IF NOT EXISTS` is a no-op when the name
+  // already exists, so an already-deployed database does not pick up a schema
+  // change by having the CREATE edited — it needs the explicit DROP. Build a
+  // database with the OLD schema, then open it with the current Store.
+  const dir = mkdtempSync(join(tmpdir(), "iris-mig-"));
+  try {
+    const path = join(dir, "old.sqlite");
+    const seedStore = new Store(path);
+    (seedStore as unknown as { db: { exec(s: string): void } }).db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(github_user_id, created_at DESC);`,
+    );
+    assert.deepEqual(indexes(seedStore), ["idx_sessions_user", "idx_sessions_user_page"], "precondition");
+    // Reopening runs the migration.
+    const reopened = new Store(path);
+    assert.deepEqual(indexes(reopened), ["idx_sessions_user_page"]);
+    // And the paging query still uses an index rather than scanning — dropping the
+    // wrong one would be silent, since correctness is unaffected.
+    const plan = (
+      reopened as unknown as { db: { prepare(s: string): { all(...a: unknown[]): { detail: string }[] } } }
+    ).db
+      .prepare(
+        `EXPLAIN QUERY PLAN SELECT * FROM sessions WHERE github_user_id = ?
+         AND (created_at, session_id) < (?, ?) ORDER BY created_at DESC, session_id DESC LIMIT ?`,
+      )
+      .all(1, "x", "y", 2)
+      .map((r) => r.detail)
+      .join(" ");
+    assert.match(plan, /INDEX idx_sessions_user_page/, `expected an index seek, got: ${plan}`);
+    assert.doesNotMatch(plan, /SCAN sessions/, `expected no table scan, got: ${plan}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a session_id containing the separator does not truncate the cursor", () => {
   // Ids are ULIDs today, but splitting on the FIRST separator rather than the
   // last keeps a weird id from silently becoming a different, valid cursor.

@@ -57,16 +57,32 @@ export function encodeCursor(s: SessionCursor): string {
  *     cursor existed, and it degrades to the old `created_at < ?` predicate
  *     (nothing sorts below the empty string, so the tie-breaking clause is
  *     unsatisfiable). A client mid-pagination across a deploy keeps working.
- *   * Anything whose timestamp half is not a valid date is REJECTED rather than
- *     passed through. The old code compared it as a string, so `cursor=hello`
- *     matched every row (`'2026-…' < 'hello'`) and handed back page one — a
- *     client looping on next_cursor would page forever. A 400 says what is wrong.
+ *   * The timestamp half must be in EXACTLY the format the column stores —
+ *     `Date#toISOString()`, UTC with milliseconds — not merely something
+ *     `Date.parse` accepts. It is bound into a **string** comparison, so the only
+ *     question that matters is whether it is comparable to the stored values, and
+ *     "parses as a date" is a much weaker predicate than that. `"9999"`,
+ *     `"Dec 2026"`, and even the legitimate ISO forms `"2026-05-22T18:00:00Z"`
+ *     (no milliseconds) and `"2026-05-22T19:00:00.000+01:00"` (an offset instead
+ *     of Z) all parse, and all sort ABOVE every stored `"2026-…"` value — which
+ *     reproduces the exact bug the compound cursor exists to fix: the query
+ *     matches every row and hands back page one, so a client looping on
+ *     `next_cursor` pages forever. The last two are not adversarial input; they
+ *     are what a client that reformats a timestamp produces. Rejecting them is a
+ *     400 that says what is wrong, rather than a 200 that quietly lies.
+ *
+ *     Round-tripping through `toISOString()` is the check, because that is
+ *     literally the function that produced the stored value (see createSession).
+ *     Cursors this endpoint issued before the compound form existed were bare
+ *     `created_at` values from the same call, so they still pass.
  */
 export function parseCursor(raw: string): SessionCursor | null {
   const i = raw.indexOf(CURSOR_SEP);
   const created_at = i === -1 ? raw : raw.slice(0, i);
   const session_id = i === -1 ? "" : raw.slice(i + 1);
-  if (!created_at || Number.isNaN(Date.parse(created_at))) return null;
+  if (!created_at) return null;
+  const t = new Date(created_at);
+  if (Number.isNaN(t.getTime()) || t.toISOString() !== created_at) return null;
   return { created_at, session_id };
 }
 
@@ -83,13 +99,21 @@ export function parseCursor(raw: string): SessionCursor | null {
  * This lives beside the query rather than in the route because the two halves are
  * one contract — the over-fetch, the slice, and the cursor have to agree, and a
  * route that re-derives them can drift from the query silently.
+ *
+ * `limit` is clamped here as well as at the route, because a negative one is
+ * quietly destructive at both ends: SQLite treats `LIMIT -4` as NO limit (it
+ * reads the user's entire session table), and `rows.slice(0, -5)` drops rows off
+ * the END of the page while still leaving `rows.length > limit` true — so the
+ * response is a short page with a non-null cursor, the one combination that tells
+ * a client "there is more" about rows it was never shown.
  */
 export function pageSessions(
   rows: SessionRecord[],
   limit: number,
 ): { page: SessionRecord[]; next: SessionCursor | null } {
-  const page = rows.slice(0, limit);
-  const held = rows.length > limit ? page[page.length - 1] : null;
+  const size = Math.max(1, Math.floor(limit) || 1);
+  const page = rows.slice(0, size);
+  const held = rows.length > size ? page[page.length - 1] : null;
   return {
     page,
     next: held ? { created_at: held.created_at, session_id: held.session_id } : null,
@@ -124,14 +148,19 @@ export class Store {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(github_user_id, created_at DESC);
-      -- Matches the compound keyset order listSessions pages on. A separate name
-      -- from idx_sessions_user rather than a redefinition: CREATE INDEX IF NOT
-      -- EXISTS is a no-op when the name already exists, so changing the columns
-      -- of the old index in place would silently leave every already-deployed
+      -- Matches the compound keyset order listSessions pages on, exactly. A new
+      -- NAME rather than a redefinition of idx_sessions_user: CREATE INDEX IF NOT
+      -- EXISTS is a no-op when the name already exists, so editing the old
+      -- statement's columns in place would silently leave every already-deployed
       -- database on the two-column version.
       CREATE INDEX IF NOT EXISTS idx_sessions_user_page
         ON sessions(github_user_id, created_at DESC, session_id DESC);
+      -- ...and then drop the two-column index it supersedes. It was a strict
+      -- PREFIX of the above, and no query orders on (github_user_id, created_at)
+      -- alone any more, so keeping it bought nothing and cost an extra b-tree
+      -- write on every session insert. Unconditional and idempotent: this is the
+      -- migration step for databases created before the compound cursor.
+      DROP INDEX IF EXISTS idx_sessions_user;
     `);
   }
 
@@ -246,7 +275,13 @@ export class Store {
       where += ` AND (created_at, session_id) < (?, ?)`;
       params.push(opts.cursor.created_at, opts.cursor.session_id);
     }
-    params.push(opts.limit);
+    // Clamped, not trusted. SQLite reads a NEGATIVE limit as *no* limit, so
+    // `LIMIT -4` returns the user's entire session table — a caller that computed
+    // its limit with `parseInt(x) || 20` (where a negative x is truthy and
+    // survives) turns one list request into a full scan, and nothing about the
+    // response says so. Refusing it here rather than only at the route means the
+    // query cannot be made unbounded by arithmetic upstream of it.
+    params.push(Math.max(1, Math.floor(opts.limit) || 1));
     return this.db
       .prepare(
         `SELECT * FROM sessions WHERE ${where} ORDER BY created_at DESC, session_id DESC LIMIT ?`,

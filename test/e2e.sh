@@ -448,9 +448,27 @@ dupes=$(echo "$walked_sorted" | uniq -d)
 # A cursor that is not one is a 400, not a silent restart. The old code compared
 # the raw string, so `cursor=hello` matched every row and handed back page one —
 # a client following next_cursor would page forever.
-code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions?cursor=hello")
-[ "$code" = "400" ] && pass "an unparseable cursor is rejected (400)" \
-  || fail "pagination" "expected 400 for a garbage cursor, got $code"
+#
+# Every value below string-sorts ABOVE the stored `2026-…` timestamps, so each one
+# reproduces that bug if it gets through. The last two are the ones that matter in
+# practice: both PARSE as dates — they are legitimate ISO-8601 for a real instant —
+# and are what a client that reformats a timestamp sends (milliseconds dropped, or
+# a UTC offset instead of Z). "Date.parse succeeded" is not the same question as
+# "this string is comparable to that column".
+for bad in hello 9999 '2026-05-22T18:00:00Z' '2026-05-22T19:00:00.000+01:00'; do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" --get \
+    --data-urlencode "cursor=$bad" "$BASE/sessions")
+  [ "$code" = "400" ] \
+    || fail "pagination" "expected 400 for cursor='$bad', got $code (it would restart at page one)"
+done
+pass "cursors that are not this column's format are rejected (400), including ones that parse as dates"
+# The real cursor still works, obviously — the check above must not be so strict it
+# rejects what the endpoint itself issues.
+realc=$(curl -s "${AUTH[@]}" "$BASE/sessions?limit=1" | jq -r '.next_cursor')
+code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" --get \
+  --data-urlencode "cursor=$realc" "$BASE/sessions?limit=1")
+[ "$code" = "200" ] && pass "the endpoint's own next_cursor is accepted (200)" \
+  || fail "pagination" "the API rejected its own cursor '$realc' with $code"
 
 echo "==> 12. POST /v1/sessions/{id}/close (finalize + clean tmp; no PRs)"
 close=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/close")

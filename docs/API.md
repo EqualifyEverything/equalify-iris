@@ -244,8 +244,15 @@ repeats rows at page boundaries. Treat it as opaque; the shape is documented so 
 bug is readable in a request log, not so clients can construct one.
 
 `next_cursor` is `null` on the last page — including when that page is full. Stop when it
-is `null` rather than when a page comes back short. A cursor that is not a valid one is a
-`400 invalid_request`, not a silent restart from page one.
+is `null` rather than when a page comes back short.
+
+**Send the cursor back byte-for-byte.** It is validated against the exact format the store
+writes (UTC ISO-8601 with milliseconds), and anything else is a `400 invalid_request` — not
+a silent restart from page one. That includes values which are perfectly good timestamps
+for the same instant: `2026-05-22T18:00:00Z` (milliseconds dropped) and
+`2026-05-22T19:00:00.000+01:00` (an offset instead of `Z`) are both rejected, because the
+cursor is compared as a *string* and either one sorts above every stored value. If you
+round-trip cursors through a date type, you will reformat them; keep them as strings.
 
 ```bash
 # Walk every page.

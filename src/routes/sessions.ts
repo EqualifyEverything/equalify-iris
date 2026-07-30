@@ -111,12 +111,23 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   // therefore compound, and an unparseable one is a 400 rather than being
   // compared as a string, which used to silently hand back page one forever.
   r.get("/", (req: AuthedRequest, res) => {
-    const limit = Math.min(parseInt(String(req.query.limit ?? "20"), 10) || 20, 100);
+    // Clamped low as well as high. `parseInt("-5") || 20` is -5 — a negative
+    // number is truthy — and a negative limit is destructive twice over: SQLite
+    // reads `LIMIT -4` as NO limit, so the whole table comes back, and
+    // `slice(0, -5)` then trims rows off the end of the page while still leaving
+    // an extra row held back, i.e. a short page with a next_cursor.
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? "20"), 10) || 20, 1), 100);
     const status = req.query.status ? String(req.query.status) : undefined;
     const raw = req.query.cursor ? String(req.query.cursor) : undefined;
     const cursor = raw ? parseCursor(raw) : undefined;
     if (raw && !cursor) {
-      sendError(res, 400, "invalid_request", `Invalid cursor: ${raw}. Pass a next_cursor value verbatim.`);
+      sendError(
+        res,
+        400,
+        "invalid_request",
+        `Invalid cursor: ${raw}. Pass a next_cursor value from a previous response verbatim ` +
+          `(<created_at>|<session_id>, where created_at is UTC ISO-8601 with milliseconds).`,
+      );
       return;
     }
     const rows = store.listSessions(req.user!.github_user_id, {
