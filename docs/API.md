@@ -234,9 +234,53 @@ curl -s -H "$AUTH" "$BASE/sessions?status=ready_for_review"
 ```
 ```json
 { "sessions": [ { "session_id": "ses_...", "status": "ready_for_review",
-  "image_count": 2, "created_at": "...", "updated_at": "..." } ], "next_cursor": null }
+  "image_count": 2, "created_at": "...", "updated_at": "..." } ],
+  "next_cursor": "2026-05-22T18:00:00.000Z|ses_01HXYZ..." }
 ```
-Paginate by passing `cursor=<next_cursor>`.
+`limit` is `20` by default and capped at `100`. Anything not an integer of at least 1 —
+`0`, negative, fractional, non-numeric — is the default, not an error: one rule, so two
+equally invalid values can't get page sizes differing by a factor of twenty.
+
+Paginate by passing `cursor=<next_cursor>` **verbatim** — it encodes both halves of the
+sort key (`created_at|session_id`), because `created_at` alone is not unique: sessions
+created in the same millisecond tie on it, and paging on a non-unique key skips and
+repeats rows at page boundaries. Treat it as opaque; the shape is documented so a paging
+bug is readable in a request log, not so clients can construct one.
+
+"Verbatim" means the *value*, not the URL: **percent-encode it when you build the query
+string** (`%7C` for the `|`). A raw `|` is not a legal query character per RFC 3986 — curl,
+browsers and Express all accept it, but a strict URI type (`java.net.URI`) or a strict proxy
+will reject the request, and the error will not point back here. Use whatever your client
+calls `--data-urlencode`; the examples below do.
+
+`next_cursor` is `null` on the last page — including when that page is full. Stop when it
+is `null` rather than when a page comes back short.
+
+**Send the cursor back byte-for-byte.** It is validated against the exact format the store
+writes (UTC ISO-8601 with milliseconds), and anything else is a `400 invalid_request` — not
+a silent restart from page one. That includes values which are perfectly good timestamps
+for the same instant: `2026-05-22T18:00:00Z` (milliseconds dropped) and
+`2026-05-22T19:00:00.000+01:00` (an offset instead of `Z`) are both rejected, because the
+cursor is compared as a *string* and either one sorts above every stored value. If you
+round-trip cursors through a date type, you will reformat them; keep them as strings.
+
+One exception, and the only case where a page can still lose rows: a cursor from *before*
+this endpoint became compound is a bare timestamp with no `|`, and it is still accepted
+rather than 400'd — so a client paginating across the deploy that introduced the compound
+cursor keeps working, but that one request skips any sessions tied on that timestamp.
+It clears itself on the next page, since the cursor it hands back is compound. If a client
+reports a gap during an upgrade window, this is why; re-listing from the start is the fix.
+
+```bash
+# Walk every page.
+cursor=""
+while :; do
+  page=$(curl -s -H "$AUTH" --get ${cursor:+--data-urlencode "cursor=$cursor"} "$BASE/sessions?limit=50")
+  echo "$page" | jq -r '.sessions[].session_id'
+  cursor=$(echo "$page" | jq -r '.next_cursor // empty')
+  [ -z "$cursor" ] && break
+done
+```
 
 ## 9. Close the session (finalize + clean up)
 

@@ -393,6 +393,129 @@ list=$(curl -s "${AUTH[@]}" "$BASE/sessions")
 echo "$list" | jq -e --arg sid "$SID" '.sessions | map(.session_id) | index($sid) != null' >/dev/null \
   && pass "session appears in list" || fail "list" "$list"
 
+echo "==> 11b. paginating GET /v1/sessions visits every session exactly once"
+# The list used to page on `created_at` alone. That is a millisecond timestamp, so
+# a burst of uploads ties on it, and at a page boundary inside a tie the old query
+# both skipped rows (`created_at < ?` drops the rest of the tied group) and could
+# repeat them (nothing pinned the order among ties).
+#
+# Fire the burst in parallel and walk one row per page, so every boundary lands
+# inside it. Whether a tie ACTUALLY occurs is up to the machine — the count is
+# printed rather than asserted, since a run that produced none has still proved
+# the walk is complete, just not the tie-breaking specifically. The tie case is
+# pinned deterministically in test/pagination.test.ts, which forges the
+# timestamps; this step's job is to prove the real wire cursor round-trips
+# through HTTP at all, which no unit test covers.
+burst=()
+for n in 1 2 3 4 5; do
+  curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
+    -F "images=@$png;filename=page-burst-$n.png" -F 'config={"max_review_iterations":1}' >/dev/null &
+  burst+=("$!")
+done
+# Wait on THESE pids only. A bare `wait` would also wait on the mock services and
+# the Iris server — they were started with `&` in this same shell and never exit,
+# so it would hang the script forever.
+for p in "${burst[@]}"; do wait "$p"; done
+# Reference set: one unpaged request (limit is capped at 100, well above what this
+# script creates).
+all=$(curl -s "${AUTH[@]}" "$BASE/sessions?limit=100" | jq -r '.sessions[].session_id' | sort)
+ties=$(curl -s "${AUTH[@]}" "$BASE/sessions?limit=100" \
+  | jq '[.sessions[].created_at] | length - (unique | length)')
+# Walk with limit=1, following next_cursor exactly as a client would.
+walked=""
+cursor=""
+for i in $(seq 1 40); do
+  if [ -z "$cursor" ]; then
+    pg=$(curl -s "${AUTH[@]}" "$BASE/sessions?limit=1")
+  else
+    pg=$(curl -s "${AUTH[@]}" --get --data-urlencode "cursor=$cursor" "$BASE/sessions?limit=1")
+  fi
+  walked="$walked$(echo "$pg" | jq -r '.sessions[].session_id')
+"
+  cursor=$(echo "$pg" | jq -r '.next_cursor // empty')
+  [ -z "$cursor" ] && break
+done
+if [ -n "$cursor" ]; then fail "pagination" "did not terminate after 40 pages"; fi
+walked_sorted=$(echo "$walked" | grep -v '^$' | sort)
+[ "$walked_sorted" = "$all" ] \
+  && pass "one-at-a-time pagination saw every session once ($(echo "$all" | wc -l | tr -d ' ') rows, $ties timestamp ties)" \
+  || fail "pagination" "walked pages differ from the unpaged list:
+$(diff <(echo "$all") <(echo "$walked_sorted") || true)"
+# No duplicates even if the sets happened to match by luck.
+dupes=$(echo "$walked_sorted" | uniq -d)
+[ -z "$dupes" ] && pass "no session was returned on two pages" \
+  || fail "pagination" "duplicated across pages: $dupes"
+# A cursor that is not one is a 400, not a silent restart. The old code compared
+# the raw string, so `cursor=hello` matched every row and handed back page one —
+# a client following next_cursor would page forever.
+#
+# Every value below string-sorts ABOVE the stored `2026-…` timestamps, so each one
+# reproduces that bug if it gets through. The last two are the ones that matter in
+# practice: both PARSE as dates — they are legitimate ISO-8601 for a real instant —
+# and are what a client that reformats a timestamp sends (milliseconds dropped, or
+# a UTC offset instead of Z). "Date.parse succeeded" is not the same question as
+# "this string is comparable to that column".
+for bad in hello 9999 '2026-05-22T18:00:00Z' '2026-05-22T19:00:00.000+01:00'; do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" --get \
+    --data-urlencode "cursor=$bad" "$BASE/sessions")
+  [ "$code" = "400" ] \
+    || fail "pagination" "expected 400 for cursor='$bad', got $code (it would restart at page one)"
+done
+pass "cursors that are not this column's format are rejected (400), including ones that parse as dates"
+# The real cursor still works, obviously — the check above must not be so strict it
+# rejects what the endpoint itself issues.
+realc=$(curl -s "${AUTH[@]}" "$BASE/sessions?limit=1" | jq -r '.next_cursor')
+code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" --get \
+  --data-urlencode "cursor=$realc" "$BASE/sessions?limit=1")
+[ "$code" = "200" ] && pass "the endpoint's own next_cursor is accepted (200)" \
+  || fail "pagination" "the API rejected its own cursor '$realc' with $code"
+# Every unusable limit gets the SAME answer: the default. Written as
+# `Math.max(parseInt(x) || 20, 1)` this was two rules — 0 is falsy so it became 20,
+# while -1 clamped to 1 — i.e. two equally invalid values twenty-fold apart. There are
+# 9 sessions by now, so the default (20) and the clamp (1) are distinguishable.
+# Compared against the no-limit-param response rather than a hardcoded 20, so this does
+# not break if the session count later exceeds the default page size.
+deflt=$(curl -s "${AUTH[@]}" "$BASE/sessions" | jq '.sessions | length')
+[ "$deflt" -gt 1 ] || fail "pagination" "need >1 session to tell the default from a clamp (got $deflt)"
+for bad in 0 -1 -100 abc ''; do
+  n=$(curl -s "${AUTH[@]}" --get --data-urlencode "limit=$bad" "$BASE/sessions" | jq '.sessions | length')
+  [ "$n" = "$deflt" ] \
+    || fail "pagination" "limit='$bad' returned $n rows; the default returns $deflt (two rules, not one)"
+done
+# A fractional limit truncates to a usable size rather than defaulting — 2.7 -> 2.
+n=$(curl -s "${AUTH[@]}" "$BASE/sessions?limit=2.7" | jq '.sessions | length')
+[ "$n" = "2" ] || fail "pagination" "limit=2.7 returned $n rows, expected 2"
+pass "every unusable limit falls back to the default rather than clamping to 1 ($deflt rows)"
+# ...and it survives percent-encoding, which is how a correct client sends it: a raw
+# `|` is not a legal query character per RFC 3986, so a strict URI type or proxy will
+# encode it (or refuse). Sent as a literal %7C rather than via --data-urlencode, to
+# prove the server decodes it rather than only tolerating the raw form.
+enc=${realc//|/%7C}
+code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions?limit=1&cursor=$enc")
+[ "$code" = "200" ] && pass "a percent-encoded cursor (%7C) is accepted (200)" \
+  || fail "pagination" "the API rejected its own percent-encoded cursor '$enc' with $code"
+# A rejected cursor is echoed so the 400 is diagnosable, but truncated. Asserting
+# BOUNDEDNESS rather than a length threshold: a 10x longer input must not produce a
+# longer message, which is the actual property (the reflected value is unbounded
+# client input). The length is still reported, so the client can see it was the input
+# and not the truncation that was wrong.
+# Both inputs are 4-digit lengths (1000 and 9000) so the messages must come out
+# EXACTLY equal: the only part that varies with the input is the reported length, and
+# "(1000 chars)" and "(9000 chars)" are the same width. Comparing 500 to 5000 instead
+# leaves a legitimate one-character difference and makes the assertion look broken.
+# (Plain variables, not an associative array — macOS ships bash 3.2.)
+len_a=""; len_b=""
+for n in 1000 9000; do
+  long=$(printf 'x%.0s' $(seq 1 "$n"))
+  msg=$(curl -s "${AUTH[@]}" --get --data-urlencode "cursor=$long" "$BASE/sessions" | jq -r '.error.message')
+  echo "$msg" | grep -q "($n chars)" \
+    || fail "pagination" "a $n-char cursor's 400 should report its length, got: $msg"
+  [ -z "$len_a" ] && len_a=${#msg} || len_b=${#msg}
+done
+[ "$len_a" = "$len_b" ] \
+  && pass "an overlong cursor's 400 echo is bounded ($len_a chars for both a 1000- and a 9000-char input)" \
+  || fail "pagination" "the echoed cursor is not bounded: $len_a vs $len_b chars"
+
 echo "==> 12. POST /v1/sessions/{id}/close (finalize + clean tmp; no PRs)"
 close=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/close")
 echo "$close" | jq -e '.status=="closed"' >/dev/null && pass "session closed" || fail "close" "$close"

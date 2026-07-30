@@ -27,6 +27,105 @@ export interface SessionRecord {
   updated_at: string;
 }
 
+// The sort key `GET /v1/sessions` pages on. Both halves are required: session
+// rows are ordered by `created_at DESC`, and `created_at` is a millisecond
+// ISO-8601 string, so two sessions created in the same millisecond are
+// indistinguishable by it. Ties are broken by `session_id DESC` — arbitrary but
+// TOTAL, which is what keyset pagination needs.
+export interface SessionCursor {
+  created_at: string;
+  session_id: string;
+}
+
+// Cursors are line-noise to a client but deliberately readable in a log:
+// "2026-05-22T18:00:00.000Z|ses_01HXYZ…". No base64 wrapper, because an opaque
+// blob makes a paging bug unreadable from a request log without buying any real
+// encapsulation — the shape is documented either way.
+const CURSOR_SEP = "|";
+
+export function encodeCursor(s: SessionCursor): string {
+  return `${s.created_at}${CURSOR_SEP}${s.session_id}`;
+}
+
+/**
+ * Parse a client-supplied cursor, or return null if it is not one.
+ *
+ * Two behaviors worth stating:
+ *
+ *   * A cursor with no separator is treated as a bare `created_at` with an empty
+ *     id. That is exactly the shape this endpoint issued before the compound
+ *     cursor existed, and it degrades to the old `created_at < ?` predicate
+ *     (nothing sorts below the empty string, so the tie-breaking clause is
+ *     unsatisfiable). A client mid-pagination across a deploy keeps working —
+ *     but note what "keeps working" means: that one request still skips the rows
+ *     tied on its timestamp, which is the very bug the compound cursor exists to
+ *     fix. It is accepted anyway because the alternative is a 400 that breaks the
+ *     client outright, and it is self-clearing: the cursor handed back is
+ *     compound. Documented in docs/API.md §8 so a gap reported during an upgrade
+ *     window is diagnosable rather than mysterious.
+ *   * The timestamp half must be in EXACTLY the format the column stores —
+ *     `Date#toISOString()`, UTC with milliseconds — not merely something
+ *     `Date.parse` accepts. It is bound into a **string** comparison, so the only
+ *     question that matters is whether it is comparable to the stored values, and
+ *     "parses as a date" is a much weaker predicate than that. `"9999"`,
+ *     `"Dec 2026"`, and even the legitimate ISO forms `"2026-05-22T18:00:00Z"`
+ *     (no milliseconds) and `"2026-05-22T19:00:00.000+01:00"` (an offset instead
+ *     of Z) all parse, and all sort ABOVE every stored `"2026-…"` value — which
+ *     reproduces the exact bug the compound cursor exists to fix: the query
+ *     matches every row and hands back page one, so a client looping on
+ *     `next_cursor` pages forever. The last two are not adversarial input; they
+ *     are what a client that reformats a timestamp produces. Rejecting them is a
+ *     400 that says what is wrong, rather than a 200 that quietly lies.
+ *
+ *     Round-tripping through `toISOString()` is the check, because that is
+ *     literally the function that produced the stored value (see createSession).
+ *     Cursors this endpoint issued before the compound form existed were bare
+ *     `created_at` values from the same call, so they still pass.
+ */
+export function parseCursor(raw: string): SessionCursor | null {
+  const i = raw.indexOf(CURSOR_SEP);
+  const created_at = i === -1 ? raw : raw.slice(0, i);
+  const session_id = i === -1 ? "" : raw.slice(i + 1);
+  if (!created_at) return null;
+  const t = new Date(created_at);
+  if (Number.isNaN(t.getTime()) || t.toISOString() !== created_at) return null;
+  return { created_at, session_id };
+}
+
+/**
+ * Turn an over-fetched result set into one page plus the cursor that follows it.
+ *
+ * Callers ask `listSessions` for `limit + 1` rows and pass the result here. The
+ * extra row is the entire mechanism: it is what distinguishes "the page is full
+ * and there is more" from "the page is full and that was everything". Emitting a
+ * cursor in the second case costs every client one guaranteed-empty request per
+ * list, and a client that treats a non-null cursor as "more exists" reports a
+ * page that isn't there.
+ *
+ * This lives beside the query rather than in the route because the two halves are
+ * one contract — the over-fetch, the slice, and the cursor have to agree, and a
+ * route that re-derives them can drift from the query silently.
+ *
+ * `limit` is clamped here as well as at the route, because a negative one is
+ * quietly destructive at both ends: SQLite treats `LIMIT -4` as NO limit (it
+ * reads the user's entire session table), and `rows.slice(0, -5)` drops rows off
+ * the END of the page while still leaving `rows.length > limit` true — so the
+ * response is a short page with a non-null cursor, the one combination that tells
+ * a client "there is more" about rows it was never shown.
+ */
+export function pageSessions(
+  rows: SessionRecord[],
+  limit: number,
+): { page: SessionRecord[]; next: SessionCursor | null } {
+  const size = Math.max(1, Math.floor(limit) || 1);
+  const page = rows.slice(0, size);
+  const held = rows.length > size ? page[page.length - 1] : null;
+  return {
+    page,
+    next: held ? { created_at: held.created_at, session_id: held.session_id } : null,
+  };
+}
+
 export class Store {
   private db: DatabaseSync;
 
@@ -55,7 +154,19 @@ export class Store {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(github_user_id, created_at DESC);
+      -- Matches the compound keyset order listSessions pages on, exactly. A new
+      -- NAME rather than a redefinition of idx_sessions_user: CREATE INDEX IF NOT
+      -- EXISTS is a no-op when the name already exists, so editing the old
+      -- statement's columns in place would silently leave every already-deployed
+      -- database on the two-column version.
+      CREATE INDEX IF NOT EXISTS idx_sessions_user_page
+        ON sessions(github_user_id, created_at DESC, session_id DESC);
+      -- ...and then drop the two-column index it supersedes. It was a strict
+      -- PREFIX of the above, and no query orders on (github_user_id, created_at)
+      -- alone any more, so keeping it bought nothing and cost an extra b-tree
+      -- write on every session insert. Unconditional and idempotent: this is the
+      -- migration step for databases created before the compound cursor.
+      DROP INDEX IF EXISTS idx_sessions_user;
     `);
   }
 
@@ -135,7 +246,32 @@ export class Store {
       .run(...(values as never[]), new Date().toISOString(), id);
   }
 
-  listSessions(userId: number, opts: { status?: string; limit: number; cursor?: string }): SessionRecord[] {
+  // Keyset pagination over (created_at DESC, session_id DESC).
+  //
+  // This used to page on `created_at < ?` alone. `created_at` is a millisecond
+  // ISO-8601 timestamp and sessions are created by an HTTP handler, so two rows
+  // sharing one is not a corner case — it is what a burst of uploads looks like.
+  // With a non-unique sort key the old query lost and duplicated rows at every
+  // page boundary that fell inside a tie: `<` skipped every other row sharing the
+  // last row's timestamp (they never appear on any page), while SQLite is free to
+  // order the tied rows differently between the two queries, so a row already
+  // returned could come back on the next page. Neither shows up in testing at
+  // small volume, and both silently corrupt any client that walks pages to build
+  // a list.
+  //
+  // The predicate is the row-value form `(created_at, session_id) < (?, ?)`
+  // rather than the equivalent `created_at < ? OR (created_at = ? AND ...)`
+  // expansion. Only the row-value form is visible to SQLite's planner as an
+  // index bound: it seeks
+  // (`SEARCH ... USING INDEX ... (u=? AND (created_at,session_id)<(?,?))`)
+  // where the OR-expansion degrades to scanning every one of the user's rows
+  // (`SEARCH ... (u=?)`). Not a COVERING index seek — this is `SELECT *`, so the
+  // row has to be fetched from the table either way; the index earns its keep by
+  // bounding which rows are visited, not by answering the query alone.
+  listSessions(
+    userId: number,
+    opts: { status?: string; limit: number; cursor?: SessionCursor },
+  ): SessionRecord[] {
     const params: unknown[] = [userId];
     let where = `github_user_id = ?`;
     if (opts.status) {
@@ -143,13 +279,23 @@ export class Store {
       params.push(opts.status);
     }
     if (opts.cursor) {
-      // Cursor is the created_at of the last item from the previous page.
-      where += ` AND created_at < ?`;
-      params.push(opts.cursor);
+      // Strictly after the last row of the previous page, in the same total order
+      // the ORDER BY below imposes — the two must match exactly or rows are
+      // skipped.
+      where += ` AND (created_at, session_id) < (?, ?)`;
+      params.push(opts.cursor.created_at, opts.cursor.session_id);
     }
-    params.push(opts.limit);
+    // Clamped, not trusted. SQLite reads a NEGATIVE limit as *no* limit, so
+    // `LIMIT -4` returns the user's entire session table — a caller that computed
+    // its limit with `parseInt(x) || 20` (where a negative x is truthy and
+    // survives) turns one list request into a full scan, and nothing about the
+    // response says so. Refusing it here rather than only at the route means the
+    // query cannot be made unbounded by arithmetic upstream of it.
+    params.push(Math.max(1, Math.floor(opts.limit) || 1));
     return this.db
-      .prepare(`SELECT * FROM sessions WHERE ${where} ORDER BY created_at DESC LIMIT ?`)
+      .prepare(
+        `SELECT * FROM sessions WHERE ${where} ORDER BY created_at DESC, session_id DESC LIMIT ?`,
+      )
       .all(...(params as never[])) as unknown as SessionRecord[];
   }
 }
