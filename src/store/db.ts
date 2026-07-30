@@ -246,6 +246,43 @@ export class Store {
       .run(...(values as never[]), new Date().toISOString(), id);
   }
 
+  // Apply `patch` only if the session is still in `expected`, and report whether
+  // this call is the one that did it. The status test and the write are one
+  // statement, so exactly one of two concurrent callers can win: SQLite reports 0
+  // changed rows to the loser.
+  //
+  // This replaces read-status-then-write in the endpoints that start work on a
+  // session (`POST /:id/feedback`, `POST /:id/close`). Those handlers are fully
+  // synchronous, so within one process there is no await between the check and the
+  // write and the plain pattern is already safe — the gap only opens across
+  // processes, where two instances share this WAL database. Verified: two processes
+  // racing the read-then-write pattern at a shared wall-clock instant both reported
+  // "won"; through this method exactly one does.
+  //
+  // A second instance is not the supported topology (the queue is in-process and
+  // `failStaleSessions` assumes it), so this is defense in depth rather than a fix
+  // for a reachable bug today. It earns its place by being the *cheaper* invariant
+  // to hold: correctness stops depending on every future handler staying
+  // synchronous. Adding one `await` between the guard and the write in a handler —
+  // the ordinary thing to do when a check needs I/O — would silently reintroduce
+  // the race in-process, and a duplicated feedback run is invisible in the response
+  // (both callers get a 202) while two pipelines write the same output.html and
+  // fragments/final.json.
+  claimSession(
+    id: string,
+    expected: SessionStatus,
+    patch: Partial<Omit<SessionRecord, "session_id" | "github_user_id" | "created_at">>,
+  ): boolean {
+    const keys = Object.keys(patch);
+    if (keys.length === 0) return false;
+    const sets = keys.map((k) => `${k} = ?`).join(", ");
+    const values = keys.map((k) => (patch as Record<string, unknown>)[k]);
+    const res = this.db
+      .prepare(`UPDATE sessions SET ${sets}, updated_at = ? WHERE session_id = ? AND status = ?`)
+      .run(...(values as never[]), new Date().toISOString(), id, expected);
+    return Number(res.changes) > 0;
+  }
+
   // Keyset pagination over (created_at DESC, session_id DESC).
   //
   // This used to page on `created_at < ?` alone. `created_at` is a millisecond
