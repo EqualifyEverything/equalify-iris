@@ -243,6 +243,46 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   editor-rewritten body looks like once it no longer matches the source excerpts — so narrowing
   wrongly can leave a real issue unfixed at the iteration cap, while broadening wrongly costs no
   more than the behavior this optimization replaced.
+- **The flattened screen-reader view must never lose text (§7.8).** `flatten.ts` has two
+  consumers, and both fail *silently* when text goes missing: the Reader reviews this view
+  instead of the source images, so anything absent from it cannot be reported as an issue; and
+  `contentCoverage` measures a candidate agent against an accepted fixture using these words, so
+  text the view can't see is absent from both sides of the comparison. The second is the sharp
+  edge — the regression gate exists to stop an agent update from dropping content, and it scored
+  a table whose every row had been deleted as *perfect*, because the old implementation emitted
+  a table's `<caption>` and returned. Inline elements (`a`, `img`, `em`, …) are now announced
+  within the surrounding phrase and block elements are separate stops, with tables expanded row
+  by row; `test/flatten.test.ts` asserts the invariant mechanically by deriving the expected word
+  set from the DOM independently of `flatten`.
+
+  Two rules follow from `contentCoverage` stripping `[...]` before it compares words, and both
+  are easy to break by accident. **Everything `flatten` adds itself must be inside brackets** —
+  including annotations that read like prose (`[3 rows, 2 columns]`, `[empty]`, `[spans 3
+  columns]`, `[alt missing]`) and a control's `type`, which a screen reader announces as its
+  role. An unbracketed annotation is counted as a word the agent produced and is reproduced free
+  by any candidate emitting a similar structure, which pads the ratio: `(2 rows, 3 columns)`
+  alone moved a fixture that had dropped a table row from a true 0.833 to a reported 0.875,
+  across the 0.85 gate. **And a field's text lives in its attributes, not its child nodes** — so
+  every code path must announce fields through the one shared helper. When only the block path
+  did, a field inside a table cell or an inline wrapper contributed nothing and a form-as-table
+  with every value emptied scored 1.0. `test/flatten.test.ts` enforces the first rule generically
+  (nothing outside brackets may be a word the source document doesn't contain) rather than by
+  listing known markers, which is what let the parenthesised ones slip through initially.
+
+  A third rule, learned the same way: **an accessible name can live in an attribute**
+  (`aria-label`, `title`), so those count as announced content — an agent update that dropped
+  every `aria-label` scored 1.0 before and 0.3 after. The test baseline deliberately collects a
+  *wider* attribute set than `flatten` reads, because when the two lists matched the baseline
+  shared the code's blind spot and no attribute loss could fail a test. A baseline derived from
+  what the code looks at is not independent of the code.
+
+  The prompt and the markers are one contract in the other direction too: `test/flatten.test.ts`
+  asserts `READER_SYSTEM` advertises no marker `flatten` never emits (`[Option]` was documented
+  and unreachable), and every annotation that explains *correct* markup — `[spans N columns]`,
+  `[spans N rows]`, `[decorative, alt empty]` — exists because the prompt tells the Reader that
+  an unexplained mismatch is a defect, and the Copy Editor is licensed to restructure tables.
+  Adding a check to that prompt without the annotation that reconciles it turns the review loop
+  into a false-positive generator aimed at accessible output.
 - **`GET /v1/sessions` pages on a compound cursor (§9.2 v1.1).** The PRD names a `cursor`
   parameter without saying what is in it, and the obvious reading — the last row's
   `created_at` — is unsound: `created_at` is a millisecond timestamp assigned by a request
