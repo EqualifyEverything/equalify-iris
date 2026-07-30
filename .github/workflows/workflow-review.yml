@@ -615,11 +615,13 @@ jobs:
 
             ## Do NOT flag
 
-            - YAML style, key order, comment wording, or line length. There is no linter here.
+            - YAML style, key order, comment wording, or line length. `actionlint` runs in
+              the sibling job and covers schema and expression errors; style is not reviewed.
             - "You could also do X" when the existing approach is correct.
             - Pre-existing issues the PR does not touch.
             - Anything the diff already handles correctly. Verify before claiming.
-            - The absence of test results in your context. That is by design, stated above.
+            - The fact that this job ran no tests itself. That is the invariant, not a gap —
+              the results in your context come from the sibling run, as described above.
 
             ## Output
 
