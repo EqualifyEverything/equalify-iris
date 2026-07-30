@@ -254,6 +254,20 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   within the surrounding phrase and block elements are separate stops, with tables expanded row
   by row; `test/flatten.test.ts` asserts the invariant mechanically by deriving the expected word
   set from the DOM independently of `flatten`.
+
+  Two rules follow from `contentCoverage` stripping `[...]` before it compares words, and both
+  are easy to break by accident. **Everything `flatten` adds itself must be inside brackets** —
+  including annotations that read like prose (`[3 rows, 2 columns]`, `[empty]`, `[spans 3
+  columns]`, `[alt missing]`) and a control's `type`, which a screen reader announces as its
+  role. An unbracketed annotation is counted as a word the agent produced and is reproduced free
+  by any candidate emitting a similar structure, which pads the ratio: `(2 rows, 3 columns)`
+  alone moved a fixture that had dropped a table row from a true 0.833 to a reported 0.875,
+  across the 0.85 gate. **And a field's text lives in its attributes, not its child nodes** — so
+  every code path must announce fields through the one shared helper. When only the block path
+  did, a field inside a table cell or an inline wrapper contributed nothing and a form-as-table
+  with every value emptied scored 1.0. `test/flatten.test.ts` enforces the first rule generically
+  (nothing outside brackets may be a word the source document doesn't contain) rather than by
+  listing known markers, which is what let the parenthesised ones slip through initially.
 - **`GET /v1/sessions` pages on a compound cursor (§9.2 v1.1).** The PRD names a `cursor`
   parameter without saying what is in it, and the obvious reading — the last row's
   `created_at` — is unsound: `created_at` is a millisecond timestamp assigned by a request

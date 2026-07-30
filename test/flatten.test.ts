@@ -106,6 +106,12 @@ test("no announced text is lost, across the structures a real page contains", ()
     ["list inside blockquote", `<blockquote><p>Because:</p><ul><li>First</li></ul></blockquote>`],
     ["list inside a table cell", `<table><tr><td><ul><li>Alpha</li><li>Beta</li></ul></td></tr></table>`],
     ["label wrapping its field", `<label>Postcode <input value="E1 6AN"></label>`],
+    // Every field in the list above is a direct child of a block, which was the one
+    // path that read a field's attributes. These reach it through the inline path.
+    ["input in a table cell", `<table><tr><th>Name</th><td><input value="Ada Lovelace"></td></tr></table>`],
+    ["input under an inline wrapper", `<p>Name <span><input value="Ada Lovelace"></span></p>`],
+    ["select in a table cell", `<table><tr><td><select><option>Platform</option></select></td></tr></table>`],
+    ["colspan header", `<table><tr><th colspan="2">Fiscal year</th></tr><tr><td>A</td><td>B</td></tr></table>`],
     ["deeply nested inline", `<p>A <span>b <strong>c <em>d</em></strong></span> e</p>`],
     ["definition list", `<dl><dt>Term</dt><dd>Meaning</dd></dl>`],
   ] as [string, string][]) {
@@ -185,7 +191,7 @@ test("an image keeps its alt text even inside a link", () => {
   const view = flatten(`<a href="/home"><img alt="Equalify home"></a>`);
   assert.match(view, /Link/);
   assert.match(view, /Equalify home/);
-  assert.match(flatten(`<img src="x.png">`), /\(missing\)/, "a missing alt must be announced as missing");
+  assert.match(flatten(`<img src="x.png">`), /\[alt missing\]/, "a missing alt must be announced as missing");
 });
 
 test("headings keep their level", () => {
@@ -200,8 +206,9 @@ test("form fields announce their label, type and value", () => {
     `<label for="e">Work email</label><input id="e" type="email" placeholder="you@example.org">`,
   );
   assert.match(view, /\[Label\] Work email/);
-  assert.match(view, /\[Field input\]/);
-  assert.match(view, /email/);
+  // The control's type is inside the marker: a screen reader announces it as the
+  // field's role, so it is an annotation rather than transcribed content.
+  assert.match(view, /\[Field input email\]/);
   assert.match(view, /you@example\.org/, "an announced placeholder must survive");
   // A select's options are content, not chrome.
   const sel = flatten(`<select><option>Platform</option><option>Design</option></select>`);
@@ -224,6 +231,58 @@ test("every role marker is bracketed", () => {
   assert.match(view, /\[Row\]/);
 });
 
+test("nothing flatten adds itself survives the bracket strip", () => {
+  // The general form of the check above, and the one that matters: the version
+  // that only listed marker NAMES missed "(N rows, M columns)", "(empty)" and
+  // "(no caption)", whose words joined the compared sets and padded coverage.
+  //
+  // Every word in the output must trace back to the input. Anything left after
+  // stripping `[...]` that the source document does not contain is an annotation
+  // masquerading as content.
+  const cases = [
+    REPORT,
+    `<table><caption>Fees</caption><tr><th colspan="2">Both</th></tr><tr><td>A</td><td></td></tr></table>`,
+    `<table></table>`,
+    `<img src="x.png">`,
+    `<img src="x.png" alt="">`,
+    `<p>Plain paragraph</p>`,
+    `<select><option>Platform</option></select>`,
+    `<input type="email" placeholder="you@example.org" value="ada@example.org">`,
+  ];
+  for (const html of cases) {
+    const emitted = wordsOf(flatten(html).replace(/\[[^\]]*\]/g, " "));
+    const source = announcedWords(html);
+    const invented = [...emitted].filter((w) => !source.has(w));
+    assert.deepEqual(
+      invented,
+      [],
+      `flatten invented ${invented.length} word(s) outside brackets for ${html.slice(0, 60)}: ${invented.join(", ")}` +
+        `\n(they would be counted as content by contentCoverage)\n${flatten(html)}`,
+    );
+  }
+});
+
+test("the table summary does not pad a coverage comparison", () => {
+  // The concrete gate consequence of unbracketed annotations. `rows`, `columns`,
+  // `empty` and `caption` are reproduced free by any candidate that emits a table at
+  // all, so they were guaranteed hits on every table fixture — enough to move a
+  // fixture that had lost a row from a true 0.833 to a reported 0.875, across the
+  // 0.85 gate. `MIN_COVERAGE_WORDS` is 8, so the shorter the fixture the more the
+  // padding dominates.
+  const accepted = `<table><caption>Membership fees by tier</caption>
+    <tr><th>Tier</th><th>Annual cost</th></tr>
+    <tr><td>Basic</td><td>Ninety</td></tr>
+    <tr><td>Standard</td><td>Fourteen</td></tr>
+    <tr><td>Premium</td><td>Twenty</td></tr></table>`;
+  const candidate = accepted.replace("<tr><td>Premium</td><td>Twenty</td></tr>", "");
+  const cov = contentCoverage(accepted, candidate);
+  assert.notEqual(cov, null, "the fixture must be long enough to score");
+  assert.ok(
+    cov! < MIN_CONTENT_COVERAGE,
+    `a fixture that lost a table row scored ${cov}, at or above the ${MIN_CONTENT_COVERAGE} gate`,
+  );
+});
+
 test("empty and degenerate input does not throw", () => {
   for (const html of ["", "   ", "<p></p>", "<table></table>", "<div><span></span></div>", "<ul></ul>", "<img>"]) {
     assert.equal(typeof flatten(html), "string", `threw or returned non-string for ${JSON.stringify(html)}`);
@@ -237,13 +296,90 @@ test("empty and degenerate input does not throw", () => {
 test("a table reports its shape, so a gutted one is visible without reading cells", () => {
   // Row/column counts are what let the Reader (and a human reading the log) see
   // "0 rows" on a table that should have data.
-  assert.match(flatten(`<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>`), /2 rows, 2 columns/);
-  assert.match(flatten(`<table><caption>Cap</caption></table>`), /0 rows, 0 columns/);
+  assert.match(flatten(`<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>`), /\[2 rows, 2 columns\]/);
+  assert.match(flatten(`<table><caption>Cap</caption></table>`), /\[0 rows, 0 columns\]/);
 });
 
 test("an empty cell is announced rather than silently collapsing the row", () => {
   // Otherwise "A | | C" and "A | C" flatten identically, and a dropped cell — a
   // real extraction failure — is invisible.
   const view = flatten(`<table><tr><td>A</td><td></td><td>C</td></tr></table>`);
-  assert.match(view, /A \| \(empty\) \| C/);
+  assert.match(view, /A \| \[empty\] \| C/);
+});
+
+test("a form field announces its value wherever it sits", () => {
+  // A field's text lives in its ATTRIBUTES, so any path that recurses into child
+  // nodes drops it — `<input>` has no children at all. When only the block path
+  // handled fields, every field in a table cell (cells are announced through the
+  // inline path) and every field under an inline wrapper contributed nothing.
+  for (const [label, html] of [
+    ["direct block child", `<form><input value="Ada Lovelace"></form>`],
+    ["inside a table cell", `<table><tr><th>Name</th><td><input value="Ada Lovelace"></td></tr></table>`],
+    ["under an inline wrapper", `<p>Name <span><input value="Ada Lovelace"></span></p>`],
+    ["inside a link", `<a href="/x"><input value="Ada Lovelace"></a>`],
+    ["textarea in a cell", `<table><tr><td><textarea>Ada Lovelace</textarea></td></tr></table>`],
+    ["select in a cell", `<table><tr><td><select><option>Ada Lovelace</option></select></td></tr></table>`],
+  ] as [string, string][]) {
+    const view = flatten(html);
+    assert.match(view, /\[Field (input|textarea|select)\]/, `${label}: no field marker in:\n${view}`);
+    assert.match(view, /Ada Lovelace/, `${label}: the field's text was dropped from:\n${view}`);
+    assertNoTextLost(html, `field ${label}`);
+  }
+});
+
+test("emptying every field of a form-as-table is visible to the regression gate", () => {
+  // The same failure this file exists to prevent, reached through the field path
+  // instead of the table path. EDITOR_SYSTEM names "the same content rendered as
+  // both a form and a table" as a case the pipeline produces, so this shape is not
+  // hypothetical.
+  const accepted = `<table><caption>Contact details</caption>
+    <tr><th>Full name</th><td><input value="Ada Lovelace"></td></tr>
+    <tr><th>Institution</th><td><input value="Cambridge University"></td></tr></table>`;
+  const gutted = accepted.replace(/value="[^"]*"/g, 'value=""');
+  const cov = contentCoverage(accepted, gutted);
+  assert.notEqual(cov, null, "the accepted text must be long enough to score");
+  assert.ok(cov! < MIN_CONTENT_COVERAGE, `every field value was emptied yet coverage was ${cov}`);
+  assert.equal(contentCoverage(accepted, accepted), 1);
+});
+
+test("a select keeps its field marker in the ordinary block position", () => {
+  // The marker used to fire only from the inline path, so it appeared when a select
+  // sat in a table cell and was missing in the common case — leaving the Reader
+  // unable to tell a select from a bare run of [Option] lines, and so unable to see
+  // that the control has no accessible name.
+  for (const html of [
+    `<form><label for="t">Team</label><select id="t"><option>Platform</option></select></form>`,
+    `<p><select><option>Platform</option></select></p>`,
+    `<select><option>Platform</option></select>`,
+  ]) {
+    const view = flatten(html);
+    assert.match(view, /\[Field select\]/, `no select marker in:\n${view}`);
+    assert.match(view, /Platform/);
+  }
+});
+
+test("a colspan cell does not make correct markup look broken", () => {
+  // The Reader is told a table that reports [0 rows] is a defect, and the Copy
+  // Editor may restructure table headers. Counting cells structurally reported a
+  // spanning header row as narrower than the table, which would have the editor
+  // rewrite an already-accessible table. Spanning headers are common in the scanned
+  // tabular documents Iris takes as input.
+  const view = flatten(`<table><caption>Budget</caption>
+    <tr><th colspan="3">Fiscal year 2026</th></tr>
+    <tr><th>Item</th><th>Q1</th><th>Q2</th></tr>
+    <tr><td>Training</td><td>10</td><td>12</td></tr></table>`);
+  assert.match(view, /\[3 rows, 3 columns\]/, `column count should measure columns, not cells:\n${view}`);
+  assert.match(view, /Fiscal year 2026 \[spans 3 columns\]/, `the span must be announced:\n${view}`);
+  // A malformed colspan must not corrupt the count.
+  assert.match(flatten(`<table><tr><td colspan="abc">A</td></tr></table>`), /\[1 rows, 1 columns\]/);
+  assert.match(flatten(`<table><tr><td colspan="-2">A</td></tr></table>`), /\[1 rows, 1 columns\]/);
+});
+
+test("a decorative image is distinguished from a missing alt", () => {
+  // alt="" is correct markup for a decorative image; a missing alt is a defect. The
+  // Reader is told to treat only the second as one, so they must not flatten alike.
+  assert.match(flatten(`<img src="x.png">`), /\[alt missing\]/);
+  assert.doesNotMatch(flatten(`<img src="x.png" alt="">`), /\[alt missing\]/);
+  assert.match(flatten(`<img src="x.png" alt="">`), /decorative/);
+  assert.match(flatten(`<img src="x.png" alt="Bar chart">`), /\[Image alt\] Bar chart/);
 });
