@@ -240,15 +240,21 @@ jobs:
             echo "::endgroup::"
           fi
 
-          # Summary goes to three places: the context file (for the reviewer), the
-          # job log and the run summary (for humans). Without the latter two, a
-          # check failing in CI would be visible only to the model while this step
-          # still reported success.
+          # Summary goes to four places: the context file (for the reviewer), the
+          # job log and the run summary (for humans), and its own small file for
+          # the fallback step to cat. Without the middle two, a check failing in CI
+          # would be visible only to the model while this step still reported
+          # success. The standalone file exists because the fallback cannot cheaply
+          # extract this section back out of $OUT — `sed '/marker/,$p' | head -20`
+          # streams ~130KB into a 20-line reader, takes SIGPIPE, and exits 141,
+          # which `set -o pipefail` turns into a step abort *before* the review is
+          # posted. A dedicated file needs no pipe at all.
           SUMMARY=$(printf '## Check summary\n- npm ci: %s\n- typecheck: %s\n- unit (`npm test`): %s\n- e2e (`./test/e2e.sh`): %s\n' \
             "$INSTALL" "$TYPECHECK" "$UNIT" "$E2E")
           { echo; echo "$SUMMARY"; } >> "$OUT"
           echo "$SUMMARY"
           echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+          echo "$SUMMARY" > /tmp/check-summary.md
           if [ "$INSTALL$TYPECHECK$UNIT$E2E" != "passpasspasspass" ]; then
             echo "::warning::One or more checks failed — see the run summary. The review continues so Claude reports it on the PR."
           fi
@@ -343,8 +349,14 @@ jobs:
         # cancelled and the PR gets nothing (this is exactly how PR #38 ended up
         # with zero reviews after 12 minutes of Opus).
         #
-        # 22 < 30 leaves ~8 min of slack for the action's own `bun install` (up to
-        # ~3 min) plus the fallback. Keep that gap if you change either number.
+        # Budget arithmetic, stated precisely because the obvious reading is wrong:
+        # `bun install` runs INSIDE this step (it is part of the composite action),
+        # so it eats into the 22 minutes, not into the job's remaining 8. At its
+        # worst observed 3 min that leaves the model ~19 min, which is what the
+        # prompt below promises. The job's 8-minute remainder covers everything
+        # outside this step: checkout, `Build review context` (npm ci + tsc +
+        # npm test + e2e, ~2 min), OIDC, fallback and verify.
+        # If you change 22 or 30, re-check both halves of that split.
         timeout-minutes: 22
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
@@ -379,8 +391,9 @@ jobs:
 
             ## Time budget — read this before you start
 
-            You have **~20 minutes of wall clock**. You will be killed at that point, so
-            manage the budget yourself:
+            You have **~19 minutes of wall clock** (a 22-minute step cap, minus up to
+            3 minutes of dependency install before you start). You will be killed at that
+            point, so manage the budget yourself:
 
             - **Append every finding to `/tmp/review-findings.md` as soon as you confirm it**,
               before moving on. If you are cut off, that file is posted to the PR automatically,
@@ -543,11 +556,16 @@ jobs:
             printf 'No partial findings were recorded, so this PR has **not been reviewed**.\n' >> "$BODY"
           fi
 
-          # $SUMMARY is not available across steps; re-read it from the context file.
-          if [ -f /tmp/review-context.md ]; then
+          # $SUMMARY is not available across steps; the builder wrote it to its own
+          # file precisely so this is a plain cat. Do NOT reach into
+          # /tmp/review-context.md with `sed '/^## Check summary/,$p' | head -N`:
+          # the summary sits ahead of the ~130KB diff, so sed streams the whole
+          # remainder into a short reader, dies on SIGPIPE (141), and pipefail
+          # aborts this step before `gh pr review` below ever runs.
+          if [ -f /tmp/check-summary.md ]; then
             {
               printf '\n\n---\n\n'
-              sed -n '/^## Check summary/,$p' /tmp/review-context.md | head -20
+              cat /tmp/check-summary.md
             } >> "$BODY"
           fi
 
