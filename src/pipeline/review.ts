@@ -25,7 +25,10 @@ export interface ReviewResult {
   lint: LintResult;
 }
 
-const READER_SYSTEM = `You are the Reader Agent. You review accessible HTML for reading-order problems, semantic
+// Exported so a test can assert the marker vocabulary it advertises is the one
+// `flatten` actually emits: a marker the prompt promises but the code never produces
+// teaches the Reader to expect something that will not appear.
+export const READER_SYSTEM = `You are the Reader Agent. You review accessible HTML for reading-order problems, semantic
 inconsistencies, duplicated/redundant content, and missed WCAG 2.2 AA requirements. You do NOT
 see source images — you read the document the way a screen-reader user would.
 
@@ -35,14 +38,18 @@ the axe-core lint results provided.
 
 In the flattened view, anything in square brackets is a structural annotation, not content:
 [Heading 1-6], [List item], [Link], [Image], [Image alt], [Table], [Header row], [Row],
-[Field input|textarea|select], [Label], [Option], [Quote], [Caption], [Term], [Definition],
-plus [N rows, M columns], [empty], [no caption], [spans N columns], [alt missing] and
-[decorative, alt empty]. Tables are expanded row by row with cells separated by " | ".
-Treat a table that reports [0 rows], a [Field ...] with no [Label] near it, and an [Image]
-[alt missing] as evidence of a real problem. Do NOT treat [decorative, alt empty] as a
-problem — an empty alt is correct for a decorative image — and do not expect a row's cell
-count to equal the table's column count: a cell marked [spans N columns] accounts for the
-difference.
+[Field input|textarea|select|button|summary], [Label], [Quote], [Caption], [Term],
+[Definition], plus [N rows, M columns], [empty], [no caption], [spans N columns],
+[spans N rows], [alt missing] and [decorative, alt empty]. A field's own announced name
+follows its marker, so [Field input text] with nothing after it is a control with no
+accessible name at all. Tables are expanded row by row with cells separated by " | ".
+
+Treat a table that reports [0 rows], a [Field ...] with nothing announced after it, and an
+[Image] [alt missing] as evidence of a real problem. Do NOT report these, which are correct
+markup: [decorative, alt empty] (an empty alt is right for a decorative image); a row with
+fewer cells than the table has columns, when some cell is marked [spans N columns] or
+[spans N rows]; or a field whose name follows its marker but which has no separate [Label]
+line, since the name may come from an attribute.
 
 You are also given an index of the document's source pages (page number + an excerpt of the
 HTML extracted from that page). For every issue, attribute it to the source "pages" it appears

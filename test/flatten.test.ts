@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { flatten } from "../src/pipeline/flatten.ts";
 import { contentCoverage, MIN_CONTENT_COVERAGE } from "../src/pipeline/feedback.ts";
+import { READER_SYSTEM } from "../src/pipeline/review.ts";
 
 // `flatten` has one invariant: it may reorganize text, but it may not LOSE any.
 // Both of its consumers fail silently when it does.
@@ -25,6 +26,19 @@ import { contentCoverage, MIN_CONTENT_COVERAGE } from "../src/pipeline/feedback.
 // concatenates without separators, which invents words like "failuresbody" and
 // would make this baseline wrong rather than flatten wrong. Announced attribute
 // values count as content too.
+//
+// ANNOUNCED is deliberately wider than the set of attributes `flatten` reads. When
+// the two lists matched, this baseline shared the code's blind spot: a dropped
+// `aria-label` could not fail any test here, because the baseline didn't expect it
+// either. A baseline derived from what the code happens to look at is not
+// independent of the code. It is derived from what a screen reader announces.
+//
+// `style`/`script` text is excluded for the same reason from the other direction:
+// it is not announced, so treating it as expected content would require flatten to
+// emit CSS.
+const ANNOUNCED = ["alt", "placeholder", "value", "aria-label", "title"];
+const NOT_ANNOUNCED = new Set(["STYLE", "SCRIPT", "TEMPLATE", "NOSCRIPT"]);
+
 function announcedWords(html: string): Set<string> {
   const dom = new JSDOM(`<!DOCTYPE html><body>${html}</body>`);
   const doc = dom.window.document;
@@ -34,11 +48,12 @@ function announcedWords(html: string): Set<string> {
       parts.push(n.textContent ?? "");
       return;
     }
+    if (n.nodeType === 1 && NOT_ANNOUNCED.has((n as unknown as { tagName: string }).tagName)) return;
     for (const c of Array.from(n.childNodes)) walk(c);
   };
   walk(doc.body);
-  for (const el of Array.from(doc.querySelectorAll("[alt],[placeholder],[value]"))) {
-    for (const a of ["alt", "placeholder", "value"]) parts.push(el.getAttribute(a) ?? "");
+  for (const el of Array.from(doc.querySelectorAll(ANNOUNCED.map((a) => `[${a}]`).join(",")))) {
+    for (const a of ANNOUNCED) parts.push(el.getAttribute(a) ?? "");
   }
   dom.window.close();
   return wordsOf(parts.join(" "));
@@ -373,6 +388,97 @@ test("a colspan cell does not make correct markup look broken", () => {
   // A malformed colspan must not corrupt the count.
   assert.match(flatten(`<table><tr><td colspan="abc">A</td></tr></table>`), /\[1 rows, 1 columns\]/);
   assert.match(flatten(`<table><tr><td colspan="-2">A</td></tr></table>`), /\[1 rows, 1 columns\]/);
+});
+
+test("a caption with block children does not run its words together", () => {
+  // The last `textContent` call in the file, and the same invented-word bug the rest
+  // of it was rewritten to remove. Worse than a plain drop: "feesapple" is in neither
+  // the accepted fixture nor the candidate, so it pollutes both compared word sets
+  // while "fees" and "apple" vanish from both.
+  const view = flatten(`<table><caption><p>Fees</p><p>Apple</p></caption><tr><td>A</td></tr></table>`);
+  assert.ok(!view.includes("FeesApple"), `caption words ran together:\n${view}`);
+  assert.match(view, /Fees/);
+  assert.match(view, /Apple/);
+  assertNoTextLost(`<table><caption><p>Fees</p><p>Apple</p></caption><tr><td>A</td></tr></table>`, "block caption");
+});
+
+test("an accessible name in an attribute is announced", () => {
+  // A field labelled only by `aria-label` is correct, axe-clean markup. Dropping the
+  // name hid real content from the gate AND made the Reader — told a field with no
+  // announced name is a defect — report a phantom issue on correct markup.
+  for (const [label, html, want] of [
+    ["aria-label on a field", `<input type="text" aria-label="Work email" value="a@b.c">`, /Work email/],
+    ["title on a link", `<a href="/x" title="Read more"></a>`, /Read more/],
+    ["aria-label on a link", `<a href="/x"><span></span></a>`.replace("<a ", `<a aria-label="Skip to content" `), /Skip to content/],
+    ["aria-label on an image with no alt", `<img src="x.png" aria-label="Bar chart">`, /Bar chart/],
+    ["aria-label on a button", `<button aria-label="Close dialog"></button>`, /Close dialog/],
+  ] as [string, string, RegExp][]) {
+    const view = flatten(html);
+    assert.match(view, want, `${label}: accessible name dropped from:\n${view}`);
+    assertNoTextLost(html, label);
+  }
+  // A visible name is not announced twice just because an attribute also exists.
+  const both = flatten(`<a href="/x" title="Home page">Home</a>`);
+  assert.equal(both.match(/Home/g)?.length, 1, `announced twice:\n${both}`);
+});
+
+test("a button or summary announces as a control, not as prose", () => {
+  // In the one view the Reader uses to judge control labelling, a button that
+  // flattens to bare text is indistinguishable from a paragraph — and an icon-only
+  // button, the common accessible-name defect, flattened to nothing at all:
+  // invisible to review and unmeasurable by the gate.
+  assert.match(flatten(`<button type="submit">Send request</button>`), /\[Field button submit\] Send request/);
+  assert.match(flatten(`<details><summary>More</summary><p>Body</p></details>`), /\[Field summary\] More/);
+  const icon = flatten(`<button><img src="x.png"></button>`);
+  assert.match(icon, /\[Field button\]/, `an icon-only button vanished entirely:\n${icon}`);
+});
+
+test("a rowspan cell does not make correct markup look broken either", () => {
+  // Same phantom defect as colspan, one row later: a cell spanning rows leaves the
+  // next row with fewer cells than the table has columns.
+  const view = flatten(`<table><caption>Staff</caption>
+    <tr><th>Name</th><th>Role</th></tr>
+    <tr><td rowspan="2">Ada</td><td>Lead</td></tr>
+    <tr><td>Eng</td></tr></table>`);
+  assert.match(view, /Ada \[spans 2 rows\]/, `the row span must be announced:\n${view}`);
+  assert.match(flatten(`<table><tr><td rowspan="abc">A</td></tr></table>`), /^\[Table\][^\n]*\n\[Row\] A$/m);
+});
+
+test("style and script text is not treated as content", () => {
+  // CSS and JS are neither announced nor transcribed, so emitting them made them
+  // free hits in the coverage word sets — an agent leaking style markup would have
+  // made the gate read as healthier.
+  const view = flatten(`<style>.a{color:red}</style><script>var x=1</script><p>Text</p>`);
+  assert.ok(!view.includes("color"), `stylesheet text leaked into the view:\n${view}`);
+  assert.ok(!view.includes("var x"), `script text leaked into the view:\n${view}`);
+  assert.match(view, /Text/);
+});
+
+test("a marker stays attached to its text when the text is in a block child", () => {
+  // `<li><p>x</p></li>` and `<label><div>x</div></label>` are ordinary shapes. A bare
+  // `[Heading 2]` or `[Label]` alone on a line reads to the Reader as an empty
+  // heading or an unlabelled control, and the prompt teaches it to treat empty
+  // structures as real problems.
+  assert.match(flatten(`<h2><div>Q3 Revenue</div></h2>`), /\[Heading 2\] Q3 Revenue/);
+  assert.match(flatten(`<li><p>First item</p></li>`), /\[List item\] First item/);
+  assert.match(flatten(`<label><div>Work email</div></label>`), /\[Label\] Work email/);
+  // Both markers survive when they nest.
+  assert.match(flatten(`<li><h3>Nested heading</h3></li>`), /\[List item\] \[Heading 3\] Nested heading/);
+  // And a marker still precedes content it cannot merge with, in reading order.
+  const t = flatten(`<li><table><tr><td>Cell</td></tr></table></li>`);
+  assert.ok(t.indexOf("[List item]") < t.indexOf("Cell"), `reading order lost:\n${t}`);
+});
+
+test("every marker the Reader prompt advertises is one flatten emits", () => {
+  // `[Option]` was documented and unreachable: options reach the inline path, where
+  // `option` is neither inline nor a field, so it recursed to bare text. A marker the
+  // prompt promises but the code never emits teaches the Reader to expect something
+  // that will not appear.
+  const view = flatten(`<select><option>Platform</option><option>Design</option></select>`);
+  assert.match(view, /\[Field select\] Platform, Design/);
+  assert.ok(!READER_SYSTEM.includes("[Option]"), "the prompt advertises a marker flatten never emits");
+  // Options are still content, and are separated so they cannot run together.
+  assertNoTextLost(`<select><option>Platform</option><option>Design</option></select>`, "select options");
 });
 
 test("a decorative image is distinguished from a missing alt", () => {

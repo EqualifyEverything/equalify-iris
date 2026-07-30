@@ -268,6 +268,21 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   with every value emptied scored 1.0. `test/flatten.test.ts` enforces the first rule generically
   (nothing outside brackets may be a word the source document doesn't contain) rather than by
   listing known markers, which is what let the parenthesised ones slip through initially.
+
+  A third rule, learned the same way: **an accessible name can live in an attribute**
+  (`aria-label`, `title`), so those count as announced content — an agent update that dropped
+  every `aria-label` scored 1.0 before and 0.3 after. The test baseline deliberately collects a
+  *wider* attribute set than `flatten` reads, because when the two lists matched the baseline
+  shared the code's blind spot and no attribute loss could fail a test. A baseline derived from
+  what the code looks at is not independent of the code.
+
+  The prompt and the markers are one contract in the other direction too: `test/flatten.test.ts`
+  asserts `READER_SYSTEM` advertises no marker `flatten` never emits (`[Option]` was documented
+  and unreachable), and every annotation that explains *correct* markup — `[spans N columns]`,
+  `[spans N rows]`, `[decorative, alt empty]` — exists because the prompt tells the Reader that
+  an unexplained mismatch is a defect, and the Copy Editor is licensed to restructure tables.
+  Adding a check to that prompt without the annotation that reconciles it turns the review loop
+  into a false-positive generator aimed at accessible output.
 - **`GET /v1/sessions` pages on a compound cursor (§9.2 v1.1).** The PRD names a `cursor`
   parameter without saying what is in it, and the obvious reading — the last row's
   `created_at` — is unsound: `created_at` is a millisecond timestamp assigned by a request

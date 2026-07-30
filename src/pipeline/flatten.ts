@@ -71,14 +71,33 @@ function blockMarker(tag: string): string | null {
     case "figcaption": case "caption": return "[Caption]";
     case "dt": return "[Term]";
     case "dd": return "[Definition]";
-    case "option": return "[Option]";
     default: return null;
   }
 }
 
-// Form controls. `select` is here rather than in INLINE because it needs the same
-// treatment in both positions and INLINE membership alone would not give it one.
-const FIELD = new Set(["input", "textarea", "select"]);
+// Interactive controls, announced with their role and accessible name. `select` is
+// here rather than in INLINE because it needs the same treatment in both positions
+// and INLINE membership alone would not give it one. `button` and `summary` are here
+// because a control that flattens to bare prose is indistinguishable from a
+// paragraph in the one view the Reader uses to judge control labelling — and an
+// icon-only button (the common accessible-name defect) flattened to nothing at all.
+const FIELD = new Set(["input", "textarea", "select", "button", "summary"]);
+
+// Never announced and never transcribed content. Their text was being emitted as
+// content, so injected CSS or JS became free hits in the coverage word sets — the
+// gate would read as *healthier* the more style markup an agent leaked.
+const SILENT = new Set(["style", "script", "template", "noscript"]);
+
+// An accessible name can come from an attribute rather than from the subtree. A
+// field labelled only by `aria-label` is correct, axe-clean markup, so dropping it
+// both hid real content from the gate and made the Reader — told to treat a field
+// with no nearby label as a defect — report a phantom issue on correct markup.
+// `aria-labelledby` is deliberately not resolved: it references ids elsewhere in the
+// document, which may be outside the chunk being flattened, and a wrong resolution
+// would invent text rather than lose it.
+function ariaName(el: El): string {
+  return norm(el.getAttribute("aria-label") ?? el.getAttribute("title") ?? "");
+}
 
 interface El {
   tagName: string;
@@ -100,8 +119,11 @@ const tagOf = (el: El): string => el.tagName.toLowerCase();
 // licensed to restructure table headers. Spanning header cells are common in the
 // scanned tabular documents Iris takes as input, so the false positive would fire
 // on ordinary work.
-function span(el: El): number {
-  const n = parseInt(el.getAttribute("colspan") ?? "", 10);
+// `rowspan` gets the same treatment: a cell spanning rows leaves later rows with
+// fewer cells than the table has columns, which is correct markup the Reader would
+// otherwise be instructed to read as a defect.
+function span(el: El, attr: "colspan" | "rowspan" = "colspan"): number {
+  const n = parseInt(el.getAttribute(attr) ?? "", 10);
   return Number.isInteger(n) && n > 0 ? Math.min(n, 1000) : 1;
 }
 
@@ -121,19 +143,29 @@ export function flatten(html: string): string {
   // EDITOR_SYSTEM names it as a case the pipeline produces.
   const fieldText = (el: El): string => {
     const tag = tagOf(el);
-    // `select` announces its options; `input` has none and carries its value as an
-    // attribute; `textarea` carries it as text.
+    // `input` has no children and carries its value as an attribute; everything else
+    // here announces its subtree (a select's options, a button's or summary's label).
+    // A select's options are announced as its value, separated so two options never
+    // run together into an invented word. `[Option]` is deliberately not emitted per
+    // option: it is not a stop of its own inside a control, and a marker the code
+    // never produces but the prompt advertises teaches the Reader to expect something
+    // that will not appear.
     const inner =
-      tag === "select"
-        ? Array.from(el.childNodes).map(inlineText).filter(Boolean).join(" ")
-        : norm(el.textContent ?? "");
+      tag === "input"
+        ? ""
+        : tag === "select"
+          ? Array.from(el.children)
+              .map((c) => inlineText(c))
+              .filter(Boolean)
+              .join(", ")
+          : Array.from(el.childNodes).map(inlineText).filter(Boolean).join(" ");
     // `type` goes INSIDE the marker: a screen reader announces it as the control's
     // role ("email text field"), so it is an annotation, not content the agent
     // transcribed. Left outside, "email"/"checkbox"/"submit" would be counted as
     // words in the coverage comparison and reproduced free by any candidate that
     // emits a similar control.
     const type = norm(el.getAttribute("type") ?? "");
-    const bits = [el.getAttribute("placeholder"), el.getAttribute("value"), inner];
+    const bits = [ariaName(el), el.getAttribute("placeholder"), el.getAttribute("value"), inner];
     return norm(`[Field ${tag}${type ? ` ${type}` : ""}] ${bits.filter(Boolean).join(" ")}`);
   };
 
@@ -147,23 +179,30 @@ export function flatten(html: string): string {
     if (node.nodeType !== ELEMENT) return "";
     const el = asEl(node);
     const tag = tagOf(el);
+    if (SILENT.has(tag)) return "";
     // The alt text itself is content and stays outside the brackets; the fact that
     // it is absent is an annotation and goes inside, for the same reason the table
     // summary does. `alt=""` is distinguished from a missing `alt`: the first is
     // correct markup for a decorative image, the second is a defect, and the Reader
-    // is told to treat only the second as one.
+    // is told to treat only the second as one. An `aria-label`/`title` name is used
+    // when there is no `alt` at all, since that is what a screen reader announces.
     if (tag === "img") {
       const alt = el.getAttribute("alt");
-      if (alt === null) return "[Image] [alt missing]";
+      if (alt === null) {
+        const aria = ariaName(el);
+        return aria ? norm(`[Image alt] ${aria}`) : "[Image] [alt missing]";
+      }
       return alt.trim() ? norm(`[Image alt] ${alt}`) : "[Image] [decorative, alt empty]";
     }
     if (tag === "br") return "";
     if (FIELD.has(tag)) return fieldText(el);
     const kids = Array.from(el.childNodes).map(inlineText).filter(Boolean).join(" ");
-    // A link's name can come from its text, its nested image's alt, or both, so
-    // the marker precedes whatever the subtree produced instead of replacing it.
-    if (tag === "a") return norm(`[Link] ${kids}`);
-    return kids;
+    // A link's name can come from its text, its nested image's alt, an attribute, or
+    // several of those, so the marker precedes whatever the subtree produced instead
+    // of replacing it. The attribute name is added only when the subtree yielded
+    // nothing, so a normal link is not announced twice.
+    if (tag === "a") return norm(`[Link] ${kids || ariaName(el)}`);
+    return norm(`${kids} ${kids ? "" : ariaName(el)}`);
   };
 
   // A table is announced cell by cell, so it is expanded row by row here. Nested
@@ -177,19 +216,27 @@ export function flatten(html: string): string {
     // `colspan` header does not make the table look narrower than its body rows.
     const width = (r: El): number => cellsOf(r).reduce((n, c) => n + span(c), 0);
     const cols = rows.length ? Math.max(...rows.map(width)) : 0;
-    const label = caption ? norm(caption.textContent ?? "") : "[no caption]";
+    // `inlineText`, not `textContent`: a caption with block children
+    // (`<caption><p>Fees</p><p>Apple</p></caption>`) concatenated to "FeesApple" —
+    // the same invented-word bug the rest of this file was rewritten to remove, and
+    // worse than a plain drop, since the invented word pollutes both compared word
+    // sets while the real ones vanish from both.
+    const label = caption ? inlineText(caption as unknown as Node) : "[no caption]";
     out.push(norm(`[Table] ${label} [${rows.length} rows, ${cols} columns]`));
     for (const row of rows) {
       const cells = cellsOf(row);
       const headerRow = cells.length > 0 && cells.every((c) => tagOf(c) === "th");
       const text = cells
         .map((c) => {
-          const s = span(c);
-          // The span is announced on the cell so a row that is narrower in cells
-          // than the table is in columns still reconciles — otherwise the Reader,
-          // told to treat a cell-count mismatch as a defect, reports a phantom
-          // issue and the Copy Editor restructures correct markup.
-          return `${inlineText(c) || "[empty]"}${s > 1 ? ` [spans ${s} columns]` : ""}`;
+          // Spans are announced on the cell so a row that is narrower in cells than
+          // the table is in columns still reconciles — otherwise the Reader, told to
+          // treat a cell-count mismatch as a defect, reports a phantom issue and the
+          // Copy Editor restructures correct markup. `rowspan` produces exactly the
+          // same short row as `colspan`, one row later.
+          const cs = span(c);
+          const rs = span(c, "rowspan");
+          const notes = [cs > 1 ? `[spans ${cs} columns]` : "", rs > 1 ? `[spans ${rs} rows]` : ""];
+          return norm(`${inlineText(c) || "[empty]"} ${notes.filter(Boolean).join(" ")}`);
         })
         .join(" | ");
       out.push(norm(`${headerRow ? "[Header row]" : "[Row]"} ${text}`));
@@ -224,6 +271,7 @@ export function flatten(html: string): string {
       if (child.nodeType !== ELEMENT) continue;
       const el = asEl(child);
       const tag = tagOf(el);
+      if (SILENT.has(tag)) continue;
       if (INLINE.has(tag)) {
         const t = inlineText(child);
         if (t) run.push(t);
@@ -231,6 +279,21 @@ export function flatten(html: string): string {
       }
       // A block child ends the current line. Flushing first is what keeps
       // reading order intact: "Fruit" is announced before the nested list.
+      //
+      // Unless this element has produced no line yet: then its marker travels down
+      // to the child instead of being emitted alone. `<li><p>text</p></li>` and
+      // `<label><div>Work email</div></label>` are ordinary shapes, and a bare
+      // `[List item]` or `[Label]` on its own line reads to the Reader as an empty
+      // list item or an unlabelled control — the phantom-defect direction, since the
+      // prompt teaches it to treat empty structures as real problems.
+      const inherit = pending !== null && !run.length && tag !== "table" && !FIELD.has(tag);
+      if (inherit) {
+        const own = blockMarker(tag);
+        const combined = own ? `${pending} ${own}` : (pending as string);
+        pending = null;
+        block(el, combined);
+        continue;
+      }
       flush();
       if (tag === "table") {
         table(el);
