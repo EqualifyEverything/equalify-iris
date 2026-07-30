@@ -243,6 +243,17 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   editor-rewritten body looks like once it no longer matches the source excerpts — so narrowing
   wrongly can leave a real issue unfixed at the iteration cap, while broadening wrongly costs no
   more than the behavior this optimization replaced.
+- **The flattened screen-reader view must never lose text (§7.8).** `flatten.ts` has two
+  consumers, and both fail *silently* when text goes missing: the Reader reviews this view
+  instead of the source images, so anything absent from it cannot be reported as an issue; and
+  `contentCoverage` measures a candidate agent against an accepted fixture using these words, so
+  text the view can't see is absent from both sides of the comparison. The second is the sharp
+  edge — the regression gate exists to stop an agent update from dropping content, and it scored
+  a table whose every row had been deleted as *perfect*, because the old implementation emitted
+  a table's `<caption>` and returned. Inline elements (`a`, `img`, `em`, …) are now announced
+  within the surrounding phrase and block elements are separate stops, with tables expanded row
+  by row; `test/flatten.test.ts` asserts the invariant mechanically by deriving the expected word
+  set from the DOM independently of `flatten`.
 - **`GET /v1/sessions` pages on a compound cursor (§9.2 v1.1).** The PRD names a `cursor`
   parameter without saying what is in it, and the obvious reading — the last row's
   `created_at` — is unsound: `created_at` is a millisecond timestamp assigned by a request

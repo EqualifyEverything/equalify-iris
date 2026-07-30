@@ -33,6 +33,13 @@ You get two views of the same content: the HTML (structural reference) and a fla
 text-only view (what a screen reader announces, in order). Cross-check them, and also consider
 the axe-core lint results provided.
 
+In the flattened view, bracketed markers are structural roles, not content: [Heading 1-6],
+[List item], [Link], [Image], [Table], [Header row], [Row], [Field ...], [Label], [Option],
+[Quote], [Caption], [Term], [Definition]. Tables are expanded row by row with cells separated
+by " | " and a "(N rows, M columns)" summary; "(empty)" marks a cell with no content. Treat a
+table whose summary reports 0 rows, a row whose cell count differs from the table's column
+count, or an [Image] with alt="(missing)" as evidence of a real problem.
+
 You are also given an index of the document's source pages (page number + an excerpt of the
 HTML extracted from that page). For every issue, attribute it to the source "pages" it appears
 on, by matching the offending content against those excerpts. This is what lets the Copy Editor

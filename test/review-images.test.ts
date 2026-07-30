@@ -249,7 +249,12 @@ test("the reader prompt carries the page index and the editor prompt names the p
 
 test("the reader page index is excerpted, not the whole page", async () => {
   await withTemp(async (dir) => {
-    const long = "<p>" + "word ".repeat(400) + "</p>";
+    // A distinctive tail word: if the whole page were indexed it would appear in
+    // the prompt. Asserting on the CONTENT rather than on total prompt length,
+    // because the recorded prompt includes the system message — comparing its
+    // length to the page's makes the test a proxy for "the system prompt is
+    // shorter than 400 words", which is unrelated and breaks when it is edited.
+    const long = "<p>" + "word ".repeat(400) + "tailmarker</p>";
     const { ctx, rec } = ctxWith(dir, 1, []);
     await runReview(ctx, {
       body: "<h1>Report</h1>",
@@ -257,7 +262,11 @@ test("the reader page index is excerpted, not the whole page", async () => {
       pages: [{ order: 1, innerHtml: long }],
     });
     const reader = rec.calls.find((c) => c.agent === "reader");
-    assert.ok(reader!.prompt.length < long.length, "a long page is truncated in the index");
+    assert.ok(!reader!.prompt.includes("tailmarker"), "the whole page reached the index instead of an excerpt");
+    // ...and the head of the page IS there, so this isn't passing because the
+    // index was omitted entirely.
+    assert.match(reader!.prompt, /page 1/i);
+    assert.match(reader!.prompt, /word/);
   });
 });
 
