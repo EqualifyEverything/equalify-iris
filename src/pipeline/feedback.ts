@@ -218,6 +218,50 @@ export interface RegressionResult {
   meanCoverage: number | null; // mean content coverage of the candidate over fixtures
 }
 
+// How one fixture contributes to an agent's mean coverage. `null` means "abstain":
+// this fixture is not counted in the mean at all.
+//
+// Both sides of the eval-regression comparison at the end of
+// proposeAgentUpdatesFromFeedback MUST score fixtures by this one rule, because the
+// comparison is a subtraction between two means. `regressionGate` scores the
+// CANDIDATE prompt and `evalAgent` scores the CURRENT one; when they disagreed the
+// difference between them was an artifact of the scoring, not of the prompts.
+//
+// `evalAgent` used to score an unjudgeable fixture (accepted text shorter than
+// MIN_COVERAGE_WORDS, so contentCoverage abstains) as a perfect 1, while
+// regressionGate excluded it. Since abstention depends only on `accepted_html`, the
+// SAME fixture abstained on both sides — so the 1 landed on the current-prompt side
+// only and inflated it. With MAX_GATE_FIXTURES = 3 that inflation is large: two
+// judgeable fixtures at 0.90 plus one unjudgeable gave current 0.933 vs candidate
+// 0.900, a 0.033 gap from padding alone, past EVAL_REGRESSION_EPS = 0.02. The gate
+// blocked an update whose measurable coverage was IDENTICAL, and logged it as
+// "eval_regression" — a real improvement discarded with a reason that named a
+// regression that had not happened.
+//
+// No output is scored 0 rather than abstaining because producing nothing is a
+// FAILURE on the fixture, not an absence of evidence: abstaining would let a prompt
+// that returns nothing score exactly as well as one that handles the fixture.
+// regressionGate already scores it 0 (and fails the fixture outright), so 0 is also
+// the symmetric choice.
+//
+// It is the one input where "abstain" is not purely a property of the fixture:
+// whether a prompt produced blocks is a property of THAT prompt, so a single fixture
+// can be scored 0 for one prompt and excluded for the other. One direction is
+// harmless — a silent CANDIDATE fails regressionGate outright, before the comparison.
+// The other is a KNOWN, pre-existing hole, not closed here: if the CURRENT prompt
+// flakes to no output on a fixture the candidate handles, the current side is
+// deflated and the bar drops. Worked example — one unjudgeable fixture the current
+// prompt flakes on plus one judgeable at 0.98: current = (0 + 0.98)/2 = 0.49, while
+// the candidate abstains on the short one and scores 0.88 on the judgeable one. Then
+// 0.88 < 0.49 - 0.02 is false and 0.88 clears MIN_CONTENT_COVERAGE, so a real 0.10
+// coverage regression passes both gates. Fixing it means distinguishing "this prompt
+// failed" from "this fixture cannot be judged" per side, which changes what the mean
+// means; it is not a scoring-rule question. No test covers this direction yet.
+function fixtureScore(coverage: number | null, blockCount: number): number | null {
+  if (blockCount === 0) return 0;
+  return coverage;
+}
+
 // Fraction of the accepted output's distinct words that still appear in the
 // candidate output (screen-reader-flattened, punctuation-insensitive). Returns
 // null when the accepted text is too short to judge reliably. Structural role
@@ -316,7 +360,9 @@ export async function regressionGate(
     const blocks = await reRunAgentOnImage(ctx, updatedAgent, img);
     if (blocks.length === 0) {
       failures.push(`${c.image_file}: updated agent produced no output`);
-      coverages.push(0);
+      // fixtureScore's no-output rule, which never abstains — see its comment for
+      // why producing nothing scores 0 rather than dropping out of the mean.
+      coverages.push(fixtureScore(null, 0) as number);
       continue;
     }
     // Content-preservation check: the updated agent must still reproduce the
@@ -325,7 +371,8 @@ export async function regressionGate(
     // a large drop means the change regressed a use we already shipped.
     const candidateHtml = blocks.map((b) => b.html).join("\n\n");
     const coverage = contentCoverage(c.accepted_html, candidateHtml);
-    if (coverage !== null) coverages.push(coverage);
+    const score = fixtureScore(coverage, blocks.length);
+    if (score !== null) coverages.push(score);
     if (coverage !== null && coverage < MIN_CONTENT_COVERAGE) {
       failures.push(`${c.image_file}: only ${(coverage * 100).toFixed(0)}% of the accepted content remained`);
       continue;
@@ -341,7 +388,11 @@ export async function regressionGate(
 }
 
 // Mean content coverage of an agent's content across its regression fixtures,
-// reused as a lightweight eval set (#3). Returns null when there are no fixtures.
+// reused as a lightweight eval set (#3). Returns null when there are no fixtures —
+// and also when no fixture was judgeable, since a mean over zero measurements is not
+// a score of zero. The caller compares this against regressionGate's meanCoverage,
+// so it scores each fixture with the shared `fixtureScore` rule; see the comment
+// there for why any divergence between the two makes the comparison meaningless.
 export async function evalAgent(ctx: PipelineContext, agentFile: string, content: string): Promise<number | null> {
   const dir = ctx.paths.agentFixtures(agentFile);
   if (!existsSync(dir)) return null;
@@ -369,7 +420,8 @@ export async function evalAgent(ctx: PipelineContext, agentFile: string, content
     const img: InputImage = { name: c.source_image, order: 0, path: imgPath };
     const blocks = await reRunAgentOnImage(ctx, agent, img);
     const cov = contentCoverage(c.accepted_html, blocks.map((b) => b.html).join("\n\n"));
-    scores.push(cov !== null ? cov : blocks.length ? 1 : 0);
+    const score = fixtureScore(cov, blocks.length);
+    if (score !== null) scores.push(score);
   }
   return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
 }
@@ -441,6 +493,16 @@ export async function proposeAgentUpdatesFromFeedback(
 
   // Eval gate (#3): the proposed prompt must hold-or-improve the agent's mean
   // coverage over its fixtures versus the current prompt — not just pass the floor.
+  //
+  // Both means come from `fixtureScore`, so an UNJUDGEABLE fixture (the abstention
+  // that depends only on accepted_html) is absent from both sides and the subtraction
+  // below measures the prompts rather than the fixture mix. The one input that is not
+  // symmetric this way is a prompt producing no output at all; see `fixtureScore` for
+  // which direction of that is caught here and which remains open.
+  //
+  // Either side being null means there was nothing measurable to compare, which is
+  // not evidence of a regression — the update proceeds on the regression gate's
+  // verdict alone.
   const currentScore = await evalAgent(ctx, target.file, target.content);
   if (currentScore !== null && gate.meanCoverage !== null && gate.meanCoverage < currentScore - EVAL_REGRESSION_EPS) {
     ctx.log.event("agent_update_blocked", {

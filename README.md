@@ -283,6 +283,37 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   an unexplained mismatch is a defect, and the Copy Editor is licensed to restructure tables.
   Adding a check to that prompt without the annotation that reconciles it turns the review loop
   into a false-positive generator aimed at accessible output.
+- **Both sides of the eval gate must score fixtures by the same rule (§7.12).** Before proposing
+  an agent update, Iris compares the candidate prompt's mean fixture coverage (from
+  `regressionGate`) against the current prompt's (from `evalAgent`) and blocks a drop of more than
+  `EVAL_REGRESSION_EPS` (0.02). That comparison is a subtraction between two means, so it is only
+  valid if both are computed identically — and they were not. `contentCoverage` returns `null` for
+  a fixture whose accepted text is under `MIN_COVERAGE_WORDS` (8) because one dropped word would
+  swing the ratio; `regressionGate` excluded those from its mean, while `evalAgent` scored them a
+  perfect **1**. Since abstention depends only on `accepted_html`, the *same* fixture abstained on
+  both sides, so the 1 landed on the current-prompt side alone and inflated it. With
+  `MAX_GATE_FIXTURES` = 3 that is large: two judgeable fixtures at 0.90 plus one unjudgeable gave
+  current 0.933 vs candidate 0.900 — a 0.033 gap from padding alone, past the 0.02 threshold. The
+  gate discarded updates whose measurable coverage was *identical*, logged as `eval_regression`:
+  a reason naming a regression that had not happened. A single `fixtureScore` helper now defines
+  the rule for both, and an abstaining fixture is absent from both sides rather than scored.
+  Note the direction — the failure mode here is a **false block**, not a wave-through, which is
+  why it was invisible: a learning loop that silently declines to learn looks like a loop with
+  nothing to learn. A mean over zero measurements is `null`, not 0 — the caller treats that as
+  "nothing to compare" and defers to the regression gate, since 0 would block every update and 1
+  would assert a score no fixture demonstrated.
+
+  No output at all is scored 0 rather than abstaining, because producing nothing is a *failure* on
+  the fixture, not an absence of evidence — abstaining would let a prompt that returns nothing
+  score as well as one that handles it. That is also the one input where abstention is **not**
+  purely a property of the fixture, and a **still-open hole**: if the *current* prompt flakes to no
+  output on a fixture the candidate handles, the current side is deflated and the bar drops. One
+  unjudgeable fixture the current prompt flakes on plus one judgeable at 0.98 gives current
+  `(0 + 0.98)/2 = 0.49`, while the candidate abstains on the short one and scores 0.88 — so
+  `0.88 < 0.49 - 0.02` is false, 0.88 clears the 0.85 floor, and a real 0.10 regression passes both
+  gates. Closing it means distinguishing "this prompt failed" from "this fixture cannot be judged"
+  per side, which changes what the mean measures; it is not a scoring-rule question, and no test
+  covers that direction yet.
 - **`GET /v1/sessions` pages on a compound cursor (§9.2 v1.1).** The PRD names a `cursor`
   parameter without saying what is in it, and the obvious reading — the last row's
   `created_at` — is unsound: `created_at` is a millisecond timestamp assigned by a request
