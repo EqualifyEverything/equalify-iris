@@ -238,11 +238,25 @@ export interface RegressionResult {
 // "eval_regression" — a real improvement discarded with a reason that named a
 // regression that had not happened.
 //
-// The no-output case runs the other way and is why this returns 0 rather than
-// abstaining there: scoring it 0 on the current-prompt side deflates that side, so a
-// candidate that genuinely lost content clears a floor lowered by one flaky vision
-// call on the current prompt. regressionGate already scores no-output 0 (and fails
-// the fixture outright), so 0 is the symmetric choice.
+// No output is scored 0 rather than abstaining because producing nothing is a
+// FAILURE on the fixture, not an absence of evidence: abstaining would let a prompt
+// that returns nothing score exactly as well as one that handles the fixture.
+// regressionGate already scores it 0 (and fails the fixture outright), so 0 is also
+// the symmetric choice.
+//
+// It is the one input where "abstain" is not purely a property of the fixture:
+// whether a prompt produced blocks is a property of THAT prompt, so a single fixture
+// can be scored 0 for one prompt and excluded for the other. One direction is
+// harmless — a silent CANDIDATE fails regressionGate outright, before the comparison.
+// The other is a KNOWN, pre-existing hole, not closed here: if the CURRENT prompt
+// flakes to no output on a fixture the candidate handles, the current side is
+// deflated and the bar drops. Worked example — one unjudgeable fixture the current
+// prompt flakes on plus one judgeable at 0.98: current = (0 + 0.98)/2 = 0.49, while
+// the candidate abstains on the short one and scores 0.88 on the judgeable one. Then
+// 0.88 < 0.49 - 0.02 is false and 0.88 clears MIN_CONTENT_COVERAGE, so a real 0.10
+// coverage regression passes both gates. Fixing it means distinguishing "this prompt
+// failed" from "this fixture cannot be judged" per side, which changes what the mean
+// means; it is not a scoring-rule question. No test covers this direction yet.
 function fixtureScore(coverage: number | null, blockCount: number): number | null {
   if (blockCount === 0) return 0;
   return coverage;
@@ -346,8 +360,9 @@ export async function regressionGate(
     const blocks = await reRunAgentOnImage(ctx, updatedAgent, img);
     if (blocks.length === 0) {
       failures.push(`${c.image_file}: updated agent produced no output`);
-      const score = fixtureScore(null, 0);
-      if (score !== null) coverages.push(score);
+      // fixtureScore's no-output rule, which never abstains — see its comment for
+      // why producing nothing scores 0 rather than dropping out of the mean.
+      coverages.push(fixtureScore(null, 0) as number);
       continue;
     }
     // Content-preservation check: the updated agent must still reproduce the
@@ -479,11 +494,15 @@ export async function proposeAgentUpdatesFromFeedback(
   // Eval gate (#3): the proposed prompt must hold-or-improve the agent's mean
   // coverage over its fixtures versus the current prompt — not just pass the floor.
   //
-  // Both means come from `fixtureScore`, so a fixture that abstains is absent from
-  // both sides and the subtraction below measures the prompts rather than the
-  // fixture mix. Either side being null means there was nothing measurable to
-  // compare, which is not evidence of a regression — the update proceeds on the
-  // regression gate's verdict alone.
+  // Both means come from `fixtureScore`, so an UNJUDGEABLE fixture (the abstention
+  // that depends only on accepted_html) is absent from both sides and the subtraction
+  // below measures the prompts rather than the fixture mix. The one input that is not
+  // symmetric this way is a prompt producing no output at all; see `fixtureScore` for
+  // which direction of that is caught here and which remains open.
+  //
+  // Either side being null means there was nothing measurable to compare, which is
+  // not evidence of a regression — the update proceeds on the regression gate's
+  // verdict alone.
   const currentScore = await evalAgent(ctx, target.file, target.content);
   if (currentScore !== null && gate.meanCoverage !== null && gate.meanCoverage < currentScore - EVAL_REGRESSION_EPS) {
     ctx.log.event("agent_update_blocked", {

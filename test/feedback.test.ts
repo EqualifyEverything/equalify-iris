@@ -64,6 +64,12 @@ test("returns null when the accepted text is too short to judge", () => {
 // The case that matters is a fixture contentCoverage abstains on (accepted text
 // under MIN_COVERAGE_WORDS). Abstention depends only on `accepted_html`, so it is
 // a property of the FIXTURE and applies identically to both prompts.
+//
+// These tests pin symmetry where both prompts behave the same on a fixture. They do
+// NOT cover the case where the CURRENT prompt produces no output on a fixture the
+// candidate handles — inclusion is per-prompt there, so the two means are over
+// different fixture sets and the bar drops. That hole is pre-existing and documented
+// on `fixtureScore`; it needs a decision about what the mean measures, not a test.
 
 // Accepted text long enough for contentCoverage to judge (>= 8 distinct words).
 const JUDGEABLE = "<p>alpha bravo charlie delta echo foxtrot golf hotel india</p>";

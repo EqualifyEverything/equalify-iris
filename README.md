@@ -299,11 +299,21 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   the rule for both, and an abstaining fixture is absent from both sides rather than scored.
   Note the direction — the failure mode here is a **false block**, not a wave-through, which is
   why it was invisible: a learning loop that silently declines to learn looks like a loop with
-  nothing to learn. (No-output is scored 0 rather than abstaining, on both sides, because that
-  case runs the other way: deflating the current-prompt side would let a candidate that genuinely
-  lost content clear a floor lowered by one flaky vision call.) A mean over zero measurements is
-  `null`, not 0 — the caller treats that as "nothing to compare" and defers to the regression
-  gate, since 0 would block every update and 1 would assert a score no fixture demonstrated.
+  nothing to learn. A mean over zero measurements is `null`, not 0 — the caller treats that as
+  "nothing to compare" and defers to the regression gate, since 0 would block every update and 1
+  would assert a score no fixture demonstrated.
+
+  No output at all is scored 0 rather than abstaining, because producing nothing is a *failure* on
+  the fixture, not an absence of evidence — abstaining would let a prompt that returns nothing
+  score as well as one that handles it. That is also the one input where abstention is **not**
+  purely a property of the fixture, and a **still-open hole**: if the *current* prompt flakes to no
+  output on a fixture the candidate handles, the current side is deflated and the bar drops. One
+  unjudgeable fixture the current prompt flakes on plus one judgeable at 0.98 gives current
+  `(0 + 0.98)/2 = 0.49`, while the candidate abstains on the short one and scores 0.88 — so
+  `0.88 < 0.49 - 0.02` is false, 0.88 clears the 0.85 floor, and a real 0.10 regression passes both
+  gates. Closing it means distinguishing "this prompt failed" from "this fixture cannot be judged"
+  per side, which changes what the mean measures; it is not a scoring-rule question, and no test
+  covers that direction yet.
 - **`GET /v1/sessions` pages on a compound cursor (§9.2 v1.1).** The PRD names a `cursor`
   parameter without saying what is in it, and the obvious reading — the last row's
   `created_at` — is unsound: `created_at` is a millisecond timestamp assigned by a request
