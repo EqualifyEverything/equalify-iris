@@ -40,6 +40,16 @@ name: Workflow Review
 #   - run `npm ci` / `npm install` / `npm test` / `./test/e2e.sh` / any script or
 #     binary that could come from the PR. There is deliberately no setup-node step
 #     here, so the omission is not silent.
+#   - interpolate `${{ github.event.pull_request.* }}` (title, body, branch names)
+#     into a `run:` block. Those are attacker-controlled strings and `${{ }}` is
+#     textual substitution, so a crafted title becomes shell. Pass them through `env:`
+#     and quote the variable, as below.
+#   - widen `permissions:` beyond the read scopes it needs, or add tools to
+#     `--allowedTools`.
+#
+# PR content reaches this job only as data: fetched over the API into /tmp and read,
+# never executed. The model's tool list is correspondingly narrow — no `Bash(*)`,
+# no Write/Edit.
 #
 # HOW THE REVIEWER STILL KNOWS THE PR WORKS
 #
@@ -54,17 +64,13 @@ name: Workflow Review
 # `pull_request` scope and no OIDC — never in this one, which holds the Bedrock role.
 # Untrusted output crosses into here as log text and is read, never executed.
 #
+# Reading it needs `actions: read` in the permissions block below. Without that scope
+# the log download 403s and the summary is silently always "Not available" — verified:
+# GET /actions/runs/{id}/logs returns 403 without it, while /actions/runs (list) and
+# /actions/runs/{id} return 200. Do not remove that scope thinking it is unused.
+#
 # If the sibling run has not finished (or does not exist), the context says so and the
 # reviewer is told to treat correctness as unverified rather than assume a pass.
-#   - interpolate `${{ github.event.pull_request.* }}` (title, body, branch names)
-#     into a `run:` block. Those are attacker-controlled strings and `${{ }}` is
-#     textual substitution, so a crafted title becomes shell. Pass them through `env:`
-#     and quote the variable, as below.
-#   - widen `permissions:` or add tools to `--allowedTools`.
-#
-# PR content reaches this job only as data: fetched over the API into /tmp and read,
-# never executed. The model's tool list is correspondingly narrow — no `Bash(*)`,
-# no Write/Edit.
 #
 # SCOPE
 #
@@ -109,10 +115,17 @@ jobs:
     timeout-minutes: 25
     permissions:
       # Narrower than code-review.yml — no `issues: write`. This job posts a review
-      # and nothing else.
+      # and nothing else. Note that naming ANY scope here sets every unnamed one to
+      # `none`, so each line below is load-bearing.
       contents: read
       pull-requests: write
       id-token: write
+      # Required to read the sibling `Code Review` run's log for the check summary.
+      # `gh run view --log` hits GET /actions/runs/{id}/logs, which 403s without this
+      # (the runs list and the run object itself do not). Dropping it does not fail the
+      # job — it silently degrades every review to "checks UNAVAILABLE". Read-only, on
+      # a job that already holds id-token: write, so the blast radius is unchanged.
+      actions: read
 
     steps:
       # Pinned to the base sha, NOT the PR head. See the invariant above. Under
@@ -165,33 +178,61 @@ jobs:
           # (npm ci + tsc + unit + e2e) and its Claude step self-skips in ~30s, so the
           # whole run concludes in ~3 min; 6 is headroom, not an expectation. This bound
           # is part of the job's timeout arithmetic — see `timeout-minutes` on the job.
+          # Fail fast on a missing `actions: read` scope instead of polling for 6
+          # minutes and then reporting "unavailable". This is a permissions
+          # misconfiguration in *this* file, not a property of the PR, so it must be
+          # loud: without it the degradation is invisible (job green, every review
+          # claiming the checks could not be read) — which is exactly how this shipped
+          # broken the first time.
+          SCOPE_OK=yes
+          if ! gh api "repos/${{ github.repository }}/actions/runs?per_page=1" >/dev/null 2>&1; then
+            SCOPE_OK=no
+            echo "::error::Cannot read the Actions API — the job is missing 'actions: read'. The check summary will be unavailable for every review until that scope is restored in .github/workflows/workflow-review.yml."
+          fi
+
           SIBLING_STATUS=missing
           SIBLING_RUN=""
-          for _ in $(seq 1 18); do
-            SIBLING_RUN=$(gh api \
-              "repos/${{ github.repository }}/actions/runs?head_sha=$HEAD_SHA&event=pull_request" \
-              --jq '[.workflow_runs[] | select(.name=="Code Review")] | sort_by(.run_number) | last | .id' \
-              2>/dev/null || echo null)
-            if [ "${SIBLING_RUN:-null}" != "null" ] && [ -n "${SIBLING_RUN:-}" ]; then
-              CONCLUSION=$(gh api "repos/${{ github.repository }}/actions/runs/$SIBLING_RUN" \
-                --jq '.conclusion // "pending"' 2>/dev/null || echo pending)
-              if [ "$CONCLUSION" != "pending" ] && [ "$CONCLUSION" != "null" ]; then
-                SIBLING_STATUS="$CONCLUSION"
-                break
+          if [ "$SCOPE_OK" = yes ]; then
+            for _ in $(seq 1 18); do
+              SIBLING_RUN=$(gh api \
+                "repos/${{ github.repository }}/actions/runs?head_sha=$HEAD_SHA&event=pull_request" \
+                --jq '[.workflow_runs[] | select(.name=="Code Review")] | sort_by(.run_number) | last | .id' \
+                2>/dev/null || echo null)
+              if [ "${SIBLING_RUN:-null}" != "null" ] && [ -n "${SIBLING_RUN:-}" ]; then
+                CONCLUSION=$(gh api "repos/${{ github.repository }}/actions/runs/$SIBLING_RUN" \
+                  --jq '.conclusion // "pending"' 2>/dev/null || echo pending)
+                if [ "$CONCLUSION" != "pending" ] && [ "$CONCLUSION" != "null" ]; then
+                  SIBLING_STATUS="$CONCLUSION"
+                  break
+                fi
               fi
+              sleep 20
+            done
+            if [ "$SIBLING_STATUS" = missing ]; then
+              echo "::warning::Sibling 'Code Review' run for $HEAD_SHA did not conclude within 6 minutes; the review will proceed without check results."
             fi
-            sleep 20
-          done
+          fi
 
-          # Pull the four Result lines out of the sibling job log. `grep -c ''`-free and
-          # pipe-safe: grep reads its input to completion, so there is no SIGPIPE here
-          # (the trap that broke PR #39 was `producer | head -N`). `|| true` because a
-          # missing pattern exits 1 under `set -e`.
+          # Pull the four Result lines out of the sibling job log. Pipe-safe: grep reads
+          # its input to completion, so there is no SIGPIPE here (the trap that broke
+          # PR #39 was `producer | head -N`). `|| true` because grep exits 1 when the
+          # pattern is absent, which `set -e` would otherwise treat as fatal.
+          #
+          # This needs `actions: read` — see the permissions block. Distinguish "log
+          # unreadable" from "log read but pattern absent": the first is a config bug in
+          # this file, the second means code-review.yml changed its summary format and
+          # the grep below has to be updated to match.
           : > /tmp/sibling-summary.txt
           if [ "$SIBLING_STATUS" != missing ] && [ -n "$SIBLING_RUN" ]; then
-            gh run view "$SIBLING_RUN" --log 2>/dev/null \
-              | grep -oE '(npm ci|typecheck|unit \(`npm test`\)|e2e \(`\./test/e2e\.sh`\)): (pass|fail)' \
-              > /tmp/sibling-summary.txt || true
+            if gh run view "$SIBLING_RUN" --log > /tmp/sibling-log.txt 2>/dev/null; then
+              grep -oE '(npm ci|typecheck|unit \(`npm test`\)|e2e \(`\./test/e2e\.sh`\)): (pass|fail)' \
+                /tmp/sibling-log.txt > /tmp/sibling-summary.txt || true
+              if [ ! -s /tmp/sibling-summary.txt ]; then
+                echo "::warning::Read the sibling run log but found no check-summary lines. code-review.yml's 'Check summary' format has probably changed — update the grep in this step to match."
+              fi
+            else
+              echo "::error::Could not download the sibling run log (needs 'actions: read'). Check summary will be unavailable."
+            fi
           fi
 
           {
@@ -478,7 +519,14 @@ jobs:
         # The model step is continue-on-error, so the job is still green here. Without
         # this, a timeout would leave the PR with no verdict — which is the failure mode
         # this whole workflow exists to close.
-        if: steps.claude.outcome != 'success'
+        #
+        # `always() &&` is required, not decorative. Without it an earlier step failing
+        # (a transient API error in the context build, which runs under `set -e`) marks
+        # this step `skipped` under the default `if` semantics, so the PR gets no verdict
+        # at all — the exact outcome this workflow exists to prevent. With `always()` the
+        # step runs and posts, and `outcome` is then `skipped` for the model step, which
+        # the message below reports honestly.
+        if: always() && steps.claude.outcome != 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -487,8 +535,11 @@ jobs:
         run: |
           set -euo pipefail
           # It may have posted and then failed on a later turn. Don't double-post.
+          # Both identities: the model posts as claude[bot], this step posts as
+          # github-actions[bot] (the GITHUB_TOKEN identity). Matching only claude[bot]
+          # would let a re-run on the same head sha stack a second fallback review.
           COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
-            --jq ".[] | select(.user.login==\"claude[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
+            --jq ".[] | select(.user.login==\"claude[bot]\" or .user.login==\"github-actions[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
             | wc -l | tr -d ' ')
           if [ "${COUNT:-0}" -gt 0 ]; then
             echo "Claude already posted a review for $HEAD_SHA despite outcome=$OUTCOME — nothing to do."
@@ -499,7 +550,14 @@ jobs:
           {
             printf 'Scope: CI/workflow security review — no code was executed in this job.\n\n'
             printf '## Automated workflow review did not complete\n\n'
-            printf 'The review step ended with outcome `%s` (likely the 14-minute step timeout).\n' "$OUTCOME"
+            # `skipped` means an earlier step failed, so the model never ran at all —
+            # a different story from a timeout, and the human needs to know which.
+            if [ "$OUTCOME" = skipped ]; then
+              printf 'The review step never ran (outcome `%s`): an earlier step in this job\n' "$OUTCOME"
+              printf 'failed, most likely while building the review context. See the job log.\n'
+            else
+              printf 'The review step ended with outcome `%s` (likely the 14-minute step timeout).\n' "$OUTCOME"
+            fi
             printf 'The PR'"'"'s own checks are unaffected — see the sibling `Code Review` run for those.\n\n'
             printf 'This PR changes `.github/workflows/code-review.yml`, which the normal reviewer\n'
             printf 'self-skips on, so it has **not been reviewed by anything**. It needs a human read\n'
@@ -519,6 +577,11 @@ jobs:
         # exempt PRs touching code-review.yml because the action self-skips on them;
         # this workflow runs the default-branch definition, so validation always passes
         # and there is never a legitimate reason for zero reviews here.
+        #
+        # `always()` for the same reason as the fallback: if an earlier step failed, that
+        # is precisely when a verdict is most likely missing, so this check must still
+        # run. It only reports — a red job here means the PR genuinely has no review.
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
