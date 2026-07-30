@@ -254,6 +254,13 @@ for the same instant: `2026-05-22T18:00:00Z` (milliseconds dropped) and
 cursor is compared as a *string* and either one sorts above every stored value. If you
 round-trip cursors through a date type, you will reformat them; keep them as strings.
 
+One exception, and the only case where a page can still lose rows: a cursor from *before*
+this endpoint became compound is a bare timestamp with no `|`, and it is still accepted
+rather than 400'd — so a client paginating across the deploy that introduced the compound
+cursor keeps working, but that one request skips any sessions tied on that timestamp.
+It clears itself on the next page, since the cursor it hands back is compound. If a client
+reports a gap during an upgrade window, this is why; re-listing from the start is the fix.
+
 ```bash
 # Walk every page.
 cursor=""

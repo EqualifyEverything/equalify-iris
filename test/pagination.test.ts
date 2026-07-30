@@ -236,7 +236,13 @@ test("a legacy bare-timestamp cursor still pages, and does not skip rows", () =>
     ]);
     const rows = store.listSessions(USER, { limit: 10, cursor: parsed! });
     // Strictly older than T(3): the tied rows themselves are excluded, exactly as
-    // the old cursor did. The point is that it still WORKS, not that it is exact.
+    // the old cursor did. Asserting the SKIP, not just that it returns something —
+    // ses_b and ses_c are lost on this one request, which is the accepted cost of
+    // honoring a pre-deploy cursor instead of 400ing it. It is self-clearing (the
+    // next cursor is compound) and it is in docs/API.md §8, so a gap reported
+    // during an upgrade window is diagnosable. If someone "fixes" this by making a
+    // bare cursor inclusive, this assertion is what tells them they have instead
+    // made the endpoint repeat rows.
     assert.deepEqual(rows.map((r) => r.session_id), ["ses_a"]);
   });
 });
@@ -383,8 +389,14 @@ test("an existing database is migrated off the two-column index", () => {
       .all(1, "x", "y", 2)
       .map((r) => r.detail)
       .join(" ");
-    assert.match(plan, /INDEX idx_sessions_user_page/, `expected an index seek, got: ${plan}`);
+    assert.match(plan, /SEARCH sessions USING INDEX idx_sessions_user_page/, `expected an index seek, got: ${plan}`);
     assert.doesNotMatch(plan, /SCAN sessions/, `expected no table scan, got: ${plan}`);
+    // And it is NOT a covering-index seek, because the real query is `SELECT *`:
+    // the row is fetched from the table either way, and the index earns its keep
+    // by bounding which rows are visited. Asserted because the comment in
+    // listSessions says so, and the plan for a projection over indexed columns
+    // alone DOES say COVERING — which is how that comment came to be wrong.
+    assert.doesNotMatch(plan, /COVERING/, `SELECT * cannot be covered by this index: ${plan}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

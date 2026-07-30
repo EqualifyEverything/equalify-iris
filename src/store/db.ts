@@ -56,7 +56,13 @@ export function encodeCursor(s: SessionCursor): string {
  *     id. That is exactly the shape this endpoint issued before the compound
  *     cursor existed, and it degrades to the old `created_at < ?` predicate
  *     (nothing sorts below the empty string, so the tie-breaking clause is
- *     unsatisfiable). A client mid-pagination across a deploy keeps working.
+ *     unsatisfiable). A client mid-pagination across a deploy keeps working —
+ *     but note what "keeps working" means: that one request still skips the rows
+ *     tied on its timestamp, which is the very bug the compound cursor exists to
+ *     fix. It is accepted anyway because the alternative is a 400 that breaks the
+ *     client outright, and it is self-clearing: the cursor handed back is
+ *     compound. Documented in docs/API.md §8 so a gap reported during an upgrade
+ *     window is diagnosable rather than mysterious.
  *   * The timestamp half must be in EXACTLY the format the column stores —
  *     `Date#toISOString()`, UTC with milliseconds — not merely something
  *     `Date.parse` accepts. It is bound into a **string** comparison, so the only
@@ -255,9 +261,13 @@ export class Store {
   //
   // The predicate is the row-value form `(created_at, session_id) < (?, ?)`
   // rather than the equivalent `created_at < ? OR (created_at = ? AND ...)`
-  // expansion; SQLite's planner uses the covering index for the former
-  // (`SEARCH ... (u=? AND (created_at,session_id)<(?,?))`) and degrades to
-  // scanning the whole user's rows for the latter (`SEARCH ... (u=?)`).
+  // expansion. Only the row-value form is visible to SQLite's planner as an
+  // index bound: it seeks
+  // (`SEARCH ... USING INDEX ... (u=? AND (created_at,session_id)<(?,?))`)
+  // where the OR-expansion degrades to scanning every one of the user's rows
+  // (`SEARCH ... (u=?)`). Not a COVERING index seek — this is `SELECT *`, so the
+  // row has to be fetched from the table either way; the index earns its keep by
+  // bounding which rows are visited, not by answering the query alone.
   listSessions(
     userId: number,
     opts: { status?: string; limit: number; cursor?: SessionCursor },
