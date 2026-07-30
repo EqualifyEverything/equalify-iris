@@ -329,7 +329,7 @@ jobs:
           if [ "$SIBLING_STATUS" = done ] && [ -n "$SIBLING_JOB" ]; then
             if gh api "repos/${{ github.repository }}/actions/jobs/$SIBLING_JOB/logs" \
                  > /tmp/sibling-log.txt 2>/dev/null; then
-              grep -oE '(npm ci|typecheck|unit \(`npm test`\)|e2e \(`\./test/e2e\.sh`\)): (pass|fail)' \
+              grep -oE '(npm ci|typecheck|unit \(`npm test`\)|e2e \(`\./test/e2e\.sh`\)|workflow lint \(`actionlint`\)): (pass|fail|skip)' \
                 /tmp/sibling-log.txt > /tmp/sibling-summary.txt || true
               if [ ! -s /tmp/sibling-summary.txt ]; then
                 echo "::warning::Read the sibling job log but found no check-summary lines. code-review.yml's 'Check summary' format has probably changed — update the grep in this step to match."
@@ -547,7 +547,7 @@ jobs:
                restricted to same-repo PRs, so it holds no fork's code. If a change weakens
                either of those two properties while keeping the test run, that is the bug.
 
-            2. **Script injection via `${{ }}` in `run:` blocks.** `${{ }}` is textual
+            2. **Script injection via `${{ '${{' }} }}` in `run:` blocks.** It is textual
                substitution performed before the shell sees the line, so any
                attacker-controlled expression interpolated into `run:` is arbitrary shell.
                `github.event.pull_request.title`, `.body`, `.head.ref`, `.user.login`, and
@@ -717,7 +717,7 @@ jobs:
             fi
             printf 'It needs a human read of the workflow diff before merge — in particular whether\n'
             printf 'it lets PR-authored code run with secrets, widens `permissions:`, or interpolates\n'
-            printf 'attacker-controlled `${{ ... }}` into a `run:` block.\n\n'
+            printf 'attacker-controlled `${{ '${{' }} ... }}` into a `run:` block.\n\n'
           } > "$BODY"
 
           # The sibling checks were already fetched by the build step, so report them

@@ -269,6 +269,47 @@ jobs:
             echo "::endgroup::"
           fi
 
+          # Workflow lint. Added because a real bug shipped past every check above: a
+          # literal `${{ '${{' }} }}` written inside a `run:` block — in prose, in a
+          # prompt, even in a shell comment like this one, since comments are still part
+          # of the run string — is parsed by Actions as an expression, not text. The
+          # resulting error kills the whole FILE: GitHub lists the workflow by its path
+          # instead of its `name:`, and every run fails instantly with no jobs and no
+          # logs, which reads like an infrastructure blip. YAML parsing, `bash -n` and
+          # the test suite all pass on such a file; nothing here would have caught it.
+          # Escape it as this comment does — see the two occurrences in
+          # workflow-review.yml's prompt.
+          #
+          # Pinned by version, and the download is verified: an unpinned installer for
+          # a linter is a supply-chain path into a job that holds id-token: write.
+          {
+            echo
+            echo "## Workflow lint — \`actionlint\`"
+            echo '```'
+          } >> "$OUT"
+          ACTIONLINT_VERSION=1.7.12
+          # From actionlint_1.7.12_checksums.txt on the release page, confirmed against
+          # a local download of the same asset.
+          ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          if curl -fsSL -o /tmp/actionlint.tgz \
+               "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+             && echo "${ACTIONLINT_SHA256}  /tmp/actionlint.tgz" | sha256sum -c - >/dev/null 2>&1 \
+             && tar -xzf /tmp/actionlint.tgz -C /tmp actionlint; then
+            # shellcheck/pyflakes disabled: this gate is about Actions-expression and
+            # workflow-schema errors. Shell style in the review workflows is reviewed
+            # by a human and by the CI-security reviewer, and shellcheck on these
+            # heavily-templated blocks is mostly false positives.
+            if /tmp/actionlint -shellcheck= -pyflakes= .github/workflows/*.yml 2>&1 | tail -40 >> "$OUT"; then
+              WFLINT=pass
+            else
+              WFLINT=fail
+            fi
+          else
+            echo "(could not install actionlint v${ACTIONLINT_VERSION} — download failed or checksum mismatch)" >> "$OUT"
+            WFLINT=skip
+          fi
+          { echo '```'; echo; echo "Result: **$WFLINT**"; } >> "$OUT"
+
           # Summary goes to four places: the context file (for the reviewer), the
           # job log and the run summary (for humans), and its own small file for
           # the fallback step to cat. Without the middle two, a check failing in CI
@@ -278,13 +319,19 @@ jobs:
           # streams ~130KB into a 20-line reader, takes SIGPIPE, and exits 141,
           # which `set -o pipefail` turns into a step abort *before* the review is
           # posted. A dedicated file needs no pipe at all.
-          SUMMARY=$(printf '## Check summary\n- npm ci: %s\n- typecheck: %s\n- unit (`npm test`): %s\n- e2e (`./test/e2e.sh`): %s\n' \
-            "$INSTALL" "$TYPECHECK" "$UNIT" "$E2E")
+          # workflow-review.yml greps these four lines out of this job's log, so their
+          # text is load-bearing — see the grep in that file's build step. actionlint is
+          # appended after them for that reason: a format change there breaks the
+          # sibling's parse, and the four originals are what it matches on.
+          SUMMARY=$(printf '## Check summary\n- npm ci: %s\n- typecheck: %s\n- unit (`npm test`): %s\n- e2e (`./test/e2e.sh`): %s\n- workflow lint (`actionlint`): %s\n' \
+            "$INSTALL" "$TYPECHECK" "$UNIT" "$E2E" "$WFLINT")
           { echo; echo "$SUMMARY"; } >> "$OUT"
           echo "$SUMMARY"
           echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
           echo "$SUMMARY" > /tmp/check-summary.md
-          if [ "$INSTALL$TYPECHECK$UNIT$E2E" != "passpasspasspass" ]; then
+          # `skip` for the lint (install failed) is not a check failure — it says
+          # nothing about the PR. Only an actual `fail` counts.
+          if [ "$INSTALL$TYPECHECK$UNIT$E2E" != "passpasspasspass" ] || [ "$WFLINT" = fail ]; then
             echo "::warning::One or more checks failed — see the run summary. The review continues so Claude reports it on the PR."
           fi
 
@@ -543,7 +590,11 @@ jobs:
                `src/store/paths.ts` that could escape the data dir.
 
             6. **Failing checks.** If the "Check summary" shows install, typecheck, unit tests,
-               or e2e failing, that is blocking. Say which one and quote the relevant output.
+               e2e, or the workflow lint failing, that is blocking. Say which one and quote the
+               relevant output. An `actionlint` failure on a `.github/workflows/*.yml` change is
+               especially serious: an Actions-expression error does not degrade the workflow, it
+               disables it — every run fails immediately with no jobs and no logs, which reads as
+               an infrastructure blip rather than a broken file.
 
             7. **Missing tests.** New pipeline behaviour, new routes, or a fixed bug with no
                corresponding assertion. Unit tests live in `test/*.test.ts` (all of them are
