@@ -65,25 +65,40 @@ name: Workflow Review
 # Untrusted output crosses into here as log text and is read, never executed.
 #
 # Reading it needs `actions: read` in the permissions block below. Without that scope
-# the log download 403s and the summary is silently always "Not available" — verified:
-# GET /actions/runs/{id}/logs returns 403 without it, while /actions/runs (list) and
-# /actions/runs/{id} return 200. Do not remove that scope thinking it is unused.
+# the log download 403s and the summary would silently always be "Not available", so
+# the build step probes for the scope up front and errors out loudly. Note that only
+# the log download is gated — /actions/runs (list), /actions/runs/{id} and
+# /actions/runs/{id}/jobs all answer 200 without it, which is why the probe targets
+# /actions/runs/{id}/logs specifically. Do not remove that scope thinking it is unused;
+# the run *metadata* being readable is not evidence that the logs are.
 #
 # If the sibling run has not finished (or does not exist), the context says so and the
 # reviewer is told to treat correctness as unverified rather than assume a pass.
 #
 # SCOPE
 #
-# Deliberately gated to PRs touching code-review.yml, so it never double-posts:
-# for any other workflow file, code-review.yml does not self-skip and reviews the PR
-# normally. When it does fire, it reviews the PR's whole diff, since a PR that touches
-# code-review.yml gets no other automated review at all.
+# Two files, for two different reasons:
+#
+#   code-review.yml    — gets NO other automated review (the action self-skips on it),
+#                        so this is its only reviewer. Reviews the PR's whole diff.
+#   workflow-review.yml — this file. It holds `pull_request_target` + `id-token: write`,
+#                        which makes it the single most dangerous file in the repo to
+#                        get wrong. code-review.yml *does* review it, but with the
+#                        general Iris prompt (accessibility, pipeline, provider
+#                        routing) — not the CI-security prompt below, which is the one
+#                        that actually knows to look for a PR-head checkout or an
+#                        interpolated `${{ }}`. Both reviews are wanted here.
+#
+# No double-post risk on either: code-review.yml self-skips only for changes to itself,
+# and these two workflows post under separate reviews on separate runs. A PR touching
+# both files gets one review from each, which is the intent.
 
 on:
   pull_request_target:
     types: [opened, synchronize, ready_for_review]
     paths:
       - '.github/workflows/code-review.yml'
+      - '.github/workflows/workflow-review.yml'
 
 concurrency:
   group: workflow-review-${{ github.event.pull_request.number }}
@@ -121,10 +136,13 @@ jobs:
       pull-requests: write
       id-token: write
       # Required to read the sibling `Code Review` run's log for the check summary.
-      # `gh run view --log` hits GET /actions/runs/{id}/logs, which 403s without this
-      # (the runs list and the run object itself do not). Dropping it does not fail the
-      # job — it silently degrades every review to "checks UNAVAILABLE". Read-only, on
-      # a job that already holds id-token: write, so the blast radius is unchanged.
+      # `gh run view --log` hits GET /actions/runs/{id}/logs, which 403s without this.
+      # The runs list, the run object and its jobs list do NOT require it (all 200
+      # unauthenticated), so only the log download actually depends on this scope.
+      # Dropping it does not fail the job on its own — it would degrade every review to
+      # "checks UNAVAILABLE" — so the build step probes the logs endpoint explicitly and
+      # emits ::error:: if it is gone. Read-only, on a job that already holds
+      # id-token: write, so the blast radius is unchanged.
       actions: read
 
     steps:
@@ -184,11 +202,42 @@ jobs:
           # loud: without it the degradation is invisible (job green, every review
           # claiming the checks could not be read) — which is exactly how this shipped
           # broken the first time.
+          #
+          # Probe the LOGS endpoint, which is the one actually gated. Measured against
+          # this repo, anonymously vs. authorized:
+          #   /actions/runs?per_page=1      200   (NOT gated — useless as a probe)
+          #   /actions/runs/{id}            200   (NOT gated)
+          #   /actions/runs/{id}/jobs       200   (NOT gated)
+          #   /actions/runs/{id}/logs       403 anon / 302 authorized   <-- gated
+          # An earlier version of this probe hit the runs list and therefore passed with
+          # `actions: none`, so the fail-fast it was added for never fired.
+          #
+          # Two details that made the first attempt at this probe false-positive:
+          #   - it must use a COMPLETED run. An in-progress run's logs 404, not 403.
+          #   - only 403 means "missing scope". 404 means the logs are gone or not ready
+          #     (they expire), which says nothing about permissions.
           SCOPE_OK=yes
-          if ! gh api "repos/${{ github.repository }}/actions/runs?per_page=1" >/dev/null 2>&1; then
-            SCOPE_OK=no
-            echo "::error::Cannot read the Actions API — the job is missing 'actions: read'. The check summary will be unavailable for every review until that scope is restored in .github/workflows/workflow-review.yml."
+          PROBE_RUN=$(gh api "repos/${{ github.repository }}/actions/runs?status=completed&per_page=1" \
+            --jq '.workflow_runs[0].id // empty' 2>/dev/null || echo "")
+          if [ -z "${PROBE_RUN:-}" ]; then
+            echo "::warning::No completed Actions run available to probe for 'actions: read'; skipping the scope check."
+          else
+            PROBE_ERR=$(gh api "repos/${{ github.repository }}/actions/runs/$PROBE_RUN/logs" 2>&1 >/dev/null || true)
+            case "$PROBE_ERR" in
+              *"HTTP 403"*)
+                SCOPE_OK=no
+                echo "::error::Cannot download Actions run logs (HTTP 403) — the job is missing 'actions: read'. The check summary will be unavailable for every review until that scope is restored in .github/workflows/workflow-review.yml."
+                ;;
+              "") : ;;  # succeeded
+              *) echo "::warning::Actions log probe against run $PROBE_RUN did not succeed, but not with 403 (so the scope looks present): $PROBE_ERR" ;;
+            esac
           fi
+          # Recorded so `Verify` can fail the job at the END. Deliberately not `exit 1`
+          # here: the review itself is still worth posting without check results (reading
+          # the workflow YAML is most of its value), and aborting now would trade a
+          # degraded review for no review — the failure mode this file exists to close.
+          # Posting first and going red afterwards gets both.
+          echo "scope_ok=$SCOPE_OK" >> "$GITHUB_OUTPUT"
 
           SIBLING_STATUS=missing
           SIBLING_RUN=""
@@ -379,11 +428,19 @@ jobs:
 
             ## Why you specifically are running
 
-            This PR changes `.github/workflows/code-review.yml`. The normal reviewer cannot
-            look at it: `claude-code-action` refuses to run when its own workflow file differs
-            from the default-branch copy, so it self-skips and the PR would otherwise merge with
-            **no automated review at all**. You are the only review this PR gets. Treat the
-            whole diff as in scope, not just the YAML.
+            This PR changes one of the two CI files that gate every other review in this repo.
+            Which case you are in is visible in the "Changed files" section of your context:
+
+            - **`code-review.yml`** — the normal reviewer cannot look at it.
+              `claude-code-action` refuses to run when its own workflow file differs from the
+              default-branch copy, so it self-skips and the PR would otherwise merge with **no
+              automated review at all**. You are the only review it gets. Treat the whole diff
+              as in scope, not just the YAML.
+            - **`workflow-review.yml`** — this workflow itself, which holds
+              `pull_request_target` together with `id-token: write`, the most dangerous
+              combination in the repo. The normal reviewer does see this file, but with the
+              general Iris prompt; you are the one carrying the CI-security checklist below.
+              Focus on that checklist and assume the general review covers the rest.
 
             ## Where your check results come from
 
@@ -559,13 +616,42 @@ jobs:
               printf 'The review step ended with outcome `%s` (likely the 14-minute step timeout).\n' "$OUTCOME"
             fi
             printf 'The PR'"'"'s own checks are unaffected — see the sibling `Code Review` run for those.\n\n'
-            printf 'This PR changes `.github/workflows/code-review.yml`, which the normal reviewer\n'
-            printf 'self-skips on, so it has **not been reviewed by anything**. It needs a human read\n'
-            printf 'of the workflow diff before merge — in particular whether it lets PR-authored code\n'
-            printf 'run with secrets, widens `permissions:`, or interpolates attacker-controlled\n'
-            printf '`${{ ... }}` into a `run:` block.\n\n'
-            printf 'Executes PR code: not assessed — automated review was interrupted.\n'
+            # A PR touching code-review.yml gets no other review at all (the action
+            # self-skips on it); one touching only workflow-review.yml still gets the
+            # general review, just not this security-focused one. Say which.
+            if grep -qx '.github/workflows/code-review.yml' /tmp/wf-files.txt 2>/dev/null; then
+              printf 'This PR changes `.github/workflows/code-review.yml`, which the normal reviewer\n'
+              printf 'self-skips on, so it has **not been reviewed by anything**.\n\n'
+            else
+              printf 'The general `Code Review` reviewer still covers this PR; what is missing is the\n'
+              printf 'CI-security pass over the workflow diff.\n\n'
+            fi
+            printf 'It needs a human read of the workflow diff before merge — in particular whether\n'
+            printf 'it lets PR-authored code run with secrets, widens `permissions:`, or interpolates\n'
+            printf 'attacker-controlled `${{ ... }}` into a `run:` block.\n\n'
           } > "$BODY"
+
+          # The sibling checks were already fetched by the build step, so report them
+          # even though the model never got to. Without this a cut-off review says
+          # nothing about a failing build — the same reason code-review.yml cats
+          # /tmp/check-summary.md into its own fallback body. `cat`, no pipe: see the
+          # SIGPIPE note in that file.
+          if [ -s /tmp/sibling-summary.txt ]; then
+            {
+              printf '### Checks from the sibling `Code Review` run\n\n'
+              printf 'These did run against this PR'"'"'s head:\n\n'
+              printf '```\n'
+              sort -u /tmp/sibling-summary.txt
+              printf '```\n\n'
+            } >> "$BODY"
+            if grep -q ': fail' /tmp/sibling-summary.txt; then
+              printf '**At least one check FAILED** — that is blocking regardless of this review being incomplete.\n\n' >> "$BODY"
+            fi
+          else
+            printf 'No check results were available from the sibling `Code Review` run either.\n\n' >> "$BODY"
+          fi
+
+          printf 'Executes PR code: not assessed — automated review was interrupted.\n' >> "$BODY"
 
           # --request-changes, not --comment: an incomplete review must not read as a
           # pass. A human can approve over it.
@@ -586,6 +672,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SCOPE_OK: ${{ steps.ctx.outputs.scope_ok }}
         run: |
           set -euo pipefail
           # The action can exit 0 without ever calling `gh pr review`. Fail loudly.
@@ -596,6 +683,14 @@ jobs:
             | wc -l | tr -d ' ')
           if [ "${COUNT:-0}" -eq 0 ]; then
             echo "::error::No workflow review posted for $HEAD_SHA."
+            exit 1
+          fi
+          # A missing `actions: read` degrades every review to "checks UNAVAILABLE".
+          # The review is posted by now, so failing here costs nothing and makes the
+          # misconfiguration impossible to miss. Empty means the build step never got
+          # far enough to record it — that path is already red on its own.
+          if [ "${SCOPE_OK:-}" = no ]; then
+            echo "::error::Review posted, but WITHOUT check results: this job could not read Actions run logs. Restore 'actions: read' in .github/workflows/workflow-review.yml."
             exit 1
           fi
           echo "review exists for $HEAD_SHA"
