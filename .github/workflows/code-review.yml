@@ -86,12 +86,14 @@ jobs:
             META=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER")
             HEAD_SHA=$(echo "$META" | jq -r .head.sha)
             BASE_REF=$(echo "$META" | jq -r .base.ref)
+            BASE_SHA=$(echo "$META" | jq -r .base.sha)
             git fetch origin "pull/$PR_NUMBER/head:pr-$PR_NUMBER"
             git checkout "pr-$PR_NUMBER"
           else
             PR_NUMBER="${{ github.event.pull_request.number }}"
             HEAD_SHA="${{ github.event.pull_request.head.sha }}"
             BASE_REF="${{ github.event.pull_request.base.ref }}"
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
           fi
           # Does this PR modify the review workflow itself? If so the action will
           # self-skip (it requires an identical copy on the default branch), and
@@ -106,6 +108,7 @@ jobs:
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HEAD_SHA"   >> "$GITHUB_OUTPUT"
           echo "base_ref=$BASE_REF"   >> "$GITHUB_OUTPUT"
+          echo "base_sha=$BASE_SHA"   >> "$GITHUB_OUTPUT"
 
       - name: Skip if a claude review already exists for this commit
         id: guard
@@ -143,6 +146,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
           BASE_REF: ${{ steps.ctx.outputs.base_ref }}
+          BASE_SHA: ${{ steps.ctx.outputs.base_sha }}
         run: |
           set -euo pipefail
           OUT=/tmp/review-context.md
@@ -161,6 +165,21 @@ jobs:
           # docs come back.
           MIN_CHANGED_PCT=15
           ALWAYS_INCLUDE_UNDER_BYTES=8000
+
+          # Risk allowlist: always include these in full, whatever the ratio says.
+          # The ratio filter keys on change *size*, but the prompt's "Must flag" list
+          # keys on *risk*, and the two disagree exactly where it matters most — a
+          # 6-line change to an auth check or a token choice is both the smallest
+          # possible diff and the most dangerous. Most of the highest-risk files
+          # (src/auth/*, src/github/issue.ts, src/store/paths.ts, contribute.ts,
+          # src/providers/*) are under the 8KB floor and already arrive in full;
+          # these are the ones big enough to be dropped:
+          #   routes/sessions.ts — per-session ownership checks, Must flag #3
+          #   config.ts          — model routing + provider resolution, Must flag #4
+          #   pipeline/*.ts      — phase error handling and the axe-clean guarantee,
+          #                        Must flag #1 and #5
+          # Matched as path prefixes against the changed-file list below.
+          ALWAYS_INCLUDE_PATHS="src/auth/ src/github/ src/providers/ src/store/paths.ts src/pipeline/ src/routes/sessions.ts src/config.ts"
 
           {
             echo "# Review context"
@@ -259,16 +278,53 @@ jobs:
             echo "::warning::One or more checks failed — see the run summary. The review continues so Claude reports it on the PR."
           fi
 
-          # No --depth flag: `--depth=0` is invalid ("fatal: depth 0 is not a
-          # positive number"), so this fetch silently no-op'd behind the `|| true`.
-          # checkout above uses fetch-depth: 0, so full history is already present
-          # and the merge-base below resolves either way — but a real fetch here
-          # keeps it correct if the base branch moved since checkout.
-          git fetch origin "$BASE_REF" || true
-          MERGE_BASE=$(git merge-base "origin/$BASE_REF" HEAD)
+          # Diff against the PR's recorded base SHA, NOT `merge-base origin/$BASE_REF
+          # HEAD`. The old form silently produced an EMPTY diff whenever the base
+          # branch had advanced to contain HEAD — e.g. reviewing an already-merged PR
+          # via workflow_dispatch — because merge-base then returns HEAD itself. The
+          # reviewer got a context with no changed files and no diff, reviewed
+          # nothing, and posted anyway; `Verify` was satisfied, so it read as a pass.
+          # That happened for real on PR #39's own review.
+          #
+          # base.sha is fixed at the tip of the base branch when the PR was created
+          # or last synchronized, so it cannot drift into HEAD. `fetch-depth: 0` on
+          # checkout means it is already present locally.
+          MERGE_BASE="$BASE_SHA"
+          if ! git cat-file -e "$MERGE_BASE^{commit}" 2>/dev/null; then
+            # Force-push to the base branch can orphan the recorded base.sha. Fall
+            # back to a real merge-base rather than failing the whole review.
+            echo "::warning::base sha $MERGE_BASE not found locally; falling back to merge-base against origin/$BASE_REF"
+            git fetch origin "$BASE_REF" || true
+            MERGE_BASE=$(git merge-base "origin/$BASE_REF" HEAD)
+          fi
+
+          # An empty diff means the context would carry no changes at all. Warn
+          # loudly rather than exiting: a `workflow_dispatch` re-review of a merged
+          # PR is a legitimate thing to ask for, and hard-failing would turn it into
+          # a red job. The reviewer is told below to treat this as unreviewable, so
+          # it cannot be mistaken for a clean pass.
+          if [ -z "$(git diff --name-only "$MERGE_BASE"...HEAD)" ]; then
+            echo "::warning::Empty diff for base $MERGE_BASE — the PR head is already contained in its base. The review context has no changes."
+            EMPTY_DIFF=yes
+          else
+            EMPTY_DIFF=no
+          fi
           {
             echo
-            echo "## Changed files (merge-base \`$MERGE_BASE\`)"
+            if [ "$EMPTY_DIFF" = yes ]; then
+              echo "## ⚠️ NO CHANGES TO REVIEW"
+              echo
+              echo "The diff against base \`$MERGE_BASE\` is empty — this PR's head is already"
+              echo "contained in its base branch (most likely it is already merged, and this"
+              echo "review was dispatched manually afterwards)."
+              echo
+              echo "**Do not post an approval.** There is nothing here to approve, and an"
+              echo "\`--approve\` on an empty context reads as a verified pass. Post a single"
+              echo "\`--request-changes\` stating that the context contained no diff and the PR"
+              echo "could not be reviewed, and stop."
+              echo
+            fi
+            echo "## Changed files (base \`$MERGE_BASE\`)"
             echo '```'
             git diff --name-status "$MERGE_BASE"...HEAD
             echo '```'
@@ -282,6 +338,8 @@ jobs:
             echo
             echo "Files changed by less than ${MIN_CHANGED_PCT}% of their lines are omitted here —"
             echo "their hunks are in the diff above, and the reviewer can Read them on demand."
+            echo "High-risk paths (auth, github, providers, pipeline, session routes, config)"
+            echo "are always included in full, however small the change."
           } >> "$OUT"
 
           # Whole-file source is included only where the diff alone is hard to
@@ -300,6 +358,19 @@ jobs:
             BYTES=$(wc -c < "$f" | tr -d ' ')
             if [ "$BYTES" -gt "$MAX_BYTES_PER_FILE" ]; then
               printf '\n### %s\n\n_(%s bytes — too large, see diff above)_\n' "$f" "$BYTES" >> "$OUT"
+              continue
+            fi
+            # Risk allowlist wins over the ratio: see ALWAYS_INCLUDE_PATHS above.
+            FORCED=no
+            for p in $ALWAYS_INCLUDE_PATHS; do
+              case "$f" in
+                "$p"*) FORCED=yes; break ;;
+              esac
+            done
+            if [ "$FORCED" = yes ]; then
+              printf '\n### %s\n\n_(high-risk path — included in full regardless of change size)_\n\n```\n' "$f" >> "$OUT"
+              head -n "$MAX_LINES_PER_FILE" "$f" >> "$OUT"
+              printf '\n```\n' >> "$OUT"
               continue
             fi
             # Ratio of changed (added+deleted) lines to current file length.
