@@ -111,12 +111,19 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   // therefore compound, and an unparseable one is a 400 rather than being
   // compared as a string, which used to silently hand back page one forever.
   r.get("/", (req: AuthedRequest, res) => {
-    // Clamped low as well as high. `parseInt("-5") || 20` is -5 — a negative
-    // number is truthy — and a negative limit is destructive twice over: SQLite
-    // reads `LIMIT -4` as NO limit, so the whole table comes back, and
-    // `slice(0, -5)` then trims rows off the end of the page while still leaving
-    // an extra row held back, i.e. a short page with a next_cursor.
-    const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? "20"), 10) || 20, 1), 100);
+    // One rule for every unusable value: fall back to the default. Written as
+    // `Math.max(parseInt(x) || 20, 1)` it was two rules — `?limit=0` is falsy so
+    // it became 20, while `?limit=-1` clamped to 1 — so two equally invalid
+    // inputs got different page sizes, neither of them documented.
+    //
+    // Clamping the low end at all matters because a negative limit is destructive
+    // twice over: SQLite reads `LIMIT -4` as NO limit, so the whole table comes
+    // back, and `slice(0, -5)` then trims rows off the end of the page while
+    // still leaving an extra row held back — a short page carrying a next_cursor.
+    // (`listSessions` and `pageSessions` clamp too; that symptom is invisible in
+    // the response, so it should not depend on one caller getting this right.)
+    const asked = parseInt(String(req.query.limit ?? ""), 10);
+    const limit = Number.isInteger(asked) && asked >= 1 ? Math.min(asked, 100) : 20;
     const status = req.query.status ? String(req.query.status) : undefined;
     const raw = req.query.cursor ? String(req.query.cursor) : undefined;
     const cursor = raw ? parseCursor(raw) : undefined;

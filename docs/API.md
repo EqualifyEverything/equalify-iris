@@ -237,6 +237,10 @@ curl -s -H "$AUTH" "$BASE/sessions?status=ready_for_review"
   "image_count": 2, "created_at": "...", "updated_at": "..." } ],
   "next_cursor": "2026-05-22T18:00:00.000Z|ses_01HXYZ..." }
 ```
+`limit` is `20` by default and capped at `100`. Anything not an integer of at least 1 —
+`0`, negative, fractional, non-numeric — is the default, not an error: one rule, so two
+equally invalid values can't get page sizes differing by a factor of twenty.
+
 Paginate by passing `cursor=<next_cursor>` **verbatim** — it encodes both halves of the
 sort key (`created_at|session_id`), because `created_at` alone is not unique: sessions
 created in the same millisecond tie on it, and paging on a non-unique key skips and

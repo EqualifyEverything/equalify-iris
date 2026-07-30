@@ -469,6 +469,23 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" --get \
   --data-urlencode "cursor=$realc" "$BASE/sessions?limit=1")
 [ "$code" = "200" ] && pass "the endpoint's own next_cursor is accepted (200)" \
   || fail "pagination" "the API rejected its own cursor '$realc' with $code"
+# Every unusable limit gets the SAME answer: the default. Written as
+# `Math.max(parseInt(x) || 20, 1)` this was two rules — 0 is falsy so it became 20,
+# while -1 clamped to 1 — i.e. two equally invalid values twenty-fold apart. There are
+# 9 sessions by now, so the default (20) and the clamp (1) are distinguishable.
+# Compared against the no-limit-param response rather than a hardcoded 20, so this does
+# not break if the session count later exceeds the default page size.
+deflt=$(curl -s "${AUTH[@]}" "$BASE/sessions" | jq '.sessions | length')
+[ "$deflt" -gt 1 ] || fail "pagination" "need >1 session to tell the default from a clamp (got $deflt)"
+for bad in 0 -1 -100 abc ''; do
+  n=$(curl -s "${AUTH[@]}" --get --data-urlencode "limit=$bad" "$BASE/sessions" | jq '.sessions | length')
+  [ "$n" = "$deflt" ] \
+    || fail "pagination" "limit='$bad' returned $n rows; the default returns $deflt (two rules, not one)"
+done
+# A fractional limit truncates to a usable size rather than defaulting — 2.7 -> 2.
+n=$(curl -s "${AUTH[@]}" "$BASE/sessions?limit=2.7" | jq '.sessions | length')
+[ "$n" = "2" ] || fail "pagination" "limit=2.7 returned $n rows, expected 2"
+pass "every unusable limit falls back to the default rather than clamping to 1 ($deflt rows)"
 # ...and it survives percent-encoding, which is how a correct client sends it: a raw
 # `|` is not a legal query character per RFC 3986, so a strict URI type or proxy will
 # encode it (or refuse). Sent as a literal %7C rather than via --data-urlencode, to
@@ -487,18 +504,17 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions?limit
 # "(1000 chars)" and "(9000 chars)" are the same width. Comparing 500 to 5000 instead
 # leaves a legitimate one-character difference and makes the assertion look broken.
 # (Plain variables, not an associative array — macOS ships bash 3.2.)
-msglens=""
+len_a=""; len_b=""
 for n in 1000 9000; do
   long=$(printf 'x%.0s' $(seq 1 "$n"))
   msg=$(curl -s "${AUTH[@]}" --get --data-urlencode "cursor=$long" "$BASE/sessions" | jq -r '.error.message')
   echo "$msg" | grep -q "($n chars)" \
     || fail "pagination" "a $n-char cursor's 400 should report its length, got: $msg"
-  msglens="$msglens ${#msg}"
+  [ -z "$len_a" ] && len_a=${#msg} || len_b=${#msg}
 done
-set -- $msglens
-[ "$1" = "$2" ] \
-  && pass "an overlong cursor's 400 echo is bounded ($1 chars for both a 1000- and a 9000-char input)" \
-  || fail "pagination" "the echoed cursor is not bounded: $1 vs $2 chars"
+[ "$len_a" = "$len_b" ] \
+  && pass "an overlong cursor's 400 echo is bounded ($len_a chars for both a 1000- and a 9000-char input)" \
+  || fail "pagination" "the echoed cursor is not bounded: $len_a vs $len_b chars"
 
 echo "==> 12. POST /v1/sessions/{id}/close (finalize + clean tmp; no PRs)"
 close=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/close")
