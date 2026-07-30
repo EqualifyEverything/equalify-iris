@@ -243,6 +243,15 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   editor-rewritten body looks like once it no longer matches the source excerpts — so narrowing
   wrongly can leave a real issue unfixed at the iteration cap, while broadening wrongly costs no
   more than the behavior this optimization replaced.
+- **`GET /v1/sessions` pages on a compound cursor (§9.2 v1.1).** The PRD names a `cursor`
+  parameter without saying what is in it, and the obvious reading — the last row's
+  `created_at` — is unsound: `created_at` is a millisecond timestamp assigned by a request
+  handler, so a burst of uploads ties on it, and paging on a non-unique key skips rows
+  (`created_at < ?` drops the rest of a tied group) and can repeat them (nothing pins the
+  order among ties). `next_cursor` is therefore `"<created_at>|<session_id>"`, the full sort
+  key; clients pass it back verbatim. A cursor that doesn't parse is a `400`, not a silent
+  restart at page one, and `next_cursor` is `null` on a full final page — so clients stop on
+  a null cursor rather than on a short page.
 - **Runs are queued, and the queue is in-process (§9.4).** A bounded FIFO queue
   (`src/util/queue.ts`) caps concurrent pipelines at `defaults.max_concurrent_runs`; sessions over
   the cap wait in `queued`. Two things this deliberately does *not* do. It does not persist: the

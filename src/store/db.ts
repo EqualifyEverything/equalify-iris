@@ -27,6 +27,75 @@ export interface SessionRecord {
   updated_at: string;
 }
 
+// The sort key `GET /v1/sessions` pages on. Both halves are required: session
+// rows are ordered by `created_at DESC`, and `created_at` is a millisecond
+// ISO-8601 string, so two sessions created in the same millisecond are
+// indistinguishable by it. Ties are broken by `session_id DESC` — arbitrary but
+// TOTAL, which is what keyset pagination needs.
+export interface SessionCursor {
+  created_at: string;
+  session_id: string;
+}
+
+// Cursors are line-noise to a client but deliberately readable in a log:
+// "2026-05-22T18:00:00.000Z|ses_01HXYZ…". No base64 wrapper, because an opaque
+// blob makes a paging bug unreadable from a request log without buying any real
+// encapsulation — the shape is documented either way.
+const CURSOR_SEP = "|";
+
+export function encodeCursor(s: SessionCursor): string {
+  return `${s.created_at}${CURSOR_SEP}${s.session_id}`;
+}
+
+/**
+ * Parse a client-supplied cursor, or return null if it is not one.
+ *
+ * Two behaviors worth stating:
+ *
+ *   * A cursor with no separator is treated as a bare `created_at` with an empty
+ *     id. That is exactly the shape this endpoint issued before the compound
+ *     cursor existed, and it degrades to the old `created_at < ?` predicate
+ *     (nothing sorts below the empty string, so the tie-breaking clause is
+ *     unsatisfiable). A client mid-pagination across a deploy keeps working.
+ *   * Anything whose timestamp half is not a valid date is REJECTED rather than
+ *     passed through. The old code compared it as a string, so `cursor=hello`
+ *     matched every row (`'2026-…' < 'hello'`) and handed back page one — a
+ *     client looping on next_cursor would page forever. A 400 says what is wrong.
+ */
+export function parseCursor(raw: string): SessionCursor | null {
+  const i = raw.indexOf(CURSOR_SEP);
+  const created_at = i === -1 ? raw : raw.slice(0, i);
+  const session_id = i === -1 ? "" : raw.slice(i + 1);
+  if (!created_at || Number.isNaN(Date.parse(created_at))) return null;
+  return { created_at, session_id };
+}
+
+/**
+ * Turn an over-fetched result set into one page plus the cursor that follows it.
+ *
+ * Callers ask `listSessions` for `limit + 1` rows and pass the result here. The
+ * extra row is the entire mechanism: it is what distinguishes "the page is full
+ * and there is more" from "the page is full and that was everything". Emitting a
+ * cursor in the second case costs every client one guaranteed-empty request per
+ * list, and a client that treats a non-null cursor as "more exists" reports a
+ * page that isn't there.
+ *
+ * This lives beside the query rather than in the route because the two halves are
+ * one contract — the over-fetch, the slice, and the cursor have to agree, and a
+ * route that re-derives them can drift from the query silently.
+ */
+export function pageSessions(
+  rows: SessionRecord[],
+  limit: number,
+): { page: SessionRecord[]; next: SessionCursor | null } {
+  const page = rows.slice(0, limit);
+  const held = rows.length > limit ? page[page.length - 1] : null;
+  return {
+    page,
+    next: held ? { created_at: held.created_at, session_id: held.session_id } : null,
+  };
+}
+
 export class Store {
   private db: DatabaseSync;
 
@@ -56,6 +125,13 @@ export class Store {
         updated_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(github_user_id, created_at DESC);
+      -- Matches the compound keyset order listSessions pages on. A separate name
+      -- from idx_sessions_user rather than a redefinition: CREATE INDEX IF NOT
+      -- EXISTS is a no-op when the name already exists, so changing the columns
+      -- of the old index in place would silently leave every already-deployed
+      -- database on the two-column version.
+      CREATE INDEX IF NOT EXISTS idx_sessions_user_page
+        ON sessions(github_user_id, created_at DESC, session_id DESC);
     `);
   }
 
@@ -135,7 +211,28 @@ export class Store {
       .run(...(values as never[]), new Date().toISOString(), id);
   }
 
-  listSessions(userId: number, opts: { status?: string; limit: number; cursor?: string }): SessionRecord[] {
+  // Keyset pagination over (created_at DESC, session_id DESC).
+  //
+  // This used to page on `created_at < ?` alone. `created_at` is a millisecond
+  // ISO-8601 timestamp and sessions are created by an HTTP handler, so two rows
+  // sharing one is not a corner case — it is what a burst of uploads looks like.
+  // With a non-unique sort key the old query lost and duplicated rows at every
+  // page boundary that fell inside a tie: `<` skipped every other row sharing the
+  // last row's timestamp (they never appear on any page), while SQLite is free to
+  // order the tied rows differently between the two queries, so a row already
+  // returned could come back on the next page. Neither shows up in testing at
+  // small volume, and both silently corrupt any client that walks pages to build
+  // a list.
+  //
+  // The predicate is the row-value form `(created_at, session_id) < (?, ?)`
+  // rather than the equivalent `created_at < ? OR (created_at = ? AND ...)`
+  // expansion; SQLite's planner uses the covering index for the former
+  // (`SEARCH ... (u=? AND (created_at,session_id)<(?,?))`) and degrades to
+  // scanning the whole user's rows for the latter (`SEARCH ... (u=?)`).
+  listSessions(
+    userId: number,
+    opts: { status?: string; limit: number; cursor?: SessionCursor },
+  ): SessionRecord[] {
     const params: unknown[] = [userId];
     let where = `github_user_id = ?`;
     if (opts.status) {
@@ -143,13 +240,17 @@ export class Store {
       params.push(opts.status);
     }
     if (opts.cursor) {
-      // Cursor is the created_at of the last item from the previous page.
-      where += ` AND created_at < ?`;
-      params.push(opts.cursor);
+      // Strictly after the last row of the previous page, in the same total order
+      // the ORDER BY below imposes — the two must match exactly or rows are
+      // skipped.
+      where += ` AND (created_at, session_id) < (?, ?)`;
+      params.push(opts.cursor.created_at, opts.cursor.session_id);
     }
     params.push(opts.limit);
     return this.db
-      .prepare(`SELECT * FROM sessions WHERE ${where} ORDER BY created_at DESC LIMIT ?`)
+      .prepare(
+        `SELECT * FROM sessions WHERE ${where} ORDER BY created_at DESC, session_id DESC LIMIT ?`,
+      )
       .all(...(params as never[])) as unknown as SessionRecord[];
   }
 }

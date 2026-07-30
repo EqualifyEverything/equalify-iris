@@ -393,6 +393,65 @@ list=$(curl -s "${AUTH[@]}" "$BASE/sessions")
 echo "$list" | jq -e --arg sid "$SID" '.sessions | map(.session_id) | index($sid) != null' >/dev/null \
   && pass "session appears in list" || fail "list" "$list"
 
+echo "==> 11b. paginating GET /v1/sessions visits every session exactly once"
+# The list used to page on `created_at` alone. That is a millisecond timestamp, so
+# a burst of uploads ties on it, and at a page boundary inside a tie the old query
+# both skipped rows (`created_at < ?` drops the rest of the tied group) and could
+# repeat them (nothing pinned the order among ties).
+#
+# Fire the burst in parallel and walk one row per page, so every boundary lands
+# inside it. Whether a tie ACTUALLY occurs is up to the machine — the count is
+# printed rather than asserted, since a run that produced none has still proved
+# the walk is complete, just not the tie-breaking specifically. The tie case is
+# pinned deterministically in test/pagination.test.ts, which forges the
+# timestamps; this step's job is to prove the real wire cursor round-trips
+# through HTTP at all, which no unit test covers.
+burst=()
+for n in 1 2 3 4 5; do
+  curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
+    -F "images=@$png;filename=page-burst-$n.png" -F 'config={"max_review_iterations":1}' >/dev/null &
+  burst+=("$!")
+done
+# Wait on THESE pids only. A bare `wait` would also wait on the mock services and
+# the Iris server — they were started with `&` in this same shell and never exit,
+# so it would hang the script forever.
+for p in "${burst[@]}"; do wait "$p"; done
+# Reference set: one unpaged request (limit is capped at 100, well above what this
+# script creates).
+all=$(curl -s "${AUTH[@]}" "$BASE/sessions?limit=100" | jq -r '.sessions[].session_id' | sort)
+ties=$(curl -s "${AUTH[@]}" "$BASE/sessions?limit=100" \
+  | jq '[.sessions[].created_at] | length - (unique | length)')
+# Walk with limit=1, following next_cursor exactly as a client would.
+walked=""
+cursor=""
+for i in $(seq 1 40); do
+  if [ -z "$cursor" ]; then
+    pg=$(curl -s "${AUTH[@]}" "$BASE/sessions?limit=1")
+  else
+    pg=$(curl -s "${AUTH[@]}" --get --data-urlencode "cursor=$cursor" "$BASE/sessions?limit=1")
+  fi
+  walked="$walked$(echo "$pg" | jq -r '.sessions[].session_id')
+"
+  cursor=$(echo "$pg" | jq -r '.next_cursor // empty')
+  [ -z "$cursor" ] && break
+done
+if [ -n "$cursor" ]; then fail "pagination" "did not terminate after 40 pages"; fi
+walked_sorted=$(echo "$walked" | grep -v '^$' | sort)
+[ "$walked_sorted" = "$all" ] \
+  && pass "one-at-a-time pagination saw every session once ($(echo "$all" | wc -l | tr -d ' ') rows, $ties timestamp ties)" \
+  || fail "pagination" "walked pages differ from the unpaged list:
+$(diff <(echo "$all") <(echo "$walked_sorted") || true)"
+# No duplicates even if the sets happened to match by luck.
+dupes=$(echo "$walked_sorted" | uniq -d)
+[ -z "$dupes" ] && pass "no session was returned on two pages" \
+  || fail "pagination" "duplicated across pages: $dupes"
+# A cursor that is not one is a 400, not a silent restart. The old code compared
+# the raw string, so `cursor=hello` matched every row and handed back page one —
+# a client following next_cursor would page forever.
+code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions?cursor=hello")
+[ "$code" = "400" ] && pass "an unparseable cursor is rejected (400)" \
+  || fail "pagination" "expected 400 for a garbage cursor, got $code"
+
 echo "==> 12. POST /v1/sessions/{id}/close (finalize + clean tmp; no PRs)"
 close=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/close")
 echo "$close" | jq -e '.status=="closed"' >/dev/null && pass "session closed" || fail "close" "$close"

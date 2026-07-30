@@ -234,9 +234,29 @@ curl -s -H "$AUTH" "$BASE/sessions?status=ready_for_review"
 ```
 ```json
 { "sessions": [ { "session_id": "ses_...", "status": "ready_for_review",
-  "image_count": 2, "created_at": "...", "updated_at": "..." } ], "next_cursor": null }
+  "image_count": 2, "created_at": "...", "updated_at": "..." } ],
+  "next_cursor": "2026-05-22T18:00:00.000Z|ses_01HXYZ..." }
 ```
-Paginate by passing `cursor=<next_cursor>`.
+Paginate by passing `cursor=<next_cursor>` **verbatim** — it encodes both halves of the
+sort key (`created_at|session_id`), because `created_at` alone is not unique: sessions
+created in the same millisecond tie on it, and paging on a non-unique key skips and
+repeats rows at page boundaries. Treat it as opaque; the shape is documented so a paging
+bug is readable in a request log, not so clients can construct one.
+
+`next_cursor` is `null` on the last page — including when that page is full. Stop when it
+is `null` rather than when a page comes back short. A cursor that is not a valid one is a
+`400 invalid_request`, not a silent restart from page one.
+
+```bash
+# Walk every page.
+cursor=""
+while :; do
+  page=$(curl -s -H "$AUTH" --get ${cursor:+--data-urlencode "cursor=$cursor"} "$BASE/sessions?limit=50")
+  echo "$page" | jq -r '.sessions[].session_id'
+  cursor=$(echo "$page" | jq -r '.next_cursor // empty')
+  [ -z "$cursor" ] && break
+done
+```
 
 ## 9. Close the session (finalize + clean up)
 

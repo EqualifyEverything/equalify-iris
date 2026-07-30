@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { ulid } from "ulid";
 import type { IrisConfig } from "../config.ts";
 import type { Store, SessionRecord } from "../store/db.ts";
+import { encodeCursor, pageSessions, parseCursor } from "../store/db.ts";
 import { Paths } from "../store/paths.ts";
 import { runPipeline } from "../pipeline/orchestrator.ts";
 import type { AuthedRequest } from "../auth/middleware.ts";
@@ -103,14 +104,34 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   };
 
   // GET /v1/sessions — list this user's sessions, newest first.
+  //
+  // Paged by keyset on (created_at, session_id), not by created_at alone: that is
+  // not unique — a burst of uploads shares a millisecond — and paging on it drops
+  // and repeats rows at tie boundaries (see store.listSessions). The cursor is
+  // therefore compound, and an unparseable one is a 400 rather than being
+  // compared as a string, which used to silently hand back page one forever.
   r.get("/", (req: AuthedRequest, res) => {
     const limit = Math.min(parseInt(String(req.query.limit ?? "20"), 10) || 20, 100);
     const status = req.query.status ? String(req.query.status) : undefined;
-    const cursor = req.query.cursor ? String(req.query.cursor) : undefined;
-    const rows = store.listSessions(req.user!.github_user_id, { limit: limit + 1, status, cursor });
-    const page = rows.slice(0, limit);
-    const next = rows.length > limit ? page[page.length - 1].created_at : null;
-    res.json({ sessions: page.map(sessionSummary), next_cursor: next });
+    const raw = req.query.cursor ? String(req.query.cursor) : undefined;
+    const cursor = raw ? parseCursor(raw) : undefined;
+    if (raw && !cursor) {
+      sendError(res, 400, "invalid_request", `Invalid cursor: ${raw}. Pass a next_cursor value verbatim.`);
+      return;
+    }
+    const rows = store.listSessions(req.user!.github_user_id, {
+      limit: limit + 1,
+      status,
+      cursor: cursor ?? undefined,
+    });
+    // The slice-and-cursor decision lives with the query (pageSessions), not
+    // here: the over-fetch above, the page boundary, and the cursor are one
+    // contract, and a route that re-derives it can drift from the query silently.
+    const { page, next } = pageSessions(rows, limit);
+    res.json({
+      sessions: page.map(sessionSummary),
+      next_cursor: next ? encodeCursor(next) : null,
+    });
   });
 
   // POST /v1/sessions — create a session. Accepts images and/or PDFs; PDFs are
