@@ -335,10 +335,20 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       return;
     }
     // Mark it non-terminal before enqueueing, both so a second feedback POST
-    // hits the ready_for_review guard above and so a client polling a waiting
-    // re-run sees `queued` rather than a stale `ready_for_review` alongside a
-    // 202 that promised a new run.
-    store.updateSession(s.session_id, { status: "queued", phase: "triage", error: null });
+    // hits the ready_for_review guard and so a client polling a waiting re-run
+    // sees `queued` rather than a stale `ready_for_review` alongside a 202 that
+    // promised a new run.
+    //
+    // The claim is what makes that guard a lock rather than a check: the status
+    // test and the write are one statement, so of two concurrent callers exactly
+    // one proceeds to enqueue. The validation above stays ahead of it so a request
+    // with no feedback body still gets its 400 without disturbing the session.
+    // Losing the claim means someone else moved the session out of
+    // ready_for_review in between, which is the same condition the guard reports.
+    if (!store.claimSession(s.session_id, "ready_for_review", { status: "queued", phase: "triage", error: null })) {
+      sendError(res, 409, "invalid_state", "Feedback can only be submitted when ready_for_review");
+      return;
+    }
     const started = enqueueRun({
       cfg,
       store,
@@ -369,6 +379,17 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 409, "invalid_state", "Session is not ready_for_review");
       return;
     }
+    // Claim the session BEFORE doing any of the work below, unlike the feedback
+    // endpoint where the claim sits last. Everything after this point mutates
+    // state outside the database — it captures fixtures into the shared agent
+    // library and deletes the session's tmp tree — and a loser that discovers it
+    // lost only afterwards has already done both. Two concurrent closes would
+    // file the same fixtures twice, so the claim goes first and the work happens
+    // only on the winning path.
+    if (!store.claimSession(s.session_id, "ready_for_review", { status: "closed" })) {
+      sendError(res, 409, "invalid_state", "Session is not ready_for_review");
+      return;
+    }
     // Auto-capture regression fixtures from the accepted output (PRD §7.12): the
     // page agent's per-page output + its source image, used to gate future agent
     // updates so a change can't break a use it already handled. Best-effort —
@@ -382,9 +403,21 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     } catch {
       // ignore — fixture capture must not prevent accepting a session
     }
-    const tmp = paths.tmpDir(s.session_id);
-    if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
-    store.updateSession(s.session_id, { status: "closed" });
+    // Best-effort for the same reason as the capture above, and newly REQUIRED by
+    // the claim-first ordering: the row is already `closed`, so a throw here is
+    // unrecoverable rather than transient. `force: true` suppresses ENOENT only —
+    // an unwritable subdirectory still gives ENOTEMPTY. Previously the status write
+    // came last, so a throw left the session at ready_for_review and the client's
+    // retry re-ran the cleanup; now the retry would get a 409 while
+    // `data_dir/tmp/<id>` is orphaned anyway (nothing else touches tmpDir, and
+    // failStaleSessions only rewrites statuses). Swallowing keeps the leak a leak
+    // instead of also stranding the session.
+    try {
+      const tmp = paths.tmpDir(s.session_id);
+      if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+    } catch {
+      // ignore — the session is closed either way
+    }
     res.json({ session_id: s.session_id, status: "closed" });
   });
 

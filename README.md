@@ -333,6 +333,26 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   queue sees a session its images are already buffered in RAM (ceiling: multer's own
   `limits.fileSize` × part count) and any PDF is already rasterized to full-page 150-DPI PNGs.
   Both are consequences of the single-instance, single-process design the store declares.
+- **Starting work on a session is a claim, not a check (`store.claimSession`).** The two endpoints
+  that begin non-idempotent work — `POST /:id/feedback` (enqueues a pipeline) and `POST /:id/close`
+  (files regression fixtures into the shared agent library, deletes the tmp tree) — used to read the
+  status, compare it, then write. `claimSession` folds the comparison into the write
+  (`UPDATE … WHERE session_id = ? AND status = ?`) and reports whether this caller is the one that
+  changed the row, so of two concurrent callers exactly one is told it won.
+
+  What this is and is not: both handlers are fully synchronous, so *today* nothing can interleave
+  between the check and the write and the plain pattern was already correct. Racing two **processes**
+  against a shared WAL database, both callers won — but a second instance is not the supported
+  topology (see the in-process queue above). So this is defense in depth. It earns its place by
+  being the cheaper invariant to hold: correctness stops depending on every future handler staying
+  synchronous. Adding one `await` between the guard and the write — the ordinary thing to do when a
+  check needs I/O — would silently reintroduce the race in-process, and a duplicated feedback run is
+  invisible in the response (both callers get a `202`) while two pipelines write the same
+  `output.html` and `fragments/final.json`.
+
+  The claim sits *last* in the feedback handler (after request validation, so a malformed body still
+  gets its `400` without disturbing the session) and *first* in close (before fixture capture and the
+  `rmSync`, because a loser that discovers it lost afterwards has already filed the fixtures twice).
 - **Provider retries are not symmetric in code, but are in behavior.** OpenRouter retries by hand
   (3 attempts, exponential backoff) because `fetch()` has no retry strategy. Bedrock has no retry
   loop *on purpose*: the AWS SDK already applies its `standard` strategy — also 3 attempts with
