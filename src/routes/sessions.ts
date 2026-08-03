@@ -403,8 +403,21 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     } catch {
       // ignore — fixture capture must not prevent accepting a session
     }
-    const tmp = paths.tmpDir(s.session_id);
-    if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+    // Best-effort for the same reason as the capture above, and newly REQUIRED by
+    // the claim-first ordering: the row is already `closed`, so a throw here is
+    // unrecoverable rather than transient. `force: true` suppresses ENOENT only —
+    // an unwritable subdirectory still gives ENOTEMPTY. Previously the status write
+    // came last, so a throw left the session at ready_for_review and the client's
+    // retry re-ran the cleanup; now the retry would get a 409 while
+    // `data_dir/tmp/<id>` is orphaned anyway (nothing else touches tmpDir, and
+    // failStaleSessions only rewrites statuses). Swallowing keeps the leak a leak
+    // instead of also stranding the session.
+    try {
+      const tmp = paths.tmpDir(s.session_id);
+      if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+    } catch {
+      // ignore — the session is closed either way
+    }
     res.json({ session_id: s.session_id, status: "closed" });
   });
 

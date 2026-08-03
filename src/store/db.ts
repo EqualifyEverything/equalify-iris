@@ -132,8 +132,18 @@ export class Store {
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
+    // busy_timeout is 0 on a fresh node:sqlite connection — "fail immediately",
+    // not "wait for the lock". WAL still allows only one writer, so without a
+    // timeout a second process's UPDATE against a held write lock throws
+    // ERR_SQLITE_ERROR instead of completing. That would break claimSession in
+    // the very scenario that justifies it: a loser is supposed to report 0
+    // changed rows so the caller can answer 409, and a synchronous throw in a
+    // handler is an uncaught exception (there is no error middleware) — a 500.
+    // Every write here is a single-statement autocommit, so contention lasts
+    // microseconds; 5s is a ceiling for the multi-process case, not a budget.
     this.db.exec(`
       PRAGMA journal_mode = WAL;
+      PRAGMA busy_timeout = 5000;
       CREATE TABLE IF NOT EXISTS users (
         github_user_id INTEGER PRIMARY KEY,
         github_login TEXT NOT NULL,

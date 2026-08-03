@@ -521,6 +521,31 @@ close=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/close")
 echo "$close" | jq -e '.status=="closed"' >/dev/null && pass "session closed" || fail "close" "$close"
 [ ! -d "$DATA/tmp/$SID" ] && pass "tmp/ cleaned on close" || fail "tmp cleanup" "tmp dir still present"
 
+echo "==> 12b. a tmp tree that cannot be removed still closes the session"
+# The close handler claims the session (status -> closed) BEFORE the cleanup, so
+# the cleanup must not be able to throw: after the claim there is no way back to
+# ready_for_review, and a 500 here would leave the client unable to retry (the
+# guard answers 409) with the tmp tree orphaned anyway. `force: true` does not
+# cover this — it suppresses ENOENT only, and an unwritable subdirectory whose
+# child cannot be unlinked gives ENOTEMPTY.
+#
+# QB is a completed, still-open session left over from step 9e.
+qbtmp="$DATA/tmp/$QB/agents"
+if [ -d "$qbtmp" ]; then
+  touch "$qbtmp/undeletable.md"
+  chmod 0500 "$qbtmp"
+  qbclose=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$QB/close")
+  chmod 0700 "$qbtmp"   # restore so the harness's own cleanup works
+  echo "$qbclose" | jq -e '.status=="closed"' >/dev/null \
+    && pass "close survives an unremovable tmp tree (no 500, session still closed)" \
+    || fail "close cleanup" "expected status=closed, got: $qbclose"
+  qbst=$(curl -s "${AUTH[@]}" "$BASE/sessions/$QB" | jq -r '.status')
+  [ "$qbst" = "closed" ] && pass "the stored status is closed despite the failed cleanup" \
+    || fail "close cleanup" "GET says '$qbst', expected closed"
+else
+  fail "close cleanup" "expected a tmp tree for $QB at $qbtmp"
+fi
+
 echo "==> 13. close again => 409 invalid_state"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${AUTH[@]}" "$BASE/sessions/$SID/close")
 [ "$code" = "409" ] && pass "re-close rejected (409)" || fail "re-close" "got $code"
