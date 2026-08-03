@@ -19,9 +19,6 @@ export class Paths {
   sessionInput(id: string): string {
     return join(this.sessionDir(id), "input");
   }
-  sessionNotes(id: string): string {
-    return join(this.sessionDir(id), "notes");
-  }
   sessionFragments(id: string): string {
     return join(this.sessionDir(id), "fragments");
   }
@@ -91,10 +88,16 @@ export class Paths {
   }
 
   // Create the persisted session skeleton and the ephemeral tmp area (§8.2).
+  //
+  // `notes/` is no longer created, and `sessionNotes()` is gone with it: the
+  // Triage phase that would write `notes/<image>.md` (PRD §7.2) is not
+  // implemented, so every session got an empty directory that nothing ever read
+  // or wrote. Restore both together if Triage is built (#30 Tier 4) — an empty
+  // directory reads as "this ran and found nothing", which is the opposite of
+  // what was true.
   initSession(id: string): void {
     for (const d of [
       this.sessionInput(id),
-      this.sessionNotes(id),
       this.sessionFragments(id),
       this.tmpAgentsDir(id),
     ]) {

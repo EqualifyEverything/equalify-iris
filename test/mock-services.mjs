@@ -88,10 +88,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // a truncation run — the mock boots once for the whole e2e.
 let truncateNext = false;
 
+// When set, the page agent's response carries a `suggested_agent` with this name,
+// so the e2e can drive specialist dispatch. Set to a real library agent to make
+// dispatch succeed, or to a name no file matches to make it MISS — the case the
+// service used to handle silently. Toggled via POST /__suggest.
+let suggestAgent = null;
+
 const or = createServer(async (req, res) => {
   if (req.method === "POST" && new URL(req.url, "http://x").pathname === "/__truncate") {
     truncateNext = !truncateNext;
     return json(res, 200, { truncate: truncateNext });
+  }
+  if (req.method === "POST" && new URL(req.url, "http://x").pathname === "/__suggest") {
+    const raw = await readBody(req);
+    suggestAgent = JSON.parse(raw || "{}").name ?? null;
+    return json(res, 200, { suggest: suggestAgent });
   }
   const body = await readBody(req);
   let sys = "";
@@ -133,6 +144,22 @@ const or = createServer(async (req, res) => {
         `<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n` +
         `<p>Page marker ${page}.${revised ? " Revised." : ""}</p>`,
       log: "",
+      // Only when the e2e has armed it, and only on page 1, so the run yields
+      // exactly one dispatch attempt to assert on.
+      ...(suggestAgent && page === 1
+        ? { suggested_agent: { name: suggestAgent, reason: "e2e-driven dispatch" } }
+        : {}),
+    });
+  } else if (user.includes("Extract ONLY the content your contract covers")) {
+    // A dispatched library specialist. Returns a marked fragment so the e2e can
+    // tell a dispatch that ran from one that was skipped.
+    content = JSON.stringify({ no_content: false, html: `<p>Specialist fragment.</p>` });
+  } else if (sys.includes("You merge a higher-fidelity HTML fragment")) {
+    // The merge step, which folds the specialist fragment back into the page.
+    content = JSON.stringify({
+      html:
+        `<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n` +
+        `<p>Page marker 1.</p>\n<p>Specialist fragment.</p>`,
     });
   } else if (sys.includes("Reader Agent")) {
     // Normally clean. When the run carries feedback asking for a copy-edit pass,

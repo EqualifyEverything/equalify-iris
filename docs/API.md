@@ -119,6 +119,15 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID" | jq
   "updated_at": "..."
 }
 ```
+`status` is one of `queued`, `running`, `ready_for_review`, `closed`, `failed`.
+
+`phase` is one of `extraction`, `assembly`, `review`, `done`, and is only meaningful while
+`status` is `running` — a `queued` session reports the phase it will start in, not one it has
+reached. These are the four phases the pipeline enters; `triage` and `reconciliation` appear in
+PRD §6/§7.2/§7.6 but are **not implemented** and are no longer emitted, so a client should not
+branch on them. Treat the list as open anyway: fall back to displaying the raw value rather than
+showing nothing for a phase you don't recognize.
+
 A simple wait loop:
 ```bash
 until [ "$(curl -s -H "$AUTH" "$BASE/sessions/$SID" | jq -r .status)" = "ready_for_review" ]; do
@@ -150,7 +159,7 @@ curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/feedback" \
 # 202 {"session_id":"ses_...","status":"running","phase":"extraction"}
 ```
 Then poll status again as in step 4. A re-run is subject to the same `max_concurrent_runs` cap as a
-new upload, so the 202 may instead report `{"status":"queued","phase":"triage"}` — accepted, waiting
+new upload, so the 202 may instead report `{"status":"queued","phase":"extraction"}` — accepted, waiting
 for a slot. Either way the session is no longer `ready_for_review`, so a second feedback POST gets a
 `409` until this run finishes.
 

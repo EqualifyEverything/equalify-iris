@@ -566,12 +566,14 @@ Response `201 Created`:
 
 Retrieve session status. When `status` is `ready_for_review`, the response also includes a preview of what `/close` will do (which PRs will be opened) so the user can inspect before closing.
 
+**Amended (v1.1): `phase` enumerates only the phases the pipeline enters, and `queued` is a documented status.** `triage` and `reconciliation` were removed from the enum. Neither is implemented — nothing writes the triage notes of §7.2, and reconciliation (§7.6) cannot run at all while extraction produces `edges: []` — so a client switching on them was branching on states no session could ever report. Worse, a new session was *created* at `phase: "triage"`, held it for the length of one INSERT, and was overwritten by `extraction` before any client could poll: the one phase that appeared in responses was the one that does not exist. New sessions now start at `extraction`. This narrows the API to what ships; it does not decide whether either phase gets built (see the tracking issue's Tier 4) — restoring a phase means restoring its enum value with it. `queued` was already returned by the run queue (§9.4) but was missing from this list.
+
 Response `200 OK`:
 ```json
 {
   "session_id": "ses_01HXYZ…",
-  "status": "running" | "ready_for_review" | "closed" | "failed",
-  "phase": "triage" | "extraction" | "reconciliation" | "assembly" | "review" | "done",
+  "status": "queued" | "running" | "ready_for_review" | "closed" | "failed",
+  "phase": "extraction" | "assembly" | "review" | "done",
   "iterations_completed": 1,
   "iterations_max": 3,
   "image_count": 12,
@@ -617,7 +619,7 @@ Request:
 
 Response `202 Accepted`:
 ```json
-{ "session_id": "ses_01HXYZ…", "status": "running", "phase": "triage" }
+{ "session_id": "ses_01HXYZ…", "status": "running", "phase": "extraction" }
 ```
 
 #### `POST /v1/sessions/{session_id}/close`

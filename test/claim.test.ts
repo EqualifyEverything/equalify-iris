@@ -37,10 +37,15 @@ function ready(store: Store, id = "ses_1"): string {
 test("a claim from the expected status wins and applies the patch", () => {
   withStore((store) => {
     const id = ready(store);
-    assert.equal(store.claimSession(id, "ready_for_review", { status: "queued", phase: "triage" }), true);
+    // `phase` is deliberately NOT "extraction" here: createSession inserts that
+    // value, so patching to it would assert nothing — the row would read
+    // "extraction" whether or not the patch was applied. "review" is a value only
+    // this claim could have written. (The feedback route does patch "extraction";
+    // what that route sets is its own concern, not this method's.)
+    assert.equal(store.claimSession(id, "ready_for_review", { status: "queued", phase: "review" }), true);
     const s = store.getSession(id)!;
     assert.equal(s.status, "queued");
-    assert.equal(s.phase, "triage");
+    assert.equal(s.phase, "review");
   });
 });
 
@@ -51,8 +56,8 @@ test("only the first of two claims wins", () => {
     // landed — the interleaving that matters, without needing real concurrency:
     // the guard is the WHERE clause, so a serialized second attempt exercises it
     // exactly as a raced one does.
-    const first = store.claimSession(id, "ready_for_review", { status: "queued", phase: "triage" });
-    const second = store.claimSession(id, "ready_for_review", { status: "queued", phase: "triage" });
+    const first = store.claimSession(id, "ready_for_review", { status: "queued", phase: "extraction" });
+    const second = store.claimSession(id, "ready_for_review", { status: "queued", phase: "extraction" });
     assert.equal(first, true);
     assert.equal(second, false, "two callers both got permission to start a run");
   });
@@ -65,7 +70,7 @@ test("a losing claim leaves the winner's state untouched", () => {
     // A close and a feedback re-run racing: the re-run must not resurrect a
     // closed session into `queued`, which would enqueue a pipeline writing over
     // an accepted output.
-    assert.equal(store.claimSession(id, "ready_for_review", { status: "queued", phase: "triage" }), false);
+    assert.equal(store.claimSession(id, "ready_for_review", { status: "queued", phase: "extraction" }), false);
     assert.equal(store.getSession(id)!.status, "closed");
   });
 });
@@ -75,7 +80,7 @@ test("a claim from the wrong status changes nothing", () => {
     const id = "ses_running";
     store.createSession({ session_id: id, github_user_id: USER, image_count: 1, iterations_max: 3 });
     store.updateSession(id, { status: "running", phase: "extraction" });
-    assert.equal(store.claimSession(id, "ready_for_review", { status: "queued", phase: "triage" }), false);
+    assert.equal(store.claimSession(id, "ready_for_review", { status: "queued", phase: "extraction" }), false);
     const s = store.getSession(id)!;
     assert.equal(s.status, "running");
     assert.equal(s.phase, "extraction", "the patch was applied despite the claim failing");

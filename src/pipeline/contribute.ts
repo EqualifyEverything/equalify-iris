@@ -54,7 +54,13 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
 
   const seen = new Set<string>();
   for (const s of suggestions) {
-    const name = s.name.replace(/\.md$/, "").trim();
+    // Trim first, then strip the extension — same order as dispatchSpecialist, and
+    // for the same reason: the other way round leaves `"table.md "` as `"table.md"`,
+    // which STANDARD does not contain, so a padded standard name gets past the
+    // filter. Here that only costs a redundant issue (loadAgent below still finds
+    // `agents/table.md` and skips it), but the two call sites resolving one model
+    // string differently is a bug waiting for the next reader.
+    const name = s.name.trim().replace(/\.md$/, "").trim();
     if (!name || STANDARD.has(name) || seen.has(name)) continue;
     seen.add(name);
     // Skip if the library (or this session) already has the agent.

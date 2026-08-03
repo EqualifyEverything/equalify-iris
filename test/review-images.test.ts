@@ -49,7 +49,11 @@ interface Recorded {
 function ctxWith(
   dir: string,
   pageCount: number,
-  issues: (ReviewIssue & { pages?: unknown })[],
+  // `pages` is widened rather than intersected: `ReviewIssue & { pages?: unknown }`
+  // keeps the stricter `number[]` from the intersection, but these tests
+  // deliberately feed what a sloppy model returns (`["3", 3]`) to prove the
+  // coercion works. Omit removes the declared type so the override applies.
+  issues: (Omit<ReviewIssue, "pages"> & { pages?: unknown })[],
 ): { ctx: PipelineContext; rec: Recorded; images: InputImage[] } {
   const inputDir = join(dir, "input");
   mkdirSync(inputDir, { recursive: true });

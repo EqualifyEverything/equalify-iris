@@ -3,7 +3,15 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 export type SessionStatus = "queued" | "running" | "ready_for_review" | "closed" | "failed";
-export type Phase = "triage" | "extraction" | "reconciliation" | "assembly" | "review" | "done";
+// The phases the pipeline actually enters, in order. "triage" and
+// "reconciliation" were removed: neither is implemented (nothing writes triage
+// notes, and reconciliation cannot run while extraction hardcodes `edges: []`),
+// so a client that switched on them was branching on states it would never see.
+// A new session starts at "extraction" rather than "triage" for the same reason
+// — it used to report a phase for the length of one INSERT, until runPipeline
+// immediately overwrote it. See #30 Tier 4 for the decision to build or drop
+// each phase; this only stops the enum from claiming they exist today.
+export type Phase = "extraction" | "assembly" | "review" | "done";
 
 export interface UserRecord {
   github_user_id: number;
@@ -222,7 +230,7 @@ export class Store {
       .prepare(
         `INSERT INTO sessions
          (session_id, github_user_id, status, phase, iterations_completed, iterations_max, image_count, error, created_at, updated_at)
-         VALUES (?, ?, 'queued', 'triage', 0, ?, ?, NULL, ?, ?)`,
+         VALUES (?, ?, 'queued', 'extraction', 0, ?, ?, NULL, ?, ?)`,
       )
       .run(s.session_id, s.github_user_id, s.iterations_max, s.image_count, now, now);
     return this.getSession(s.session_id)!;
@@ -230,7 +238,15 @@ export class Store {
 
   // Sessions run in-process; after a restart any still-"running"/"queued" rows
   // are orphaned (the process that drove them is gone). Mark them failed so
-  // clients stop polling a run that will never finish. Single-instance only.
+  // clients stop polling a run that will never finish.
+  //
+  // SINGLE-INSTANCE ONLY, and this is the sharpest edge of that constraint: no
+  // row records which process owns a run, so this cannot distinguish "orphaned"
+  // from "a peer instance is running it right now". A second instance booting
+  // against the same data_dir marks the first instance's live runs `failed` —
+  // the pipeline keeps going and still writes output.html, but the client is
+  // told the conversion failed. Declared in README's implementation notes;
+  // making it safe needs an owning-instance id, not a change here.
   failStaleSessions(): number {
     const now = new Date().toISOString();
     const res = this.db
