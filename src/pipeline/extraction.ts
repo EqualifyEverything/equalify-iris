@@ -219,12 +219,20 @@ async function mergeSpecialist(
   return parsed?.html?.trim() || null;
 }
 
-// The non-standard agent files a suggestion could have resolved to, for the
+// The agent names a suggestion could have resolved to, for the
 // `specialist_unresolved` log line. Session-built agents (tmp/) are included
 // because loadAgent prefers them, so they are genuinely dispatchable. Sorted so
 // two runs of the same library produce comparable log lines. Best-effort: this
 // exists to explain a miss, so it must never turn one into a failed run.
-function availableSpecialists(ctx: PipelineContext): string[] {
+//
+// Standard-type names ARE listed even though dispatchSpecialist declines them.
+// The list is there to make a near-miss readable, and the commonest near-miss is a
+// plural or variant of a standard type — a suggestion of "tables" never reaches
+// the decline branch (it is not in STANDARD_AGENTS) and does not resolve to a
+// file, so it lands here, where a list without "table" hides the whole
+// explanation. `page` and `feedback` are excluded because they are the pipeline's
+// own agents, not content types anything should route to.
+function libraryAgentNames(ctx: PipelineContext): string[] {
   const names = new Set<string>();
   for (const dir of [ctx.paths.agentsDir, ctx.paths.tmpAgentsDir(ctx.sessionId)]) {
     let entries: string[];
@@ -236,7 +244,7 @@ function availableSpecialists(ctx: PipelineContext): string[] {
     for (const f of entries) {
       if (!f.endsWith(".md")) continue;
       const logical = f.slice(0, -3);
-      if (logical === PAGE_AGENT || logical === "feedback" || STANDARD_AGENTS.has(logical)) continue;
+      if (logical === PAGE_AGENT || logical === "feedback") continue;
       names.add(logical);
     }
   }
@@ -254,7 +262,16 @@ async function dispatchSpecialist(
   pageHtml: string,
   suggestion: { name: string; reason: string },
 ): Promise<{ html: string; dispatched: boolean }> {
-  const logical = suggestion.name.replace(/\.md$/, "").trim();
+  // Trim BEFORE stripping the extension, not after. The other order leaves
+  // `"table.md "` as `"table.md"`, which is not in STANDARD_AGENTS (that set
+  // holds `"table"`) but which loadAgent resolves to `agents/table.md` — so a
+  // whitespace-padded standard name skips the decline below and dispatches a
+  // standard specialist, splicing its fragment over content the general page pass
+  // already rendered. That is the two-representations-of-one-thing duplication the
+  // page prompt forbids and this decline exists to prevent. `" table "` declines
+  // correctly either way, which is what makes the trailing-`.md` case easy to
+  // miss.
+  const logical = suggestion.name.trim().replace(/\.md$/, "").trim();
   // Every path out of here is logged, including the ones that do nothing.
   // `logical` is free text the model wrote, resolved to a file by name, so a
   // specialist silently fails to run whenever the model's wording and the
@@ -264,8 +281,17 @@ async function dispatchSpecialist(
   // same observation: a page that came out of the general pass. `candidates`
   // names what WAS available, so a miss can be read as a near-miss rather than
   // needing a second run to investigate.
+  //
+  // `agent` carries the same meaning on every branch, so one filter on
+  // `type=="specialist_unresolved"` can read `.agent` regardless of which branch
+  // produced it. The empty-name case reports the raw string it could not use.
   if (!logical) {
-    ctx.log.event("specialist_unresolved", { suggested: suggestion.name, image: img.name, reason: "empty name" });
+    ctx.log.event("specialist_unresolved", {
+      agent: suggestion.name,
+      image: img.name,
+      reason: "empty name",
+      candidates: libraryAgentNames(ctx),
+    });
     return { html: pageHtml, dispatched: false };
   }
   if (STANDARD_AGENTS.has(logical)) {
@@ -284,7 +310,7 @@ async function dispatchSpecialist(
       agent: logical,
       image: img.name,
       reason: "no agent file of that name",
-      candidates: availableSpecialists(ctx),
+      candidates: libraryAgentNames(ctx),
     });
     return { html: pageHtml, dispatched: false };
   }

@@ -388,7 +388,7 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   peer" because nothing records which process owns a run.
 
   Two other single-process assumptions ride along: the run queue that enforces
-  `max_concurrent_runs` is in-memory, so N instances allow N × the cap, and `notes`/fixture and
+  `max_concurrent_runs` is in-memory, so N instances allow N × the cap, and fixture and
   agent-memory writes under `data_dir` are unsynchronized between processes.
 
   To scale beyond one box, put a second `data_dir` behind it (independent instances, sessions not

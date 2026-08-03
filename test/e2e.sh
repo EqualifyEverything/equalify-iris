@@ -320,24 +320,30 @@ echo "==> 9f. specialist dispatch says so in the log, whether it runs or misses"
 #
 # Both directions are driven here, on their own sessions, because a miss that
 # LOOKS like a success is the whole failure mode.
-dispatch_run() {   # $1 = suggested agent name, $2 = label
+#
+# The session id comes back in the global DISPATCH_SID rather than on stdout: a
+# `SID=$(dispatch_run ...)` would run this in a subshell, where `fail`'s ✗ line and
+# server-log dump land in SID instead of the terminal and its `exit 1` only leaves
+# the subshell — so a broken run would read as a green test with a garbled id,
+# after cleanup had already deleted the data dir out from under the servers.
+dispatch_run() {   # $1 = suggested agent name, $2 = label; sets DISPATCH_SID
   curl -s -X POST -H 'content-type: application/json' \
     -d "{\"name\":\"$1\"}" "http://localhost:$OR_PORT/__suggest" >/dev/null
-  local created sid st
+  local created st
   created=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
     -F "images=@$png;filename=dispatch-001.png" -F 'config={"max_review_iterations":1}')
-  sid=$(echo "$created" | jq -r '.session_id')
+  DISPATCH_SID=$(echo "$created" | jq -r '.session_id')
   for i in $(seq 1 120); do
-    st=$(curl -s "${AUTH[@]}" "$BASE/sessions/$sid" | jq -r '.status')
+    st=$(curl -s "${AUTH[@]}" "$BASE/sessions/$DISPATCH_SID" | jq -r '.status')
     { [ "$st" = "ready_for_review" ] || [ "$st" = "failed" ]; } && break
     sleep 0.5
   done
-  [ "$st" = "ready_for_review" ] || fail "$2" "run ended $st: $(curl -s "${AUTH[@]}" "$BASE/sessions/$sid" | jq -r .error)"
-  echo "$sid"
+  [ "$st" = "ready_for_review" ] \
+    || fail "$2" "run ended $st: $(curl -s "${AUTH[@]}" "$BASE/sessions/$DISPATCH_SID" | jq -r .error)"
 }
 
 # (a) A name that DOES resolve: chartDataAgent.md is in the library.
-HIT=$(dispatch_run "chartDataAgent" "specialist dispatch (hit)")
+dispatch_run "chartDataAgent" "specialist dispatch (hit)"; HIT=$DISPATCH_SID
 hitlog=$(curl -s "${AUTH[@]}" "$BASE/sessions/$HIT/logs")
 echo "$hitlog" | jq -e -s 'map(select(.type=="specialist_dispatched")) | length == 1' >/dev/null \
   && pass "a resolvable suggestion logs specialist_dispatched" \
@@ -348,7 +354,7 @@ curl -s "${AUTH[@]}" "$BASE/sessions/$HIT/output" | grep -q 'Specialist fragment
   || fail "specialist dispatch" "merged fragment absent from output"
 
 # (b) A name that does NOT resolve — the silent case.
-MISS=$(dispatch_run "chart" "specialist dispatch (miss)")
+dispatch_run "chart" "specialist dispatch (miss)"; MISS=$DISPATCH_SID
 misslog=$(curl -s "${AUTH[@]}" "$BASE/sessions/$MISS/logs")
 echo "$misslog" | jq -e -s 'map(select(.type=="specialist_unresolved")) | length == 1' >/dev/null \
   && pass "an unresolvable suggestion logs specialist_unresolved (was silent)" \
