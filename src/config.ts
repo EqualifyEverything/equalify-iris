@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parse } from "yaml";
+import { DEFAULT_OAUTH_SCOPE } from "./auth/github.ts";
 
 export type Capability = "text" | "vision" | "structured_output";
 
@@ -29,6 +30,12 @@ export interface IrisConfig {
     // Service token (PAT) used to auto-file agent-suggestion issues on the
     // upstream repo. When empty, issue filing is disabled (safe no-op).
     issue_token?: string;
+    // OAuth scope requested from the user. Defaults to `public_repo` — enough to
+    // file an issue on a public upstream, and no more. Raise it to `repo` only for
+    // a PRIVATE upstream, and set it to "" when `issue_token` files every issue,
+    // in which case the user's token only needs to identify them. Normalized by
+    // loadConfig, so it is always a string (never null from a valueless YAML key).
+    oauth_scope: string;
   };
   providers: {
     default: string;
@@ -181,6 +188,35 @@ export function normalizeMaxConcurrentRuns(value: unknown): number {
   return Math.min(MAX_CONCURRENT_RUNS_CEILING, Math.max(1, Math.floor(n)));
 }
 
+// Coerce a configured github.oauth_scope into a usable string.
+//
+// The "absent means the default" trap the other normalizers guard against has an
+// extra twist here, because the safe fallback and the meaningful empty value are
+// different things that YAML renders almost identically:
+//
+//   (key absent)      -> DEFAULT_OAUTH_SCOPE   ("didn't say" — don't silently
+//                                               drop the scope issue filing needs)
+//   oauth_scope:      -> DEFAULT_OAUTH_SCOPE   (null; a valueless key is a typo,
+//                                               not a decision)
+//   oauth_scope: ""   -> ""                    (an explicit "request nothing")
+//
+// Only a quoted empty string counts as the deliberate one. Getting this backwards
+// in either direction is a silent failure: treating null as "" would break issue
+// filing with a 403 mid-run on a deployment that never asked for that, and
+// treating "" as the default would keep requesting a scope an operator explicitly
+// declined. Exported for tests.
+export function normalizeScope(value: unknown): string {
+  if (value === null || value === undefined) return DEFAULT_OAUTH_SCOPE;
+  if (typeof value !== "string") return DEFAULT_OAUTH_SCOPE;
+  // Whitespace-only is the same mistake as a valueless key, but `""` is not: it
+  // reached here as an explicit empty string, so it means what it says. Trimmed
+  // because " repo " in YAML would otherwise be sent verbatim in the scope
+  // parameter.
+  const trimmed = value.trim();
+  if (!trimmed) return value === "" ? "" : DEFAULT_OAUTH_SCOPE;
+  return trimmed;
+}
+
 // Coerce a configured extraction_concurrency into a usable integer: missing or
 // non-numeric falls back to the default, and anything valid is clamped to
 // [1, MAX_EXTRACTION_CONCURRENCY]. Exported for tests.
@@ -225,6 +261,7 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   // GitHub host defaults (overridable for GitHub Enterprise / testing).
   parsed.github.api_base_url = parsed.github.api_base_url || "https://api.github.com";
   parsed.github.oauth_base_url = parsed.github.oauth_base_url || "https://github.com";
+  parsed.github.oauth_scope = normalizeScope(parsed.github.oauth_scope);
   // Normalize the extraction concurrency knob once, here, so every consumer can
   // trust it: absent/garbage -> default, out-of-range -> clamped. A deployment
   // that sets 0 or a negative value means "don't parallelize" -> 1.

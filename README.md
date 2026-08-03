@@ -123,6 +123,50 @@ from the environment at startup; changes require a restart.
   service uses a **bundled OAuth App via the device flow** — no per-operator app setup, no
   secret (the same approach the `gh` CLI uses). Set `github.client_id` only to point at your
   own OAuth App; `client_secret` is needed only if you enable the web redirect flow.
+  `github.oauth_scope` is the scope requested from the user, **`public_repo`** by default —
+  see [Read this before you deploy](#read-this-before-you-deploy-token-storage) for why that
+  default matters and when to change it.
+
+### Read this before you deploy: token storage
+
+**The user's GitHub token is stored in plaintext.** `users.github_token` in
+`data/iris.sqlite` holds the OAuth access token as-is — no encryption, no hashing (it has to
+be replayable, since it *is* the credential used to call GitHub). So **read access to that
+file is API access to GitHub as every user who has ever logged in.** Anything with the
+database has it: a backup, a synced folder, a stray `scp`, another process on a shared box, a
+laptop that walks off.
+
+What that is worth to an attacker depends entirely on the scope those tokens carry, which is
+why `github.oauth_scope` defaults to the narrowest thing that works:
+
+| `oauth_scope` | What a stolen database allows | When to use it |
+| --- | --- | --- |
+| `""` | Read the user's public profile | `issue_token` is set, so the user's token only identifies them |
+| `public_repo` *(default)* | Write to the user's **public** repos | The default: upstream is public, users file their own issues |
+| `repo` | **Push to every private repo the user can reach** | Only if your upstream is private |
+
+The service needs exactly two things from a user's token: `GET /user` to identify them (no
+scope required) and filing an agent-suggestion issue on the upstream (`public_repo` for a
+public upstream). Nothing opens pull requests and nothing pushes — the fork-and-PR flow in
+PRD §7.13 was never built. `repo` was requested until this default changed, which granted
+read *and write* to all of a user's private repositories for a feature that does not exist.
+
+**If you set `github.issue_token`**, every issue is filed by that service account and the
+user's token does nothing but prove who they are — so set `oauth_scope: ""` and the stored
+tokens stop being worth stealing. That is the recommended production shape.
+
+Narrowing the request does **not** shrink a grant a user already made. Tokens issued under
+`repo` keep it until revoked at
+[github.com/settings/applications](https://github.com/settings/applications); only new
+authorizations get the narrower scope. If you have been running with `repo`, treat the
+existing rows as `repo`-scoped and consider clearing them so users re-authorize.
+
+This is an accepted, documented limitation of v1, not an oversight — encrypting at rest on a
+box that must also hold the key is close to no protection, and the real fix is to not hold a
+long-lived credential at all (tracked in
+[#29](https://github.com/EqualifyEverything/equalify-iris/issues/29), which moves the GitHub
+surface out of this service). Until then: keep `data_dir` off shared storage, keep backups
+encrypted, and prefer the `issue_token` + `oauth_scope: ""` shape above.
 
 ## API
 

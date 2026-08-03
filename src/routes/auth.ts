@@ -16,7 +16,8 @@ export function authRouter(cfg: IrisConfig): Router {
     for (const [s, exp] of states) if (exp < now) states.delete(s);
   };
 
-  // Web flow: redirect to the GitHub consent screen (requests `repo` scope).
+  // Web flow: redirect to the GitHub consent screen (requesting
+  // `github.oauth_scope` — `public_repo` unless the deployment says otherwise).
   // Unlike the device flow, the web flow's code exchange needs the client
   // secret, so both are required here.
   r.get("/github/start", (_req, res) => {
@@ -26,7 +27,9 @@ export function authRouter(cfg: IrisConfig): Router {
     }
     const state = randomBytes(16).toString("hex");
     states.set(state, Date.now() + STATE_TTL);
-    res.redirect(authorizeUrl(cfg.github.client_id, callbackUrl, state, cfg.github.oauth_base_url));
+    res.redirect(
+      authorizeUrl(cfg.github.client_id, callbackUrl, state, cfg.github.oauth_base_url, cfg.github.oauth_scope),
+    );
   });
 
   // Web flow: exchange the code for a token and return it to the client.
@@ -62,7 +65,7 @@ export function authRouter(cfg: IrisConfig): Router {
       return;
     }
     try {
-      const d = await startDeviceFlow(cfg.github.client_id, cfg.github.oauth_base_url);
+      const d = await startDeviceFlow(cfg.github.client_id, cfg.github.oauth_base_url, cfg.github.oauth_scope);
       res.json({
         device_code: d.device_code,
         user_code: d.user_code,

@@ -467,6 +467,32 @@ This is the same pattern GitHub's own CLI uses.
 
 The token authenticates the caller (via GitHub's user endpoint) and opens PRs on `/close`. Required scope is `repo`. The consent screen requests it; a user who declines `repo` cannot complete OAuth, and therefore cannot use the service. This is deliberate — the system has no useful mode for an authenticated user who cannot contribute back.
 
+**Amended (v1.1): the requested scope is per-deployment and defaults to `public_repo`.** This section derives `repo` from a premise that no longer holds: nothing opens PRs or pushes (§7.13's fork-and-PR flow was never built — contributions are filed as issues), so the token needs only two things. Identifying the caller via `GET /user` requires **no scope at all** — `id` and `login` are public fields. Filing an agent-suggestion issue on a public upstream requires `public_repo`. `repo` additionally grants read *and write* to every private repository the user can reach, for a capability the service does not have.
+
+That over-grant compounds with how the token is stored (below) rather than sitting beside it: it is persisted in plaintext, so the requested scope is exactly the answer to "what does a copy of the database allow". The scope is therefore configurable per deployment (`github.oauth_scope`) with three intended settings:
+
+| Value | Rationale |
+| --- | --- |
+| `""` | The deployment sets `github.issue_token`, so the user's token only ever identifies them. Recommended for production. |
+| `public_repo` | Default. Public upstream; each user files their own issues. |
+| `repo` | Required only when the upstream repository is private. |
+
+An empty value is sent as **no** `scope` parameter rather than `scope=`, which is the form GitHub documents for requesting no scopes. And narrowing what is requested does not narrow a grant already made: tokens issued under `repo` retain it until the user revokes the authorization, so a deployment that has been running with `repo` should treat existing rows as `repo`-scoped.
+
+The last sentence above still holds in spirit — a user who declines cannot use the service — but the thing being declined is now much smaller.
+
+#### How the token is stored (v1.1)
+
+This specification never said, and the implementation's answer is worth stating rather than leaving to be discovered: **the user's access token is stored in plaintext**, in `users.github_token` in the service's SQLite database. It has to be replayable, because it *is* the credential used to call GitHub on the user's behalf, so it is not hashed.
+
+The consequence follows directly: **read access to the database file is GitHub API access as every user who has ever authenticated**, at whatever scope those tokens carry. A backup, a synced directory, another process on a shared host, or a lost laptop are all sufficient.
+
+This is an accepted v1 limitation, not an oversight, and it is why the scope default above matters as much as it does:
+
+- **Encryption at rest does not fix it here.** §10.1 requires a deployment to run on a laptop with no managed dependencies, so the key would live on the same machine as the database — which is most of the way back to plaintext. A real fix needs a KMS or an operator-managed secret, and therefore a dependency §10.1 forbids requiring.
+- **Not holding the credential is the actual fix.** Short-lived tokens need a refresh credential, which needs the same key management. Moving the GitHub surface out of this service (so it holds no long-lived user credential at all) removes the reason to store anything — storing nothing beats encrypting something.
+- **What v1 does instead**, and what an operator must be told: request the narrowest scope that works (above), and state the exposure in the deployment documentation so the risk can be weighed rather than discovered. A deployment that sets `github.issue_token` and `oauth_scope: ""` stores tokens that grant nothing beyond reading a public profile, which is the recommended shape.
+
 #### User identity and isolation
 
 The user is identified by their GitHub numeric user ID (stable across login renames). Sessions are scoped to that user; a token cannot see or modify sessions owned by a different GitHub user.
