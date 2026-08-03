@@ -43,12 +43,17 @@ export function authorizeUrl(
     redirect_uri: redirectUri,
     state,
   });
-  // A configured empty scope is sent as NO parameter rather than `scope=`. Per
-  // GitHub's docs, omitting it requests no scopes for a first-time user and reuses
-  // whatever a returning user already authorized — which is the documented
-  // behavior, whereas what a present-but-empty value does is not specified. A
-  // deployment reaches for `oauth_scope: ""` when its service token files every
-  // issue, so the user's token only ever needs to answer `GET /user`.
+  // An empty scope is sent as NO parameter rather than `scope=`. Per GitHub's
+  // docs, omitting it requests no scopes for a first-time user and reuses whatever
+  // a returning user already authorized — which is the documented behavior,
+  // whereas what a present-but-empty value does is not specified.
+  //
+  // Empty is what `normalizeScope` produces for `oauth_scope: none`, and ONLY for
+  // that: it cannot be reached by an absent key or an unset `${VAR}`, both of
+  // which fall back to the default. See the note on NO_OAUTH_SCOPE in config.ts —
+  // an accidental "request nothing" is a 403 at issue-filing time, several steps
+  // removed from its cause. A deployment asks for it when its service token files
+  // every issue, so a user's token only ever needs to answer `GET /user`.
   if (scope) params.set("scope", scope);
   return `${oauthBase}/login/oauth/authorize?${params.toString()}`;
 }

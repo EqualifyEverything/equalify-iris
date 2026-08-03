@@ -188,32 +188,49 @@ export function normalizeMaxConcurrentRuns(value: unknown): number {
   return Math.min(MAX_CONCURRENT_RUNS_CEILING, Math.max(1, Math.floor(n)));
 }
 
-// Coerce a configured github.oauth_scope into a usable string.
+// "Request no scope at all" has to be spelled out as a word, because empty
+// cannot be trusted to mean it. `expandEnv` above turns an unset `${VAR}` into
+// `""` before this function ever runs, and every other `github.*` key in
+// config.example.yaml uses the `${...}` form — so `oauth_scope: ${IRIS_SCOPE}`
+// with the variable unset is both the likely way an operator parameterizes this
+// and indistinguishable, by the time we see it, from a deliberate `""`.
 //
-// The "absent means the default" trap the other normalizers guard against has an
-// extra twist here, because the safe fallback and the meaningful empty value are
-// different things that YAML renders almost identically:
+// Reading empty as "request nothing" therefore fails silently in the direction
+// that hurts: a deployment with no `github.issue_token` (the documented default,
+// where users file their own issues) would send no scope, users would authorize
+// scopelessly, and `createAgentIssue` would 403 — swallowed as one
+// `agent_issue_failed` log line. Worse for a returning user, since omitting the
+// scope makes GitHub reuse the grant already authorized, so an existing token may
+// still carry `repo` while the operator believes nothing was requested.
 //
-//   (key absent)      -> DEFAULT_OAUTH_SCOPE   ("didn't say" — don't silently
-//                                               drop the scope issue filing needs)
-//   oauth_scope:      -> DEFAULT_OAUTH_SCOPE   (null; a valueless key is a typo,
-//                                               not a decision)
-//   oauth_scope: ""   -> ""                    (an explicit "request nothing")
+// `none` cannot be produced by expansion, by a valueless key, or by a typo that
+// happens to evaluate to empty. It has to be typed.
+export const NO_OAUTH_SCOPE = "none";
+
+// Coerce a configured github.oauth_scope into the string to send to GitHub, where
+// "" means "send no scope parameter":
 //
-// Only a quoted empty string counts as the deliberate one. Getting this backwards
-// in either direction is a silent failure: treating null as "" would break issue
-// filing with a 403 mid-run on a deployment that never asked for that, and
-// treating "" as the default would keep requesting a scope an operator explicitly
-// declined. Exported for tests.
+//   (key absent)         -> DEFAULT_OAUTH_SCOPE  ("didn't say" — don't silently
+//                                                 drop the scope issue filing needs)
+//   oauth_scope:         -> DEFAULT_OAUTH_SCOPE  (null; a valueless key is a typo)
+//   oauth_scope: ${UNSET} -> DEFAULT_OAUTH_SCOPE (expanded to "" — see above)
+//   oauth_scope: ""      -> DEFAULT_OAUTH_SCOPE  (same, and not distinguishable)
+//   oauth_scope: none    -> ""                   (the deliberate "request nothing")
+//
+// Empty-after-expansion meaning "unset, use the default" is also the convention
+// every other key in this block already follows (`api_base_url` a few lines down
+// in loadConfig). This was the one place it would have meant the opposite.
+// Exported for tests.
 export function normalizeScope(value: unknown): string {
-  if (value === null || value === undefined) return DEFAULT_OAUTH_SCOPE;
   if (typeof value !== "string") return DEFAULT_OAUTH_SCOPE;
-  // Whitespace-only is the same mistake as a valueless key, but `""` is not: it
-  // reached here as an explicit empty string, so it means what it says. Trimmed
-  // because " repo " in YAML would otherwise be sent verbatim in the scope
-  // parameter.
+  // Trimmed because " repo " in YAML would otherwise be sent verbatim in the
+  // scope parameter and GitHub would reject it.
   const trimmed = value.trim();
-  if (!trimmed) return value === "" ? "" : DEFAULT_OAUTH_SCOPE;
+  if (!trimmed) return DEFAULT_OAUTH_SCOPE;
+  // Case-insensitive: `None` and `NONE` are the same intent, and YAML parses
+  // neither as null (only `null`, `Null`, `NULL`, `~` and empty are null), so
+  // they arrive here as strings and would otherwise be sent as literal scopes.
+  if (trimmed.toLowerCase() === NO_OAUTH_SCOPE) return "";
   return trimmed;
 }
 

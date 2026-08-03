@@ -367,7 +367,8 @@ The workflow is automatic on session close:
 
 **Auth and configuration**:
 
-- The user's GitHub credential is the same credential they authenticated with (see §9.1). OAuth requires `repo` scope, so every authenticated user can open PRs.
+- The user's GitHub credential is the same credential they authenticated with (see §9.1). OAuth requires `repo` scope, so every authenticated user can open PRs. **Amended (v1.1): the requested scope defaults to `public_repo` and is per-deployment — see §9.1 "What the token grants".** Nothing in this section is implemented (contributions are filed as labeled issues), so the scope it assumes is not requested; a deployment that later builds this flow has to raise the scope deliberately.
+
 - The upstream repository is determined by the service's `agents/` git checkout — its `origin` remote is the PR target. This is a per-deployment setting, not a per-user one.
 - PRs are opened from the user's fork of the upstream. The service creates the fork on the user's account on first close, if it does not already exist.
 - All PR activity is logged in the session record. Closing or rejecting a PR upstream does not affect the produced HTML — the HTML has already been generated using the session-built agent recorded inline in `log.jsonl`.
@@ -446,7 +447,7 @@ Authentication is GitHub OAuth. A user *is* their GitHub account. The first time
 #### OAuth flow (web clients)
 
 1. Client redirects the user to `GET /v1/auth/github/start`.
-2. Server redirects to the GitHub consent screen requesting `repo` scope.
+2. Server redirects to the GitHub consent screen requesting `github.oauth_scope` (`public_repo` by default — see "What the token grants" below; `repo` in the original spec).
 3. User approves; GitHub redirects to `GET /v1/auth/github/callback?code=…`.
 4. Server exchanges the code for a GitHub access token, calls `GET https://api.github.com/user` to identify the user, provisions the account if new, and returns the token to the client.
 5. Subsequent requests use `Authorization: Bearer <github_token>`.
@@ -473,11 +474,11 @@ That over-grant compounds with how the token is stored (below) rather than sitti
 
 | Value | Rationale |
 | --- | --- |
-| `""` | The deployment sets `github.issue_token`, so the user's token only ever identifies them. Recommended for production. |
+| `none` | The deployment sets `github.issue_token`, so the user's token only ever identifies them. Recommended for production. |
 | `public_repo` | Default. Public upstream; each user files their own issues. |
 | `repo` | Required only when the upstream repository is private. |
 
-An empty value is sent as **no** `scope` parameter rather than `scope=`, which is the form GitHub documents for requesting no scopes. And narrowing what is requested does not narrow a grant already made: tokens issued under `repo` retain it until the user revokes the authorization, so a deployment that has been running with `repo` should treat existing rows as `repo`-scoped.
+`none` is sent as **no** `scope` parameter rather than as `scope=`, which is the form GitHub documents for requesting no scopes. It is a word rather than an empty string because `${VAR}` expansion turns an unset variable into `""` before the config is normalized, so an empty value cannot be distinguished from a missing one — every empty form falls back to `public_repo`, and only the literal `none` disables the scope. And narrowing what is requested does not narrow a grant already made: tokens issued under `repo` retain it until the user revokes the authorization, so a deployment that has been running with `repo` should treat existing rows as `repo`-scoped.
 
 The last sentence above still holds in spirit — a user who declines cannot use the service — but the thing being declined is now much smaller.
 
@@ -491,7 +492,7 @@ This is an accepted v1 limitation, not an oversight, and it is why the scope def
 
 - **Encryption at rest does not fix it here.** §10.1 requires a deployment to run on a laptop with no managed dependencies, so the key would live on the same machine as the database — which is most of the way back to plaintext. A real fix needs a KMS or an operator-managed secret, and therefore a dependency §10.1 forbids requiring.
 - **Not holding the credential is the actual fix.** Short-lived tokens need a refresh credential, which needs the same key management. Moving the GitHub surface out of this service (so it holds no long-lived user credential at all) removes the reason to store anything — storing nothing beats encrypting something.
-- **What v1 does instead**, and what an operator must be told: request the narrowest scope that works (above), and state the exposure in the deployment documentation so the risk can be weighed rather than discovered. A deployment that sets `github.issue_token` and `oauth_scope: ""` stores tokens that grant nothing beyond reading a public profile, which is the recommended shape.
+- **What v1 does instead**, and what an operator must be told: request the narrowest scope that works (above), and state the exposure in the deployment documentation so the risk can be weighed rather than discovered. A deployment that sets `github.issue_token` and `oauth_scope: none` stores tokens that grant nothing beyond reading a public profile, which is the recommended shape.
 
 #### User identity and isolation
 
@@ -502,7 +503,7 @@ The user is identified by their GitHub numeric user ID (stable across login rena
 Two things are configured at deployment time, not per user:
 
 - **The agent library upstream.** The service's local `agents/` directory is a git checkout of one upstream repo (its `origin` remote). All PRs target that upstream. Users who want a different upstream run their own deployment pointing at their own checkout.
-- **PR fork behavior.** PRs are opened from each user's GitHub fork of the upstream. If the user does not already have a fork, the service creates one on their account (this is what `repo` scope is for) before pushing.
+- **PR fork behavior.** PRs are opened from each user's GitHub fork of the upstream. If the user does not already have a fork, the service creates one on their account (this is what `repo` scope is for) before pushing. **Amended (v1.1):** unimplemented, and the scope it assumes is no longer requested by default — see §9.1 "What the token grants" and §7.13.
 
 Per-user defaults (e.g., `max_review_iterations`) live on the user's account record, populated on first auth and updateable via a config endpoint not specified in v1.
 

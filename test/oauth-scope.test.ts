@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import express from "express";
 import type { AddressInfo } from "node:net";
 import { authorizeUrl, startDeviceFlow, DEFAULT_OAUTH_SCOPE } from "../src/auth/github.ts";
-import { normalizeScope, type IrisConfig } from "../src/config.ts";
+import { normalizeScope, loadConfig, NO_OAUTH_SCOPE, type IrisConfig } from "../src/config.ts";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { authRouter } from "../src/routes/auth.ts";
 
 // The OAuth scope decides what a stolen copy of `data/iris.sqlite` is worth: the
@@ -37,6 +40,9 @@ test("a configured scope reaches the consent screen", () => {
   assert.equal(p.get("state"), "st8", "the CSRF state was dropped");
 });
 
+// `""` is the NORMALIZED form, not a config spelling: an operator writes
+// `oauth_scope: none` and normalizeScope maps it to "" for the helpers. See the
+// normalizeScope tests below for why the config side cannot accept empty.
 test("an empty scope omits the parameter instead of sending scope=", () => {
   const url = authorizeUrl("cid", "https://iris.test/cb", "st8", "https://github.test", "");
   // `has` rather than `get`: an empty value also reads as "" from get(), so
@@ -83,25 +89,38 @@ test("the device flow sends the same scope, and omits it when empty", async () =
 
 // --- normalizeScope: the config side ----------------------------------------
 //
-// The trap here is that the safe fallback and the meaningful empty value look
-// nearly identical in YAML — `oauth_scope:` (null, a typo) versus
-// `oauth_scope: ""` (an explicit "ask for nothing"). Confusing them fails
-// silently in opposite directions: treating null as "" breaks issue filing with a
-// mid-run 403 on a deployment that never asked for that, and treating "" as the
-// default keeps requesting a scope an operator deliberately declined.
+// "Request nothing" has to be a word, because empty cannot be trusted to mean it:
+// `expandEnv` rewrites an unset `${VAR}` to `""` before normalizeScope runs, so a
+// deliberate `oauth_scope: ""` and a mistyped or unset environment variable are
+// the same value by then. Reading empty as "request nothing" would send no scope
+// on a deployment that never asked for that, and the resulting 403 from issue
+// filing is swallowed as a single log line.
 
-test("an absent or valueless scope falls back to the default", () => {
+test("every flavor of empty falls back to the default, including an unset ${VAR}", () => {
   assert.equal(normalizeScope(undefined), DEFAULT_OAUTH_SCOPE, "key absent");
   assert.equal(normalizeScope(null), DEFAULT_OAUTH_SCOPE, "`oauth_scope:` with no value parses as null");
-  assert.equal(normalizeScope("   "), DEFAULT_OAUTH_SCOPE, "whitespace is the same mistake as a valueless key");
+  // The one that matters: expandEnv has already turned `${IRIS_SCOPE}` into "" by
+  // the time this runs, and it is the form config.example.yaml's house style leads
+  // an operator to write. Indistinguishable here from a quoted "", which is
+  // exactly why neither can mean "request nothing".
+  assert.equal(normalizeScope(""), DEFAULT_OAUTH_SCOPE, "an unset ${VAR} silently requested no scope");
+  assert.equal(normalizeScope("   "), DEFAULT_OAUTH_SCOPE, "whitespace is the same mistake");
   // A non-string (`oauth_scope: 5`, or a nested block) is a config error; falling
   // back beats sending "5" or "[object Object]" as a scope.
   assert.equal(normalizeScope(42), DEFAULT_OAUTH_SCOPE);
   assert.equal(normalizeScope(["repo"]), DEFAULT_OAUTH_SCOPE);
 });
 
-test("an explicitly empty scope is honored, not replaced by the default", () => {
-  assert.equal(normalizeScope(""), "", "the deployment asked for no scope and got public_repo");
+test("`none` is the spelling that requests no scope", () => {
+  // Maps to "" because that is what the helpers read as "omit the parameter" —
+  // the word exists so the intent cannot be produced by an accident.
+  assert.equal(normalizeScope("none"), "");
+  assert.equal(normalizeScope(NO_OAUTH_SCOPE), "");
+  assert.equal(normalizeScope("  none  "), "");
+  // YAML parses `None`/`NONE` as strings, not as null, so they would otherwise be
+  // sent to GitHub as literal scope values.
+  assert.equal(normalizeScope("None"), "");
+  assert.equal(normalizeScope("NONE"), "");
 });
 
 test("a configured scope is passed through, trimmed", () => {
@@ -114,6 +133,47 @@ test("a configured scope is passed through, trimmed", () => {
   assert.equal(normalizeScope("public_repo read:org"), "public_repo read:org");
 });
 
+// The bug the `none` spelling exists to prevent lived one layer above
+// normalizeScope, in the order loadConfig does things: expandEnv rewrites
+// `${VAR}` before any normalizer runs. Unit-testing normalizeScope with literals
+// cannot see that, so this drives the real loadConfig over a real file.
+test("loadConfig: an unset ${VAR} yields the default, and `none` survives expansion", () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-scope-"));
+  // A distinct filename per case, because loadConfig caches by resolved path:
+  // reusing one name would hand back the previous case's parsed config and the
+  // assertion would be checking nothing.
+  let n = 0;
+  const write = (scope: string) => {
+    const p = join(dir, `cfg-${n++}.yaml`);
+    writeFileSync(
+      p,
+      `server: { port: 3000, base_url: "http://localhost:3000" }\n` +
+        `storage:\n  data_dir: ${dir}\n  agents_dir: ${dir}/agents\n  database: ${dir}/iris.sqlite\n` +
+        `github:\n  client_id: cid\n  oauth_scope: ${scope}\n` +
+        `providers:\n  default: openrouter\n  openrouter: { api_key: k, default_model: m }\n`,
+    );
+    return p;
+  };
+  const scopeIn = (path: string) => loadConfig(path).github.oauth_scope;
+  try {
+    delete process.env.IRIS_TEST_SCOPE;
+    // The failure this replaced: `""` after expansion read as "request nothing".
+    assert.equal(scopeIn(write("${IRIS_TEST_SCOPE}")), DEFAULT_OAUTH_SCOPE, "an unset ${VAR} requested no scope");
+    assert.equal(scopeIn(write('""')), DEFAULT_OAUTH_SCOPE, "a quoted empty string is not distinguishable from the above");
+    // `none` is a plain string, so expansion leaves it alone and the deliberate
+    // intent still gets through.
+    assert.equal(scopeIn(write("none")), "", "`none` did not reach normalizeScope intact");
+    // And a set variable expands normally — the knob still works via env.
+    process.env.IRIS_TEST_SCOPE = "repo";
+    assert.equal(scopeIn(write("${IRIS_TEST_SCOPE} ")), "repo");
+    process.env.IRIS_TEST_SCOPE = "none";
+    assert.equal(scopeIn(write("${IRIS_TEST_SCOPE}  ")), "", "`none` via the environment");
+  } finally {
+    delete process.env.IRIS_TEST_SCOPE;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- the routes actually pass the configured scope ---------------------------
 //
 // The two halves above can both be right while the config never reaches them: the
@@ -121,8 +181,10 @@ test("a configured scope is passed through, trimmed", () => {
 // forgets to pass `cfg.github.oauth_scope` looks correct in every default
 // deployment AND in test/e2e.sh (whose config sets no scope). The only shape that
 // catches it is a deployment configuring something OTHER than the default — the
-// `repo` case an operator with a private upstream depends on, and the `""` case
-// that is the recommended production shape.
+// `repo` case an operator with a private upstream depends on, and the no-scope case
+// that is the recommended production shape. These take the value POST-normalization
+// (`""`, what `oauth_scope: none` becomes), since that is what a route reads off
+// the config object.
 
 // A config with only the fields the auth router reads.
 function cfgWith(scope: string, oauthBase: string): IrisConfig {

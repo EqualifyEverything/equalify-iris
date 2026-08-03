@@ -53,9 +53,12 @@ github:
   # `upstream_repo`. So:
   #
   #   public_repo  (default)  public upstream, users file their own issues
-  #   ""                      `issue_token` above is set — the user's token then
+  #   none                    `issue_token` above is set — the user's token then
   #                           only identifies them, so ask for nothing. This is
-  #                           the recommended production shape.
+  #                           the recommended production shape. Spelled as a word,
+  #                           NOT as "": an unset ${VAR} expands to an empty string,
+  #                           so every empty form falls back to public_repo rather
+  #                           than silently requesting nothing.
   #   repo                    ONLY if `upstream_repo` is private. Grants read AND
   #                           WRITE to every private repo the user can reach, and
   #                           that token is what sits in the database in plaintext.

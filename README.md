@@ -141,9 +141,16 @@ why `github.oauth_scope` defaults to the narrowest thing that works:
 
 | `oauth_scope` | What a stolen database allows | When to use it |
 | --- | --- | --- |
-| `""` | Read the user's public profile | `issue_token` is set, so the user's token only identifies them |
+| `none` | Read the user's public profile | `issue_token` is set, so the user's token only identifies them |
 | `public_repo` *(default)* | Write to the user's **public** repos | The default: upstream is public, users file their own issues |
 | `repo` | **Push to every private repo the user can reach** | Only if your upstream is private |
+
+"Request nothing" is spelled `none`, not `""`, and that is deliberate. An unset `${VAR}`
+expands to an empty string before the config is read, so `oauth_scope: ${IRIS_SCOPE}` with the
+variable missing would otherwise silently mean "ask for no scope" — and the resulting 403 when
+a user tries to file an issue is swallowed as one log line. Every empty form (absent key,
+valueless key, unset variable, quoted `""`) falls back to `public_repo`; only the literal word
+turns the scope off.
 
 The service needs exactly two things from a user's token: `GET /user` to identify them (no
 scope required) and filing an agent-suggestion issue on the upstream (`public_repo` for a
@@ -152,7 +159,7 @@ PRD §7.13 was never built. `repo` was requested until this default changed, whi
 read *and write* to all of a user's private repositories for a feature that does not exist.
 
 **If you set `github.issue_token`**, every issue is filed by that service account and the
-user's token does nothing but prove who they are — so set `oauth_scope: ""` and the stored
+user's token does nothing but prove who they are — so set `oauth_scope: none` and the stored
 tokens stop being worth stealing. That is the recommended production shape.
 
 Narrowing the request does **not** shrink a grant a user already made. Tokens issued under
@@ -166,7 +173,7 @@ box that must also hold the key is close to no protection, and the real fix is t
 long-lived credential at all (tracked in
 [#29](https://github.com/EqualifyEverything/equalify-iris/issues/29), which moves the GitHub
 surface out of this service). Until then: keep `data_dir` off shared storage, keep backups
-encrypted, and prefer the `issue_token` + `oauth_scope: ""` shape above.
+encrypted, and prefer the `issue_token` + `oauth_scope: none` shape above.
 
 ## API
 

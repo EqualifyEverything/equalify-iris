@@ -27,7 +27,8 @@ service uses a **bundled OAuth App** — you don't create or configure anything;
 device flow below and approve in your browser.
 
 The scope is `github.oauth_scope` in the deployment's config; a deployment whose upstream repo
-is private needs `repo`. Note that **the token you get back is stored in the service's database
+is private needs `repo`, and one with a service token can set `none` to request nothing at all
+(a word rather than `""`, so that an unset `${VAR}` cannot turn the scope off by accident). Note that **the token you get back is stored in the service's database
 in plaintext** — see the README's "Read this before you deploy: token storage" before pointing
 real users at an instance you don't control.
 
