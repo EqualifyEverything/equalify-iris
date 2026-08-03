@@ -345,7 +345,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     // with no feedback body still gets its 400 without disturbing the session.
     // Losing the claim means someone else moved the session out of
     // ready_for_review in between, which is the same condition the guard reports.
-    if (!store.claimSession(s.session_id, "ready_for_review", { status: "queued", phase: "triage", error: null })) {
+    if (!store.claimSession(s.session_id, "ready_for_review", { status: "queued", phase: "extraction", error: null })) {
       sendError(res, 409, "invalid_state", "Feedback can only be submitted when ready_for_review");
       return;
     }
@@ -358,11 +358,14 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       githubToken: req.token,
     });
     // Report what actually happened. Under the run cap a re-run waits, and
-    // saying "running" then would make a queued session look hung.
+    // saying "running" then would make a queued session look hung. Both report
+    // `extraction` — the phase the run starts in; the queued branch used to say
+    // `triage`, a phase the pipeline never enters, and this 202 was the one place
+    // a client could actually observe it.
     res.status(202).json(
       started
         ? { session_id: s.session_id, status: "running", phase: "extraction" }
-        : { session_id: s.session_id, status: "queued", phase: "triage" },
+        : { session_id: s.session_id, status: "queued", phase: "extraction" },
     );
   });
 

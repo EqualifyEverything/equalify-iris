@@ -69,7 +69,6 @@
     #error:not(:empty) {
       background: var(--err); color: #fff; padding: .75rem 1rem; border-radius: 8px; margin: 1rem 0;
     }
-    .built { border-left: 4px solid var(--accent); padding-left: .9rem; }
     iframe { width: 100%; height: 32rem; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
     pre { overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
       padding: 1rem; max-height: 24rem; }
@@ -155,7 +154,6 @@
     <!-- Step 4: result -->
     <section id="result-section" aria-labelledby="step4-h" hidden>
       <h2 id="step4-h" tabindex="-1">Your accessible HTML</h2>
-      <p id="built-agents" class="built" hidden></p>
       <p>Your document was converted to accessible HTML.</p>
       <div class="row">
         <button id="view-btn" type="button">View converted document</button>
@@ -372,10 +370,14 @@
     });
 
     // ----- Step 3: poll status -----
+    // Every phase the API can report, plus `queued`. 'triage' and
+    // 'reconciliation' were removed with the dead Phase values — the pipeline
+    // never entered either, so those two labels could not be reached. An
+    // unrecognized phase still falls back to the raw value below rather than
+    // announcing nothing.
     const PHASE_LABEL = {
-      queued: 'waiting for a free slot', triage: 'reading each page',
-      extraction: 'extracting content',
-      reconciliation: 'stitching pages together', assembly: 'assembling the document',
+      queued: 'waiting for a free slot',
+      extraction: 'extracting content', assembly: 'assembling the document',
       review: 'reviewing for accessibility', done: 'finishing up',
     };
     // One-time announcement when conversion starts: tells screen-reader users it
@@ -454,12 +456,15 @@
         a.download = sourceBase + '_converted.html';
         document.body.appendChild(a); a.click(); a.remove();
       };
-      const built = (d.pending_prs && d.pending_prs.new_agents) || [];
-      if (built.length) {
-        $('built-agents').textContent = 'Iris taught itself ' + built.length +
-          ' new agent(s) for content it had not seen before: ' + built.map(a => a.agent_name).join(', ') + '.';
-        show('built-agents');
-      }
+      // A "Iris taught itself N new agent(s)" panel used to be built here from
+      // `d.pending_prs.new_agents`. Removed because it was dead twice over: no
+      // endpoint has ever returned `pending_prs` (see #30 Tier 4), so `built` was
+      // always `[]` and the branch never ran — and the sentence it would have
+      // shown is no longer true. Agents suggested during a run are drafted and
+      // filed as GitHub issues for a maintainer (pipeline/contribute.ts); nothing
+      // is built into the session and used, so there is no "taught itself" to
+      // report to the person converting a document. The run log's `agent_issue`
+      // events are where that information actually lives if it is wanted back.
       hide('status-section'); show('result-section'); focusHeading('step4-h');
     }
 

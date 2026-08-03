@@ -310,6 +310,62 @@ tout=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/$TSID
 [ "$tout" = "409" ] && pass "no output served for the truncated run (409)" \
   || fail "truncation output" "expected 409, got $tout"
 
+echo "==> 9f. specialist dispatch says so in the log, whether it runs or misses"
+# The page agent names the specialist it wants in free text, and the service
+# resolves that string to a file. Any drift between what the model writes and what
+# the library is called ("chart" vs "chartDataAgent.md", a plural, a display name)
+# silently disables routing: no error, and previously no log line either, so
+# "routing was never attempted" and "routing was attempted and the name did not
+# resolve" produced the identical observation — a page from the general pass.
+#
+# Both directions are driven here, on their own sessions, because a miss that
+# LOOKS like a success is the whole failure mode.
+dispatch_run() {   # $1 = suggested agent name, $2 = label
+  curl -s -X POST -H 'content-type: application/json' \
+    -d "{\"name\":\"$1\"}" "http://localhost:$OR_PORT/__suggest" >/dev/null
+  local created sid st
+  created=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
+    -F "images=@$png;filename=dispatch-001.png" -F 'config={"max_review_iterations":1}')
+  sid=$(echo "$created" | jq -r '.session_id')
+  for i in $(seq 1 120); do
+    st=$(curl -s "${AUTH[@]}" "$BASE/sessions/$sid" | jq -r '.status')
+    { [ "$st" = "ready_for_review" ] || [ "$st" = "failed" ]; } && break
+    sleep 0.5
+  done
+  [ "$st" = "ready_for_review" ] || fail "$2" "run ended $st: $(curl -s "${AUTH[@]}" "$BASE/sessions/$sid" | jq -r .error)"
+  echo "$sid"
+}
+
+# (a) A name that DOES resolve: chartDataAgent.md is in the library.
+HIT=$(dispatch_run "chartDataAgent" "specialist dispatch (hit)")
+hitlog=$(curl -s "${AUTH[@]}" "$BASE/sessions/$HIT/logs")
+echo "$hitlog" | jq -e -s 'map(select(.type=="specialist_dispatched")) | length == 1' >/dev/null \
+  && pass "a resolvable suggestion logs specialist_dispatched" \
+  || fail "specialist dispatch" "no specialist_dispatched event: $(echo "$hitlog" | jq -c -s 'map(.type)')"
+# It really ran, rather than just being logged: the merged fragment is in the output.
+curl -s "${AUTH[@]}" "$BASE/sessions/$HIT/output" | grep -q 'Specialist fragment' \
+  && pass "the dispatched specialist's fragment reached the document" \
+  || fail "specialist dispatch" "merged fragment absent from output"
+
+# (b) A name that does NOT resolve — the silent case.
+MISS=$(dispatch_run "chart" "specialist dispatch (miss)")
+misslog=$(curl -s "${AUTH[@]}" "$BASE/sessions/$MISS/logs")
+echo "$misslog" | jq -e -s 'map(select(.type=="specialist_unresolved")) | length == 1' >/dev/null \
+  && pass "an unresolvable suggestion logs specialist_unresolved (was silent)" \
+  || fail "specialist dispatch" "no specialist_unresolved event: $(echo "$misslog" | jq -c -s 'map(.type)')"
+# The log must name what the model asked for AND what was available — that is what
+# makes a near-miss ("chart" vs "chartDataAgent") diagnosable from one run.
+missev=$(echo "$misslog" | jq -c -s 'map(select(.type=="specialist_unresolved")) | .[0]')
+echo "$missev" | jq -e '.agent=="chart"' >/dev/null \
+  && echo "$missev" | jq -e '.candidates | index("chartDataAgent") != null' >/dev/null \
+  && pass "the miss names the requested agent and the available candidates" \
+  || fail "specialist dispatch" "expected agent=chart and chartDataAgent among candidates, got $missev"
+# And a miss must not be reported as a dispatch.
+echo "$misslog" | jq -e -s 'map(select(.type=="specialist_dispatched")) | length == 0' >/dev/null \
+  && pass "a miss is not logged as a dispatch" \
+  || fail "specialist dispatch" "miss logged specialist_dispatched"
+curl -s -X POST -H 'content-type: application/json' -d '{}' "http://localhost:$OR_PORT/__suggest" >/dev/null  # disarm
+
 echo "==> 9e. a second upload WAITS in the run queue instead of starting a second pipeline"
 # max_concurrent_runs=1 in the config above. Uploads used to `void runPipeline(...)`
 # straight out of the handler, so two simultaneous uploads meant two unthrottled

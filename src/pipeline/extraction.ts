@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { extractJson } from "../util/json.ts";
 import { mapWithConcurrency } from "../util/concurrency.ts";
@@ -23,7 +23,14 @@ const PAGE_AGENT = "page";
 // feedback). This DEFAULT is used only when that file is absent, so the service
 // still runs against a bare checkout. It also asks the model to flag a page that
 // would benefit from a dedicated specialist agent (collected as `suggestions`).
-const DEFAULT_PAGE_PROMPT = `You convert an ENTIRE document page (provided as an image) into a single, coherent,
+//
+// It therefore duplicates agents/page.md's "## System prompt" + "## Output
+// contract" on purpose, and cannot be replaced by reading that file — the whole
+// point is the file being missing. `test/page-prompt.test.ts` asserts the two
+// agree (word-for-word, whitespace-insensitive), because the file is what every
+// real deployment runs while this copy is exercised only by bare checkouts: edit
+// one and nothing here would otherwise notice. Exported for that test.
+export const DEFAULT_PAGE_PROMPT = `You convert an ENTIRE document page (provided as an image) into a single, coherent,
 accessible HTML fragment that meets WCAG 2.2 AA. You see the whole page and produce ONE
 faithful representation of it. NEVER duplicate content or render the same thing two ways
 (for example, do not output both a <form> and a <table> for the same fields) — choose the
@@ -212,6 +219,30 @@ async function mergeSpecialist(
   return parsed?.html?.trim() || null;
 }
 
+// The non-standard agent files a suggestion could have resolved to, for the
+// `specialist_unresolved` log line. Session-built agents (tmp/) are included
+// because loadAgent prefers them, so they are genuinely dispatchable. Sorted so
+// two runs of the same library produce comparable log lines. Best-effort: this
+// exists to explain a miss, so it must never turn one into a failed run.
+function availableSpecialists(ctx: PipelineContext): string[] {
+  const names = new Set<string>();
+  for (const dir of [ctx.paths.agentsDir, ctx.paths.tmpAgentsDir(ctx.sessionId)]) {
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      continue; // tmp/ may not exist yet, or agents_dir may be misconfigured
+    }
+    for (const f of entries) {
+      if (!f.endsWith(".md")) continue;
+      const logical = f.slice(0, -3);
+      if (logical === PAGE_AGENT || logical === "feedback" || STANDARD_AGENTS.has(logical)) continue;
+      names.add(logical);
+    }
+  }
+  return [...names].sort();
+}
+
 // If a page flagged a content type that an EXISTING library agent handles, run
 // that specialist on the page and merge its higher-fidelity fragment into the
 // page output. Non-blocking: any failure leaves the page output unchanged.
@@ -223,13 +254,40 @@ async function dispatchSpecialist(
   pageHtml: string,
   suggestion: { name: string; reason: string },
 ): Promise<{ html: string; dispatched: boolean }> {
-  const logical = suggestion.name.replace(/\.md$/, "");
-  if (STANDARD_AGENTS.has(logical)) return { html: pageHtml, dispatched: false };
+  const logical = suggestion.name.replace(/\.md$/, "").trim();
+  // Every path out of here is logged, including the ones that do nothing.
+  // `logical` is free text the model wrote, resolved to a file by name, so a
+  // specialist silently fails to run whenever the model's wording and the
+  // library's filenames disagree — `chart` for `chartDataAgent.md`, a display
+  // name, a plural. Without a log line for the miss, "routing was never
+  // attempted" and "routing was attempted and the name did not resolve" are the
+  // same observation: a page that came out of the general pass. `candidates`
+  // names what WAS available, so a miss can be read as a near-miss rather than
+  // needing a second run to investigate.
+  if (!logical) {
+    ctx.log.event("specialist_unresolved", { suggested: suggestion.name, image: img.name, reason: "empty name" });
+    return { html: pageHtml, dispatched: false };
+  }
+  if (STANDARD_AGENTS.has(logical)) {
+    // Not a failure: the general page pass already covers the standard types, so
+    // this suggestion is correctly declined. Logged to keep the counts of
+    // suggested / declined / dispatched / unresolved reconcilable from one run.
+    ctx.log.event("specialist_declined", { agent: logical, image: img.name, reason: "standard type" });
+    return { html: pageHtml, dispatched: false };
+  }
   const specialist = loadAgent(logical, {
     agentsDir: ctx.paths.agentsDir,
     tmpAgentsDir: ctx.paths.tmpAgentsDir(ctx.sessionId),
   });
-  if (!specialist) return { html: pageHtml, dispatched: false };
+  if (!specialist) {
+    ctx.log.event("specialist_unresolved", {
+      agent: logical,
+      image: img.name,
+      reason: "no agent file of that name",
+      candidates: availableSpecialists(ctx),
+    });
+    return { html: pageHtml, dispatched: false };
+  }
   try {
     const fragment = await runSpecialist(ctx, specialist, img);
     if (!fragment) {

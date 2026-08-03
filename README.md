@@ -377,6 +377,30 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   answer, pages it cannot localize, or a claim spanning more than half the document all fall
   back to `document`. A wrong `document` answer costs one review round; a wrong `extraction`
   answer costs a vision call per page.
+- **One instance per `data_dir` — this is a hard constraint, not a preference.** Running two
+  processes against the same `storage.data_dir` corrupts sessions, and it fails loudly in the
+  wrong direction: on boot each instance runs `failStaleSessions()`, which marks every `running`
+  and `queued` row `failed` with `interrupted (server restarted)`. Those rows include the *other*
+  instance's live runs. A second instance starting therefore kills the first one's in-flight
+  conversions from the client's point of view — the pipeline keeps going and still writes
+  `output.html`, but the session reads `failed`, so the user is told their document failed while
+  work continues on it. The sweep cannot tell "this row is orphaned" from "this row belongs to a
+  peer" because nothing records which process owns a run.
+
+  Two other single-process assumptions ride along: the run queue that enforces
+  `max_concurrent_runs` is in-memory, so N instances allow N × the cap, and `notes`/fixture and
+  agent-memory writes under `data_dir` are unsynchronized between processes.
+
+  To scale beyond one box, put a second `data_dir` behind it (independent instances, sessions not
+  shared) rather than pointing two at one directory. Gating the sweep on an instance id, and
+  moving the queue and locks out of process, is what a genuinely multi-instance version needs.
+
+- **`phase` reports only phases that exist.** `extraction`, `assembly`, `review`, `done`. The
+  PRD's `triage` (§7.2) and `reconciliation` (§7.6) are not implemented — reconciliation is
+  unreachable while extraction hardcodes `edges: []` — so they are not in the enum and not
+  emitted (§9.2 v1.1). New sessions start at `extraction`; they used to be created at `triage`
+  and overwritten before a client could observe it.
+
 Intentionally **not** built in v1 (the PRD frames each as optional / alternative / out of scope):
 PostgreSQL and S3 backends (§10.2 — "supported alternative," SQLite + local FS is the v1
 reference), the per-user config endpoint (§9.1 — "not specified in v1"), and webhooks (§9.4 —
