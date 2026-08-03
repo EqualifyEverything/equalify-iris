@@ -143,13 +143,15 @@ test("loadConfig: an unset ${VAR} yields the default, and `none` survives expans
   // reusing one name would hand back the previous case's parsed config and the
   // assertion would be checking nothing.
   let n = 0;
+  // `issue_token` is set throughout, because `none` without it is a startup error
+  // (see the pairing test below) — the subject here is expansion, not the pairing.
   const write = (scope: string) => {
     const p = join(dir, `cfg-${n++}.yaml`);
     writeFileSync(
       p,
       `server: { port: 3000, base_url: "http://localhost:3000" }\n` +
         `storage:\n  data_dir: ${dir}\n  agents_dir: ${dir}/agents\n  database: ${dir}/iris.sqlite\n` +
-        `github:\n  client_id: cid\n  oauth_scope: ${scope}\n` +
+        `github:\n  client_id: cid\n  issue_token: svc\n  oauth_scope: ${scope}\n` +
         `providers:\n  default: openrouter\n  openrouter: { api_key: k, default_model: m }\n`,
     );
     return p;
@@ -170,6 +172,46 @@ test("loadConfig: an unset ${VAR} yields the default, and `none` survives expans
     assert.equal(scopeIn(write("${IRIS_TEST_SCOPE}  ")), "", "`none` via the environment");
   } finally {
     delete process.env.IRIS_TEST_SCOPE;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// `oauth_scope: none` and `issue_token` are only meaningful together: the first
+// says "a user's token never files anything", which is only true if the second
+// files everything instead. Configured apart, contributions fall back to a
+// now-scopeless user token and GitHub 403s — caught and logged as one
+// `agent_issue_failed` line, so the deployment looks healthy while the feature it
+// exists to feed is dead. Startup is the last place this is cheap to notice.
+test("loadConfig: `none` without an issue_token is a startup error", () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-pair-"));
+  let n = 0;
+  const write = (github: string) => {
+    const p = join(dir, `cfg-${n++}.yaml`);
+    writeFileSync(
+      p,
+      `server: { port: 3000, base_url: "http://localhost:3000" }\n` +
+        `storage:\n  data_dir: ${dir}\n  agents_dir: ${dir}/agents\n  database: ${dir}/iris.sqlite\n` +
+        `github:\n  client_id: cid\n${github}` +
+        `providers:\n  default: openrouter\n  openrouter: { api_key: k, default_model: m }\n`,
+    );
+    return p;
+  };
+  try {
+    assert.throws(
+      () => loadConfig(write("  oauth_scope: none\n")),
+      // The message has to name the fix, since the symptom it prevents (a 403 on
+      // an issue nobody was watching for) gives no hint about which key is wrong.
+      /oauth_scope.*none.*issue_token is not set/s,
+      "a scopeless deployment with no service token started up",
+    );
+    // The pairing is what is checked, not the scope alone: with the token present
+    // `none` is the recommended production shape.
+    assert.equal(loadConfig(write("  issue_token: svc\n  oauth_scope: none\n")).github.oauth_scope, "");
+    // And an accidental empty is NOT this error — it has already become the
+    // default by the time validateConfig runs, so it needs no service token.
+    assert.equal(loadConfig(write('  oauth_scope: ""\n')).github.oauth_scope, DEFAULT_OAUTH_SCOPE);
+    assert.equal(loadConfig(write("")).github.oauth_scope, DEFAULT_OAUTH_SCOPE, "the default config must still start");
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -2,6 +2,7 @@ import { loadAgent } from "../agents/loader.ts";
 import { loadImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { createAgentIssue } from "../github/issue.ts";
+import { NO_OAUTH_SCOPE } from "../config.ts";
 
 // Content types already covered by the standard library — never suggest these,
 // and never dispatch the generic page extraction to them (see extraction.ts).
@@ -76,7 +77,30 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
       });
       ctx.log.event("agent_issue", { agent: name, url: url ?? "(duplicate — skipped)" });
     } catch (e) {
-      ctx.log.event("agent_issue_failed", { agent: name, error: (e as Error).message });
+      const message = (e as Error).message;
+      // A 403 here is almost always a scope problem, and the scope is several
+      // steps away from this line — it was decided at consent time, by a config
+      // key, possibly by a previous operator. Naming the likely cause turns a
+      // swallowed failure into a diagnosable one. The two configurations that
+      // reach it: `oauth_scope` narrower than a PRIVATE `upstream_repo` needs
+      // (`public_repo`, the default, cannot write to a private repo), and a
+      // pre-existing token issued before the requested scope was narrowed.
+      // The scopeless-token-with-no-issue_token case is rejected at startup.
+      // Octokit throws RequestError carrying `.status`; its `message` is GitHub's
+      // prose ("Resource not accessible by personal access token"), which does not
+      // contain the code — so match on the status, and fall back to the text for a
+      // non-Octokit throw.
+      const status = (e as { status?: number }).status;
+      const scopeHint = status === 403 || /\b403\b/.test(message)
+        ? {
+            hint:
+              `403 usually means the token lacks the scope this repo needs. ` +
+              `github.oauth_scope is "${ctx.cfg.github.oauth_scope || NO_OAUTH_SCOPE}"; a private ` +
+              `upstream_repo needs "repo". Tokens issued before a scope change keep the old scope ` +
+              `until the user re-authorizes.`,
+          }
+        : {};
+      ctx.log.event("agent_issue_failed", { agent: name, error: message, ...scopeHint });
     }
   }
 }

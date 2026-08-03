@@ -63,6 +63,9 @@ github:
   #                           WRITE to every private repo the user can reach, and
   #                           that token is what sits in the database in plaintext.
   #
+  # `none` requires `issue_token` above — the service refuses to start otherwise,
+  # since a scopeless user token cannot file anything.
+  #
   # Changing this does not narrow tokens already issued — those keep their old
   # scope until revoked at github.com/settings/applications.
   oauth_scope: public_repo

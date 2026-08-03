@@ -162,6 +162,13 @@ read *and write* to all of a user's private repositories for a feature that does
 user's token does nothing but prove who they are — so set `oauth_scope: none` and the stored
 tokens stop being worth stealing. That is the recommended production shape.
 
+The two keys go together, and the service **refuses to start** if you set `none` without an
+`issue_token`: a scopeless user token cannot file issues, and GitHub's 403 would otherwise turn
+up only as an `agent_issue_failed` line in a run log. The two combinations startup *cannot*
+check for are a private `upstream_repo` left on the `public_repo` default, and tokens issued
+before you narrowed the scope — for those, a 403 during issue filing is logged with a `hint`
+naming the configured scope.
+
 Narrowing the request does **not** shrink a grant a user already made. Tokens issued under
 `repo` keep it until revoked at
 [github.com/settings/applications](https://github.com/settings/applications); only new

@@ -32,9 +32,13 @@ export interface IrisConfig {
     issue_token?: string;
     // OAuth scope requested from the user. Defaults to `public_repo` — enough to
     // file an issue on a public upstream, and no more. Raise it to `repo` only for
-    // a PRIVATE upstream, and set it to "" when `issue_token` files every issue,
-    // in which case the user's token only needs to identify them. Normalized by
-    // loadConfig, so it is always a string (never null from a valueless YAML key).
+    // a PRIVATE upstream, and set it to `none` when `issue_token` files every
+    // issue, in which case the user's token only needs to identify them.
+    //
+    // `none` and not `""`: see NO_OAUTH_SCOPE below. loadConfig normalizes this,
+    // so by the time anything reads it, it is always a string — `none` has become
+    // `""` (meaning "send no scope parameter") and every accidental empty form has
+    // become the default.
     oauth_scope: string;
   };
   providers: {
@@ -129,6 +133,24 @@ function expandEnv(value: unknown, unset: Set<string>): unknown {
 // provider block stays valid without its credentials.
 function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void {
   const problems: string[] = [];
+
+  // `oauth_scope: none` says "a user's token never files anything", which is only
+  // true when `issue_token` files everything instead. Without it, contributions
+  // fall back to the user's token (src/pipeline/contribute.ts) — which now has no
+  // scope — and GitHub answers 403. That is caught and logged as a single
+  // `agent_issue_failed` line, so the deployment looks healthy while the feature
+  // it exists to feed is dead. The two keys are only meaningful together, so the
+  // pairing is checked here rather than discovered mid-run.
+  //
+  // Checked after normalizeScope, so "" here means the operator wrote `none`; an
+  // accidental empty has already become the default and is not this error.
+  if (cfg.github?.oauth_scope === "" && !cfg.github.issue_token) {
+    problems.push(
+      `github.oauth_scope is "${NO_OAUTH_SCOPE}" but github.issue_token is not set — ` +
+        `a scopeless user token cannot file agent-suggestion issues (GitHub answers 403). ` +
+        `Set github.issue_token, or remove oauth_scope to request the default (${DEFAULT_OAUTH_SCOPE})`,
+    );
+  }
 
   if (!cfg.providers?.default) problems.push("providers.default is not set");
 
