@@ -244,7 +244,14 @@ test("a real coverage regression is still blocked", async () => {
     // Re-point the router: the UPDATED prompt produces almost nothing. The two
     // prompts differ by content, so keying on the prompt text distinguishes them.
     const inner = ctx.router.complete;
-    ctx.router.complete = (async (agent: string, cap: string, messages: { role: string; content: string }[], extra?: unknown) => {
+    // Parameters are borrowed from the real signature rather than re-declared, so
+    // this stub cannot drift from the interface it stands in for.
+    ctx.router.complete = (async (
+      agent: string,
+      cap: Parameters<typeof inner>[1],
+      messages: Parameters<typeof inner>[2],
+      extra?: Parameters<typeof inner>[3],
+    ) => {
       const user = messages.map((m) => m.content).join("\n");
       if (agent !== "feedback" && /Updated prompt/.test(user) && user.includes("case000.png")) {
         return { text: JSON.stringify({ html: "<p>alpha</p>" }) };
