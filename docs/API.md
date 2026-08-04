@@ -39,6 +39,12 @@ for the duration of the run it authorizes, and discarded — revoke it any time 
 [github.com/settings/applications](https://github.com/settings/applications) and the service loses
 that access within five minutes (see the README's "What happens to your token").
 
+*Operators:* an earlier build did store tokens, in a `github_token` column. There is no migration —
+delete any `data/iris.sqlite` from before that change and let users re-authorize. The service
+refuses to start against such a file rather than adopting it, since the old table would break
+first-time logins *and* would still hold live plaintext tokens, making the paragraph above false for
+that deployment.
+
 ### CLI / bash — device flow (recommended for terminals)
 
 ```bash

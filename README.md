@@ -161,6 +161,13 @@ scope until revoked at
 [github.com/settings/applications](https://github.com/settings/applications). Only new
 authorizations are affected.
 
+**If you are coming from an earlier build, `oauth_scope: none` used to be the recommendation.** It
+was paired with `github.issue_token` to minimize what a stolen token was worth back when tokens were
+stored in the database. Tokens are no longer stored at all, so that trade no longer buys anything —
+and what it cost is the requirement above: a token that cannot file cannot contribute. Such a config
+now **fails at startup** with a message naming the fix. Remove the key (or set `public_repo`); keep
+`issue_token` if you were relying on it, since it is independent of the scope floor.
+
 **2. `github.issue_token` is an override, and not a recommended one.** Set it to a service-account
 PAT and every issue is filed under that bot account instead of under the user who produced it. It is
 off by default because it erases the attribution that is the point of the design. Use it only where
@@ -179,8 +186,18 @@ Two smaller things follow from that, both worth knowing:
   revoked token keeps working for up to that long. The cache is bounded (10,000 entries, oldest
   evicted) and entries are *not* renewed on use — deliberately, so that a busy token cannot outlive
   its revocation indefinitely. It is empty on restart.
-- Because nothing is stored, there is nothing to rotate, re-encrypt or purge, and no upgrade step
-  when a user revokes access. Revocation at github.com is the whole mechanism.
+- Because nothing is stored, there is nothing to rotate, re-encrypt or purge when a user revokes
+  access. Revocation at github.com is the whole mechanism.
+
+**If you have a `data/iris.sqlite` from an earlier build, delete it.** Tokens *were* stored in a
+`github_token` column once, and there is no migration — every user re-authorizes from scratch. The
+service refuses to start against such a file and names the fix, rather than adopting it: the old
+table's `github_token TEXT NOT NULL` would survive `CREATE TABLE IF NOT EXISTS`, so first-time
+logins would fail with a SQLite constraint error returned as `401 unauthorized` (users who already
+had a row would keep working, which makes it look like flaky GitHub auth rather than a schema
+mismatch) — and the claim above would be false for that file, since it still holds live plaintext
+tokens for everyone who ever logged in. Delete it rather than archiving it; users lose only their
+session history.
 
 ## API
 

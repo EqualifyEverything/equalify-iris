@@ -192,6 +192,52 @@ export class Store {
       -- migration step for databases created before the compound cursor.
       DROP INDEX IF EXISTS idx_sessions_user;
     `);
+    this.rejectLegacyUsersTable(path);
+  }
+
+  /**
+   * Refuse to open a database whose `users` table predates the removal of
+   * `github_token` / `fork_repo`.
+   *
+   * There is deliberately **no migration**: every user starts from scratch, so a
+   * pre-existing database is not a deployment to be upgraded — it is a leftover, and
+   * the honest response is to say so rather than to quietly adopt it.
+   *
+   * A check is still needed, because `CREATE TABLE IF NOT EXISTS` above is a no-op
+   * when the table already exists. Without this, a stray `data/` directory (a
+   * development leftover, a restored backup, a volume mounted from an older image)
+   * keeps the old table — `github_token TEXT NOT NULL` — while `upsertUser` no longer
+   * supplies that column, and the two symptoms both point away from the cause:
+   *
+   *   * Every FIRST-TIME login throws `NOT NULL constraint failed:
+   *     users.github_token` inside the auth middleware's try, which answers
+   *     `401 unauthorized` with the SQLite message in the body. Anyone who already
+   *     has a row keeps working, so it reads as "GitHub is flaky for new signups"
+   *     rather than as a schema mismatch.
+   *   * The plaintext tokens in that file stay there, now never refreshed and never
+   *     cleared, while `getUser`'s `SELECT *` still returns them — so
+   *     `req.user.github_token` exists at runtime although `UserRecord` says it
+   *     cannot. The claim that a stolen copy of `data/iris.sqlite` is not GitHub
+   *     access would be false for exactly that file.
+   *
+   * Failing at startup is what makes "starting from scratch" a checked precondition
+   * instead of an assumption. It also keeps the fix in the operator's hands: deleting
+   * the file is a decision about live credentials, and a silent rebuild-and-VACUUM
+   * would be this service erasing data nobody asked it to touch.
+   */
+  private rejectLegacyUsersTable(path: string): void {
+    const cols = this.db.prepare(`PRAGMA table_info(users)`).all() as { name: string }[];
+    const legacy = cols.map((c) => c.name).filter((n) => n === "github_token" || n === "fork_repo");
+    if (legacy.length === 0) return;
+    this.db.close();
+    throw new Error(
+      `${path} was created by an older version of Iris: its users table still has ` +
+        `${legacy.join(" and ")}. There is no migration — GitHub tokens are no longer stored at ` +
+        `all, and every user re-authorizes from scratch. Delete the database (and its -wal/-shm ` +
+        `files) and restart; users log in again with GitHub and lose nothing but their session ` +
+        `history. Note that the old file still contains plaintext GitHub tokens for every user ` +
+        `who logged in, so delete it rather than archiving it.`,
+    );
   }
 
   // --- users ---

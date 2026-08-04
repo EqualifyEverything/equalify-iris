@@ -59,6 +59,24 @@ export function __clearTokenCache(): void {
   tokenCache.clear();
 }
 
+// Test-only introspection. The bound is 10k entries, so asserting it through real
+// HTTP requests would mean issuing 10,001 of them; seeding the map directly and then
+// driving ONE real request through the middleware exercises the same `evict` call on
+// the same state, in milliseconds. The properties worth pinning are invisible from
+// outside — that the sweep runs before the insert, that expired entries go first, and
+// that a cache hit does not renew `expires` (FIFO, not LRU) — so they need a window
+// into the map rather than a behavioral proxy.
+export const __MAX_ENTRIES = MAX_ENTRIES;
+export function __tokenCacheSize(): number {
+  return tokenCache.size;
+}
+export function __tokenCacheExpiry(token: string): number | undefined {
+  return tokenCache.get(token)?.expires;
+}
+export function __seedTokenCache(token: string, id: number, expires: number): void {
+  tokenCache.set(token, { id, expires });
+}
+
 export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
   const apiBase = cfg.github.api_base_url;
   const defaultMaxIter = cfg.defaults.max_review_iterations;

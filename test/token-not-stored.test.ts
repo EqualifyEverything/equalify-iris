@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import express from "express";
@@ -145,4 +146,62 @@ test("GET /v1/me returns no fork_repo", async () => {
     "upstream_repo",
   ]);
   assert.equal(body.github_login, GH_USER.login);
+});
+
+// A database created before the token column was removed is a LEFTOVER, not a
+// deployment to upgrade — there is no migration, by decision. But the check has to
+// exist, because `CREATE TABLE IF NOT EXISTS` silently keeps the old table, and the
+// resulting failure points away from its cause: `upsertUser` throws
+// `NOT NULL constraint failed: users.github_token`, the auth middleware catches it,
+// and a first-time login gets `401 unauthorized` with a SQLite message in the body
+// while anyone who already has a row keeps working.
+test("a pre-existing database with a token column is refused at startup", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-legacy-"));
+  const dbPath = join(dir, "iris.sqlite");
+  try {
+    // Build the old schema by hand — the shape this branch removed.
+    const legacy = new DatabaseSync(dbPath);
+    legacy.exec(`
+      CREATE TABLE users (
+        github_user_id INTEGER PRIMARY KEY,
+        github_login TEXT NOT NULL,
+        github_token TEXT NOT NULL,
+        fork_repo TEXT,
+        max_review_iterations INTEGER NOT NULL DEFAULT 3,
+        created_at TEXT NOT NULL
+      );
+    `);
+    legacy.prepare(`INSERT INTO users VALUES (?, ?, ?, NULL, 3, ?)`).run(1, "old-user", TOKEN, "2026-01-01T00:00:00.000Z");
+    legacy.close();
+
+    assert.throws(
+      () => new Store(dbPath),
+      (e: Error) =>
+        /older version of Iris/.test(e.message) &&
+        /github_token/.test(e.message) &&
+        // The message must name the fix and say why archiving is not it, since the
+        // file still holds live plaintext credentials.
+        /[Dd]elete the database/.test(e.message) &&
+        /plaintext/.test(e.message),
+      "an older database was adopted silently — new logins would 401 with a SQL error",
+    );
+
+    // Sanity: the same file, minus the offending columns, opens fine. Otherwise this
+    // test would pass for any database at all and prove nothing about the columns.
+    rmSync(dbPath, { force: true });
+    const fresh = new DatabaseSync(dbPath);
+    fresh.exec(`
+      CREATE TABLE users (
+        github_user_id INTEGER PRIMARY KEY,
+        github_login TEXT NOT NULL,
+        max_review_iterations INTEGER NOT NULL DEFAULT 3,
+        created_at TEXT NOT NULL
+      );
+    `);
+    fresh.close();
+    const store = new Store(dbPath);
+    assert.equal(store.getUser(1), undefined, "the current schema failed to open");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
