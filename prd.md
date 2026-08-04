@@ -883,8 +883,8 @@ GitHub itself is a non-replaceable dependency in v1 because the agent contributi
 Equalify Iris is Open Source. Continued development, security review, and accessibility expertise — the work that keeps the agent library current and trustworthy — require a sustainable funding stream. The model:
 
 - The code is free to use, modify, fork, and contribute to under the project's Open Source license.
-- Iris is maintained by **Equalify Inc.** ([https://equalify.app/](https://equalify.app/)), the **University of Illinois Chicago**, and **California State University**. **Amended (v1.2):** maintenance is shared across those three institutions rather than held by one company. That is a fact about the project's governance with a consequence for this section: no single maintainer's commercial interest can be the whole funding story, and the design must not assume one — which is why the agent library's growth is tied to *users* contributing (below) rather than to a vendor's roadmap.
-- Commercial hosting and support are offered by **Equalify Inc.** and fund its share of continued development.
+- Iris is maintained by **Equalify Inc.**, the **University of Illinois Chicago**, and **California State University**. **Amended (v1.2):** maintenance is shared across those three institutions rather than held by one company. That is a fact about the project's governance with a consequence for this section: no single maintainer's commercial interest can be the whole funding story, and the design must not assume one — which is why the agent library's growth is tied to *users* contributing (below) rather than to a vendor's roadmap.
+- Commercial hosting and support are offered by **[Equalify Inc.](https://equalify.app/)** and fund its share of continued development.
 - The hosted and self-hosted versions are functionally identical. A commercial maintainer's value to paying customers is operational (managed deployment, monitoring, accessibility consulting), not feature gating.
 
 #### Every user contributes (v1.2)
