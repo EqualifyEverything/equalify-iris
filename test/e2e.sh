@@ -132,9 +132,11 @@ TOKEN=$(echo "$poll" | jq -r '.access_token')
 AUTH=(-H "Authorization: Bearer $TOKEN")
 
 # The scope the service ASKED GitHub for. Invisible from the client — the flow
-# succeeds whatever is requested — and it is what decides how much a copy of the
-# plaintext token database is worth. The config above sets no `oauth_scope`, so
-# this asserts the DEFAULT that ships, not a value the test chose.
+# succeeds whatever is requested — and bounded from both sides: too narrow and the
+# user cannot file the feedback issue every session contributes (PRD §12), too wide
+# and every user hands over write access to all their private repos for nothing. The
+# config above sets no `oauth_scope`, so this asserts the DEFAULT that ships, not a
+# value the test chose.
 scope=$(curl -s "http://localhost:$GH_PORT/__last_device_scope")
 echo "$scope" | jq -e '.scope=="public_repo"' >/dev/null \
   && pass "the device flow requested public_repo, not repo" \
@@ -144,6 +146,10 @@ echo "==> 4. GET /v1/me"
 me=$(curl -s "${AUTH[@]}" "$BASE/me")
 echo "$me" | jq -e '.github_login=="iris-tester" and .defaults.max_review_iterations==1' >/dev/null \
   && pass "identity resolved ($(echo "$me" | jq -r .github_login))" || fail "me" "$me"
+# The response shape over the wire, not just in a unit test: `fork_repo` is gone
+# rather than permanently null, since nothing forks (PRD §7.13 v1.2).
+echo "$me" | jq -e 'has("fork_repo")|not' >/dev/null \
+  && pass "no fork_repo in /me" || fail "me shape" "$me"
 
 echo "==> 5. POST /v1/sessions (upload 3 images)"
 # minimal valid 1x1 PNGs. Three pages, with extraction_concurrency=4 above, so

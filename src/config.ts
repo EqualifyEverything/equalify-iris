@@ -27,18 +27,24 @@ export interface IrisConfig {
     // Overridable for GitHub Enterprise (and for testing). Defaults below.
     api_base_url: string; // e.g. https://api.github.com
     oauth_base_url: string; // e.g. https://github.com
-    // Service token (PAT) used to auto-file agent-suggestion issues on the
-    // upstream repo. When empty, issue filing is disabled (safe no-op).
-    issue_token?: string;
-    // OAuth scope requested from the user. Defaults to `public_repo` — enough to
-    // file an issue on a public upstream, and no more. Raise it to `repo` only for
-    // a PRIVATE upstream, and set it to `none` when `issue_token` files every
-    // issue, in which case the user's token only needs to identify them.
+    // OPTIONAL service token (PAT) that files every issue under one bot account
+    // instead of under the user who ran the session.
     //
-    // `none` and not `""`: see NO_OAUTH_SCOPE below. loadConfig normalizes this,
-    // so by the time anything reads it, it is always a string — `none` has become
-    // `""` (meaning "send no scope parameter") and every accidental empty form has
-    // become the default.
+    // Off by default, and deliberately not recommended: filing under each user's
+    // own identity is the point of authenticating with GitHub at all (PRD §12 —
+    // every user gives back to the shared agent library, credited to them). A bot
+    // account erases that attribution. Set it only when a deployment cannot file as
+    // its users — e.g. an org policy that forbids it.
+    issue_token?: string;
+    // OAuth scope requested from the user. `public_repo` (the default) is the FLOOR,
+    // not a starting point to lower: it is exactly what filing an issue on a public
+    // upstream needs, and filing is required of every user, not optional. Raise it
+    // to `repo` only for a PRIVATE upstream.
+    //
+    // There is no "request nothing" setting. A scopeless token can identify a user
+    // but cannot contribute, which is not a mode this service has (see
+    // validateConfig). loadConfig normalizes this, so by the time anything reads it,
+    // it is a non-empty string.
     oauth_scope: string;
   };
   providers: {
@@ -134,21 +140,29 @@ function expandEnv(value: unknown, unset: Set<string>): unknown {
 function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void {
   const problems: string[] = [];
 
-  // `oauth_scope: none` says "a user's token never files anything", which is only
-  // true when `issue_token` files everything instead. Without it, contributions
-  // fall back to the user's token (src/pipeline/contribute.ts) — which now has no
-  // scope — and GitHub answers 403. That is caught and logged as a single
-  // `agent_issue_failed` line, so the deployment looks healthy while the feature
-  // it exists to feed is dead. The two keys are only meaningful together, so the
-  // pairing is checked here rather than discovered mid-run.
+  // A scopeless token is rejected outright rather than paired with anything.
   //
-  // Checked after normalizeScope, so "" here means the operator wrote `none`; an
-  // accidental empty has already become the default and is not this error.
-  if (cfg.github?.oauth_scope === "" && !cfg.github.issue_token) {
+  // Iris authenticates with GitHub so that using it and contributing back to the
+  // shared agent library are the same act (PRD §12): every session's feedback is
+  // filed as an issue under the user's own identity. A token that can identify a
+  // user but not file on their behalf breaks that, and GitHub's 403 would show up
+  // only as one `agent_issue_failed` line in a run log — the deployment would look
+  // healthy while the thing it exists to feed was dead.
+  //
+  // `github.issue_token` does NOT rescue this configuration, which is why there is
+  // no pairing check here any more. A service PAT changes who gets the credit, not
+  // whether a user can contribute; a deployment that files everything under a bot
+  // account still needs its users able to file, because the PAT is an override for
+  // where issues land, not a substitute for the user's participation.
+  //
+  // Checked after normalizeScope, which never produces "" from a valid config, so
+  // reaching this means the operator wrote something that meant "no scope".
+  if (cfg.github?.oauth_scope === "") {
     problems.push(
-      `github.oauth_scope is "${NO_OAUTH_SCOPE}" but github.issue_token is not set — ` +
-        `a scopeless user token cannot file agent-suggestion issues (GitHub answers 403). ` +
-        `Set github.issue_token, or remove oauth_scope to request the default (${DEFAULT_OAUTH_SCOPE})`,
+      `github.oauth_scope requests no scope, which cannot work — a scopeless token can ` +
+        `identify a user but not file the feedback issues every session contributes ` +
+        `(GitHub answers 403). The minimum is "${DEFAULT_OAUTH_SCOPE}" (the default; ` +
+        `remove the key to get it), or "repo" for a private upstream_repo`,
     );
   }
 
@@ -210,38 +224,34 @@ export function normalizeMaxConcurrentRuns(value: unknown): number {
   return Math.min(MAX_CONCURRENT_RUNS_CEILING, Math.max(1, Math.floor(n)));
 }
 
-// "Request no scope at all" has to be spelled out as a word, because empty
-// cannot be trusted to mean it. `expandEnv` above turns an unset `${VAR}` into
-// `""` before this function ever runs, and every other `github.*` key in
-// config.example.yaml uses the `${...}` form — so `oauth_scope: ${IRIS_SCOPE}`
-// with the variable unset is both the likely way an operator parameterizes this
-// and indistinguishable, by the time we see it, from a deliberate `""`.
+// The word an operator might reach for to turn the scope off. There is no such
+// setting — a scopeless token cannot file the feedback issues every session
+// contributes (PRD §12), so this is recognized only in order to be REJECTED with an
+// explanation by validateConfig, rather than passed to GitHub as a literal scope
+// named "none" and failing later at the consent screen.
 //
-// Reading empty as "request nothing" therefore fails silently in the direction
-// that hurts: a deployment with no `github.issue_token` (the documented default,
-// where users file their own issues) would send no scope, users would authorize
-// scopelessly, and `createAgentIssue` would 403 — swallowed as one
-// `agent_issue_failed` log line. Worse for a returning user, since omitting the
-// scope makes GitHub reuse the grant already authorized, so an existing token may
-// still carry `repo` while the operator believes nothing was requested.
-//
-// `none` cannot be produced by expansion, by a valueless key, or by a typo that
-// happens to evaluate to empty. It has to be typed.
+// Recognized case-insensitively because YAML parses `None`/`NONE` as strings, not as
+// null (only `null`, `Null`, `NULL`, `~` and empty are null), so all three spellings
+// arrive here as text.
 export const NO_OAUTH_SCOPE = "none";
 
-// Coerce a configured github.oauth_scope into the string to send to GitHub, where
-// "" means "send no scope parameter":
+// Coerce a configured github.oauth_scope into the string to send to GitHub:
 //
-//   (key absent)         -> DEFAULT_OAUTH_SCOPE  ("didn't say" — don't silently
-//                                                 drop the scope issue filing needs)
-//   oauth_scope:         -> DEFAULT_OAUTH_SCOPE  (null; a valueless key is a typo)
-//   oauth_scope: ${UNSET} -> DEFAULT_OAUTH_SCOPE (expanded to "" — see above)
-//   oauth_scope: ""      -> DEFAULT_OAUTH_SCOPE  (same, and not distinguishable)
-//   oauth_scope: none    -> ""                   (the deliberate "request nothing")
+//   (key absent)          -> DEFAULT_OAUTH_SCOPE  ("didn't say" — take the floor)
+//   oauth_scope:          -> DEFAULT_OAUTH_SCOPE  (null; a valueless key is a typo)
+//   oauth_scope: ${UNSET} -> DEFAULT_OAUTH_SCOPE  (expandEnv already made it "")
+//   oauth_scope: ""       -> DEFAULT_OAUTH_SCOPE  (same, and not distinguishable)
+//   oauth_scope: none     -> ""                   -> REJECTED by validateConfig
 //
-// Empty-after-expansion meaning "unset, use the default" is also the convention
-// every other key in this block already follows (`api_base_url` a few lines down
-// in loadConfig). This was the one place it would have meant the opposite.
+// Every empty form becomes the default rather than "no scope", which is the
+// convention every other key in this block follows (`api_base_url` a few lines down
+// in loadConfig). It matters here beyond consistency: `expandEnv` turns an unset
+// `${VAR}` into `""` before this runs, and `config.example.yaml`'s house style is the
+// `${...}` form — so a mistyped variable name must not be able to quietly strip the
+// scope out of a deployment. `none` returns "" rather than throwing here so that
+// validateConfig can report it with the full reason; this function has no error
+// channel.
+//
 // Exported for tests.
 export function normalizeScope(value: unknown): string {
   if (typeof value !== "string") return DEFAULT_OAUTH_SCOPE;
@@ -249,9 +259,6 @@ export function normalizeScope(value: unknown): string {
   // scope parameter and GitHub would reject it.
   const trimmed = value.trim();
   if (!trimmed) return DEFAULT_OAUTH_SCOPE;
-  // Case-insensitive: `None` and `NONE` are the same intent, and YAML parses
-  // neither as null (only `null`, `Null`, `NULL`, `~` and empty are null), so
-  // they arrive here as strings and would otherwise be sent as literal scopes.
   if (trimmed.toLowerCase() === NO_OAUTH_SCOPE) return "";
   return trimmed;
 }

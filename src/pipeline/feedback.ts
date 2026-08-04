@@ -540,9 +540,11 @@ export async function proposeAgentUpdatesFromFeedback(
   ctx.log.event("agent_updates_proposed", { agents: [proposal.agent_name], count: 1 });
 
   // Surface the proposal where maintainers act on it: file a GitHub issue (the
-  // contribution model uses issues, not close-time PRs). Attributed to the
-  // logged-in user unless a service token override is configured. No-op without a
-  // token, so local runs still keep the proposal in agent-updates.md.
+  // contribution model uses issues, not close-time PRs). This is the path that makes
+  // a user's feedback give back to the shared library — filed under their own GitHub
+  // identity, which is why authenticating with GitHub is required (PRD §12).
+  // `github.issue_token` overrides the attribution to a bot account. No-op without
+  // any token, so local runs still keep the proposal in agent-updates.md.
   const usingServiceToken = Boolean(ctx.cfg.github.issue_token);
   const token = ctx.cfg.github.issue_token || ctx.githubToken;
   if (token) {

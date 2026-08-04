@@ -38,14 +38,12 @@ export class Paths {
   sessionLog(id: string): string {
     return join(this.sessionDir(id), "log.jsonl");
   }
-  sessionNewAgents(id: string): string {
-    return join(this.sessionDir(id), "new-agents.md");
-  }
+  // `sessionNewAgents()` and `sessionPrs()` used to sit here with zero callers,
+  // left over from the fork-and-PR flow of PRD §7.13. That flow has been dropped
+  // (contributions are issues filed under the user's identity), so they are gone
+  // rather than waiting for it.
   sessionAgentUpdates(id: string): string {
     return join(this.sessionDir(id), "agent-updates.md");
-  }
-  sessionPrs(id: string): string {
-    return join(this.sessionDir(id), "prs.md");
   }
   sessionUnresolved(id: string): string {
     return join(this.sessionDir(id), "unresolved.md");

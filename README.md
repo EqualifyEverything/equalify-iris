@@ -10,6 +10,12 @@ iterative reader/copy-editor review loop.
 > **Equalify Iris is Open Source.** Sustainability is key to sustaining its growth. With that
 > in mind, we hope you use and alter the codebase.
 >
+> **Every user gives back.** GitHub is the only SSO layer, and a GitHub token is required on every
+> API call — because that token is what files your session's feedback back to the shared agent
+> library, as an issue under your own GitHub identity. Using Iris and improving it for the next
+> person are the same act, and there is no way to consume the service without contributing. See
+> [GitHub is the only SSO layer](#github-is-the-only-sso-layer-and-tokens-are-required).
+>
 > Iris is built by **Equalify Inc** ([https://equalify.app/](https://equalify.app/)). Continued
 > support and development are paid for when you hire us to host or support any instance. Please
 > consider hiring us.
@@ -119,77 +125,85 @@ from the environment at startup; changes require a restart.
   is rejected — the upload is already received and on disk, so a 429 would discard work the user
   has already paid for. The cap is global rather than per user because the resources it protects
   (memory, jsdom, the provider's rate limit) are global.
-- **GitHub** (§9.1): OAuth is the auth mechanism — a user *is* their GitHub account. By default the
+- **GitHub** (§9.1): OAuth is the auth mechanism — a user *is* their GitHub account, and a token
+  is **required** on every call. By default the
   service uses a **bundled OAuth App via the device flow** — no per-operator app setup, no
   secret (the same approach the `gh` CLI uses). Set `github.client_id` only to point at your
   own OAuth App; `client_secret` is needed only if you enable the web redirect flow.
   `github.oauth_scope` is the scope requested from the user, **`public_repo`** by default —
-  see [Read this before you deploy](#read-this-before-you-deploy-token-storage) for why that
-  default matters and when to change it.
+  see [GitHub is the only SSO layer](#github-is-the-only-sso-layer-and-tokens-are-required) for
+  why that is a floor rather than a default, and when to raise it.
 
-### Read this before you deploy: token storage
+### GitHub is the only SSO layer, and tokens are required
 
-**The user's GitHub token is stored in plaintext.** `users.github_token` in
-`data/iris.sqlite` holds the OAuth access token as-is — no encryption, no hashing (it has to
-be replayable, since it *is* the credential used to call GitHub). So **read access to that
-file is API access to GitHub as every user who has ever logged in.** Anything with the
-database has it: a backup, a synced folder, a stray `scp`, another process on a shared box, a
-laptop that walks off.
+There is no anonymous mode, no API key, and no second identity provider. Every request carries a
+user's GitHub token, and that token is what files the session's feedback back to the shared agent
+library — as an issue, under that user's own GitHub identity.
 
-What that is worth to an attacker depends entirely on the scope those tokens carry, which is
-why `github.oauth_scope` defaults to the narrowest thing that works:
+**That is the sustainability model, not an implementation detail** (PRD §12). The agents in
+`agents/` get better because sessions run against real documents and real corrections; a user who
+could consume the service without contributing would be taking from a library nobody was refilling.
+Requiring GitHub auth is how using Iris and improving it become the same act, and how each
+contribution is credited to the person who produced it. If you would rather your users not
+contribute, this is not the service to deploy.
 
-| `oauth_scope` | What a stolen database allows | When to use it |
-| --- | --- | --- |
-| `none` | Read the user's public profile | **Requires `issue_token`** — issues are filed by the service account and the user's token only identifies them |
-| `public_repo` *(default)* | Write to the user's **public** repos | The default: upstream is public, users file their own issues |
-| `repo` | **Push to every private repo the user can reach** | Only if your upstream is private |
+Two consequences an operator should know before deploying:
 
-"Request nothing" is spelled `none`, not `""`, and that is deliberate. An unset `${VAR}`
-expands to an empty string before the config is read, so `oauth_scope: ${IRIS_SCOPE}` with the
-variable missing would otherwise silently mean "ask for no scope" — and the resulting 403 when
-a user tries to file an issue is swallowed as one log line. Every empty form (absent key,
-valueless key, unset variable, quoted `""`) falls back to `public_repo`; only the literal word
-turns the scope off.
+**1. The scope is a floor.** The token does exactly two things: `GET /user` to identify the caller
+(no scope needed) and file issues on `upstream_repo` (`public_repo` for a public upstream, which is
+the default). Filing is not optional, so:
 
-The service needs exactly two things from a user's token: `GET /user` to identify them (no
-scope required) and filing an agent-suggestion issue on the upstream (`public_repo` for a
-public upstream). Nothing opens pull requests and nothing pushes — the fork-and-PR flow in
-PRD §7.13 was never built. `repo` was requested until this default changed, which granted
-read *and write* to all of a user's private repositories for a feature that does not exist.
+| `oauth_scope` | When to use it |
+| --- | --- |
+| `public_repo` *(default)* | The floor. A public `upstream_repo` — the normal case. |
+| `repo` | **Only** if `upstream_repo` is private. Also grants read *and write* to every private repo the user can reach, which nothing here uses. |
+| `none` | **Not supported — the service refuses to start.** |
 
-**If you set `github.issue_token`**, every issue is filed by that service account and the
-user's token does nothing but prove who they are — so set `oauth_scope: none` and the stored
-tokens stop being worth stealing. That is the recommended production shape.
+`oauth_scope: none` is recognized only in order to be rejected, with a message naming the fix. A
+token that identifies a user but cannot file on their behalf would leave the deployment looking
+healthy while the thing it exists to feed was dead: GitHub answers 403 and the failure is swallowed
+as one `agent_issue_failed` line per run. Setting `github.issue_token` does **not** make it valid —
+a service PAT changes who gets the credit, not whether a user can contribute.
 
-The two keys go together, and the service **refuses to start** if you set `none` without an
-`issue_token`: a scopeless user token cannot file issues, and GitHub's 403 would otherwise turn
-up only as an `agent_issue_failed` line in a run log. One consequence worth stating plainly:
-there is no supported way to run with users identified but *nothing ever filed on their behalf*.
-That shape would be `none` with no `issue_token`, which is the combination startup rejects — if
-you want no contributions at all, the way to say so is to leave `oauth_scope` at its default and
-ignore the issues, since the filing is a soft side effect either way. The two combinations startup *cannot*
-check for are a private `upstream_repo` left on the `public_repo` default, and tokens issued
-before you narrowed the scope — for those, a **403 or 404** during issue filing is logged with a
-`hint` naming the configured scope. Both statuses, because GitHub does not reveal that a private
-repository exists: a token that cannot see your private `upstream_repo` gets `404 Not Found`, not
-a permissions error, so that is the status the private-upstream case actually produces. (A
-misspelled `upstream_repo` looks identical, and the hint says so rather than blaming the scope.)
-When `issue_token` is set, the hint names the **service PAT** instead: `oauth_scope` governs only
-tokens issued to users, and widening it would not fix a failure of the service account.
+Every *empty* form is a different case and falls back to `public_repo`: an absent key, a valueless
+key, a quoted `""`, and an unset `${VAR}`. That last one is why "no scope" needs a word at all —
+`${IRIS_SCOPE}` with the variable missing expands to `""` before the config is read, and a typo in a
+variable name must not be able to strip the scope out of a deployment.
 
-Narrowing the request does **not** shrink a grant a user already made. Tokens issued under
-`repo` keep it until revoked at
-[github.com/settings/applications](https://github.com/settings/applications); only new
-authorizations get the narrower scope. If you have been running with `repo`, treat the
-existing rows as `repo`-scoped and consider clearing them so users re-authorize.
+The one misconfiguration startup *cannot* see is a private `upstream_repo` left on the
+`public_repo` default (or a token issued before you changed the scope). For those, a **403 or 404**
+during filing is logged with a `hint` naming the configured scope. Both statuses, because GitHub
+does not reveal that a private repository exists: a token that cannot see your private
+`upstream_repo` gets `404 Not Found`, not a permissions error — so 404 is the status the
+private-upstream case actually produces. (A misspelled `upstream_repo` looks identical, and the hint
+says so rather than blaming the scope.) When `issue_token` is set, the hint names the **service
+PAT** instead, since `oauth_scope` governs only tokens issued to users.
 
-This is an accepted, documented limitation of v1, not an oversight — encrypting at rest on a
-box that must also hold the key is close to no protection, and the real fix is to not hold a
-long-lived credential at all (tracked in
-[#29](https://github.com/EqualifyEverything/equalify-iris/issues/29), which moves the GitHub
-surface out of this service). Until then: keep `data_dir` off shared storage, keep backups
-encrypted, and prefer the `issue_token` + `oauth_scope: none` shape above.
+Changing this key does not shrink a grant a user already made — an existing token keeps its old
+scope until revoked at
+[github.com/settings/applications](https://github.com/settings/applications). Only new
+authorizations are affected.
+
+**2. `github.issue_token` is an override, and not a recommended one.** Set it to a service-account
+PAT and every issue is filed under that bot account instead of under the user who produced it. It is
+off by default because it erases the attribution that is the point of the design. Use it only where
+a deployment genuinely cannot file as its users — an org policy that forbids it, say.
+
+### What happens to your token
+
+**It is never written to disk.** The token arrives in the `Authorization` header, is used in memory
+for the request and for the pipeline run it authorizes, and is gone when the run ends. There is no
+`github_token` column in `data/iris.sqlite` and no token file — a stolen copy of the database is a
+list of GitHub user IDs and logins, not GitHub access.
+
+Two smaller things follow from that, both worth knowing:
+
+- Identity lookups (`GET /user`) are cached in memory for **5 minutes**, keyed by the token, so a
+  revoked token keeps working for up to that long. The cache is bounded (10,000 entries, oldest
+  evicted) and entries are *not* renewed on use — deliberately, so that a busy token cannot outlive
+  its revocation indefinitely. It is empty on restart.
+- Because nothing is stored, there is nothing to rotate, re-encrypt or purge, and no upgrade step
+  when a user revokes access. Revocation at github.com is the whole mechanism.
 
 ## API
 
@@ -277,11 +291,14 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
   when the review loop hits its iteration cap with issues outstanding (§7.11).
 - **Contributions are issues, not PRs (§7.13/§9.2).** Instead of fork+PR-on-close, when the
   extractor flags content a specialist would handle better, Iris drafts that agent and files a
-  labeled `iris-agent-suggestion` GitHub issue with the agent code + context. Simpler to triage,
-  and it needs no write access to a fork. Consequently the PRD's `pending_prs` and `prs_opened`
-  response fields and the `skip_prs` parameter are **not** part of the API.
-  By default the issue is filed with the logged-in user's token; set `IRIS_GITHUB_TOKEN` to file
-  everything under a service account instead.
+  labeled `iris-agent-suggestion` GitHub issue with the agent code + context; feedback that
+  generalizes files an `iris-agent-update` issue the same way. Simpler to triage, and it needs no
+  write access to a fork — so nothing forks and nothing pushes. Consequently the PRD's
+  `pending_prs` and `prs_opened` response fields, the `skip_prs` parameter and the `fork_repo`
+  field on `/v1/me` are **not** part of the API.
+  Issues are filed with the logged-in user's token, which is
+  [required, and the point](#github-is-the-only-sso-layer-and-tokens-are-required);
+  `github.issue_token` overrides that with a service account, at the cost of the attribution.
 - **Review issues are attributed by page, not by `@source` region (§7.8/§7.9).** The PRD's issue
   format references `@source` region ids from the per-region fan-out, which extraction no longer
   produces and which are stripped from the deliverable anyway (§7.4 v1.1). Issues instead carry

@@ -46,16 +46,14 @@ async function draftAgent(ctx: PipelineContext, s: Suggestion): Promise<string> 
 // For each genuinely-new suggested content type, draft an agent and file a
 // labeled GitHub issue with the code + context.
 //
-// This is a no-op only when there is NO token at all. It used to say "no-op
-// without a service token, so we never publish under end users' identities",
-// which the code has not done for some time: `issue_token` is an override, and
-// without it the issue is filed as the logged-in user. That is now the documented
-// default shape for a public upstream (README, "Read this before you deploy"),
-// with `issue_token` + `oauth_scope: none` as the recommended production shape.
+// Filed under the LOGGED-IN USER's identity, which is the whole reason GitHub is
+// the auth layer: using Iris and giving back to the shared agent library are the
+// same act, credited to the person who did it (PRD §12). `github.issue_token` is an
+// optional override for deployments that must file under one bot account instead,
+// and it trades that attribution away.
 export async function runContribution(ctx: PipelineContext, suggestions: Suggestion[]): Promise<void> {
-  // Attribute issues to the logged-in user by default; a configured service
-  // token overrides that (e.g. to file everything under a bot account). Which one
-  // it is decides what a 403 means, so it is recorded rather than re-derived.
+  // Which credential is used decides what a 403 means, so it is recorded rather
+  // than re-derived at the failure.
   const usingServiceToken = Boolean(ctx.cfg.github.issue_token);
   const token = ctx.cfg.github.issue_token || ctx.githubToken;
   if (!token || suggestions.length === 0) return;

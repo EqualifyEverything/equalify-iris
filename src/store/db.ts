@@ -13,11 +13,15 @@ export type SessionStatus = "queued" | "running" | "ready_for_review" | "closed"
 // each phase; this only stops the enum from claiming they exist today.
 export type Phase = "extraction" | "assembly" | "review" | "done";
 
+// No `github_token` field, deliberately. The user's GitHub token is a live
+// credential — it files issues on their behalf during a run (§7.13) — but it never
+// needs to OUTLIVE the request that carried it: it arrives in the `Authorization`
+// header, is passed in memory to the queued run, and is gone when the run ends.
+// Storing it made a copy of `data/iris.sqlite` equivalent to GitHub API access as
+// every user who had ever logged in, in exchange for nothing the service used.
 export interface UserRecord {
   github_user_id: number;
   github_login: string;
-  github_token: string;
-  fork_repo: string | null;
   max_review_iterations: number;
   created_at: string;
 }
@@ -152,11 +156,13 @@ export class Store {
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA busy_timeout = 5000;
+      -- No github_token column, and no fork_repo column. The token is never
+      -- persisted (see UserRecord above); fork_repo belonged to the fork-and-PR
+      -- flow of PRD §7.13, which was never built and is not going to be —
+      -- contributions are filed as issues under the user's own identity (§12).
       CREATE TABLE IF NOT EXISTS users (
         github_user_id INTEGER PRIMARY KEY,
         github_login TEXT NOT NULL,
-        github_token TEXT NOT NULL,
-        fork_repo TEXT,
         max_review_iterations INTEGER NOT NULL DEFAULT 3,
         created_at TEXT NOT NULL
       );
@@ -191,25 +197,28 @@ export class Store {
   // --- users ---
 
   // On first auth a user account is provisioned with the deployment's default
-  // max_review_iterations (PRD §9.1). Existing users keep their stored default;
-  // only login + token are refreshed.
+  // max_review_iterations (PRD §9.1). Existing users keep their stored default; the
+  // login is the only field an existing row refreshes, since it is the only one that
+  // can change upstream and the token is not stored at all (see UserRecord).
   upsertUser(
-    u: { github_user_id: number; github_login: string; github_token: string },
+    u: { github_user_id: number; github_login: string },
     defaultMaxIter = 3,
   ): UserRecord {
     const existing = this.getUser(u.github_user_id);
     if (existing) {
+      // Only the login can change (GitHub renames); the numeric id is stable and
+      // is what everything else keys on.
       this.db
-        .prepare(`UPDATE users SET github_login = ?, github_token = ? WHERE github_user_id = ?`)
-        .run(u.github_login, u.github_token, u.github_user_id);
+        .prepare(`UPDATE users SET github_login = ? WHERE github_user_id = ?`)
+        .run(u.github_login, u.github_user_id);
       return this.getUser(u.github_user_id)!;
     }
     this.db
       .prepare(
-        `INSERT INTO users (github_user_id, github_login, github_token, fork_repo, max_review_iterations, created_at)
-         VALUES (?, ?, ?, NULL, ?, ?)`,
+        `INSERT INTO users (github_user_id, github_login, max_review_iterations, created_at)
+         VALUES (?, ?, ?, ?)`,
       )
-      .run(u.github_user_id, u.github_login, u.github_token, defaultMaxIter, new Date().toISOString());
+      .run(u.github_user_id, u.github_login, defaultMaxIter, new Date().toISOString());
     return this.getUser(u.github_user_id)!;
   }
 
