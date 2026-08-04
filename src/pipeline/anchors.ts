@@ -1,35 +1,37 @@
 import { JSDOM, VirtualConsole } from "jsdom";
 
-// Make one page's ids unique within the assembled document (PRD §7.7).
+// Make the ids of independently extracted pages unique across the assembled
+// document (PRD §7.7 v1.2), while leaving every reference that already worked
+// alone.
 //
-// Extraction is per page and independent: `extractPage` runs concurrently, each
-// call sees one image, and no page knows what any other page emitted. Assembly is
-// then a plain concatenation. So any id a page invents is a claim about the whole
-// document that the page had no way to check — and the page prompt asks for ids by
-// name, for footnotes: `id="fn-N"` with `href="#fn-N"`, numbering preserved from
-// the source. A three-page scan whose pages each carry a footnote "1" is the normal
-// case, not an edge case, and it produces three `id="fn-1"` in one file.
+// Why this is needed at all: extraction is per page and concurrent. `extractPage`
+// sees one image and nothing of what any other page emitted, and assembly is a
+// plain concatenation — so an id is a claim about the whole document that no page
+// is in a position to make. The page prompt asks for ids by name for footnotes
+// (`id="fn-N"`, `href="#fn-N"`, "preserve the original numbering"), so a scan whose
+// pages each carry a footnote 1 emits several `id="fn-1"` in one file. Then every
+// `href="#fn-1"` resolves to the first: a screen-reader user following the
+// reference on page 3 lands on page 1's note and the back-reference returns them to
+// the wrong paragraph. Both notes exist, both are announced, the link works. The
+// lint gate does not see it either — WCAG 2.2 dropped 4.1.1, so axe tags
+// `duplicate-id` obsolete and lint.ts's tag filter excludes it (`duplicate-id-aria`
+// is current but fires only for ids referenced from ARIA attributes, not an `href`),
+// which is why lint.ts re-enables it by name.
 //
-// The failure is silent and specific: every `href="#fn-1"` resolves to the FIRST
-// one, so a screen-reader user following the reference on page 3 lands on page 1's
-// note and the back-reference returns them to the wrong paragraph. The reference
-// still looks like a working link. Both notes exist, both are announced, and
-// nothing in the output says they are crossed.
+// **Only ids that more than one page claims are renamed.** A first version prefixed
+// every id with its page number, which fixed collisions and broke everything that
+// legitimately pointed across a page break: a `<label for="q1">` whose `<input
+// id="q1">` fell on the next page, or endnotes with continuous numbering where the
+// markers are in the body and the notes are collected at the back. Those references
+// resolved correctly before assembly touched them, and renaming one end of the pair
+// made them dangle — which for `for`/`headers`/`aria-*` is a real 1.3.1/4.1.2
+// failure (that is how a field gets its accessible name and how a data cell is
+// attributed to its headers) on content that was correct when the page produced it.
+// Trading a wrong-target reference for a no-target one is not a fix.
 //
-// The axe gate does not see it. In the pinned axe-core, `duplicate-id` is tagged
-// `wcag2a-obsolete`/`deprecated` (WCAG 2.2 dropped 4.1.1), so the tag filter in
-// lint.ts excludes it; `duplicate-id-aria` is `wcag2a` but fires only for ids
-// referenced from ARIA attributes, not from an `href`. `runAxe` on a document with
-// the duplicated pairs returns `{ ok: true, violations: [] }`. lint.ts re-enables
-// the rule explicitly as a backstop for what the review loop's editor may
-// reintroduce; this function is what stops it arising in the first place.
-//
-// Rewriting the ids means rewriting everything that points AT them, in the same
-// pass and from the same id set. Half of this — unique ids, stale references —
-// would be worse than the collision: `<label for>` and `<th id>`/`<td headers>`
-// are how a field gets its accessible name and how a data cell is attributed to
-// its headers, so a dangling reference is a WCAG 1.3.1/4.1.2 failure on content
-// that was correct before assembly touched it.
+// Renaming only the collisions makes the common document a no-op, and it is also
+// the honest scope: a unique id needs nothing done to it, and a colliding one has no
+// correct cross-page interpretation to preserve.
 const IDREF_ATTRS = [
   "for", // <label for> — the field's accessible name
   "form",
@@ -45,65 +47,205 @@ const IDREF_ATTRS = [
   "aria-activedescendant",
 ];
 
-// A reference is rewritten ONLY when it resolves inside this same fragment, which
-// is what makes a cross-page reference survive as a visibly broken link instead of
-// a silently wrong one. A marker on page 3 whose body is on page 4 keeps
-// `href="#fn-1"`, now pointing at nothing, because pointing at page 1's unrelated
-// note is the outcome this function exists to prevent — and the page prompt already
-// tells the agent to report that split in its "log" field.
-export function namespaceAnchors(innerHtml: string, prefix: string): string {
-  // A page with no ids cannot collide, and most pages have none — so it is returned
-  // untouched rather than parsed and reserialized, which would rewrite the model's
-  // markup for no benefit (jsdom canonicalizes: `required` becomes `required=""`, a
-  // `<table>` gains a `<tbody>`). This regex is only the fast path; the guarantee is
-  // the `owned.size === 0` return below, which holds even for a page whose only
-  // "id=" is inside a text node.
-  if (!/\sid\s*=/i.test(innerHtml)) return innerHtml;
+export interface AnchorReport {
+  // Bare ids that more than one page claimed, and were therefore namespaced.
+  collisions: string[];
+  // References that name a colliding id from a page that does not own it. There is
+  // no correct target: the id existed on two pages, so the pre-namespacing
+  // resolution (the first one in document order) was arbitrary. Left as written,
+  // which makes them resolve to nothing — a visibly broken link rather than a
+  // silently wrong one. Reported because a deliverable with a dead reference must
+  // be debuggable; today's alternative was silence.
+  unresolved: { page: number; ref: string }[];
+  // Pages whose rewrite was abandoned to avoid losing markup (see `wouldLoseTags`).
+  // The collision survives on these pages and lint's `duplicate-id` will name it.
+  skipped_pages: number[];
+}
 
-  let dom: JSDOM;
-  try {
-    dom = new JSDOM(`<body>${innerHtml}</body>`, { virtualConsole: new VirtualConsole() });
-  } catch {
-    return innerHtml; // unparseable: leave the page exactly as the agent wrote it
+const EMPTY_REPORT: AnchorReport = { collisions: [], unresolved: [], skipped_pages: [] };
+
+// Names of the start tags in a fragment, counted from the raw source.
+//
+// This exists to catch losses that happen during PARSING, so it cannot be computed
+// from the parsed document. `<td>` outside a `<table>` — a plausible thing for a
+// page agent to emit for a table continuing across a page break — is foster-parented
+// out of existence: jsdom parses `<p id="a">A</p><tr><td>DATA</td></tr>` to
+// `<p id="a">A</p>DATA`, keeping the text and dropping the row and cell, and does not
+// throw. Reserializing that would silently discard structure the review loop and the
+// user should have seen.
+//
+// A regex over the source can over-count (a literal `<b` inside prose or an
+// attribute value), which fails in the safe direction: the page keeps its collision
+// and lint reports it, rather than the document quietly losing a table row.
+function tagCounts(html: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const m of html.matchAll(/<([a-zA-Z][^\s/>]*)/g)) {
+    const name = m[1].toLowerCase();
+    counts.set(name, (counts.get(name) ?? 0) + 1);
   }
-  try {
-    const { document } = dom.window;
-    const owned = new Set<string>();
-    for (const el of document.querySelectorAll("[id]")) {
-      const id = el.getAttribute("id");
-      if (id) owned.add(id);
-    }
-    if (owned.size === 0) return innerHtml;
+  return counts;
+}
 
-    const rename = (id: string) => `${prefix}${id}`;
-    for (const el of document.querySelectorAll("[id]")) {
-      const id = el.getAttribute("id");
-      if (id) el.setAttribute("id", rename(id));
-    }
-    // Same-document fragment links: `#fn-1`, and `href="#"` / `#top` which name no
-    // id and must not be prefixed into one.
-    for (const el of document.querySelectorAll("[href^='#']")) {
-      const target = el.getAttribute("href")!.slice(1);
-      if (target && owned.has(target)) el.setAttribute("href", `#${rename(target)}`);
-    }
-    for (const attr of IDREF_ATTRS) {
-      for (const el of document.querySelectorAll(`[${attr}]`)) {
-        const value = el.getAttribute(attr)!;
-        // Treated as a token list throughout: `headers` and the aria-* plural
-        // attributes genuinely are, and a single-valued attribute whose value
-        // contains a space was never a valid reference anyway.
-        const rewritten = value
-          .split(/\s+/)
-          .filter((t) => t.length > 0)
-          .map((t) => (owned.has(t) ? rename(t) : t))
-          .join(" ");
-        if (rewritten !== value) el.setAttribute(attr, rewritten);
-      }
-    }
-    return document.body.innerHTML;
+function wouldLoseTags(source: string, document: Document): boolean {
+  const parsed = new Map<string, number>();
+  for (const el of document.body.querySelectorAll("*")) {
+    const name = el.tagName.toLowerCase();
+    parsed.set(name, (parsed.get(name) ?? 0) + 1);
+  }
+  // Only a DECREASE matters, and only for tags the source actually wrote. Two kinds
+  // of increase are normal and neither loses anything: a tag the source omitted
+  // entirely (a well-formed `<table><tr>` gains a `<tbody>`, which is absent from
+  // `tagCounts` and so never compared), and a tag the parser DUPLICATES to repair
+  // misnesting — the adoption agency algorithm turns `<b>1<p>2</b>3</p>` into
+  // `<b>1</b><p><b>2</b>3</p>`, two `<b>` from one. An equality check would abandon
+  // the rewrite on both, leaving exactly the collisions this function exists to fix.
+  for (const [name, n] of tagCounts(source)) {
+    if ((parsed.get(name) ?? 0) < n) return true;
+  }
+  return false;
+}
+
+function ownedIds(document: Document): Set<string> {
+  const ids = new Set<string>();
+  for (const el of document.querySelectorAll("[id]")) {
+    const id = el.getAttribute("id");
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+function parseFragment(innerHtml: string): JSDOM | null {
+  try {
+    return new JSDOM(`<body>${innerHtml}</body>`, { virtualConsole: new VirtualConsole() });
   } catch {
-    return innerHtml;
+    return null;
+  }
+}
+
+// Every reference a page makes, so the report can name the ones left dangling.
+function referencesIn(document: Document): string[] {
+  const refs: string[] = [];
+  for (const el of document.querySelectorAll("[href^='#']")) {
+    const target = el.getAttribute("href")!.slice(1);
+    if (target) refs.push(target);
+  }
+  for (const attr of IDREF_ATTRS) {
+    for (const el of document.querySelectorAll(`[${attr}]`)) {
+      for (const token of el.getAttribute(attr)!.split(/\s+/)) if (token) refs.push(token);
+    }
+  }
+  return refs;
+}
+
+// Namespace colliding ids across a document's pages. Input is one entry per page in
+// document order; output is the rewritten inner HTML in the same order, plus what
+// was done. Pages are processed as a set because a collision is not visible from
+// inside any single one of them.
+export function namespaceAnchors(pages: { order: number; innerHtml: string }[]): {
+  pages: string[];
+  report: AnchorReport;
+} {
+  // Pass 1: who owns what. A page with no ids cannot contribute a collision, and
+  // needs no parse for the rewrite either, so most documents stop here.
+  const doms: (JSDOM | null)[] = [];
+  const owned: Set<string>[] = [];
+  const claims = new Map<string, number>(); // bare id -> how many pages claim it
+  for (const page of pages) {
+    if (!/\sid\s*=/i.test(page.innerHtml)) {
+      doms.push(null);
+      owned.push(new Set());
+      continue;
+    }
+    const dom = parseFragment(page.innerHtml);
+    const ids = dom ? ownedIds(dom.window.document) : new Set<string>();
+    doms.push(dom);
+    owned.push(ids);
+    for (const id of ids) claims.set(id, (claims.get(id) ?? 0) + 1);
+  }
+
+  const collisions = [...claims].filter(([, n]) => n > 1).map(([id]) => id);
+  // Pages parsed only to collect their references (see pass 2). Declared out here so
+  // `finally` closes them along with pass 1's.
+  const reportOnly: (JSDOM | null)[] = [];
+  try {
+    if (collisions.length === 0) {
+      // The overwhelmingly common case: nothing to rename, so nothing is parsed and
+      // reserialized and every page is delivered exactly as its agent wrote it. (A
+      // page that used the same id twice by itself is a collision no prefix can fix
+      // — both copies would get the same one — and is left to lint's
+      // `duplicate-id`.)
+      return { pages: pages.map((p) => p.innerHtml), report: EMPTY_REPORT };
+    }
+
+    const colliding = new Set(collisions);
+    const out: string[] = [];
+    const report: AnchorReport = { collisions: collisions.sort(), unresolved: [], skipped_pages: [] };
+
+    for (const [i, page] of pages.entries()) {
+      const dom = doms[i];
+      const mine = owned[i];
+      const prefix = `p${page.order}-`;
+      const rename = (id: string) => `${prefix}${id}`;
+      // A colliding id this page owns, so this page has work to do.
+      const toRename = [...mine].filter((id) => colliding.has(id));
+
+      // Anything this page points at that names a colliding id it does NOT own is
+      // ambiguous, whether or not the page is being rewritten. A page with no ids of
+      // its own was not parsed in pass 1 and still has to be checked — the page that
+      // holds the markers while the notes live elsewhere is exactly that shape, and
+      // it is the one whose references go dead. Parsed here rather than in pass 1 so
+      // the cost is paid only by documents that actually have a collision.
+      let refDom = dom;
+      if (!refDom) {
+        refDom = parseFragment(page.innerHtml);
+        reportOnly.push(refDom);
+      }
+      for (const ref of refDom ? referencesIn(refDom.window.document) : []) {
+        if (colliding.has(ref) && !mine.has(ref)) report.unresolved.push({ page: page.order, ref });
+      }
+
+      if (!dom || toRename.length === 0) {
+        out.push(page.innerHtml);
+        continue;
+      }
+
+      const { document } = dom.window;
+      if (wouldLoseTags(page.innerHtml, document)) {
+        report.skipped_pages.push(page.order);
+        out.push(page.innerHtml);
+        continue;
+      }
+
+      for (const el of document.querySelectorAll("[id]")) {
+        const id = el.getAttribute("id");
+        if (id && colliding.has(id)) el.setAttribute("id", rename(id));
+      }
+      // Same-page references to the ids just renamed. `href="#"` and `#top` name no
+      // colliding id and are left alone, as is any reference to an id this page does
+      // not own — including one that resolves on another page, which is the whole
+      // point of renaming collisions only.
+      for (const el of document.querySelectorAll("[href^='#']")) {
+        const target = el.getAttribute("href")!.slice(1);
+        if (target && mine.has(target) && colliding.has(target)) el.setAttribute("href", `#${rename(target)}`);
+      }
+      for (const attr of IDREF_ATTRS) {
+        for (const el of document.querySelectorAll(`[${attr}]`)) {
+          const value = el.getAttribute(attr)!;
+          // Treated as a token list throughout: `headers` and the aria-* plural
+          // attributes genuinely are, and a single-valued attribute whose value
+          // contains a space was never a valid reference anyway.
+          const rewritten = value
+            .split(/\s+/)
+            .filter((t) => t.length > 0)
+            .map((t) => (mine.has(t) && colliding.has(t) ? rename(t) : t))
+            .join(" ");
+          if (rewritten !== value) el.setAttribute(attr, rewritten);
+        }
+      }
+      out.push(document.body.innerHTML);
+    }
+    return { pages: out, report };
   } finally {
-    dom.window.close();
+    for (const dom of [...doms, ...reportOnly]) dom?.window.close();
   }
 }

@@ -367,14 +367,22 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   later page silently goes to the wrong note while the link still looks like it works. The current
   `duplicate-id-aria` rule does not cover it — that one fires only for ids referenced from ARIA
   attributes, not from an `href`.
-- **Ids are namespaced per page during assembly (§7.7 v1.2).** A page is extracted alone and
+- **Colliding ids are namespaced during assembly (§7.7 v1.2).** A page is extracted alone and
   concurrently, so it cannot know that another page also numbered its first footnote 1 — and the
-  page prompt asks it to preserve the source numbering. `assembleBody` prefixes each page's ids
-  with its page number (`fn-1` → `p3-fn-1`) and rewrites everything that points at them in the
-  same pass: `href="#…"`, plus `for`, `headers`, `list`, `form` and the `aria-*` references, since
-  unique ids with dangling references would be a worse defect than the collision. A reference that
-  does *not* resolve within its own page is deliberately left alone, so a marker whose body is on
-  the next page stays visibly broken instead of silently pointing at the wrong note.
+  page prompt asks it to preserve the source numbering. `assembleBody` prefixes the ids that more
+  than one page claimed with their page number (`fn-1` → `p3-fn-1`) and rewrites everything that
+  points at them in the same pass: `href="#…"`, plus `for`, `headers`, `list`, `form` and the
+  `aria-*` references, since unique ids with dangling references would be a worse defect than the
+  collision.
+
+  The scope is deliberately one id at a time, not one page at a time. Prefixing every id on a page
+  also breaks the references that legitimately span a page break — a `<label for>` whose input is
+  on the next page, or endnotes with continuous numbering — which resolved correctly before
+  assembly touched them, so that trade is a no-target reference in place of a wrong-target one. A
+  reference to a colliding id the page does *not* own has no correct target and is left as written,
+  which makes it visibly dead rather than silently wrong; those are named in the run log as
+  `assembly_anchors`. A page whose markup would not survive a reserialization (a `<tr>` outside a
+  `<table>` gets foster-parented into nothing) keeps its collision instead, for lint to report.
 - **Copy Editor image payload (§7.9).** When every issue in a round is attributed to a page, the
   editor gets only those pages' images (logged per round as `editor_images`). Attaching every
   page's image on every round is the dominant per-round cost of the review loop — on a 25-page

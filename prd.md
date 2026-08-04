@@ -315,17 +315,27 @@ This is also the answer to the context concern that motivates specialization: th
 - Validates the document parses and basic accessibility lint passes (axe-core in headless mode).
 - Lint failures are surfaced to the Reader as input.
 
-#### Amended (v1.2): ids are namespaced per page as the fragments are joined
+#### Amended (v1.2): colliding ids are namespaced as the fragments are joined
 
 This section said "combine all fragments in image order" and left it there, which is right about the text and wrong about the ids. **An id is a claim about the whole document, and no page is in a position to make it.** Extraction is per page and concurrent (§7.4 v1.2): a page sees one image and nothing of what any other page emitted. §7.4's page prompt then asks for ids by name — footnote markers as `<sup><a href="#fn-N" id="fnref-N">` with the body at the foot of the page and *"preserve the original numbering"* — so a three-page scan whose pages each carry a footnote 1 emits three `id="fn-1"`, which is the ordinary case rather than an edge one.
 
 Concatenation makes that a navigation defect: every `href="#fn-1"` resolves to the first, so a screen-reader user following the reference on page 3 lands on page 1's note and the back-reference returns them to the wrong paragraph. Nothing about it looks wrong — both notes exist, both are announced, the link works — and the lint gate passes it, because WCAG 2.2 dropped 4.1.1 and axe therefore tags `duplicate-id` obsolete and excludes it from the tag filter this section's lint step uses (`duplicate-id-aria`, which is current, fires only for ids referenced from ARIA attributes, not from an `href`).
 
-So assembly prefixes each page's ids with its page number (`fn-1` → `p3-fn-1`), and this is the only place that can: a page cannot know what another page did, and this is the first moment the whole document exists. Three properties make it safe rather than merely unique:
+So assembly prefixes the colliding ids with their page number (`fn-1` → `p3-fn-1`), and assembly is the only place that can: a page cannot know what another page did, and this is the first moment the whole document exists.
 
-- **Everything that points at an id is rewritten with it, in the same pass** — `href="#…"`, and also `for`, `headers`, `list`, `form` and the `aria-*` references. Unique ids with stale references would be worse than the collision: `<label for>` is how a field gets its accessible name and `<td headers>` is how a data cell is attributed to its headers, so a dangling one is a 1.3.1/4.1.2 failure introduced by assembly on content that was correct when the page produced it.
-- **A reference is rewritten only if it resolves within the same page.** A marker whose body is on the next page keeps `#fn-1` and resolves to nothing — a visibly broken link, which is the honest outcome. Pointing it at page 1's unrelated note is the silent version of exactly this bug. The page prompt is what handles the split case: it says to leave such a marker unlinked and report it in the "log" field.
+**The scope is one id at a time, not one page at a time**, and that distinction is the whole correctness argument. Prefixing *every* id on a page — the obvious reading of "namespace per page" — fixes the collisions and breaks every reference that legitimately spans a page break:
+
+- a `<label for="q1">` on one page whose `<input id="q1">` falls on the next, which axe reports as a real `label` violation;
+- endnotes with continuous numbering, where the markers are in the body and the notes are collected at the back — the normal shape for a scanned report, and one where nothing collides at all. Both directions break, including the back-reference on the page that *does* own the note.
+
+Those references resolved correctly before assembly touched them, so renaming one end of the pair is the assembler introducing a 1.3.1/4.1.2 failure into content that was correct when the page produced it. **Trading a wrong-target reference for a no-target one is not a fix.** Renaming only what actually collides makes the ordinary document a no-op and is the honest scope: a unique id needs nothing done to it, and a colliding one has no correct cross-page interpretation to preserve.
+
+Four properties then make the rewrite safe rather than merely unique:
+
+- **Everything that points at a renamed id is rewritten with it, in the same pass** — `href="#…"`, and also `for`, `headers`, `list`, `form` and the `aria-*` references. Unique ids with stale references are the failure described above.
+- **A reference is rewritten only if it names a colliding id the page itself owns.** A reference to a *non*-colliding id is untouched, which is what keeps the split form and the endnotes working. A reference to a colliding id the page does *not* own is genuinely ambiguous — the id exists on two pages, so whichever it resolved to before was an accident of document order — and is also left as written, which makes it resolve to nothing: a visibly dead link beats a silently wrong one. Every such reference is named in the run log (`assembly_anchors`), because a dead reference in a delivered document has to be findable.
 - **The prefix is the page's `order`, not its position in the arrival array**, so the ids in a delivered document are stable across runs of the same input and match the page numbers the Reader attributes issues to.
+- **A page whose markup would not survive a reserialization is left exactly as its agent wrote it**, with its collision intact. A `<tr>` outside a `<table>` — a plausible emission for a table continuing across a page break — is foster-parented by the HTML parser: the row and cell vanish and only their text survives, with no error raised. Keeping a duplicate id that lint will report is strictly better than silently dropping a table row from the deliverable.
 
 The lint step additionally re-enables `duplicate-id` by name, as a backstop rather than the fix: the review loop re-lints after the Copy Editor has rewritten the whole body, and that is a model rewrite that can reintroduce a collision assembly had already resolved.
 

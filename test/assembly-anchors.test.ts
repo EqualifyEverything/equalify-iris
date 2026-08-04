@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assembleBody, wrapDocument } from "../src/pipeline/assembly.ts";
-import { namespaceAnchors } from "../src/pipeline/anchors.ts";
+import { assembleBody, assembleBodyWithReport, runAssembly, wrapDocument } from "../src/pipeline/assembly.ts";
 import { runAxe } from "../src/pipeline/lint.ts";
 import type { Fragment } from "../src/pipeline/fragment.ts";
+import type { PipelineContext } from "../src/pipeline/context.ts";
 
 // Assembly is where per-page output becomes one document, and ids are the thing that
 // cannot survive that join untouched. Each page is extracted alone and concurrently,
@@ -12,11 +12,19 @@ import type { Fragment } from "../src/pipeline/fragment.ts";
 // `href="#fn-N"`, "preserve the original numbering"). A multi-page scan where each
 // page carries a footnote 1 is the ordinary case.
 //
-// The resulting defect is invisible in every way that usually catches things: both
-// notes are present, both are announced, the link works, and the axe gate passes it
-// (WCAG 2.2 dropped 4.1.1, so `duplicate-id` is tagged obsolete and filtered out).
-// The only symptom is that a screen-reader user following the reference on page 3
-// arrives at page 1's note. So it is pinned here, at the join.
+// That defect is invisible in every way that usually catches things: both notes are
+// present, both are announced, the link works, and the axe gate passes it (WCAG 2.2
+// dropped 4.1.1, so `duplicate-id` is tagged obsolete and filtered out). The only
+// symptom is that a screen-reader user following the reference on page 3 arrives at
+// page 1's note.
+//
+// The fix has a narrow correct scope, and both edges are pinned here. Renaming every
+// id — the first attempt — fixed collisions and broke the references that legitimately
+// span a page break: a `<label for>` whose input is on the next page, or endnotes with
+// continuous numbering. Those resolved correctly BEFORE assembly touched them, and
+// trading a wrong-target reference for a no-target one is not a fix; for
+// `for`/`headers`/`aria-*` it is a real 1.3.1/4.1.2 failure introduced by the
+// assembler. So only ids that more than one page claims are renamed.
 
 function frag(order: number, innerHtml: string): Fragment {
   return {
@@ -73,51 +81,113 @@ test("the prefix follows the page's order, not its position in the array", () =>
   assert.deepEqual(idsOf(body), ["p1-fnref-1", "p1-fn-1", "p3-fnref-1", "p3-fn-1"]);
 });
 
-test("a reference to an id on another page is left broken rather than pointed at the wrong note", () => {
-  // A marker whose body is on the NEXT page: page 2 links `#fn-7` but emits no
-  // `fn-7`. Prefixing it would be a guess; leaving it as `#fn-7` makes it resolve
-  // to nothing, which is the honest outcome and the one a lint or a human notices.
-  // Rewriting it to page 1's unrelated note would be the silent version of this
-  // whole bug class.
-  //
-  // Page 2 carries an id of its own (`fn-9`) on purpose. Without one it never gets
-  // past `namespaceAnchors`' no-ids bail-out, and this test would pass for a
-  // version that prefixes every href blindly — it would be asserting the bail-out,
-  // not the resolves-locally rule.
+// The other edge, and the reason renaming is scoped to collisions. These two shapes
+// worked before any namespacing existed, so breaking them would mean the assembler
+// introducing a defect into content that was correct when the page produced it.
+test("a form split across a page break keeps its label associated", () => {
+  // `<label for="q1">` on page 1, `<input id="q1">` on page 2. No collision, so
+  // nothing is renamed and the reference still resolves. Prefixing the input's id
+  // (and not the label's `for`, which the label's page does not own) is what an
+  // unconditional rename does, and it costs the field its accessible name.
   const body = assembleBody([
-    frag(1, `<ol><li id="fn-7">An unrelated note that happens to be numbered 7.</li></ol>`),
-    frag(2, `<p>See<sup><a href="#fn-7">7</a></sup> and<sup><a href="#fn-9" id="fnref-9">9</a></sup></p>` +
-      `<ol start="9"><li id="fn-9">A note this page does own.</li></ol>`),
+    frag(1, `<h1>Form</h1><label for="q1">Your name</label>`),
+    frag(2, `<input id="q1" type="text"><p>rest</p>`),
   ]);
-  assert.match(body, /href="#fn-7"/, "a cross-page reference was rewritten");
-  assert.doesNotMatch(body, /href="#p[12]-fn-7"/, "a cross-page reference was pointed at another page's note");
-  assert.match(body, /id="p1-fn-7"/, "page 1's own id was not namespaced");
-  // The same page's local reference IS rewritten, which is what proves the page
-  // reached the rewriting path at all.
-  assert.match(body, /href="#p2-fn-9"/, "page 2's own reference was not rewritten");
+  assert.match(body, /<label for="q1">/, "the label's `for` was rewritten");
+  assert.match(body, /id="q1"/, "the input's id was rewritten away from its label");
+  assert.doesNotMatch(body, /id="p2-q1"/, "the input's id was namespaced despite no collision");
+});
+
+test("a form split across a page break is still axe-clean", async () => {
+  // The assertion above is about the markup; this is about the consequence. A
+  // dangling `for` is not a stylistic matter — axe reports it as a `label`
+  // violation, so the review loop would spend iterations on a defect assembly
+  // created.
+  const body = assembleBody([
+    frag(1, `<h1>Form</h1><label for="q1">Your name</label>`),
+    frag(2, `<input id="q1" type="text"><p>rest</p>`),
+  ]);
+  const lint = await runAxe(wrapDocument(body));
+  if (lint.error) return; // axe could not run here; runAxe degrades to a parse check
+  assert.equal(
+    lint.violations.map((v) => v.id).join(", "),
+    "",
+    "assembly introduced a lint violation into a document that was clean",
+  );
+});
+
+test("endnotes collected on a later page still round-trip", () => {
+  // Continuous numbering with the notes at the back — the normal shape for a scanned
+  // report, and one where no id collides. Both directions have to survive: the
+  // marker's link forward to the note, and the note's back-reference to the marker.
+  const body = assembleBody([
+    frag(1, `<p>Claim<sup><a href="#fn-1" id="fnref-1">1</a></sup></p>`),
+    frag(2, `<p>More<sup><a href="#fn-2" id="fnref-2">2</a></sup></p>`),
+    frag(3, `<ol><li id="fn-1">First <a href="#fnref-1">↩</a></li><li id="fn-2">Second <a href="#fnref-2">↩</a></li></ol>`),
+  ]);
+  const ids = new Set(idsOf(body));
+  for (const href of fragHrefs(body)) assert.ok(ids.has(href), `href="#${href}" no longer resolves`);
+  assert.equal(ids.size, 4, `expected 4 ids, got: ${[...ids].join(", ")}`);
+  assert.doesNotMatch(body, /id="p\d+-/, "ids were namespaced although nothing collided");
+});
+
+test("a cross-page reference survives in a document that DOES have a collision", () => {
+  // The case that matters, and the one the two tests above cannot reach. They contain
+  // no colliding id at all, so they are protected by the document-level "nothing
+  // collides, change nothing" short-circuit — they would still pass if every id on a
+  // rewritten page were renamed. A real document mixes the two: per-page footnotes
+  // numbered 1 (colliding, must be renamed) alongside a form or an endnote reference
+  // that spans a page break (not colliding, must be left alone). Renaming per PAGE
+  // rather than per ID breaks the second while fixing the first.
+  const body = assembleBody([
+    frag(1, `${footnotePage(1)}<label for="q1">Your name</label>`),
+    frag(2, `${footnotePage(1)}<input id="q1" type="text">`),
+  ]);
+  // The colliding footnote ids are namespaced and each marker points at its own note.
+  assert.match(body, /href="#p1-fn-1" id="p1-fnref-1"/);
+  assert.match(body, /href="#p2-fn-1" id="p2-fnref-1"/);
+  // The non-colliding pair, on the same rewritten pages, is untouched.
+  assert.match(body, /<label for="q1">/, "a non-colliding `for` was rewritten on a page that had a collision");
+  assert.match(body, /<input id="q1"/, "a non-colliding id was rewritten because its page had a collision");
+  assert.doesNotMatch(body, /"p\d+-q1"/, "the label/input pair was namespaced and no longer matches");
+  const ids = new Set(idsOf(body));
+  for (const href of fragHrefs(body)) assert.ok(ids.has(href), `href="#${href}" resolves to nothing`);
+});
+
+test("a document with nothing colliding is passed through untouched", () => {
+  // The overwhelmingly common case. Nothing is parsed and reserialized, so each page
+  // is delivered exactly as its agent wrote it. The fixture is markup jsdom rewrites
+  // on a round-trip — bare `required` becomes `required=""`, a `<table>` gains a
+  // `<tbody>` — because already-canonical HTML would come back identical either way
+  // and assert nothing.
+  const p1 = `<h1 id="title">Title</h1>\n<label>Name <input type="text" required></label>`;
+  const p2 = `<table><tr><td>1994</td></tr></table>`;
+  const { body, anchors } = assembleBodyWithReport([frag(1, p1), frag(2, p2)]);
+  assert.equal(body, `${p1}\n\n${p2}`);
+  assert.deepEqual(anchors.collisions, []);
 });
 
 test("references that are not ids at all are untouched", () => {
   const body = assembleBody([
-    frag(1, `<p id="top">Top</p><p><a href="#">Nowhere</a> <a href="#top">Up</a> <a href="https://example.org/#frag">Out</a></p>`),
+    frag(1, `<p id="top">Top</p><p><a href="#">Nowhere</a> <a href="#top">Up</a> <a href="https://example.org/#top">Out</a></p>`),
+    frag(2, `<p id="top">Also top</p>`), // forces `top` to collide, so page 1 is rewritten
   ]);
   assert.match(body, /href="#"/, "a bare #href was prefixed into an id reference");
-  assert.match(body, /href="#p1-top"/, "an in-page reference was not rewritten");
-  assert.match(body, /href="https:\/\/example\.org\/#frag"/, "an external URL's fragment was rewritten");
+  assert.match(body, /href="#p1-top"/, "an in-page reference to a colliding id was not rewritten");
+  assert.match(body, /href="https:\/\/example\.org\/#top"/, "an external URL's fragment was rewritten");
 });
 
 // Namespacing ids without namespacing what points at them would be worse than the
 // collision it fixes. `for`, `headers` and the aria-* references are how a field
-// gets its accessible name and how a data cell is attributed to its headers, so a
-// dangling one is a real WCAG failure introduced by assembly on content that was
-// correct when the page produced it.
+// gets its accessible name and how a data cell is attributed to its headers.
 test("every kind of id reference is rewritten with the id, not just href", () => {
-  const page =
+  const page = (suffix: string) =>
     `<label for="q1">Name</label><input id="q1" aria-describedby="h1 h2">` +
-    `<p id="h1">Hint one</p><p id="h2">Hint two</p>` +
+    `<p id="h1">Hint one${suffix}</p><p id="h2">Hint two</p>` +
     `<table><tr><th id="c1">Year</th><td headers="c1">1994</td></tr></table>` +
     `<div aria-labelledby="h1"></div>`;
-  const body = assembleBody([frag(2, page)]);
+  // Two pages of the same form, so every id collides and both pages are rewritten.
+  const body = assembleBody([frag(1, page("")), frag(2, page(" again"))]);
   assert.match(body, /<label for="p2-q1">/, "label/for lost its target — the field has no accessible name");
   assert.match(body, /aria-describedby="p2-h1 p2-h2"/, "a multi-token idref list was not fully rewritten");
   assert.match(body, /headers="p2-c1"/, "a data cell lost its header association");
@@ -128,39 +198,138 @@ test("every kind of id reference is rewritten with the id, not just href", () =>
   }
 });
 
-test("a page with no ids is passed through byte for byte", () => {
-  // The common case, and the reason for the early bail-out: a page that cannot
-  // collide should not be reshaped on the way through. The markup here is
-  // deliberately the kind jsdom rewrites when it reserializes — a bare `required`
-  // becomes `required=""` and a `<table>` gains a `<tbody>` — because a fixture of
-  // already-canonical HTML would come back identical either way and assert nothing.
-  const html =
-    `<h1>Title</h1>\n<p>Plain text with <em>emphasis</em>.</p>\n` +
-    `<label>Name <input type="text" required></label>\n` +
-    `<table><tr><td>1994</td></tr></table>`;
-  assert.equal(namespaceAnchors(html, "p1-"), html);
-  assert.equal(assembleBody([frag(1, html)]), html);
+test("a reference to a colliding id the page does not own is left alone and reported", () => {
+  // The genuinely ambiguous case: `fn-1` exists on pages 1 and 2, and page 3 links to
+  // it. There is no correct target — whichever it resolved to before was an accident
+  // of document order — so it is left as written, which makes it resolve to nothing.
+  // A visibly dead link beats a silently wrong one, and the run log has to say so,
+  // because otherwise the only symptom is a reference that goes nowhere.
+  //
+  // Page 3 owns a colliding id of its own (`fn-9`) as well as referencing `fn-1`.
+  // Without that it would exit before the reference-rewriting loop is even reached,
+  // and this test would be asserting the has-nothing-to-rename shortcut rather than
+  // the ownership rule — a version that rewrote every reference to a colliding id
+  // would still pass.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<ol><li id="fn-1">One</li></ol>`),
+    frag(2, `<ol><li id="fn-1">Two</li></ol><p id="fn-9">Nine here too</p>`),
+    frag(3, `<p>See<sup><a href="#fn-1">1</a></sup> and<sup><a href="#fn-9">9</a></sup></p><ol start="9"><li id="fn-9">Nine</li></ol>`),
+  ]);
+  assert.match(body, /href="#fn-1"/, "an ambiguous reference was pointed at one of the two candidates");
+  assert.doesNotMatch(body, /href="#p\d+-fn-1"/, "an ambiguous reference was resolved to a page that owns it");
+  // The reference page 3 DOES own is rewritten, which proves the page reached the
+  // rewriting loop rather than being skipped.
+  assert.match(body, /href="#p3-fn-9"/, "page 3's own colliding reference was not rewritten");
+  assert.deepEqual(anchors.collisions, ["fn-1", "fn-9"]);
+  assert.deepEqual(anchors.unresolved, [{ page: 3, ref: "fn-1" }]);
 });
 
-test("unparseable page content is delivered as the agent wrote it", () => {
-  // namespaceAnchors is not a validator. Whatever the agent emitted is what the
-  // rest of the pipeline reviews, so a failure here must not silently rewrite or
-  // drop content — the review loop and the lint gate are what judge it.
-  const html = `<p id="a">Unclosed <div><span>nested`;
-  const out = namespaceAnchors(html, "p1-");
-  assert.match(out, /Unclosed/, "content was lost");
-  assert.match(out, /nested/, "content was lost");
+test("a page with no ids of its own still has its dangling references reported", () => {
+  // The marker page: it links `#fn-1` and `#fn-2` and emits no id at all, while the
+  // notes are duplicated across two later pages. That shape is the one whose links go
+  // dead, and it is also the one a first pass skips — a page with no ids cannot
+  // contribute a collision, so it is never parsed for ownership and its references
+  // are invisible unless they are looked for separately.
+  const { anchors } = assembleBodyWithReport([
+    frag(1, `<p>See<sup><a href="#fn-1">1</a></sup> and<sup><a href="#fn-2">2</a></sup></p>`),
+    frag(2, `<ol><li id="fn-1">One</li><li id="fn-2">Two</li></ol>`),
+    frag(3, `<ol><li id="fn-1">One again</li><li id="fn-2">Two again</li></ol>`),
+  ]);
+  assert.deepEqual(anchors.collisions, ["fn-1", "fn-2"]);
+  assert.deepEqual(anchors.unresolved, [
+    { page: 1, ref: "fn-1" },
+    { page: 1, ref: "fn-2" },
+  ]);
 });
 
-// The two halves of the fix are independent and both are load-bearing: assembly
-// prevents the collision, and lint catches one the Copy Editor reintroduces when it
-// rewrites the whole body. Asserting the gate directly, because the tag filter is
-// what hid this in the first place.
+test("runAssembly logs what the join did, and only when it did something", async () => {
+  // The report's whole purpose is that a dead reference in a delivered document is
+  // findable. It reaches a human through this log line, so an unlogged report is the
+  // same as no report — and a line on every ordinary run is noise that gets ignored,
+  // which comes to the same thing.
+  const events: { type: string; data: Record<string, unknown> }[] = [];
+  const ctx = {
+    log: { event: (type: string, data: Record<string, unknown> = {}) => events.push({ type, data }) },
+  } as unknown as PipelineContext;
+
+  await runAssembly(ctx, [frag(1, `<p id="intro">Clean</p>`), frag(2, `<p>Nothing to collide</p>`)]);
+  assert.deepEqual(events.filter((e) => e.type === "assembly_anchors"), [], "an ordinary document logged an anchor line");
+
+  events.length = 0;
+  await runAssembly(ctx, [
+    frag(1, `<ol><li id="fn-1">One</li></ol>`),
+    frag(2, `<ol><li id="fn-1">Two</li></ol>`),
+    frag(3, `<p>See<sup><a href="#fn-1">1</a></sup></p>`),
+  ]);
+  const logged = events.filter((e) => e.type === "assembly_anchors");
+  assert.equal(logged.length, 1, "the namespacing was not reported");
+  assert.deepEqual(logged[0].data.collisions, ["fn-1"]);
+  assert.deepEqual(logged[0].data.unresolved, ["page 3: #fn-1"], "the dangling reference was not named");
+});
+
+test("a page that would lose markup on reserialization is left as the agent wrote it", () => {
+  // A stray `<tr>` outside a `<table>` — a plausible emission for a table continuing
+  // across a page break — is foster-parented by the HTML parser: the row and cell
+  // vanish and only their text survives, without any error. Reserializing that would
+  // silently discard structure. So the rewrite is abandoned for that page: the
+  // collision survives (and lint's `duplicate-id` reports it), which is strictly
+  // better than losing a table row from the deliverable.
+  const stray = `<p id="fn-1">A</p><tr><td>IMPORTANT DATA</td></tr>`;
+  const { body, anchors } = assembleBodyWithReport([frag(1, `<p id="fn-1">B</p>`), frag(2, stray)]);
+  assert.match(body, /<tr><td>IMPORTANT DATA<\/td><\/tr>/, "a table row was dropped by reserialization");
+  assert.deepEqual(anchors.skipped_pages, [2]);
+  assert.match(body, /<p id="fn-1">A<\/p>/, "page 2 was rewritten despite the markup risk");
+});
+
+test("parsing that legitimately adds elements is not mistaken for a loss", () => {
+  // Two shapes where the parse produces MORE than the source wrote, both harmless:
+  //
+  //   * A well-formed `<table><tr>` gains the `<tbody>` the source omitted. That tag
+  //     is absent from the source counts, so it is never compared — but a check
+  //     written as "the counts must match" would abandon the rewrite on most real
+  //     tables, leaving exactly the collisions this function exists to fix.
+  //   * The parser DUPLICATES a tag to repair misnesting: `<b>1<p>2</b>3</p>` becomes
+  //     `<b>1</b><p><b>2</b>3</p>`, two `<b>` from one source `<b>`. An
+  //     inequality check catches this one even though no content was lost, which is
+  //     why the comparison is one-directional.
+  const page = `<table><tr><th id="c1">Year</th><td headers="c1">1994</td></tr></table><b>1<p>2</b>3</p>`;
+  const { body, anchors } = assembleBodyWithReport([frag(1, page), frag(2, page)]);
+  assert.deepEqual(anchors.skipped_pages, [], "a page that loses nothing was skipped");
+  assert.match(body, /id="p2-c1"/, "the rewrite was skipped for a page that loses nothing");
+  assert.match(body, /<tbody>/, "the fixture no longer exercises tbody insertion");
+  assert.match(body, /<b>1<\/b><p><b>2<\/b>3<\/p>/, "the fixture no longer exercises tag duplication");
+});
+
+test("no content is lost on a page the rewrite actually touches", () => {
+  // namespaceAnchors is not a validator. Whatever the agent emitted is what the rest
+  // of the pipeline reviews, so this must never drop text — the review loop and the
+  // lint gate are what judge the markup.
+  //
+  // Both pages carry `fn-1` so the rewrite runs; a single page would collide with
+  // nothing and be returned by the short-circuit, which would make this test assert
+  // the pass-through rather than the rewrite. The markup is deliberately sloppy
+  // (unclosed tags, misnesting) because that is what a page whose content ran off an
+  // edge tends to look like, and it is where a reserialization bug would bite.
+  const { body } = assembleBodyWithReport([
+    frag(1, `<p id="fn-1">Unclosed <div><span>nested one`),
+    frag(2, `<p id="fn-1">Second <b>page<i>text</b> tail</p>`),
+  ]);
+  for (const word of ["Unclosed", "nested one", "Second", "page", "text", "tail"]) {
+    assert.match(body, new RegExp(word), `"${word}" was lost`);
+  }
+  assert.match(body, /id="p1-fn-1"/, "the rewrite did not run, so this asserts nothing");
+  assert.match(body, /id="p2-fn-1"/, "the rewrite did not run, so this asserts nothing");
+});
+
+// The two halves of the fix are independent and both load-bearing: assembly prevents
+// the collision, and lint catches one the Copy Editor reintroduces when it rewrites
+// the whole body. Asserting the gate directly, because the tag filter is what hid
+// this in the first place.
 test("axe reports a duplicate id, which the WCAG tag filter alone does not", async () => {
   const colliding = `${footnotePage(1)}\n\n${footnotePage(1)}`;
   const lint = await runAxe(wrapDocument(colliding));
-  if (lint.error) return; // axe could not run here; runAxe degrades to a parse check
-  assert.equal(lint.ok, false, "a document with two id=\"fn-1\" passed the lint gate");
+  if (lint.error) return;
+  assert.equal(lint.ok, false, 'a document with two id="fn-1" passed the lint gate');
   assert.ok(
     lint.violations.some((v) => v.id.startsWith("duplicate-id")),
     `expected a duplicate-id violation, got: ${lint.violations.map((v) => v.id).join(", ") || "none"}`,

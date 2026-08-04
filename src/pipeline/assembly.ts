@@ -1,5 +1,5 @@
 import { runAxe, type LintResult } from "./lint.ts";
-import { namespaceAnchors } from "./anchors.ts";
+import { namespaceAnchors, type AnchorReport } from "./anchors.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PipelineContext } from "./context.ts";
 
@@ -12,19 +12,25 @@ export interface AssemblyResult {
 // Join page fragments in order into clean body content — no provenance comments
 // in the delivered HTML. Per-page provenance is preserved in fragments.json.
 //
-// Each page's ids are namespaced as they are joined (see anchors.ts). This is the
-// only place that can do it: a page is extracted alone and concurrently, so it
-// cannot know that another page also numbered its first footnote "1", and this is
-// the first moment the whole document exists. The prefix comes from `order` rather
-// than the array index so the ids in a delivered document are stable across runs
-// and match the page numbering everything else reports (the Reader's `pages`, the
-// unresolved comment, `fragments.json`).
+// Ids that more than one page claimed are namespaced as the pages are joined (see
+// anchors.ts). This is the only place that can do it: a page is extracted alone and
+// concurrently, so it cannot know that another page also numbered its first footnote
+// "1", and this is the first moment the whole document exists. The prefix comes from
+// `order` rather than the array index so the ids in a delivered document are stable
+// across runs and match the page numbering everything else reports (the Reader's
+// `pages`, the unresolved comment, `fragments.json`).
 export function assembleBody(fragments: Fragment[]): string {
-  return [...fragments]
-    .sort((a, b) => a.order - b.order)
-    .map((f) => namespaceAnchors(f.innerHtml.trim(), `p${f.order}-`))
-    .filter((h) => h.length > 0)
-    .join("\n\n");
+  return assembleBodyWithReport(fragments).body;
+}
+
+// Same join, with what the namespacing did. Split out rather than folded in because
+// `assembleBody` has callers that only want the body (the review loop's re-lint, the
+// re-extraction baseline) and a returned report they ignore would be one more thing
+// to thread through.
+export function assembleBodyWithReport(fragments: Fragment[]): { body: string; anchors: AnchorReport } {
+  const ordered = [...fragments].sort((a, b) => a.order - b.order);
+  const { pages, report } = namespaceAnchors(ordered.map((f) => ({ order: f.order, innerHtml: f.innerHtml.trim() })));
+  return { body: pages.filter((h) => h.length > 0).join("\n\n"), anchors: report };
 }
 
 // Wrap body content in a minimal accessible document shell. If issues remain at
@@ -54,9 +60,23 @@ export async function runAssembly(
   fragments: Fragment[],
   opts: { unresolved?: string[] } = {},
 ): Promise<AssemblyResult> {
-  const body = assembleBody(fragments);
+  const { body, anchors } = assembleBodyWithReport(fragments);
   const html = wrapDocument(body, opts);
   const lint = await runAxe(html);
   ctx.log.event("assembly", { pages: fragments.length, lint_ok: lint.ok, violations: lint.violations.length });
+  // Logged only when the join actually had to do something, so the ordinary run adds
+  // no line. `unresolved` is the one that matters to a human: a reference naming an id
+  // that two pages claimed has no correct target, so it is left as written and
+  // resolves to nothing. A dead link in a delivered document must be findable —
+  // without this the only symptom is a reference that goes nowhere. `skipped_pages`
+  // means a page was left with its collision rather than risk losing markup on
+  // reserialization; lint's `duplicate-id` names it.
+  if (anchors.collisions.length > 0 || anchors.unresolved.length > 0) {
+    ctx.log.event("assembly_anchors", {
+      collisions: anchors.collisions,
+      unresolved: anchors.unresolved.map((u) => `page ${u.page}: #${u.ref}`),
+      skipped_pages: anchors.skipped_pages,
+    });
+  }
   return { html, body, lint };
 }

@@ -35,10 +35,10 @@ Three structures are easy to render as something that merely looks right, so be 
   paragraph that references it. Emit the in-text marker as a link
   (<sup><a href="#fn-N" id="fnref-N">N</a></sup>) and the footnote body at the foot of its
   section or the document, with a back-reference (<a href="#fnref-N">↩</a>). Preserve the
-  original numbering: use the number the page shows, even if another page also starts at 1 —
-  ids only have to be unique within YOUR page, and are made unique across the document when
-  the pages are joined. Never link to an id you did not emit; if a marker's body is not on
-  this page, leave the marker unlinked and say so in the "log" field.
+  original numbering: use the number the page shows, even if another page also starts at 1.
+  Ids only have to be unique within YOUR page — where two pages reuse one, they are made
+  unique across the document when the pages are joined. A marker whose body is on a later
+  page (endnotes) should still link to it, and should be noted in the "log" field.
 - QUOTATIONS: <blockquote> for a block quotation, <q> only for a short inline one. Attribute a
   visible source with <cite>. Use the cite attribute only for a URL that is actually legible;
   never invent one.
