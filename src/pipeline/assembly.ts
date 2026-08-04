@@ -18,7 +18,7 @@ export interface AssemblyResult {
 // "1", and this is the first moment the whole document exists. The prefix comes from
 // `order` rather than the array index so the ids in a delivered document are stable
 // across runs and match the page numbering everything else reports (the Reader's
-// `pages`, the unresolved comment, `fragments.json`).
+// `pages`, the `assembly_anchors` log, `fragments.json`).
 export function assembleBody(fragments: Fragment[]): string {
   return assembleBodyWithReport(fragments).body;
 }
@@ -65,16 +65,18 @@ export async function runAssembly(
   const lint = await runAxe(html);
   ctx.log.event("assembly", { pages: fragments.length, lint_ok: lint.ok, violations: lint.violations.length });
   // Logged only when the join actually had to do something, so the ordinary run adds
-  // no line. `unresolved` is the one that matters to a human: a reference naming an id
-  // that two pages claimed has no correct target, so it is left as written and
-  // resolves to nothing. A dead link in a delivered document must be findable —
-  // without this the only symptom is a reference that goes nowhere. `skipped_pages`
-  // means a page was left with its collision rather than risk losing markup on
-  // reserialization; lint's `duplicate-id` names it.
-  if (anchors.collisions.length > 0 || anchors.unresolved.length > 0) {
+  // no line. `ambiguous` is the one that matters to a human: a reference naming an id
+  // that two pages claimed is repointed at the first of them, which is what the
+  // un-namespaced document resolved it to, but no page vouches for that being the
+  // copy it meant — worth an eye, and without this line there is no symptom at all.
+  // `skipped_pages` means a page was left exactly as written rather than risk losing
+  // markup on reserialization, so it may still carry a collision (lint's
+  // `duplicate-id` / `duplicate-id-active` names that) or a reference that others
+  // renamed away from.
+  if (anchors.collisions.length > 0 || anchors.ambiguous.length > 0) {
     ctx.log.event("assembly_anchors", {
       collisions: anchors.collisions,
-      unresolved: anchors.unresolved.map((u) => `page ${u.page}: #${u.ref}`),
+      ambiguous: anchors.ambiguous.map((u) => `page ${u.page}: #${u.ref}`),
       skipped_pages: anchors.skipped_pages,
     });
   }

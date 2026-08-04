@@ -33,8 +33,9 @@ export async function runAxe(html: string): Promise<LintResult> {
     const { window } = dom;
     // Inject the axe-core library source into the jsdom realm and run it there.
     window.eval(axe.source);
+    type AxeIssue = { id: string; impact: string | null; description: string; nodes: unknown[] };
     const w = window as unknown as {
-      axe: { run: (ctx: unknown, opts: unknown) => Promise<{ violations: { id: string; impact: string | null; description: string; nodes: unknown[] }[] }> };
+      axe: { run: (ctx: unknown, opts: unknown) => Promise<{ violations: AxeIssue[]; incomplete: AxeIssue[] }> };
     };
     const results = await w.axe.run(window.document, {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] },
@@ -56,11 +57,41 @@ export async function runAxe(html: string): Promise<LintResult> {
         // assembleBody namespaces each page's ids, so this is a backstop, not the
         // fix: the review loop re-lints after the Copy Editor has rewritten the
         // whole body, and that is a rewrite by a model that can reintroduce a
-        // collision the assembler had already resolved.
+        // collision the assembler had already resolved. It is also what reports the
+        // collision on a page whose rewrite was abandoned (anchors.ts
+        // `skipped_pages`), and the same-page duplicate no prefix can fix.
+        //
+        // Both obsolete halves are needed, because axe splits duplicate ids across
+        // three rules by what the element IS, and each rule deliberately skips the
+        // others' elements (`duplicateIdMiscMatches` requires that no element with the
+        // id is focusable; `duplicateIdActiveMatches` requires that one is; both first
+        // require that the id is not an accessibility reference target). So with only
+        // `duplicate-id` enabled, two `<li id="x">` are reported and two `<a id="x">`
+        // or two `<input id="x">` come back clean — verified in this environment, and
+        // pinned by a test, since which rule claims which element is an axe internal
+        // that a version bump can move. Active elements are the ones that matter most
+        // here: a duplicate id on an `<input>` is what makes a `<label for>` name the
+        // wrong field.
         "duplicate-id": { enabled: true },
+        "duplicate-id-active": { enabled: true },
+        // The third rule needs no enabling — `duplicate-id-aria` is current (`wcag2a`)
+        // and arrives via the tag filter — but it is `reviewOnFail`, so axe puts its
+        // findings in `incomplete` rather than `violations`. Handled below.
       },
     });
-    const violations = results.violations.map((v) => ({
+    // `duplicate-id-aria` is the one duplicate-id rule that is still a live WCAG
+    // criterion (4.1.2), and it is the only one that fires for an id something actually
+    // references — `<label for>`, `aria-describedby`. It is also `reviewOnFail`, so axe
+    // reports it as `incomplete` and not as a violation, which meant the case with the
+    // clearest user harm was the one this gate could not see: two `<input id="q1">`
+    // under one `<label for="q1">` came back with zero violations even after enabling
+    // both obsolete rules. A duplicate id needs no human judgement to confirm — the ids
+    // are either equal or they are not — so this rule's incomplete results are promoted
+    // to violations. Only this rule: the rest of `incomplete` is genuinely
+    // can't-tell-without-rendering (contrast, off-screen content) and promoting it
+    // would fail every run.
+    const promoted = results.incomplete.filter((v) => v.id === "duplicate-id-aria");
+    const violations = [...results.violations, ...promoted].map((v) => ({
       id: v.id,
       impact: v.impact,
       description: v.description,

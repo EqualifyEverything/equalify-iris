@@ -358,15 +358,24 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
 - **Color-contrast lint.** Output is content-only with no styling (§4), so axe-core's
   `color-contrast` rule is disabled — it cannot be assessed without rendering and is out of
   scope.
-- **Two lint rules that WCAG 2.2 no longer requires are checked anyway (§7.7 v1.2).** `duplicate-id`
-  is enabled by name even though axe tags it `wcag2a-obsolete` (WCAG 2.2 dropped 4.1.1) and the
-  tag filter would otherwise skip it. Obsolete as a *conformance criterion* is not the same as
-  harmless here: this document is assembled from independently extracted pages, so a duplicate id
-  is the specific defect concatenation produces, and it breaks navigation rather than conformance.
-  Two `id="fn-1"` means every `href="#fn-1"` reaches the first one, so a footnote reference on a
-  later page silently goes to the wrong note while the link still looks like it works. The current
-  `duplicate-id-aria` rule does not cover it — that one fires only for ids referenced from ARIA
-  attributes, not from an `href`.
+- **Duplicate ids are linted for three separate ways (§7.7 v1.2).** Obsolete as a *conformance
+  criterion* is not the same as harmless here: this document is assembled from independently
+  extracted pages, so a duplicate id is the specific defect concatenation produces, and it breaks
+  navigation rather than conformance. Two `id="fn-1"` means every `href="#fn-1"` reaches the first
+  one, so a footnote reference on a later page silently goes to the wrong note while the link still
+  looks like it works. Covering that takes three rules, because axe splits the check by what the
+  element *is* and each rule skips the others' elements:
+
+  - `duplicate-id` (elements nothing references and nothing focuses) and `duplicate-id-active`
+    (focusable ones) are both tagged `wcag2a-obsolete` — WCAG 2.2 dropped 4.1.1 — so the tag filter
+    would skip them and each is enabled by name.
+  - `duplicate-id-aria` covers ids something actually *references*, is still live WCAG 4.1.2, and
+    needs no enabling — but axe marks it `reviewOnFail`, so its findings arrive as `incomplete`
+    rather than `violations`. That left the worst case invisible: two `<input id="q1">` under one
+    `<label for="q1">` returned **zero** violations even with both obsolete rules on. A duplicate id
+    needs no human judgement to confirm, so this rule's incomplete results are promoted to
+    violations — only this rule, since the rest of `incomplete` genuinely cannot be decided without
+    rendering.
 - **Colliding ids are namespaced during assembly (§7.7 v1.2).** A page is extracted alone and
   concurrently, so it cannot know that another page also numbered its first footnote 1 — and the
   page prompt asks it to preserve the source numbering. `assembleBody` prefixes the ids that more
@@ -378,11 +387,19 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   The scope is deliberately one id at a time, not one page at a time. Prefixing every id on a page
   also breaks the references that legitimately span a page break — a `<label for>` whose input is
   on the next page, or endnotes with continuous numbering — which resolved correctly before
-  assembly touched them, so that trade is a no-target reference in place of a wrong-target one. A
-  reference to a colliding id the page does *not* own has no correct target and is left as written,
-  which makes it visibly dead rather than silently wrong; those are named in the run log as
-  `assembly_anchors`. A page whose markup would not survive a reserialization (a `<tr>` outside a
-  `<table>` gets foster-parented into nothing) keeps its collision instead, for lint to report.
+  assembly touched them, so that trade is a no-target reference in place of a wrong-target one.
+
+  Every reference to a colliding id is repointed rather than abandoned. If the page owns the id it
+  goes to the page's own copy (reference and target were written together by one agent looking at
+  one image). If it does not, the reference is ambiguous and goes to the first page in document
+  order that claims the id — where a browser sent the bare reference before any of this ran.
+  Leaving it dangling instead was the same defect in a new place: with a `<label for="q1">` on page
+  1 and an `<input id="q1">` on pages 2 *and* 3, every owner is renamed and the label points at
+  nothing, so the field loses its accessible name and axe reports `label` on a document a plain
+  concatenation passed. Ambiguous references are named in the run log as `assembly_anchors`. A page
+  whose markup would not survive a reserialization (a `<tr>` outside a `<table>` gets
+  foster-parented into nothing) is left exactly as written, keeping its collision for lint to
+  report and its bare ids for anything resolved to it.
 - **Copy Editor image payload (§7.9).** When every issue in a round is attributed to a page, the
   editor gets only those pages' images (logged per round as `editor_images`). Attaching every
   page's image on every round is the dominant per-round cost of the review loop — on a 25-page

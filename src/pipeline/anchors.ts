@@ -32,6 +32,11 @@ import { JSDOM, VirtualConsole } from "jsdom";
 // Renaming only the collisions makes the common document a no-op, and it is also
 // the honest scope: a unique id needs nothing done to it, and a colliding one has no
 // correct cross-page interpretation to preserve.
+//
+// A reference to a colliding id is then repointed rather than abandoned: to the
+// page's own copy if it has one, otherwise to the first page in document order that
+// claims the id — which is what a browser resolved the bare reference to before any
+// of this ran. See pass 2 below for why leaving it dangling was the worse of the two.
 const IDREF_ATTRS = [
   "for", // <label for> — the field's accessible name
   "form",
@@ -50,19 +55,22 @@ const IDREF_ATTRS = [
 export interface AnchorReport {
   // Bare ids that more than one page claimed, and were therefore namespaced.
   collisions: string[];
-  // References that name a colliding id from a page that does not own it. There is
-  // no correct target: the id existed on two pages, so the pre-namespacing
-  // resolution (the first one in document order) was arbitrary. Left as written,
-  // which makes them resolve to nothing — a visibly broken link rather than a
-  // silently wrong one. Reported because a deliverable with a dead reference must
-  // be debuggable; today's alternative was silence.
-  unresolved: { page: number; ref: string }[];
-  // Pages whose rewrite was abandoned to avoid losing markup (see `wouldLoseTags`).
-  // The collision survives on these pages and lint's `duplicate-id` will name it.
+  // References that name a colliding id from a page that does not own it, so no page
+  // can say which copy was meant. They are repointed at the first owner in document
+  // order — what the un-namespaced document resolved them to — and reported here
+  // because a reference disambiguated by document order rather than by the agent that
+  // wrote it is a document worth a human's attention. Named `ambiguous` and not
+  // `unresolved`: they do resolve, just not on the page's own authority.
+  ambiguous: { page: number; ref: string }[];
+  // Pages left exactly as written because rewriting them would have lost markup (see
+  // `wouldLoseTags`). Either the page's own colliding ids keep their bare form — in
+  // which case lint's `duplicate-id` / `duplicate-id-active` names the collision — or
+  // an ambiguous reference on it keeps pointing at a bare id that other pages
+  // renamed away, which is why the page is named here as well as in `ambiguous`.
   skipped_pages: number[];
 }
 
-const EMPTY_REPORT: AnchorReport = { collisions: [], unresolved: [], skipped_pages: [] };
+const EMPTY_REPORT: AnchorReport = { collisions: [], ambiguous: [], skipped_pages: [] };
 
 // Names of the start tags in a fragment, counted from the raw source.
 //
@@ -149,7 +157,10 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
   // needs no parse for the rewrite either, so most documents stop here.
   const doms: (JSDOM | null)[] = [];
   const owned: Set<string>[] = [];
-  const claims = new Map<string, number>(); // bare id -> how many pages claim it
+  // Bare id -> the pages claiming it, in document order. The FIRST entry is what a
+  // browser resolves that bare id to in the un-namespaced document, which is what a
+  // reference from a non-owning page has to keep pointing at.
+  const claims = new Map<string, number[]>();
   for (const page of pages) {
     if (!/\sid\s*=/i.test(page.innerHtml)) {
       doms.push(null);
@@ -160,73 +171,105 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     const ids = dom ? ownedIds(dom.window.document) : new Set<string>();
     doms.push(dom);
     owned.push(ids);
-    for (const id of ids) claims.set(id, (claims.get(id) ?? 0) + 1);
+    for (const id of ids) claims.set(id, [...(claims.get(id) ?? []), page.order]);
   }
 
-  const collisions = [...claims].filter(([, n]) => n > 1).map(([id]) => id);
-  // Pages parsed only to collect their references (see pass 2). Declared out here so
-  // `finally` closes them along with pass 1's.
+  const collisions = [...claims].filter(([, owners]) => owners.length > 1).map(([id]) => id);
+  // Pages pass 1 did not parse because they own no id, parsed in pass 2 for their
+  // references. Declared out here so `finally` closes them along with pass 1's.
   const reportOnly: (JSDOM | null)[] = [];
   try {
     if (collisions.length === 0) {
       // The overwhelmingly common case: nothing to rename, so nothing is parsed and
-      // reserialized and every page is delivered exactly as its agent wrote it. (A
-      // page that used the same id twice by itself is a collision no prefix can fix
-      // — both copies would get the same one — and is left to lint's
-      // `duplicate-id`.)
+      // reserialized and every page is delivered exactly as its agent wrote it.
+      //
+      // A page that used one id twice BY ITSELF is deliberately not a collision here:
+      // ids are collected per page as a set, and no prefix could fix it anyway since
+      // both copies would get the same one. It needs a human or the review loop, so it
+      // is left to lint's `duplicate-id` / `duplicate-id-active`, which see the
+      // assembled document and report it.
       return { pages: pages.map((p) => p.innerHtml), report: EMPTY_REPORT };
     }
 
     const colliding = new Set(collisions);
-    const out: string[] = [];
-    const report: AnchorReport = { collisions: collisions.sort(), unresolved: [], skipped_pages: [] };
+    const report: AnchorReport = { collisions: collisions.sort(), ambiguous: [], skipped_pages: [] };
+    const out = pages.map((p) => p.innerHtml);
 
+    // Pass 2: which pages the join has to touch, and which of those it must not.
+    //
+    // A page has work to do if it owns a colliding id (its ids get prefixed) or if it
+    // references one it does NOT own (that reference has to be repointed at whatever
+    // the owner's id became). The second kind is easy to miss and is the shape that
+    // breaks: a page carrying only the footnote markers, with the notes collected at
+    // the back, owns nothing at all — so a version that only visited owners would
+    // leave precisely those references dangling.
+    //
+    // A page needing work is parsed if pass 1 did not already do it, and then checked
+    // with `wouldLoseTags`. Deciding the skips HERE, before anything is rewritten, is
+    // what lets the rename targets below be computed once: a skipped page keeps its
+    // bare ids, so what a reference to it should say depends on the skip decision.
+    const work: { index: number; order: number; dom: JSDOM; mine: Set<string>; refs: Set<string> }[] = [];
     for (const [i, page] of pages.entries()) {
-      const dom = doms[i];
       const mine = owned[i];
-      const prefix = `p${page.order}-`;
-      const rename = (id: string) => `${prefix}${id}`;
-      // A colliding id this page owns, so this page has work to do.
-      const toRename = [...mine].filter((id) => colliding.has(id));
-
-      // Anything this page points at that names a colliding id it does NOT own is
-      // ambiguous, whether or not the page is being rewritten. A page with no ids of
-      // its own was not parsed in pass 1 and still has to be checked — the page that
-      // holds the markers while the notes live elsewhere is exactly that shape, and
-      // it is the one whose references go dead. Parsed here rather than in pass 1 so
-      // the cost is paid only by documents that actually have a collision.
-      let refDom = dom;
-      if (!refDom) {
-        refDom = parseFragment(page.innerHtml);
-        reportOnly.push(refDom);
+      const ownsCollision = [...mine].some((id) => colliding.has(id));
+      let dom = doms[i];
+      if (!dom) {
+        // No `id=` at all, so pass 1 skipped it. It can still hold a reference.
+        if (!/href\s*=\s*["']#|\s(?:for|form|list|headers|aria-)/i.test(page.innerHtml)) continue;
+        dom = parseFragment(page.innerHtml);
+        reportOnly.push(dom);
       }
-      for (const ref of refDom ? referencesIn(refDom.window.document) : []) {
-        if (colliding.has(ref) && !mine.has(ref)) report.unresolved.push({ page: page.order, ref });
-      }
-
-      if (!dom || toRename.length === 0) {
-        out.push(page.innerHtml);
-        continue;
-      }
-
+      if (!dom) continue;
       const { document } = dom.window;
+      const refs = new Set(referencesIn(document).filter((r) => colliding.has(r) && !mine.has(r)));
+      if (!ownsCollision && refs.size === 0) continue;
+      // Reported whether or not the page can be rewritten — an ambiguity a skipped page
+      // has to live with is still one a human should see.
+      for (const ref of refs) report.ambiguous.push({ page: page.order, ref });
       if (wouldLoseTags(page.innerHtml, document)) {
         report.skipped_pages.push(page.order);
-        out.push(page.innerHtml);
         continue;
       }
+      work.push({ index: i, order: page.order, dom, mine, refs });
+    }
+    const skipped = new Set(report.skipped_pages);
 
+    // What each colliding id becomes, from the point of view of the page naming it.
+    //
+    // If the page OWNS the id, it means its own copy: the reference and its target were
+    // written together by one agent looking at one image, so no other page's copy can
+    // have been meant — whatever the concatenation happened to resolve it to.
+    //
+    // Otherwise the reference is ambiguous, and it is repointed at the FIRST page in
+    // document order that claims the id. Leaving it alone was the first answer and it
+    // was the wrong one: consider a form whose `<label for="q1">` is on page 1 while
+    // pages 2 and 3 each carry an `<input id="q1">`. Every owner gets renamed, so the
+    // label — which named the right control before assembly touched anything — points
+    // at an id no element has, the field loses its accessible name, and axe reports
+    // `label` on a document a plain concatenation passed. Same shape for a notes page
+    // back-referencing `#fnref-1` while two body pages both carry a marker numbered 1.
+    // First-owner is what a browser resolved the bare reference to before any of this
+    // ran: arbitrary between the owners, but exactly as arbitrary as the behaviour it
+    // replaces, and it keeps the association `for`/`headers`/`aria-*` depend on rather
+    // than destroying it.
+    const resolve = (order: number, mine: Set<string>, token: string) => {
+      if (!colliding.has(token)) return token; // includes `href="#"`, whose token is ""
+      const owner = mine.has(token) ? order : claims.get(token)![0];
+      // A page left as written kept its bare ids, so a reference to it must stay bare.
+      return skipped.has(owner) ? token : `p${owner}-${token}`;
+    };
+
+    // Pass 3: rewrite. One loop, because by now every decision has been made.
+    for (const { index, order, dom, mine } of work) {
+      const { document } = dom.window;
       for (const el of document.querySelectorAll("[id]")) {
         const id = el.getAttribute("id");
-        if (id && colliding.has(id)) el.setAttribute("id", rename(id));
+        if (id && colliding.has(id)) el.setAttribute("id", `p${order}-${id}`);
       }
-      // Same-page references to the ids just renamed. `href="#"` and `#top` name no
-      // colliding id and are left alone, as is any reference to an id this page does
-      // not own — including one that resolves on another page, which is the whole
-      // point of renaming collisions only.
       for (const el of document.querySelectorAll("[href^='#']")) {
         const target = el.getAttribute("href")!.slice(1);
-        if (target && mine.has(target) && colliding.has(target)) el.setAttribute("href", `#${rename(target)}`);
+        const next = resolve(order, mine, target);
+        if (next !== target) el.setAttribute("href", `#${next}`);
       }
       for (const attr of IDREF_ATTRS) {
         for (const el of document.querySelectorAll(`[${attr}]`)) {
@@ -234,16 +277,19 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
           // Treated as a token list throughout: `headers` and the aria-* plural
           // attributes genuinely are, and a single-valued attribute whose value
           // contains a space was never a valid reference anyway.
-          const rewritten = value
+          const next = value
             .split(/\s+/)
             .filter((t) => t.length > 0)
-            .map((t) => (mine.has(t) && colliding.has(t) ? rename(t) : t))
+            .map((t) => resolve(order, mine, t))
             .join(" ");
-          if (rewritten !== value) el.setAttribute(attr, rewritten);
+          if (next !== value) el.setAttribute(attr, next);
         }
       }
-      out.push(document.body.innerHTML);
+      out[index] = document.body.innerHTML;
     }
+
+    report.ambiguous.sort((a, b) => a.page - b.page || a.ref.localeCompare(b.ref));
+    report.skipped_pages.sort((a, b) => a - b);
     return { pages: out, report };
   } finally {
     for (const dom of [...doms, ...reportOnly]) dom?.window.close();
