@@ -89,7 +89,7 @@ function gateCtx(
   dir: string,
   agentFile: string,
   fixtures: Fixture[],
-  opts: { proposal?: string } = {},
+  opts: { proposal?: string; githubToken?: string; oauthScope?: string } = {},
 ): { ctx: PipelineContext; events: { type: string; data: Record<string, unknown> }[] } {
   const agentsDir = join(dir, "agents");
   mkdirSync(agentsDir, { recursive: true });
@@ -117,7 +117,17 @@ function gateCtx(
   const events: { type: string; data: Record<string, unknown> }[] = [];
   const ctx = {
     sessionId: "ses_test",
-    cfg: { github: { upstream_repo: "o/r", api_base_url: "https://api.github.test" } },
+    githubToken: opts.githubToken,
+    cfg: {
+      github: {
+        // A full URL, not "o/r": parseRepo only accepts the github.com form, and
+        // the shorthand throws before the filing path ever reaches GitHub — which
+        // would make the 403 test below pass on the wrong error.
+        upstream_repo: "https://github.com/example/iris",
+        api_base_url: "https://api.github.test",
+        oauth_scope: opts.oauthScope ?? "public_repo",
+      },
+    },
     paths: {
       agentsDir,
       tmpAgentsDir: () => join(dir, "tmp-agents"),
@@ -320,5 +330,41 @@ test("no judgeable fixture means no score, not a perfect one", async () => {
       { accepted: UNJUDGEABLE, produces: "<p>something else</p>" },
     ]);
     assert.equal(await evalAgent(ctx, "table.md", "# Target Agent\n\nCurrent prompt.\n"), null);
+  });
+});
+
+// The agent-update proposal is filed as a GitHub issue on the same soft-failure
+// terms as runContribution's new-agent issue, so a 403 caused by an over-narrow
+// `oauth_scope` reaches an operator only through the log line. This asserts that
+// path carries the diagnosis too — it was added to the suggestion path first and
+// this one was missed, which is easy to repeat since the two are in different
+// files with no shared call site.
+test("a 403 filing an agent-update issue carries the scope hint", async () => {
+  await withTemp(async (dir) => {
+    const { ctx, events } = gateCtx(dir, "table.md", [{ accepted: JUDGEABLE, produces: JUDGEABLE }], {
+      // A token is required to reach the filing call at all; without one the code
+      // logs agent_update_issue_skipped and never tries.
+      githubToken: "gho_user",
+      oauthScope: "public_repo",
+    });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ message: "Resource not accessible by personal access token" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof globalThis.fetch;
+    try {
+      await proposeAgentUpdatesFromFeedback(ctx, {
+        agentFile: "table.md",
+        before: "<p>old body</p>",
+        after: "<p>new body</p>",
+        feedback: "keep the table headers",
+      });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    const failed = events.find((e) => e.type === "agent_update_issue_failed");
+    assert.ok(failed, `no agent_update_issue_failed event: ${events.map((e) => e.type).join(", ")}`);
+    assert.match(String(failed.data.hint ?? ""), /oauth_scope is "public_repo"/, "the update path logged no scope hint");
   });
 });

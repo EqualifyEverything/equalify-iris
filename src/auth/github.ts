@@ -1,11 +1,30 @@
-// GitHub OAuth helpers (PRD §9.1). GitHub is the only auth mechanism; the same
-// token authenticates requests and opens PRs on /close, so `repo` scope is
-// requested and required.
+// GitHub OAuth helpers (PRD §9.1). GitHub is the only auth mechanism.
 //
-// Base URLs are passed in (not hardcoded) so a deployment can target GitHub
-// Enterprise, and so the suite can drive the flow against a mock host.
+// Base URLs and the requested scope are passed in (not hardcoded) so a deployment
+// can target GitHub Enterprise or a private upstream, and so the suite can drive
+// the flow against a mock host.
 
-const SCOPE = "repo";
+// What the user's token is actually used for, and therefore the narrowest scope
+// that still works:
+//
+//   1. `GET /user`, to identify the caller — needs NO scope. `id` and `login` are
+//      public fields, so even a scopeless token answers.
+//   2. Filing agent-suggestion issues on the upstream repo — `public_repo` for a
+//      public upstream, which the default deployment's is.
+//
+// Nothing opens pull requests, and nothing pushes. `repo` was requested because
+// PRD §7.13 described a fork-and-PR flow that was never built (see README
+// "Implementation notes"), and it grants read AND WRITE to every private repo the
+// user can reach. That matters more than a scope usually would here, because the
+// token is stored in `data/iris.sqlite` in plaintext: with `repo`, read access to
+// that file is push access to all of a user's repos, so narrowing the grant
+// directly shrinks what a stolen database is worth. See PRD §9.1 ("How the token
+// is stored") and the README's deployment note.
+//
+// Narrowing what we REQUEST does not shrink a grant a user already made — an
+// existing token keeps `repo` until it is revoked at
+// github.com/settings/applications. Only new authorizations are narrower.
+export const DEFAULT_OAUTH_SCOPE = "public_repo";
 
 export interface GitHubUser {
   id: number;
@@ -17,13 +36,25 @@ export function authorizeUrl(
   redirectUri: string,
   state: string,
   oauthBase: string,
+  scope: string = DEFAULT_OAUTH_SCOPE,
 ): string {
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: SCOPE,
     state,
   });
+  // An empty scope is sent as NO parameter rather than `scope=`. Per GitHub's
+  // docs, omitting it requests no scopes for a first-time user and reuses whatever
+  // a returning user already authorized — which is the documented behavior,
+  // whereas what a present-but-empty value does is not specified.
+  //
+  // Empty is what `normalizeScope` produces for `oauth_scope: none`, and ONLY for
+  // that: it cannot be reached by an absent key or an unset `${VAR}`, both of
+  // which fall back to the default. See the note on NO_OAUTH_SCOPE in config.ts —
+  // an accidental "request nothing" is a 403 at issue-filing time, several steps
+  // removed from its cause. A deployment asks for it when its service token files
+  // every issue, so a user's token only ever needs to answer `GET /user`.
+  if (scope) params.set("scope", scope);
   return `${oauthBase}/login/oauth/authorize?${params.toString()}`;
 }
 
@@ -54,11 +85,17 @@ export interface DeviceCodeResponse {
 }
 
 // Begin the device flow (CLI clients).
-export async function startDeviceFlow(clientId: string, oauthBase: string): Promise<DeviceCodeResponse> {
+export async function startDeviceFlow(
+  clientId: string,
+  oauthBase: string,
+  scope: string = DEFAULT_OAUTH_SCOPE,
+): Promise<DeviceCodeResponse> {
   const res = await fetch(`${oauthBase}/login/device/code`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ client_id: clientId, scope: SCOPE }),
+    // Same reason as authorizeUrl: send no `scope` key at all rather than an empty
+    // one when the deployment configured none.
+    body: JSON.stringify({ client_id: clientId, ...(scope ? { scope } : {}) }),
   });
   if (!res.ok) throw new Error(`device flow start failed: ${res.status}`);
   return (await res.json()) as DeviceCodeResponse;

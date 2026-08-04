@@ -21,14 +21,29 @@ function json(res, status, obj) {
 // ---- Mock GitHub (covers both api.github.com and github.com OAuth paths) ----
 const forks = new Set(); // repos that have been forked to the test user
 let prNumber = 140;
+// Body of the most recent POST /login/device/code, readable via
+// GET /__last_device_scope so e2e.sh can assert the scope the service requested.
+let lastDeviceBody = {};
 
 const gh = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${GH_PORT}`);
   const p = url.pathname;
   const m = req.method;
 
+  // What the last device-flow start asked GitHub for. Recorded rather than
+  // asserted here so e2e.sh can check the scope the SERVICE sends — the request
+  // body is otherwise invisible from outside, and an over-broad scope is a silent
+  // problem: the flow succeeds either way.
+  if (m === "GET" && p === "/__last_device_scope")
+    return json(res, 200, { present: "scope" in lastDeviceBody, scope: lastDeviceBody.scope ?? null });
+
   // OAuth / device flow
-  if (m === "POST" && p === "/login/device/code")
+  if (m === "POST" && p === "/login/device/code") {
+    try {
+      lastDeviceBody = JSON.parse((await readBody(req)) || "{}");
+    } catch {
+      lastDeviceBody = {};
+    }
     return json(res, 200, {
       device_code: "DEVICECODE123",
       user_code: "WXYZ-1234",
@@ -36,8 +51,9 @@ const gh = createServer(async (req, res) => {
       expires_in: 900,
       interval: 1,
     });
+  }
   if (m === "POST" && p === "/login/oauth/access_token")
-    return json(res, 200, { access_token: "gho_testtoken", token_type: "bearer", scope: "repo" });
+    return json(res, 200, { access_token: "gho_testtoken", token_type: "bearer", scope: "public_repo" });
 
   // Authenticated user (api base): identifies the caller AND getAuthenticated()
   if (m === "GET" && p === "/user") return json(res, 200, { id: 4242, login: "iris-tester" });

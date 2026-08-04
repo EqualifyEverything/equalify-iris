@@ -19,11 +19,18 @@ curl -s "$BASE/health"
 
 ## 1. Authenticate (get a token)
 
-GitHub OAuth is the only auth mechanism. The consent screen requests `repo` scope because the
-same token is used to file agent-suggestion issues on your behalf (unless the deployment sets a
-service token — see [Contributions](#contributions-automatic)). Nothing opens pull requests. By
-default the service uses a **bundled OAuth App** — you don't create or configure anything; just
-run the device flow below and approve in your browser.
+GitHub OAuth is the only auth mechanism. The consent screen requests **`public_repo`** by
+default, because the same token is used to file agent-suggestion issues on your behalf (unless
+the deployment sets a service token — see [Contributions](#contributions-automatic), in which
+case the deployment can request no scope at all). Nothing opens pull requests. By default the
+service uses a **bundled OAuth App** — you don't create or configure anything; just run the
+device flow below and approve in your browser.
+
+The scope is `github.oauth_scope` in the deployment's config; a deployment whose upstream repo
+is private needs `repo`, and one with a service token can set `none` to request nothing at all
+(a word rather than `""`, so that an unset `${VAR}` cannot turn the scope off by accident). Note that **the token you get back is stored in the service's database
+in plaintext** — see the README's "Read this before you deploy: token storage" before pointing
+real users at an instance you don't control.
 
 ### CLI / bash — device flow (recommended for terminals)
 

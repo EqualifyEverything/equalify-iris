@@ -1,7 +1,7 @@
 import { loadAgent } from "../agents/loader.ts";
 import { loadImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
-import { createAgentIssue } from "../github/issue.ts";
+import { createAgentIssue, scopeHintFor } from "../github/issue.ts";
 
 // Content types already covered by the standard library — never suggest these,
 // and never dispatch the generic page extraction to them (see extraction.ts).
@@ -44,11 +44,19 @@ async function draftAgent(ctx: PipelineContext, s: Suggestion): Promise<string> 
 }
 
 // For each genuinely-new suggested content type, draft an agent and file a
-// labeled GitHub issue with the code + context. No-op when no service token is
-// configured (so we never publish under end users' identities).
+// labeled GitHub issue with the code + context.
+//
+// This is a no-op only when there is NO token at all. It used to say "no-op
+// without a service token, so we never publish under end users' identities",
+// which the code has not done for some time: `issue_token` is an override, and
+// without it the issue is filed as the logged-in user. That is now the documented
+// default shape for a public upstream (README, "Read this before you deploy"),
+// with `issue_token` + `oauth_scope: none` as the recommended production shape.
 export async function runContribution(ctx: PipelineContext, suggestions: Suggestion[]): Promise<void> {
   // Attribute issues to the logged-in user by default; a configured service
-  // token overrides that (e.g. to file everything under a bot account).
+  // token overrides that (e.g. to file everything under a bot account). Which one
+  // it is decides what a 403 means, so it is recorded rather than re-derived.
+  const usingServiceToken = Boolean(ctx.cfg.github.issue_token);
   const token = ctx.cfg.github.issue_token || ctx.githubToken;
   if (!token || suggestions.length === 0) return;
 
@@ -65,8 +73,19 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
     seen.add(name);
     // Skip if the library (or this session) already has the agent.
     if (loadAgent(name, { agentsDir: ctx.paths.agentsDir, tmpAgentsDir: ctx.paths.tmpAgentsDir(ctx.sessionId) })) continue;
+    // Drafting is a MODEL call and is kept out of the GitHub try below: a
+    // provider error is a plain Error whose message can contain "403"
+    // (src/providers/openrouter.ts formats the status into the text), and inside
+    // one try it would be indistinguishable from a GitHub permissions failure.
+    // Both still fail softly — a contribution is a side effect.
+    let markdown: string;
     try {
-      const markdown = await draftAgent(ctx, s);
+      markdown = await draftAgent(ctx, s);
+    } catch (e) {
+      ctx.log.event("agent_issue_failed", { agent: name, error: (e as Error)?.message ?? String(e), stage: "draft" });
+      continue;
+    }
+    try {
       const url = await createAgentIssue(token, ctx.cfg.github.upstream_repo, ctx.cfg.github.api_base_url, {
         agentName: name,
         agentMarkdown: markdown,
@@ -76,7 +95,14 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
       });
       ctx.log.event("agent_issue", { agent: name, url: url ?? "(duplicate — skipped)" });
     } catch (e) {
-      ctx.log.event("agent_issue_failed", { agent: name, error: (e as Error).message });
+      // A 403 is swallowed here by design, so the log line has to carry the
+      // diagnosis — see scopeHintFor.
+      ctx.log.event("agent_issue_failed", {
+        agent: name,
+        error: (e as Error)?.message ?? String(e),
+        stage: "file",
+        ...scopeHintFor(e, { scope: ctx.cfg.github.oauth_scope, usingServiceToken }),
+      });
     }
   }
 }

@@ -123,6 +123,73 @@ from the environment at startup; changes require a restart.
   service uses a **bundled OAuth App via the device flow** — no per-operator app setup, no
   secret (the same approach the `gh` CLI uses). Set `github.client_id` only to point at your
   own OAuth App; `client_secret` is needed only if you enable the web redirect flow.
+  `github.oauth_scope` is the scope requested from the user, **`public_repo`** by default —
+  see [Read this before you deploy](#read-this-before-you-deploy-token-storage) for why that
+  default matters and when to change it.
+
+### Read this before you deploy: token storage
+
+**The user's GitHub token is stored in plaintext.** `users.github_token` in
+`data/iris.sqlite` holds the OAuth access token as-is — no encryption, no hashing (it has to
+be replayable, since it *is* the credential used to call GitHub). So **read access to that
+file is API access to GitHub as every user who has ever logged in.** Anything with the
+database has it: a backup, a synced folder, a stray `scp`, another process on a shared box, a
+laptop that walks off.
+
+What that is worth to an attacker depends entirely on the scope those tokens carry, which is
+why `github.oauth_scope` defaults to the narrowest thing that works:
+
+| `oauth_scope` | What a stolen database allows | When to use it |
+| --- | --- | --- |
+| `none` | Read the user's public profile | **Requires `issue_token`** — issues are filed by the service account and the user's token only identifies them |
+| `public_repo` *(default)* | Write to the user's **public** repos | The default: upstream is public, users file their own issues |
+| `repo` | **Push to every private repo the user can reach** | Only if your upstream is private |
+
+"Request nothing" is spelled `none`, not `""`, and that is deliberate. An unset `${VAR}`
+expands to an empty string before the config is read, so `oauth_scope: ${IRIS_SCOPE}` with the
+variable missing would otherwise silently mean "ask for no scope" — and the resulting 403 when
+a user tries to file an issue is swallowed as one log line. Every empty form (absent key,
+valueless key, unset variable, quoted `""`) falls back to `public_repo`; only the literal word
+turns the scope off.
+
+The service needs exactly two things from a user's token: `GET /user` to identify them (no
+scope required) and filing an agent-suggestion issue on the upstream (`public_repo` for a
+public upstream). Nothing opens pull requests and nothing pushes — the fork-and-PR flow in
+PRD §7.13 was never built. `repo` was requested until this default changed, which granted
+read *and write* to all of a user's private repositories for a feature that does not exist.
+
+**If you set `github.issue_token`**, every issue is filed by that service account and the
+user's token does nothing but prove who they are — so set `oauth_scope: none` and the stored
+tokens stop being worth stealing. That is the recommended production shape.
+
+The two keys go together, and the service **refuses to start** if you set `none` without an
+`issue_token`: a scopeless user token cannot file issues, and GitHub's 403 would otherwise turn
+up only as an `agent_issue_failed` line in a run log. One consequence worth stating plainly:
+there is no supported way to run with users identified but *nothing ever filed on their behalf*.
+That shape would be `none` with no `issue_token`, which is the combination startup rejects — if
+you want no contributions at all, the way to say so is to leave `oauth_scope` at its default and
+ignore the issues, since the filing is a soft side effect either way. The two combinations startup *cannot*
+check for are a private `upstream_repo` left on the `public_repo` default, and tokens issued
+before you narrowed the scope — for those, a **403 or 404** during issue filing is logged with a
+`hint` naming the configured scope. Both statuses, because GitHub does not reveal that a private
+repository exists: a token that cannot see your private `upstream_repo` gets `404 Not Found`, not
+a permissions error, so that is the status the private-upstream case actually produces. (A
+misspelled `upstream_repo` looks identical, and the hint says so rather than blaming the scope.)
+When `issue_token` is set, the hint names the **service PAT** instead: `oauth_scope` governs only
+tokens issued to users, and widening it would not fix a failure of the service account.
+
+Narrowing the request does **not** shrink a grant a user already made. Tokens issued under
+`repo` keep it until revoked at
+[github.com/settings/applications](https://github.com/settings/applications); only new
+authorizations get the narrower scope. If you have been running with `repo`, treat the
+existing rows as `repo`-scoped and consider clearing them so users re-authorize.
+
+This is an accepted, documented limitation of v1, not an oversight — encrypting at rest on a
+box that must also hold the key is close to no protection, and the real fix is to not hold a
+long-lived credential at all (tracked in
+[#29](https://github.com/EqualifyEverything/equalify-iris/issues/29), which moves the GitHub
+surface out of this service). Until then: keep `data_dir` off shared storage, keep backups
+encrypted, and prefer the `issue_token` + `oauth_scope: none` shape above.
 
 ## API
 

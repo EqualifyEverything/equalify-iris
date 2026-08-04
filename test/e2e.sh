@@ -131,6 +131,15 @@ TOKEN=$(echo "$poll" | jq -r '.access_token')
 [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] && pass "token obtained: $TOKEN" || fail "device poll" "$poll"
 AUTH=(-H "Authorization: Bearer $TOKEN")
 
+# The scope the service ASKED GitHub for. Invisible from the client — the flow
+# succeeds whatever is requested — and it is what decides how much a copy of the
+# plaintext token database is worth. The config above sets no `oauth_scope`, so
+# this asserts the DEFAULT that ships, not a value the test chose.
+scope=$(curl -s "http://localhost:$GH_PORT/__last_device_scope")
+echo "$scope" | jq -e '.scope=="public_repo"' >/dev/null \
+  && pass "the device flow requested public_repo, not repo" \
+  || fail "oauth scope" "expected scope=public_repo, got $scope"
+
 echo "==> 4. GET /v1/me"
 me=$(curl -s "${AUTH[@]}" "$BASE/me")
 echo "$me" | jq -e '.github_login=="iris-tester" and .defaults.max_review_iterations==1' >/dev/null \

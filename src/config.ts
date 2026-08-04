@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parse } from "yaml";
+import { DEFAULT_OAUTH_SCOPE } from "./auth/github.ts";
 
 export type Capability = "text" | "vision" | "structured_output";
 
@@ -29,6 +30,16 @@ export interface IrisConfig {
     // Service token (PAT) used to auto-file agent-suggestion issues on the
     // upstream repo. When empty, issue filing is disabled (safe no-op).
     issue_token?: string;
+    // OAuth scope requested from the user. Defaults to `public_repo` — enough to
+    // file an issue on a public upstream, and no more. Raise it to `repo` only for
+    // a PRIVATE upstream, and set it to `none` when `issue_token` files every
+    // issue, in which case the user's token only needs to identify them.
+    //
+    // `none` and not `""`: see NO_OAUTH_SCOPE below. loadConfig normalizes this,
+    // so by the time anything reads it, it is always a string — `none` has become
+    // `""` (meaning "send no scope parameter") and every accidental empty form has
+    // become the default.
+    oauth_scope: string;
   };
   providers: {
     default: string;
@@ -123,6 +134,24 @@ function expandEnv(value: unknown, unset: Set<string>): unknown {
 function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void {
   const problems: string[] = [];
 
+  // `oauth_scope: none` says "a user's token never files anything", which is only
+  // true when `issue_token` files everything instead. Without it, contributions
+  // fall back to the user's token (src/pipeline/contribute.ts) — which now has no
+  // scope — and GitHub answers 403. That is caught and logged as a single
+  // `agent_issue_failed` line, so the deployment looks healthy while the feature
+  // it exists to feed is dead. The two keys are only meaningful together, so the
+  // pairing is checked here rather than discovered mid-run.
+  //
+  // Checked after normalizeScope, so "" here means the operator wrote `none`; an
+  // accidental empty has already become the default and is not this error.
+  if (cfg.github?.oauth_scope === "" && !cfg.github.issue_token) {
+    problems.push(
+      `github.oauth_scope is "${NO_OAUTH_SCOPE}" but github.issue_token is not set — ` +
+        `a scopeless user token cannot file agent-suggestion issues (GitHub answers 403). ` +
+        `Set github.issue_token, or remove oauth_scope to request the default (${DEFAULT_OAUTH_SCOPE})`,
+    );
+  }
+
   if (!cfg.providers?.default) problems.push("providers.default is not set");
 
   const referenced = new Set<string>([cfg.providers.default]);
@@ -181,6 +210,52 @@ export function normalizeMaxConcurrentRuns(value: unknown): number {
   return Math.min(MAX_CONCURRENT_RUNS_CEILING, Math.max(1, Math.floor(n)));
 }
 
+// "Request no scope at all" has to be spelled out as a word, because empty
+// cannot be trusted to mean it. `expandEnv` above turns an unset `${VAR}` into
+// `""` before this function ever runs, and every other `github.*` key in
+// config.example.yaml uses the `${...}` form — so `oauth_scope: ${IRIS_SCOPE}`
+// with the variable unset is both the likely way an operator parameterizes this
+// and indistinguishable, by the time we see it, from a deliberate `""`.
+//
+// Reading empty as "request nothing" therefore fails silently in the direction
+// that hurts: a deployment with no `github.issue_token` (the documented default,
+// where users file their own issues) would send no scope, users would authorize
+// scopelessly, and `createAgentIssue` would 403 — swallowed as one
+// `agent_issue_failed` log line. Worse for a returning user, since omitting the
+// scope makes GitHub reuse the grant already authorized, so an existing token may
+// still carry `repo` while the operator believes nothing was requested.
+//
+// `none` cannot be produced by expansion, by a valueless key, or by a typo that
+// happens to evaluate to empty. It has to be typed.
+export const NO_OAUTH_SCOPE = "none";
+
+// Coerce a configured github.oauth_scope into the string to send to GitHub, where
+// "" means "send no scope parameter":
+//
+//   (key absent)         -> DEFAULT_OAUTH_SCOPE  ("didn't say" — don't silently
+//                                                 drop the scope issue filing needs)
+//   oauth_scope:         -> DEFAULT_OAUTH_SCOPE  (null; a valueless key is a typo)
+//   oauth_scope: ${UNSET} -> DEFAULT_OAUTH_SCOPE (expanded to "" — see above)
+//   oauth_scope: ""      -> DEFAULT_OAUTH_SCOPE  (same, and not distinguishable)
+//   oauth_scope: none    -> ""                   (the deliberate "request nothing")
+//
+// Empty-after-expansion meaning "unset, use the default" is also the convention
+// every other key in this block already follows (`api_base_url` a few lines down
+// in loadConfig). This was the one place it would have meant the opposite.
+// Exported for tests.
+export function normalizeScope(value: unknown): string {
+  if (typeof value !== "string") return DEFAULT_OAUTH_SCOPE;
+  // Trimmed because " repo " in YAML would otherwise be sent verbatim in the
+  // scope parameter and GitHub would reject it.
+  const trimmed = value.trim();
+  if (!trimmed) return DEFAULT_OAUTH_SCOPE;
+  // Case-insensitive: `None` and `NONE` are the same intent, and YAML parses
+  // neither as null (only `null`, `Null`, `NULL`, `~` and empty are null), so
+  // they arrive here as strings and would otherwise be sent as literal scopes.
+  if (trimmed.toLowerCase() === NO_OAUTH_SCOPE) return "";
+  return trimmed;
+}
+
 // Coerce a configured extraction_concurrency into a usable integer: missing or
 // non-numeric falls back to the default, and anything valid is clamped to
 // [1, MAX_EXTRACTION_CONCURRENCY]. Exported for tests.
@@ -225,6 +300,7 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   // GitHub host defaults (overridable for GitHub Enterprise / testing).
   parsed.github.api_base_url = parsed.github.api_base_url || "https://api.github.com";
   parsed.github.oauth_base_url = parsed.github.oauth_base_url || "https://github.com";
+  parsed.github.oauth_scope = normalizeScope(parsed.github.oauth_scope);
   // Normalize the extraction concurrency knob once, here, so every consumer can
   // trust it: absent/garbage -> default, out-of-range -> clamped. A deployment
   // that sets 0 or a negative value means "don't parallelize" -> 1.

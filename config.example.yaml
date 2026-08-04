@@ -21,9 +21,14 @@ storage:
 
 # GitHub OAuth is the only auth mechanism (PRD §9.1). The token is used to
 # identify the user and, unless `issue_token` is set below, to file
-# agent-suggestion issues on their behalf — so `repo` scope is requested.
-# Nothing here opens pull requests: contributions are filed as issues
-# (deviation from PRD §7.13 — see README "Implementation notes").
+# agent-suggestion issues on their behalf. Nothing here opens pull requests:
+# contributions are filed as issues (deviation from PRD §7.13 — see README
+# "Implementation notes").
+#
+# READ THIS: the user's token is stored in the SQLite database in PLAINTEXT, so
+# read access to it is GitHub access as every user who has logged in. Keep
+# `oauth_scope` (below) as narrow as your setup allows. See the README's
+# "Read this before you deploy: token storage".
 github:
   # Leave blank to use the bundled "Equalify Iris" OAuth App via the device flow
   # (no per-operator app setup needed — like the GitHub CLI). Set it only to
@@ -43,6 +48,27 @@ github:
   # (default): filed as the logged-in user. Set to a service-account PAT to file
   # everything under that bot account instead.
   issue_token: ${IRIS_GITHUB_TOKEN}
+  # OAuth scope requested from each user. The service needs only two things from
+  # this token: GET /user to identify them (no scope needed) and filing an issue on
+  # `upstream_repo`. So:
+  #
+  #   public_repo  (default)  public upstream, users file their own issues
+  #   none                    `issue_token` above is set — the user's token then
+  #                           only identifies them, so ask for nothing. This is
+  #                           the recommended production shape. Spelled as a word,
+  #                           NOT as "": an unset ${VAR} expands to an empty string,
+  #                           so every empty form falls back to public_repo rather
+  #                           than silently requesting nothing.
+  #   repo                    ONLY if `upstream_repo` is private. Grants read AND
+  #                           WRITE to every private repo the user can reach, and
+  #                           that token is what sits in the database in plaintext.
+  #
+  # `none` requires `issue_token` above — the service refuses to start otherwise,
+  # since a scopeless user token cannot file anything.
+  #
+  # Changing this does not narrow tokens already issued — those keep their old
+  # scope until revoked at github.com/settings/applications.
+  oauth_scope: public_repo
 
 # LLM provider abstraction (PRD §10.3). Each agent declares a capability;
 # the deployment decides which provider serves it.
