@@ -3,8 +3,19 @@ import { loadImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { createAgentIssue, scopeHintFor } from "../github/issue.ts";
 
-// Content types already covered by the standard library — never suggest these,
-// and never dispatch the generic page extraction to them (see extraction.ts).
+// The content types the general page pass covers itself (PRD §7.4 v1.2). A
+// suggestion naming one of these is declined rather than dispatched, and never
+// filed as a new agent to build (see extraction.ts).
+//
+// These were nine agent FILES until they were deleted as unreachable: every one of
+// them was declined by name here before `loadAgent` was ever called, so no run
+// could reach them. The list outlived the files because it was never really a
+// mirror of the library — it is the boundary of what one whole-page vision call
+// handles, which is exactly the question a suggestion asks. Keeping it as data
+// rather than as a directory listing also makes the decline independent of what
+// happens to be on disk: a deployment that drops a file into `agents/` named
+// `table.md` still does not get a second rendering of a table spliced over the
+// page's own.
 export const STANDARD = new Set([
   "paragraph", "heading", "list", "table", "formField", "image", "quote", "caption", "footnote",
 ]);
@@ -63,9 +74,12 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
     // Trim first, then strip the extension — same order as dispatchSpecialist, and
     // for the same reason: the other way round leaves `"table.md "` as `"table.md"`,
     // which STANDARD does not contain, so a padded standard name gets past the
-    // filter. Here that only costs a redundant issue (loadAgent below still finds
-    // `agents/table.md` and skips it), but the two call sites resolving one model
-    // string differently is a bug waiting for the next reader.
+    // filter. The `loadAgent` check below used to catch it anyway (it resolved to
+    // `agents/table.md`), which made this the cheap call site; the nine standard
+    // agent files are gone (§7.4 v1.2), so nothing resolves and the fallthrough now
+    // drafts and FILES an upstream issue proposing a `table` agent — for a type the
+    // page pass covers, under the user's own GitHub identity. Order matters here on
+    // its own merits, not just for consistency with the other call site.
     const name = s.name.trim().replace(/\.md$/, "").trim();
     if (!name || STANDARD.has(name) || seen.has(name)) continue;
     seen.add(name);

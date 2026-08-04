@@ -15,8 +15,15 @@ const PAGE_AGENT = "page";
 // Single coherent extraction: one vision call converts the WHOLE page into one
 // accessible-HTML fragment. This replaces fanning the page out to many
 // content agents that each re-rendered it (which produced duplicated output for
-// nested structures like forms). The specialist agents in agents/ remain in the
-// repo for the contribution/refinement story; this is the primary path.
+// nested structures like forms).
+//
+// The nine standard content agents that fan-out used to call are no longer in the
+// repo (§7.4 v1.2). They were not merely unused: `dispatchSpecialist` declines every
+// name in STANDARD_AGENTS below before `loadAgent` is reached, only `page.md` is
+// ever trained, and `runContribution` filters the same names — so no run could
+// reach them by any path. What survives is the part that pays for itself:
+// specialists for content a whole-page pass genuinely handles worse (see
+// `chartDataAgent.md`), dispatched by name and merged in.
 //
 // The prompt now lives in agents/page.md so the page agent is a first-class,
 // loadable, trainable, contributable agent (verified at build time, trained from
@@ -225,15 +232,19 @@ async function mergeSpecialist(
 // two runs of the same library produce comparable log lines. Best-effort: this
 // exists to explain a miss, so it must never turn one into a failed run.
 //
-// Standard-type names ARE listed even though dispatchSpecialist declines them.
-// The list is there to make a near-miss readable, and the commonest near-miss is a
-// plural or variant of a standard type — a suggestion of "tables" never reaches
-// the decline branch (it is not in STANDARD_AGENTS) and does not resolve to a
-// file, so it lands here, where a list without "table" hides the whole
-// explanation. `page` and `feedback` are excluded because they are the pipeline's
-// own agents, not content types anything should route to.
+// Standard-type names ARE listed even though dispatchSpecialist declines them,
+// and they now come from STANDARD_AGENTS rather than from files on disk. The list
+// is there to make a near-miss readable, and the commonest near-miss is a plural
+// or variant of a standard type — a suggestion of "tables" never reaches the
+// decline branch (it is not in STANDARD_AGENTS) and resolves to no file, so it
+// lands here, where a list without "table" hides the whole explanation. That used
+// to work only incidentally, because `agents/table.md` happened to exist; the nine
+// standard agent files are gone (§7.4 v1.2, they were unreachable), so reading the
+// directory alone would now drop exactly the names that explain the commonest
+// miss. `page` and `feedback` are excluded because they are the pipeline's own
+// agents, not content types anything should route to.
 function libraryAgentNames(ctx: PipelineContext): string[] {
-  const names = new Set<string>();
+  const names = new Set<string>(STANDARD_AGENTS);
   for (const dir of [ctx.paths.agentsDir, ctx.paths.tmpAgentsDir(ctx.sessionId)]) {
     let entries: string[];
     try {
@@ -263,14 +274,18 @@ async function dispatchSpecialist(
   suggestion: { name: string; reason: string },
 ): Promise<{ html: string; dispatched: boolean }> {
   // Trim BEFORE stripping the extension, not after. The other order leaves
-  // `"table.md "` as `"table.md"`, which is not in STANDARD_AGENTS (that set
-  // holds `"table"`) but which loadAgent resolves to `agents/table.md` — so a
-  // whitespace-padded standard name skips the decline below and dispatches a
-  // standard specialist, splicing its fragment over content the general page pass
-  // already rendered. That is the two-representations-of-one-thing duplication the
-  // page prompt forbids and this decline exists to prevent. `" table "` declines
-  // correctly either way, which is what makes the trailing-`.md` case easy to
-  // miss.
+  // `"table.md "` as `"table.md"`, which is not in STANDARD_AGENTS (that set holds
+  // `"table"`), so a whitespace-padded standard name skips the decline below and is
+  // looked up as a file instead. The library ships no `table.md` today, so it would
+  // now land in the unresolved branch rather than dispatching — but the decline is
+  // the correct outcome and the two differ observably (a `specialist_unresolved`
+  // line blaming the name, versus a `specialist_declined` line stating the policy),
+  // and any deployment that adds a `table.md` gets the original bug back: a standard
+  // specialist splicing its fragment over content the general page pass already
+  // rendered, which is the two-representations-of-one-thing duplication the page
+  // prompt forbids and this decline exists to prevent. That is also why the decline
+  // is keyed on STANDARD_AGENTS rather than on what is on disk. `" table "` declines
+  // correctly either way, which is what makes the trailing-`.md` case easy to miss.
   const logical = suggestion.name.trim().replace(/\.md$/, "").trim();
   // Every path out of here is logged, including the ones that do nothing.
   // `logical` is free text the model wrote, resolved to a file by name, so a

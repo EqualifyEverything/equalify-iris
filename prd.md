@@ -101,6 +101,19 @@ After phase 5, the document is returned to the user, who may submit feedback (re
                                                               (loops back to top)
 ```
 
+**Amended (v1.2): the extraction fan-out in the diagram above is withdrawn.** The row of per-content-type agents (`table` / `formField` / `paragraph`) and the Reconciliation step below it describe a shape that is not built and is not coming: extraction is **one vision call per page** to the page agent, optionally merging a specialist for content that call handles worse (§7.4 v1.2). Read that band of the diagram as:
+
+```
+[images] → page agent (one call per page, sees the whole page)
+                 │
+                 ├── flags a content type a specialist handles better?
+                 │        └─→ specialist agent → merged into the page
+                 ↓
+           Assembly (single HTML file)
+```
+
+Phase 2 in the list above ("content agents convert their assigned regions") and phase 3 (Reconciliation) are superseded accordingly — there are no assigned regions and no per-region fragments to stitch. §7.4 v1.2 gives the reasoning.
+
 ## 7. Detailed Requirements
 
 ### 7.1 Input
@@ -209,6 +222,31 @@ These comments travel with the fragment through Reconciliation, Assembly, and th
 - `caption.md`
 - `footnote.md`
 
+#### Amended (v1.2): one agent per *page*, plus specialists that earn their place
+
+The nine files above have been **deleted**, and "one agent per content type" is withdrawn as the default shape. This is a decision about extraction, and it resolves the open question of whether the agent library is the product: it is, but the library is not the *type taxonomy*.
+
+**Why the nine went.** They were not merely unused — they were **unreachable by construction**, through all three paths that can reach an agent file:
+
+- *Dispatch* declines every name in the standard set before the file is ever looked up. That is deliberate (below), so it was not a bug to fix.
+- *Training* only ever targets `page.md`; nothing routes feedback to a content agent.
+- *Contribution* filters the same standard names, so none could be re-suggested either.
+
+So no run could reach them by any path, and a fixture, a lesson or a prompt improvement could never accrue to one. Keeping nine prompt files that cannot run is worse than not having them: they read as the live extraction path to anyone opening `agents/`, and the PRD's §7.4 contract described a data flow (cropped-free regions, `@source` wrappers, reconciliation) that nothing executes.
+
+**Why per-region fan-out is not coming back.** One vision call already sees the whole page, and *seeing the whole page is the capability*. Fanning one page out to nine specialists made each of them re-render the same page from the same image, which produced two representations of one thing — a `<form>` and a `<table>` for the same fields — and then required a reconciliation phase to remove a duplication the architecture had just created. Nine calls per page also multiplies the dominant latency and cost term by nine to get output a single call already produces.
+
+**What the library is instead.** Specialization is justified where it handles content *better*, not where it partitions content by name:
+
+- **The page agent** (`page.md`) is the general pass and the trainable core. It is a real agent file — versioned, fixture-gated, improvable by feedback — so the contribution story runs through the agent every session exercises, rather than through nine that no session touches.
+- **Specialists** exist for content a whole-page pass demonstrably handles worse, and are dispatched by name and merged into the page (§7.4 dispatch). `chartDataAgent.md` is the shape: reading precise values off a chart's axes into a data table is a different task from transcribing a page, needs its own long contract, and would bloat the page prompt for the majority of pages that contain no chart. A `paragraph` specialist is not that shape — "wrap prose in `<p>`" is one line of the page prompt.
+
+This is also the answer to the context concern that motivates specialization: the pressure is real, but it is per-*capability*, not per-content-type. Nine near-duplicate prompts do not relieve it; one page prompt plus a few deep specialists does, because each specialist's contract is loaded only for the pages that need it.
+
+**The standard-type list survives as data, not as files.** `STANDARD` in `src/pipeline/contribute.ts` still names those nine types, and still drives both the dispatch decline and the new-agent filter. It was never a mirror of the library: it is the boundary of what one whole-page call covers, which is exactly the question a suggestion asks. Holding it as data rather than as a directory listing also keeps the decline independent of what is on disk — dropping a `table.md` into `agents/` does not start splicing a second rendering of a table over the page's own.
+
+**Consequences elsewhere in this document.** §6's diagram (a page fanned out to `table agent` / `formField agent` / `paragraph agent`) and §8.1's tree (which lists the deleted files) describe the withdrawn shape. §7.6 Reconciliation was the phase that existed to merge per-region fragments; with no fan-out there are no competing fragments to reconcile, which is why it is unimplemented rather than pending. The **Output wrapper** above (`@source` / `@agent` / `@fragment` comments) is likewise a per-region artifact: the page agent returns body content and provenance lives in the run log (v1.1 amendment above).
+
 **Accessibility requirements that every agent must satisfy**:
 - Semantic HTML elements only (no `<div>` where `<section>`, `<nav>`, `<article>`, `<aside>`, `<header>`, `<footer>` apply).
 - Headings used in correct nesting order.
@@ -261,6 +299,11 @@ These comments travel with the fragment through Reconciliation, Assembly, and th
 
 - Low-confidence candidates are left as separate blocks with a `@suspected-continuation` comment so the Reader is alerted but the document does not silently fabricate joined content.
 - Unmatched fragments remain as-is and are flagged for the Reader Agent's attention.
+
+**Note (v1.2): half of this section's premise is gone, and the remaining half is still open.** Not implemented, and the reason splits in two:
+
+- **Within a page, there is nothing to reconcile.** The per-region fan-out this phase was designed to clean up after does not exist (§7.4 v1.2): one page yields one fragment from one agent, so there are never two fragments competing to represent the same content. The `@agent: paragraph.md (reconciled)` example above refers to a deleted agent.
+- **Across pages, the problem is real and unsolved.** A paragraph, table or list genuinely can span a page boundary, and the page agent notes a cut-off edge in its fragment log rather than joining anything. So the document can still contain two adjacent blocks that were one block in the source. What is withdrawn is the *mechanism* above (edge-matching over per-region fragments with `@`-comment markers), not the requirement. A page-level design would compare the tail of page N's fragment with the head of page N+1's, and the conservatism argument above — a false stitch is silently wrong, a missed stitch is visible to the Reader — carries over unchanged and is the reason not to approximate it.
 
 ### 7.7 Assembly
 
@@ -406,11 +449,10 @@ The framing sentence at the top of this section still holds, with "upstream merg
 ```
 project/
 ├── agents/                 # the agent library — modified ONLY by `git pull` from upstream
-│   ├── paragraph.md
-│   ├── heading.md
-│   ├── table.md
-│   ├── formField.md
-│   └── …
+│   ├── page.md             # the general extraction pass (v1.2: what actually runs)
+│   ├── feedback.md         # verification + agent-update drafting
+│   ├── chartDataAgent.md   # a specialist, dispatched by name (§7.4 v1.2)
+│   └── …                   # (the nine per-content-type agents were deleted — §7.4 v1.2)
 ├── tmp/
 │   └── <session-id>/
 │       └── agents/         # session-built agents (ephemeral)
@@ -922,6 +964,8 @@ A hosted UI should surface the contribution model at the point of login, where i
 ---
 
 ## Appendix A: Example Content Agent File (`agents/table.md`)
+
+**Note (v1.2): this file no longer exists.** It is kept here as an illustration of the *file format* — the `## Purpose` / `## Required capability` / `## System prompt` / `## Output contract` sections the loader parses — which is unchanged and is what a specialist agent still looks like. What it is not is an example of a live agent: `table` is a type the general page pass covers, so a `table.md` is never dispatched (§7.4 v1.2). For a specialist that actually runs, see `agents/chartDataAgent.md`. The `@source` / `@end-source` wrapper in its output contract is also superseded (§7.4 v1.1).
 
 ```markdown
 # Table Agent

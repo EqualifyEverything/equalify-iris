@@ -241,7 +241,8 @@ Then poll `GET /v1/sessions/{id}` until `status` is `ready_for_review`, fetch
 ## Layout
 
 ```
-agents/                  # the agent library (git checkout; v1 content agents)
+agents/                  # the agent library: page.md (the general pass), feedback.md,
+                         #   and specialists dispatched by name (§7.4 v1.2)
 src/
   config.ts              # config loader (${ENV} expansion)
   providers/             # ModelProvider interface + openrouter & bedrock adapters
@@ -277,6 +278,43 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
   single general page agent rather than triage → per-region fan-out; the fan-out was removed
   because it duplicated output for nested structures like forms. Reconciliation additionally
   cannot run until extraction emits fragment edge data (it currently emits none).
+
+  Reconciliation's *within-page* job also no longer exists: it was there to clean up after the
+  fan-out, and one page now yields one fragment from one agent, so there are never two fragments
+  competing to represent the same content. Across pages the problem is real and open — a
+  paragraph or table can span a page break, and the page agent notes the cut-off edge rather
+  than joining anything (§7.6 v1.2).
+- **One agent per page, not one per content type (§7.4 v1.2).** The PRD's nine per-content-type
+  agents (`paragraph.md`, `table.md`, `formField.md`, …) have been **deleted**, and this is the
+  decision on whether the agent library is the product: it is, but the library is not a taxonomy
+  of content types. Those nine were not merely unused, they were unreachable through every path
+  that can reach an agent file — dispatch declines each of their names *before* the file is
+  looked up, only `page.md` is ever trained, and the contribution filter blocks the same names —
+  so no fixture, lesson or prompt improvement could ever accrue to one. Nine prompt files that
+  cannot run are worse than none: they read as the live extraction path to anyone opening
+  `agents/`.
+
+  Seeing the whole page is the capability, so per-region fan-out is not coming back: nine agents
+  re-rendering one image produced two representations of one thing (a `<form>` and a `<table>`
+  for the same fields) and then needed a reconciliation phase to remove a duplication the
+  architecture had just created — at nine times the cost and latency of the single call that
+  already produces the answer.
+
+  What is left is specialization that *earns* its place: `page.md` as the general, trainable
+  pass, plus specialists for content a whole-page pass demonstrably handles worse, dispatched by
+  name and merged in. `chartDataAgent.md` is the shape — reading precise values off a chart's
+  axes into a data table is a different task, needs its own long contract, and would bloat the
+  page prompt for every page containing no chart. A `paragraph` specialist is not that shape;
+  "wrap prose in `<p>`" is one line of the page prompt. This is also why the context pressure
+  that motivates splitting agents up is answered per-*capability* rather than per-content-type:
+  a specialist's contract is loaded only for the pages that need it, whereas nine near-duplicate
+  prompts relieve nothing.
+
+  The nine type *names* survive as data (`STANDARD` in `src/pipeline/contribute.ts`), which is
+  what declines a suggestion the page pass already covers and what keeps it from being re-filed
+  as a new agent to build. That list was never a mirror of the library — it is the boundary of
+  what one whole-page call handles — so it stays data rather than a directory listing, and
+  dropping a `table.md` into `agents/` does not start splicing a second table over the page's own.
 - **No provenance comments in the output (§7.4/§7.7).** The PRD specifies `@source` / `@agent` /
   `@fragment` wrappers preserved into the final HTML. Iris delivers clean content-only HTML
   instead: the comments leak pipeline internals into a document meant to be handed to end users,

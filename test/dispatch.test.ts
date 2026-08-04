@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runExtraction } from "../src/pipeline/extraction.ts";
+import { STANDARD } from "../src/pipeline/contribute.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 
@@ -24,9 +25,12 @@ interface Recorded {
   calls: { agent: string; prompt: string }[];
 }
 
-// One page, one library specialist (chartDataAgent.md) plus the standard `table.md`
-// the page pass is supposed to handle on its own. No feedback.md, so
-// verifyAgentOutput short-circuits to ok and these tests stay about dispatch.
+// One page, one library specialist (chartDataAgent.md), plus a `table.md` that the
+// real library no longer ships. It is written here on purpose: `table` is a standard
+// type, so the decline must hold even when a file of that name IS present and would
+// resolve — which is the case a directory-listing-based decline would get wrong.
+// No feedback.md, so verifyAgentOutput short-circuits to ok and these tests stay
+// about dispatch.
 function makeCtx(dir: string, suggestedName: string | null): { ctx: PipelineContext; rec: Recorded } {
   const agentsDir = join(dir, "agents");
   const fragDir = join(dir, "fragments");
@@ -170,11 +174,31 @@ test("a miss names the standard agents among the candidates too", async () => {
     const { suggestions } = await runExtraction(ctx);
     const miss = ev(rec, "specialist_unresolved")[0];
     assert.equal(miss?.data.agent, "tables");
-    assert.deepEqual(miss?.data.candidates, ["chartDataAgent", "table"]);
+    assert.deepEqual(miss?.data.candidates, [...STANDARD, "chartDataAgent"].sort());
     assert.equal(ranSpecialist(rec), false);
     // Unresolved IS reported for contribution: this is the path that proposes a new
     // agent for a type the library genuinely lacks.
     assert.deepEqual(suggestions, [{ name: "tables", reason: "test", image: "page-001.png" }]);
+  });
+});
+
+test("standard types are named as candidates with no agent files on disk", async () => {
+  await withTemp(async (dir) => {
+    // The real library ships no standard agent files — the nine were deleted as
+    // unreachable (§7.4 v1.2). The near-miss explanation above must therefore come
+    // from STANDARD, not from a directory listing: with `table.md` absent, a
+    // readdir-only candidate list drops `table` and the commonest miss ("tables")
+    // becomes unexplainable in exactly the deployment everyone runs.
+    //
+    // This is the same assertion as above with the file removed, which is the whole
+    // point: the other test writes `table.md` to prove the DECLINE is not
+    // file-driven, and this one removes it to prove the CANDIDATES are not either.
+    const { ctx, rec } = makeCtx(dir, "tables");
+    rmSync(join(dir, "agents", "table.md"));
+    await runExtraction(ctx);
+    const candidates = ev(rec, "specialist_unresolved")[0]?.data.candidates as string[];
+    assert.deepEqual(candidates, [...STANDARD, "chartDataAgent"].sort());
+    assert.ok(candidates.includes("table"), "the name that explains the miss is absent");
   });
 });
 
