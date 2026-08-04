@@ -82,7 +82,7 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
     try {
       markdown = await draftAgent(ctx, s);
     } catch (e) {
-      ctx.log.event("agent_issue_failed", { agent: name, error: (e as Error).message, stage: "draft" });
+      ctx.log.event("agent_issue_failed", { agent: name, error: (e as Error)?.message ?? String(e), stage: "draft" });
       continue;
     }
     try {
@@ -99,7 +99,7 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
       // diagnosis — see scopeHintFor.
       ctx.log.event("agent_issue_failed", {
         agent: name,
-        error: (e as Error).message,
+        error: (e as Error)?.message ?? String(e),
         stage: "file",
         ...scopeHintFor(e, { scope: ctx.cfg.github.oauth_scope, usingServiceToken }),
       });

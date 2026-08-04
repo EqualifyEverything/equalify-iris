@@ -368,7 +368,6 @@ The workflow is automatic on session close:
 **Auth and configuration**:
 
 - The user's GitHub credential is the same credential they authenticated with (see §9.1). OAuth requires `repo` scope, so every authenticated user can open PRs. **Amended (v1.1): the requested scope defaults to `public_repo` and is per-deployment — see §9.1 "What the token grants".** Nothing in this section is implemented (contributions are filed as labeled issues), so the scope it assumes is not requested; a deployment that later builds this flow has to raise the scope deliberately.
-
 - The upstream repository is determined by the service's `agents/` git checkout — its `origin` remote is the PR target. This is a per-deployment setting, not a per-user one.
 - PRs are opened from the user's fork of the upstream. The service creates the fork on the user's account on first close, if it does not already exist.
 - All PR activity is logged in the session record. Closing or rejecting a PR upstream does not affect the produced HTML — the HTML has already been generated using the session-built agent recorded inline in `log.jsonl`.

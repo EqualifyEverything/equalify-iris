@@ -170,10 +170,13 @@ That shape would be `none` with no `issue_token`, which is the combination start
 you want no contributions at all, the way to say so is to leave `oauth_scope` at its default and
 ignore the issues, since the filing is a soft side effect either way. The two combinations startup *cannot*
 check for are a private `upstream_repo` left on the `public_repo` default, and tokens issued
-before you narrowed the scope — for those, a 403 during issue filing is logged with a `hint`
-naming the configured scope. When `issue_token` is set, that hint names the **service PAT**
-instead: `oauth_scope` governs only tokens issued to users, and widening it would not fix a
-failure of the service account.
+before you narrowed the scope — for those, a **403 or 404** during issue filing is logged with a
+`hint` naming the configured scope. Both statuses, because GitHub does not reveal that a private
+repository exists: a token that cannot see your private `upstream_repo` gets `404 Not Found`, not
+a permissions error, so that is the status the private-upstream case actually produces. (A
+misspelled `upstream_repo` looks identical, and the hint says so rather than blaming the scope.)
+When `issue_token` is set, the hint names the **service PAT** instead: `oauth_scope` governs only
+tokens issued to users, and widening it would not fix a failure of the service account.
 
 Narrowing the request does **not** shrink a grant a user already made. Tokens issued under
 `repo` keep it until revoked at

@@ -561,7 +561,7 @@ export async function proposeAgentUpdatesFromFeedback(
       // `iris-agent-update` label needs it as much as the suggestion one.
       ctx.log.event("agent_update_issue_failed", {
         agent: proposal.agent_name,
-        error: (e as Error).message,
+        error: (e as Error)?.message ?? String(e),
         ...scopeHintFor(e, { scope: ctx.cfg.github.oauth_scope, usingServiceToken }),
       });
     }

@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runContribution } from "../src/pipeline/contribute.ts";
+import { scopeHintFor } from "../src/github/issue.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 
@@ -123,9 +124,33 @@ test("a 403 from issue filing names the scope as the likely cause", async () => 
   // The configured value, so an operator reading the log does not have to go and
   // look it up to know whether it is the problem.
   assert.match(hint, /public_repo/, "the hint did not report the configured scope");
-  assert.match(hint, /private/, "the hint did not mention the private-upstream case");
-  // The other cause a config file cannot show: an already-issued token.
+  // The cause a config file cannot show: an already-issued token.
   assert.match(hint, /re-authoriz/i, "the hint did not mention pre-existing tokens");
+});
+
+test("a private upstream is diagnosed on its 404, which is how GitHub reports it", async () => {
+  // The first cause this hint was written for — `public_repo` against a PRIVATE
+  // `upstream_repo`, which an existing deployment acquires just by upgrading — does
+  // NOT produce a 403. GitHub does not leak the existence of a private repo, so a
+  // token that cannot see one gets 404. Diagnosing only 403 would have missed the
+  // case the feature exists for.
+  const data = await contribute("public_repo", { status: 404, body: "Not Found" });
+  const hint = String(data.hint ?? "");
+  assert.match(hint, /404/, "a 404 from issue filing got no diagnosis at all");
+  assert.match(hint, /private/i, "the hint did not name the private-upstream cause");
+  assert.match(hint, /"repo"/, "the hint did not say which scope a private upstream needs");
+  assert.match(hint, /public_repo/, "the hint did not report the configured scope");
+  // 404 is genuinely ambiguous — a typo in upstream_repo looks identical — so the
+  // hint must offer that too rather than asserting the scope confidently.
+  assert.match(hint, /misspelled|spelled/i, "the hint asserted the scope for an ambiguous 404");
+});
+
+test("a 404 under a service token still points at the PAT", async () => {
+  const data = await contribute("", { status: 404, body: "Not Found" }, { issueToken: "ghp_service" });
+  const hint = String(data.hint ?? "");
+  assert.match(hint, /issue_token/, "did not name the credential that actually failed");
+  assert.match(hint, /404/);
+  assert.doesNotMatch(hint, /oauth_scope is "/, "pointed at oauth_scope for a service-token failure");
 });
 
 test("a scopeless deployment reports `none` rather than an empty string", async () => {
@@ -136,7 +161,7 @@ test("a scopeless deployment reports `none` rather than an empty string", async 
   assert.match(String(data.hint), /is "none"/, "the hint printed an empty scope instead of `none`");
 });
 
-test("a non-403 failure gets no scope hint", async () => {
+test("a non-permissions failure gets no scope hint", async () => {
   // A 500, a timeout or a DNS failure has nothing to do with the scope, and a
   // hint on every failure would train an operator to ignore it.
   const data = await contribute("public_repo", { status: 500, body: "Internal Server Error" });
@@ -216,4 +241,19 @@ test("a provider 403 while drafting is not diagnosed as a GitHub scope problem",
   assert.match(String(data.error), /openrouter 403/);
   assert.equal(data.hint, undefined, "blamed github.oauth_scope for a model-provider failure");
   assert.equal(data.stage, "draft", "a provider failure was not distinguishable from a filing failure");
+});
+
+test("a thrown non-object cannot make the diagnosis itself throw", async () => {
+  // Called directly: Octokit re-wraps whatever fetch throws, so a bare `throw null`
+  // cannot be injected through the pipeline. The guard still matters — this runs
+  // INSIDE the caller's catch, after the document has been delivered and
+  // `run_complete` logged, so throwing here would flip a finished session to
+  // `failed` (the orchestrator's outer catch). Cheap to make impossible.
+  for (const thrown of [null, undefined, "just a string", 403]) {
+    assert.equal(
+      scopeHintFor(thrown, { scope: "public_repo", usingServiceToken: false }),
+      undefined,
+      `threw or hinted for ${JSON.stringify(thrown)}`,
+    );
+  }
 });
