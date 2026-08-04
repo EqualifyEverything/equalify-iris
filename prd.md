@@ -355,6 +355,13 @@ Narrowing requires *full* attribution: if any issue in the round could not be at
 
 This preserves the intent above (feedback reaches the agent that reads the images) while making a re-run proportional to what was actually wrong. Routing is biased toward the document path: feedback that cannot be localized to specific pages, or that spans more than half the document, is treated as document-scoped.
 
+**Amended (v1.2): when a re-run proposes an agent update, the eval gate is a *paired* comparison, fixture by fixture.** Feedback that generalizes past its own document becomes a proposed agent update, and it is only filed (§7.13 v1.2) if the candidate prompt holds or improves on the current one over that agent's stored fixtures. Two rules define that comparison, and they are separate:
+
+- **What a score means.** A fixture whose accepted text is too short to measure abstains — it is absent from the scores rather than scored 0, because no evidence is not a failure. A prompt that produces *no output at all* is the exception: that scores 0, since producing nothing is a failure on the fixture, and abstaining would let it tie a prompt that handled the page.
+- **What the mean is taken over.** Only fixtures **both** prompts have a score for. Whether a prompt produced output is a property of *that prompt*, so the two sides can end up measuring different fixture sets — and averaging each over whatever it happened to measure moves the threshold instead of comparing prompts. Concretely: a current prompt that flakes to no output on one fixture (0) and scores 0.98 on another averages 0.49, so a candidate at 0.88 — a real 0.10 regression — clears both this gate and the coverage floor. Pairing drops such a fixture from both means.
+
+A current-prompt flake is therefore evidence for neither side. It is a defect in the library agent, and lowering the bar is the one response that would hide both it and any regression behind it; it is logged instead, in the gate's `unpaired` list. If no fixture is measurable on both sides, there is no comparison to make: the update defers to the coverage gate rather than passing on an unmeasured claim.
+
 ### 7.13 GitHub PR Workflow for Agent Contributions
 
 **This is the only path by which any agent ever becomes available outside the session it was created in.** No agent persists locally except by way of upstream merge plus a subsequent `git pull`.

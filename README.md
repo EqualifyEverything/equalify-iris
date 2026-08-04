@@ -384,14 +384,24 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   No output at all is scored 0 rather than abstaining, because producing nothing is a *failure* on
   the fixture, not an absence of evidence — abstaining would let a prompt that returns nothing
   score as well as one that handles it. That is also the one input where abstention is **not**
-  purely a property of the fixture, and a **still-open hole**: if the *current* prompt flakes to no
-  output on a fixture the candidate handles, the current side is deflated and the bar drops. One
-  unjudgeable fixture the current prompt flakes on plus one judgeable at 0.98 gives current
-  `(0 + 0.98)/2 = 0.49`, while the candidate abstains on the short one and scores 0.88 — so
-  `0.88 < 0.49 - 0.02` is false, 0.88 clears the 0.85 floor, and a real 0.10 regression passes both
-  gates. Closing it means distinguishing "this prompt failed" from "this fixture cannot be judged"
-  per side, which changes what the mean measures; it is not a scoring-rule question, and no test
-  covers that direction yet.
+  purely a property of the fixture: whether a prompt produced output is a property of *that
+  prompt*, so one fixture can be scored 0 for one side and excluded from the other.
+- **The eval gate is a *paired* comparison, per fixture (§7.12).** The rule above is right about
+  what a score means, but averaging each side over whatever it happened to measure compared two
+  different fixture sets — and in one direction that waved a real regression through. If the
+  **current** prompt flaked to no output on a fixture the candidate abstained on, the current mean
+  was *deflated* and the bar dropped: one such fixture plus one judgeable at 0.98 gave current
+  `(0 + 0.98)/2 = 0.49` against a candidate at 0.88, so `0.88 < 0.49 - 0.02` was false, 0.88
+  cleared the 0.85 floor, and a real 0.10 coverage regression passed both gates. Note this is the
+  *opposite* direction from the false block above — the same asymmetry, read from the other side.
+
+  Both scorers now return per-fixture scores and `pairedMeans` averages only the fixtures **both**
+  prompts could be scored on, so a per-prompt exclusion drops the fixture from both means instead
+  of moving the threshold. Deliberately, a current-prompt flake is treated as evidence for neither
+  side: it is a problem with the current library agent, and lowering the bar is the one response
+  that hides both it and any regression behind it. It stays visible in the `eval_gate` log line's
+  `unpaired` list. If no fixture is measurable on both sides, both means are `null` — "nothing to
+  compare", deferring to the regression gate, rather than a pass.
 - **`GET /v1/sessions` pages on a compound cursor (§9.2 v1.1).** The PRD names a `cursor`
   parameter without saying what is in it, and the obvious reading — the last row's
   `created_at` — is unsound: `created_at` is a millisecond timestamp assigned by a request
