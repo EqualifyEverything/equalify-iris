@@ -347,8 +347,10 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
 Places where the PRD left a decision open, and where v1 intentionally stops:
 
 - **`runs/<run-id>` vs `sessions/<session-id>`.** The PRD references both (§7.3/§7.5 vs §8.1).
-  This implementation treats the run id as the session id and writes the log, `new-agents.md`,
-  etc. under `sessions/<session-id>/`, matching the authoritative layout in §8.1.
+  This implementation treats the run id as the session id and writes the log, `agent-updates.md`,
+  etc. under `sessions/<session-id>/`, matching the authoritative layout in §8.1. (Two files in
+  that tree, `new-agents.md` and `prs.md`, are not written at all — they belong to the withdrawn
+  fork-and-PR flow; see §8.1 v1.2.)
 - **Reader chunking (§7.8).** Chunks use a fixed character budget with overlap rather than a
   literal 30%-of-context computation, since the per-model context window is not exposed through
   the provider abstraction. The two-view (HTML + flattened) cross-check is implemented as
@@ -356,6 +358,23 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
 - **Color-contrast lint.** Output is content-only with no styling (§4), so axe-core's
   `color-contrast` rule is disabled — it cannot be assessed without rendering and is out of
   scope.
+- **Two lint rules that WCAG 2.2 no longer requires are checked anyway (§7.7 v1.2).** `duplicate-id`
+  is enabled by name even though axe tags it `wcag2a-obsolete` (WCAG 2.2 dropped 4.1.1) and the
+  tag filter would otherwise skip it. Obsolete as a *conformance criterion* is not the same as
+  harmless here: this document is assembled from independently extracted pages, so a duplicate id
+  is the specific defect concatenation produces, and it breaks navigation rather than conformance.
+  Two `id="fn-1"` means every `href="#fn-1"` reaches the first one, so a footnote reference on a
+  later page silently goes to the wrong note while the link still looks like it works. The current
+  `duplicate-id-aria` rule does not cover it — that one fires only for ids referenced from ARIA
+  attributes, not from an `href`.
+- **Ids are namespaced per page during assembly (§7.7 v1.2).** A page is extracted alone and
+  concurrently, so it cannot know that another page also numbered its first footnote 1 — and the
+  page prompt asks it to preserve the source numbering. `assembleBody` prefixes each page's ids
+  with its page number (`fn-1` → `p3-fn-1`) and rewrites everything that points at them in the
+  same pass: `href="#…"`, plus `for`, `headers`, `list`, `form` and the `aria-*` references, since
+  unique ids with dangling references would be a worse defect than the collision. A reference that
+  does *not* resolve within its own page is deliberately left alone, so a marker whose body is on
+  the next page stays visibly broken instead of silently pointing at the wrong note.
 - **Copy Editor image payload (§7.9).** When every issue in a round is attributed to a page, the
   editor gets only those pages' images (logged per round as `editor_images`). Attaching every
   page's image on every round is the dominant per-round cost of the review loop — on a 25-page

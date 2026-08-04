@@ -265,7 +265,7 @@ This is also the answer to the context concern that motivates specialization: th
 - Reads the notes file references to the new content type and the source image.
 - Drafts a new agent markdown file matching the content agent contract (§7.4).
 - Saves the draft to the session's `tmp/<session-id>/agents/<type>.md`. This location is ephemeral — it exists only for the duration of the session and is deleted on close (see §8.2 for lifecycle).
-- Logs the creation to `runs/<run-id>/new-agents.md` with a summary of what the new agent does, why it was created, and the image region that triggered it.
+- Logs the creation to `runs/<run-id>/new-agents.md` with a summary of what the new agent does, why it was created, and the image region that triggered it. *(v1.2: this file is not written — see §8.1 v1.2. The creation is logged to `log.jsonl` with the draft's content inline, and the summary of what it does and why goes in the filed issue.)*
 - The orchestrator then calls the new agent for the current image and any subsequent images in the same session that reference the same type.
 
 **Lifecycle of session-built agents**:
@@ -314,6 +314,20 @@ This is also the answer to the context concern that motivates specialization: th
 - Strips the `@source`, `@agent`, `@fragment`, and `@reconciled` provenance comments — they served the pipeline up to this point and are not part of the deliverable (see the v1.1 amendment in §7.4). Provenance is recorded in the run log instead.
 - Validates the document parses and basic accessibility lint passes (axe-core in headless mode).
 - Lint failures are surfaced to the Reader as input.
+
+#### Amended (v1.2): ids are namespaced per page as the fragments are joined
+
+This section said "combine all fragments in image order" and left it there, which is right about the text and wrong about the ids. **An id is a claim about the whole document, and no page is in a position to make it.** Extraction is per page and concurrent (§7.4 v1.2): a page sees one image and nothing of what any other page emitted. §7.4's page prompt then asks for ids by name — footnote markers as `<sup><a href="#fn-N" id="fnref-N">` with the body at the foot of the page and *"preserve the original numbering"* — so a three-page scan whose pages each carry a footnote 1 emits three `id="fn-1"`, which is the ordinary case rather than an edge one.
+
+Concatenation makes that a navigation defect: every `href="#fn-1"` resolves to the first, so a screen-reader user following the reference on page 3 lands on page 1's note and the back-reference returns them to the wrong paragraph. Nothing about it looks wrong — both notes exist, both are announced, the link works — and the lint gate passes it, because WCAG 2.2 dropped 4.1.1 and axe therefore tags `duplicate-id` obsolete and excludes it from the tag filter this section's lint step uses (`duplicate-id-aria`, which is current, fires only for ids referenced from ARIA attributes, not from an `href`).
+
+So assembly prefixes each page's ids with its page number (`fn-1` → `p3-fn-1`), and this is the only place that can: a page cannot know what another page did, and this is the first moment the whole document exists. Three properties make it safe rather than merely unique:
+
+- **Everything that points at an id is rewritten with it, in the same pass** — `href="#…"`, and also `for`, `headers`, `list`, `form` and the `aria-*` references. Unique ids with stale references would be worse than the collision: `<label for>` is how a field gets its accessible name and `<td headers>` is how a data cell is attributed to its headers, so a dangling one is a 1.3.1/4.1.2 failure introduced by assembly on content that was correct when the page produced it.
+- **A reference is rewritten only if it resolves within the same page.** A marker whose body is on the next page keeps `#fn-1` and resolves to nothing — a visibly broken link, which is the honest outcome. Pointing it at page 1's unrelated note is the silent version of exactly this bug. The page prompt is what handles the split case: it says to leave such a marker unlinked and report it in the "log" field.
+- **The prefix is the page's `order`, not its position in the arrival array**, so the ids in a delivered document are stable across runs of the same input and match the page numbers the Reader attributes issues to.
+
+The lint step additionally re-enables `duplicate-id` by name, as a backstop rather than the fix: the review loop re-lints after the Copy Editor has rewritten the whole body, and that is a model rewrite that can reintroduce a collision assembly had already resolved.
 
 ### 7.8 Reader Agent
 
@@ -469,6 +483,10 @@ project/
         ├── prs.md           # links to any PRs opened from this session
         └── unresolved.md    # issues remaining at iteration cap, if any
 ```
+
+**Amended (v1.2): `new-agents.md` and `prs.md` are not written.** They are the last two entries of the fork-and-PR flow withdrawn in §7.13 v1.2, and this tree is the place that outlived the withdrawal — every other consequence got an amendment note, so the one that reads as a file layout got a stale line instead. `prs.md` cannot exist: nothing opens a PR. `new-agents.md` was a summary of session-built agents *"whether PR'd or dismissed"*, which is a distinction about PRs; the draft itself lives in `tmp/<session-id>/agents/` for the session and the proposal survives as a filed issue under the user's identity. `paths.ts` carried `sessionNewAgents()` and `sessionPrs()` with zero callers until they were deleted with the flow. The line in §7.6 about logging a session-built agent to `runs/<run-id>/new-agents.md` goes with them.
+
+What the current build actually writes is the same tree minus those two, plus four the original never named: `source-name.txt` (the upload's base name, for the output title and download filename), `fragments/final.json` (the reviewed fragments a feedback re-run refines instead of re-extracting, §7.12), `lint.json` (the final axe result), and `history/` (snapshots of prior outputs, since a re-run overwrites `output.html`).
 
 ### 8.2 Session lifecycle
 

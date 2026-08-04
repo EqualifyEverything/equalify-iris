@@ -38,9 +38,27 @@ export async function runAxe(html: string): Promise<LintResult> {
     };
     const results = await w.axe.run(window.document, {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] },
-      // Output is content-only with no styling (PRD §4), so color contrast is
-      // out of scope and cannot be assessed without rendering anyway.
-      rules: { "color-contrast": { enabled: false } },
+      rules: {
+        // Output is content-only with no styling (PRD §4), so color contrast is
+        // out of scope and cannot be assessed without rendering anyway.
+        "color-contrast": { enabled: false },
+        // Enabled BY NAME because the tag filter above excludes it: WCAG 2.2
+        // dropped 4.1.1, so axe tags `duplicate-id` `wcag2a-obsolete` and
+        // `deprecated`. Obsolete as a conformance criterion is not the same as
+        // harmless here. This document is assembled from independently extracted
+        // pages, so a duplicate id is the specific defect that arises from
+        // concatenation, and it breaks navigation rather than conformance: two
+        // `id="fn-1"` means every `href="#fn-1"` reaches the first one, so a
+        // footnote reference on a later page silently goes to the wrong note.
+        // `duplicate-id-aria` (which IS wcag2a) does not cover it — that rule
+        // fires for ids referenced from ARIA attributes, not from an `href`.
+        //
+        // assembleBody namespaces each page's ids, so this is a backstop, not the
+        // fix: the review loop re-lints after the Copy Editor has rewritten the
+        // whole body, and that is a rewrite by a model that can reintroduce a
+        // collision the assembler had already resolved.
+        "duplicate-id": { enabled: true },
+      },
     });
     const violations = results.violations.map((v) => ({
       id: v.id,
