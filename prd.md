@@ -883,8 +883,9 @@ GitHub itself is a non-replaceable dependency in v1 because the agent contributi
 Equalify Iris is Open Source. Continued development, security review, and accessibility expertise — the work that keeps the agent library current and trustworthy — require a sustainable funding stream. The model:
 
 - The code is free to use, modify, fork, and contribute to under the project's Open Source license.
-- Iris is built and stewarded by **Equalify Inc** ([https://equalify.app/](https://equalify.app/)). Commercial hosting and support are offered by Equalify and fund continued development of the Open Source project.
-- The hosted and self-hosted versions are functionally identical. Equalify's value to paying customers is operational (managed deployment, monitoring, accessibility consulting), not feature gating.
+- Iris is maintained by **Equalify Inc** ([https://equalify.app/](https://equalify.app/)), the **University of Illinois Chicago**, and **California State University**. **Amended (v1.2):** maintenance is shared across those three institutions rather than held by one company. That is a fact about the project's governance with a consequence for this section: no single maintainer's commercial interest can be the whole funding story, and the design must not assume one — which is why the agent library's growth is tied to *users* contributing (below) rather than to a vendor's roadmap.
+- Commercial hosting and support are offered by **Equalify** and fund its share of continued development.
+- The hosted and self-hosted versions are functionally identical. A commercial maintainer's value to paying customers is operational (managed deployment, monitoring, accessibility consulting), not feature gating.
 
 #### Every user contributes (v1.2)
 
@@ -906,7 +907,7 @@ What the PRD does still require of the documentation, because these are claims a
 
 - **The token requirement and its reason must be documented where an operator will hit them** — that a GitHub token is required on every call, that it is required *so that every session contributes*, and that there is no way to opt out. Currently satisfied by the README's "GitHub is the only SSO layer, and tokens are required" section, `docs/API.md` §1, and `config.example.yaml`.
 - **The scope floor must be documented as a floor**, including that `oauth_scope: none` fails at startup and that `github.issue_token` does not lower it.
-- **The funding model must be stated somewhere in the repo** — that Equalify Inc stewards Iris, that hosting and support fund it, and that hosted and self-hosted are functionally identical with no feature gating. Currently in the README's License section. Placement and tone are not specified here.
+- **Maintainership and the funding model must be stated somewhere in the repo** — that Iris is maintained by Equalify Inc, the University of Illinois Chicago, and California State University; that commercial hosting and support fund Equalify's share; and that hosted and self-hosted are functionally identical with no feature gating. Currently in the README's License section and `CONTRIBUTING.md`. Placement and tone are not specified here, but the three maintainers should be named together wherever any one of them is.
 
 A hosted UI should surface the contribution model at the point of login, where it is a fact the user needs (their token files issues under their name), not in a footer.
 
