@@ -900,17 +900,15 @@ Filing is a **soft** side effect in the failure direction only: a GitHub outage 
 
 **Success metric (§11):** contribution rate — the fraction of sessions that produce at least one filed issue when the pipeline generated one to file. A deployment where that trends to zero is misconfigured, not frugal.
 
-**README requirement**: the repository's `README.md` must include a sustainability notice prominently, placed above install or usage instructions so anyone landing on the repo sees it on first scroll. The same notice should appear in any hosted UI's footer or About page.
+**Amended (v1.2): the README requirement is about the contribution model, not a marketing notice.** This section used to require a "Sustainability notice" above the install instructions, with suggested copy pitching Equalify's hosting. That top-of-README notice was **removed deliberately** (commit `874e665`), and this amendment follows the decision rather than treating the README as out of compliance: whether the repo opens with a pitch is an editorial call for whoever owns the README, and a PRD that hardcodes promotional copy makes an ordinary edit look like a spec violation.
 
-Suggested copy:
+What the PRD does still require of the documentation, because these are claims about how the service behaves rather than positioning:
 
-> ## Sustainability
->
-> **Equalify Iris is Open Source.** Sustainability is key to sustaining its growth. With that in mind, we hope you use and alter the codebase.
->
-> **Every user gives back.** GitHub is the only SSO layer, and a GitHub token is required on every API call — because that token is what files your session's feedback back to the shared agent library, as an issue under your own GitHub identity. Using Iris and improving it for the next person are the same act, and there is no way to consume the service without contributing.
->
-> Iris is built by **Equalify Inc** ([https://equalify.app/](https://equalify.app/)). Continued support and development are paid for when you hire us to host or support any instance. Please consider hiring us.
+- **The token requirement and its reason must be documented where an operator will hit them** — that a GitHub token is required on every call, that it is required *so that every session contributes*, and that there is no way to opt out. Currently satisfied by the README's "GitHub is the only SSO layer, and tokens are required" section, `docs/API.md` §1, and `config.example.yaml`.
+- **The scope floor must be documented as a floor**, including that `oauth_scope: none` fails at startup and that `github.issue_token` does not lower it.
+- **The funding model must be stated somewhere in the repo** — that Equalify Inc stewards Iris, that hosting and support fund it, and that hosted and self-hosted are functionally identical with no feature gating. Currently in the README's License section. Placement and tone are not specified here.
+
+A hosted UI should surface the contribution model at the point of login, where it is a fact the user needs (their token files issues under their name), not in a footer.
 
 ---
 

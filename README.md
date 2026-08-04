@@ -5,21 +5,6 @@
 document, using specialized per-content-type agents, a self-extending builder, and an
 iterative reader/copy-editor review loop.
 
-> ## Sustainability
->
-> **Equalify Iris is Open Source.** Sustainability is key to sustaining its growth. With that
-> in mind, we hope you use and alter the codebase.
->
-> **Every user gives back.** GitHub is the only SSO layer, and a GitHub token is required on every
-> API call — because that token is what files your session's feedback back to the shared agent
-> library, as an issue under your own GitHub identity. Using Iris and improving it for the next
-> person are the same act, and there is no way to consume the service without contributing. See
-> [GitHub is the only SSO layer](#github-is-the-only-sso-layer-and-tokens-are-required).
->
-> Iris is built by **Equalify Inc** ([https://equalify.app/](https://equalify.app/)). Continued
-> support and development are paid for when you hire us to host or support any instance. Please
-> consider hiring us.
-
 ---
 
 ## How it works
@@ -42,14 +27,6 @@ The pipeline as **implemented today** runs in three phases:
    each to the source page(s) it appears on; the Copy Editor proposes fixes against **just those
    pages'** source images; fixes are applied and the document re-linted. Loops up to
    `max_review_iterations` (default 3).
-
-> **The PRD (§6) specifies five phases** — Triage → Extraction → Reconciliation → Assembly →
-> Review. **Triage, Reconciliation, and the Builder Agent's session-scoped drafting are not
-> implemented.** Extraction runs one general page agent instead of triage-then-fan-out, because
-> the fan-out produced duplicated output for nested structures like forms. Reconciliation is
-> currently unreachable: `extraction.ts` emits no fragment edge data, which is the input
-> reconciliation would need. Treat the three phases above — not the PRD's five — as the
-> description of what runs. See [Implementation notes](#implementation-notes--prd-coverage).
 
 When Iris meets content a specialist agent would handle better than the general pass, it drafts
 that agent and **automatically files a labeled `iris-agent-suggestion` GitHub issue** (with the
@@ -500,5 +477,7 @@ accessibility barrier — in the app or in the HTML it produces? Please open an
 
 **[GNU AGPL-3.0-or-later](LICENSE).** Iris is copyleft: if you modify it and run it as a
 network service, you must make your modified source available to its users (AGPL §13). The
-hosted and self-hosted versions are functionally identical — see the Sustainability notice
-above, and please consider hiring Equalify to host or support your instance.
+hosted and self-hosted versions are functionally identical: Iris is built and stewarded by
+**Equalify Inc** ([https://equalify.app/](https://equalify.app/)), and what paying customers
+get is operational — managed deployment, monitoring, accessibility consulting — not features
+withheld from this repo. Please consider hiring us to host or support your instance.
