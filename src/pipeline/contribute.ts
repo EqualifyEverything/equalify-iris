@@ -1,8 +1,7 @@
 import { loadAgent } from "../agents/loader.ts";
 import { loadImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
-import { createAgentIssue } from "../github/issue.ts";
-import { NO_OAUTH_SCOPE } from "../config.ts";
+import { createAgentIssue, scopeHintFor } from "../github/issue.ts";
 
 // Content types already covered by the standard library — never suggest these,
 // and never dispatch the generic page extraction to them (see extraction.ts).
@@ -45,8 +44,14 @@ async function draftAgent(ctx: PipelineContext, s: Suggestion): Promise<string> 
 }
 
 // For each genuinely-new suggested content type, draft an agent and file a
-// labeled GitHub issue with the code + context. No-op when no service token is
-// configured (so we never publish under end users' identities).
+// labeled GitHub issue with the code + context.
+//
+// This is a no-op only when there is NO token at all. It used to say "no-op
+// without a service token, so we never publish under end users' identities",
+// which the code has not done for some time: `issue_token` is an override, and
+// without it the issue is filed as the logged-in user. That is now the documented
+// default shape for a public upstream (README, "Read this before you deploy"),
+// with `issue_token` + `oauth_scope: none` as the recommended production shape.
 export async function runContribution(ctx: PipelineContext, suggestions: Suggestion[]): Promise<void> {
   // Attribute issues to the logged-in user by default; a configured service
   // token overrides that (e.g. to file everything under a bot account).
@@ -77,30 +82,13 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
       });
       ctx.log.event("agent_issue", { agent: name, url: url ?? "(duplicate — skipped)" });
     } catch (e) {
-      const message = (e as Error).message;
-      // A 403 here is almost always a scope problem, and the scope is several
-      // steps away from this line — it was decided at consent time, by a config
-      // key, possibly by a previous operator. Naming the likely cause turns a
-      // swallowed failure into a diagnosable one. The two configurations that
-      // reach it: `oauth_scope` narrower than a PRIVATE `upstream_repo` needs
-      // (`public_repo`, the default, cannot write to a private repo), and a
-      // pre-existing token issued before the requested scope was narrowed.
-      // The scopeless-token-with-no-issue_token case is rejected at startup.
-      // Octokit throws RequestError carrying `.status`; its `message` is GitHub's
-      // prose ("Resource not accessible by personal access token"), which does not
-      // contain the code — so match on the status, and fall back to the text for a
-      // non-Octokit throw.
-      const status = (e as { status?: number }).status;
-      const scopeHint = status === 403 || /\b403\b/.test(message)
-        ? {
-            hint:
-              `403 usually means the token lacks the scope this repo needs. ` +
-              `github.oauth_scope is "${ctx.cfg.github.oauth_scope || NO_OAUTH_SCOPE}"; a private ` +
-              `upstream_repo needs "repo". Tokens issued before a scope change keep the old scope ` +
-              `until the user re-authorizes.`,
-          }
-        : {};
-      ctx.log.event("agent_issue_failed", { agent: name, error: message, ...scopeHint });
+      // A 403 is swallowed here by design, so the log line has to carry the
+      // diagnosis — see scopeHintFor.
+      ctx.log.event("agent_issue_failed", {
+        agent: name,
+        error: (e as Error).message,
+        ...scopeHintFor(e, ctx.cfg.github.oauth_scope),
+      });
     }
   }
 }

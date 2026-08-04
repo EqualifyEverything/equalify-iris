@@ -25,7 +25,7 @@ interface Rec {
 // for the transport-failure case. Injected as a Response rather than as a thrown
 // RequestError because Octokit re-wraps anything fetch throws and the injected
 // `.status` would not survive — which is exactly the detail the code depends on.
-type Failure = { status: number; body?: string } | Error;
+type Failure = { status: number; body?: string; headers?: Record<string, string> } | Error;
 
 function makeCtx(dir: string, scope: string, failure: Failure): { ctx: PipelineContext; rec: Rec } {
   const agentsDir = join(dir, "agents");
@@ -65,7 +65,7 @@ function makeCtx(dir: string, scope: string, failure: Failure): { ctx: PipelineC
     if (failure instanceof Error) throw failure;
     return new Response(JSON.stringify({ message: failure.body ?? "failed" }), {
       status: failure.status,
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...failure.headers },
     });
   }) as unknown as typeof globalThis.fetch;
   (ctx as unknown as { __restore: () => void }).__restore = () => {
@@ -124,6 +124,37 @@ test("a non-403 failure gets no scope hint", async () => {
 
   const network = await contribute("public_repo", new Error("fetch failed"));
   assert.equal(network.hint, undefined, "hinted at the scope for a network failure");
+});
+
+test("a rate-limit 403 gets no scope hint", async () => {
+  // GitHub answers 403 for primary and secondary rate limits too, where the scope
+  // is irrelevant. A confident "your oauth_scope is wrong" would send a throttled
+  // operator to the wrong config key.
+  // The body deliberately does NOT say "rate limit", so this exercises the header
+  // and not the text fallback — otherwise the two checks would be indistinguishable
+  // and one of them could be dead.
+  const primary = await contribute("public_repo", {
+    status: 403,
+    body: "Resource not accessible by personal access token",
+    headers: { "x-ratelimit-remaining": "0" },
+  });
+  assert.equal(primary.hint, undefined, "blamed the scope for a primary rate limit");
+
+  // The secondary limit says so in prose rather than in a header.
+  const secondary = await contribute("public_repo", {
+    status: 403,
+    body: "You have exceeded a secondary rate limit. Please wait a few minutes.",
+  });
+  assert.equal(secondary.hint, undefined, "blamed the scope for a secondary rate limit");
+
+  // And a genuine scope 403 with rate-limit budget REMAINING still hints — the
+  // header is only disqualifying when it reads 0.
+  const scoped = await contribute("public_repo", {
+    status: 403,
+    body: "Resource not accessible by personal access token",
+    headers: { "x-ratelimit-remaining": "4999" },
+  });
+  assert.match(String(scoped.hint), /403/, "a real scope failure lost its hint");
 });
 
 test("a 403 that only says so in its message still hints", async () => {

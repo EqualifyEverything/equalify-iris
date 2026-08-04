@@ -14,6 +14,51 @@ export function parseRepo(url: string): RepoRef {
 // Label maintainers can sort/filter agent suggestions by.
 export const AGENT_LABEL = "iris-agent-suggestion";
 
+// Why an issue-filing 403 probably happened, or undefined if the failure has
+// nothing to do with the token's scope.
+//
+// Both filing paths (a new-agent suggestion and an agent-update proposal) fail
+// softly — a contribution is a side effect and a GitHub outage must not fail a
+// document the user already paid for — so the log line is the only place the cause
+// can appear. And the cause is several steps away: the scope was decided at
+// consent time, by a config key, possibly by a previous operator. The two
+// configurations that produce it cannot be seen from config alone, which is why
+// this lives at the failure rather than at startup:
+//
+//   - `oauth_scope` narrower than a PRIVATE `upstream_repo` needs. `public_repo`
+//     is the default, so an existing private-upstream deployment can acquire this
+//     on upgrade without touching its config.
+//   - A token issued BEFORE the requested scope was narrowed, which keeps the old
+//     scope until the user re-authorizes.
+//
+// (The third case, a scopeless token with no `issue_token`, is rejected at
+// startup by validateConfig.)
+export function scopeHintFor(e: unknown, configuredScope: string): { hint: string } | undefined {
+  const message = (e as Error)?.message ?? "";
+  // Octokit throws RequestError carrying `.status`; its `message` is GitHub's
+  // prose ("Resource not accessible by personal access token"), which does NOT
+  // contain the code — so match on the status, and fall back to the text only for
+  // a non-Octokit or re-wrapped throw.
+  const status = (e as { status?: number }).status;
+  if (status !== 403 && !/\b403\b/.test(message)) return undefined;
+  // GitHub also answers 403 for primary and secondary rate limits, where the scope
+  // is irrelevant and this hint would send an operator to the wrong config key.
+  // Checked on the response headers first (`x-ratelimit-remaining: 0` is the
+  // primary-limit signal) and on the message text for the secondary limit, which
+  // says so in prose rather than in a header.
+  const headers = (e as { response?: { headers?: Record<string, string> } }).response?.headers ?? {};
+  const remaining = headers["x-ratelimit-remaining"];
+  if (remaining === "0" || /rate limit|abuse|secondary limit/i.test(message)) return undefined;
+  return {
+    hint:
+      `403 usually means the token lacks the scope this repo needs. ` +
+      // `none` rather than a bare "" — an empty string reads as unset rather than
+      // as the deliberate setting the operator wrote.
+      `github.oauth_scope is "${configuredScope || "none"}"; a private upstream_repo needs "repo". ` +
+      `Tokens issued before a scope change keep the old scope until the user re-authorizes.`,
+  };
+}
+
 async function ensureLabel(
   octokit: Octokit,
   repo: RepoRef,

@@ -141,7 +141,7 @@ why `github.oauth_scope` defaults to the narrowest thing that works:
 
 | `oauth_scope` | What a stolen database allows | When to use it |
 | --- | --- | --- |
-| `none` | Read the user's public profile | `issue_token` is set, so the user's token only identifies them |
+| `none` | Read the user's public profile | **Requires `issue_token`** — issues are filed by the service account and the user's token only identifies them |
 | `public_repo` *(default)* | Write to the user's **public** repos | The default: upstream is public, users file their own issues |
 | `repo` | **Push to every private repo the user can reach** | Only if your upstream is private |
 
@@ -164,7 +164,11 @@ tokens stop being worth stealing. That is the recommended production shape.
 
 The two keys go together, and the service **refuses to start** if you set `none` without an
 `issue_token`: a scopeless user token cannot file issues, and GitHub's 403 would otherwise turn
-up only as an `agent_issue_failed` line in a run log. The two combinations startup *cannot*
+up only as an `agent_issue_failed` line in a run log. One consequence worth stating plainly:
+there is no supported way to run with users identified but *nothing ever filed on their behalf*.
+That shape would be `none` with no `issue_token`, which is the combination startup rejects — if
+you want no contributions at all, the way to say so is to leave `oauth_scope` at its default and
+ignore the issues, since the filing is a soft side effect either way. The two combinations startup *cannot*
 check for are a private `upstream_repo` left on the `public_repo` default, and tokens issued
 before you narrowed the scope — for those, a 403 during issue filing is logged with a `hint`
 naming the configured scope.
