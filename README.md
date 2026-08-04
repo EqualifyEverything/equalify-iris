@@ -171,7 +171,9 @@ you want no contributions at all, the way to say so is to leave `oauth_scope` at
 ignore the issues, since the filing is a soft side effect either way. The two combinations startup *cannot*
 check for are a private `upstream_repo` left on the `public_repo` default, and tokens issued
 before you narrowed the scope — for those, a 403 during issue filing is logged with a `hint`
-naming the configured scope.
+naming the configured scope. When `issue_token` is set, that hint names the **service PAT**
+instead: `oauth_scope` governs only tokens issued to users, and widening it would not fix a
+failure of the service account.
 
 Narrowing the request does **not** shrink a grant a user already made. Tokens issued under
 `repo` keep it until revoked at

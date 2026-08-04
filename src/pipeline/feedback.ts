@@ -543,6 +543,7 @@ export async function proposeAgentUpdatesFromFeedback(
   // contribution model uses issues, not close-time PRs). Attributed to the
   // logged-in user unless a service token override is configured. No-op without a
   // token, so local runs still keep the proposal in agent-updates.md.
+  const usingServiceToken = Boolean(ctx.cfg.github.issue_token);
   const token = ctx.cfg.github.issue_token || ctx.githubToken;
   if (token) {
     try {
@@ -561,7 +562,7 @@ export async function proposeAgentUpdatesFromFeedback(
       ctx.log.event("agent_update_issue_failed", {
         agent: proposal.agent_name,
         error: (e as Error).message,
-        ...scopeHintFor(e, ctx.cfg.github.oauth_scope),
+        ...scopeHintFor(e, { scope: ctx.cfg.github.oauth_scope, usingServiceToken }),
       });
     }
   } else {

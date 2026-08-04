@@ -15,6 +15,12 @@ import type { Paths } from "../src/store/paths.ts";
 // (`oauth_scope: none` with no `issue_token`); the two it cannot are a PRIVATE
 // upstream under the `public_repo` default, and a token issued before the scope
 // was narrowed. For those, the log line has to carry the diagnosis.
+//
+// A hint that fires on the wrong failure is worse than no hint, because an
+// operator reading it mid-incident acts on it. Three ways this one could: a
+// rate-limit 403, a 403 from the SERVICE token (whose scopes have nothing to do
+// with `oauth_scope`), and a "403" that came from the model provider and never
+// reached GitHub at all. There is a test for each.
 
 interface Rec {
   events: { type: string; data: Record<string, unknown> }[];
@@ -27,7 +33,12 @@ interface Rec {
 // `.status` would not survive — which is exactly the detail the code depends on.
 type Failure = { status: number; body?: string; headers?: Record<string, string> } | Error;
 
-function makeCtx(dir: string, scope: string, failure: Failure): { ctx: PipelineContext; rec: Rec } {
+function makeCtx(
+  dir: string,
+  scope: string,
+  failure: Failure,
+  opts: { issueToken?: string; draftError?: Error } = {},
+): { ctx: PipelineContext; rec: Rec } {
   const agentsDir = join(dir, "agents");
   const inputDir = join(dir, "input");
   for (const d of [agentsDir, inputDir]) mkdirSync(d, { recursive: true });
@@ -43,13 +54,17 @@ function makeCtx(dir: string, scope: string, failure: Failure): { ctx: PipelineC
         upstream_repo: "https://github.com/example/iris",
         api_base_url: "http://127.0.0.1:1/never-listening",
         oauth_scope: scope,
+        issue_token: opts.issueToken,
       },
     },
     paths: { agentsDir, tmpAgentsDir: () => join(dir, "tmp-agents") } as unknown as Paths,
     router: {
       // Drafting the agent markdown has to succeed for the code to reach the
-      // issue-filing call at all.
-      complete: async () => ({ text: "# Chart Agent\n\n## Required capability\nvision\n" }),
+      // issue-filing call at all — unless the test is about the draft failing.
+      complete: async () => {
+        if (opts.draftError) throw opts.draftError;
+        return { text: "# Chart Agent\n\n## Required capability\nvision\n" };
+      },
     },
     log: {
       event: (type: string, data: Record<string, unknown> = {}) => rec.events.push({ type, data }),
@@ -74,9 +89,13 @@ function makeCtx(dir: string, scope: string, failure: Failure): { ctx: PipelineC
   return { ctx, rec };
 }
 
-async function contribute(scope: string, failure: Failure): Promise<Record<string, unknown>> {
+async function contribute(
+  scope: string,
+  failure: Failure,
+  opts: { issueToken?: string; draftError?: Error } = {},
+): Promise<Record<string, unknown>> {
   const dir = mkdtempSync(join(tmpdir(), "iris-403-"));
-  const { ctx, rec } = makeCtx(dir, scope, failure);
+  const { ctx, rec } = makeCtx(dir, scope, failure, opts);
   try {
     await runContribution(ctx, [{ name: "chartDataAgent", reason: "test", image: "page-001.png" }]);
   } finally {
@@ -90,8 +109,10 @@ async function contribute(scope: string, failure: Failure): Promise<Record<strin
 
 // Octokit's RequestError carries the code on `.status`; its `message` is GitHub's
 // prose ("Resource not accessible by personal access token") and does not contain
-// "403" — so matching on the text alone would never fire. These tests assert that
-// by sending real statuses and never a message containing the code.
+// "403" — so matching on the text alone would never fire, and matching on it as a
+// FALLBACK catches the wrong things (see the provider test at the bottom). The
+// status is the only signal. These tests assert that by sending real statuses and
+// never a message containing the code.
 
 test("a 403 from issue filing names the scope as the likely cause", async () => {
   const data = await contribute("public_repo", { status: 403, body: "Resource not accessible by personal access token" });
@@ -157,9 +178,42 @@ test("a rate-limit 403 gets no scope hint", async () => {
   assert.match(String(scoped.hint), /403/, "a real scope failure lost its hint");
 });
 
-test("a 403 that only says so in its message still hints", async () => {
-  // A non-Octokit throw (or a wrapped one) has no `.status`, so the text is the
-  // fallback path.
+test("a service-token 403 blames the PAT, not oauth_scope", async () => {
+  // With `issue_token` set, the failing credential is a service PAT whose scopes
+  // live on github.com. `oauth_scope` governs only tokens issued to users, so
+  // naming it here would send an operator to widen the user grant this service
+  // exists to keep narrow — to fix a failure widening it cannot touch. And this is
+  // the shape the README recommends for production (`issue_token` + `none`), so it
+  // is the most likely 403 an operator will ever read.
+  const data = await contribute("", { status: 403, body: "Resource not accessible by integration" }, {
+    issueToken: "ghp_service",
+  });
+  const hint = String(data.hint ?? "");
+  assert.match(hint, /issue_token/, "did not name the credential that actually failed");
+  // The user path's phrasing is `github.oauth_scope is "<value>"`, i.e. the key
+  // reported as the thing to change. This branch must not produce it — it may
+  // mention the key only to rule it out, which the next assertion pins.
+  assert.doesNotMatch(hint, /oauth_scope is "/, "pointed at oauth_scope for a service-token failure");
+  assert.match(hint, /oauth_scope is not involved/, "left the reader to wonder about the other key");
+});
+
+test("a 403 that only says so in its message is NOT treated as a GitHub failure", async () => {
+  // The message fallback used to exist for a re-wrapped Octokit throw. It cost
+  // more than it bought: a provider error is a plain
+  // `Error("openrouter 403: ...")` (src/providers/openrouter.ts), which matched it
+  // and produced a GitHub-permissions hint for a call that never reached GitHub.
   const data = await contribute("repo", new Error("HTTP 403 while creating issue"));
-  assert.match(String(data.hint), /403/);
+  assert.equal(data.hint, undefined, "matched 403 in the message text, which a provider error can carry");
+});
+
+test("a provider 403 while drafting is not diagnosed as a GitHub scope problem", async () => {
+  // draftAgent is a model call. OpenRouter formats the status into the message, so
+  // a blocked key or a moderation refusal arrives as "openrouter 403: ...". It is
+  // reported under its own stage and gets no scope hint.
+  const data = await contribute("public_repo", { status: 403, body: "unused" }, {
+    draftError: new Error("openrouter 403: {\"error\":{\"message\":\"key disabled\"}}"),
+  });
+  assert.match(String(data.error), /openrouter 403/);
+  assert.equal(data.hint, undefined, "blamed github.oauth_scope for a model-provider failure");
+  assert.equal(data.stage, "draft", "a provider failure was not distinguishable from a filing failure");
 });

@@ -54,7 +54,9 @@ async function draftAgent(ctx: PipelineContext, s: Suggestion): Promise<string> 
 // with `issue_token` + `oauth_scope: none` as the recommended production shape.
 export async function runContribution(ctx: PipelineContext, suggestions: Suggestion[]): Promise<void> {
   // Attribute issues to the logged-in user by default; a configured service
-  // token overrides that (e.g. to file everything under a bot account).
+  // token overrides that (e.g. to file everything under a bot account). Which one
+  // it is decides what a 403 means, so it is recorded rather than re-derived.
+  const usingServiceToken = Boolean(ctx.cfg.github.issue_token);
   const token = ctx.cfg.github.issue_token || ctx.githubToken;
   if (!token || suggestions.length === 0) return;
 
@@ -71,8 +73,19 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
     seen.add(name);
     // Skip if the library (or this session) already has the agent.
     if (loadAgent(name, { agentsDir: ctx.paths.agentsDir, tmpAgentsDir: ctx.paths.tmpAgentsDir(ctx.sessionId) })) continue;
+    // Drafting is a MODEL call and is kept out of the GitHub try below: a
+    // provider error is a plain Error whose message can contain "403"
+    // (src/providers/openrouter.ts formats the status into the text), and inside
+    // one try it would be indistinguishable from a GitHub permissions failure.
+    // Both still fail softly — a contribution is a side effect.
+    let markdown: string;
     try {
-      const markdown = await draftAgent(ctx, s);
+      markdown = await draftAgent(ctx, s);
+    } catch (e) {
+      ctx.log.event("agent_issue_failed", { agent: name, error: (e as Error).message, stage: "draft" });
+      continue;
+    }
+    try {
       const url = await createAgentIssue(token, ctx.cfg.github.upstream_repo, ctx.cfg.github.api_base_url, {
         agentName: name,
         agentMarkdown: markdown,
@@ -87,7 +100,8 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
       ctx.log.event("agent_issue_failed", {
         agent: name,
         error: (e as Error).message,
-        ...scopeHintFor(e, ctx.cfg.github.oauth_scope),
+        stage: "file",
+        ...scopeHintFor(e, { scope: ctx.cfg.github.oauth_scope, usingServiceToken }),
       });
     }
   }
