@@ -1,7 +1,7 @@
 # Contributing to Equalify Iris
 
 Thanks for helping make document remediation more accessible! Iris is Open Source under
-**AGPL-3.0** (see [LICENSE](LICENSE)) and maintained by [Equalify Inc](https://equalify.app/),
+**AGPL-3.0** (see [LICENSE](LICENSE)) and maintained by [Equalify Inc.](https://equalify.app/),
 the **University of Illinois Chicago**, and **California State University**.
 
 By participating you agree to our [Code of Conduct](CODE_OF_CONDUCT.md).

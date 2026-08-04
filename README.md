@@ -478,8 +478,10 @@ accessibility barrier — in the app or in the HTML it produces? Please open an
 **[GNU AGPL-3.0-or-later](LICENSE).** Iris is copyleft: if you modify it and run it as a
 network service, you must make your modified source available to its users (AGPL §13).
 
-Iris is maintained by **Equalify Inc** ([https://equalify.app/](https://equalify.app/)), the
-**University of Illinois Chicago**, and **California State University**. The hosted and
-self-hosted versions are functionally identical — what commercial hosting buys is operational
-(managed deployment, monitoring, accessibility consulting), not features withheld from this
-repo. Please consider hiring Equalify to host or support your instance.
+Iris is maintained by **Equalify Inc.** ([https://equalify.app/](https://equalify.app/)), the
+**University of Illinois Chicago**, and **California State University**.
+
+**Commercial hosting and support are offered by Equalify Inc.** The hosted and self-hosted
+versions are functionally identical — what you are paying for is operational (managed
+deployment, monitoring, accessibility consulting), not features withheld from this repo. Please
+consider hiring them to host or support your instance.
