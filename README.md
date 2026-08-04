@@ -5,15 +5,6 @@
 document, using specialized per-content-type agents, a self-extending builder, and an
 iterative reader/copy-editor review loop.
 
-> ## Sustainability
->
-> **Equalify Iris is Open Source.** Sustainability is key to sustaining its growth. With that
-> in mind, we hope you use and alter the codebase.
->
-> Iris is built by **Equalify Inc** ([https://equalify.app/](https://equalify.app/)). Continued
-> support and development are paid for when you hire us to host or support any instance. Please
-> consider hiring us.
-
 ---
 
 ## How it works
@@ -36,14 +27,6 @@ The pipeline as **implemented today** runs in three phases:
    each to the source page(s) it appears on; the Copy Editor proposes fixes against **just those
    pages'** source images; fixes are applied and the document re-linted. Loops up to
    `max_review_iterations` (default 3).
-
-> **The PRD (§6) specifies five phases** — Triage → Extraction → Reconciliation → Assembly →
-> Review. **Triage, Reconciliation, and the Builder Agent's session-scoped drafting are not
-> implemented.** Extraction runs one general page agent instead of triage-then-fan-out, because
-> the fan-out produced duplicated output for nested structures like forms. Reconciliation is
-> currently unreachable: `extraction.ts` emits no fragment edge data, which is the input
-> reconciliation would need. Treat the three phases above — not the PRD's five — as the
-> description of what runs. See [Implementation notes](#implementation-notes--prd-coverage).
 
 When Iris meets content a specialist agent would handle better than the general pass, it drafts
 that agent and **automatically files a labeled `iris-agent-suggestion` GitHub issue** (with the
