@@ -139,8 +139,14 @@ the default). Filing is not optional, so:
 `oauth_scope: none` is recognized only in order to be rejected, with a message naming the fix. A
 token that identifies a user but cannot file on their behalf would leave the deployment looking
 healthy while the thing it exists to feed was dead: GitHub answers 403 and the failure is swallowed
-as one `agent_issue_failed` line per run. Setting `github.issue_token` does **not** make it valid —
-a service PAT changes who gets the credit, not whether a user can contribute.
+as one `agent_issue_failed` line per run. Setting `github.issue_token` does **not** make it valid,
+and it is worth being exact about why, because the mechanics point the other way: filing uses
+`issue_token` when it is set and the user's token otherwise, so *while the PAT is there*, filing
+works and the user's scope is never used. The floor is not what makes that deployment run — it is
+what makes **losing** the PAT visible. Rotate it, let it expire, or move it to another instance and
+the user tokens become the credential that files; scopeless ones cannot, so contribution stops while
+the service still answers `200`. The scope floor turns that into a startup error instead of a silent
+one. (A PAT does change who gets the credit — see below.)
 
 Every *empty* form is a different case and falls back to `public_repo`: an absent key, a valueless
 key, a quoted `""`, and an unset `${VAR}`. That last one is why "no scope" needs a word at all —

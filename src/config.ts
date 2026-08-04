@@ -149,11 +149,19 @@ function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void
   // only as one `agent_issue_failed` line in a run log — the deployment would look
   // healthy while the thing it exists to feed was dead.
   //
-  // `github.issue_token` does NOT rescue this configuration, which is why there is
-  // no pairing check here any more. A service PAT changes who gets the credit, not
-  // whether a user can contribute; a deployment that files everything under a bot
-  // account still needs its users able to file, because the PAT is an override for
-  // where issues land, not a substitute for the user's participation.
+  // `github.issue_token` does NOT rescue this configuration, and the rejection is
+  // unconditional — there is no pairing check here any more. Note what that means
+  // precisely, because the mechanics point the other way: both filing paths resolve
+  // `issue_token || ctx.githubToken`, so while the PAT is set, filing works and the
+  // user's scope is never used. The floor is not a functional requirement in that
+  // state; it is required so that leaving that state cannot be silent. Unset the PAT
+  // (rotated, expired, moved to another deployment) and every user token in the
+  // database is suddenly the credential that files — and a fleet of scopeless tokens
+  // cannot, so contribution stops with one `agent_issue_failed` line per run while
+  // the service keeps answering 200. Rejecting the scope at startup makes that
+  // transition impossible instead of quiet, at the cost of storing tokens with
+  // `public_repo` in a deployment that does not currently need it (§9.1 v1.2 weighs
+  // that trade the other way for the token store, which is why nothing is persisted).
   //
   // Checked after normalizeScope, which never produces "" from a valid config, so
   // reaching this means the operator wrote something that meant "no scope".

@@ -50,6 +50,19 @@ paragraphs, lists, tables with <caption>/<thead>/<th scope>, forms with
 text faithfully and do not invent content. If content is cut off at a page edge, note it in
 the "log" field.
 
+Three structures are easy to render as something that merely looks right, so be explicit:
+- FOOTNOTES: keep them structurally distinct from body text — never inline a footnote into the
+  paragraph that references it. Emit the in-text marker as a link
+  (<sup><a href="#fn-N" id="fnref-N">N</a></sup>) and the footnote body at the foot of its
+  section or the document, with a back-reference (<a href="#fnref-N">↩</a>). Preserve the
+  original numbering. If a marker's body is not on this page, say so in the "log" field.
+- QUOTATIONS: <blockquote> for a block quotation, <q> only for a short inline one. Attribute a
+  visible source with <cite>. Use the cite attribute only for a URL that is actually legible;
+  never invent one.
+- ORDERED LISTS: when the numbering does not begin at 1, set start on the <ol> so the numbers
+  match the source. Use <ul>/<ol>/<dl> for real lists, never dashes or manual numbering in
+  paragraphs.
+
 If — and only if — this page contains a content type that a DEDICATED specialist agent would
 handle clearly better than this general pass (something beyond the common types: paragraph,
 heading, list, table, form field, image, quote, caption, footnote), include a
@@ -232,19 +245,17 @@ async function mergeSpecialist(
 // two runs of the same library produce comparable log lines. Best-effort: this
 // exists to explain a miss, so it must never turn one into a failed run.
 //
-// Standard-type names ARE listed even though dispatchSpecialist declines them,
-// and they now come from STANDARD_AGENTS rather than from files on disk. The list
-// is there to make a near-miss readable, and the commonest near-miss is a plural
-// or variant of a standard type — a suggestion of "tables" never reaches the
-// decline branch (it is not in STANDARD_AGENTS) and resolves to no file, so it
-// lands here, where a list without "table" hides the whole explanation. That used
-// to work only incidentally, because `agents/table.md` happened to exist; the nine
-// standard agent files are gone (§7.4 v1.2, they were unreachable), so reading the
-// directory alone would now drop exactly the names that explain the commonest
-// miss. `page` and `feedback` are excluded because they are the pipeline's own
-// agents, not content types anything should route to.
+// `page` and `feedback` are excluded because they are the pipeline's own agents,
+// not content types anything should route to.
+//
+// Standard-type names are NOT in here, even though they are the commonest
+// near-miss. They are reported alongside, under `declined_types` (see
+// `unresolvedCandidates`), because the two answer different questions and merging
+// them makes the answer to the first one false: `candidates` reads as "what I could
+// have asked for", and a standard type is not that — it is declined by policy
+// before the file is ever looked up, and since §7.4 v1.2 there is no file either.
 function libraryAgentNames(ctx: PipelineContext): string[] {
-  const names = new Set<string>(STANDARD_AGENTS);
+  const names = new Set<string>();
   for (const dir of [ctx.paths.agentsDir, ctx.paths.tmpAgentsDir(ctx.sessionId)]) {
     let entries: string[];
     try {
@@ -260,6 +271,23 @@ function libraryAgentNames(ctx: PipelineContext): string[] {
     }
   }
   return [...names].sort();
+}
+
+// The two lists a `specialist_unresolved` line needs, kept apart on purpose.
+//
+// `candidates` is what WAS dispatchable — real files, so a near-miss against one of
+// them ("chart" for `chartDataAgent`) is readable as a near-miss rather than needing
+// a second run to investigate.
+//
+// `declined_types` is the other half of the explanation, and the commonest one: the
+// most frequent near-miss is a plural or variant of a standard type. A suggestion of
+// "tables" is not in STANDARD_AGENTS, so it never reaches the decline branch, and it
+// resolves to no file — so it lands in the unresolved branch, where omitting "table"
+// hides the whole reason. Naming these separately says what is true of them: had the
+// model written "table", it would have been declined, not dispatched. Reporting them
+// as `candidates` would claim the opposite.
+function unresolvedCandidates(ctx: PipelineContext): { candidates: string[]; declined_types: string[] } {
+  return { candidates: libraryAgentNames(ctx), declined_types: [...STANDARD_AGENTS].sort() };
 }
 
 // If a page flagged a content type that an EXISTING library agent handles, run
@@ -305,7 +333,7 @@ async function dispatchSpecialist(
       agent: suggestion.name,
       image: img.name,
       reason: "empty name",
-      candidates: libraryAgentNames(ctx),
+      ...unresolvedCandidates(ctx),
     });
     return { html: pageHtml, dispatched: false };
   }
@@ -325,7 +353,7 @@ async function dispatchSpecialist(
       agent: logical,
       image: img.name,
       reason: "no agent file of that name",
-      candidates: libraryAgentNames(ctx),
+      ...unresolvedCandidates(ctx),
     });
     return { html: pageHtml, dispatched: false };
   }

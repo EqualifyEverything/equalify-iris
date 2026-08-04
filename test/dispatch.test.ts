@@ -164,17 +164,23 @@ test("a resolvable non-standard name dispatches and merges", async () => {
   });
 });
 
-test("a miss names the standard agents among the candidates too", async () => {
+test("a miss reports what was dispatchable and what would have been declined, separately", async () => {
   await withTemp(async (dir) => {
     // "tables" is the commonest near-miss shape: a plural of a standard type. It is
     // not in STANDARD (so it is never declined) and resolves to no file, so it
-    // arrives here — and a candidate list that hid `table` would omit the one name
+    // arrives here — and a log line that omitted `table` would hide the one name
     // that explains the miss.
+    //
+    // The two lists stay apart because they answer different questions.
+    // `candidates` means "what you could have asked for", which is true only of real
+    // files; a standard type is declined by policy before the file is even looked up.
+    // Merging them would make the first claim false for most of the list.
     const { ctx, rec } = makeCtx(dir, "tables");
     const { suggestions } = await runExtraction(ctx);
     const miss = ev(rec, "specialist_unresolved")[0];
     assert.equal(miss?.data.agent, "tables");
-    assert.deepEqual(miss?.data.candidates, [...STANDARD, "chartDataAgent"].sort());
+    assert.deepEqual(miss?.data.candidates, ["chartDataAgent", "table"]);
+    assert.deepEqual(miss?.data.declined_types, [...STANDARD].sort());
     assert.equal(ranSpecialist(rec), false);
     // Unresolved IS reported for contribution: this is the path that proposes a new
     // agent for a type the library genuinely lacks.
@@ -182,23 +188,25 @@ test("a miss names the standard agents among the candidates too", async () => {
   });
 });
 
-test("standard types are named as candidates with no agent files on disk", async () => {
+test("the near-miss explanation survives with no standard agent files on disk", async () => {
   await withTemp(async (dir) => {
     // The real library ships no standard agent files — the nine were deleted as
-    // unreachable (§7.4 v1.2). The near-miss explanation above must therefore come
-    // from STANDARD, not from a directory listing: with `table.md` absent, a
-    // readdir-only candidate list drops `table` and the commonest miss ("tables")
-    // becomes unexplainable in exactly the deployment everyone runs.
+    // unreachable (§7.4 v1.2). So `declined_types` must come from STANDARD rather
+    // than from a directory listing: reading the directory, `table` appears nowhere
+    // and the commonest miss ("tables") becomes unexplainable in exactly the
+    // deployment everyone runs.
     //
-    // This is the same assertion as above with the file removed, which is the whole
-    // point: the other test writes `table.md` to prove the DECLINE is not
-    // file-driven, and this one removes it to prove the CANDIDATES are not either.
+    // Same scenario as above with `table.md` removed, which is the point of running
+    // both: there, the file's presence proves the DECLINE is not file-driven; here,
+    // its absence proves the EXPLANATION is not either. `candidates` correctly loses
+    // `table` — it is no longer a file — while `declined_types` keeps it.
     const { ctx, rec } = makeCtx(dir, "tables");
     rmSync(join(dir, "agents", "table.md"));
     await runExtraction(ctx);
-    const candidates = ev(rec, "specialist_unresolved")[0]?.data.candidates as string[];
-    assert.deepEqual(candidates, [...STANDARD, "chartDataAgent"].sort());
-    assert.ok(candidates.includes("table"), "the name that explains the miss is absent");
+    const data = ev(rec, "specialist_unresolved")[0]?.data as Record<string, string[]>;
+    assert.deepEqual(data.candidates, ["chartDataAgent"]);
+    assert.deepEqual(data.declined_types, [...STANDARD].sort());
+    assert.ok(data.declined_types.includes("table"), "the name that explains the miss is absent");
   });
 });
 

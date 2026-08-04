@@ -68,7 +68,10 @@ github:
   # order to be REJECTED at startup with an explanation: a token that can identify a
   # user but not file on their behalf breaks the contribution model, and GitHub's 403
   # would surface as one swallowed log line per run. `issue_token` above does not
-  # change that.
+  # change that — while a PAT is set it does the filing and the user's scope goes
+  # unused, but unset it (rotation, expiry, a copied config) and the user tokens
+  # become the credential that files. Scopeless ones cannot, and the service keeps
+  # answering 200 while contribution stops. The floor is what makes that loud.
   #
   # Every EMPTY form (key absent, valueless key, "", an unset ${VAR}) falls back to
   # public_repo rather than to nothing — a typo in a variable name must not be able to

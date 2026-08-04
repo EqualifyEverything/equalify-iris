@@ -30,6 +30,19 @@ paragraphs, lists, tables with <caption>/<thead>/<th scope>, forms with
 text faithfully and do not invent content. If content is cut off at a page edge, note it in
 the "log" field.
 
+Three structures are easy to render as something that merely looks right, so be explicit:
+- FOOTNOTES: keep them structurally distinct from body text — never inline a footnote into the
+  paragraph that references it. Emit the in-text marker as a link
+  (<sup><a href="#fn-N" id="fnref-N">N</a></sup>) and the footnote body at the foot of its
+  section or the document, with a back-reference (<a href="#fnref-N">↩</a>). Preserve the
+  original numbering. If a marker's body is not on this page, say so in the "log" field.
+- QUOTATIONS: <blockquote> for a block quotation, <q> only for a short inline one. Attribute a
+  visible source with <cite>. Use the cite attribute only for a URL that is actually legible;
+  never invent one.
+- ORDERED LISTS: when the numbering does not begin at 1, set start on the <ol> so the numbers
+  match the source. Use <ul>/<ol>/<dl> for real lists, never dashes or manual numbering in
+  paragraphs.
+
 If — and only if — this page contains a content type that a DEDICATED specialist agent would
 handle clearly better than this general pass (something beyond the common types: paragraph,
 heading, list, table, form field, image, quote, caption, footnote), include a

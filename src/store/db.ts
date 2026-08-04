@@ -144,6 +144,14 @@ export class Store {
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
+    // BEFORE any DDL or PRAGMA below. Refusing to adopt a file and then writing to
+    // it anyway is a contradiction, and the writes are not harmless: the `exec`
+    // block drops `idx_sessions_user`, creates its compound replacement, and
+    // switches the file to WAL. All three land on a database this then declines,
+    // which breaks the one recovery path the error message implies — rolling back to
+    // the previous build to export session history before deleting the file, whose
+    // `listSessions` pages on the index that is now gone.
+    this.rejectLegacyUsersTable(path);
     // busy_timeout is 0 on a fresh node:sqlite connection — "fail immediately",
     // not "wait for the lock". WAL still allows only one writer, so without a
     // timeout a second process's UPDATE against a held write lock throws
@@ -192,7 +200,6 @@ export class Store {
       -- migration step for databases created before the compound cursor.
       DROP INDEX IF EXISTS idx_sessions_user;
     `);
-    this.rejectLegacyUsersTable(path);
   }
 
   /**
@@ -203,8 +210,8 @@ export class Store {
    * pre-existing database is not a deployment to be upgraded — it is a leftover, and
    * the honest response is to say so rather than to quietly adopt it.
    *
-   * A check is still needed, because `CREATE TABLE IF NOT EXISTS` above is a no-op
-   * when the table already exists. Without this, a stray `data/` directory (a
+   * A check is still needed, because `CREATE TABLE IF NOT EXISTS` in the constructor
+   * is a no-op when the table already exists. Without this, a stray `data/` directory (a
    * development leftover, a restored backup, a volume mounted from an older image)
    * keeps the old table — `github_token TEXT NOT NULL` — while `upsertUser` no longer
    * supplies that column, and the two symptoms both point away from the cause:
@@ -224,6 +231,14 @@ export class Store {
    * instead of an assumption. It also keeps the fix in the operator's hands: deleting
    * the file is a decision about live credentials, and a silent rebuild-and-VACUUM
    * would be this service erasing data nobody asked it to touch.
+   *
+   * Which is why this runs FIRST, before the schema block and before `journal_mode`.
+   * "We will not adopt this file" and "we already modified this file" cannot both be
+   * true, and the modifications are the kind an operator would need undone: the DDL
+   * drops the index the older build's `listSessions` pages on, so a rollback to that
+   * build in order to export session history before deleting the file would meet a
+   * schema its queries no longer match. `PRAGMA table_info` on a table that does not
+   * exist returns no rows, so a fresh or current database falls straight through.
    */
   private rejectLegacyUsersTable(path: string): void {
     const cols = this.db.prepare(`PRAGMA table_info(users)`).all() as { name: string }[];
