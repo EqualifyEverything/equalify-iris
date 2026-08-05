@@ -100,6 +100,36 @@ test("whitespace and a .md extension around a standard type are still filtered",
   assert.deepEqual(rec.events, [], "a padded standard name produced a contribution event");
 });
 
+test("a case variant of a standard type is filtered too", async () => {
+  // The names in a suggestion are prose descriptions of content types, not filenames,
+  // so a model writing `"Table"` or `"FormField"` is entirely ordinary — `STANDARD`
+  // itself spells one entry `formField`. An exact-match filter lets every one of these
+  // through to a vision call and a public issue on the upstream repo, filed under the
+  // user's own GitHub identity, proposing a specialist for a type the page pass has
+  // always handled.
+  //
+  // Until §7.4 v1.2 this was invisible: `loadAgent` looked up `agents/Table.md`, which
+  // resolves on a case-insensitive volume (macOS, the usual dev machine), so the
+  // suggestion was skipped for the wrong reason and only a Linux deployment filed the
+  // issue. The nine files are gone now and nothing resolves anywhere.
+  const rec = await contribute(["Table", "FormField", "FOOTNOTE", " Heading.md "]);
+  assert.equal(rec.drafted, 0, "a case variant of a standard name was drafted");
+  assert.deepEqual(rec.events, [], "a case variant of a standard name produced a contribution event");
+});
+
+test("two spellings of one new type are drafted once, not twice", async () => {
+  // Deduplication is case-insensitive for the same reason the filter is: a run that
+  // suggested `"chartData"` on one page and `"chartdata"` on another would otherwise pay
+  // for two vision calls and file two issues proposing the same agent.
+  const rec = await contribute(["chartData", "chartdata", "CHARTDATA.md"]);
+  assert.equal(rec.drafted, 1, "one type spelled three ways was drafted more than once");
+  assert.deepEqual(
+    rec.events.map((e) => [e.type, e.data.agent]),
+    [["agent_issue_failed", "chartData"]],
+    "the issue was filed under a name other than the first spelling seen",
+  );
+});
+
 test("a genuinely new type is still drafted, so the filter is not just refusing everything", async () => {
   // The control. Without it, a filter that dropped every suggestion would pass both
   // tests above while silently ending contributions altogether — the failure §12

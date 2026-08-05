@@ -396,6 +396,52 @@ test("an ordinary document keeps the short prefix", () => {
   assert.match(body, /id="p9-y"/, "an id that looked like a prefix was rewritten");
 });
 
+test("two fragments sharing an order still get distinct prefixes", () => {
+  // `order` is an input, and it is the one input that can silently defeat the whole
+  // function: if the prefix were `p${order}` outright, two fragments numbered 1 would
+  // both become `p1-x` and the collision the rename exists to remove would survive it —
+  // with a report claiming `x` was namespaced. The current pipeline takes `order` from
+  // the image index so it does not happen today, but nothing in the type says so, and
+  // the failure is invisible (unique-looking report, duplicate ids in the document).
+  //
+  // Ownership is tracked per array position and the page LABEL is deduplicated, so the
+  // second page numbered 1 becomes `p1_2-`. The label still leads with the page number,
+  // because that is what the Reader and the `assembly_anchors` log cite.
+  const { body, anchors } = assembleBodyWithReport([frag(1, `<p id="x">one</p>`), frag(1, `<p id="x">two</p>`)]);
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `two pages with the same order shared a prefix: ${ids.join(", ")}`);
+  assert.deepEqual(anchors.collisions, ["x"], "the collision was not even detected");
+  assert.deepEqual(ids, ["p1-x", "p1_2-x"]);
+});
+
+test("a reference from a page sharing an order goes to its own copy, not the other's", () => {
+  // The deduplication has to line up with ownership, not just produce two strings. Both
+  // pages are numbered 1 and each owns an `fn-1` it references itself. If the reference
+  // resolved by `order` it would find the first page claiming 1 and both markers would
+  // land on the first note — the original wrong-note defect, arriving through the
+  // duplicate-order path rather than through concatenation.
+  const { body } = assembleBodyWithReport([frag(1, footnotePage(1)), frag(1, footnotePage(1))]);
+  const ids = new Set(idsOf(body));
+  for (const href of fragHrefs(body)) assert.ok(ids.has(href), `href="#${href}" resolves to nothing`);
+  assert.deepEqual(idsOf(body), ["p1-fnref-1", "p1-fn-1", "p1_2-fnref-1", "p1_2-fn-1"]);
+  assert.deepEqual(fragHrefs(body), ["p1-fn-1", "p1-fnref-1", "p1_2-fn-1", "p1_2-fnref-1"]);
+});
+
+test("the reservation covers a deduplicated label too", () => {
+  // The prefix reservation reads the page LABELS, not `p${order}`, so an id shaped like
+  // a deduplicated label is protected the same way `p1-x` is. Two pages numbered 1
+  // collide on `x` while page 2 owns a working `<label for="p1_2-x">` pair, which the
+  // second page-1's rename would otherwise land on.
+  const { body } = assembleBodyWithReport([
+    frag(1, `<p id="x">one</p>`),
+    frag(1, `<p id="x">two</p>`),
+    frag(2, `<label for="p1_2-x">Field</label><input id="p1_2-x">`),
+  ]);
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `the rename created a duplicate id: ${ids.join(", ")}`);
+  assert.match(body, /<label for="p1_2-x">Field<\/label><input id="p1_2-x">/, "page 2's own pair was disturbed");
+});
+
 test("a reference whose first owner was left as written stays bare, so it still resolves", () => {
   // The two mechanisms meeting. Page 1 owns `fn-1` and cannot be rewritten (the stray
   // `<tr>` would be foster-parented away), so it keeps the BARE id. Page 2 owns `fn-1`

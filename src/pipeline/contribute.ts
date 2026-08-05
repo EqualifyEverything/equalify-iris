@@ -20,6 +20,45 @@ export const STANDARD = new Set([
   "paragraph", "heading", "list", "table", "formField", "image", "quote", "caption", "footnote",
 ]);
 
+const STANDARD_LOWER = new Set([...STANDARD].map((s) => s.toLowerCase()));
+
+// The one way a suggestion's name is turned into a logical agent type, shared by both
+// places that decide what to do with one (this file's contribution filter and
+// extraction.ts's dispatch). It exists because the two used to normalize separately and
+// drifted: trim-then-strip versus strip-then-trim disagreed on `"table.md "`.
+//
+// Trim before stripping the extension, not after — the other order leaves `"table.md "`
+// as `"table.md"`, which is not a standard name, so a padded standard type gets past
+// the filter. Then trim again, for `" table .md"`.
+export function logicalType(name: string): string {
+  return name.trim().replace(/\.md$/, "").trim();
+}
+
+// Whether a suggestion names a content type the general page pass already covers.
+//
+// Case-insensitive, because the name is free text a model wrote and the consequence of
+// a miss is not symmetric. `STANDARD` spells one entry `formField`, so `"FormField"` or
+// `"Table"` — spellings a model will produce, since these are prose descriptions of
+// content types and not filenames — used to fall through to `draftAgent` and
+// `createAgentIssue`: a public issue on the upstream repo, filed under the USER's own
+// GitHub identity (§12), proposing a specialist for a type the page pass has always
+// handled. A false decline costs one specialist that the page pass covers anyway; a
+// false accept costs a real person's name on a spurious proposal.
+//
+// This used to be backstopped by `loadAgent` finding `agents/table.md` — on a
+// case-insensitive volume, `agents/Table.md` too. Those nine files are gone (§7.4 v1.2,
+// they were unreachable), so this predicate is the whole filter.
+// Takes a name ALREADY through `logicalType`, and does not re-normalize. An earlier
+// version called `logicalType` here as well, which was worse than redundant: both call
+// sites pass a normalized name, so `"table.md "` got its extension stripped twice and
+// arrived as `"table"` no matter what `logicalType` did — the double strip silently
+// covered for a broken normalizer, and a sabotage of `logicalType` went undetected here
+// while failing at the dispatch site. One normalization, at the call site, where it is
+// visible.
+export function isStandardType(logical: string): boolean {
+  return STANDARD_LOWER.has(logical.toLowerCase());
+}
+
 const DRAFT_SYSTEM = `Draft a NEW content-agent markdown file for a content type the general extractor flagged as
 needing a specialist. The file MUST contain these sections:
 
@@ -71,18 +110,16 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
 
   const seen = new Set<string>();
   for (const s of suggestions) {
-    // Trim first, then strip the extension — same order as dispatchSpecialist, and
-    // for the same reason: the other way round leaves `"table.md "` as `"table.md"`,
-    // which STANDARD does not contain, so a padded standard name gets past the
-    // filter. The `loadAgent` check below used to catch it anyway (it resolved to
-    // `agents/table.md`), which made this the cheap call site; the nine standard
-    // agent files are gone (§7.4 v1.2), so nothing resolves and the fallthrough now
-    // drafts and FILES an upstream issue proposing a `table` agent — for a type the
-    // page pass covers, under the user's own GitHub identity. Order matters here on
-    // its own merits, not just for consistency with the other call site.
-    const name = s.name.trim().replace(/\.md$/, "").trim();
-    if (!name || STANDARD.has(name) || seen.has(name)) continue;
-    seen.add(name);
+    // Normalized and tested for standardness the same way dispatchSpecialist does it —
+    // one shared pair of functions, because when the two normalized separately they
+    // disagreed and the disagreement was a filed issue. See `isStandardType` for why
+    // the fallthrough is expensive: a draft is a vision call, and the issue goes up
+    // under the user's own GitHub identity.
+    const name = logicalType(s.name);
+    if (!name || isStandardType(name) || seen.has(name.toLowerCase())) continue;
+    // Deduplicated case-insensitively too: `"chartData"` and `"chartdata"` in one run
+    // are two vision calls and two issues for the same proposal.
+    seen.add(name.toLowerCase());
     // Skip if the library (or this session) already has the agent.
     if (loadAgent(name, { agentsDir: ctx.paths.agentsDir, tmpAgentsDir: ctx.paths.tmpAgentsDir(ctx.sessionId) })) continue;
     // Drafting is a MODEL call and is kept out of the GitHub try below: a

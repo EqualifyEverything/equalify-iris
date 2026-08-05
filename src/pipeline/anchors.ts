@@ -157,11 +157,19 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
   // needs no parse for the rewrite either, so most documents stop here.
   const doms: (JSDOM | null)[] = [];
   const owned: Set<string>[] = [];
-  // Bare id -> the pages claiming it, in document order. The FIRST entry is what a
-  // browser resolves that bare id to in the un-namespaced document, which is what a
-  // reference from a non-owning page has to keep pointing at.
+  // Bare id -> the pages claiming it, in document order, identified by ARRAY INDEX
+  // and not by `order`. The FIRST entry is what a browser resolves that bare id to in
+  // the un-namespaced document, which is what a reference from a non-owning page has
+  // to keep pointing at.
+  //
+  // Index rather than `order` because index is unique by construction and `order` is
+  // an input: two fragments carrying the same `order` would be one page as far as
+  // ownership went, both get the same prefix, and their colliding ids stay collided —
+  // the one input that silently defeats this whole function. `order` is still what the
+  // prefix and the report SAY (see `labelFor`), since that is the page numbering
+  // everything else reports.
   const claims = new Map<string, number[]>();
-  for (const page of pages) {
+  for (const [i, page] of pages.entries()) {
     if (!/\sid\s*=/i.test(page.innerHtml)) {
       doms.push(null);
       owned.push(new Set());
@@ -171,7 +179,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     const ids = dom ? ownedIds(dom.window.document) : new Set<string>();
     doms.push(dom);
     owned.push(ids);
-    for (const id of ids) claims.set(id, [...(claims.get(id) ?? []), page.order]);
+    for (const id of ids) claims.set(id, [...(claims.get(id) ?? []), i]);
   }
 
   const collisions = [...claims].filter(([, owners]) => owners.length > 1).map(([id]) => id);
@@ -212,10 +220,24 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     // extra `-` per round terminates: `claims` is finite, each round is strictly longer,
     // and a document would have to contain a literal `p1--…-x` for every length below
     // the winner to push it far.
+    //
+    // The label a page contributes to its prefix is its `order` — the page numbering
+    // the Reader, the `assembly_anchors` log and `fragments.json` all use, so a
+    // delivered `p3-fn-1` names the page a human can find. But the prefix has to be
+    // unique per page or the rename is a no-op for the pages that share one, and
+    // `order` is caller-supplied, so a repeat is deduplicated here rather than trusted.
+    const labels: string[] = [];
+    const usedLabels = new Set<string>();
+    for (const page of pages) {
+      let label = `p${page.order}`;
+      for (let n = 2; usedLabels.has(label); n++) label = `p${page.order}_${n}`;
+      usedLabels.add(label);
+      labels.push(label);
+    }
     let sep = "-";
     const taken = [...claims.keys()];
-    while (taken.some((id) => pages.some((p) => id.startsWith(`p${p.order}${sep}`)))) sep += "-";
-    const prefixFor = (order: number) => `p${order}${sep}`;
+    while (taken.some((id) => labels.some((label) => id.startsWith(`${label}${sep}`)))) sep += "-";
+    const prefixFor = (index: number) => `${labels[index]}${sep}`;
 
     // Pass 2: which pages the join has to touch, and which of those it must not.
     //
@@ -230,7 +252,10 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     // with `wouldLoseTags`. Deciding the skips HERE, before anything is rewritten, is
     // what lets the rename targets below be computed once: a skipped page keeps its
     // bare ids, so what a reference to it should say depends on the skip decision.
-    const work: { index: number; order: number; dom: JSDOM; mine: Set<string>; refs: Set<string> }[] = [];
+    const work: { index: number; dom: JSDOM; mine: Set<string>; refs: Set<string> }[] = [];
+    // Indexes, not `order`s: `skipped_pages` is the report and reports in `order`, but
+    // the skip decision is consulted per page below and two pages can share an `order`.
+    const skipped = new Set<number>();
     for (const [i, page] of pages.entries()) {
       const mine = owned[i];
       const ownsCollision = [...mine].some((id) => colliding.has(id));
@@ -257,11 +282,11 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       for (const ref of refs) report.ambiguous.push({ page: page.order, ref });
       if (wouldLoseTags(page.innerHtml, document)) {
         report.skipped_pages.push(page.order);
+        skipped.add(i);
         continue;
       }
-      work.push({ index: i, order: page.order, dom, mine, refs });
+      work.push({ index: i, dom, mine, refs });
     }
-    const skipped = new Set(report.skipped_pages);
 
     // What each colliding id becomes, from the point of view of the page naming it.
     //
@@ -281,23 +306,23 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     // ran: arbitrary between the owners, but exactly as arbitrary as the behaviour it
     // replaces, and it keeps the association `for`/`headers`/`aria-*` depend on rather
     // than destroying it.
-    const resolve = (order: number, mine: Set<string>, token: string) => {
+    const resolve = (index: number, mine: Set<string>, token: string) => {
       if (!colliding.has(token)) return token; // includes `href="#"`, whose token is ""
-      const owner = mine.has(token) ? order : claims.get(token)![0];
+      const owner = mine.has(token) ? index : claims.get(token)![0];
       // A page left as written kept its bare ids, so a reference to it must stay bare.
       return skipped.has(owner) ? token : `${prefixFor(owner)}${token}`;
     };
 
     // Pass 3: rewrite. One loop, because by now every decision has been made.
-    for (const { index, order, dom, mine } of work) {
+    for (const { index, dom, mine } of work) {
       const { document } = dom.window;
       for (const el of document.querySelectorAll("[id]")) {
         const id = el.getAttribute("id");
-        if (id && colliding.has(id)) el.setAttribute("id", `${prefixFor(order)}${id}`);
+        if (id && colliding.has(id)) el.setAttribute("id", `${prefixFor(index)}${id}`);
       }
       for (const el of document.querySelectorAll("[href^='#']")) {
         const target = el.getAttribute("href")!.slice(1);
-        const next = resolve(order, mine, target);
+        const next = resolve(index, mine, target);
         if (next !== target) el.setAttribute("href", `#${next}`);
       }
       for (const attr of IDREF_ATTRS) {
@@ -309,7 +334,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
           const next = value
             .split(/\s+/)
             .filter((t) => t.length > 0)
-            .map((t) => resolve(order, mine, t))
+            .map((t) => resolve(index, mine, t))
             .join(" ");
           if (next !== value) el.setAttribute(attr, next);
         }

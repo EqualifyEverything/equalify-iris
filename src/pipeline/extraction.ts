@@ -7,7 +7,7 @@ import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } fr
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { verifyAgentOutput } from "./feedback.ts";
 import { examplesForPrompt } from "./memory.ts";
-import { STANDARD as STANDARD_AGENTS } from "./contribute.ts";
+import { STANDARD as STANDARD_AGENTS, isStandardType, logicalType } from "./contribute.ts";
 import type { Fragment } from "./fragment.ts";
 
 const PAGE_AGENT = "page";
@@ -304,20 +304,19 @@ async function dispatchSpecialist(
   pageHtml: string,
   suggestion: { name: string; reason: string },
 ): Promise<{ html: string; dispatched: boolean }> {
-  // Trim BEFORE stripping the extension, not after. The other order leaves
-  // `"table.md "` as `"table.md"`, which is not in STANDARD_AGENTS (that set holds
-  // `"table"`), so a whitespace-padded standard name skips the decline below and is
-  // looked up as a file instead. The library ships no `table.md` today, so it would
-  // now land in the unresolved branch rather than dispatching — but the decline is
-  // the correct outcome and the two differ observably (a `specialist_unresolved`
-  // line blaming the name, versus a `specialist_declined` line stating the policy),
-  // and any deployment that adds a `table.md` gets the original bug back: a standard
-  // specialist splicing its fragment over content the general page pass already
-  // rendered, which is the two-representations-of-one-thing duplication the page
-  // prompt forbids and this decline exists to prevent. That is also why the decline
-  // is keyed on STANDARD_AGENTS rather than on what is on disk. `" table "` declines
-  // correctly either way, which is what makes the trailing-`.md` case easy to miss.
-  const logical = suggestion.name.trim().replace(/\.md$/, "").trim();
+  // Normalized by the shared `logicalType`, and tested for standardness by the shared
+  // `isStandardType`, so this site and `runContribution` cannot disagree about what a
+  // name means. They did once: trim-then-strip versus strip-then-trim differed on
+  // `"table.md "`, which slipped past one filter and not the other.
+  //
+  // The decline below is keyed on the STANDARD list rather than on what is on disk,
+  // because a deployment that drops a `table.md` into `agents/` must not get the
+  // original bug back: a standard specialist splicing its fragment over content the
+  // general page pass already rendered, which is the two-representations-of-one-thing
+  // duplication the page prompt forbids. The two outcomes also differ observably — a
+  // `specialist_unresolved` line blaming the name versus a `specialist_declined` line
+  // stating the policy — and the decline is the true one.
+  const logical = logicalType(suggestion.name);
   // Every path out of here is logged, including the ones that do nothing.
   // `logical` is free text the model wrote, resolved to a file by name, so a
   // specialist silently fails to run whenever the model's wording and the
@@ -340,10 +339,16 @@ async function dispatchSpecialist(
     });
     return { html: pageHtml, dispatched: false };
   }
-  if (STANDARD_AGENTS.has(logical)) {
+  if (isStandardType(logical)) {
     // Not a failure: the general page pass already covers the standard types, so
     // this suggestion is correctly declined. Logged to keep the counts of
     // suggested / declined / dispatched / unresolved reconcilable from one run.
+    //
+    // Case-insensitive, so `"Table"` declines here rather than falling through to a
+    // file lookup — which on a case-insensitive volume would find `agents/table.md` if
+    // a deployment added one, and dispatch the very specialist this rule forbids. The
+    // name is logged as the model wrote it, since that is what a maintainer reading the
+    // log has to recognize.
     ctx.log.event("specialist_declined", { agent: logical, image: img.name, reason: "standard type" });
     return { html: pageHtml, dispatched: false };
   }

@@ -134,6 +134,27 @@ test("whitespace and a .md extension around a standard type are still declined",
   });
 });
 
+test("a case variant of a standard type is still declined", async () => {
+  await withTemp(async (dir) => {
+    // `STANDARD` spells one of its nine entries `formField`, so these names are prose
+    // descriptions of content types rather than filenames and a model writing "Table" is
+    // ordinary output, not sloppy output. An exact-match decline sends it on to the file
+    // lookup, where this fixture's `table.md` resolves on a case-insensitive volume and
+    // the standard specialist runs — splicing a second rendering of the table over the
+    // one the page pass already produced.
+    //
+    // The decline event is asserted rather than just the absence of a dispatch, because
+    // the two failure modes are platform-dependent (dispatch on macOS, an unresolved
+    // miss on Linux) while the correct outcome is the same everywhere.
+    const { ctx, rec } = makeCtx(dir, "Table");
+    const { fragments } = await runExtraction(ctx);
+    assert.deepEqual(ev(rec, "specialist_declined").map((e) => e.data.agent), ["Table"]);
+    assert.equal(ranSpecialist(rec), false, "a case variant of a standard name was dispatched");
+    assert.equal(ev(rec, "specialist_unresolved").length, 0, "the variant was treated as a near-miss, not policy");
+    assert.equal(fragments[0].innerHtml, "<p>page</p>", "the page output was rewritten");
+  });
+});
+
 test("an unusable name is logged as unresolved rather than silently dropped", async () => {
   await withTemp(async (dir) => {
     // A model that emits `"name": "  "` (or ".md") has still SUGGESTED something;

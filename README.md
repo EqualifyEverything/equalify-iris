@@ -321,6 +321,13 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
   as a new agent to build. That list was never a mirror of the library — it is the boundary of
   what one whole-page call handles — so it stays data rather than a directory listing, and
   dropping a `table.md` into `agents/` does not start splicing a second table over the page's own.
+
+  The names are matched case-insensitively, through one shared normalizer used by both the
+  dispatch decline and the contribution filter. A suggestion's name is prose a model wrote, not a
+  filename (`STANDARD` itself spells one entry `formField`), so `"Table"` is ordinary output.
+  While the nine files existed, `agents/Table.md` resolved on a case-insensitive volume and
+  absorbed it; with them gone, an exact-match filter would draft an agent and file a public issue
+  on the upstream repo — under the user's own GitHub identity — for a type the page pass covers.
 - **No provenance comments in the output (§7.4/§7.7).** The PRD specifies `@source` / `@agent` /
   `@fragment` wrappers preserved into the final HTML. Iris delivers clean content-only HTML
   instead: the comments leak pipeline internals into a document meant to be handed to end users,
@@ -393,6 +400,11 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   separator (`p1-` → `p1--` → …) until nothing collides with it, because `p1-total` and
   `p2-name` are what a paginated form emits and a blind prefix would manufacture the
   duplicate it exists to remove. An ordinary document keeps the short form.
+
+  The prefix is *labelled* with the page number, but it does not depend on that number being
+  unique: two fragments sharing an `order` would otherwise take the same prefix and stay
+  collided, with the log reporting the id as namespaced. Ownership is tracked per fragment
+  position and a repeated label becomes `p1_2-`.
 
   Every reference to a colliding id is repointed rather than abandoned. If the page owns the id it
   goes to the page's own copy (reference and target were written together by one agent looking at
