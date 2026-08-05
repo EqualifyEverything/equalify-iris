@@ -337,6 +337,7 @@ Four properties then make the rewrite safe rather than merely unique:
 
   Leaving that last case as written was the first answer and it was wrong, in exactly the direction the previous paragraph warns about. Take a form whose `<label for="q1">` is on page 1 while pages 2 *and* 3 each carry an `<input id="q1">`. Now `q1` collides, every owner is renamed, and page 1's label — which named the right control before assembly touched anything — points at an id no element has. The field loses its accessible name and axe reports `label` on a document a plain concatenation passed. First-owner is arbitrary between the owners, but it is *exactly as* arbitrary as the behaviour it replaces, and it keeps the association rather than destroying it. Every such reference is still named in the run log (`assembly_anchors`), because a reference disambiguated by document order rather than by the agent that wrote it deserves an eye.
 - **The prefix is the page's `order`, not its position in the arrival array**, so the ids in a delivered document are stable across runs of the same input and match the page numbers the Reader attributes issues to.
+- **The prefix is reserved against every id the document already claims**, or the rename manufactures the collision it exists to remove — silently, since the reference it breaks is one the page owns and is therefore not ambiguous. `p1-total`, `p2-name` and the like are what a paginated form or worksheet emits, and the page agent has no idea the assembler reserves that shape. Given `id="x"` on pages 1 and 2 plus a working `<label for="p1-x">`/`<input id="p1-x">` pair on page 2, prefixing turns page 1's `x` into `p1-x`, two elements own it, and page 2's label resolves to page 1's `<p>` — not a labelable element, so the field loses its accessible name. The separator is therefore grown (`p1-` → `p1--` → …) until no page claims anything starting with it; the ordinary document keeps the short form.
 - **A page whose markup would not survive a reserialization is left exactly as its agent wrote it**, with its collision intact. A `<tr>` outside a `<table>` — a plausible emission for a table continuing across a page break — is foster-parented by the HTML parser: the row and cell vanish and only their text survives, with no error raised. Keeping a duplicate id that lint will report is strictly better than silently dropping a table row from the deliverable. Such a page keeps its *bare* ids, so a reference resolved to it by document order stays bare too.
 
 The lint step is the backstop rather than the fix — the review loop re-lints after the Copy Editor has rewritten the whole body, and that is a model rewrite that can reintroduce a collision assembly had already resolved — and covering duplicate ids there takes three separate things, because axe splits the check across three rules by what the element *is*, each skipping the others' elements:
@@ -571,11 +572,15 @@ The token authenticates the caller (via GitHub's user endpoint) and opens PRs on
 
 The scope is therefore configurable per deployment (`github.oauth_scope`) with three intended settings:
 
-| Value | Rationale |
-| --- | --- |
-| `none` | The deployment sets `github.issue_token`, so the user's token only ever identifies them. Recommended for production. |
-| `public_repo` | Default. Public upstream; each user files their own issues. |
-| `repo` | Required only when the upstream repository is private. |
+> **Superseded by the v1.2 amendment below.** The first row is wrong now: `none` is
+> rejected at startup and there is no configuration in which it is valid. Read the v1.2
+> table before acting on this one.
+
+| Value | Rationale | Status in v1.2 |
+| --- | --- | --- |
+| `none` | The deployment sets `github.issue_token`, so the user's token only ever identifies them. Recommended for production. | **Withdrawn — rejected at startup.** |
+| `public_repo` | Default. Public upstream; each user files their own issues. | Still the default, and now the floor. |
+| `repo` | Required only when the upstream repository is private. | Unchanged. |
 
 `none` is sent as **no** `scope` parameter rather than as `scope=`, which is the form GitHub documents for requesting no scopes. It is a word rather than an empty string because `${VAR}` expansion turns an unset variable into `""` before the config is normalized, so an empty value cannot be distinguished from a missing one — every empty form falls back to `public_repo`, and only the literal `none` disables the scope. And narrowing what is requested does not narrow a grant already made: tokens issued under `repo` retain it until the user revokes the authorization, so a deployment that has been running with `repo` should treat existing rows as `repo`-scoped.
 
@@ -596,6 +601,12 @@ Three consequences worth stating explicitly:
 The last sentence of the v1.1 amendment still holds in spirit — a user who declines cannot use the service — but the thing being declined is now much smaller.
 
 #### How the token is stored (v1.1)
+
+> **Superseded in its entirety by the v1.2 amendment below.** The token is not stored at
+> all — the column is gone and startup refuses a database that still has it. Everything
+> in this subsection describes a state the service can no longer be in, including the
+> `oauth_scope: none` recommendation in its last bullet. It is kept because the reasoning
+> that led away from it is the reason the fix was so small.
 
 This specification never said, and the implementation's answer is worth stating rather than leaving to be discovered: **the user's access token is stored in plaintext**, in `users.github_token` in the service's SQLite database. It has to be replayable, because it *is* the credential used to call GitHub on the user's behalf, so it is not hashed.
 

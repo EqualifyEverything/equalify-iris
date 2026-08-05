@@ -389,6 +389,11 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   on the next page, or endnotes with continuous numbering — which resolved correctly before
   assembly touched them, so that trade is a no-target reference in place of a wrong-target one.
 
+  The prefix is reserved against every id the document already claims, growing its
+  separator (`p1-` → `p1--` → …) until nothing collides with it, because `p1-total` and
+  `p2-name` are what a paginated form emits and a blind prefix would manufacture the
+  duplicate it exists to remove. An ordinary document keeps the short form.
+
   Every reference to a colliding id is repointed rather than abandoned. If the page owns the id it
   goes to the page's own copy (reference and target were written together by one agent looking at
   one image). If it does not, the reference is ambiguous and goes to the first page in document

@@ -195,6 +195,28 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     const report: AnchorReport = { collisions: collisions.sort(), ambiguous: [], skipped_pages: [] };
     const out = pages.map((p) => p.innerHtml);
 
+    // The prefix has to be one no id in the document already uses, or the rename
+    // manufactures the very collision it exists to remove — and does it silently.
+    //
+    // `p1-total`, `p2-name` and the like are exactly what a paginated form or worksheet
+    // emits, and the page agent has no idea the assembler reserves that shape. Given
+    // `id="x"` on pages 1 and 2 plus a working `<label for="p1-x">`/`<input id="p1-x">`
+    // pair on page 2, page 1's `x` becomes `p1-x` and now two elements own it. Page 2's
+    // label, which named its own field correctly before assembly touched anything,
+    // resolves to page 1's `<p>` — not a labelable element, so the field loses its
+    // accessible name (1.3.1 / 4.1.2). Nothing in the report says so either: page 2
+    // owns `p1-x`, so the reference is not ambiguous, and the page was not skipped. The
+    // only symptom is a duplicate-id violation on a document that was clean before.
+    //
+    // So the separator is grown until no page claims anything starting with it. One
+    // extra `-` per round terminates: `claims` is finite, each round is strictly longer,
+    // and a document would have to contain a literal `p1--…-x` for every length below
+    // the winner to push it far.
+    let sep = "-";
+    const taken = [...claims.keys()];
+    while (taken.some((id) => pages.some((p) => id.startsWith(`p${p.order}${sep}`)))) sep += "-";
+    const prefixFor = (order: number) => `p${order}${sep}`;
+
     // Pass 2: which pages the join has to touch, and which of those it must not.
     //
     // A page has work to do if it owns a colliding id (its ids get prefixed) or if it
@@ -214,7 +236,14 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       const ownsCollision = [...mine].some((id) => colliding.has(id));
       let dom = doms[i];
       if (!dom) {
-        // No `id=` at all, so pass 1 skipped it. It can still hold a reference.
+        // No `id=` at all, so pass 1 skipped it. It can still hold a reference, so it is
+        // parsed unless the source contains nothing that could be one.
+        //
+        // Deliberately over-inclusive, like `tagCounts`: the attribute alternatives match
+        // ordinary prose too (`<p>see the headers for details</p>`), and the cost of a
+        // false positive is one parse whose reference set comes back empty. A false
+        // NEGATIVE would leave a page's references unrepointed, so the test is written to
+        // be impossible to fail in that direction.
         if (!/href\s*=\s*["']#|\s(?:for|form|list|headers|aria-)/i.test(page.innerHtml)) continue;
         dom = parseFragment(page.innerHtml);
         reportOnly.push(dom);
@@ -256,7 +285,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       if (!colliding.has(token)) return token; // includes `href="#"`, whose token is ""
       const owner = mine.has(token) ? order : claims.get(token)![0];
       // A page left as written kept its bare ids, so a reference to it must stay bare.
-      return skipped.has(owner) ? token : `p${owner}-${token}`;
+      return skipped.has(owner) ? token : `${prefixFor(owner)}${token}`;
     };
 
     // Pass 3: rewrite. One loop, because by now every decision has been made.
@@ -264,7 +293,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       const { document } = dom.window;
       for (const el of document.querySelectorAll("[id]")) {
         const id = el.getAttribute("id");
-        if (id && colliding.has(id)) el.setAttribute("id", `p${order}-${id}`);
+        if (id && colliding.has(id)) el.setAttribute("id", `${prefixFor(order)}${id}`);
       }
       for (const el of document.querySelectorAll("[href^='#']")) {
         const target = el.getAttribute("href")!.slice(1);

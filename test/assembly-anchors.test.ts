@@ -322,6 +322,80 @@ test("a page that would lose markup on reserialization is left as the agent wrot
   assert.match(body, /<p id="fn-1">A<\/p>/, "page 2 was rewritten despite the markup risk");
 });
 
+test("the prefix cannot land on an id a page already claims", async () => {
+  // The rename must not manufacture the collision it exists to remove. `p1-total`,
+  // `p2-name` and the like are what a paginated form or worksheet emits, and the page
+  // agent has no idea the assembler reserves that shape.
+  //
+  // Here `x` collides across pages 1 and 2, and page 2 also carries a working
+  // `<label for="p1-x">`/`<input id="p1-x">` pair. A prefix applied without checking
+  // turns page 1's `x` into `p1-x`, so two elements own it and page 2's label — correct
+  // before assembly touched anything — resolves to page 1's `<p>`, which is not
+  // labelable. The field loses its accessible name, and nothing in the report says so:
+  // page 2 owns `p1-x`, so the reference is not ambiguous, and no page was skipped.
+  const frags = [
+    frag(1, `<p id="x">page one x</p>`),
+    frag(2, `<p id="x">two</p><label for="p1-x">Field</label><input id="p1-x">`),
+  ];
+  const { body } = assembleBodyWithReport(frags);
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `the rename created a duplicate id: ${ids.join(", ")}`);
+  // The pre-existing pair is what it was, and still points at its own field.
+  assert.match(body, /<label for="p1-x">Field<\/label><input id="p1-x">/, "an id the page wrote itself was disturbed");
+  const lint = await runAxe(wrapDocument(body));
+  if (lint.error) return;
+  assert.equal(
+    lint.violations.map((v) => v.id).join(", "),
+    "",
+    "assembly introduced a duplicate id into a document that was clean",
+  );
+});
+
+test("the reservation covers every page's prefix, not just the first", () => {
+  // Same defect, one page over. `x` collides on pages 1 and 2, and it is page 2's own
+  // rename that lands on an id already in the document — page 3 wrote `p2-x` itself.
+  // A reservation that only checked `p1-` would pass every other test in this file
+  // while still shipping the duplicate, since each of those fixtures happens to put the
+  // occupied prefix on page 1.
+  const { body } = assembleBodyWithReport([
+    frag(1, `<p id="x">one</p>`),
+    frag(2, `<p id="x">two</p>`),
+    frag(3, `<label for="p2-x">Field</label><input id="p2-x">`),
+  ]);
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `the rename created a duplicate id: ${ids.join(", ")}`);
+  assert.match(body, /<label for="p2-x">Field<\/label><input id="p2-x">/, "page 3's own pair was disturbed");
+});
+
+test("a document that has taken the escalated prefix too is stepped past", () => {
+  // The separator grows until nothing claims it, so one occupied candidate is not
+  // enough to prove the loop rather than a single hard-coded fallback. Pages 1 and 2
+  // collide on `x` while page 2 also owns `p1-x` AND `p1--x`, so the first two
+  // candidates are both taken. Termination is by construction: `claims` is finite and
+  // each round is strictly longer.
+  const { body } = assembleBodyWithReport([
+    frag(1, `<p id="x">one</p>`),
+    frag(2, `<p id="x">two</p><p id="p1-x">a</p><p id="p1--x">b</p>`),
+  ]);
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `duplicate ids survived: ${ids.join(", ")}`);
+  assert.match(body, /id="p1---x"/, "the separator did not grow past both occupied candidates");
+});
+
+test("an ordinary document keeps the short prefix", () => {
+  // The escalation is driven by what the document claims, not applied defensively. A
+  // scan whose pages simply numbered their footnotes 1 gets `p1-fn-1`, so the ids in a
+  // delivered document stay legible and the pages 1 and 2 case is not penalised by an
+  // unrelated `p9-` id elsewhere.
+  const { body } = assembleBodyWithReport([
+    frag(1, `<p id="x">one</p><p id="p9-y">y</p>`),
+    frag(2, `<p id="x">two</p>`),
+  ]);
+  assert.match(body, /id="p1-x"/, "an id under a page number no page has took the short prefix away");
+  assert.match(body, /id="p2-x"/);
+  assert.match(body, /id="p9-y"/, "an id that looked like a prefix was rewritten");
+});
+
 test("a reference whose first owner was left as written stays bare, so it still resolves", () => {
   // The two mechanisms meeting. Page 1 owns `fn-1` and cannot be rewritten (the stray
   // `<tr>` would be foster-parented away), so it keeps the BARE id. Page 2 owns `fn-1`
