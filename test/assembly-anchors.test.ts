@@ -396,6 +396,50 @@ test("an ordinary document keeps the short prefix", () => {
   assert.match(body, /id="p9-y"/, "an id that looked like a prefix was rewritten");
 });
 
+test("a slash-separated id is still seen as a claim on that id", () => {
+  // Pass 1's sniff decides whether a page is parsed for the ids it OWNS, and a page it
+  // skips contributes nothing to the claims map — so a collision is not merely
+  // unrepointed but never detected, and the whole join no-ops. `<p/id="fn-1">` is an
+  // element with that id as far as the parser is concerned (`/` is the only character
+  // besides whitespace the tokenizer accepts before an attribute name), so requiring
+  // whitespace shipped two `id="fn-1"` with an empty report.
+  //
+  // Pass 2's reference sniff was fixed for exactly this and pass 1 was not, which is why
+  // both directions are pinned rather than just the one that was reported.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<p/id="fn-1">one</p>`),
+    frag(2, `<p id="fn-1">two</p><a href="#fn-1">r</a>`),
+  ]);
+  assert.deepEqual(anchors.collisions, ["fn-1"], "the collision was never detected");
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `duplicate ids survived assembly: ${ids.join(", ")}`);
+  // Page 2 owns its `fn-1`, so its own reference follows its own copy.
+  assert.match(body, /href="#p2-fn-1"/, "page 2's reference did not follow its own note");
+});
+
+test("a page the parser would REORDER is left as the agent wrote it", () => {
+  // The skip guard used to compare per-tag COUNTS, which cannot see a move. Foster
+  // parenting moves things: a `<p>` inside a `<table>` is hoisted out to before the
+  // table, so this page reserializes with the note ahead of the table it followed —
+  // every count identical, so the guard called it safe and rewrote it.
+  //
+  // A reading-order change is the worst thing this file could do, and it lands on
+  // precisely the shape that produces the collisions in the first place: content inside a
+  // table that continues across a page break. Skipping the page costs a duplicate id
+  // lint reports, which is the trade the header's rule demands.
+  const source = `<table><caption>Q1</caption><tbody><tr><td>1</td></tr></tbody><p id="fn-1">note after table</p></table><p>tail</p>`;
+  const { body, anchors } = assembleBodyWithReport([frag(1, source), frag(2, `<p id="fn-1">two</p>`)]);
+  assert.deepEqual(anchors.skipped_pages, [1], "the reordering page was rewritten instead of skipped");
+  assert.ok(body.startsWith(source), "page 1 was not delivered exactly as written");
+  // The note still follows the table, which is the property at stake.
+  assert.ok(
+    body.indexOf("<table>") < body.indexOf(`<p id="fn-1">note after table`),
+    "the note was hoisted ahead of the table it followed",
+  );
+  // And the skip is reported, so the surviving duplicate is not silent.
+  assert.deepEqual(anchors.collisions, ["fn-1"]);
+});
+
 test("an unquoted href on a page that owns no id is still repointed", () => {
   // The pre-parse sniff in pass 2 decides whether a page that owns no `id=` gets parsed
   // for its references at all, and a page it skips is never repointed. It used to

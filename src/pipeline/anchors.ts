@@ -63,7 +63,7 @@ export interface AnchorReport {
   // `unresolved`: they do resolve, just not on the page's own authority.
   ambiguous: { page: number; ref: string }[];
   // Pages left exactly as written because rewriting them would have lost markup (see
-  // `wouldLoseTags`). Either the page's own colliding ids keep their bare form — in
+  // `wouldChangeMarkup`). Either the page's own colliding ids keep their bare form — in
   // which case lint's `duplicate-id` / `duplicate-id-active` names the collision — or
   // an ambiguous reference on it keeps pointing at a bare id that other pages
   // renamed away, which is why the page is named here as well as in `ambiguous`.
@@ -72,45 +72,52 @@ export interface AnchorReport {
 
 const EMPTY_REPORT: AnchorReport = { collisions: [], ambiguous: [], skipped_pages: [] };
 
-// Names of the start tags in a fragment, counted from the raw source.
+// Names of the start tags in a fragment, in source order.
 //
-// This exists to catch losses that happen during PARSING, so it cannot be computed
-// from the parsed document. `<td>` outside a `<table>` — a plausible thing for a
-// page agent to emit for a table continuing across a page break — is foster-parented
-// out of existence: jsdom parses `<p id="a">A</p><tr><td>DATA</td></tr>` to
-// `<p id="a">A</p>DATA`, keeping the text and dropping the row and cell, and does not
-// throw. Reserializing that would silently discard structure the review loop and the
-// user should have seen.
+// This exists to catch what PARSING changes, so it cannot be computed from the parsed
+// document. `<td>` outside a `<table>` — a plausible thing for a page agent to emit for
+// a table continuing across a page break — is foster-parented out of existence: jsdom
+// parses `<p id="a">A</p><tr><td>DATA</td></tr>` to `<p id="a">A</p>DATA`, keeping the
+// text and dropping the row and cell, and does not throw. Reserializing that would
+// silently discard structure the review loop and the user should have seen.
 //
-// A regex over the source can over-count (a literal `<b` inside prose or an
-// attribute value), which fails in the safe direction: the page keeps its collision
-// and lint reports it, rather than the document quietly losing a table row.
-function tagCounts(html: string): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const m of html.matchAll(/<([a-zA-Z][^\s/>]*)/g)) {
-    const name = m[1].toLowerCase();
-    counts.set(name, (counts.get(name) ?? 0) + 1);
-  }
-  return counts;
+// A regex over the source can over-count (a literal `<b` inside prose or an attribute
+// value), which fails in the safe direction: the page keeps its collision and lint
+// reports it, rather than the document quietly losing a table row.
+function tagSequence(html: string): string[] {
+  return [...html.matchAll(/<([a-zA-Z][^\s/>]*)/g)].map((m) => m[1].toLowerCase());
 }
 
-function wouldLoseTags(source: string, document: Document): boolean {
-  const parsed = new Map<string, number>();
+// Would reserializing this page change its markup as anything more than a rewrite of the
+// ids? True means leave the page exactly as its agent wrote it.
+//
+// The source's tag sequence must appear IN ORDER in the parsed document — a subsequence,
+// not an equality and not a multiset. That form is what it is because of what each
+// relaxation has to allow and what it must still catch:
+//
+//   * Extra tags in the parsed output are fine, so a subsequence rather than equality. A
+//     well-formed `<table><tr>` gains the `<tbody>` the source omitted, and the adoption
+//     agency algorithm DUPLICATES a tag to repair misnesting — `<b>1<p>2</b>3</p>` becomes
+//     `<b>1</b><p><b>2</b>3</p>`, two `<b>` from one. An equality check abandons the
+//     rewrite on both, leaving exactly the collisions this exists to fix.
+//   * Order matters, which is why this is a sequence and not the tag COUNTS it used to be.
+//     Counting cannot see a MOVE, and foster parenting moves things: a `<p>` inside a
+//     `<table>` is hoisted out to before the table, so
+//     `<table>…<p id="fn-1">note</p></table><p>tail</p>` reserializes with the note ahead
+//     of the table it followed. Every count is identical, so the old guard called that page
+//     safe and rewrote it — a reading-order change, on the one property this codebase
+//     exists to protect, and on precisely the shape (content inside a table) that a table
+//     spanning a page break produces, which is also what produces these collisions.
+//
+// Skipping the page costs a duplicate id that lint reports. Rewriting it costs silently
+// reordered content. The header's rule applies: that is not a trade to make.
+function wouldChangeMarkup(source: string, document: Document): boolean {
+  const wanted = tagSequence(source);
+  let next = 0;
   for (const el of document.body.querySelectorAll("*")) {
-    const name = el.tagName.toLowerCase();
-    parsed.set(name, (parsed.get(name) ?? 0) + 1);
+    if (next < wanted.length && wanted[next] === el.tagName.toLowerCase()) next++;
   }
-  // Only a DECREASE matters, and only for tags the source actually wrote. Two kinds
-  // of increase are normal and neither loses anything: a tag the source omitted
-  // entirely (a well-formed `<table><tr>` gains a `<tbody>`, which is absent from
-  // `tagCounts` and so never compared), and a tag the parser DUPLICATES to repair
-  // misnesting — the adoption agency algorithm turns `<b>1<p>2</b>3</p>` into
-  // `<b>1</b><p><b>2</b>3</p>`, two `<b>` from one. An equality check would abandon
-  // the rewrite on both, leaving exactly the collisions this function exists to fix.
-  for (const [name, n] of tagCounts(source)) {
-    if ((parsed.get(name) ?? 0) < n) return true;
-  }
-  return false;
+  return next < wanted.length;
 }
 
 function ownedIds(document: Document): Set<string> {
@@ -180,7 +187,15 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
   // everything else reports.
   const claims = new Map<string, number[]>();
   for (const [i, page] of pages.entries()) {
-    if (!/\sid\s*=/i.test(page.innerHtml)) {
+    // `[\s/]`, for the same reason pass 2's reference sniff uses it: those two characters
+    // are the complete set the HTML tokenizer accepts before an attribute name, and jsdom
+    // parses `<p/id="fn-1">` as an element with that id. A false negative is worse here
+    // than there — the page contributes nothing to `claims`, so the collision is not
+    // merely unrepointed but never DETECTED, and the whole join no-ops on a document that
+    // ships two `id="fn-1"` with an empty report. Lint's `duplicate-id` still catches it,
+    // which is the difference between a reported defect and a silent one, but the fix
+    // belongs here.
+    if (!/[\s/]id\s*=/i.test(page.innerHtml)) {
       doms.push(null);
       owned.push(new Set());
       continue;
@@ -259,7 +274,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     // leave precisely those references dangling.
     //
     // A page needing work is parsed if pass 1 did not already do it, and then checked
-    // with `wouldLoseTags`. Deciding the skips HERE, before anything is rewritten, is
+    // with `wouldChangeMarkup`. Deciding the skips HERE, before anything is rewritten, is
     // what lets the rename targets below be computed once: a skipped page keeps its
     // bare ids, so what a reference to it should say depends on the skip decision.
     const work: { index: number; dom: JSDOM; mine: Set<string>; refs: Set<string> }[] = [];
@@ -274,7 +289,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
         // No `id=` at all, so pass 1 skipped it. It can still hold a reference, so it is
         // parsed unless the source contains nothing that could be one.
         //
-        // Deliberately over-inclusive, like `tagCounts`: the attribute alternatives match
+        // Deliberately over-inclusive, like `tagSequence`: the attribute alternatives match
         // ordinary prose too (`<p>see the headers for details</p>`), and the cost of a
         // false positive is one parse whose reference set comes back empty. A false
         // NEGATIVE would leave a page's references unrepointed, so the test has to be
@@ -306,7 +321,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       // Reported whether or not the page can be rewritten — an ambiguity a skipped page
       // has to live with is still one a human should see.
       for (const ref of refs) report.ambiguous.push({ page: page.order, ref });
-      if (wouldLoseTags(page.innerHtml, document)) {
+      if (wouldChangeMarkup(page.innerHtml, document)) {
         report.skipped_pages.push(page.order);
         skipped.add(i);
         continue;

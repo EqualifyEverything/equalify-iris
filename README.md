@@ -414,9 +414,13 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   1 and an `<input id="q1">` on pages 2 *and* 3, every owner is renamed and the label points at
   nothing, so the field loses its accessible name and axe reports `label` on a document a plain
   concatenation passed. Ambiguous references are named in the run log as `assembly_anchors`. A page
-  whose markup would not survive a reserialization (a `<tr>` outside a `<table>` gets
-  foster-parented into nothing) is left exactly as written, keeping its collision for lint to
-  report and its bare ids for anything resolved to it.
+  whose markup would not survive a reserialization is left exactly as written, keeping its collision
+  for lint to report and its bare ids for anything resolved to it. That covers foster parenting in
+  both directions: a `<tr>` outside a `<table>` is dropped to bare text, and a `<p>` inside one is
+  *hoisted out ahead of the table* — a reading-order change, worse than the duplicate id it would be
+  fixing. The guard compares the source's tag sequence against the parsed document as a
+  subsequence, since counts cannot see a move and equality would refuse every page where the parser
+  legitimately adds a tag.
 - **Copy Editor image payload (§7.9).** When every issue in a round is attributed to a page, the
   editor gets only those pages' images (logged per round as `editor_images`). Attaching every
   page's image on every round is the dominant per-round cost of the review loop — on a 25-page
