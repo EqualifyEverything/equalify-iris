@@ -396,6 +396,114 @@ test("an ordinary document keeps the short prefix", () => {
   assert.match(body, /id="p9-y"/, "an id that looked like a prefix was rewritten");
 });
 
+test("an unquoted href on a page that owns no id is still repointed", () => {
+  // The pre-parse sniff in pass 2 decides whether a page that owns no `id=` gets parsed
+  // for its references at all, and a page it skips is never repointed. It used to
+  // require a QUOTE after `href=`, so this page — whose only reference is
+  // `href=#fn-1` — was skipped while pages 1 and 3 were renamed out from under it.
+  //
+  // That is worse than the defect the file exists to fix. Before assembly the link
+  // resolved to page 1's note: the wrong note, but a target. After, it resolved to
+  // nothing — and silently, since the page lands in neither `ambiguous` nor
+  // `skipped_pages`, so no `assembly_anchors` line mentions it and axe has no rule for a
+  // broken same-document anchor.
+  //
+  // Unquoted attributes are valid HTML and a model writes them occasionally; the sniff
+  // is the only thing between that and a dangling reference.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<ol><li id="fn-1">Note one</li></ol>`),
+    frag(2, `<p>see <a href=#fn-1>1</a></p>`),
+    frag(3, `<ol><li id="fn-1">Note three</li></ol>`),
+  ]);
+  assert.deepEqual(anchors.collisions, ["fn-1"]);
+  assert.deepEqual(anchors.ambiguous, [{ page: 2, ref: "fn-1" }], "the page was skipped, so nothing reported it");
+  // Repointed at the first owner, which is where the bare reference went before.
+  assert.match(body, /href="#p1-fn-1"/, "the unquoted reference was left dangling");
+  assert.doesNotMatch(body, /href="?#fn-1/, "a bare reference to a renamed id survived");
+});
+
+test("a slash-separated reference attribute is not missed either", () => {
+  // The same sniff's other alternative required whitespace before the attribute name.
+  // `/` is the only other character the HTML tokenizer accepts there, and jsdom does
+  // parse `<label/for="q1">` — so a page whose sole reference is written that way would
+  // have been skipped for the same reason and with the same consequence, a `for` that
+  // names no element being a 1.3.1/4.1.2 failure rather than just a dead link.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<input id="q1" type="text">`),
+    frag(2, `<p>text</p><label/for="q1">Your name</label>`),
+    frag(3, `<input id="q1" type="text">`),
+  ]);
+  assert.deepEqual(anchors.ambiguous, [{ page: 2, ref: "q1" }]);
+  assert.match(body, /for="p1-q1"/, "the slash-separated `for` was left dangling");
+});
+
+test("no reference a page can write escapes the pre-parse sniff", async () => {
+  // The sniff is asserted to be unfailable in the false-negative direction, so the
+  // spellings are enumerated rather than sampled: quoted, unquoted and slash-separated
+  // `href`, an `aria-*` reference with each separator, and an unquoted `headers` token
+  // list. Every page owns no id of its own, so each depends entirely on the sniff to be
+  // parsed at all.
+  //
+  // One spelling per page, which is the part that makes this a test rather than a
+  // demonstration. A first version put three `href` forms on one page, and the quoted one
+  // pulled the page in and repointed all three — so the case survived a sabotage that
+  // reinstated the mandatory quote. A page is the unit the sniff decides on, so a spelling
+  // is only covered when it is the sole reason its page gets parsed.
+  //
+  // Checked by resolution rather than by matching prefixes: the property is that every
+  // href and every IDREF names something in the document, which is what a dangling
+  // reference violates and what a prefix assertion would only approximate.
+  const referrers = [
+    `<p>quoted <a href="#t">a</a></p>`,
+    `<p>unquoted <a href=#t>b</a></p>`,
+    `<p>slash <a/href="#t">c</a></p>`,
+    `<p aria-describedby="t">space-separated aria</p>`,
+    `<p/aria-labelledby="t">slash-separated aria</p>`,
+  ];
+  const target = `<ol><li id="t">Target</li></ol><table><tr><th id="h">H</th></tr></table>`;
+  const frags = [
+    frag(1, target),
+    ...referrers.map((html, i) => frag(i + 2, html)),
+    // `headers` last, so the pages above stay free of the cross-table `headers` shape.
+    frag(referrers.length + 2, `<table><tr><td headers=h>cell</td></tr></table>`),
+    frag(referrers.length + 3, `<ol><li id="t">Other target</li></ol><table><tr><th id="h">H2</th></tr></table>`),
+  ];
+  const { body, anchors } = assembleBodyWithReport(frags);
+  assert.deepEqual(anchors.collisions, ["h", "t"], "the fixture stopped producing collisions");
+  const ids = new Set(idsOf(body));
+  for (const href of fragHrefs(body)) assert.ok(ids.has(href), `href="#${href}" resolves to nothing`);
+  for (const attr of ["aria-describedby", "aria-labelledby", "headers"]) {
+    for (const m of body.matchAll(new RegExp(`\\s${attr}="([^"]+)"`, "g"))) {
+      for (const token of m[1].split(/\s+/)) assert.ok(ids.has(token), `${attr}="${token}" resolves to nothing`);
+    }
+  }
+  // Every referring page had to be repointed, so a sniff that dropped any one of them
+  // shows up here as a missing entry — naming the page, and so the spelling — rather than
+  // only as a dangling reference somewhere in the body.
+  assert.deepEqual(
+    anchors.ambiguous,
+    [
+      { page: 2, ref: "t" },
+      { page: 3, ref: "t" },
+      { page: 4, ref: "t" },
+      { page: 5, ref: "t" },
+      { page: 6, ref: "t" },
+      { page: 7, ref: "h" },
+    ],
+    "a page holding only references was not visited",
+  );
+  const lint = await runAxe(wrapDocument(body));
+  if (lint.error) return;
+  // `td-headers-attr` is excluded, and only it: axe requires a `headers` token to name a
+  // cell in the SAME table, so a `headers` reference spanning a page break violates that
+  // rule whatever assembly does — verified by running the same fixture through a plain
+  // concatenation with no namespacing at all, which reports it too. Excluding the rule by
+  // name rather than dropping the lint check keeps the rest of the gate on this document,
+  // including the `duplicate-id` family that would catch a prefix collision here.
+  const remaining = lint.violations.map((v) => v.id).filter((id) => id !== "td-headers-attr");
+  assert.equal(remaining.join(", "), "", "assembly left the document with a lint violation");
+});
+
 test("two fragments sharing an order still get distinct prefixes", () => {
   // `order` is an input, and it is the one input that can silently defeat the whole
   // function: if the prefix were `p${order}` outright, two fragments numbered 1 would

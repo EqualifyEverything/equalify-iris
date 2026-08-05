@@ -149,6 +149,16 @@ function referencesIn(document: Document): string[] {
 // document order; output is the rewritten inner HTML in the same order, plus what
 // was done. Pages are processed as a set because a collision is not visible from
 // inside any single one of them.
+//
+// **`pages` must already be in document order** — a precondition, not a preference.
+// `resolve` sends a reference the page does not own to the FIRST page in the array
+// claiming that id, on the grounds that this is what a browser resolved the bare
+// reference to before any renaming. Array order is what that reads, so an unsorted
+// input would silently repoint at a different owner than the pre-assembly document
+// used. `assembleBodyWithReport`, the only caller, sorts by `.order` first. Sorting
+// again here would be the wrong fix: `order` is caller-supplied and can repeat (see
+// the label deduplication below), so a sort would not establish the property, and it
+// would hide a caller that had lost track of its own ordering.
 export function namespaceAnchors(pages: { order: number; innerHtml: string }[]): {
   pages: string[];
   report: AnchorReport;
@@ -267,9 +277,25 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
         // Deliberately over-inclusive, like `tagCounts`: the attribute alternatives match
         // ordinary prose too (`<p>see the headers for details</p>`), and the cost of a
         // false positive is one parse whose reference set comes back empty. A false
-        // NEGATIVE would leave a page's references unrepointed, so the test is written to
-        // be impossible to fail in that direction.
-        if (!/href\s*=\s*["']#|\s(?:for|form|list|headers|aria-)/i.test(page.innerHtml)) continue;
+        // NEGATIVE would leave a page's references unrepointed, so the test has to be
+        // impossible to fail in that direction — and an earlier version was not.
+        //
+        // It required a QUOTE after `href=`, so a page owning no `id=` whose only
+        // cross-page reference was `href=#fn-1` was skipped here and never repointed,
+        // while the pages owning `fn-1` were renamed out from under it. That link had
+        // resolved to the wrong note before assembly; afterwards it resolved to nothing,
+        // and nothing said so — the page appears in neither `ambiguous` nor
+        // `skipped_pages`, so no `assembly_anchors` line names it, and axe has no rule for
+        // a broken same-document anchor. Exactly the trade this file's header rejects,
+        // reached through the one branch that claimed it could not be.
+        //
+        // So the quote is optional, and the attribute separator is `[\s/]` rather than
+        // `\s`: those two are the complete set the HTML tokenizer accepts before an
+        // attribute name, and jsdom does parse `<a/href="#fn-1">` and `<label/for="q1">`.
+        // Anything an attribute reference can be written as therefore matches, because a
+        // reference attribute cannot appear without one of those two characters in front
+        // of it.
+        if (!/href\s*=\s*["']?#|[\s/](?:for|form|list|headers|aria-)/i.test(page.innerHtml)) continue;
         dom = parseFragment(page.innerHtml);
         reportOnly.push(dom);
       }

@@ -127,6 +127,15 @@ Accessibility target is fixed at WCAG 2.2 AA for v1 and is not user-configurable
 
 ### 7.2 Image Analysis Agent (Triage)
 
+> **Not implemented, and its `# Agent Calls` list is withdrawn (v1.2).** Nothing writes
+> `notes/<image>.md`; `notes/` is not created and `paths.ts` has no `sessionNotes()`. A
+> session starts at `extraction`, and `triage` is not in the phase enum (§9.2 v1.1).
+> Read this section as a design for a phase that may be built (#30 Tier 4) rather than a
+> description of what runs — and read the `# Agent Calls` block below as naming agents
+> that **no longer exist**: `table.md`, `formField.md`, `paragraph.md` and `heading.md`
+> were deleted with the per-content-type fan-out (§7.4 v1.2). A triage phase built today
+> would name `page.md` plus any specialist the page warrants.
+
 **Purpose**: For each image, produce a notes file describing (a) the content types present and (b) which edges may contain fragments continuing onto adjacent images.
 
 **Required capability**: a vision-capable LLM with strong structured-output behavior. The specific model is determined by the deployment's configured provider for the `vision` capability (see §10.3). One image at a time.
@@ -168,6 +177,12 @@ order: 3
 
 ### 7.3 Orchestrator
 
+> **The dispatch model in this section is superseded (v1.2).** There are no notes files to
+> read (§7.2 above) and no list of per-content-type agents to dispatch: the orchestrator
+> calls `page.md` once per image, concurrently rather than sequentially, and merges a named
+> specialist only where one is warranted (§7.4 v1.2). Everything below about **agent version
+> pinning** is implemented as written and is not affected.
+
 **Purpose**: Read each notes file, dispatch the listed content agents against the relevant image, and collect their outputs.
 
 **Behavior**:
@@ -182,6 +197,15 @@ order: 3
 - A run can be replayed later by checking out the recorded SHAs and substituting the inline content for any session-built agents that were never merged upstream.
 
 ### 7.4 Content Agents
+
+> **"One agent per content type" is withdrawn, and the nine files this section names are
+> deleted — see the v1.2 amendment below**, which is the authority for this section. The
+> prose and the **Initial agent set** list that follow describe the withdrawn shape and are
+> kept because the amendment argues against them. The parts that survived and still govern
+> every agent: the input contract (full uncropped image, no baseline OCR pass), the output
+> contract (a fragment accessible by itself, plus a fragment log), and the accessibility
+> requirements. `agents/table.md` and `agents/formField.md` below are examples of the file
+> *format*, not of files that exist.
 
 **Purpose**: One agent per content type. Each agent is defined by its own markdown file (e.g., `agents/table.md`, `agents/formField.md`) containing its system prompt, the model capability it requires (e.g., `vision`, `structured_output`), and its input/output contract. The concrete model used at runtime is chosen by the deployment's provider configuration (§10.3), not by the agent file. An agent specifies what it needs; the deployment decides which provider serves that need.
 
@@ -211,7 +235,7 @@ These comments travel with the fragment through Reconciliation, Assembly, and th
 
 **Amended (v1.1): provenance comments are stripped from the delivered HTML.** An earlier revision of this section required them to survive into the final document. They do not. The deliverable is a document handed to end users — often published as-is — and pipeline internals do not belong in it: every consumer would have to strip them, and `@source` references to page images are meaningless outside the session that produced them. Provenance is retained where it is actually useful, in the run log (`GET /v1/sessions/{id}/logs`), which records the agent, its pinned git SHA, and the source image for every fragment. Anything the *user* must see stays in the document: the `@unresolved` block (§7.11) is emitted as before.
 
-**Initial agent set (v1)**:
+**Initial agent set (v1)** — *all nine deleted; see the v1.2 amendment immediately below*:
 - `paragraph.md`
 - `heading.md`
 - `list.md`
