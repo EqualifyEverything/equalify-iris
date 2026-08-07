@@ -72,6 +72,30 @@ export interface AnchorReport {
 
 const EMPTY_REPORT: AnchorReport = { collisions: [], ambiguous: [], skipped_pages: [] };
 
+// The characters that can sit immediately before an attribute name in source HTML, as a
+// regex character class. Both passes below use a cheap regex over the unparsed source to
+// decide whether a page is worth parsing at all, and each needs to be certain it cannot
+// return false when a real attribute is present.
+//
+// `\s` and `/` are the obvious ones. `"` and `'` are here because a quoted attribute
+// value can be followed IMMEDIATELY by the next attribute name: `<p class="note"id="x">`
+// is a parse error the spec recovers from by reconsuming in before-attribute-name state,
+// so jsdom reads a real `id` there. That one cost a round — the comment this replaces
+// asserted `[\s/]` was the complete set, having reasoned about it rather than measured.
+//
+// So it is measured. Enumerating every ASCII character in each position where a preceding
+// attribute can end, and recording the character sitting directly before every attribute
+// jsdom actually parsed, yields exactly eight: `\t \n \f \r space " ' /`. All eight are in
+// this class, and the enumeration lives in test/assembly-anchors.test.ts so a jsdom upgrade
+// that widens the set fails a test rather than going unnoticed.
+//
+// One shared constant rather than the same class written twice: the two sniffs have now
+// drifted apart twice, and both times the pass that was left behind was the bug.
+//
+// Exported only for that test. It is the class ITSELF that has to be measured, not a copy
+// of it written out again in the test file — a copy would keep passing while this drifted.
+export const ATTR_SEP = `[\\s/"']`;
+
 // Names of the start tags in a fragment, in source order.
 //
 // This exists to catch what PARSING changes, so it cannot be computed from the parsed
@@ -187,15 +211,13 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
   // everything else reports.
   const claims = new Map<string, number[]>();
   for (const [i, page] of pages.entries()) {
-    // `[\s/]`, for the same reason pass 2's reference sniff uses it: those two characters
-    // are the complete set the HTML tokenizer accepts before an attribute name, and jsdom
-    // parses `<p/id="fn-1">` as an element with that id. A false negative is worse here
-    // than there — the page contributes nothing to `claims`, so the collision is not
-    // merely unrepointed but never DETECTED, and the whole join no-ops on a document that
-    // ships two `id="fn-1"` with an empty report. Lint's `duplicate-id` still catches it,
-    // which is the difference between a reported defect and a silent one, but the fix
-    // belongs here.
-    if (!/[\s/]id\s*=/i.test(page.innerHtml)) {
+    // The same ATTR_SEP class pass 2's reference sniff uses. A false negative is
+    // worse here than there: the page contributes nothing to `claims`, so the collision is
+    // not merely unrepointed but never DETECTED, and the whole join no-ops on a document
+    // that ships two `id="fn-1"` with an empty report. Lint's `duplicate-id` still catches
+    // that one, which is the difference between a reported defect and a silent one, but
+    // the fix belongs here.
+    if (!new RegExp(`${ATTR_SEP}id\\s*=`, "i").test(page.innerHtml)) {
       doms.push(null);
       owned.push(new Set());
       continue;
@@ -304,13 +326,10 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
         // a broken same-document anchor. Exactly the trade this file's header rejects,
         // reached through the one branch that claimed it could not be.
         //
-        // So the quote is optional, and the attribute separator is `[\s/]` rather than
-        // `\s`: those two are the complete set the HTML tokenizer accepts before an
-        // attribute name, and jsdom does parse `<a/href="#fn-1">` and `<label/for="q1">`.
-        // Anything an attribute reference can be written as therefore matches, because a
-        // reference attribute cannot appear without one of those two characters in front
-        // of it.
-        if (!/href\s*=\s*["']?#|[\s/](?:for|form|list|headers|aria-)/i.test(page.innerHtml)) continue;
+        // So the quote after `href=` is optional, and the attribute separator is the
+        // ATTR_SEP class rather than `\s`. Both of those were bugs found one at a time,
+        // each one a page whose references went unrepointed.
+        if (!new RegExp(`href\\s*=\\s*["']?#|${ATTR_SEP}(?:for|form|list|headers|aria-)`, "i").test(page.innerHtml)) continue;
         dom = parseFragment(page.innerHtml);
         reportOnly.push(dom);
       }

@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
 import { assembleBody, assembleBodyWithReport, runAssembly, wrapDocument } from "../src/pipeline/assembly.ts";
 import { runAxe } from "../src/pipeline/lint.ts";
+import { ATTR_SEP } from "../src/pipeline/anchors.ts";
 import type { Fragment } from "../src/pipeline/fragment.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 
@@ -417,6 +419,60 @@ test("a slash-separated id is still seen as a claim on that id", () => {
   assert.match(body, /href="#p2-fn-1"/, "page 2's reference did not follow its own note");
 });
 
+test("a quote-adjacent id is still seen as a claim on that id", () => {
+  // The third and fourth separators, and the ones the header comment used to deny existed:
+  // `<p class="note"id="fn-1">` omits the space between two attributes, which is a parse
+  // error the spec recovers from by reading the next attribute name anyway. Both quote
+  // styles, since a page agent writing one writes the other.
+  //
+  // Same consequence as the slash case above and the reason it is a separate test: pass 1
+  // skipping the page means the id is never CLAIMED, so the collision is not detected, the
+  // report comes back empty, and two `id="fn-1"` ship. This is the third separator bug in
+  // this pair of sniffs, which is why they now share one ATTR_SEP constant.
+  for (const first of [`<p class="note"id="fn-1">one</p>`, `<p class='note'id='fn-1'>one</p>`]) {
+    const { body, anchors } = assembleBodyWithReport([
+      frag(1, first),
+      frag(2, `<p id="fn-1">two</p><a href="#fn-1">r</a>`),
+    ]);
+    assert.deepEqual(anchors.collisions, ["fn-1"], `collision not detected for ${first}`);
+    const ids = idsOf(body).concat([...body.matchAll(/\sid='([^']+)'/g)].map((m) => m[1]));
+    assert.equal(new Set(ids).size, ids.length, `duplicate ids survived assembly: ${ids.join(", ")}`);
+    assert.match(body, /href="#p2-fn-1"/, "page 2's reference did not follow its own note");
+  }
+});
+
+test("the separator class covers every character jsdom accepts before an attribute name", () => {
+  // ATTR_SEP is a claim about the parser, and the last two versions of that claim were
+  // wrong because they were reasoned about instead of measured. So this measures it, and
+  // will fail if a jsdom upgrade widens the set rather than letting the sniffs silently
+  // start missing attributes.
+  //
+  // Every way a preceding attribute can end, crossed with every gap that could follow it;
+  // for each source jsdom parses as carrying a real `id`, the character sitting directly
+  // before the `id` in the SOURCE is what the sniff's class has to match.
+  const prev = ["", `a="b"`, `a='b'`, `a=b`, "a", `a=""`, `a=''`, `a="b/"`, `data-x="1"`];
+  const gaps = ["", " ", "  ", "\t", "\n", "\r", "\f", "/", "//", " / ", "\t/"];
+  const seen = new Set<string>();
+  for (const p of prev) {
+    for (const g of gaps) {
+      const src = `<p ${p}${g}id="fn-1">t</p>`;
+      const el = new JSDOM(`<body>${src}`).window.document.body.querySelector("*");
+      if (el?.getAttribute("id") !== "fn-1") continue;
+      seen.add(src[src.lastIndexOf(`id="fn-1"`) - 1]);
+    }
+  }
+  // The eight the enumeration finds today. Asserted as a set equality, not a superset: a
+  // character DISAPPEARING would mean the probe stopped exercising a case it thinks it
+  // covers, which is how the false-negative fixtures above go stale.
+  assert.deepEqual([...seen].sort(), ["\t", "\n", "\f", "\r", " ", '"', "'", "/"].sort());
+  // The real constant, imported rather than restated: a copy of the class here would keep
+  // passing while the one the sniffs use drifted, which is the failure this pins.
+  const attrSep = new RegExp(ATTR_SEP);
+  for (const ch of seen) {
+    assert.ok(attrSep.test(ch), `ATTR_SEP does not match ${JSON.stringify(ch)}`);
+  }
+});
+
 test("a page the parser would REORDER is left as the agent wrote it", () => {
   // The skip guard used to compare per-tag COUNTS, which cannot see a move. Foster
   // parenting moves things: a `<p>` inside a `<table>` is hoisted out to before the
@@ -468,10 +524,9 @@ test("an unquoted href on a page that owns no id is still repointed", () => {
 
 test("a slash-separated reference attribute is not missed either", () => {
   // The same sniff's other alternative required whitespace before the attribute name.
-  // `/` is the only other character the HTML tokenizer accepts there, and jsdom does
-  // parse `<label/for="q1">` — so a page whose sole reference is written that way would
-  // have been skipped for the same reason and with the same consequence, a `for` that
-  // names no element being a 1.3.1/4.1.2 failure rather than just a dead link.
+  // jsdom parses `<label/for="q1">` — so a page whose sole reference is written that way
+  // was skipped for the same reason and with the same consequence, a `for` that names no
+  // element being a 1.3.1/4.1.2 failure rather than just a dead link.
   const { body, anchors } = assembleBodyWithReport([
     frag(1, `<input id="q1" type="text">`),
     frag(2, `<p>text</p><label/for="q1">Your name</label>`),
@@ -479,6 +534,28 @@ test("a slash-separated reference attribute is not missed either", () => {
   ]);
   assert.deepEqual(anchors.ambiguous, [{ page: 2, ref: "q1" }]);
   assert.match(body, /for="p1-q1"/, "the slash-separated `for` was left dangling");
+});
+
+test("a quote-adjacent reference attribute is not missed either", () => {
+  // `/` was not the last separator, and this is the case that says so. A quoted attribute
+  // value can be followed immediately by the next attribute name, so `<label class="l"for=
+  // "q1">` carries a real `for` — and the sniff skipped the page, leaving that `for`
+  // naming an id both owners had been renamed away from.
+  //
+  // Worse than the pass-1 direction because nothing reports it: page 2 appears in neither
+  // `ambiguous` nor `skipped_pages`, axe has no rule for a dangling `for` (the input still
+  // has an id, the label still has text), and `duplicate-id` no longer fires because the
+  // duplicate really was resolved. A working label association became a broken one and the
+  // document looked cleaner afterwards.
+  for (const label of [`<label class="l"for="q1">Your name</label>`, `<label class='l'for='q1'>Your name</label>`]) {
+    const { body, anchors } = assembleBodyWithReport([
+      frag(1, `<input id="q1" type="text">`),
+      frag(2, `<p>text</p>${label}`),
+      frag(3, `<input id="q1" type="text">`),
+    ]);
+    assert.deepEqual(anchors.ambiguous, [{ page: 2, ref: "q1" }], `page 2 was not visited for ${label}`);
+    assert.match(body, /for="p1-q1"/, `the quote-adjacent \`for\` was left dangling: ${label}`);
+  }
 });
 
 test("no reference a page can write escapes the pre-parse sniff", async () => {
@@ -503,6 +580,11 @@ test("no reference a page can write escapes the pre-parse sniff", async () => {
     `<p>slash <a/href="#t">c</a></p>`,
     `<p aria-describedby="t">space-separated aria</p>`,
     `<p/aria-labelledby="t">slash-separated aria</p>`,
+    // Quote-adjacent, the two spellings this test asserted coverage of before the code
+    // had it: a quoted attribute value can be followed immediately by the next attribute
+    // name, and the tokenizer recovers rather than giving up on the rest of the tag.
+    `<p class="note"aria-details="t">double-quote-adjacent aria</p>`,
+    `<p class='note'aria-controls='t'>single-quote-adjacent aria</p>`,
   ];
   const target = `<ol><li id="t">Target</li></ol><table><tr><th id="h">H</th></tr></table>`;
   const frags = [
@@ -516,7 +598,7 @@ test("no reference a page can write escapes the pre-parse sniff", async () => {
   assert.deepEqual(anchors.collisions, ["h", "t"], "the fixture stopped producing collisions");
   const ids = new Set(idsOf(body));
   for (const href of fragHrefs(body)) assert.ok(ids.has(href), `href="#${href}" resolves to nothing`);
-  for (const attr of ["aria-describedby", "aria-labelledby", "headers"]) {
+  for (const attr of ["aria-describedby", "aria-labelledby", "aria-details", "aria-controls", "headers"]) {
     for (const m of body.matchAll(new RegExp(`\\s${attr}="([^"]+)"`, "g"))) {
       for (const token of m[1].split(/\s+/)) assert.ok(ids.has(token), `${attr}="${token}" resolves to nothing`);
     }
@@ -532,7 +614,9 @@ test("no reference a page can write escapes the pre-parse sniff", async () => {
       { page: 4, ref: "t" },
       { page: 5, ref: "t" },
       { page: 6, ref: "t" },
-      { page: 7, ref: "h" },
+      { page: 7, ref: "t" },
+      { page: 8, ref: "t" },
+      { page: 9, ref: "h" },
     ],
     "a page holding only references was not visited",
   );
