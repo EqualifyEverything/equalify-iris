@@ -216,6 +216,81 @@ export interface RegressionResult {
   passed: boolean;
   failures: string[];
   meanCoverage: number | null; // mean content coverage of the candidate over fixtures
+  scores: FixtureScores; // per-fixture, for the paired comparison (see pairedMeans)
+}
+
+// What one prompt scored on each fixture, keyed by the fixture's image file (unique
+// within an agent's fixtures directory). `null` means "not measurable for this prompt
+// on this fixture" — either the fixture is unjudgeable at all (accepted text under
+// MIN_COVERAGE_WORDS) or it could not be read.
+//
+// Keyed rather than averaged because the eval gate is a PAIRED comparison: two means
+// are only comparable if they are taken over the same fixtures, and which fixtures a
+// prompt can be scored on is partly a property of that prompt (see pairedMeans).
+export type FixtureScores = Record<string, number | null>;
+
+/**
+ * Mean score for each prompt over the fixtures **both** could be scored on.
+ *
+ * This is the fix for the wave-through the unpaired version allowed. Scoring is not
+ * purely a property of the fixture: `fixtureScore` gives a prompt that produced NO
+ * output a 0 (a failure, not an absence of evidence), while a fixture whose accepted
+ * text is too short to judge abstains. Those two rules can land on the same fixture
+ * for different prompts, and then the two means were over different sets:
+ *
+ *   fixture A (unjudgeable): current flakes to no output -> 0. candidate produces
+ *                            something -> abstains, excluded.
+ *   fixture B (judgeable):   current 0.98, candidate 0.88 — a real 0.10 regression.
+ *
+ * Unpaired, current = (0 + 0.98)/2 = 0.49 and candidate = 0.88, so
+ * `0.88 < 0.49 - 0.02` is false, 0.88 clears MIN_CONTENT_COVERAGE, and the regression
+ * ships. One flake on the CURRENT prompt deflated the bar it was supposed to set.
+ *
+ * Pairing drops fixture A from both sides — the candidate has no score there, so
+ * there is nothing to compare — leaving current 0.98 vs candidate 0.88, which blocks.
+ * The mean now answers "over the fixtures where both prompts are measurable, is the
+ * candidate worse?", which is the only question the subtraction can honestly ask.
+ *
+ * What this deliberately does NOT do is treat the current prompt's flake as evidence
+ * against the candidate, or as evidence for it. A prompt that produces nothing is a
+ * problem, but it is a problem with the CURRENT library agent, and silently lowering
+ * the bar is the one response that hides both it and any regression behind it. It
+ * stays visible in the `eval_gate` log line's `unpaired` list instead.
+ *
+ * Both means can be null (no fixture is measurable on both sides), which the caller
+ * reads as "nothing to compare" and defers to the regression gate — not as a pass and
+ * not as a regression.
+ */
+export function pairedMeans(
+  current: FixtureScores,
+  candidate: FixtureScores,
+): { current: number | null; candidate: number | null; paired: string[]; unpaired: string[] } {
+  const paired: string[] = [];
+  const unpaired: string[] = [];
+  let currentSum = 0;
+  let candidateSum = 0;
+  // Union of both key sets: a fixture one side never even read is as unpaired as one
+  // it abstained on, and both belong in the log line.
+  for (const key of new Set([...Object.keys(current), ...Object.keys(candidate)])) {
+    const a = current[key];
+    const b = candidate[key];
+    if (typeof a === "number" && typeof b === "number") {
+      paired.push(key);
+      currentSum += a;
+      candidateSum += b;
+    } else {
+      unpaired.push(key);
+    }
+  }
+  paired.sort();
+  unpaired.sort();
+  const n = paired.length;
+  return {
+    current: n ? currentSum / n : null,
+    candidate: n ? candidateSum / n : null,
+    paired,
+    unpaired,
+  };
 }
 
 // How one fixture contributes to an agent's mean coverage. `null` means "abstain":
@@ -246,17 +321,17 @@ export interface RegressionResult {
 //
 // It is the one input where "abstain" is not purely a property of the fixture:
 // whether a prompt produced blocks is a property of THAT prompt, so a single fixture
-// can be scored 0 for one prompt and excluded for the other. One direction is
-// harmless — a silent CANDIDATE fails regressionGate outright, before the comparison.
-// The other is a KNOWN, pre-existing hole, not closed here: if the CURRENT prompt
-// flakes to no output on a fixture the candidate handles, the current side is
-// deflated and the bar drops. Worked example — one unjudgeable fixture the current
-// prompt flakes on plus one judgeable at 0.98: current = (0 + 0.98)/2 = 0.49, while
-// the candidate abstains on the short one and scores 0.88 on the judgeable one. Then
-// 0.88 < 0.49 - 0.02 is false and 0.88 clears MIN_CONTENT_COVERAGE, so a real 0.10
-// coverage regression passes both gates. Fixing it means distinguishing "this prompt
-// failed" from "this fixture cannot be judged" per side, which changes what the mean
-// means; it is not a scoring-rule question. No test covers this direction yet.
+// can be scored 0 for one prompt and excluded for the other. That asymmetry used to
+// make the comparison unsound in one direction — if the CURRENT prompt flaked to no
+// output on a fixture the candidate abstained on, the current mean was deflated and a
+// real regression cleared the bar.
+//
+// It is no longer this function's problem to solve, and that is the resolution: the
+// scoring rule here is right (nothing produced IS a failure on that fixture), and what
+// was wrong was averaging two sets of per-fixture scores that did not cover the same
+// fixtures. `pairedMeans` now compares only fixtures where BOTH prompts have a score,
+// so a per-prompt exclusion drops the fixture from both sides instead of moving the
+// bar. See `pairedMeans` for the worked example this used to wave through.
 function fixtureScore(coverage: number | null, blockCount: number): number | null {
   if (blockCount === 0) return 0;
   return coverage;
@@ -327,13 +402,13 @@ export async function regressionGate(
   updatedContent: string,
 ): Promise<RegressionResult> {
   const dir = ctx.paths.agentFixtures(agentFile);
-  if (!existsSync(dir)) return { passed: true, failures: [], meanCoverage: null };
+  if (!existsSync(dir)) return { passed: true, failures: [], meanCoverage: null, scores: {} };
   const caseFiles = readdirSync(dir)
     .filter((f) => f.endsWith(".json"))
     .sort()
     .reverse()
     .slice(0, MAX_GATE_FIXTURES);
-  if (caseFiles.length === 0) return { passed: true, failures: [], meanCoverage: null };
+  if (caseFiles.length === 0) return { passed: true, failures: [], meanCoverage: null, scores: {} };
 
   const file = agentFile.endsWith(".md") ? agentFile : `${agentFile}.md`;
   const updatedAgent: AgentSpec = {
@@ -347,6 +422,11 @@ export async function regressionGate(
 
   const failures: string[] = [];
   const coverages: number[] = [];
+  // Keyed by fixture as well as averaged: the eval gate compares this prompt against
+  // the current one fixture-by-fixture (see pairedMeans), which a mean alone cannot
+  // support. `meanCoverage` stays for the log line and for callers that only want a
+  // single number.
+  const scores: FixtureScores = {};
   for (const caseFile of caseFiles) {
     let c: FixtureCase;
     try {
@@ -362,7 +442,9 @@ export async function regressionGate(
       failures.push(`${c.image_file}: updated agent produced no output`);
       // fixtureScore's no-output rule, which never abstains — see its comment for
       // why producing nothing scores 0 rather than dropping out of the mean.
-      coverages.push(fixtureScore(null, 0) as number);
+      const zero = fixtureScore(null, 0) as number;
+      coverages.push(zero);
+      scores[c.image_file] = zero;
       continue;
     }
     // Content-preservation check: the updated agent must still reproduce the
@@ -372,6 +454,7 @@ export async function regressionGate(
     const candidateHtml = blocks.map((b) => b.html).join("\n\n");
     const coverage = contentCoverage(c.accepted_html, candidateHtml);
     const score = fixtureScore(coverage, blocks.length);
+    scores[c.image_file] = score;
     if (score !== null) coverages.push(score);
     if (coverage !== null && coverage < MIN_CONTENT_COVERAGE) {
       failures.push(`${c.image_file}: only ${(coverage * 100).toFixed(0)}% of the accepted content remained`);
@@ -384,20 +467,29 @@ export async function regressionGate(
   const passed = failures.length === 0;
   const meanCoverage = coverages.length ? coverages.reduce((a, b) => a + b, 0) / coverages.length : null;
   ctx.log.event("regression_gate", { agent: file, cases: caseFiles.length, passed, failures: failures.length, meanCoverage });
-  return { passed, failures, meanCoverage };
+  return { passed, failures, meanCoverage, scores };
 }
 
-// Mean content coverage of an agent's content across its regression fixtures,
-// reused as a lightweight eval set (#3). Returns null when there are no fixtures —
-// and also when no fixture was judgeable, since a mean over zero measurements is not
-// a score of zero. The caller compares this against regressionGate's meanCoverage,
-// so it scores each fixture with the shared `fixtureScore` rule; see the comment
-// there for why any divergence between the two makes the comparison meaningless.
-export async function evalAgent(ctx: PipelineContext, agentFile: string, content: string): Promise<number | null> {
+// Score an agent's content against each of its regression fixtures, and return both
+// the per-fixture scores and their mean — a lightweight eval set (#3).
+//
+// The per-fixture map is what the eval gate actually uses: the caller pairs it against
+// regressionGate's `scores` so the comparison is over fixtures BOTH prompts could be
+// scored on (see pairedMeans). The mean is retained for the log line and for callers
+// that want one number; it is null when no fixture was judgeable, since a mean over
+// zero measurements is not a score of zero.
+//
+// Both sides score with the shared `fixtureScore` rule; see the comment there for why
+// any divergence between the two makes the subtraction meaningless.
+export async function evalAgentScores(
+  ctx: PipelineContext,
+  agentFile: string,
+  content: string,
+): Promise<{ mean: number | null; scores: FixtureScores }> {
   const dir = ctx.paths.agentFixtures(agentFile);
-  if (!existsSync(dir)) return null;
+  if (!existsSync(dir)) return { mean: null, scores: {} };
   const caseFiles = readdirSync(dir).filter((f) => f.endsWith(".json")).sort().reverse().slice(0, MAX_GATE_FIXTURES);
-  if (caseFiles.length === 0) return null;
+  if (caseFiles.length === 0) return { mean: null, scores: {} };
   const file = agentFile.endsWith(".md") ? agentFile : `${agentFile}.md`;
   const agent: AgentSpec = {
     name: file.replace(/\.md$/, ""),
@@ -407,7 +499,8 @@ export async function evalAgent(ctx: PipelineContext, agentFile: string, content
     sha: null,
     sessionBuilt: false,
   };
-  const scores: number[] = [];
+  const measured: number[] = [];
+  const scores: FixtureScores = {};
   for (const caseFile of caseFiles) {
     let c: FixtureCase;
     try {
@@ -421,9 +514,18 @@ export async function evalAgent(ctx: PipelineContext, agentFile: string, content
     const blocks = await reRunAgentOnImage(ctx, agent, img);
     const cov = contentCoverage(c.accepted_html, blocks.map((b) => b.html).join("\n\n"));
     const score = fixtureScore(cov, blocks.length);
-    if (score !== null) scores.push(score);
+    scores[c.image_file] = score;
+    if (score !== null) measured.push(score);
   }
-  return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+  return {
+    mean: measured.length ? measured.reduce((a, b) => a + b, 0) / measured.length : null,
+    scores,
+  };
+}
+
+// The mean alone, for callers that do not need the paired comparison.
+export async function evalAgent(ctx: PipelineContext, agentFile: string, content: string): Promise<number | null> {
+  return (await evalAgentScores(ctx, agentFile, content)).mean;
 }
 
 // ---------------------------------------------------------------------------
@@ -491,25 +593,39 @@ export async function proposeAgentUpdatesFromFeedback(
     return [];
   }
 
-  // Eval gate (#3): the proposed prompt must hold-or-improve the agent's mean
-  // coverage over its fixtures versus the current prompt — not just pass the floor.
+  // Eval gate (#3): the proposed prompt must hold-or-improve the agent's coverage
+  // over its fixtures versus the current prompt — not just pass the floor.
   //
-  // Both means come from `fixtureScore`, so an UNJUDGEABLE fixture (the abstention
-  // that depends only on accepted_html) is absent from both sides and the subtraction
-  // below measures the prompts rather than the fixture mix. The one input that is not
-  // symmetric this way is a prompt producing no output at all; see `fixtureScore` for
-  // which direction of that is caught here and which remains open.
+  // PAIRED, per fixture. Both sides score with `fixtureScore`, but whether a given
+  // fixture HAS a score is partly a property of the prompt: one that produced no
+  // output scores 0, while a fixture too short to judge abstains. Averaging each side
+  // over whatever it happened to measure therefore compared two different fixture
+  // sets, and one flake on the CURRENT prompt could deflate the bar enough to let a
+  // real regression through (worked example on `pairedMeans`). Comparing only the
+  // fixtures both prompts could be scored on removes that: an exclusion drops the
+  // fixture from both means instead of moving the threshold.
   //
-  // Either side being null means there was nothing measurable to compare, which is
-  // not evidence of a regression — the update proceeds on the regression gate's
-  // verdict alone.
-  const currentScore = await evalAgent(ctx, target.file, target.content);
-  if (currentScore !== null && gate.meanCoverage !== null && gate.meanCoverage < currentScore - EVAL_REGRESSION_EPS) {
+  // Either mean being null means no fixture was measurable on both sides, which is not
+  // evidence of a regression — the update proceeds on the regression gate's verdict
+  // alone. `unpaired` is logged either way, because a fixture that only one prompt
+  // could be scored on is worth seeing: on the current side it usually means the
+  // library agent itself is flaking.
+  const current = await evalAgentScores(ctx, target.file, target.content);
+  const means = pairedMeans(current.scores, gate.scores);
+  ctx.log.event("eval_gate", {
+    agent: target.file,
+    current: means.current === null ? null : Number(means.current.toFixed(3)),
+    candidate: means.candidate === null ? null : Number(means.candidate.toFixed(3)),
+    paired: means.paired,
+    unpaired: means.unpaired,
+  });
+  if (means.current !== null && means.candidate !== null && means.candidate < means.current - EVAL_REGRESSION_EPS) {
     ctx.log.event("agent_update_blocked", {
       agent: target.file,
       reason: "eval_regression",
-      current: Number(currentScore.toFixed(3)),
-      candidate: Number(gate.meanCoverage.toFixed(3)),
+      current: Number(means.current.toFixed(3)),
+      candidate: Number(means.candidate.toFixed(3)),
+      paired: means.paired,
     });
     return [];
   }
@@ -540,9 +656,11 @@ export async function proposeAgentUpdatesFromFeedback(
   ctx.log.event("agent_updates_proposed", { agents: [proposal.agent_name], count: 1 });
 
   // Surface the proposal where maintainers act on it: file a GitHub issue (the
-  // contribution model uses issues, not close-time PRs). Attributed to the
-  // logged-in user unless a service token override is configured. No-op without a
-  // token, so local runs still keep the proposal in agent-updates.md.
+  // contribution model uses issues, not close-time PRs). This is the path that makes
+  // a user's feedback give back to the shared library — filed under their own GitHub
+  // identity, which is why authenticating with GitHub is required (PRD §12).
+  // `github.issue_token` overrides the attribution to a bot account. No-op without
+  // any token, so local runs still keep the proposal in agent-updates.md.
   const usingServiceToken = Boolean(ctx.cfg.github.issue_token);
   const token = ctx.cfg.github.issue_token || ctx.githubToken;
   if (token) {

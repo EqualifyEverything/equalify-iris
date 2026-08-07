@@ -9,13 +9,17 @@ import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 
 // Issue filing fails softly on purpose — a contribution is a side effect, and a
-// GitHub outage must not fail a document the user already paid for. But that means
-// a scope misconfiguration lands as a single log line, several steps from its
-// cause: the scope was decided at consent time, by a config key, possibly by a
-// previous operator. `loadConfig` rejects the one combination it can see
-// (`oauth_scope: none` with no `issue_token`); the two it cannot are a PRIVATE
-// upstream under the `public_repo` default, and a token issued before the scope
-// was narrowed. For those, the log line has to carry the diagnosis.
+// GitHub outage must not fail a document the user already paid for. But filing is
+// also the point of the design (PRD §12: every session gives back under the user's
+// own identity), so a permissions failure means the deployment is silently not
+// contributing while looking healthy — and it lands as a single log line, several
+// steps from its cause: the scope was decided at consent time, by a config key,
+// possibly by a previous operator.
+//
+// `loadConfig` rejects the only scope problem visible from config alone (a scopeless
+// `oauth_scope`). The two it cannot see are a PRIVATE upstream under the
+// `public_repo` default, and a token issued before the scope was narrowed. For those,
+// the log line has to carry the diagnosis.
 //
 // A hint that fires on the wrong failure is worse than no hint, because an
 // operator reading it mid-incident acts on it. Three ways this one could: a
@@ -146,19 +150,14 @@ test("a private upstream is diagnosed on its 404, which is how GitHub reports it
 });
 
 test("a 404 under a service token still points at the PAT", async () => {
-  const data = await contribute("", { status: 404, body: "Not Found" }, { issueToken: "ghp_service" });
+  // A real scope, because there is no other kind: `oauth_scope` reaches this code
+  // only through a config loadConfig accepted, and it rejects a scopeless one. The
+  // scope is nonetheless irrelevant to the outcome here, which is the point.
+  const data = await contribute("public_repo", { status: 404, body: "Not Found" }, { issueToken: "ghp_service" });
   const hint = String(data.hint ?? "");
   assert.match(hint, /issue_token/, "did not name the credential that actually failed");
   assert.match(hint, /404/);
   assert.doesNotMatch(hint, /oauth_scope is "/, "pointed at oauth_scope for a service-token failure");
-});
-
-test("a scopeless deployment reports `none` rather than an empty string", async () => {
-  // `oauth_scope` is "" internally — the normalized form of `none`. Interpolating
-  // it raw would print `github.oauth_scope is ""`, which reads as unset rather
-  // than as the deliberate setting the operator wrote.
-  const data = await contribute("", { status: 403, body: "Resource not accessible" });
-  assert.match(String(data.hint), /is "none"/, "the hint printed an empty scope instead of `none`");
 });
 
 test("a non-permissions failure gets no scope hint", async () => {
@@ -206,11 +205,10 @@ test("a rate-limit 403 gets no scope hint", async () => {
 test("a service-token 403 blames the PAT, not oauth_scope", async () => {
   // With `issue_token` set, the failing credential is a service PAT whose scopes
   // live on github.com. `oauth_scope` governs only tokens issued to users, so
-  // naming it here would send an operator to widen the user grant this service
-  // exists to keep narrow — to fix a failure widening it cannot touch. And this is
-  // the shape the README recommends for production (`issue_token` + `none`), so it
-  // is the most likely 403 an operator will ever read.
-  const data = await contribute("", { status: 403, body: "Resource not accessible by integration" }, {
+  // naming it here would send an operator to change a key that cannot affect this
+  // failure — and `oauth_scope` is exactly the key they must not lower, since the
+  // user's own token is what carries their contribution.
+  const data = await contribute("public_repo", { status: 403, body: "Resource not accessible by integration" }, {
     issueToken: "ghp_service",
   });
   const hint = String(data.hint ?? "");

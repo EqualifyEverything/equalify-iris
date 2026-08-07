@@ -7,7 +7,7 @@ import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } fr
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { verifyAgentOutput } from "./feedback.ts";
 import { examplesForPrompt } from "./memory.ts";
-import { STANDARD as STANDARD_AGENTS } from "./contribute.ts";
+import { STANDARD as STANDARD_AGENTS, isStandardType, logicalType } from "./contribute.ts";
 import type { Fragment } from "./fragment.ts";
 
 const PAGE_AGENT = "page";
@@ -15,8 +15,15 @@ const PAGE_AGENT = "page";
 // Single coherent extraction: one vision call converts the WHOLE page into one
 // accessible-HTML fragment. This replaces fanning the page out to many
 // content agents that each re-rendered it (which produced duplicated output for
-// nested structures like forms). The specialist agents in agents/ remain in the
-// repo for the contribution/refinement story; this is the primary path.
+// nested structures like forms).
+//
+// The nine standard content agents that fan-out used to call are no longer in the
+// repo (§7.4 v1.2). They were not merely unused: `dispatchSpecialist` declines every
+// name in STANDARD_AGENTS below before `loadAgent` is reached, only `page.md` is
+// ever trained, and `runContribution` filters the same names — so no run could
+// reach them by any path. What survives is the part that pays for itself:
+// specialists for content a whole-page pass genuinely handles worse (see
+// `chartDataAgent.md`), dispatched by name and merged in.
 //
 // The prompt now lives in agents/page.md so the page agent is a first-class,
 // loadable, trainable, contributable agent (verified at build time, trained from
@@ -42,6 +49,22 @@ paragraphs, lists, tables with <caption>/<thead>/<th scope>, forms with
 <label>/<fieldset>/<legend>, figures with <figcaption>, footnotes, etc. Transcribe visible
 text faithfully and do not invent content. If content is cut off at a page edge, note it in
 the "log" field.
+
+Three structures are easy to render as something that merely looks right, so be explicit:
+- FOOTNOTES: keep them structurally distinct from body text — never inline a footnote into the
+  paragraph that references it. Emit the in-text marker as a link
+  (<sup><a href="#fn-N" id="fnref-N">N</a></sup>) and the footnote body at the foot of its
+  section or the document, with a back-reference (<a href="#fnref-N">↩</a>). Preserve the
+  original numbering: use the number the page shows, even if another page also starts at 1.
+  Ids only have to be unique within YOUR page — where two pages reuse one, they are made
+  unique across the document when the pages are joined. A marker whose body is on a later
+  page (endnotes) should still link to it, and should be noted in the "log" field.
+- QUOTATIONS: <blockquote> for a block quotation, <q> only for a short inline one. Attribute a
+  visible source with <cite>. Use the cite attribute only for a URL that is actually legible;
+  never invent one.
+- ORDERED LISTS: when the numbering does not begin at 1, set start on the <ol> so the numbers
+  match the source. Use <ul>/<ol>/<dl> for real lists, never dashes or manual numbering in
+  paragraphs.
 
 If — and only if — this page contains a content type that a DEDICATED specialist agent would
 handle clearly better than this general pass (something beyond the common types: paragraph,
@@ -225,13 +248,15 @@ async function mergeSpecialist(
 // two runs of the same library produce comparable log lines. Best-effort: this
 // exists to explain a miss, so it must never turn one into a failed run.
 //
-// Standard-type names ARE listed even though dispatchSpecialist declines them.
-// The list is there to make a near-miss readable, and the commonest near-miss is a
-// plural or variant of a standard type — a suggestion of "tables" never reaches
-// the decline branch (it is not in STANDARD_AGENTS) and does not resolve to a
-// file, so it lands here, where a list without "table" hides the whole
-// explanation. `page` and `feedback` are excluded because they are the pipeline's
-// own agents, not content types anything should route to.
+// `page` and `feedback` are excluded because they are the pipeline's own agents,
+// not content types anything should route to.
+//
+// Standard-type names are NOT in here, even though they are the commonest
+// near-miss. They are reported alongside, under `declined_types` (see
+// `unresolvedCandidates`), because the two answer different questions and merging
+// them makes the answer to the first one false: `candidates` reads as "what I could
+// have asked for", and a standard type is not that — it is declined by policy
+// before the file is ever looked up, and since §7.4 v1.2 there is no file either.
 function libraryAgentNames(ctx: PipelineContext): string[] {
   const names = new Set<string>();
   for (const dir of [ctx.paths.agentsDir, ctx.paths.tmpAgentsDir(ctx.sessionId)]) {
@@ -251,6 +276,23 @@ function libraryAgentNames(ctx: PipelineContext): string[] {
   return [...names].sort();
 }
 
+// The two lists a `specialist_unresolved` line needs, kept apart on purpose.
+//
+// `candidates` is what WAS dispatchable — real files, so a near-miss against one of
+// them ("chart" for `chartDataAgent`) is readable as a near-miss rather than needing
+// a second run to investigate.
+//
+// `declined_types` is the other half of the explanation, and the commonest one: the
+// most frequent near-miss is a plural or variant of a standard type. A suggestion of
+// "tables" is not in STANDARD_AGENTS, so it never reaches the decline branch, and it
+// resolves to no file — so it lands in the unresolved branch, where omitting "table"
+// hides the whole reason. Naming these separately says what is true of them: had the
+// model written "table", it would have been declined, not dispatched. Reporting them
+// as `candidates` would claim the opposite.
+function unresolvedCandidates(ctx: PipelineContext): { candidates: string[]; declined_types: string[] } {
+  return { candidates: libraryAgentNames(ctx), declined_types: [...STANDARD_AGENTS].sort() };
+}
+
 // If a page flagged a content type that an EXISTING library agent handles, run
 // that specialist on the page and merge its higher-fidelity fragment into the
 // page output. Non-blocking: any failure leaves the page output unchanged.
@@ -262,16 +304,19 @@ async function dispatchSpecialist(
   pageHtml: string,
   suggestion: { name: string; reason: string },
 ): Promise<{ html: string; dispatched: boolean }> {
-  // Trim BEFORE stripping the extension, not after. The other order leaves
-  // `"table.md "` as `"table.md"`, which is not in STANDARD_AGENTS (that set
-  // holds `"table"`) but which loadAgent resolves to `agents/table.md` — so a
-  // whitespace-padded standard name skips the decline below and dispatches a
-  // standard specialist, splicing its fragment over content the general page pass
-  // already rendered. That is the two-representations-of-one-thing duplication the
-  // page prompt forbids and this decline exists to prevent. `" table "` declines
-  // correctly either way, which is what makes the trailing-`.md` case easy to
-  // miss.
-  const logical = suggestion.name.trim().replace(/\.md$/, "").trim();
+  // Normalized by the shared `logicalType`, and tested for standardness by the shared
+  // `isStandardType`, so this site and `runContribution` cannot disagree about what a
+  // name means. They did once: trim-then-strip versus strip-then-trim differed on
+  // `"table.md "`, which slipped past one filter and not the other.
+  //
+  // The decline below is keyed on the STANDARD list rather than on what is on disk,
+  // because a deployment that drops a `table.md` into `agents/` must not get the
+  // original bug back: a standard specialist splicing its fragment over content the
+  // general page pass already rendered, which is the two-representations-of-one-thing
+  // duplication the page prompt forbids. The two outcomes also differ observably — a
+  // `specialist_unresolved` line blaming the name versus a `specialist_declined` line
+  // stating the policy — and the decline is the true one.
+  const logical = logicalType(suggestion.name);
   // Every path out of here is logged, including the ones that do nothing.
   // `logical` is free text the model wrote, resolved to a file by name, so a
   // specialist silently fails to run whenever the model's wording and the
@@ -290,14 +335,20 @@ async function dispatchSpecialist(
       agent: suggestion.name,
       image: img.name,
       reason: "empty name",
-      candidates: libraryAgentNames(ctx),
+      ...unresolvedCandidates(ctx),
     });
     return { html: pageHtml, dispatched: false };
   }
-  if (STANDARD_AGENTS.has(logical)) {
+  if (isStandardType(logical)) {
     // Not a failure: the general page pass already covers the standard types, so
     // this suggestion is correctly declined. Logged to keep the counts of
     // suggested / declined / dispatched / unresolved reconcilable from one run.
+    //
+    // Case-insensitive, so `"Table"` declines here rather than falling through to a
+    // file lookup — which on a case-insensitive volume would find `agents/table.md` if
+    // a deployment added one, and dispatch the very specialist this rule forbids. The
+    // name is logged as the model wrote it, since that is what a maintainer reading the
+    // log has to recognize.
     ctx.log.event("specialist_declined", { agent: logical, image: img.name, reason: "standard type" });
     return { html: pageHtml, dispatched: false };
   }
@@ -310,7 +361,7 @@ async function dispatchSpecialist(
       agent: logical,
       image: img.name,
       reason: "no agent file of that name",
-      candidates: libraryAgentNames(ctx),
+      ...unresolvedCandidates(ctx),
     });
     return { html: pageHtml, dispatched: false };
   }

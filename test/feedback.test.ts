@@ -6,6 +6,8 @@ import { join } from "node:path";
 import {
   contentCoverage,
   evalAgent,
+  evalAgentScores,
+  pairedMeans,
   regressionGate,
   MIN_CONTENT_COVERAGE,
   proposeAgentUpdatesFromFeedback,
@@ -65,11 +67,11 @@ test("returns null when the accepted text is too short to judge", () => {
 // under MIN_COVERAGE_WORDS). Abstention depends only on `accepted_html`, so it is
 // a property of the FIXTURE and applies identically to both prompts.
 //
-// These tests pin symmetry where both prompts behave the same on a fixture. They do
-// NOT cover the case where the CURRENT prompt produces no output on a fixture the
-// candidate handles — inclusion is per-prompt there, so the two means are over
-// different fixture sets and the bar drops. That hole is pre-existing and documented
-// on `fixtureScore`; it needs a decision about what the mean measures, not a test.
+// These tests pin symmetry where both prompts behave the same on a fixture. The case
+// where they DON'T — the current prompt produces no output on a fixture the candidate
+// abstains on, so the two sides measure different fixture sets — is the wave-through
+// the gate used to allow, and is covered by the paired-comparison tests at the end of
+// this section.
 
 // Accepted text long enough for contentCoverage to judge (>= 8 distinct words).
 const JUDGEABLE = "<p>alpha bravo charlie delta echo foxtrot golf hotel india</p>";
@@ -330,6 +332,142 @@ test("no judgeable fixture means no score, not a perfect one", async () => {
       { accepted: UNJUDGEABLE, produces: "<p>something else</p>" },
     ]);
     assert.equal(await evalAgent(ctx, "table.md", "# Target Agent\n\nCurrent prompt.\n"), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The paired comparison: the gate's two means must cover the same fixtures
+// ---------------------------------------------------------------------------
+//
+// `fixtureScore` is right that a prompt producing NOTHING has failed the fixture
+// rather than abstained — but whether a fixture is scored is then partly a property
+// of the prompt, and the gate averaged each side over whatever it happened to
+// measure. So one flake on the CURRENT prompt deflated the bar the candidate had to
+// clear. These pin the fix at both levels: the pure function, and the end-to-end gate
+// that used to wave the regression through.
+
+test("pairedMeans compares only fixtures both prompts could be scored on", () => {
+  // The worked example from #30: the current prompt flakes to no output (0) on a
+  // fixture the candidate abstains on, plus a judgeable fixture where the candidate
+  // is genuinely 0.10 worse.
+  const current = { "flake.png": 0, "real.png": 0.98 };
+  const candidate = { "flake.png": null, "real.png": 0.88 };
+  const m = pairedMeans(current, candidate);
+
+  // Unpaired: 0.49 vs 0.88 — the candidate looks BETTER than the prompt it regresses.
+  assert.deepEqual(m.paired, ["real.png"]);
+  assert.deepEqual(m.unpaired, ["flake.png"]);
+  assert.equal(m.current, 0.98, "the current mean still includes the flaked fixture");
+  assert.equal(m.candidate, 0.88);
+  assert.ok(m.candidate < m.current - 0.02, "the paired comparison no longer hides the regression");
+});
+
+test("pairedMeans reports no comparison rather than a false one", () => {
+  // Nothing is measurable on both sides. Null is not a pass and not a regression —
+  // the caller defers to the regression gate. Returning 0 for either side here would
+  // block every update; returning a mean over one side alone is the original bug.
+  const m = pairedMeans({ a: 0, b: null }, { a: null, b: null });
+  assert.equal(m.current, null);
+  assert.equal(m.candidate, null);
+  assert.deepEqual(m.paired, []);
+  assert.deepEqual(m.unpaired, ["a", "b"]);
+});
+
+test("pairedMeans counts a fixture only one side ever read as unpaired", () => {
+  // A fixture missing from one map entirely (unreadable json, missing image) is as
+  // uncomparable as one that abstained, and belongs in `unpaired` so it is visible.
+  const m = pairedMeans({ both: 0.9, onlyCurrent: 0.5 }, { both: 0.9 });
+  assert.deepEqual(m.paired, ["both"]);
+  assert.deepEqual(m.unpaired, ["onlyCurrent"]);
+  assert.equal(m.current, 0.9);
+  assert.equal(m.candidate, 0.9);
+});
+
+test("a real regression is blocked even when the current prompt flakes on another fixture", async () => {
+  await withTemp(async (dir) => {
+    // The end-to-end wave-through, with the fixture mix that produced it:
+    //   case000 — judgeable; the candidate drops content (a real regression)
+    //   case001 — UNJUDGEABLE accepted text, and the CURRENT prompt returns nothing
+    //
+    // Unpaired, the current side scored (0 + 0.98)/2 = 0.49 against the candidate's
+    // 0.88 — so `0.88 < 0.49 - eps` was false, 0.88 cleared MIN_CONTENT_COVERAGE, and
+    // a real coverage regression passed both gates. Paired, case001 drops out of both
+    // means and the regression is compared on its own terms.
+    //
+    // The candidate's output on case000 is chosen to sit ABOVE the 0.85 floor, so this
+    // test can only pass by way of the eval comparison: the floor cannot catch it.
+    const nineWords = "<p>alpha bravo charlie delta echo foxtrot golf hotel india</p>";
+    const eightOfNine = "<p>alpha bravo charlie delta echo foxtrot golf hotel</p>"; // 0.889
+
+    const { ctx, events } = gateCtx(
+      dir,
+      "table.md",
+      [
+        { accepted: nineWords, produces: nineWords }, // case000, current: 1.0
+        { accepted: UNJUDGEABLE, produces: null }, // case001, current: no output -> 0
+      ],
+      { proposal: "# Target Agent\n\nUpdated prompt.\n" },
+    );
+
+    // The candidate handles case001 (so it ABSTAINS there rather than scoring 0) and
+    // is worse than the current prompt on case000.
+    const inner = ctx.router.complete;
+    ctx.router.complete = (async (
+      agent: string,
+      cap: Parameters<typeof inner>[1],
+      messages: Parameters<typeof inner>[2],
+      extra?: Parameters<typeof inner>[3],
+    ) => {
+      const user = messages.map((m) => m.content).join("\n");
+      if (agent !== "feedback" && /Updated prompt/.test(user)) {
+        if (user.includes("case000.png")) return { text: JSON.stringify({ html: eightOfNine }) };
+        if (user.includes("case001.png")) return { text: JSON.stringify({ html: "<p>anything at all</p>" }) };
+      }
+      return inner(agent, cap, messages, extra);
+    }) as typeof inner;
+
+    const out = await proposeAgentUpdatesFromFeedback(ctx, {
+      agentFile: "table.md",
+      before: "<p>old body</p>",
+      after: "<p>new body</p>",
+      feedback: "keep the table headers",
+    });
+
+    const blocked = events.find((e) => e.type === "agent_update_blocked");
+    assert.ok(blocked, "a real regression passed the gate because the current prompt flaked elsewhere");
+    assert.equal(blocked.data.reason, "eval_regression");
+    // Paired over case000 alone: 1.0 vs 0.889. If this reported 0.5 the comparison is
+    // unpaired again and the test would be passing for the wrong reason.
+    assert.equal(blocked.data.current, 1);
+    assert.deepEqual(blocked.data.paired, ["case000.png"]);
+    assert.equal(out.length, 0, "the regressing proposal was filed anyway");
+
+    // The flaked fixture is not silently dropped — it is reported, because a current
+    // library agent that returns nothing is itself worth an operator's attention.
+    const gate = events.find((e) => e.type === "eval_gate");
+    assert.ok(gate, "the eval gate did not log its comparison");
+    assert.deepEqual(gate.data.unpaired, ["case001.png"]);
+  });
+});
+
+test("evalAgentScores reports per-fixture scores, not just their mean", async () => {
+  await withTemp(async (dir) => {
+    // The map is what makes the pairing possible, so its shape is the contract: an
+    // abstention must be present as `null` rather than absent, otherwise "abstained"
+    // and "never read" become indistinguishable to pairedMeans.
+    const { ctx } = gateCtx(dir, "table.md", [
+      { accepted: JUDGEABLE, produces: JUDGEABLE },
+      { accepted: UNJUDGEABLE, produces: "<p>anything at all</p>" },
+      { accepted: UNJUDGEABLE, produces: null },
+    ]);
+    const { mean, scores } = await evalAgentScores(ctx, "table.md", "# Target Agent\n\nCurrent prompt.\n");
+    assert.deepEqual(scores, {
+      "case000.png": 1, // reproduced exactly
+      "case001.png": null, // accepted text too short to judge -> abstain
+      "case002.png": 0, // produced nothing -> a failure on this fixture
+    });
+    // The mean skips the abstention but counts the zero: (1 + 0) / 2.
+    assert.equal(mean, 0.5);
   });
 });
 
