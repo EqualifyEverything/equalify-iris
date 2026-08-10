@@ -22,7 +22,7 @@ function json(res, status, obj) {
 const forks = new Set(); // repos that have been forked to the test user
 let prNumber = 140;
 // Body of the most recent POST /login/device/code, readable via
-// GET /__last_device_scope so e2e.sh can assert the scope the service requested.
+// GET /__last_device_scope so e2e.sh can assert that the service requested NO scope.
 let lastDeviceBody = {};
 
 const gh = createServer(async (req, res) => {
@@ -31,8 +31,8 @@ const gh = createServer(async (req, res) => {
   const m = req.method;
 
   // What the last device-flow start asked GitHub for. Recorded rather than
-  // asserted here so e2e.sh can check the scope the SERVICE sends — the request
-  // body is otherwise invisible from outside, and an over-broad scope is a silent
+  // asserted here so e2e.sh can check what the SERVICE sends — the request
+  // body is otherwise invisible from outside, and a reintroduced scope is a silent
   // problem: the flow succeeds either way.
   if (m === "GET" && p === "/__last_device_scope")
     return json(res, 200, { present: "scope" in lastDeviceBody, scope: lastDeviceBody.scope ?? null });
@@ -53,7 +53,9 @@ const gh = createServer(async (req, res) => {
     });
   }
   if (m === "POST" && p === "/login/oauth/access_token")
-    return json(res, 200, { access_token: "gho_testtoken", token_type: "bearer", scope: "public_repo" });
+    // No `scope` and no `refresh_token`/`expires_in`: the shape a GitHub App with
+    // user-token expiry disabled actually returns.
+    return json(res, 200, { access_token: "gho_testtoken", token_type: "bearer" });
 
   // Authenticated user (api base): identifies the caller AND getAuthenticated()
   if (m === "GET" && p === "/user") return json(res, 200, { id: 4242, login: "iris-tester" });

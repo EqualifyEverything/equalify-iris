@@ -1,7 +1,7 @@
 import { loadAgent } from "../agents/loader.ts";
 import { loadImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
-import { createAgentIssue, scopeHintFor } from "../github/issue.ts";
+import { createAgentIssue, installHintFor } from "../github/issue.ts";
 
 // The content types the general page pass covers itself (PRD §7.4 v1.2). A
 // suggestion naming one of these is declined rather than dispatched, and never
@@ -145,12 +145,12 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
       ctx.log.event("agent_issue", { agent: name, url: url ?? "(duplicate — skipped)" });
     } catch (e) {
       // A 403 is swallowed here by design, so the log line has to carry the
-      // diagnosis — see scopeHintFor.
+      // diagnosis — see installHintFor.
       ctx.log.event("agent_issue_failed", {
         agent: name,
         error: (e as Error)?.message ?? String(e),
         stage: "file",
-        ...scopeHintFor(e, { scope: ctx.cfg.github.oauth_scope, usingServiceToken }),
+        ...installHintFor(e, { usingServiceToken }),
       });
     }
   }

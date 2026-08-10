@@ -1,35 +1,46 @@
-// GitHub OAuth helpers (PRD §9.1). GitHub is the only auth mechanism.
+// GitHub App auth helpers (PRD §9.1). GitHub is the only auth mechanism.
 //
-// Base URLs and the requested scope are passed in (not hardcoded) so a deployment
-// can target GitHub Enterprise or a private upstream, and so the suite can drive
-// the flow against a mock host.
-
-// What the user's token is actually used for, and therefore the narrowest scope
-// that still works:
+// Base URLs are passed in (not hardcoded) so a deployment can target GitHub
+// Enterprise, and so the suite can drive the flow against a mock host.
 //
-//   1. `GET /user`, to identify the caller — needs NO scope. `id` and `login` are
-//      public fields, so even a scopeless token answers.
-//   2. Filing agent-suggestion and agent-update issues on the upstream repo —
-//      `public_repo` for a public upstream, which the default deployment's is.
+// Iris authenticates as a GITHUB APP, not an OAuth App, and no scope is requested
+// anywhere in this file. That is the whole reason for the choice, so it is worth
+// being explicit about where the permission went.
 //
-// The second one is not optional, and that is the point of the design rather than
-// an implementation detail: every user of Iris contributes their feedback back to
-// the shared agent library under their own GitHub identity (PRD §12). GitHub is the
-// only SSO layer precisely so that authenticating and contributing are the same
-// act — a user who could log in but not file would be taking from the library
-// without giving back, and there is no mode for that.
+// What the user's token is used for is unchanged, and it is only two things:
 //
-// So `public_repo` is the floor, not a default to be lowered. It is exactly what
-// filing an issue on a public upstream needs and no more. `repo` is for a private
-// upstream only; it additionally grants read AND WRITE to every private repo the
-// user can reach, which nothing here uses. Nothing opens pull requests and nothing
-// pushes — PRD §7.13 described a fork-and-PR flow that was never built and has
-// been dropped.
+//   1. `GET /user`, to identify the caller.
+//   2. Filing agent-suggestion and agent-update issues on the upstream repo
+//      (create the issue, and read-or-create its triage label).
 //
-// Narrowing what we REQUEST does not shrink a grant a user already made — an
-// existing token keeps `repo` until it is revoked at
-// github.com/settings/applications. Only new authorizations are narrower.
-export const DEFAULT_OAUTH_SCOPE = "public_repo";
+// An OAuth App can only express #2 as `public_repo`, an ACCOUNT-WIDE grant of read
+// and write to every public repository the user can reach — code, commit statuses,
+// collaborators, webhooks. Nothing here uses any of that: nothing pushes and nothing
+// opens pull requests (PRD §7.13 described a fork-and-PR flow that was never built
+// and has been dropped). The consent screen was therefore asking for orders of
+// magnitude more than the service does, and there is no narrower OAuth scope — no
+// scope means "issues on one repository".
+//
+// A GitHub App moves that permission off the user entirely. `issues: write` is
+// granted once, by INSTALLING the app on `upstream_repo`, and it is scoped to the
+// repositories of that installation. Users only authorize; the consent screen
+// requests no repository access at all, because there is nothing left for it to ask
+// for. A private `upstream_repo` needs no escalation either — installation covers it.
+//
+// What the user's token still carries is their IDENTITY: a user-to-server token acts
+// as the user, so issues are filed under their own account and each contribution is
+// credited to the person whose session produced it (PRD §12). That is why the app is
+// authorized by users at all rather than filing everything as itself.
+//
+// Two registration settings this code depends on, both invisible from here:
+//   - Device flow ENABLED. It is off by default for a new app, and the default
+//     deployment's only login path (`startDeviceFlow`) returns
+//     `device_flow_disabled` without it.
+//   - Token expiry OFF. GitHub's default is an 8-hour user token plus a refresh
+//     token; with expiry off, `expires_in`/`refresh_token` are omitted and a token
+//     stays valid until revoked. Nothing here persists or refreshes a credential
+//     (src/auth/middleware.ts caches only a token->id mapping, in memory), so
+//     turning expiry on later means building refresh plumbing first.
 
 export interface GitHubUser {
   id: number;
@@ -41,20 +52,15 @@ export function authorizeUrl(
   redirectUri: string,
   state: string,
   oauthBase: string,
-  scope: string = DEFAULT_OAUTH_SCOPE,
 ): string {
+  // No `scope` parameter, deliberately. A GitHub App ignores it — its permissions
+  // come from the installation, not from the authorization — so sending one would
+  // be inert at best and misleading to anyone reading this URL.
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     state,
   });
-  // A running service never gets here with an empty scope: `oauth_scope: none` is
-  // the only config that normalizes to "", and validateConfig rejects it at startup
-  // (a token that cannot file is not a mode this service has). The guard stays for
-  // direct callers — if it ever were empty, send NO parameter rather than `scope=`,
-  // because GitHub documents what omitting it does and says nothing about what a
-  // present-but-empty value does.
-  if (scope) params.set("scope", scope);
   return `${oauthBase}/login/oauth/authorize?${params.toString()}`;
 }
 
@@ -88,15 +94,15 @@ export interface DeviceCodeResponse {
 export async function startDeviceFlow(
   clientId: string,
   oauthBase: string,
-  scope: string = DEFAULT_OAUTH_SCOPE,
 ): Promise<DeviceCodeResponse> {
   const res = await fetch(`${oauthBase}/login/device/code`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
-    // Same reason as authorizeUrl: unreachable from a valid config, and if it were
-    // empty, omit the key rather than sending an empty one.
-    body: JSON.stringify({ client_id: clientId, ...(scope ? { scope } : {}) }),
+    // No `scope`, same reason as authorizeUrl.
+    body: JSON.stringify({ client_id: clientId }),
   });
+  // A `device_flow_disabled` error here means the app was registered without the
+  // "Enable Device Flow" checkbox — the one setting this default login path needs.
   if (!res.ok) throw new Error(`device flow start failed: ${res.status}`);
   return (await res.json()) as DeviceCodeResponse;
 }

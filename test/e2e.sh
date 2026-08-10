@@ -131,16 +131,16 @@ TOKEN=$(echo "$poll" | jq -r '.access_token')
 [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] && pass "token obtained: $TOKEN" || fail "device poll" "$poll"
 AUTH=(-H "Authorization: Bearer $TOKEN")
 
-# The scope the service ASKED GitHub for. Invisible from the client — the flow
-# succeeds whatever is requested — and bounded from both sides: too narrow and the
-# user cannot file the feedback issue every session contributes (PRD §12), too wide
-# and every user hands over write access to all their private repos for nothing. The
-# config above sets no `oauth_scope`, so this asserts the DEFAULT that ships, not a
-# value the test chose.
+# Iris requests NO scope: it authenticates as a GitHub App, whose `issues: write`
+# comes from installing the app on `upstream_repo` rather than from the user. This is
+# invisible from the client — the flow succeeds whatever is requested — and a scope
+# added back would be silently ignored by GitHub rather than breaking anything, so
+# nothing but this assertion would notice the service going back to asking every user
+# for account-wide access to their public repos.
 scope=$(curl -s "http://localhost:$GH_PORT/__last_device_scope")
-echo "$scope" | jq -e '.scope=="public_repo"' >/dev/null \
-  && pass "the device flow requested public_repo, not repo" \
-  || fail "oauth scope" "expected scope=public_repo, got $scope"
+echo "$scope" | jq -e '.present==false' >/dev/null \
+  && pass "the device flow requested no scope" \
+  || fail "oauth scope" "expected no scope in the device-flow body, got $scope"
 
 echo "==> 4. GET /v1/me"
 me=$(curl -s "${AUTH[@]}" "$BASE/me")

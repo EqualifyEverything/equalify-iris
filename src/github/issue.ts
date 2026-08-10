@@ -14,40 +14,41 @@ export function parseRepo(url: string): RepoRef {
 // Label maintainers can sort/filter agent suggestions by.
 export const AGENT_LABEL = "iris-agent-suggestion";
 
-// Why an issue-filing failure was probably about the token's permissions, or
-// undefined if it was not.
+// Why an issue-filing failure was probably about permissions, or undefined if it
+// was not.
 //
 // Both filing paths (a new-agent suggestion and an agent-update proposal) fail
 // softly — a contribution is a side effect and a GitHub outage must not fail a
 // document the user already paid for — so the log line is the only place the cause
-// can appear. And the cause is several steps away from the failure: which token
-// was used depends on config, and what that token may do was decided elsewhere
-// (at consent time for a user's, on github.com for a service PAT). Neither of the
-// two user-token cases can be seen from config alone, which is why this lives at
-// the failure rather than at startup:
+// can appear. And the cause is several steps away from the failure: which credential
+// was used depends on config, and what it may do was decided elsewhere, on
+// github.com, in a place no config file can show.
 //
-//   - `oauth_scope` narrower than a PRIVATE `upstream_repo` needs. `public_repo`
-//     is the default, so an existing private-upstream deployment can acquire this
-//     on upgrade without touching its config.
-//   - A token issued BEFORE the requested scope was narrowed, which keeps the old
-//     scope until the user re-authorizes.
+// Under a GitHub App there is exactly one such cause on the user path, and it
+// replaced two scope-related ones:
 //
-// Both 403 and 404 are diagnosed, and the FIRST case above is the 404 one: GitHub
-// does not leak the existence of a private repository, so a token without access
-// to one gets `404 Not Found` rather than a permissions error. Treating 403 as the
-// only permissions signal would have missed exactly the case this hint was written
-// for. 404 is genuinely ambiguous, though — a misspelled `upstream_repo` produces
-// the same status — so that wording names both possibilities instead of asserting
-// one.
+//   - The app is NOT INSTALLED on `upstream_repo` (or its installation was removed,
+//     or `issues` was never granted write). A user-to-server token carries the
+//     user's identity but takes its repository permission from the installation, so
+//     with no installation there is no permission — for every user at once. This is
+//     the misconfiguration to suspect first, and it cannot be caught at startup: the
+//     app's install state lives on github.com, not in config.
 //
-// `usingServiceToken` is load-bearing, not decoration: when `github.issue_token`
-// is set it is that PAT that failed, and `oauth_scope` has nothing to do with it.
-// Naming `oauth_scope` there would send an operator to widen the user grant this
-// service is trying to keep narrow, to fix a failure widening it cannot touch —
-// and that is the shape the README recommends for production.
-export function scopeHintFor(
+// Both 403 and 404 are diagnosed, and the uninstalled case is usually the 404 one:
+// GitHub does not reveal repositories a credential cannot see, so no-installation
+// reads as "no such repo" rather than as a permissions error. Treating 403 as the
+// only permissions signal would miss the case this hint exists for. 404 stays
+// genuinely ambiguous — a misspelled `upstream_repo` is identical on the wire — so
+// the wording names both possibilities instead of asserting one.
+//
+// `usingServiceToken` is load-bearing, not decoration: when `github.issue_token` is
+// set it is that PAT that failed, and the app's installation has nothing to do with
+// it. Sending an operator to re-install the app to fix a PAT failure would waste the
+// one clue they have — and the service-token shape is what the README recommends for
+// deployments that cannot file as their users.
+export function installHintFor(
   e: unknown,
-  opts: { scope: string; usingServiceToken: boolean },
+  opts: { usingServiceToken: boolean },
 ): { hint: string } | undefined {
   // Octokit's RequestError carries the code on `.status`, and only calls that
   // actually reached GitHub produce one. Deliberately NOT falling back to
@@ -60,8 +61,8 @@ export function scopeHintFor(
   const status = (e as { status?: number } | null)?.status;
   if (status !== 403 && status !== 404) return undefined;
   // GitHub also answers 403 for primary and secondary rate limits, where
-  // permissions are irrelevant and this hint would send an operator to the wrong
-  // config key. Checked on the response headers first (`x-ratelimit-remaining: 0`
+  // permissions are irrelevant and this hint would send an operator to re-install a
+  // working app. Checked on the response headers first (`x-ratelimit-remaining: 0`
   // is the primary-limit signal) and on the message text for the secondary limit,
   // which says so in prose rather than in a header.
   const message = (e as Error | null)?.message ?? "";
@@ -78,21 +79,20 @@ export function scopeHintFor(
         `${status} while filing as the service account: github.issue_token is set, so the failing ` +
         `credential is that PAT — check its scopes and its access to upstream_repo on github.com` +
         (notFound ? `, and check that upstream_repo is spelled correctly (GitHub answers 404 for a repo a token cannot see)` : ``) +
-        `. github.oauth_scope is not involved; it only governs tokens issued to users.`,
+        `. The GitHub App's installation is not involved; it only governs tokens issued to users.`,
     };
   }
   return {
     hint:
       (notFound
-        ? // The private-upstream case. GitHub hides the repo rather than refusing,
-          // so this reads as "no such repo" until you know to suspect the scope.
-          `404 on a repo that exists means the user's token cannot see it: a PRIVATE upstream_repo needs "repo". ` +
-          `(A misspelled upstream_repo gives the same 404.) `
-        : `403 usually means the user's token lacks the scope this repo needs. `) +
-      // Never empty: a scopeless deployment is rejected at startup, so whatever is
-      // here is a real scope an operator configured (or the default).
-      `github.oauth_scope is "${opts.scope}". ` +
-      `Tokens issued before a scope change keep the old scope until the user re-authorizes.`,
+        ? // The uninstalled case. GitHub hides the repo rather than refusing, so
+          // this reads as "no such repo" until you know to suspect the installation.
+          `404 on a repo that exists means the user's token cannot see it: the GitHub App is probably not ` +
+          `installed on upstream_repo. (A misspelled upstream_repo gives the same 404.) `
+        : `403 usually means the GitHub App's installation lacks Issues write on this repo. `) +
+      `Install the app on upstream_repo — or check that its installation still grants Issues: Read and write — ` +
+      `at github.com/settings/installations. A user's authorization carries no repository access on its own; ` +
+      `permission comes from the installation, so this affects every user until it is fixed.`,
   };
 }
 

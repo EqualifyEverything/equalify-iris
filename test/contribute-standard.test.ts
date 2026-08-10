@@ -47,7 +47,6 @@ function makeCtx(dir: string): { ctx: PipelineContext; rec: Rec } {
       github: {
         upstream_repo: "https://github.com/example/iris",
         api_base_url: "http://127.0.0.1:1/never-listening",
-        oauth_scope: "public_repo",
       },
     },
     paths: { agentsDir, tmpAgentsDir: () => join(dir, "tmp-agents") } as unknown as Paths,

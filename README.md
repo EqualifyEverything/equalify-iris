@@ -102,14 +102,13 @@ from the environment at startup; changes require a restart.
   is rejected — the upload is already received and on disk, so a 429 would discard work the user
   has already paid for. The cap is global rather than per user because the resources it protects
   (memory, jsdom, the provider's rate limit) are global.
-- **GitHub** (§9.1): OAuth is the auth mechanism — a user *is* their GitHub account, and a token
+- **GitHub** (§9.1): GitHub is the auth mechanism — a user *is* their GitHub account, and a token
   is **required** on every call. By default the
-  service uses a **bundled OAuth App via the device flow** — no per-operator app setup, no
+  service uses a **bundled GitHub App via the device flow** — no per-operator app setup, no
   secret (the same approach the `gh` CLI uses). Set `github.client_id` only to point at your
-  own OAuth App; `client_secret` is needed only if you enable the web redirect flow.
-  `github.oauth_scope` is the scope requested from the user, **`public_repo`** by default —
-  see [GitHub is the only SSO layer](#github-is-the-only-sso-layer-and-tokens-are-required) for
-  why that is a floor rather than a default, and when to raise it.
+  own GitHub App; `client_secret` is needed only if you enable the web redirect flow.
+  **No OAuth scope is requested at all** — the app's one permission comes from installing it on
+  `upstream_repo` — see [GitHub is the only SSO layer](#github-is-the-only-sso-layer-and-tokens-are-required).
 
 ### GitHub is the only SSO layer, and tokens are required
 
@@ -126,53 +125,44 @@ contribute, this is not the service to deploy.
 
 Two consequences an operator should know before deploying:
 
-**1. The scope is a floor.** The token does exactly two things: `GET /user` to identify the caller
-(no scope needed) and file issues on `upstream_repo` (`public_repo` for a public upstream, which is
-the default). Filing is not optional, so:
+**1. The permission lives with the installation, not with your users.** The token does exactly two
+things: `GET /user` to identify the caller, and file issues on `upstream_repo`. Iris is registered as
+a **GitHub App**, so the second one is granted once — by installing the app on `upstream_repo` with
+`issues: write` — and users only *authorize*. Their consent screen requests **no repository access
+at all**, because there is nothing left for it to ask for. A private `upstream_repo` needs no
+escalation either; the installation covers it.
 
-| `oauth_scope` | When to use it |
-| --- | --- |
-| `public_repo` *(default)* | The floor. A public `upstream_repo` — the normal case. |
-| `repo` | **Only** if `upstream_repo` is private. Also grants read *and write* to every private repo the user can reach, which nothing here uses. |
-| `none` | **Not supported — the service refuses to start.** |
+This replaced an OAuth App requesting `public_repo`, and the reason is worth stating plainly: there
+is no OAuth scope meaning "open issues on one repository". `public_repo` was the narrowest one that
+could file, and it grants read **and write** to every public repository the user can reach —
+code, commit statuses, collaborators, webhooks — none of which Iris touches. Nothing pushes and
+nothing opens pull requests. So the old consent screen asked for orders of magnitude more than the
+service uses, and the app is the only way to fix that rather than merely document it.
 
-`oauth_scope: none` is recognized only in order to be rejected, with a message naming the fix. A
-token that identifies a user but cannot file on their behalf would leave the deployment looking
-healthy while the thing it exists to feed was dead: GitHub answers 403 and the failure is swallowed
-as one `agent_issue_failed` line per run. Setting `github.issue_token` does **not** make it valid,
-and it is worth being exact about why, because the mechanics point the other way: filing uses
-`issue_token` when it is set and the user's token otherwise, so *while the PAT is there*, filing
-works and the user's scope is never used. The floor is not what makes that deployment run — it is
-what makes **losing** the PAT visible. Rotate it, let it expire, or move it to another instance and
-the user tokens become the credential that files; scopeless ones cannot, so contribution stops while
-the service still answers `200`. The scope floor turns that into a startup error instead of a silent
-one. (A PAT does change who gets the credit — see below.)
+What the user's token still carries is their **identity**. A user-to-server token acts as the user,
+so issues are filed under their own account and each contribution is credited to the person whose
+session produced it — the whole reason users authorize at all instead of the app filing as itself.
 
-Every *empty* form is a different case and falls back to `public_repo`: an absent key, a valueless
-key, a quoted `""`, and an unset `${VAR}`. That last one is why "no scope" needs a word at all —
-`${IRIS_SCOPE}` with the variable missing expands to `""` before the config is read, and a typo in a
-variable name must not be able to strip the scope out of a deployment.
+Two registration settings the service depends on, if you point `client_id` at your own app:
 
-The one misconfiguration startup *cannot* see is a private `upstream_repo` left on the
-`public_repo` default (or a token issued before you changed the scope). For those, a **403 or 404**
-during filing is logged with a `hint` naming the configured scope. Both statuses, because GitHub
-does not reveal that a private repository exists: a token that cannot see your private
-`upstream_repo` gets `404 Not Found`, not a permissions error — so 404 is the status the
-private-upstream case actually produces. (A misspelled `upstream_repo` looks identical, and the hint
-says so rather than blaming the scope.) When `issue_token` is set, the hint names the **service
-PAT** instead, since `oauth_scope` governs only tokens issued to users.
+| Setting | Value | Why |
+| --- | --- | --- |
+| **Enable Device Flow** | on | Off by default for a new app, and the device flow is the default deployment's only login path (it returns `device_flow_disabled` without it). |
+| **Expire user authorization tokens** | **off** | With expiry on, user tokens last 8 hours and come with a refresh token. Nothing here persists or refreshes a credential, so turning expiry on means building refresh plumbing first. |
 
-Changing this key does not shrink a grant a user already made — an existing token keeps its old
-scope until revoked at
-[github.com/settings/applications](https://github.com/settings/applications). Only new
-authorizations are affected.
+The misconfiguration this *cannot* catch at startup is the app not being installed on
+`upstream_repo` — that state lives on github.com, not in config. It surfaces as a **403 or 404**
+during filing, logged with a `hint` saying so. Both statuses, because GitHub does not reveal
+repositories a credential cannot see: an app that was never installed reads as `404 Not Found`
+rather than as a permissions error. (A misspelled `upstream_repo` looks identical, and the hint says
+so rather than blaming the installation.) When `issue_token` is set, the hint names the **service
+PAT** instead, since the installation governs only tokens issued to users.
 
-**If you are coming from an earlier build, `oauth_scope: none` used to be the recommendation.** It
-was paired with `github.issue_token` to minimize what a stolen token was worth back when tokens were
-stored in the database. Tokens are no longer stored at all, so that trade no longer buys anything —
-and what it cost is the requirement above: a token that cannot file cannot contribute. Such a config
-now **fails at startup** with a message naming the fix. Remove the key (or set `public_repo`); keep
-`issue_token` if you were relying on it, since it is independent of the scope floor.
+**If you are coming from an earlier build,** `github.oauth_scope` is gone. A config that still sets
+it — including `oauth_scope: none`, which used to be a startup error — now starts fine and ignores
+the key. Delete it. There is no user-facing migration: no one had authorized the OAuth App, and any
+existing authorization can be revoked at
+[github.com/settings/applications](https://github.com/settings/applications).
 
 **2. `github.issue_token` is an override, and not a recommended one.** Set it to a service-account
 PAT and every issue is filed under that bot account instead of under the user who produced it. It is
