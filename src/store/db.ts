@@ -13,11 +13,15 @@ export type SessionStatus = "queued" | "running" | "ready_for_review" | "closed"
 // each phase; this only stops the enum from claiming they exist today.
 export type Phase = "extraction" | "assembly" | "review" | "done";
 
+// No `github_token` field, deliberately. The user's GitHub token is a live
+// credential — it files issues on their behalf during a run (§7.13) — but it never
+// needs to OUTLIVE the request that carried it: it arrives in the `Authorization`
+// header, is passed in memory to the queued run, and is gone when the run ends.
+// Storing it made a copy of `data/iris.sqlite` equivalent to GitHub API access as
+// every user who had ever logged in, in exchange for nothing the service used.
 export interface UserRecord {
   github_user_id: number;
   github_login: string;
-  github_token: string;
-  fork_repo: string | null;
   max_review_iterations: number;
   created_at: string;
 }
@@ -140,6 +144,14 @@ export class Store {
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
+    // BEFORE any DDL or PRAGMA below. Refusing to adopt a file and then writing to
+    // it anyway is a contradiction, and the writes are not harmless: the `exec`
+    // block drops `idx_sessions_user`, creates its compound replacement, and
+    // switches the file to WAL. All three land on a database this then declines,
+    // which breaks the one recovery path the error message implies — rolling back to
+    // the previous build to export session history before deleting the file, whose
+    // `listSessions` pages on the index that is now gone.
+    this.rejectLegacyUsersTable(path);
     // busy_timeout is 0 on a fresh node:sqlite connection — "fail immediately",
     // not "wait for the lock". WAL still allows only one writer, so without a
     // timeout a second process's UPDATE against a held write lock throws
@@ -152,11 +164,13 @@ export class Store {
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA busy_timeout = 5000;
+      -- No github_token column, and no fork_repo column. The token is never
+      -- persisted (see UserRecord above); fork_repo belonged to the fork-and-PR
+      -- flow of PRD §7.13, which was never built and is not going to be —
+      -- contributions are filed as issues under the user's own identity (§12).
       CREATE TABLE IF NOT EXISTS users (
         github_user_id INTEGER PRIMARY KEY,
         github_login TEXT NOT NULL,
-        github_token TEXT NOT NULL,
-        fork_repo TEXT,
         max_review_iterations INTEGER NOT NULL DEFAULT 3,
         created_at TEXT NOT NULL
       );
@@ -188,28 +202,84 @@ export class Store {
     `);
   }
 
+  /**
+   * Refuse to open a database whose `users` table predates the removal of
+   * `github_token` / `fork_repo`.
+   *
+   * There is deliberately **no migration**: every user starts from scratch, so a
+   * pre-existing database is not a deployment to be upgraded — it is a leftover, and
+   * the honest response is to say so rather than to quietly adopt it.
+   *
+   * A check is still needed, because `CREATE TABLE IF NOT EXISTS` in the constructor
+   * is a no-op when the table already exists. Without this, a stray `data/` directory (a
+   * development leftover, a restored backup, a volume mounted from an older image)
+   * keeps the old table — `github_token TEXT NOT NULL` — while `upsertUser` no longer
+   * supplies that column, and the two symptoms both point away from the cause:
+   *
+   *   * Every FIRST-TIME login throws `NOT NULL constraint failed:
+   *     users.github_token` inside the auth middleware's try, which answers
+   *     `401 unauthorized` with the SQLite message in the body. Anyone who already
+   *     has a row keeps working, so it reads as "GitHub is flaky for new signups"
+   *     rather than as a schema mismatch.
+   *   * The plaintext tokens in that file stay there, now never refreshed and never
+   *     cleared, while `getUser`'s `SELECT *` still returns them — so
+   *     `req.user.github_token` exists at runtime although `UserRecord` says it
+   *     cannot. The claim that a stolen copy of `data/iris.sqlite` is not GitHub
+   *     access would be false for exactly that file.
+   *
+   * Failing at startup is what makes "starting from scratch" a checked precondition
+   * instead of an assumption. It also keeps the fix in the operator's hands: deleting
+   * the file is a decision about live credentials, and a silent rebuild-and-VACUUM
+   * would be this service erasing data nobody asked it to touch.
+   *
+   * Which is why this runs FIRST, before the schema block and before `journal_mode`.
+   * "We will not adopt this file" and "we already modified this file" cannot both be
+   * true, and the modifications are the kind an operator would need undone: the DDL
+   * drops the index the older build's `listSessions` pages on, so a rollback to that
+   * build in order to export session history before deleting the file would meet a
+   * schema its queries no longer match. `PRAGMA table_info` on a table that does not
+   * exist returns no rows, so a fresh or current database falls straight through.
+   */
+  private rejectLegacyUsersTable(path: string): void {
+    const cols = this.db.prepare(`PRAGMA table_info(users)`).all() as { name: string }[];
+    const legacy = cols.map((c) => c.name).filter((n) => n === "github_token" || n === "fork_repo");
+    if (legacy.length === 0) return;
+    this.db.close();
+    throw new Error(
+      `${path} was created by an older version of Iris: its users table still has ` +
+        `${legacy.join(" and ")}. There is no migration — GitHub tokens are no longer stored at ` +
+        `all, and every user re-authorizes from scratch. Delete the database (and its -wal/-shm ` +
+        `files) and restart; users log in again with GitHub and lose nothing but their session ` +
+        `history. Note that the old file still contains plaintext GitHub tokens for every user ` +
+        `who logged in, so delete it rather than archiving it.`,
+    );
+  }
+
   // --- users ---
 
   // On first auth a user account is provisioned with the deployment's default
-  // max_review_iterations (PRD §9.1). Existing users keep their stored default;
-  // only login + token are refreshed.
+  // max_review_iterations (PRD §9.1). Existing users keep their stored default; the
+  // login is the only field an existing row refreshes, since it is the only one that
+  // can change upstream and the token is not stored at all (see UserRecord).
   upsertUser(
-    u: { github_user_id: number; github_login: string; github_token: string },
+    u: { github_user_id: number; github_login: string },
     defaultMaxIter = 3,
   ): UserRecord {
     const existing = this.getUser(u.github_user_id);
     if (existing) {
+      // Only the login can change (GitHub renames); the numeric id is stable and
+      // is what everything else keys on.
       this.db
-        .prepare(`UPDATE users SET github_login = ?, github_token = ? WHERE github_user_id = ?`)
-        .run(u.github_login, u.github_token, u.github_user_id);
+        .prepare(`UPDATE users SET github_login = ? WHERE github_user_id = ?`)
+        .run(u.github_login, u.github_user_id);
       return this.getUser(u.github_user_id)!;
     }
     this.db
       .prepare(
-        `INSERT INTO users (github_user_id, github_login, github_token, fork_repo, max_review_iterations, created_at)
-         VALUES (?, ?, ?, NULL, ?, ?)`,
+        `INSERT INTO users (github_user_id, github_login, max_review_iterations, created_at)
+         VALUES (?, ?, ?, ?)`,
       )
-      .run(u.github_user_id, u.github_login, u.github_token, defaultMaxIter, new Date().toISOString());
+      .run(u.github_user_id, u.github_login, defaultMaxIter, new Date().toISOString());
     return this.getUser(u.github_user_id)!;
   }
 

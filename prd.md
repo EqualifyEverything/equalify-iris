@@ -28,7 +28,8 @@ The deeper difficulty is content variety. PDFs in the wild contain an open-ended
 - **Portable, no vendor lock-in.** The service must run on a single machine — laptop, workstation, Mac Mini, or self-hosted server — without requiring any specific cloud account. Every external dependency is replaceable by configuration: LLM access goes through a provider abstraction with multiple supported backends (Amazon Bedrock and OpenRouter at v1, more planned including direct provider APIs and self-hosted models), and no managed cloud service is mandatory. An Open Source maintainer or a small organization should be able to stand up a working deployment in minutes.
 - Decompose the problem by content type so each agent's prompt and model can be tuned narrowly.
 - **Self-extend within a session**: when no agent exists for a content type encountered in a job, build one for use in that session only. Session-built agents do not persist locally.
-- **Make upstream GitHub PR the only path to permanent agents.** A session-built agent persists in a user's local `agents/` directory only after the user opens a PR, the upstream maintainer merges it, and the user pulls the updated repo. There is no local promotion path. This enforces upstream review as the floor of trust for every agent that ever runs.
+- **Make upstream GitHub PR the only path to permanent agents.** A session-built agent persists in a user's local `agents/` directory only after the user opens a PR, the upstream maintainer merges it, and the user pulls the updated repo. There is no local promotion path. This enforces upstream review as the floor of trust for every agent that ever runs. **Amended (v1.2):** the contribution is a labeled **issue** rather than a PR (§7.13 v1.2); upstream merge plus `git pull` is still the only path, and upstream review is still the floor of trust.
+- **Make every user a contributor (v1.2).** GitHub is the only SSO layer and a user's GitHub token is required on every API call, because that token is what files the session's contributions under the user's own identity. Consuming the agent library and refilling it are the same act; there is no anonymous mode, no alternative credential, and no opt-out (§12).
 - Reconcile fragments that span image boundaries.
 - Verify output with a reader-style agent that flags reading-order and consistency issues, with a bounded refinement loop.
 - Accept user feedback and re-run the pipeline with that feedback as a first-class input.
@@ -37,6 +38,8 @@ The deeper difficulty is content variety. PDFs in the wild contain an open-ended
 
 - **Styling**: no CSS, no visual fidelity to the source. Content and semantics only.
 - **Pixel-perfect layout reproduction**: a two-column source becomes linear semantic HTML.
+- **Auth providers other than GitHub (v1.2)**: no API keys, no pasted PATs, no basic auth, no second SSO provider, and no anonymous mode. This is a design boundary rather than deferred work — the GitHub token is what files each session's contributions under the user's identity, so any credential that cannot do that would admit callers who consume the agent library without refilling it (§12, §9.1 v1.2).
+- **Opting out of contributing (v1.2)**: there is no parameter, config key or account setting that finalizes a session without filing what it produced. See §7.13 v1.2.
 
 ## 5. Users and Use Cases
 
@@ -56,6 +59,8 @@ The pipeline runs in five phases:
 5. **Review** — reader / copy editor / assembler loop refines the document until clean or until max iterations reached.
 
 After phase 5, the document is returned to the user, who may submit feedback (re-running phases 1–5 with feedback injected) or accept the result and optionally submit any newly built agents as a PR.
+
+**Amended (v1.2): contribution is not a step the user takes at the end.** Newly built agents and generalizable feedback are filed as labeled GitHub issues *during* the run, by the phase that produced them, using the user's own token (§7.13 v1.2, §12). Accepting the document (`/close`) locks the HTML and cleans up `tmp/`; it opens nothing and offers no choice about contributing.
 
 ```
        ┌─────────────────────────────────────────────────────────────┐
@@ -96,6 +101,19 @@ After phase 5, the document is returned to the user, who may submit feedback (re
                                                               (loops back to top)
 ```
 
+**Amended (v1.2): the extraction fan-out in the diagram above is withdrawn.** The row of per-content-type agents (`table` / `formField` / `paragraph`) and the Reconciliation step below it describe a shape that is not built and is not coming: extraction is **one vision call per page** to the page agent, optionally merging a specialist for content that call handles worse (§7.4 v1.2). Read that band of the diagram as:
+
+```
+[images] → page agent (one call per page, sees the whole page)
+                 │
+                 ├── flags a content type a specialist handles better?
+                 │        └─→ specialist agent → merged into the page
+                 ↓
+           Assembly (single HTML file)
+```
+
+Phase 2 in the list above ("content agents convert their assigned regions") and phase 3 (Reconciliation) are superseded accordingly — there are no assigned regions and no per-region fragments to stitch. §7.4 v1.2 gives the reasoning.
+
 ## 7. Detailed Requirements
 
 ### 7.1 Input
@@ -108,6 +126,15 @@ After phase 5, the document is returned to the user, who may submit feedback (re
 Accessibility target is fixed at WCAG 2.2 AA for v1 and is not user-configurable. The pipeline runs sequentially — there is no concurrency option in v1.
 
 ### 7.2 Image Analysis Agent (Triage)
+
+> **Not implemented, and its `# Agent Calls` list is withdrawn (v1.2).** Nothing writes
+> `notes/<image>.md`; `notes/` is not created and `paths.ts` has no `sessionNotes()`. A
+> session starts at `extraction`, and `triage` is not in the phase enum (§9.2 v1.1).
+> Read this section as a design for a phase that may be built (#30 Tier 4) rather than a
+> description of what runs — and read the `# Agent Calls` block below as naming agents
+> that **no longer exist**: `table.md`, `formField.md`, `paragraph.md` and `heading.md`
+> were deleted with the per-content-type fan-out (§7.4 v1.2). A triage phase built today
+> would name `page.md` plus any specialist the page warrants.
 
 **Purpose**: For each image, produce a notes file describing (a) the content types present and (b) which edges may contain fragments continuing onto adjacent images.
 
@@ -150,6 +177,12 @@ order: 3
 
 ### 7.3 Orchestrator
 
+> **The dispatch model in this section is superseded (v1.2).** There are no notes files to
+> read (§7.2 above) and no list of per-content-type agents to dispatch: the orchestrator
+> calls `page.md` once per image, concurrently rather than sequentially, and merges a named
+> specialist only where one is warranted (§7.4 v1.2). Everything below about **agent version
+> pinning** is implemented as written and is not affected.
+
 **Purpose**: Read each notes file, dispatch the listed content agents against the relevant image, and collect their outputs.
 
 **Behavior**:
@@ -164,6 +197,15 @@ order: 3
 - A run can be replayed later by checking out the recorded SHAs and substituting the inline content for any session-built agents that were never merged upstream.
 
 ### 7.4 Content Agents
+
+> **"One agent per content type" is withdrawn, and the nine files this section names are
+> deleted — see the v1.2 amendment below**, which is the authority for this section. The
+> prose and the **Initial agent set** list that follow describe the withdrawn shape and are
+> kept because the amendment argues against them. The parts that survived and still govern
+> every agent: the input contract (full uncropped image, no baseline OCR pass), the output
+> contract (a fragment accessible by itself, plus a fragment log), and the accessibility
+> requirements. `agents/table.md` and `agents/formField.md` below are examples of the file
+> *format*, not of files that exist.
 
 **Purpose**: One agent per content type. Each agent is defined by its own markdown file (e.g., `agents/table.md`, `agents/formField.md`) containing its system prompt, the model capability it requires (e.g., `vision`, `structured_output`), and its input/output contract. The concrete model used at runtime is chosen by the deployment's provider configuration (§10.3), not by the agent file. An agent specifies what it needs; the deployment decides which provider serves that need.
 
@@ -193,7 +235,7 @@ These comments travel with the fragment through Reconciliation, Assembly, and th
 
 **Amended (v1.1): provenance comments are stripped from the delivered HTML.** An earlier revision of this section required them to survive into the final document. They do not. The deliverable is a document handed to end users — often published as-is — and pipeline internals do not belong in it: every consumer would have to strip them, and `@source` references to page images are meaningless outside the session that produced them. Provenance is retained where it is actually useful, in the run log (`GET /v1/sessions/{id}/logs`), which records the agent, its pinned git SHA, and the source image for every fragment. Anything the *user* must see stays in the document: the `@unresolved` block (§7.11) is emitted as before.
 
-**Initial agent set (v1)**:
+**Initial agent set (v1)** — *all nine deleted; see the v1.2 amendment immediately below*:
 - `paragraph.md`
 - `heading.md`
 - `list.md`
@@ -203,6 +245,33 @@ These comments travel with the fragment through Reconciliation, Assembly, and th
 - `quote.md`
 - `caption.md`
 - `footnote.md`
+
+#### Amended (v1.2): one agent per *page*, plus specialists that earn their place
+
+The nine files above have been **deleted**, and "one agent per content type" is withdrawn as the default shape. This is a decision about extraction, and it resolves the open question of whether the agent library is the product: it is, but the library is not the *type taxonomy*.
+
+**Why the nine went.** They were not merely unused — they were **unreachable by construction**, through all three paths that can reach an agent file:
+
+- *Dispatch* declines every name in the standard set before the file is ever looked up. That is deliberate (below), so it was not a bug to fix.
+- *Training* only ever targets `page.md`; nothing routes feedback to a content agent.
+- *Contribution* filters the same standard names, so none could be re-suggested either.
+
+So no run could reach them by any path, and a fixture, a lesson or a prompt improvement could never accrue to one. Keeping nine prompt files that cannot run is worse than not having them: they read as the live extraction path to anyone opening `agents/`, and the PRD's §7.4 contract described a data flow (cropped-free regions, `@source` wrappers, reconciliation) that nothing executes.
+
+**Why per-region fan-out is not coming back.** One vision call already sees the whole page, and *seeing the whole page is the capability*. Fanning one page out to nine specialists made each of them re-render the same page from the same image, which produced two representations of one thing — a `<form>` and a `<table>` for the same fields — and then required a reconciliation phase to remove a duplication the architecture had just created. Nine calls per page also multiplies the dominant latency and cost term by nine to get output a single call already produces.
+
+**What the library is instead.** Specialization is justified where it handles content *better*, not where it partitions content by name:
+
+- **The page agent** (`page.md`) is the general pass and the trainable core. It is a real agent file — versioned, fixture-gated, improvable by feedback — so the contribution story runs through the agent every session exercises, rather than through nine that no session touches.
+- **Specialists** exist for content a whole-page pass demonstrably handles worse, and are dispatched by name and merged into the page (§7.4 dispatch). `chartDataAgent.md` is the shape: reading precise values off a chart's axes into a data table is a different task from transcribing a page, needs its own long contract, and would bloat the page prompt for the majority of pages that contain no chart. A `paragraph` specialist is not that shape — "wrap prose in `<p>`" is one line of the page prompt.
+
+This is also the answer to the context concern that motivates specialization: the pressure is real, but it is per-*capability*, not per-content-type. Nine near-duplicate prompts do not relieve it; one page prompt plus a few deep specialists does, because each specialist's contract is loaded only for the pages that need it.
+
+**The standard-type list survives as data, not as files.** `STANDARD` in `src/pipeline/contribute.ts` still names those nine types, and still drives both the dispatch decline and the new-agent filter. It was never a mirror of the library: it is the boundary of what one whole-page call covers, which is exactly the question a suggestion asks. Holding it as data rather than as a directory listing also keeps the decline independent of what is on disk — dropping a `table.md` into `agents/` does not start splicing a second rendering of a table over the page's own.
+
+**The list is matched case- and whitespace-insensitively, through one shared pair of functions** (`logicalType` and `isStandardType`), because deleting the files removed the accident that had been covering for a loose match. A suggestion's name is free text a model wrote — prose describing a content type, not a filename, and `STANDARD` itself spells one entry `formField` — so `"Table"` and `"FormField"` are ordinary output. Previously `loadAgent` resolved `agents/Table.md` on a case-insensitive volume and the suggestion was dropped for the wrong reason; with the files gone, an exact-match filter would instead draft an agent and file a **public issue on the upstream repo under the user's own GitHub identity** (§12), proposing a specialist for a type the page pass has always handled. The two call sites also normalized separately once and disagreed about `"table.md "`, which is why there is now one function rather than two conventions.
+
+**Consequences elsewhere in this document.** §6's diagram (a page fanned out to `table agent` / `formField agent` / `paragraph agent`) and §8.1's tree (which lists the deleted files) describe the withdrawn shape. §7.6 Reconciliation was the phase that existed to merge per-region fragments; with no fan-out there are no competing fragments to reconcile, which is why it is unimplemented rather than pending. The **Output wrapper** above (`@source` / `@agent` / `@fragment` comments) is likewise a per-region artifact: the page agent returns body content and provenance lives in the run log (v1.1 amendment above).
 
 **Accessibility requirements that every agent must satisfy**:
 - Semantic HTML elements only (no `<div>` where `<section>`, `<nav>`, `<article>`, `<aside>`, `<header>`, `<footer>` apply).
@@ -222,7 +291,7 @@ These comments travel with the fragment through Reconciliation, Assembly, and th
 - Reads the notes file references to the new content type and the source image.
 - Drafts a new agent markdown file matching the content agent contract (§7.4).
 - Saves the draft to the session's `tmp/<session-id>/agents/<type>.md`. This location is ephemeral — it exists only for the duration of the session and is deleted on close (see §8.2 for lifecycle).
-- Logs the creation to `runs/<run-id>/new-agents.md` with a summary of what the new agent does, why it was created, and the image region that triggered it.
+- Logs the creation to `runs/<run-id>/new-agents.md` with a summary of what the new agent does, why it was created, and the image region that triggered it. *(v1.2: this file is not written — see §8.1 v1.2. The creation is logged to `log.jsonl` with the draft's content inline, and the summary of what it does and why goes in the filed issue.)*
 - The orchestrator then calls the new agent for the current image and any subsequent images in the same session that reference the same type.
 
 **Lifecycle of session-built agents**:
@@ -257,6 +326,11 @@ These comments travel with the fragment through Reconciliation, Assembly, and th
 - Low-confidence candidates are left as separate blocks with a `@suspected-continuation` comment so the Reader is alerted but the document does not silently fabricate joined content.
 - Unmatched fragments remain as-is and are flagged for the Reader Agent's attention.
 
+**Note (v1.2): half of this section's premise is gone, and the remaining half is still open.** Not implemented, and the reason splits in two:
+
+- **Within a page, there is nothing to reconcile.** The per-region fan-out this phase was designed to clean up after does not exist (§7.4 v1.2): one page yields one fragment from one agent, so there are never two fragments competing to represent the same content. The `@agent: paragraph.md (reconciled)` example above refers to a deleted agent.
+- **Across pages, the problem is real and unsolved.** A paragraph, table or list genuinely can span a page boundary, and the page agent notes a cut-off edge in its fragment log rather than joining anything. So the document can still contain two adjacent blocks that were one block in the source. What is withdrawn is the *mechanism* above (edge-matching over per-region fragments with `@`-comment markers), not the requirement. A page-level design would compare the tail of page N's fragment with the head of page N+1's, and the conservatism argument above — a false stitch is silently wrong, a missed stitch is visible to the Reader — carries over unchanged and is the reason not to approximate it.
+
 ### 7.7 Assembly
 
 **Purpose**: Combine all fragments into one HTML document in image order.
@@ -266,6 +340,36 @@ These comments travel with the fragment through Reconciliation, Assembly, and th
 - Strips the `@source`, `@agent`, `@fragment`, and `@reconciled` provenance comments — they served the pipeline up to this point and are not part of the deliverable (see the v1.1 amendment in §7.4). Provenance is recorded in the run log instead.
 - Validates the document parses and basic accessibility lint passes (axe-core in headless mode).
 - Lint failures are surfaced to the Reader as input.
+
+#### Amended (v1.2): colliding ids are namespaced as the fragments are joined
+
+This section said "combine all fragments in image order" and left it there, which is right about the text and wrong about the ids. **An id is a claim about the whole document, and no page is in a position to make it.** Extraction is per page and concurrent (§7.4 v1.2): a page sees one image and nothing of what any other page emitted. §7.4's page prompt then asks for ids by name — footnote markers as `<sup><a href="#fn-N" id="fnref-N">` with the body at the foot of the page and *"preserve the original numbering"* — so a three-page scan whose pages each carry a footnote 1 emits three `id="fn-1"`, which is the ordinary case rather than an edge one.
+
+Concatenation makes that a navigation defect: every `href="#fn-1"` resolves to the first, so a screen-reader user following the reference on page 3 lands on page 1's note and the back-reference returns them to the wrong paragraph. Nothing about it looks wrong — both notes exist, both are announced, the link works — and the lint gate passed it, because WCAG 2.2 dropped 4.1.1 and axe therefore tags `duplicate-id` obsolete and excludes it from the tag filter this section's lint step uses (`duplicate-id-aria`, which is current, fires only for ids referenced from ARIA attributes, not from an `href`).
+
+So assembly prefixes the colliding ids with their page number (`fn-1` → `p3-fn-1`), and assembly is the only place that can: a page cannot know what another page did, and this is the first moment the whole document exists.
+
+**The scope is one id at a time, not one page at a time**, and that distinction is the whole correctness argument. Prefixing *every* id on a page — the obvious reading of "namespace per page" — fixes the collisions and breaks every reference that legitimately spans a page break:
+
+- a `<label for="q1">` on one page whose `<input id="q1">` falls on the next, which axe reports as a real `label` violation;
+- endnotes with continuous numbering, where the markers are in the body and the notes are collected at the back — the normal shape for a scanned report, and one where nothing collides at all. Both directions break, including the back-reference on the page that *does* own the note.
+
+Those references resolved correctly before assembly touched them, so renaming one end of the pair is the assembler introducing a 1.3.1/4.1.2 failure into content that was correct when the page produced it. **Trading a wrong-target reference for a no-target one is not a fix.** Renaming only what actually collides makes the ordinary document a no-op and is the honest scope: a unique id needs nothing done to it, and a colliding one has no correct cross-page interpretation to preserve.
+
+Four properties then make the rewrite safe rather than merely unique:
+
+- **Everything that points at a renamed id is rewritten with it, in the same pass** — `href="#…"`, and also `for`, `headers`, `list`, `form` and the `aria-*` references. Unique ids with stale references are the failure described above.
+- **Every reference to a colliding id is repointed, never abandoned.** A reference to a *non*-colliding id is untouched, which is what keeps the split form and the endnotes working. A reference to a colliding id the page **owns** goes to the page's own copy: reference and target were written together by one agent looking at one image, so no other page's copy can have been meant. A reference to a colliding id the page does *not* own is genuinely ambiguous, and goes to the **first page in document order that claims the id** — which is where a browser sent the bare reference before any of this ran.
+
+  Leaving that last case as written was the first answer and it was wrong, in exactly the direction the previous paragraph warns about. Take a form whose `<label for="q1">` is on page 1 while pages 2 *and* 3 each carry an `<input id="q1">`. Now `q1` collides, every owner is renamed, and page 1's label — which named the right control before assembly touched anything — points at an id no element has. The field loses its accessible name and axe reports `label` on a document a plain concatenation passed. First-owner is arbitrary between the owners, but it is *exactly as* arbitrary as the behaviour it replaces, and it keeps the association rather than destroying it. Every such reference is still named in the run log (`assembly_anchors`), because a reference disambiguated by document order rather than by the agent that wrote it deserves an eye.
+- **The prefix is labelled with the page's `order`, not its position in the arrival array**, so the ids in a delivered document are stable across runs of the same input and match the page numbers the Reader attributes issues to. But `order` is an *input*, and it is the one input that would silently defeat the whole mechanism: two fragments sharing an `order` would take the same prefix, their colliding ids would stay collided, and the run log would report the id as namespaced. So ownership is tracked per fragment position — unique by construction — and a repeated label is disambiguated (`p1-`, then `p1_2-`) rather than trusted.
+- **The prefix is reserved against every id the document already claims**, or the rename manufactures the collision it exists to remove — silently, since the reference it breaks is one the page owns and is therefore not ambiguous. `p1-total`, `p2-name` and the like are what a paginated form or worksheet emits, and the page agent has no idea the assembler reserves that shape. Given `id="x"` on pages 1 and 2 plus a working `<label for="p1-x">`/`<input id="p1-x">` pair on page 2, prefixing turns page 1's `x` into `p1-x`, two elements own it, and page 2's label resolves to page 1's `<p>` — not a labelable element, so the field loses its accessible name. The separator is therefore grown (`p1-` → `p1--` → …) until no page claims anything starting with it; the ordinary document keeps the short form.
+- **A page whose markup would not survive a reserialization is left exactly as its agent wrote it**, with its collision intact. Two things count as not surviving, and both are foster parenting — the same parser behaviour, in its two directions. A `<tr>` outside a `<table>` is **dropped**: the row and cell vanish, only their text survives, no error raised. Content *inside* a `<table>` is **moved**: a `<p>` is hoisted out to before the table, and bare prose — "Continued from page 1", say — out past the whole table, so content that sat with the rows is delivered away from them. That is a reading-order change, which is worse than the duplicate id being fixed. Both are plausible emissions for a table continuing across a page break, which is also the scenario that produces these collisions. The guard therefore compares the source's sequence of tags *and text* against the parsed document as a *subsequence*, not as counts and not as tags alone: counting cannot see a move, an equality check would refuse every page where the parser legitimately adds a tag (`<tbody>`, or the adoption agency algorithm duplicating one to repair misnesting), and a tag-only sequence misses text moving on its own, since foster-parented prose leaves every tag present and in order. Keeping a duplicate id that lint will report is strictly better than either silently dropping a table row or silently reordering content. Such a page keeps its *bare* ids, so a reference resolved to it by document order stays bare too.
+
+The lint step is the backstop rather than the fix — the review loop re-lints after the Copy Editor has rewritten the whole body, and that is a model rewrite that can reintroduce a collision assembly had already resolved — and covering duplicate ids there takes three separate things, because axe splits the check across three rules by what the element *is*, each skipping the others' elements:
+
+- `duplicate-id` (elements nothing references and nothing focuses) and `duplicate-id-active` (focusable ones) are both tagged obsolete, so the tag filter excludes them and each is re-enabled by name.
+- `duplicate-id-aria` covers ids that something actually *references*, is still live WCAG 4.1.2, and arrives via the tag filter — but axe marks it `reviewOnFail`, so its findings land in `incomplete` rather than `violations`. That made the case with the clearest user harm the one the gate could not see: two `<input id="q1">` under one `<label for="q1">` returned zero violations even with both obsolete rules enabled. A duplicate id needs no human judgement to confirm, so this rule's incomplete results are promoted to violations. Only this rule — the rest of `incomplete` is genuinely undecidable without rendering.
 
 ### 7.8 Reader Agent
 
@@ -350,6 +454,13 @@ Narrowing requires *full* attribution: if any issue in the round could not be at
 
 This preserves the intent above (feedback reaches the agent that reads the images) while making a re-run proportional to what was actually wrong. Routing is biased toward the document path: feedback that cannot be localized to specific pages, or that spans more than half the document, is treated as document-scoped.
 
+**Amended (v1.2): when a re-run proposes an agent update, the eval gate is a *paired* comparison, fixture by fixture.** Feedback that generalizes past its own document becomes a proposed agent update, and it is only filed (§7.13 v1.2) if the candidate prompt holds or improves on the current one over that agent's stored fixtures. Two rules define that comparison, and they are separate:
+
+- **What a score means.** A fixture whose accepted text is too short to measure abstains — it is absent from the scores rather than scored 0, because no evidence is not a failure. A prompt that produces *no output at all* is the exception: that scores 0, since producing nothing is a failure on the fixture, and abstaining would let it tie a prompt that handled the page.
+- **What the mean is taken over.** Only fixtures **both** prompts have a score for. Whether a prompt produced output is a property of *that prompt*, so the two sides can end up measuring different fixture sets — and averaging each over whatever it happened to measure moves the threshold instead of comparing prompts. Concretely: a current prompt that flakes to no output on one fixture (0) and scores 0.98 on another averages 0.49, so a candidate at 0.88 — a real 0.10 regression — clears both this gate and the coverage floor. Pairing drops such a fixture from both means.
+
+A current-prompt flake is therefore evidence for neither side. It is a defect in the library agent, and lowering the bar is the one response that would hide both it and any regression behind it; it is logged instead, in the gate's `unpaired` list. If no fixture is measurable on both sides, there is no comparison to make: the update defers to the coverage gate rather than passing on an unmeasured claim.
+
 ### 7.13 GitHub PR Workflow for Agent Contributions
 
 **This is the only path by which any agent ever becomes available outside the session it was created in.** No agent persists locally except by way of upstream merge plus a subsequent `git pull`.
@@ -376,6 +487,17 @@ The workflow is automatic on session close:
 
 - A user who does not want to contribute the agents from a given session can pass `?skip_prs=true` to `/close`. The HTML is finalized and the session-built agents are discarded without PRs being opened.
 
+**Amended (v1.2): contributions are labeled issues filed during the run, and there is no opt-out.** This section is superseded in its mechanism *and* in its "Opt-out" clause. What ships:
+
+- **Issues, not PRs.** When the extractor meets content a specialist agent would handle better, the drafted agent is filed as an `iris-agent-suggestion` issue on `upstream_repo` with the agent code and context; feedback that generalizes past its own document is filed as an `iris-agent-update` issue with the diff, once it has passed the agent's regression fixtures. Nothing forks, nothing pushes, no branch is created. Simpler for a maintainer to triage, and it needs no write access to a fork.
+- **Filed during the run, not on `/close`.** Contribution is a side effect of the phase that produced it, so it does not depend on a client reaching the close endpoint.
+- **Filed under the user's own GitHub identity**, which is the point rather than an implementation choice (§12) — the user's token is required on every call precisely so that this can happen, and the credit for the contribution is theirs.
+- **No `skip_prs`, and no equivalent.** The opt-out above is withdrawn deliberately, not dropped for lack of time: an opt-out is exactly the mode §12 exists to prevent, since it lets a session take from the agent library without refilling it. There is no request parameter, config key or account setting that disables filing. `github.oauth_scope: none` is not a back door — it is a startup error (§9.1 v1.2).
+- **Failure is soft in one direction only.** A GitHub outage or a permissions problem is logged as `agent_issue_failed` (with a diagnostic `hint` when the failure looks like a scope problem) and never fails a document the user has already paid for. That is a failure-handling property, not an opt-out.
+- Consequently the `pending_prs` and `prs_opened` response fields (§9.2) and the `skip_prs` parameter are not part of the API. `github.issue_token` is an optional service-account override for *who authors* the issues, documented as not recommended (§9.1 v1.2).
+
+The framing sentence at the top of this section still holds, with "upstream merge" reached by issue rather than by PR: an agent becomes available outside its session only via upstream merge plus a subsequent `git pull`.
+
 ## 8. File and Directory Layout
 
 ### 8.1 Layout
@@ -383,11 +505,10 @@ The workflow is automatic on session close:
 ```
 project/
 ├── agents/                 # the agent library — modified ONLY by `git pull` from upstream
-│   ├── paragraph.md
-│   ├── heading.md
-│   ├── table.md
-│   ├── formField.md
-│   └── …
+│   ├── page.md             # the general extraction pass (v1.2: what actually runs)
+│   ├── feedback.md         # verification + agent-update drafting
+│   ├── chartDataAgent.md   # a specialist, dispatched by name (§7.4 v1.2)
+│   └── …                   # (the nine per-content-type agents were deleted — §7.4 v1.2)
 ├── tmp/
 │   └── <session-id>/
 │       └── agents/         # session-built agents (ephemeral)
@@ -404,6 +525,10 @@ project/
         ├── prs.md           # links to any PRs opened from this session
         └── unresolved.md    # issues remaining at iteration cap, if any
 ```
+
+**Amended (v1.2): `new-agents.md` and `prs.md` are not written.** They are the last two entries of the fork-and-PR flow withdrawn in §7.13 v1.2, and this tree is the place that outlived the withdrawal — every other consequence got an amendment note, so the one that reads as a file layout got a stale line instead. `prs.md` cannot exist: nothing opens a PR. `new-agents.md` was a summary of session-built agents *"whether PR'd or dismissed"*, which is a distinction about PRs; the draft itself lives in `tmp/<session-id>/agents/` for the session and the proposal survives as a filed issue under the user's identity. `paths.ts` carried `sessionNewAgents()` and `sessionPrs()` with zero callers until they were deleted with the flow. The line in §7.6 about logging a session-built agent to `runs/<run-id>/new-agents.md` goes with them.
+
+What the current build actually writes is the same tree minus those two, plus four the original never named: `source-name.txt` (the upload's base name, for the output title and download filename), `fragments/final.json` (the reviewed fragments a feedback re-run refines instead of re-extracting, §7.12), `lint.json` (the final axe result), and `history/` (snapshots of prior outputs, since a re-run overwrites `output.html`).
 
 ### 8.2 Session lifecycle
 
@@ -443,6 +568,8 @@ Authentication is GitHub OAuth. A user *is* their GitHub account. The first time
 
 **OAuth is required, not optional.** The token that authenticates a request is the same token used to open pull requests on `/close`. Without OAuth the service has no way to push a PR on the user's behalf, and PR push is the only path by which agents persist (§7.13). Alternative auth schemes (API keys, pasted PATs, basic auth) would either skip the PR step or require the user to manage a credential manually — both are non-goals.
 
+**Amended (v1.2): still required, for a stronger reason.** The mechanism above changed — nothing opens PRs; contributions are filed as labeled issues (§7.13) — but the requirement did not, and it is now load-bearing rather than incidental. **GitHub is the only SSO layer, and a GitHub token is required on every API call, so that every user gives back to the shared agent library under their own identity (§12).** The user's token is what files their session's contributions, which makes authenticating and contributing the same act. Alternative auth schemes are non-goals for the same reason as before, restated: an API key or a pasted PAT would let a caller consume the agent library without refilling it, and refilling it is the only reason the library improves. A deployment configured so that a user's token *cannot* file (see "What the token grants") fails at startup rather than running as a consumer-only instance.
+
 #### OAuth flow (web clients)
 
 1. Client redirects the user to `GET /v1/auth/github/start`.
@@ -469,19 +596,43 @@ The token authenticates the caller (via GitHub's user endpoint) and opens PRs on
 
 **Amended (v1.1): the requested scope is per-deployment and defaults to `public_repo`.** This section derives `repo` from a premise that no longer holds: nothing opens PRs or pushes (§7.13's fork-and-PR flow was never built — contributions are filed as issues), so the token needs only two things. Identifying the caller via `GET /user` requires **no scope at all** — `id` and `login` are public fields. Filing an agent-suggestion issue on a public upstream requires `public_repo`. `repo` additionally grants read *and write* to every private repository the user can reach, for a capability the service does not have.
 
-That over-grant compounds with how the token is stored (below) rather than sitting beside it: it is persisted in plaintext, so the requested scope is exactly the answer to "what does a copy of the database allow". The scope is therefore configurable per deployment (`github.oauth_scope`) with three intended settings:
+The scope is therefore configurable per deployment (`github.oauth_scope`) with three intended settings:
 
-| Value | Rationale |
-| --- | --- |
-| `none` | The deployment sets `github.issue_token`, so the user's token only ever identifies them. Recommended for production. |
-| `public_repo` | Default. Public upstream; each user files their own issues. |
-| `repo` | Required only when the upstream repository is private. |
+> **Superseded by the v1.2 amendment below.** The first row is wrong now: `none` is
+> rejected at startup and there is no configuration in which it is valid. Read the v1.2
+> table before acting on this one.
+
+| Value | Rationale | Status in v1.2 |
+| --- | --- | --- |
+| `none` | The deployment sets `github.issue_token`, so the user's token only ever identifies them. Recommended for production. | **Withdrawn — rejected at startup.** |
+| `public_repo` | Default. Public upstream; each user files their own issues. | Still the default, and now the floor. |
+| `repo` | Required only when the upstream repository is private. | Unchanged. |
 
 `none` is sent as **no** `scope` parameter rather than as `scope=`, which is the form GitHub documents for requesting no scopes. It is a word rather than an empty string because `${VAR}` expansion turns an unset variable into `""` before the config is normalized, so an empty value cannot be distinguished from a missing one — every empty form falls back to `public_repo`, and only the literal `none` disables the scope. And narrowing what is requested does not narrow a grant already made: tokens issued under `repo` retain it until the user revokes the authorization, so a deployment that has been running with `repo` should treat existing rows as `repo`-scoped.
 
-The last sentence above still holds in spirit — a user who declines cannot use the service — but the thing being declined is now much smaller.
+**Amended (v1.2): the scope has a FLOOR, and `none` is rejected at startup.** The table above is superseded on its first row. It optimizes for one thing — minimizing what a stolen token is worth — and the amendment below ("How the token is stored") removes that pressure entirely by not storing tokens at all. What remains is the requirement it was trading against: filing is what every user owes the library, and a token that cannot file is not a mode this service has (§12).
+
+| Value | Rationale (v1.2) |
+| --- | --- |
+| `public_repo` *(default)* | **The floor.** Exactly enough to file an issue on a public `upstream_repo`, and no more. |
+| `repo` | **Only** when `upstream_repo` is private. Also grants read *and write* to every private repo the user can reach, which nothing here uses. |
+| `none` | **Rejected — the service refuses to start**, with a message naming the fix. |
+
+Three consequences worth stating explicitly:
+
+- **`github.issue_token` does not make `none` valid.** There is no pairing rule between the two keys any more: `none` is rejected identically with or without a service token. (§9.1 v1.1 and the earlier implementation validated them as a pair; that rule is withdrawn.) Be precise about why, because the mechanics point the other way — both filing paths resolve `issue_token || <the request's token>`, so *while the PAT is set* filing works and the user's scope is never exercised. The floor is not a functional requirement in that state; it is required so that **leaving** that state cannot be silent. Unset the PAT — rotated, expired, moved to another deployment — and the user tokens become the credential that files, and scopeless ones cannot: contribution stops with one `agent_issue_failed` per run while the service keeps answering `200`. The floor makes that transition a startup error instead of a quiet one. What a PAT does change is *who gets the credit*, which §12 has its own view on.
+- **A consumer-only deployment is not configurable.** "Users identified, nothing ever filed on their behalf" was reachable in v1.1 via `issue_token` + `none`, and was even the recommended production shape. It is now a startup error. This is deliberate: it was the one supported way to run an instance that took from the agent library without refilling it.
+- **Empty is still not `none`.** Every empty form (absent key, valueless key, quoted `""`, unset `${VAR}`) falls back to `public_repo`, for the reason the previous paragraph gives — expansion makes a typo indistinguishable from intent, and a typo must not be able to strip the scope out of a deployment. `none` is recognized *only* in order to be rejected by name, rather than being forwarded to GitHub as a literal scope and failing at the consent screen.
+
+The last sentence of the v1.1 amendment still holds in spirit — a user who declines cannot use the service — but the thing being declined is now much smaller.
 
 #### How the token is stored (v1.1)
+
+> **Superseded in its entirety by the v1.2 amendment below.** The token is not stored at
+> all — the column is gone and startup refuses a database that still has it. Everything
+> in this subsection describes a state the service can no longer be in, including the
+> `oauth_scope: none` recommendation in its last bullet. It is kept because the reasoning
+> that led away from it is the reason the fix was so small.
 
 This specification never said, and the implementation's answer is worth stating rather than leaving to be discovered: **the user's access token is stored in plaintext**, in `users.github_token` in the service's SQLite database. It has to be replayable, because it *is* the credential used to call GitHub on the user's behalf, so it is not hashed.
 
@@ -493,6 +644,20 @@ This is an accepted v1 limitation, not an oversight, and it is why the scope def
 - **Not holding the credential is the actual fix.** Short-lived tokens need a refresh credential, which needs the same key management. Moving the GitHub surface out of this service (so it holds no long-lived user credential at all) removes the reason to store anything — storing nothing beats encrypting something.
 - **What v1 does instead**, and what an operator must be told: request the narrowest scope that works (above), and state the exposure in the deployment documentation so the risk can be weighed rather than discovered. A deployment that sets `github.issue_token` and `oauth_scope: none` stores tokens that grant nothing beyond reading a public profile, which is the recommended shape. Those two keys are validated as a pair at startup, since `none` without a service token leaves issue filing unable to work and GitHub's 403 would otherwise surface only in a run log.
 
+#### Amended (v1.2): the token is not stored at all
+
+The section above is obsolete in its entirety. It took "storing nothing beats encrypting something" to require moving the GitHub surface out of the service — a redesign — when in fact **nothing ever read the stored token**. It was written on every authenticated request and read by no code path: every GitHub call in the pipeline uses the token from the current request's `Authorization` header, threaded through the run in memory. The plaintext column was a liability maintained in exchange for nothing.
+
+So it is gone. There is no `users.github_token` column, no token file, and no encryption question to answer. The user's token arrives in the `Authorization` header, is held in memory for the request and for the pipeline run it authorizes, and is discarded when that run ends. **A copy of `data/iris.sqlite` is a list of GitHub user IDs, logins and session metadata — it is not GitHub access.** The "backup, synced directory, shared host, lost laptop" exposure above no longer exists, and neither does the trade-off it forced against the scope floor.
+
+Two properties follow, both worth specifying rather than leaving to the implementation:
+
+- **Identity lookups are cached in memory, keyed by the token, for 5 minutes.** This is what keeps `GET /user` off every request. It means a token revoked at github.com keeps working here for up to that long, which is the reason not to raise the TTL — the only cost of a miss is one API call. The cache is bounded (10,000 entries; oldest insertions evicted first) because it holds live credentials, and entries are **not** renewed on read: a busy token must not be able to outlive its revocation indefinitely, which is the failure the TTL exists to bound. It is empty on restart.
+- **There is nothing to rotate, re-encrypt or purge**, and no cleanup owed when a user revokes access. Revocation at [github.com/settings/applications](https://github.com/settings/applications) is the entire mechanism.
+- **A database created before this change is refused at startup, not migrated.** Every user starts from scratch, so a pre-existing `data/iris.sqlite` is a leftover rather than a deployment to upgrade — but the check is required, because `CREATE TABLE IF NOT EXISTS` keeps the old table silently. Two failures would follow, and neither names its cause: `github_token TEXT NOT NULL` makes every FIRST-TIME login throw a constraint error that the auth middleware returns as `401 unauthorized` (while anyone with an existing row keeps working, so it reads as flaky GitHub auth), and the file's plaintext tokens remain — never refreshed, never cleared, still returned by `getUser`'s `SELECT *` — so the claim above would be false for exactly that deployment. The startup error names the fix (delete the file, do not archive it). Refusing rather than rebuilding-and-vacuuming is deliberate: erasing live credentials is the operator's decision, not something the service should do to a file it was pointed at.
+
+This does not resolve §9.1's dependency on GitHub (see §10.5), and it is not a substitute for the scope floor: a token in flight is still a real credential, and `repo` on a deployment that does not need it still over-grants at the consent screen. It removes one specific hazard — the one that was persistent and silent.
+
 #### User identity and isolation
 
 The user is identified by their GitHub numeric user ID (stable across login renames). Sessions are scoped to that user; a token cannot see or modify sessions owned by a different GitHub user.
@@ -502,7 +667,7 @@ The user is identified by their GitHub numeric user ID (stable across login rena
 Two things are configured at deployment time, not per user:
 
 - **The agent library upstream.** The service's local `agents/` directory is a git checkout of one upstream repo (its `origin` remote). All PRs target that upstream. Users who want a different upstream run their own deployment pointing at their own checkout.
-- **PR fork behavior.** PRs are opened from each user's GitHub fork of the upstream. If the user does not already have a fork, the service creates one on their account (this is what `repo` scope is for) before pushing. **Amended (v1.1):** unimplemented, and the scope it assumes is no longer requested by default — see §9.1 "What the token grants" and §7.13.
+- **PR fork behavior.** PRs are opened from each user's GitHub fork of the upstream. If the user does not already have a fork, the service creates one on their account (this is what `repo` scope is for) before pushing. **Amended (v1.1):** unimplemented, and the scope it assumes is no longer requested by default — see §9.1 "What the token grants" and §7.13. **Amended (v1.2):** withdrawn, not merely unimplemented — contributions are issues, so no fork is ever created and there is nothing per-deployment to configure here (§7.13 v1.2).
 
 Per-user defaults (e.g., `max_review_iterations`) live on the user's account record, populated on first auth and updateable via a config endpoint not specified in v1.
 
@@ -522,6 +687,8 @@ Response `200 OK`:
 ```
 
 `fork_repo` is `null` until the first `/close` (the fork is created lazily).
+
+**Amended (v1.2): there is no `fork_repo` field.** Nothing forks and nothing pushes — contributions are filed as issues (§7.13) — so the field could only ever be `null`. It was returned as a literal `null` for one release for response-shape stability; that is now withdrawn, since a permanently-null field documenting an unbuilt feature is worse than its absence. The response is `github_login`, `github_user_id`, `upstream_repo` and `defaults`.
 
 ### 9.2 Sessions
 
@@ -626,6 +793,8 @@ Response `200 OK`:
 
 `pending_prs` is only present when `status` is `ready_for_review`. It is empty if no contributions were generated.
 
+**Amended (v1.2): there is no `pending_prs` field.** It described a queue of contributions awaiting `/close`, and no such queue exists: contributions are filed as issues during the run, at the moment the phase that produced them finishes (§7.13 v1.2). By the time a client can read this response the filing has already happened or already failed, so there is nothing pending to preview and no decision left for the user to make. What was actually filed is in the run log (`GET /v1/sessions/{id}/logs`) as `agent_issue` events carrying the issue URL — or as `agent_issue_failed` with a reason.
+
 #### `GET /v1/sessions/{session_id}/output`
 
 Retrieve the current HTML output. Available when `status` is `ready_for_review` or `closed`.
@@ -683,6 +852,10 @@ Response `200 OK`:
 ```
 
 Response `409 Conflict` if the session is not in `ready_for_review`.
+
+**Amended (v1.2): `/close` neither opens PRs nor accepts `skip_prs`, and returns no `prs_opened`.** Step 2 above does not happen here — contributions are filed as issues during the run (§7.13 v1.2) — so `/close` does exactly two things: lock the HTML as accepted, and delete `tmp/<session-id>/`. The response is `{ "session_id", "status": "closed" }`.
+
+`skip_prs=true` is not accepted, and its absence is a decision rather than a consequence of the mechanism change: it was the one supported way to consume the agent library without contributing to it, which §12 makes unsupportable. There is no replacement parameter.
 
 #### `GET /v1/sessions/{session_id}/logs`
 
@@ -811,6 +984,8 @@ The system reads this config at startup; changes require a restart in v1. Hot-re
 
 GitHub itself is a non-replaceable dependency in v1 because the agent contribution workflow (§7.13) and the auth model (§9.1) are built on it. Supporting GitLab or Gitea would require generalizing the git host abstraction; this is recognized but out of scope for v1. The rest of the system carries no such dependency.
 
+**Amended (v1.2): non-replaceable by design, not by scope.** The two reasons above are one reason. GitHub is the only SSO layer *because* it is the contribution host: requiring a GitHub token on every call is what makes every user a contributor under their own identity (§12), and a second identity provider would break that by admitting callers who cannot file. Generalizing the *git host* remains a legitimate future direction — a deployment whose upstream lives on GitLab would authenticate with GitLab, for the same reason — but adding an auth provider that is not the contribution host is a non-goal, not deferred work.
+
 ## 11. Success Metrics
 
 - **Accessibility conformance**: percentage of output documents passing axe-core with zero violations at WCAG 2.2 AA.
@@ -819,7 +994,8 @@ GitHub itself is a non-replaceable dependency in v1 because the agent contributi
 - **Agent library growth**: number of community-contributed agents and agent updates merged upstream per quarter.
 - **Review loop efficiency**: distribution of iterations-to-clean across sessions; target median ≤ 2.
 - **Feedback re-run rate**: fraction of sessions requiring a user feedback re-run; should trend down as agents mature.
-- **PR-to-merge rate**: fraction of opened PRs that get merged upstream — signal for Builder Agent quality.
+- **PR-to-merge rate**: fraction of opened PRs that get merged upstream — signal for Builder Agent quality. **Amended (v1.2):** contributions are filed as issues, not PRs (§7.13), so the measurable form is **issue-to-merge rate** — the fraction of `iris-agent-suggestion` / `iris-agent-update` issues that result in a merged change.
+- **Contribution rate (v1.2)**: fraction of sessions that file at least one issue when the pipeline produced one to file. This measures §12's central claim — that using Iris and improving it are the same act — and separates "nothing to contribute" from "could not contribute": a deployment trending to zero here is misconfigured (a scope too narrow for a private upstream, a revoked service PAT), and the failures are otherwise only visible as `agent_issue_failed` lines in individual run logs.
 - **Deployment reach**: number of distinct self-hosted deployments contributing PRs upstream — signal that the portability goal is being realized in practice.
 
 ## 12. Sustainability
@@ -827,22 +1003,39 @@ GitHub itself is a non-replaceable dependency in v1 because the agent contributi
 Equalify Iris is Open Source. Continued development, security review, and accessibility expertise — the work that keeps the agent library current and trustworthy — require a sustainable funding stream. The model:
 
 - The code is free to use, modify, fork, and contribute to under the project's Open Source license.
-- Iris is built and stewarded by **Equalify Inc** ([https://equalify.app/](https://equalify.app/)). Commercial hosting and support are offered by Equalify and fund continued development of the Open Source project.
-- The hosted and self-hosted versions are functionally identical. Equalify's value to paying customers is operational (managed deployment, monitoring, accessibility consulting), not feature gating.
+- Iris is maintained by **Equalify Inc.**, the **University of Illinois Chicago**, and **California State University**. **Amended (v1.2):** maintenance is shared across those three institutions rather than held by one company. That is a fact about the project's governance with a consequence for this section: no single maintainer's commercial interest can be the whole funding story, and the design must not assume one — which is why the agent library's growth is tied to *users* contributing (below) rather than to a vendor's roadmap.
+- Commercial hosting and support are offered by **[Equalify Inc.](https://equalify.app/)** and fund its share of continued development.
+- The hosted and self-hosted versions are functionally identical. A commercial maintainer's value to paying customers is operational (managed deployment, monitoring, accessibility consulting), not feature gating.
 
-**README requirement**: the repository's `README.md` must include a sustainability notice prominently, placed above install or usage instructions so anyone landing on the repo sees it on first scroll. The same notice should appear in any hosted UI's footer or About page.
+#### Every user contributes (v1.2)
 
-Suggested copy:
+Money is one input; the other is **the agent library itself**, and that one cannot be bought. The agents in `agents/` improve because real sessions run against real documents and real corrections — a page the general extractor handled badly, a piece of feedback that generalizes past the document that produced it. Nothing else supplies that signal.
 
-> ## Sustainability
->
-> **Equalify Iris is Open Source.** Sustainability is key to sustaining its growth. With that in mind, we hope you use and alter the codebase.
->
-> Iris is built by **Equalify Inc** ([https://equalify.app/](https://equalify.app/)). Continued support and development are paid for when you hire us to host or support any instance. Please consider hiring us.
+So it is not left to goodwill. **GitHub is the only SSO layer, and a user's GitHub token is required on every API call**, because that token is what files the session's contributions (§7.13 as implemented: labeled issues, not PRs) under the user's own GitHub identity. Three things follow, and they are requirements on the implementation rather than observations about it:
+
+- **There is no anonymous or API-key mode, and there will not be one.** An alternative credential would let a caller consume the library without refilling it, which is exactly the mode this design exists to prevent. This is why §9.1's "OAuth is required, not optional" survives even though its original justification (PR pushes) does not.
+- **A token that cannot contribute is not a supported configuration.** The requested OAuth scope has a floor — enough to file an issue on `upstream_repo` and no more (§9.1 "What the token grants"). A deployment configured to request no scope **fails at startup** rather than running as a consumer-only instance, because the symptom otherwise is a swallowed 403 in a run log while the deployment looks healthy.
+- **Contributions are credited to the user who produced them.** Filing under the user's own identity is the reciprocity being asked for: the issue carries their name, and the library's growth is visibly the work of the people using it. `github.issue_token` (a service PAT that files everything under one bot account) is an override for deployments an org policy forbids from filing as users; it is off by default, is documented as not recommended, and does not lower the scope floor.
+
+Filing is a **soft** side effect in the failure direction only: a GitHub outage is logged (`agent_issue_failed`) and never fails a document the user has already paid for. It is not soft in the configuration direction — there is no request parameter, config key, or account setting that turns contribution off.
+
+**Success metric (§11):** contribution rate — the fraction of sessions that produce at least one filed issue when the pipeline generated one to file. A deployment where that trends to zero is misconfigured, not frugal.
+
+**Amended (v1.2): the README requirement is about the contribution model, not a marketing notice.** This section used to require a "Sustainability notice" above the install instructions, with suggested copy pitching Equalify's hosting. That top-of-README notice was **removed deliberately** (commit `874e665`), and this amendment follows the decision rather than treating the README as out of compliance: whether the repo opens with a pitch is an editorial call for whoever owns the README, and a PRD that hardcodes promotional copy makes an ordinary edit look like a spec violation.
+
+What the PRD does still require of the documentation, because these are claims about how the service behaves rather than positioning:
+
+- **The token requirement and its reason must be documented where an operator will hit them** — that a GitHub token is required on every call, that it is required *so that every session contributes*, and that there is no way to opt out. Currently satisfied by the README's "GitHub is the only SSO layer, and tokens are required" section, `docs/API.md` §1, and `config.example.yaml`.
+- **The scope floor must be documented as a floor**, including that `oauth_scope: none` fails at startup and that `github.issue_token` does not lower it.
+- **Maintainership and the funding model must be stated somewhere in the repo** — that Iris is maintained by Equalify Inc., the University of Illinois Chicago, and California State University; that commercial hosting and support fund Equalify's share; and that hosted and self-hosted are functionally identical with no feature gating. Currently in the README's License section and `CONTRIBUTING.md`. Placement and tone are not specified here, but the three maintainers should be named together wherever any one of them is.
+
+A hosted UI should surface the contribution model at the point of login, where it is a fact the user needs (their token files issues under their name), not in a footer.
 
 ---
 
 ## Appendix A: Example Content Agent File (`agents/table.md`)
+
+**Note (v1.2): this file no longer exists.** It is kept here as an illustration of the *file format* — the `## Purpose` / `## Required capability` / `## System prompt` / `## Output contract` sections the loader parses — which is unchanged and is what a specialist agent still looks like. What it is not is an example of a live agent: `table` is a type the general page pass covers, so a `table.md` is never dispatched (§7.4 v1.2). For a specialist that actually runs, see `agents/chartDataAgent.md`. The `@source` / `@end-source` wrapper in its output contract is also superseded (§7.4 v1.1).
 
 ```markdown
 # Table Agent

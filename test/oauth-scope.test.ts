@@ -9,16 +9,20 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { authRouter } from "../src/routes/auth.ts";
 
-// The OAuth scope decides what a stolen copy of `data/iris.sqlite` is worth: the
-// tokens in it are plaintext and replayable, so `repo` would make read access to
-// that file push access to every user's private repos. The service needs
-// `public_repo` at most (identify the caller: no scope; file an issue on a public
-// upstream: public_repo), and nothing at all when a service token files the issues.
+// The OAuth scope is bounded from BOTH sides, and this file pins both bounds.
 //
-// Two things are therefore load-bearing and both fail silently: the scope actually
-// reaching GitHub in both flows, and an empty configured scope being sent as NO
-// `scope` parameter rather than as `scope=` (the omission is the form GitHub
-// documents for requesting no scopes).
+// The floor: every session files its feedback as an issue under the user's own
+// GitHub identity, which is why GitHub is the only SSO layer at all (PRD §12).
+// A token that can identify a user but not file on their behalf is not a mode this
+// service has — so `public_repo` is the minimum, and "request no scope" is rejected
+// at startup rather than degraded into.
+//
+// The ceiling: `repo` additionally grants read AND WRITE to every private repo the
+// user can reach, which nothing here uses. It is for a private `upstream_repo` only.
+//
+// The scope reaching GitHub is load-bearing and fails silently in both directions —
+// too narrow is one swallowed `agent_issue_failed` line, too wide is a grant nobody
+// notices — so both flows are driven end to end.
 
 const scopeOf = (url: string) => new URL(url).searchParams.get("scope");
 
@@ -40,9 +44,11 @@ test("a configured scope reaches the consent screen", () => {
   assert.equal(p.get("state"), "st8", "the CSRF state was dropped");
 });
 
-// `""` is the NORMALIZED form, not a config spelling: an operator writes
-// `oauth_scope: none` and normalizeScope maps it to "" for the helpers. See the
-// normalizeScope tests below for why the config side cannot accept empty.
+// A running service cannot reach this: "" is what `oauth_scope: none` normalizes to,
+// and loadConfig refuses to return that config at all (see the startup-error test
+// below). The helpers still guard it for direct callers, and the guard has to omit
+// the parameter rather than send `scope=` — GitHub documents what omitting it does
+// and says nothing about a present-but-empty value.
 test("an empty scope omits the parameter instead of sending scope=", () => {
   const url = authorizeUrl("cid", "https://iris.test/cb", "st8", "https://github.test", "");
   // `has` rather than `get`: an empty value also reads as "" from get(), so
@@ -89,12 +95,18 @@ test("the device flow sends the same scope, and omits it when empty", async () =
 
 // --- normalizeScope: the config side ----------------------------------------
 //
-// "Request nothing" has to be a word, because empty cannot be trusted to mean it:
-// `expandEnv` rewrites an unset `${VAR}` to `""` before normalizeScope runs, so a
-// deliberate `oauth_scope: ""` and a mistyped or unset environment variable are
-// the same value by then. Reading empty as "request nothing" would send no scope
-// on a deployment that never asked for that, and the resulting 403 from issue
-// filing is swallowed as a single log line.
+// Nothing an operator can write may quietly strip the scope out of a deployment,
+// because the floor is not optional. Two separate mechanisms enforce that, and this
+// section pins the first:
+//
+//   - Every EMPTY form (absent key, valueless key, unset `${VAR}`, `""`) falls back
+//     to the default. `expandEnv` rewrites an unset `${VAR}` to `""` before
+//     normalizeScope runs, so by then a typo in a variable name and a deliberate
+//     empty string are the same value — neither can be read as intent.
+//   - The one spelling that DOES mean "no scope", `none`, normalizes to "" so that
+//     validateConfig has something to recognize and reject with a full explanation.
+//     normalizeScope has no error channel, which is why the rejection lives there
+//     and not here.
 
 test("every flavor of empty falls back to the default, including an unset ${VAR}", () => {
   assert.equal(normalizeScope(undefined), DEFAULT_OAUTH_SCOPE, "key absent");
@@ -111,9 +123,11 @@ test("every flavor of empty falls back to the default, including an unset ${VAR}
   assert.equal(normalizeScope(["repo"]), DEFAULT_OAUTH_SCOPE);
 });
 
-test("`none` is the spelling that requests no scope", () => {
-  // Maps to "" because that is what the helpers read as "omit the parameter" —
-  // the word exists so the intent cannot be produced by an accident.
+test("`none` normalizes to the empty string validateConfig rejects", () => {
+  // Not a supported setting — the mapping exists so that a deliberate "no scope"
+  // arrives at validateConfig as a distinct value it can refuse by name, instead of
+  // being sent to GitHub as a literal scope called "none" and failing at the consent
+  // screen. Empty is the marker precisely because no other config form produces it.
   assert.equal(normalizeScope("none"), "");
   assert.equal(normalizeScope(NO_OAUTH_SCOPE), "");
   assert.equal(normalizeScope("  none  "), "");
@@ -137,21 +151,19 @@ test("a configured scope is passed through, trimmed", () => {
 // normalizeScope, in the order loadConfig does things: expandEnv rewrites
 // `${VAR}` before any normalizer runs. Unit-testing normalizeScope with literals
 // cannot see that, so this drives the real loadConfig over a real file.
-test("loadConfig: an unset ${VAR} yields the default, and `none` survives expansion", () => {
+test("loadConfig: an unset ${VAR} yields the default, and a set one is honored", () => {
   const dir = mkdtempSync(join(tmpdir(), "iris-scope-"));
   // A distinct filename per case, because loadConfig caches by resolved path:
   // reusing one name would hand back the previous case's parsed config and the
   // assertion would be checking nothing.
   let n = 0;
-  // `issue_token` is set throughout, because `none` without it is a startup error
-  // (see the pairing test below) — the subject here is expansion, not the pairing.
   const write = (scope: string) => {
     const p = join(dir, `cfg-${n++}.yaml`);
     writeFileSync(
       p,
       `server: { port: 3000, base_url: "http://localhost:3000" }\n` +
         `storage:\n  data_dir: ${dir}\n  agents_dir: ${dir}/agents\n  database: ${dir}/iris.sqlite\n` +
-        `github:\n  client_id: cid\n  issue_token: svc\n  oauth_scope: ${scope}\n` +
+        `github:\n  client_id: cid\n  oauth_scope: ${scope}\n` +
         `providers:\n  default: openrouter\n  openrouter: { api_key: k, default_model: m }\n`,
     );
     return p;
@@ -162,27 +174,28 @@ test("loadConfig: an unset ${VAR} yields the default, and `none` survives expans
     // The failure this replaced: `""` after expansion read as "request nothing".
     assert.equal(scopeIn(write("${IRIS_TEST_SCOPE}")), DEFAULT_OAUTH_SCOPE, "an unset ${VAR} requested no scope");
     assert.equal(scopeIn(write('""')), DEFAULT_OAUTH_SCOPE, "a quoted empty string is not distinguishable from the above");
-    // `none` is a plain string, so expansion leaves it alone and the deliberate
-    // intent still gets through.
-    assert.equal(scopeIn(write("none")), "", "`none` did not reach normalizeScope intact");
     // And a set variable expands normally — the knob still works via env.
     process.env.IRIS_TEST_SCOPE = "repo";
     assert.equal(scopeIn(write("${IRIS_TEST_SCOPE} ")), "repo");
-    process.env.IRIS_TEST_SCOPE = "none";
-    assert.equal(scopeIn(write("${IRIS_TEST_SCOPE}  ")), "", "`none` via the environment");
   } finally {
     delete process.env.IRIS_TEST_SCOPE;
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-// `oauth_scope: none` and `issue_token` are only meaningful together: the first
-// says "a user's token never files anything", which is only true if the second
-// files everything instead. Configured apart, contributions fall back to a
-// now-scopeless user token and GitHub 403s — caught and logged as one
-// `agent_issue_failed` line, so the deployment looks healthy while the feature it
-// exists to feed is dead. Startup is the last place this is cheap to notice.
-test("loadConfig: `none` without an issue_token is a startup error", () => {
+// A scopeless deployment does not start, full stop.
+//
+// Iris authenticates with GitHub so that using it and contributing back to the shared
+// agent library are the same act (PRD §12): every session's feedback is filed as an
+// issue under the user's own identity. A token that identifies a user but cannot file
+// on their behalf breaks that, and GitHub's 403 surfaces as one swallowed
+// `agent_issue_failed` line per run — the deployment would look healthy while the
+// thing it exists to feed was dead. Startup is the last place this is cheap to notice.
+//
+// `issue_token` does NOT make it valid. A service PAT changes who gets the credit,
+// not whether a user can contribute, so there is no pairing to check here: both
+// spellings of the config are rejected identically.
+test("loadConfig: `none` is a startup error, with or without an issue_token", () => {
   const dir = mkdtempSync(join(tmpdir(), "iris-pair-"));
   let n = 0;
   const write = (github: string) => {
@@ -197,18 +210,22 @@ test("loadConfig: `none` without an issue_token is a startup error", () => {
     return p;
   };
   try {
+    // The message has to name the fix, since the symptom it prevents (a 403 on an
+    // issue nobody was watching for) gives no hint about which key is wrong.
     assert.throws(
       () => loadConfig(write("  oauth_scope: none\n")),
-      // The message has to name the fix, since the symptom it prevents (a 403 on
-      // an issue nobody was watching for) gives no hint about which key is wrong.
-      /oauth_scope.*none.*issue_token is not set/s,
-      "a scopeless deployment with no service token started up",
+      /oauth_scope.*no scope.*minimum is "public_repo"/s,
+      "a scopeless deployment started up",
     );
-    // The pairing is what is checked, not the scope alone: with the token present
-    // `none` is the recommended production shape.
-    assert.equal(loadConfig(write("  issue_token: svc\n  oauth_scope: none\n")).github.oauth_scope, "");
-    // And an accidental empty is NOT this error — it has already become the
-    // default by the time validateConfig runs, so it needs no service token.
+    // The case that used to be the recommended production shape, and is now the same
+    // error: a bot account filing the issues does not excuse a user who cannot.
+    assert.throws(
+      () => loadConfig(write("  issue_token: svc\n  oauth_scope: none\n")),
+      /oauth_scope.*no scope/s,
+      "issue_token rescued a scopeless deployment",
+    );
+    // An accidental empty is NOT this error — it has already become the default by
+    // the time validateConfig runs, so it is a working config, not a rejected one.
     assert.equal(loadConfig(write('  oauth_scope: ""\n')).github.oauth_scope, DEFAULT_OAUTH_SCOPE);
     assert.equal(loadConfig(write("")).github.oauth_scope, DEFAULT_OAUTH_SCOPE, "the default config must still start");
   } finally {
@@ -223,10 +240,9 @@ test("loadConfig: `none` without an issue_token is a startup error", () => {
 // forgets to pass `cfg.github.oauth_scope` looks correct in every default
 // deployment AND in test/e2e.sh (whose config sets no scope). The only shape that
 // catches it is a deployment configuring something OTHER than the default — the
-// `repo` case an operator with a private upstream depends on, and the no-scope case
-// that is the recommended production shape. These take the value POST-normalization
-// (`""`, what `oauth_scope: none` becomes), since that is what a route reads off
-// the config object.
+// `repo` case an operator with a private upstream depends on. The empty case is
+// covered too, even though loadConfig now refuses to produce it: these functions take
+// a scope string, and a caller that hardcodes one is the remaining way to reach it.
 
 // A config with only the fields the auth router reads.
 function cfgWith(scope: string, oauthBase: string): IrisConfig {
@@ -279,7 +295,7 @@ test("POST /auth/github/device sends the configured scope, not the default", asy
   assert.equal((await deviceScopeFor("repo")).scope, "repo");
   assert.equal((await deviceScopeFor("public_repo")).scope, "public_repo");
   const empty = await deviceScopeFor("");
-  assert.equal("scope" in empty, false, "an operator who configured no scope still had one requested");
+  assert.equal("scope" in empty, false, "an empty scope was sent as `scope: \"\"` rather than omitted");
 });
 
 test("GET /auth/github/start redirects with the configured scope", async () => {

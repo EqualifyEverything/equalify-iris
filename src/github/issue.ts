@@ -89,9 +89,9 @@ export function scopeHintFor(
           `404 on a repo that exists means the user's token cannot see it: a PRIVATE upstream_repo needs "repo". ` +
           `(A misspelled upstream_repo gives the same 404.) `
         : `403 usually means the user's token lacks the scope this repo needs. `) +
-      // `none` rather than a bare "" — an empty string reads as unset rather than
-      // as the deliberate setting the operator wrote.
-      `github.oauth_scope is "${opts.scope || "none"}". ` +
+      // Never empty: a scopeless deployment is rejected at startup, so whatever is
+      // here is a real scope an operator configured (or the default).
+      `github.oauth_scope is "${opts.scope}". ` +
       `Tokens issued before a scope change keep the old scope until the user re-authorizes.`,
   };
 }

@@ -19,18 +19,31 @@ curl -s "$BASE/health"
 
 ## 1. Authenticate (get a token)
 
-GitHub OAuth is the only auth mechanism. The consent screen requests **`public_repo`** by
-default, because the same token is used to file agent-suggestion issues on your behalf (unless
-the deployment sets a service token — see [Contributions](#contributions-automatic), in which
-case the deployment can request no scope at all). Nothing opens pull requests. By default the
-service uses a **bundled OAuth App** — you don't create or configure anything; just run the
-device flow below and approve in your browser.
+GitHub OAuth is the only auth mechanism, and a GitHub token is **required** on every API call —
+there is no anonymous mode, no API key and no second SSO provider. That is a design decision, not
+a gap: your token is what files your session's feedback back to the shared agent library, under
+your own GitHub identity. Using Iris and improving it for the next person are the same act
+(PRD §12). If you would rather not contribute, this is not the service to run.
 
-The scope is `github.oauth_scope` in the deployment's config; a deployment whose upstream repo
-is private needs `repo`, and one with a service token can set `none` to request nothing at all
-(a word rather than `""`, so that an unset `${VAR}` cannot turn the scope off by accident). Note that **the token you get back is stored in the service's database
-in plaintext** — see the README's "Read this before you deploy: token storage" before pointing
-real users at an instance you don't control.
+By default the service uses a **bundled OAuth App** — you don't create or configure anything;
+just run the device flow below and approve in your browser.
+
+The consent screen requests **`public_repo`**, which is exactly enough to file an issue on a
+public upstream and nothing more. It is the floor, not a default to trim: the scope is
+`github.oauth_scope` in the deployment's config, a private upstream repo needs `repo`, and a
+deployment that requests no scope **does not start** — a token that can identify you but not file
+on your behalf is not a supported configuration.
+
+Your token is never written to disk. It is read from the `Authorization` header, held in memory
+for the duration of the run it authorizes, and discarded — revoke it any time at
+[github.com/settings/applications](https://github.com/settings/applications) and the service loses
+that access within five minutes (see the README's "What happens to your token").
+
+*Operators:* an earlier build did store tokens, in a `github_token` column. There is no migration —
+delete any `data/iris.sqlite` from before that change and let users re-authorize. The service
+refuses to start against such a file rather than adopting it, since the old table would break
+first-time logins *and* would still hold live plaintext tokens, making the paragraph above false for
+that deployment.
 
 ### CLI / bash — device flow (recommended for terminals)
 
@@ -72,13 +85,11 @@ curl -s -H "$AUTH" "$BASE/me"
   "github_login": "iris-tester",
   "github_user_id": 4242,
   "upstream_repo": "https://github.com/example/iris",
-  "fork_repo": null,
   "defaults": { "max_review_iterations": 3 }
 }
 ```
-`fork_repo` is **always** `null`: contributions are filed as issues, so no fork is ever created.
-The field is a vestige of the PRD's fork+PR flow and is retained only for response-shape
-stability.
+`upstream_repo` is where this deployment files your contributions. There is no `fork_repo` field:
+contributions are filed as issues, so no fork is ever created (deviation from PRD §7.13).
 
 ## 3. Create a session (upload images)
 
@@ -312,14 +323,28 @@ curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/close"
 
 ## Contributions (automatic)
 
-When the extractor encounters content a dedicated specialist agent would handle better than the
-general pass, Iris drafts that agent and **automatically files a labeled GitHub issue**
-(`iris-agent-suggestion`) on the upstream repo containing the agent code + context. This happens
-server-side during the run — there is no PR/fork flow (deviation from PRD §7.13), so `/close`
-returns no `prs_opened` and requests accept no `skip_prs`.
+Every session gives something back, and there is no opt-out. This is why the API requires a GitHub
+token at all (PRD §12).
 
-By default the issue is filed with **the logged-in user's token**. Set `IRIS_GITHUB_TOKEN` to a
-service-account PAT to file everything under a bot account instead.
+Two things get filed as labeled GitHub issues on the upstream repo, server-side during the run:
+
+- **New agent suggestions** (`iris-agent-suggestion`) — when the extractor meets content a
+  dedicated specialist agent would handle better than the general pass, Iris drafts that agent and
+  files it with the code + context.
+- **Agent improvements** (`iris-agent-update`) — when your `/feedback` produces a change that
+  generalizes beyond your document, and it survives the agent's regression fixtures.
+
+Both are filed with **your** token, so the issue carries your GitHub identity and the credit is
+yours. There is no PR/fork flow (deviation from PRD §7.13): `/close` returns no `prs_opened` and
+requests accept no `skip_prs`.
+
+Filing never fails your run — a contribution is a side effect, and a GitHub outage must not cost
+you a document you already paid for. It is logged as `agent_issue_failed` instead, with a hint
+naming the likely cause when the failure looks like a permissions problem.
+
+A deployment can set `github.issue_token` to a service-account PAT to file everything under one bot
+account instead. That is **not recommended** and it is off by default: it erases the attribution
+that is the point of the design. Use it only where an org policy forbids filing as users.
 
 ## Errors (PRD §9.3)
 

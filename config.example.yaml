@@ -19,16 +19,19 @@ storage:
   # alternative for multi-instance deployments (not implemented in v1).
   database: ./data/iris.sqlite
 
-# GitHub OAuth is the only auth mechanism (PRD §9.1). The token is used to
-# identify the user and, unless `issue_token` is set below, to file
-# agent-suggestion issues on their behalf. Nothing here opens pull requests:
-# contributions are filed as issues (deviation from PRD §7.13 — see README
-# "Implementation notes").
+# GitHub OAuth is the only auth mechanism (PRD §9.1), and a user's token is
+# REQUIRED on every API call. That is the sustainability model, not a limitation:
+# the token identifies the user AND files their session's feedback back to the
+# shared agent library under their own identity, so using Iris and improving it are
+# the same act (PRD §12). There is no anonymous mode and no way to consume the
+# service without contributing.
 #
-# READ THIS: the user's token is stored in the SQLite database in PLAINTEXT, so
-# read access to it is GitHub access as every user who has logged in. Keep
-# `oauth_scope` (below) as narrow as your setup allows. See the README's
-# "Read this before you deploy: token storage".
+# Nothing here opens pull requests: contributions are filed as issues (deviation
+# from PRD §7.13 — see README "Implementation notes").
+#
+# The user's token is never persisted. It arrives in the `Authorization` header,
+# stays in memory for the run it authorizes, and is gone when the run ends — so a
+# copy of the SQLite database is not GitHub access.
 github:
   # Leave blank to use the bundled "Equalify Iris" OAuth App via the device flow
   # (no per-operator app setup needed — like the GitHub CLI). Set it only to
@@ -44,27 +47,35 @@ github:
   # to public GitHub when omitted.
   api_base_url: ${GITHUB_API_BASE_URL}
   oauth_base_url: ${GITHUB_OAUTH_BASE_URL}
-  # Optional override for who authors auto-filed agent-suggestion issues. Blank
-  # (default): filed as the logged-in user. Set to a service-account PAT to file
-  # everything under that bot account instead.
+  # OPTIONAL override for who authors auto-filed issues. Leave blank (the default):
+  # issues are then filed as the logged-in user, which is the point of the design —
+  # each contribution is credited to the person whose session produced it. A PAT here
+  # files everything under one bot account instead and erases that attribution, so
+  # set it only where a deployment genuinely cannot file as its users (e.g. an org
+  # policy that forbids it). It does NOT let you narrow `oauth_scope` below.
   issue_token: ${IRIS_GITHUB_TOKEN}
-  # OAuth scope requested from each user. The service needs only two things from
-  # this token: GET /user to identify them (no scope needed) and filing an issue on
-  # `upstream_repo`. So:
+  # OAuth scope requested from each user. The token does two things: GET /user to
+  # identify them (no scope needed) and file issues on `upstream_repo` (which is
+  # required of every user, not optional). So:
   #
-  #   public_repo  (default)  public upstream, users file their own issues
-  #   none                    `issue_token` above is set — the user's token then
-  #                           only identifies them, so ask for nothing. This is
-  #                           the recommended production shape. Spelled as a word,
-  #                           NOT as "": an unset ${VAR} expands to an empty string,
-  #                           so every empty form falls back to public_repo rather
-  #                           than silently requesting nothing.
-  #   repo                    ONLY if `upstream_repo` is private. Grants read AND
-  #                           WRITE to every private repo the user can reach, and
-  #                           that token is what sits in the database in plaintext.
+  #   public_repo  (default)  public upstream. The FLOOR, not a starting point to
+  #                           lower — exactly enough to file an issue, nothing more.
+  #   repo                    ONLY if `upstream_repo` is private. Also grants read
+  #                           AND WRITE to every private repo the user can reach,
+  #                           which nothing here uses — so do not set it otherwise.
   #
-  # `none` requires `issue_token` above — the service refuses to start otherwise,
-  # since a scopeless user token cannot file anything.
+  # There is no "request nothing" setting. `oauth_scope: none` is recognized only in
+  # order to be REJECTED at startup with an explanation: a token that can identify a
+  # user but not file on their behalf breaks the contribution model, and GitHub's 403
+  # would surface as one swallowed log line per run. `issue_token` above does not
+  # change that — while a PAT is set it does the filing and the user's scope goes
+  # unused, but unset it (rotation, expiry, a copied config) and the user tokens
+  # become the credential that files. Scopeless ones cannot, and the service keeps
+  # answering 200 while contribution stops. The floor is what makes that loud.
+  #
+  # Every EMPTY form (key absent, valueless key, "", an unset ${VAR}) falls back to
+  # public_repo rather than to nothing — a typo in a variable name must not be able to
+  # strip the scope out of a deployment.
   #
   # Changing this does not narrow tokens already issued — those keep their old
   # scope until revoked at github.com/settings/applications.
