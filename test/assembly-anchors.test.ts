@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { assembleBody, assembleBodyWithReport, runAssembly, wrapDocument } from "../src/pipeline/assembly.ts";
 import { runAxe } from "../src/pipeline/lint.ts";
-import { ATTR_SEP } from "../src/pipeline/anchors.ts";
+import { ATTR_SEP, sourceIds } from "../src/pipeline/anchors.ts";
 import type { Fragment } from "../src/pipeline/fragment.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 
@@ -985,6 +985,76 @@ test("an unparseable page with nothing at stake is not named in the report", () 
   assert.deepEqual(anchors.collisions, ["fn-1"]);
   assert.deepEqual(anchors.skipped_pages, []);
   assert.deepEqual(anchors.ambiguous, []);
+});
+
+test("an id-shaped string that is not an attribute does not make an unparseable page an owner", () => {
+  // The source scan that reads an unparseable page's ids must not be over-inclusive, which
+  // is the opposite of the rule everywhere else here — a PHANTOM owner is worse than a
+  // missed one.
+  //
+  // Both readers of `skipped` rest on "a skipped owner is ALREADY keeping the bare id", and
+  // a phantom owner never had one. A first version scanned for `id\s*=` anywhere in the
+  // source, so `id=x` in prose made page 2 an owner of `x`: `x` became a collision that no
+  // element had twice, the pin declined to fire because an owner was skipped, page 3's real
+  // id was renamed to `p3-x`, and page 1's `<label for="x">` pointed at nothing. An unnamed
+  // field — 1.3.1/4.1.2 — manufactured out of prose.
+  //
+  // One end-to-end proof, with the delivered document as the evidence. The exhaustive
+  // position-by-position check is the test below, which does not pay for a parse per shape.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<label for="x">Name</label>`),
+    frag(2, `${tooDeepToParse}<p>the field labelled id=x on the form</p>`),
+    frag(3, `<input id="x" type="text">`),
+  ]);
+  assert.deepEqual(anchors.collisions, [], "`id=x` in prose was read as a claim on `x`");
+  assert.deepEqual(anchors.skipped_pages, []);
+  // Nothing collided, so nothing is renamed and the label keeps the field it named before
+  // assembly ran.
+  assert.match(body, /<input id="x"/, "the input's id was renamed");
+  const idSet = new Set(idsOf(body));
+  for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+    assert.ok(idSet.has(m[1]), `for="${m[1]}" resolves to nothing`);
+  }
+});
+
+test("the source id scan agrees with the parser on where an attribute is", () => {
+  // Both directions of the scan `sourceIds` uses, measured against jsdom rather than
+  // asserted from a list, since the whole question is what the parser considers an
+  // attribute. Every shape is checked in both directions at once: the ids the parser found
+  // must be exactly the ids the scan found.
+  //
+  // `sourceIds` directly rather than through `assembleBodyWithReport`, because reaching it
+  // that way needs a fragment too deep for jsdom to parse and that costs ~10s per shape —
+  // the enumeration would dominate the suite. The route is covered end to end by the
+  // unparseable-page tests above; this is the scan itself. And it is the real function, not
+  // a copy of its regex: a copy would keep passing while the original drifted.
+  //
+  // The over-inclusive direction is the one with teeth (see the test above), but a MISS is
+  // the pin's premise failing too, so both are errors here.
+  const shapes = [
+    // Ids the parser does see, in every position it accepts one.
+    `<p id="x">t</p>`,
+    `<p id='x'>t</p>`,
+    `<p id=x>t</p>`,
+    `<p class="note"id="x">t</p>`, // quote-adjacent — what ATTR_SEP exists for
+    `<p/id="x">t</p>`, // slash-separated
+    `<p\tid="x">t</p>`,
+    `<p\nid="x">t</p>`,
+    `<p ID="x">t</p>`, // attribute names are case-insensitive
+    `<p id = "x">t</p>`,
+    `<img id="x"/>`,
+    `<p title="a > b" id="x">t</p>`, // a `>` inside a quoted value does not end the tag
+    // And the phantoms: id-shaped strings in positions that are not attributes.
+    `<p>id=phantom in prose</p><p id="x">t</p>`,
+    `<!-- <p id="phantom"> --><p id="x">t</p>`,
+    `<p title='id="phantom"' id="x">t</p>`,
+    `<p data-id="phantom" id="x">t</p>`, // `data-id` is not `id`
+  ];
+  for (const shape of shapes) {
+    const parsed = new JSDOM(`<body>${shape}</body>`).window.document;
+    const fromParser = [...parsed.querySelectorAll("[id]")].map((el) => el.getAttribute("id")!).sort();
+    assert.deepEqual([...sourceIds(shape)].sort(), fromParser, `disagreed with the parser on: ${JSON.stringify(shape)}`);
+  }
 });
 
 test("parsing that legitimately adds elements is not mistaken for a loss", () => {

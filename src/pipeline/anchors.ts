@@ -252,12 +252,25 @@ function parseFragment(innerHtml: string): JSDOM | null {
 // in the document. The duplicate that whole condition exists to prevent, reached by the
 // one route that reports nothing.
 //
-// Over-inclusive in the same direction as `sourceSequence`: an `id="x"` inside a comment or
-// an attribute value is counted. The cost is a collision that is not one, which renames
-// some other page's id unnecessarily — cosmetic, and every reference still resolves,
-// because `resolve` repoints them. The cost of MISSING one is the duplicate above.
-function sourceIds(innerHtml: string): Set<string> {
-  return sourceAttr(innerHtml, "id");
+// This one must NOT be over-inclusive, which is the opposite of the rule everywhere else in
+// this file, because a phantom owner is worse than a missed one. Both readers of `skipped`
+// rest on "a skipped owner is ALREADY keeping the bare id", and a phantom owner never had
+// one: an `id=x` read out of prose on an unparseable page made that page a `claims` owner,
+// so the pin declined to fire and every REAL owner was renamed — leaving a `<label for="x">`
+// on another page pointing at nothing, the unnamed-field failure (1.3.1/4.1.2) the pin
+// exists to prevent, on an id that was never a collision in the first place. Missing a real
+// id costs a duplicate id that lint's `duplicate-id` reports, which is the trade this file's
+// header makes in that direction and only that direction.
+//
+// So ids are read from real attribute positions only — see `sourceAttrs`.
+//
+// Exported for the test that measures it against jsdom, for the same reason `ATTR_SEP` is:
+// reaching it through `namespaceAnchors` needs a fragment too deep for jsdom to parse, which
+// costs ~10s per shape, so an enumeration would dominate the suite. The end-to-end route has
+// its own tests; this export is what lets the scan's agreement with the parser be checked
+// shape by shape.
+export function sourceIds(innerHtml: string): Set<string> {
+  return new Set(sourceAttrs(innerHtml).get("id") ?? []);
 }
 
 // The references a page's SOURCE makes, read without parsing — the mirror of `sourceIds`,
@@ -268,36 +281,62 @@ function sourceIds(innerHtml: string): Set<string> {
 // file's header refuses and the defect the pin was added to fix. It was fixed for the guard
 // route and left open for this one.
 //
+// Here over-inclusiveness IS the safe direction, unlike `sourceIds` above: a reference that
+// is not really there pins a first owner that did not need pinning, which leaves one
+// colliding id bare and renames the rest — no duplicate, no dangling reference. Missing one
+// is the dangling reference. The two functions read the same source through the same scan
+// and want opposite error directions, which is why that asymmetry is stated at both ends
+// rather than left to a shared comment.
+//
 // `headers` and the `aria-*` list attributes are space-separated, so each token counts.
 function sourceRefs(innerHtml: string): Set<string> {
   const refs = new Set<string>();
-  for (const m of innerHtml.matchAll(/href\s*=\s*(?:"#([^"]*)"|'#([^']*)'|#([^\s>]+))/gi)) {
-    const target = m[1] ?? m[2] ?? m[3];
-    if (target) refs.add(target);
+  const attrs = sourceAttrs(innerHtml);
+  for (const value of attrs.get("href") ?? []) {
+    if (value.startsWith("#") && value.length > 1) refs.add(value.slice(1));
   }
   for (const attr of IDREF_ATTRS) {
-    for (const value of sourceAttr(innerHtml, attr)) {
+    for (const value of attrs.get(attr) ?? []) {
       for (const token of value.split(/\s+/)) if (token) refs.add(token);
     }
   }
   return refs;
 }
 
-// One attribute's values across a source string, quoted or bare. Over-inclusive in the same
-// direction as `sourceSequence`: a match inside a comment or another attribute's value
-// counts. For ids the cost is a collision that is not one — some other page's id renamed
-// unnecessarily, cosmetic, and every reference still resolves. For references the cost is a
-// pin that was not needed, which leaves one colliding id bare. Both are the safe direction;
-// MISSING one is the duplicate id or the dangling reference above.
-function sourceAttr(innerHtml: string, attr: string): Set<string> {
-  const out = new Set<string>();
-  const pattern = new RegExp(`(?:^|${ATTR_SEP})${attr}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "gi");
-  for (const m of innerHtml.matchAll(pattern)) {
-    const value = m[1] ?? m[2] ?? m[3];
-    if (value) out.add(value);
+// Attribute name (lowercased) -> every value the source gives it, read without parsing.
+//
+// Tag-aware, not a bare regex over the whole string, because `sourceIds` needs a name that
+// is really in attribute position: a plain `id\s*=` scan matched `id=x` in prose and
+// `title='id="x"'`, and each phantom cost a dangling reference (see `sourceIds`). Tags are
+// found with the same SOURCE_TOKEN the reserialization guard uses — so comments are skipped
+// and a quoted value containing `>` does not end the tag — and each tag's attributes are
+// then walked in order, so a value is consumed by the name it belongs to and can never be
+// re-read as a name itself.
+//
+// A tag SOURCE_TOKEN cannot match (an unbalanced quote, say) contributes nothing. For
+// references that is the unsafe direction and is why `sourceRefs` is only ever consulted for
+// pages already being delivered as written, where a missed reference leaves the same
+// wrong-target it had before assembly rather than a new dangling one; for ids it is the safe
+// direction, per `sourceIds`.
+function sourceAttrs(innerHtml: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const tag of innerHtml.matchAll(SOURCE_TOKEN)) {
+    if (tag[0].startsWith("<!--")) continue;
+    // Past the tag name: `<` + optional `/` + the name.
+    const interior = tag[0].slice(1 + tag[1].length + tag[2].length, -1);
+    for (const attr of interior.matchAll(TAG_ATTR)) {
+      const name = attr[1].toLowerCase();
+      const value = attr[2] ?? attr[3] ?? attr[4];
+      if (value === undefined || value === "") continue;
+      out.set(name, [...(out.get(name) ?? []), value]);
+    }
   }
   return out;
 }
+
+// One attribute inside a tag: a name, then optionally `=` and a quoted or bare value.
+// Matched repeatedly over a tag's interior so each value is consumed by its own name.
+const TAG_ATTR = /([^\s/>="']+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*)))?/g;
 
 // Every reference a page makes, so the report can name the ones left dangling.
 function referencesIn(document: Document): string[] {
