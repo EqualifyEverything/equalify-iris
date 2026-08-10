@@ -426,7 +426,10 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   instead, the referenced id's first owner keeps its bare form so that reference still resolves —
   only the first owner, so every other copy is still renamed, and only when none of that id's
   *owners* was skipped, since a skipped owner is already keeping the bare id and pinning a second
-  copy would ship a duplicate. That covers foster parenting in
+  copy would ship a duplicate. Any id pinned this way is listed in the same log line as
+  `pinned_ids`: it is a colliding id that deliberately was *not* renamed, so without it a bare
+  colliding id in the delivered document would be indistinguishable from namespacing that
+  silently failed. That covers foster parenting in
   both directions: a `<tr>` outside a `<table>` is dropped to bare text, and content inside one is
   *hoisted out past the table* — a reading-order change, worse than the duplicate id it would be
   fixing. The guard compares the source's sequence of tags **and text** against the parsed document

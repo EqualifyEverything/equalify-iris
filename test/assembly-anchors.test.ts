@@ -783,6 +783,13 @@ test("a REFERRING page left as written keeps its first owner bare, so its idref 
   ]);
   assert.deepEqual(anchors.skipped_pages, [3]);
   assert.deepEqual(anchors.ambiguous, [{ page: 3, ref: "q1" }]);
+  // And the pin is disclosed. `collisions` on its own says `q1` was claimed twice and would
+  // be read as "so it was renamed" — which the pin makes false for the first owner on
+  // purpose. Without this field, the bare `q1` two assertions down is indistinguishable in
+  // the run log from the namespacing having silently failed. `q1` appears in BOTH lists:
+  // it collided, and one of its owners was deliberately left alone.
+  assert.deepEqual(anchors.collisions, ["q1"]);
+  assert.deepEqual(anchors.pinned_ids, ["q1"], "the pin was not disclosed");
   assert.match(body, /<label for="q1">Name<\/label>/, "the skipped page was rewritten after all");
   // Page 2 owns its `q1`, so its own label follows its own renamed copy.
   assert.match(body, /<label for="p2-q1">Second<\/label>/, "page 2's own label did not follow its own input");
@@ -863,6 +870,9 @@ test("nothing is pinned when an OWNER of the id was itself skipped", async () =>
   ]);
   assert.deepEqual(anchors.skipped_pages, [2, 3]);
   assert.deepEqual(anchors.collisions, ["q1"]);
+  // Nothing was pinned, so the report says so — the bare `q1` in the output is page 2's own,
+  // not a pin.
+  assert.deepEqual(anchors.pinned_ids, []);
   const ids = idsOf(body);
   assert.equal(new Set(ids).size, ids.length, `duplicate ids survived assembly: ${ids.join(", ")}`);
   // Page 1 is the only owner that CAN be renamed, so it is — the skipped owner keeps the

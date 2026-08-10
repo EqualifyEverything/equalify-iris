@@ -53,8 +53,17 @@ const IDREF_ATTRS = [
 ];
 
 export interface AnchorReport {
-  // Bare ids that more than one page claimed, and were therefore namespaced.
+  // Bare ids that more than one page claimed. Namespaced, EXCEPT for whatever appears in
+  // `pinned_ids` — see there, and do not read this field as "every one of these was
+  // rewritten".
   collisions: string[];
+  // Colliding ids whose first owner was deliberately left bare, because a page that could
+  // not be rewritten holds a reference to it and a frozen reference can only find a bare
+  // id. Reported for the same reason `skipped_pages` is: without it, a bare colliding id in
+  // the delivered document is indistinguishable in the run log from the namespacing having
+  // silently failed. The other owners of a pinned id are still renamed, so the id appears
+  // here AND in `collisions`.
+  pinned_ids: string[];
   // References that name a colliding id from a page that does not own it, so no page
   // can say which copy was meant. They are repointed at the first owner in document
   // order — what the un-namespaced document resolved them to — and reported here
@@ -70,7 +79,7 @@ export interface AnchorReport {
   skipped_pages: number[];
 }
 
-const EMPTY_REPORT: AnchorReport = { collisions: [], ambiguous: [], skipped_pages: [] };
+const EMPTY_REPORT: AnchorReport = { collisions: [], pinned_ids: [], ambiguous: [], skipped_pages: [] };
 
 // The characters that can sit immediately before an attribute name in source HTML, as a
 // regex character class. Both passes below use a cheap regex over the unparsed source to
@@ -313,7 +322,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     }
 
     const colliding = new Set(collisions);
-    const report: AnchorReport = { collisions: collisions.sort(), ambiguous: [], skipped_pages: [] };
+    const report: AnchorReport = { collisions: collisions.sort(), pinned_ids: [], ambiguous: [], skipped_pages: [] };
     const out = pages.map((p) => p.innerHtml);
 
     // The prefix has to be one no id in the document already uses, or the rename
@@ -402,7 +411,30 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
         dom = parseFragment(page.innerHtml);
         reportOnly.push(dom);
       }
-      if (!dom) continue;
+      if (!dom) {
+        // The parse failed, so this page cannot be rewritten and is delivered byte-for-byte
+        // — the same OUTCOME as tripping the reserialization guard below, so it joins the
+        // same set. Two rules read `skipped` as "delivered as written": `resolve` keeps a
+        // reference to a skipped owner bare, and the pin refuses to fire when an owner was
+        // skipped. A page reaching here unrecorded could let a pinned first owner and this
+        // page both ship the bare id — the duplicate the pin's condition exists to prevent.
+        //
+        // What those two readers need is narrower than "every page delivered as written",
+        // which is just as well, because the `continue` above does not record its pages
+        // either. They need every page that is delivered as written AND owns a colliding id
+        // or refers to one. That `continue` is unreachable for such a page: owning a
+        // colliding id means pass 1 parsed it and `doms[i]` is non-null, and referring to
+        // one means the sniff matched. So the two sets coincide exactly where it matters.
+        //
+        // Not reachable today at all: jsdom recovers from malformed fragments rather than
+        // throwing, so `parseFragment` effectively never returns null — which is also why
+        // there is no test below pinning this branch, only the readers' behaviour on the
+        // guard route. Recorded anyway; the alternative is a second unrecorded route into
+        // the exact state the pin's condition rules out.
+        skipped.add(i);
+        report.skipped_pages.push(page.order);
+        continue;
+      }
       const { document } = dom.window;
       const refs = new Set(referencesIn(document).filter((r) => colliding.has(r) && !mine.has(r)));
       if (!ownsCollision && refs.size === 0) continue;
@@ -452,6 +484,10 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
         pinned.add(ref);
       }
     }
+    // Reported, because a pinned id is a colliding id that was deliberately NOT renamed.
+    // `collisions` alone would say it was, so the run log could not tell an intentional
+    // bare id from namespacing that silently failed.
+    report.pinned_ids = [...pinned].sort();
 
     // What each colliding id becomes, from the point of view of the page naming it.
     //
