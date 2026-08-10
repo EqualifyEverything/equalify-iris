@@ -915,16 +915,18 @@ test("a skipped owner does not suppress pinning for a DIFFERENT id", () => {
   }
 });
 
-// A fragment jsdom cannot parse at all. The `JSDOM` constructor builds its tree
-// recursively, so nesting past its stack depth throws `RangeError` — measured at between
-// 8,000 and 16,000 nested elements, so 20,000 is comfortably over. This is the only known
-// route to `parseFragment` returning null: malformed markup does NOT get there, because the
-// HTML parser has a recovery rule for everything and raises nothing.
+// A fragment `parseFragment` refuses to give a DOM: it nests past `MAX_NESTING` (500), so
+// the page is delivered exactly as written and everything it contributes is read from its
+// source. That is the live route to a null DOM; the parser's own `RangeError` is a backstop
+// behind it. See `MAX_NESTING` for why the guard exists rather than letting the parse fail:
+// between roughly 4,000 and 10,000 levels jsdom PARSES and then overflows in
+// serialization or `window.close()`, throwing out of assembly and failing the session, so
+// the depth at which the parse itself gives up was never a boundary worth relying on.
 //
 // Real input, not a stub. Stubbing was tried and abandoned: `anchors.ts` imports `JSDOM`
 // directly and ESM namespace objects are read-only, so a test that reassigned it would have
 // exercised nothing while appearing to pass.
-const tooDeepToParse = "<div>".repeat(20000);
+const tooDeepToParse = "<div>".repeat(600);
 
 test("an unparseable OWNER suppresses the pin, so no duplicate ships", () => {
   // The pin leaves a colliding id's first owner bare for the sake of a frozen reference. An
@@ -1017,17 +1019,89 @@ test("an id-shaped string that is not an attribute does not make an unparseable 
   }
 });
 
+test("a tag inside a <textarea> is text, so it does not make a skipped page an owner", () => {
+  // The same manufactured-dangling-reference defect as the test above, reached through markup
+  // rather than prose: the tag-aware scan walked a `<p id="x">` sitting INSIDE a `<textarea>`,
+  // which the parser treats as text. A page agent transcribing a filled-in form field emits
+  // exactly this. `x` became a collision no element had twice, the phantom owner suppressed
+  // the pin, page 3's real id was renamed, and page 1's label named nothing.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<label for="x">Name</label>`),
+    frag(2, `${tooDeepToParse}<textarea><p id="x"></textarea>`),
+    frag(3, `<input id="x" type="text">`),
+  ]);
+  assert.deepEqual(anchors.collisions, [], "a tag inside <textarea> was read as an id claim");
+  assert.deepEqual(anchors.skipped_pages, []);
+  assert.match(body, /<input id="x"/, "the input's id was renamed");
+  const idSet = new Set(idsOf(body));
+  for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+    assert.ok(idSet.has(m[1]), `for="${m[1]}" resolves to nothing`);
+  }
+});
+
+test("a character-referenced for= on a skipped page still pins its owner", () => {
+  // The mirror direction, on the reference side. `for="q&#49;"` IS a reference to `q1` — the
+  // parser decodes attribute values — but the scan read it literally, so the pin never learned
+  // the reference existed. Both owners of `q1` were renamed, page 3's frozen `for` named
+  // nothing, and the report was empty: the defect the pin was added to fix, reached through
+  // the route that reports least.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<input id="q1" type="text">`),
+    frag(2, `<label for="q1">Second</label><input id="q1" type="text">`),
+    frag(3, `${tooDeepToParse}<label for="q&#49;">Name</label>`),
+  ]);
+  assert.deepEqual(anchors.collisions, ["q1"]);
+  assert.deepEqual(anchors.pinned_ids, ["q1"], "the decoded reference did not pin its owner");
+  assert.deepEqual(anchors.skipped_pages, [3]);
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `duplicate ids survived: ${ids.join(", ")}`);
+  // Page 1 keeps `q1` bare so page 3's frozen reference finds it; page 2's copy is renamed.
+  assert.deepEqual(ids, ["q1", "p2-q1"]);
+});
+
+test("a page too deep to rewrite is delivered as written rather than throwing", () => {
+  // Every step of the rewrite recurses per level of nesting, and they do not all give up at
+  // the same depth: measured, jsdom's serializer and `window.close()` overflow from about
+  // 4,000 levels while the parse survives to about 10,000. So the band in between used to
+  // PARSE and then throw `RangeError` out of assembly, failing the session — while a DEEPER
+  // page, whose parse failed cleanly, was delivered fine. Non-monotonic in depth, and the
+  // worse outcome was the shallower one.
+  //
+  // `MAX_NESTING` (500) is checked before anything recursive runs, so the whole band is now
+  // one behaviour. The depths here span it: just over the limit, the old serializer/close
+  // band, and past the old parse threshold.
+  for (const depth of [600, 5000, 9000, 12000]) {
+    const deep = "<div>".repeat(depth);
+    const { body, anchors } = assembleBodyWithReport([
+      frag(1, `<input id="q1" type="text">`),
+      frag(2, `<input id="q1" type="text">`),
+      frag(3, `${deep}<label for="q1">Name</label>`),
+    ]);
+    assert.deepEqual(anchors.skipped_pages, [3], `depth ${depth}`);
+    assert.deepEqual(anchors.pinned_ids, ["q1"], `depth ${depth}`);
+    const ids = idsOf(body);
+    assert.equal(new Set(ids).size, ids.length, `duplicate ids survived at depth ${depth}`);
+    // The page is delivered byte-for-byte, so its nesting is still in the output.
+    assert.ok(body.includes(deep), `depth ${depth}: the page was not delivered as written`);
+    const idSet = new Set(ids);
+    for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+      assert.ok(idSet.has(m[1]), `depth ${depth}: for="${m[1]}" resolves to nothing`);
+    }
+  }
+});
+
 test("the source id scan agrees with the parser on where an attribute is", () => {
   // Both directions of the scan `sourceIds` uses, measured against jsdom rather than
   // asserted from a list, since the whole question is what the parser considers an
   // attribute. Every shape is checked in both directions at once: the ids the parser found
   // must be exactly the ids the scan found.
   //
-  // `sourceIds` directly rather than through `assembleBodyWithReport`, because reaching it
-  // that way needs a fragment too deep for jsdom to parse and that costs ~10s per shape —
-  // the enumeration would dominate the suite. The route is covered end to end by the
-  // unparseable-page tests above; this is the scan itself. And it is the real function, not
-  // a copy of its regex: a copy would keep passing while the original drifted.
+  // `sourceIds` directly rather than through `assembleBodyWithReport`: the end-to-end route
+  // needs a collision and a deep page per shape, and what is being measured here is the scan
+  // against the parser, one shape at a time, with the disagreement named in the failure. The
+  // route itself is covered end to end by the unparseable-page tests above. And it is the
+  // real function, not a copy of its regex: a copy would keep passing while the original
+  // drifted.
   //
   // The over-inclusive direction is the one with teeth (see the test above), but a MISS is
   // the pin's premise failing too, so both are errors here.
@@ -1044,11 +1118,40 @@ test("the source id scan agrees with the parser on where an attribute is", () =>
     `<p id = "x">t</p>`,
     `<img id="x"/>`,
     `<p title="a > b" id="x">t</p>`, // a `>` inside a quoted value does not end the tag
+    `<p id="fn&#45;1">t</p>`, // a character reference: the parser decodes, so this must too
+    `<p id="a&amp;b">t</p>`,
+    `<p id="a&ampb">t</p>`, // NOT decoded in attribute position, unlike in text
+    `<p id="&#x41;x">t</p>`,
     // And the phantoms: id-shaped strings in positions that are not attributes.
     `<p>id=phantom in prose</p><p id="x">t</p>`,
     `<!-- <p id="phantom"> --><p id="x">t</p>`,
     `<p title='id="phantom"' id="x">t</p>`,
     `<p data-id="phantom" id="x">t</p>`, // `data-id` is not `id`
+    `<p id="a" id="b">t</p>`, // repeated name: the parser keeps the first
+    // Elements whose content is not markup, so a tag inside one is text. The plausible one
+    // is `<textarea>`: a page agent transcribing a filled-in form field emits exactly this.
+    `<textarea><p id="phantom"></textarea><p id="x">t</p>`,
+    `<script>var s='<p id="phantom">'</script><p id="x">t</p>`,
+    `<style>/* <p id="phantom"> */</style><p id="x">t</p>`,
+    `<title><p id="phantom"></title><p id="x">t</p>`,
+    `<template><p id="phantom"></template><p id="x">t</p>`,
+    `<xmp><p id="phantom"></xmp><p id="x">t</p>`,
+    `<iframe><p id="phantom"></iframe><p id="x">t</p>`,
+    `<noembed><p id="phantom"></noembed><p id="x">t</p>`,
+    `<noframes><p id="phantom"></noframes><p id="x">t</p>`,
+    `<select><b id="phantom"></select><p id="x">t</p>`,
+    `<textarea rows="2"><p id="phantom"></textarea><p id="x">t</p>`, // its OWN attributes are real
+    `<textarea id="real"><p id="phantom"></textarea><p id="x">t</p>`,
+    `<textarea><p id="phantom"></textarea foo="bar"><p id="x">t</p>`, // junk in the close tag
+    `<TEXTAREA><p id="phantom"></TEXTAREA><p id="x">t</p>`,
+    `<textarea><textarea><p id="phantom"></textarea><p id="x">t</p>`, // raw text does not nest
+    // A raw-text element with no close tag runs to the end of the page, so the ids after it
+    // are MISSED rather than invented — `sourceIds`' safe direction, asserted so a change
+    // that flipped it to the phantom direction would fail here.
+    `<textarea><p id="missed">`,
+    // `noscript` content IS parsed (scripting is disabled in these fragments), so it is not
+    // in RAW_CONTENT and its ids are real.
+    `<noscript><p id="real"></noscript><p id="x">t</p>`,
   ];
   for (const shape of shapes) {
     const parsed = new JSDOM(`<body>${shape}</body>`).window.document;
@@ -1089,6 +1192,18 @@ test("the source reference scan agrees with the parser too", () => {
     `<p title="href=#phantom">x</p>`,
     `<!-- <a href="#phantom">x</a> -->`,
     `<p data-for="phantom">x</p>`,
+    // Character references, which the parser decodes. Reading these literally left a frozen
+    // `for=` unseen, so its owners were renamed and the reference named nothing — the exact
+    // defect the pin exists to prevent, and `sourceRefs`' unsafe direction.
+    `<label for="q&#49;">L</label>`,
+    `<a href="&#35;t">a</a>`,
+    `<p aria-labelledby="a&#32;b">x</p>`,
+    `<label for="a&amp;b">L</label>`,
+    // And references inside elements whose content is not markup.
+    `<textarea><label for="phantom"></textarea>`,
+    `<script>var s='<label for="phantom">'</script>`,
+    `<template><a href="#phantom">x</a></template>`,
+    `<label for="a" for="b">L</label>`, // repeated name: first wins
   ];
   const IDREF_ATTRS = ["for", "form", "list", "headers", "aria-labelledby", "aria-describedby", "aria-details", "aria-errormessage", "aria-controls", "aria-owns", "aria-flowto", "aria-activedescendant"];
   for (const shape of shapes) {

@@ -429,14 +429,18 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   copy would ship a duplicate. Any id pinned this way is listed in the same log line as
   `pinned_ids`: it is a colliding id that deliberately was *not* renamed, so without it a bare
   colliding id in the delivered document would be indistinguishable from namespacing that
-  silently failed. A page that cannot be *parsed* at all — jsdom's tree construction recurses,
-  so a deeply nested fragment overflows the stack, measured here as somewhere between 8,000 and
-  16,000 nested elements and dependent on how much stack the caller has already used — is
-  delivered as written for
+  silently failed. A page too deeply *nested* to rewrite — every step of the rewrite recurses per
+  level, so past a fixed limit of 500 the page is refused a DOM outright rather than allowed to
+  overflow one of them — is delivered as written for
   the same reason and takes the same treatment: its ids and its references are read straight
   from the source, so it counts as an owner (or the collision would go undetected for its copy,
   and the pin would fire on top of the bare id it is already keeping) and its frozen references
-  pin their first owner. That covers foster parenting in
+  pin their first owner. That source scan follows the parser's own rules — it reads attributes only
+  from real tag positions, skips elements whose content is not markup (`<textarea>`, `<script>`,
+  `<template>` and the rest), decodes character references, and takes the first of a repeated
+  attribute — because a *phantom* id read out of non-markup text is worse than a missed one: it
+  suppresses the pin, the real owner is renamed, and a `<label for>` elsewhere is left naming
+  nothing. That covers foster parenting in
   both directions: a `<tr>` outside a `<table>` is dropped to bare text, and content inside one is
   *hoisted out past the table* — a reading-order change, worse than the duplicate id it would be
   fixing. The guard compares the source's sequence of tags **and text** against the parsed document

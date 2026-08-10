@@ -230,12 +230,57 @@ function ownedIds(document: Document): Set<string> {
   return ids;
 }
 
-// Null when the page cannot be parsed at all. Reachable: jsdom builds its tree
-// recursively, so a deeply nested fragment throws `RangeError: Maximum call stack size
-// exceeded` somewhere between 8,000 and 16,000 nested elements. Malformed markup does NOT
-// get here — the HTML parser has a recovery rule for everything and raises nothing — so
-// this is the depth case and cases like it, not the ordinary bad-input case.
+// How deeply a page may nest before this module refuses to give it a DOM at all.
+//
+// Every step of the rewrite recurses per level of nesting — jsdom's parser, its
+// serializer, its `window.close()`, and this file's own `parsedSequence` — so a deep enough
+// page overflows the stack in one of them. Which one comes first is not a fact worth
+// relying on: measured on this machine, `body.innerHTML` and `window.close()` throw from
+// about 4,000 levels while the parse itself survives to about 10,000, so the band in
+// between PARSES and then throws out of assembly, failing the whole session — strictly
+// worse than the duplicate id the page would have shipped. Above that band the parse fails
+// and the page is delivered as written, so the behaviour was non-monotonic in depth: deeper
+// input succeeded where shallower input crashed. And every threshold moves with how much
+// stack the caller has already used, so none of them is a number to document.
+//
+// Hence one limit, checked against the source before anything recursive touches the page,
+// chosen far below every measured threshold: past it the page is delivered exactly as
+// written, which is the same outcome as tripping the reserialization guard and is handled by
+// the same code. Real documents do not come near 500 levels of nesting — the guard is for
+// pathological input, and skipping a page that did not need skipping costs a duplicate id
+// that lint reports, the trade this file's header makes in that direction.
+const MAX_NESTING = 500;
+
+// An OVER-estimate of how deep the source nests: every start tag counts, including void and
+// self-closing ones the parser never nests into. Over-estimating is the safe direction —
+// it can only refuse a page that would have been fine.
+function exceedsNesting(innerHtml: string): boolean {
+  let open = 0;
+  for (const tag of innerHtml.matchAll(SOURCE_TOKEN)) {
+    if (tag[0].startsWith("<!--")) continue;
+    if (tag[1] === "") {
+      if (++open > MAX_NESTING) return true;
+    } else if (open > 0) {
+      open--;
+    }
+  }
+  return false;
+}
+
+// Null when the page cannot be given a DOM — either because it nests past `MAX_NESTING`, or
+// because the parse itself threw. Both mean the same thing to every caller: there is no DOM
+// and there never will be one, so the page is delivered byte-for-byte and everything it
+// contributes has to be read from its source (`sourceIds`, `sourceRefs`).
+//
+// The depth check comes FIRST and is why the second case is now a backstop rather than the
+// live route. It used to be the live one: jsdom builds its tree recursively, so a fragment
+// nested past its stack depth threw `RangeError`. That is still true, but the depth guard
+// stops such a page well before the parser sees it — and it has to, because the failures
+// that arrive BETWEEN the two thresholds are throws out of assembly rather than a clean
+// null. Malformed markup does not reach the catch either: the HTML parser has a recovery
+// rule for everything and raises nothing.
 function parseFragment(innerHtml: string): JSDOM | null {
+  if (exceedsNesting(innerHtml)) return null;
   try {
     return new JSDOM(`<body>${innerHtml}</body>`, { virtualConsole: new VirtualConsole() });
   } catch {
@@ -243,9 +288,10 @@ function parseFragment(innerHtml: string): JSDOM | null {
   }
 }
 
-// The ids a page's SOURCE claims, read without parsing. Used only when the parse failed,
-// where the alternative is recording that the page owns nothing — and that is not a
-// neutral default but a false statement with teeth. An unparseable page is delivered
+// The ids a page's SOURCE claims, read without parsing. Used only when `parseFragment`
+// refused the page (nested past `MAX_NESTING`, or the parse threw), where the alternative is
+// recording that the page owns nothing — and that is not a
+// neutral default but a false statement with teeth. Such a page is delivered
 // byte-for-byte, so every id in its source is in the output; a page missing from `claims`
 // is invisible as an owner to both readers of `skipped`, so the collision goes undetected
 // AND the pin below sees no skipped owner and fires, putting a second bare copy of the id
@@ -305,6 +351,39 @@ export function sourceRefs(innerHtml: string): Set<string> {
   return refs;
 }
 
+// Elements whose CONTENT the parser does not build a tree from, so a tag-shaped string
+// inside one is text and its attributes are not attributes. Measured, not listed from the
+// spec: for every element name a `<b id="phantom">` was placed inside it and the parsed
+// document was asked whether `phantom` came back. These are the ones where it did not.
+//
+// `template` is in here for a different reason than the rest — its content IS parsed, into
+// a separate document fragment `querySelectorAll` on the body never sees — but the
+// consequence for this scan is identical, so the distinction does not earn a branch.
+//
+// `select` is here too, and it is the odd one: the parser drops most tags inside it rather
+// than treating them as text, so `<select><b id="x"></select>` yields no `x` — but
+// `<option id="x">`, `<optgroup>` and `<hr>` ARE kept. Skipping the whole element therefore
+// MISSES real ids rather than inventing phantoms, which is `sourceIds`' safe direction and
+// `sourceRefs`' unsafe one; both are the same trade the unmatched-tag case already makes
+// below, and a scan that modelled select's content rules would be modelling the parser.
+//
+// `plaintext` and `noscript` are deliberately absent. `plaintext` never ends, so everything
+// after it is text — but that means it swallows the REAL ids too, and treating it as an
+// element with a close tag is the miss direction rather than the phantom one. `noscript`'s
+// content IS parsed when scripting is disabled, which is how jsdom parses these fragments.
+const RAW_CONTENT = new Set([
+  "script",
+  "style",
+  "textarea",
+  "title",
+  "template",
+  "xmp",
+  "noembed",
+  "noframes",
+  "iframe",
+  "select",
+]);
+
 // Attribute name (lowercased) -> every value the source gives it, read without parsing.
 //
 // Tag-aware, not a bare regex over the whole string, because `sourceIds` needs a name that
@@ -315,6 +394,21 @@ export function sourceRefs(innerHtml: string): Set<string> {
 // then walked in order, so a value is consumed by the name it belongs to and can never be
 // re-read as a name itself.
 //
+// Being in a tag is not sufficient, though: a tag inside a `<textarea>` or `<script>` is
+// TEXT, and the tag-aware version still walked it. `<textarea><p id="x"></textarea>` on an
+// unparseable page made that page a phantom owner of `x`, suppressing the pin and renaming
+// the real owner — the manufactured dangling `for=` that `sourceIds` describes, reached
+// through markup a page agent transcribing a form field plausibly emits. So RAW_CONTENT
+// elements are skipped to their close tag.
+//
+// Values are DECODED, because the parser decodes them: `for="q&#49;"` is a reference to
+// `q1`, and reading it literally left the frozen reference unseen, every owner of `q1`
+// renamed, and nothing in the report — `sourceRefs`' unsafe direction. `id="fn&#45;1"` is
+// the mirror on the id side, where an undecoded value is a phantom.
+//
+// First value wins per name, because that is the parser's rule for a repeated attribute:
+// `<p id="a" id="b">` is `a`, and collecting both made `b` a phantom.
+//
 // A tag SOURCE_TOKEN cannot match (an unbalanced quote, say) contributes nothing. For
 // references that is the unsafe direction and is why `sourceRefs` is only ever consulted for
 // pages already being delivered as written, where a missed reference leaves the same
@@ -322,16 +416,56 @@ export function sourceRefs(innerHtml: string): Set<string> {
 // direction, per `sourceIds`.
 function sourceAttrs(innerHtml: string): Map<string, string[]> {
   const out = new Map<string, string[]>();
-  for (const tag of innerHtml.matchAll(SOURCE_TOKEN)) {
-    if (tag[0].startsWith("<!--")) continue;
-    // Past the tag name: `<` + optional `/` + the name.
-    const interior = tag[0].slice(1 + tag[1].length + tag[2].length, -1);
-    for (const attr of interior.matchAll(TAG_ATTR)) {
-      const name = attr[1].toLowerCase();
-      const value = attr[2] ?? attr[3] ?? attr[4];
-      if (value === undefined || value === "") continue;
-      out.set(name, [...(out.get(name) ?? []), value]);
+  // A scratch document, only to decode attribute values. One per call, not one per value.
+  const scratch = new JSDOM("<body></body>", { virtualConsole: new VirtualConsole() });
+  try {
+    const holder = scratch.window.document.createElement("div");
+    // Re-parsed in attribute position, which is where the value came from and where the
+    // decoding rules differ from text: `a&ampb` stays literal in an attribute and becomes
+    // `a&b` in text. A raw `"` can only have arrived from a single-quoted or unquoted value,
+    // so re-encoding it round-trips. Measured against the parser over every quoting style.
+    const decode = (raw: string) => {
+      if (!raw.includes("&")) return raw;
+      holder.innerHTML = `<i x="${raw.replace(/"/g, "&#34;")}">`;
+      return holder.firstElementChild?.getAttribute("x") ?? raw;
+    };
+    let skipTo = 0;
+    for (const tag of innerHtml.matchAll(SOURCE_TOKEN)) {
+      if (tag.index < skipTo) continue;
+      if (tag[0].startsWith("<!--")) continue;
+      const name = tag[2].toLowerCase();
+      // Past the tag name: `<` + optional `/` + the name.
+      const interior = tag[0].slice(1 + tag[1].length + tag[2].length, -1);
+      // The element's own attributes are real either way — it is its CONTENT that is not
+      // markup — so they are read before skipping. A close tag has none to read.
+      if (tag[1] === "") {
+        // Per TAG, so a repeated name keeps this tag's first value — the parser's rule.
+        // Accumulated across tags, because every tag's `id` is a separate id.
+        const seen = new Set<string>();
+        for (const attr of interior.matchAll(TAG_ATTR)) {
+          const attrName = attr[1].toLowerCase();
+          const value = attr[2] ?? attr[3] ?? attr[4];
+          if (value === undefined || value === "") continue;
+          if (seen.has(attrName)) continue;
+          seen.add(attrName);
+          out.set(attrName, [...(out.get(attrName) ?? []), decode(value)]);
+        }
+      }
+      if (tag[1] === "" && RAW_CONTENT.has(name)) {
+        // To the matching close tag, which the parser accepts with trailing junk
+        // (`</textarea foo>`) and in any case. No close tag means the element runs to the
+        // end of the page — the parser's rule, and the miss rather than phantom direction.
+        // Not nesting-aware, which matches the parser: raw text ends at its first close tag,
+        // and a nested `<template>` inside one already-skipped `<template>` only widens the
+        // skip, never narrows it.
+        const close = new RegExp(`</${name}(?:${ATTR_SEP}[^>]*)?>`, "i");
+        const rest = innerHtml.slice(tag.index + tag[0].length);
+        const found = rest.search(close);
+        skipTo = found === -1 ? innerHtml.length : tag.index + tag[0].length + found;
+      }
     }
+  } finally {
+    scratch.window.close();
   }
   return out;
 }
