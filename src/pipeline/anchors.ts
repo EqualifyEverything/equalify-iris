@@ -369,6 +369,9 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     // Indexes, not `order`s: `skipped_pages` is the report and reports in `order`, but
     // the skip decision is consulted per page below and two pages can share an `order`.
     const skipped = new Set<number>();
+    // Colliding ids that a skipped page REFERS to but does not own — the references that
+    // are stuck in their bare form, whatever the rest of the document does. See `pinned`.
+    const refsOfSkipped = new Map<number, Set<string>>();
     for (const [i, page] of pages.entries()) {
       const mine = owned[i];
       const ownsCollision = [...mine].some((id) => colliding.has(id));
@@ -377,7 +380,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
         // No `id=` at all, so pass 1 skipped it. It can still hold a reference, so it is
         // parsed unless the source contains nothing that could be one.
         //
-        // Deliberately over-inclusive, like `tagSequence`: the attribute alternatives match
+        // Deliberately over-inclusive, like `sourceSequence`: the attribute alternatives match
         // ordinary prose too (`<p>see the headers for details</p>`), and the cost of a
         // false positive is one parse whose reference set comes back empty. A false
         // NEGATIVE would leave a page's references unrepointed, so the test has to be
@@ -409,9 +412,45 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       if (wouldChangeMarkup(page.innerHtml, document)) {
         report.skipped_pages.push(page.order);
         skipped.add(i);
+        if (refs.size > 0) refsOfSkipped.set(i, refs);
         continue;
       }
       work.push({ index: i, dom, mine, refs });
+    }
+
+    // Colliding ids whose FIRST owner must keep its bare form, because a page that could
+    // not be rewritten holds a reference to it.
+    //
+    // The skip guard leaves a page byte-for-byte as its agent wrote it, which means a
+    // reference on that page keeps pointing at a bare id. If that id's owners are all
+    // renamed anyway, the reference names nothing — and for `for`/`headers`/`aria-*` a
+    // no-target reference is a 1.3.1/4.1.2 failure, where the wrong-target one it replaced
+    // at least gave the field a name. That is the trade this file's header refuses, and
+    // `resolve` already refuses it in the mirror direction (a reference TO a skipped page
+    // stays bare). This is the same rule applied to a reference FROM one.
+    //
+    // Only the first owner is pinned, not every owner and not the whole id. First owner is
+    // what a browser resolved the bare reference to in the concatenated document, so the
+    // skipped page keeps exactly the association it had; the remaining owners are still
+    // renamed, so the duplicate is still fixed for everyone else. Pinning the whole id
+    // would abandon the collision entirely on account of one unrewritable page.
+    //
+    // And nothing is pinned when an OWNER of the id was itself skipped, which is the
+    // condition that makes this rule safe rather than self-defeating. A skipped owner keeps
+    // its bare id by definition — it is delivered byte-for-byte as written — so the frozen
+    // reference already finds a real element, and pinning a second copy on top of that
+    // manufactures the duplicate id this whole module exists to remove. Without this check
+    // a form continued across a page break (two pages claiming `q1`, one of them holding
+    // orphaned `<tr>`s the guard will not rewrite) shipped two `id="q1"`, which axe reports
+    // as `duplicate-id-aria`. The premise "the frozen reference can only ever find the bare
+    // one" is what needs the qualification: when an owner is skipped, the bare one is
+    // already there.
+    const pinned = new Set<string>();
+    for (const i of skipped) {
+      for (const ref of refsOfSkipped.get(i) ?? []) {
+        if ((claims.get(ref) ?? []).some((owner) => skipped.has(owner))) continue;
+        pinned.add(ref);
+      }
     }
 
     // What each colliding id becomes, from the point of view of the page naming it.
@@ -436,15 +475,25 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       if (!colliding.has(token)) return token; // includes `href="#"`, whose token is ""
       const owner = mine.has(token) ? index : claims.get(token)![0];
       // A page left as written kept its bare ids, so a reference to it must stay bare.
-      return skipped.has(owner) ? token : `${prefixFor(owner)}${token}`;
+      if (skipped.has(owner)) return token;
+      // And the first owner of a pinned id keeps its bare form for a skipped page's
+      // reference, so a reference resolved TO that owner has to stay bare as well —
+      // otherwise this page's reference is the one left naming nothing.
+      if (pinned.has(token) && owner === claims.get(token)![0]) return token;
+      return `${prefixFor(owner)}${token}`;
     };
+
+    // Whether this page's copy of a colliding id gets renamed. False only for the first
+    // owner of a pinned id — the one a skipped page's bare reference has to keep finding.
+    const renames = (index: number, id: string) =>
+      !(pinned.has(id) && index === claims.get(id)![0]);
 
     // Pass 3: rewrite. One loop, because by now every decision has been made.
     for (const { index, dom, mine } of work) {
       const { document } = dom.window;
       for (const el of document.querySelectorAll("[id]")) {
         const id = el.getAttribute("id");
-        if (id && colliding.has(id)) el.setAttribute("id", `${prefixFor(index)}${id}`);
+        if (id && colliding.has(id) && renames(index, id)) el.setAttribute("id", `${prefixFor(index)}${id}`);
       }
       for (const el of document.querySelectorAll("[href^='#']")) {
         const target = el.getAttribute("href")!.slice(1);

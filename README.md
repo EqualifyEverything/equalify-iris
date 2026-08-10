@@ -383,6 +383,13 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
     needs no human judgement to confirm, so this rule's incomplete results are promoted to
     violations — only this rule, since the rest of `incomplete` genuinely cannot be decided without
     rendering.
+
+  This widens what the gate reports, which is the point but has a cost worth knowing: a document
+  that used to pass now spends review iterations on duplicate ids, and can reach
+  `max_review_iterations` with them still listed in `unresolved.md`. Assembly namespaces the
+  *cross-page* duplicates itself, so what reaches the review loop is the ids duplicated **within a
+  single page** — which the assembler cannot fix, because there is no second page to attribute the
+  copy to — plus the collisions on any page the reserialization guard left as written.
 - **Colliding ids are namespaced during assembly (§7.7 v1.2).** A page is extracted alone and
   concurrently, so it cannot know that another page also numbered its first footnote 1 — and the
   page prompt asks it to preserve the source numbering. `assembleBody` prefixes the ids that more
@@ -415,7 +422,11 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   nothing, so the field loses its accessible name and axe reports `label` on a document a plain
   concatenation passed. Ambiguous references are named in the run log as `assembly_anchors`. A page
   whose markup would not survive a reserialization is left exactly as written, keeping its collision
-  for lint to report and its bare ids for anything resolved to it. That covers foster parenting in
+  for lint to report and its bare ids for anything resolved to it. If such a page holds a *reference*
+  instead, the referenced id's first owner keeps its bare form so that reference still resolves —
+  only the first owner, so every other copy is still renamed, and only when none of that id's
+  *owners* was skipped, since a skipped owner is already keeping the bare id and pinning a second
+  copy would ship a duplicate. That covers foster parenting in
   both directions: a `<tr>` outside a `<table>` is dropped to bare text, and content inside one is
   *hoisted out past the table* — a reading-order change, worse than the duplicate id it would be
   fixing. The guard compares the source's sequence of tags **and text** against the parsed document
