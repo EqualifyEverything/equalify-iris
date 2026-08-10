@@ -496,6 +496,68 @@ test("a page the parser would REORDER is left as the agent wrote it", () => {
   assert.deepEqual(anchors.collisions, ["fn-1"]);
 });
 
+test("a page whose bare TEXT the parser would move is left as written too", () => {
+  // The same defect one level down, and the reason the guard compares text and not only
+  // tags. Wrapping that content in a `<p>` was caught (the test above); leaving it as bare
+  // prose was not — foster parenting hoists the text run out past the whole table with
+  // every tag still present and in order, so a tag-only sequence saw nothing to object to.
+  //
+  // Bare prose inside a table is a plausible page-agent emission for a table continued
+  // across a break ("Continued from page 1"), which is the same shape that produces the
+  // duplicate `<caption>` id in the first place — so the two arrive together.
+  const source = `<table><caption id="c1">Cap</caption>Continued from page 1<tr><td>x</td></tr></table>`;
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, source),
+    frag(2, `<table><caption id="c1">Cap2</caption><tr><td>y</td></tr></table>`),
+  ]);
+  assert.deepEqual(anchors.skipped_pages, [1], "the text-moving page was rewritten instead of skipped");
+  assert.ok(body.startsWith(source), "page 1 was not delivered exactly as written");
+  assert.ok(
+    body.indexOf("Continued from page 1") < body.indexOf("</table>"),
+    "the continuation text was moved out past the table",
+  );
+  assert.deepEqual(anchors.collisions, ["c1"]);
+});
+
+test("the skip guard does not fire on markup the parser only ADDS to", () => {
+  // The guard's cost is over-skipping: a page it skips keeps its duplicate id, so a guard
+  // that fires on ordinary markup quietly stops fixing the thing this module exists for.
+  // Both directions are pinned together because every past version of this check erred in
+  // one of them — counts under-fired, and a first text-aware draft over-fired on
+  // `title="a > b"`, where a `>` inside a quoted attribute value split one tag into a tag
+  // plus a phantom text run.
+  const rewritten = [
+    ["a well-formed table gains a tbody", `<table><tr><td id="x">c</td></tr></table>`],
+    ["the adoption agency duplicates a tag", `<b>1<p id="x">2</b>3</p>`],
+    ["entities decode", `<p id="x">Tom &amp; Jerry &lt;br&gt; ok</p>`],
+    ["nbsp decodes", `<p id="x">a&nbsp;b</p>`],
+    ["a quoted attribute value contains >", `<p id="x" title="a > b">t</p>`],
+    ["prose contains escaped angle brackets", `<p id="x">5 &lt; 6 and a &gt; b</p>`],
+    ["a comment sits between blocks", `<p id="x">a</p><!-- note --><p>b</p>`],
+    ["void elements", `<p id="x">a<br>b<hr></p>`],
+    ["source newlines and indentation", `<p id="x">\n  spaced\n  out\n</p>\n<p>next</p>`],
+    ["nested inline markup", `<p id="x">a <em>b <strong>c</strong></em> d</p>`],
+    ["a figure with a caption", `<figure><img src="a.png" alt="a"><figcaption id="x">c</figcaption></figure>`],
+    ["an explicit thead/tbody table", `<table><thead><tr><th id="x">h</th></tr></thead><tbody><tr><td>c</td></tr></tbody></table>`],
+  ] as const;
+  for (const [what, source] of rewritten) {
+    const { anchors } = assembleBodyWithReport([frag(1, source), frag(2, `<p id="x">two</p>`)]);
+    assert.deepEqual(anchors.skipped_pages, [], `over-skipped when ${what}: ${source}`);
+    assert.deepEqual(anchors.collisions, ["x"], `collision not namespaced when ${what}`);
+  }
+
+  // And the moves that must still fire, so this test cannot pass by never firing at all.
+  const skipped = [
+    ["a <p> inside a table is hoisted", `<table><tbody><tr><td>1</td></tr></tbody><p id="x">note</p></table>`],
+    ["bare text inside a table is hoisted", `<table><caption id="x">Cap</caption>Continued<tr><td>c</td></tr></table>`],
+    ["a <tr> outside a table is dropped", `<p id="x">A</p><tr><td>DATA</td></tr>`],
+  ] as const;
+  for (const [what, source] of skipped) {
+    const { anchors } = assembleBodyWithReport([frag(1, source), frag(2, `<p id="x">two</p>`)]);
+    assert.deepEqual(anchors.skipped_pages, [1], `did not skip when ${what}: ${source}`);
+  }
+});
+
 test("an unquoted href on a page that owns no id is still repointed", () => {
   // The pre-parse sniff in pass 2 decides whether a page that owns no `id=` gets parsed
   // for its references at all, and a page it skips is never repointed. It used to

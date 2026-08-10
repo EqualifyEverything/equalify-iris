@@ -96,50 +96,116 @@ const EMPTY_REPORT: AnchorReport = { collisions: [], ambiguous: [], skipped_page
 // of it written out again in the test file — a copy would keep passing while this drifted.
 export const ATTR_SEP = `[\\s/"']`;
 
-// Names of the start tags in a fragment, in source order.
+// Start tags and text, in document order. Tags are `<name`, text is `#normalized`, so no
+// text run can ever be mistaken for a tag (a run that decodes to `<div` becomes `#<div`).
 //
-// This exists to catch what PARSING changes, so it cannot be computed from the parsed
-// document. `<td>` outside a `<table>` — a plausible thing for a page agent to emit for
-// a table continuing across a page break — is foster-parented out of existence: jsdom
-// parses `<p id="a">A</p><tr><td>DATA</td></tr>` to `<p id="a">A</p>DATA`, keeping the
-// text and dropping the row and cell, and does not throw. Reserializing that would
-// silently discard structure the review loop and the user should have seen.
+// TEXT is in here, not just tags, because foster parenting moves text on its own. A tag
+// sequence alone declared this page safe and reordered it:
 //
-// A regex over the source can over-count (a literal `<b` inside prose or an attribute
-// value), which fails in the safe direction: the page keeps its collision and lint
-// reports it, rather than the document quietly losing a table row.
-function tagSequence(html: string): string[] {
-  return [...html.matchAll(/<([a-zA-Z][^\s/>]*)/g)].map((m) => m[1].toLowerCase());
+//   <table><caption id="c1">Cap</caption>Continued from page 1<tr><td>x</td></tr></table>
+//
+// reserializes with `Continued from page 1` after the entire table instead of before the
+// rows. Every tag is present and in order, so the tag-only sequence saw nothing — while
+// text a page agent plausibly emits for a table continued across a break, on exactly the
+// shape that produces these collisions, silently moved out of reading order.
+// Quoted attribute values are consumed as units so a `>` inside one does not end the tag:
+// `<p title="a > b">` is one tag, and treating it as a tag plus the text `b">` made the
+// guard skip an ordinary page and leave a real collision unfixed. Unbalanced quotes fail to
+// match at all and fall through to text, which is the over-skip direction — safe.
+const SOURCE_TOKEN = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][^\s/>]*)(?:"[^"]*"|'[^']*'|[^>"'])*>/g;
+
+// Whitespace-collapsed, and entity-decoded when there is an entity to decode, because the
+// parsed side is compared against text nodes: `a &amp; b` in the source is `a & b` there.
+// The decode is a parse, so it is skipped unless the run contains `&` — which also keeps
+// the parser away from runs holding a bare `<` that is only prose.
+function normalizeText(raw: string, document: Document): string {
+  let text = raw;
+  if (text.includes("&")) {
+    const decoder = document.createElement("div");
+    decoder.innerHTML = text; // A text run by construction: no tag to be moved by this parse.
+    text = decoder.textContent ?? "";
+  }
+  return text.replace(/\s+/g, " ").trim();
+}
+
+// The sequence the source ASKS for. Computed from the source text and not from the parsed
+// document, because the whole question is what parsing changed.
+//
+// Over-inclusive by design, in both the tag and the text direction: an attribute value
+// containing `>` splits into a tag plus a text run that the parsed document will not have,
+// and a comment or doctype the pattern does not match becomes text. Each of those is an
+// extra token that fails to match, so the page is left as written — the safe direction. The
+// unsafe direction is a token this MISSES, which is what let both previous versions through.
+function sourceSequence(source: string, document: Document): string[] {
+  const out: string[] = [];
+  let last = 0;
+  const pushText = (raw: string) => {
+    const text = normalizeText(raw, document);
+    if (text) out.push(`#${text}`);
+  };
+  for (const m of source.matchAll(SOURCE_TOKEN)) {
+    pushText(source.slice(last, m.index));
+    last = m.index + m[0].length;
+    // Start tags only. A close tag is not a position in the reading order — the parser
+    // supplies missing ones and moves them freely, and `<b>1<p>2</b>3</p>` legitimately
+    // ends up with more of them than the source wrote.
+    if (!m[0].startsWith("<!--") && m[1] === "") out.push(`<${m[2].toLowerCase()}`);
+  }
+  pushText(source.slice(last));
+  return out;
+}
+
+// The same sequence, read off the parsed document. Comments are skipped on both sides.
+function parsedSequence(document: Document): string[] {
+  const out: string[] = [];
+  const visit = (node: Node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === child.ELEMENT_NODE) {
+        out.push(`<${(child as Element).tagName.toLowerCase()}`);
+        visit(child);
+      } else if (child.nodeType === child.TEXT_NODE) {
+        const text = (child.textContent ?? "").replace(/\s+/g, " ").trim();
+        if (text) out.push(`#${text}`);
+      }
+    }
+  };
+  visit(document.body);
+  return out;
 }
 
 // Would reserializing this page change its markup as anything more than a rewrite of the
 // ids? True means leave the page exactly as its agent wrote it.
 //
-// The source's tag sequence must appear IN ORDER in the parsed document — a subsequence,
-// not an equality and not a multiset. That form is what it is because of what each
-// relaxation has to allow and what it must still catch:
+// The source's sequence of tags AND text must appear in order in the parsed document — a
+// subsequence, not an equality and not a multiset. That form is what it is because of what
+// each relaxation has to allow and what it must still catch:
 //
-//   * Extra tags in the parsed output are fine, so a subsequence rather than equality. A
+//   * Extra tokens in the parsed output are fine, so a subsequence rather than equality. A
 //     well-formed `<table><tr>` gains the `<tbody>` the source omitted, and the adoption
 //     agency algorithm DUPLICATES a tag to repair misnesting — `<b>1<p>2</b>3</p>` becomes
 //     `<b>1</b><p><b>2</b>3</p>`, two `<b>` from one. An equality check abandons the
 //     rewrite on both, leaving exactly the collisions this exists to fix.
-//   * Order matters, which is why this is a sequence and not the tag COUNTS it used to be.
+//   * Order matters, which is why this is a sequence and not the COUNTS it used to be.
 //     Counting cannot see a MOVE, and foster parenting moves things: a `<p>` inside a
 //     `<table>` is hoisted out to before the table, so
 //     `<table>…<p id="fn-1">note</p></table><p>tail</p>` reserializes with the note ahead
-//     of the table it followed. Every count is identical, so the old guard called that page
+//     of the table it followed. Every count is identical, so that guard called the page
 //     safe and rewrote it — a reading-order change, on the one property this codebase
 //     exists to protect, and on precisely the shape (content inside a table) that a table
 //     spanning a page break produces, which is also what produces these collisions.
+//   * Text is a token, not just tags, which is the same failure one level down. Bare prose
+//     inside a table foster-parents out with every tag still in place and in order, so a
+//     tag-only sequence declared the page safe and moved the text — see SOURCE_TOKEN. The
+//     `<p>`-wrapped version of that content was caught only because `<p>` is a tag.
 //
 // Skipping the page costs a duplicate id that lint reports. Rewriting it costs silently
 // reordered content. The header's rule applies: that is not a trade to make.
 function wouldChangeMarkup(source: string, document: Document): boolean {
-  const wanted = tagSequence(source);
+  const wanted = sourceSequence(source, document);
+  const got = parsedSequence(document);
   let next = 0;
-  for (const el of document.body.querySelectorAll("*")) {
-    if (next < wanted.length && wanted[next] === el.tagName.toLowerCase()) next++;
+  for (const token of got) {
+    if (next < wanted.length && wanted[next] === token) next++;
   }
   return next < wanted.length;
 }
