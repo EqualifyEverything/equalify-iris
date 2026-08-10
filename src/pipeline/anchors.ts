@@ -434,9 +434,23 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     // skipped page keeps exactly the association it had; the remaining owners are still
     // renamed, so the duplicate is still fixed for everyone else. Pinning the whole id
     // would abandon the collision entirely on account of one unrewritable page.
+    //
+    // And nothing is pinned when an OWNER of the id was itself skipped, which is the
+    // condition that makes this rule safe rather than self-defeating. A skipped owner keeps
+    // its bare id by definition — it is delivered byte-for-byte as written — so the frozen
+    // reference already finds a real element, and pinning a second copy on top of that
+    // manufactures the duplicate id this whole module exists to remove. Without this check
+    // a form continued across a page break (two pages claiming `q1`, one of them holding
+    // orphaned `<tr>`s the guard will not rewrite) shipped two `id="q1"`, which axe reports
+    // as `duplicate-id-aria`. The premise "the frozen reference can only ever find the bare
+    // one" is what needs the qualification: when an owner is skipped, the bare one is
+    // already there.
     const pinned = new Set<string>();
     for (const i of skipped) {
-      for (const ref of refsOfSkipped.get(i) ?? []) pinned.add(ref);
+      for (const ref of refsOfSkipped.get(i) ?? []) {
+        if ((claims.get(ref) ?? []).some((owner) => skipped.has(owner))) continue;
+        pinned.add(ref);
+      }
     }
 
     // What each colliding id becomes, from the point of view of the page naming it.

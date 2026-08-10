@@ -842,6 +842,69 @@ test("pinning is per-id and only for the first owner", () => {
   assert.equal(new Set(ids).size, ids.length, `duplicate ids survived: ${ids.join(", ")}`);
 });
 
+test("nothing is pinned when an OWNER of the id was itself skipped", async () => {
+  // The case the tests above could not reach, because in every one of them the skipped
+  // pages are pure referrers that own no colliding id. Here a skipped page OWNS `q1` while
+  // a different skipped page REFERS to it, and pinning unconditionally shipped two bare
+  // `id="q1"` — a duplicate id, which is the defect this whole module exists to remove.
+  //
+  // The premise the pin rests on is that a frozen reference can only ever find the bare id,
+  // so some owner has to keep it. That premise is already satisfied here: page 2 is
+  // delivered byte-for-byte as written, so its `q1` IS the bare one page 3's `for` finds.
+  // Pinning page 1 on top of that adds a second copy and fixes nothing.
+  //
+  // The shape is an ordinary one — a form continued across a page break. Two pages number
+  // their first field `q1`, and the page carrying the continued table's orphaned `<tr>`s is
+  // one the reserialization guard will not rewrite.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<input id="q1" type="text">`),
+    frag(2, `<input id="q1" type="text"><tr><td>IMPORTANT DATA</td></tr>`),
+    frag(3, `<label for="q1">Name</label><tr><td>MORE DATA</td></tr>`),
+  ]);
+  assert.deepEqual(anchors.skipped_pages, [2, 3]);
+  assert.deepEqual(anchors.collisions, ["q1"]);
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `duplicate ids survived assembly: ${ids.join(", ")}`);
+  // Page 1 is the only owner that CAN be renamed, so it is — the skipped owner keeps the
+  // bare id, which is what the frozen reference needs.
+  assert.deepEqual(ids, ["p1-q1", "q1"]);
+  assert.match(body, /<label for="q1">/, "the skipped referrer was rewritten after all");
+  // And the duplicate really is gone as far as the gate is concerned. `for="q1"` makes the
+  // id ARIA-referenced, so the live rule lint.ts promotes out of `incomplete` is the one
+  // that fired when this regressed.
+  const lint = await runAxe(wrapDocument(body));
+  if (lint.error) return;
+  assert.deepEqual(
+    lint.violations.filter((v) => v.id.startsWith("duplicate-id")).map((v) => v.id),
+    [],
+    "assembly delivered a duplicate id",
+  );
+});
+
+test("a skipped owner does not suppress pinning for a DIFFERENT id", () => {
+  // The condition above is per-id, not per-document: one id having a skipped owner must not
+  // switch the pin off for an unrelated id whose owners are all rewritable. Page 3 owns `a`
+  // (and is skipped) while referring to `b`, whose owners are pages 1 and 2 — so `b` still
+  // pins its first owner and `a` does not.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<input id="b" type="text">`),
+    frag(2, `<input id="b" type="text">`),
+    frag(3, `<input id="a" type="text"><label for="b">B</label><tr><td>x</td></tr>`),
+    frag(4, `<input id="a" type="text">`),
+  ]);
+  assert.deepEqual(anchors.skipped_pages, [3]);
+  assert.deepEqual(anchors.collisions, ["a", "b"]);
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `duplicate ids survived: ${ids.join(", ")}`);
+  // `b` pinned its first owner (page 1) so page 3's frozen `for="b"` resolves; `a` did not
+  // pin, so page 3 keeps its bare `a` and page 4's copy is renamed.
+  assert.deepEqual(ids, ["b", "p2-b", "a", "p4-a"]);
+  const idSet = new Set(ids);
+  for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+    assert.ok(idSet.has(m[1]), `for="${m[1]}" resolves to nothing`);
+  }
+});
+
 test("parsing that legitimately adds elements is not mistaken for a loss", () => {
   // Two shapes where the parse produces MORE than the source wrote, both harmless:
   //

@@ -424,7 +424,9 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   whose markup would not survive a reserialization is left exactly as written, keeping its collision
   for lint to report and its bare ids for anything resolved to it. If such a page holds a *reference*
   instead, the referenced id's first owner keeps its bare form so that reference still resolves —
-  only the first owner, so every other copy is still renamed. That covers foster parenting in
+  only the first owner, so every other copy is still renamed, and only when none of that id's
+  *owners* was skipped, since a skipped owner is already keeping the bare id and pinning a second
+  copy would ship a duplicate. That covers foster parenting in
   both directions: a `<tr>` outside a `<table>` is dropped to bare text, and content inside one is
   *hoisted out past the table* — a reading-order change, worse than the duplicate id it would be
   fixing. The guard compares the source's sequence of tags **and text** against the parsed document
