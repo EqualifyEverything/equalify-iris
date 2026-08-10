@@ -761,6 +761,87 @@ test("a reference whose first owner was left as written stays bare, so it still 
   for (const href of fragHrefs(body)) assert.ok(ids.has(href), `href="#${href}" resolves to nothing`);
 });
 
+test("a REFERRING page left as written keeps its first owner bare, so its idref still resolves", async () => {
+  // The mirror of the test above, and the direction that was missing. There the skipped
+  // page OWNED the id; here it holds the reference. Its `for="q1"` is frozen in bare form
+  // by the skip, so renaming every owner leaves it naming nothing — and an unnamed field
+  // is a 1.3.1/4.1.2 failure, where the wrong-target name it had at least named something.
+  // A plain concatenation gave page 1's input its name from page 3's label; the assembler
+  // must not take that away.
+  //
+  // So the FIRST owner keeps the bare id — what a browser resolved that reference to
+  // before any of this ran — while the other owners are still renamed. Pinning the whole
+  // id instead would abandon the collision on account of one unrewritable page.
+  // Page 2 carries its own label, so the only unnamed field this document can produce is
+  // the one whose name comes across the page break — which is what the axe check below is
+  // then actually testing. (Without it, page 2's input is unlabelled on its own page and
+  // `label` fires either way.)
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<input id="q1" type="text">`),
+    frag(2, `<label for="q1">Second</label><input id="q1" type="text">`),
+    frag(3, `<label for="q1">Name</label><tr><td>IMPORTANT DATA</td></tr>`),
+  ]);
+  assert.deepEqual(anchors.skipped_pages, [3]);
+  assert.deepEqual(anchors.ambiguous, [{ page: 3, ref: "q1" }]);
+  assert.match(body, /<label for="q1">Name<\/label>/, "the skipped page was rewritten after all");
+  // Page 2 owns its `q1`, so its own label follows its own renamed copy.
+  assert.match(body, /<label for="p2-q1">Second<\/label>/, "page 2's own label did not follow its own input");
+  // Page 1 keeps the bare id the label needs; page 2 is still de-duplicated.
+  assert.match(body, /<input id="q1"/, "the first owner was renamed out from under the frozen reference");
+  assert.match(body, /<input id="p2-q1"/, "the collision was abandoned instead of narrowed to the first owner");
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `duplicate ids survived: ${ids.join(", ")}`);
+  // The property underneath both assertions: every idref in the delivered document names
+  // something in it.
+  const idSet = new Set(ids);
+  for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+    assert.ok(idSet.has(m[1]), `for="${m[1]}" resolves to nothing`);
+  }
+
+  // A NORMAL page referencing the same pinned id is the other half of the fix, and it is
+  // the half the id rename alone does not cover: page 4 IS rewritten, so it goes through
+  // `resolve`, resolves to the first owner by document order, and that owner is the one
+  // holding the bare id. Prefixing here would break page 4's link instead of page 3's
+  // label — the defect moved rather than fixed.
+  const withNormalReferrer = assembleBodyWithReport([
+    frag(1, `<input id="q1" type="text">`),
+    frag(2, `<label for="q1">Second</label><input id="q1" type="text">`),
+    frag(3, `<label for="q1">Name</label><tr><td>IMPORTANT DATA</td></tr>`),
+    frag(4, `<p>See <a href="#q1">the field</a></p>`),
+  ]);
+  assert.match(withNormalReferrer.body, /href="#q1"/, "a rewritten page's reference was pointed at a renamed owner");
+  const laterIds = new Set(idsOf(withNormalReferrer.body));
+  for (const href of fragHrefs(withNormalReferrer.body)) {
+    assert.ok(laterIds.has(href), `href="#${href}" resolves to nothing`);
+  }
+  // And the field really is named, which is the accessibility claim rather than a proxy
+  // for it — axe's `label` rule is what fires when this regresses.
+  const lint = await runAxe(wrapDocument(body));
+  if (lint.error) return;
+  assert.deepEqual(
+    lint.violations.filter((v) => v.id === "label").map((v) => v.id),
+    [],
+    "the input lost its accessible name",
+  );
+});
+
+test("pinning is per-id and only for the first owner", () => {
+  // The narrowness is the point, so it is asserted rather than assumed. Two colliding ids,
+  // each referenced by a different skipped page: each id pins its own first owner, and
+  // nothing else in the document stops being namespaced.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<input id="a" type="text"><input id="b" type="text">`),
+    frag(2, `<input id="a" type="text"><input id="b" type="text">`),
+    frag(3, `<label for="a">A</label><tr><td>x</td></tr>`),
+    frag(4, `<label for="b">B</label><tr><td>y</td></tr>`),
+  ]);
+  assert.deepEqual(anchors.skipped_pages, [3, 4]);
+  assert.deepEqual(anchors.collisions, ["a", "b"]);
+  const ids = idsOf(body);
+  assert.deepEqual(ids, ["a", "b", "p2-a", "p2-b"]);
+  assert.equal(new Set(ids).size, ids.length, `duplicate ids survived: ${ids.join(", ")}`);
+});
+
 test("parsing that legitimately adds elements is not mistaken for a loss", () => {
   // Two shapes where the parse produces MORE than the source wrote, both harmless:
   //
