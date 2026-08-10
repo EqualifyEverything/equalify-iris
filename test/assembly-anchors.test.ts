@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { assembleBody, assembleBodyWithReport, runAssembly, wrapDocument } from "../src/pipeline/assembly.ts";
 import { runAxe } from "../src/pipeline/lint.ts";
-import { ATTR_SEP, sourceIds } from "../src/pipeline/anchors.ts";
+import { ATTR_SEP, sourceIds, sourceRefs } from "../src/pipeline/anchors.ts";
 import type { Fragment } from "../src/pipeline/fragment.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 
@@ -1054,6 +1054,56 @@ test("the source id scan agrees with the parser on where an attribute is", () =>
     const parsed = new JSDOM(`<body>${shape}</body>`).window.document;
     const fromParser = [...parsed.querySelectorAll("[id]")].map((el) => el.getAttribute("id")!).sort();
     assert.deepEqual([...sourceIds(shape)].sort(), fromParser, `disagreed with the parser on: ${JSON.stringify(shape)}`);
+  }
+});
+
+test("the source reference scan agrees with the parser too", () => {
+  // The other half of what an unparseable page contributes. Same method as the id scan
+  // above, and it matters for the same reason: this is the only reading of that page's
+  // references there will ever be, so a miss leaves a frozen `for=`/`aria-*` unpinned and
+  // its owners renamed out from under it — the dangling reference this whole mechanism
+  // exists to avoid.
+  //
+  // Over-inclusiveness is the SAFE direction here, unlike ids (a reference that is not
+  // really there pins a first owner that did not need pinning: one colliding id left bare,
+  // no duplicate). The exact agreement is asserted anyway — a phantom reference is still a
+  // collision left half-fixed, and asserting equality is what makes a drift in either
+  // direction visible.
+  const shapes = [
+    `<a href="#t">a</a>`,
+    `<a href='#t'>a</a>`,
+    `<a href=#t>a</a>`,
+    `<a/href="#t">a</a>`,
+    `<label for="t">L</label>`,
+    `<label for=t>L</label>`,
+    `<p aria-describedby="t">x</p>`,
+    `<p/aria-labelledby="t">x</p>`,
+    `<p class="note"aria-details="t">x</p>`, // quote-adjacent
+    `<p class='note'aria-controls='t'>x</p>`,
+    `<p aria-labelledby="a b c">x</p>`, // space-separated token list
+    // And the non-references: an external URL's fragment, a bare `#`, prose, a reference
+    // inside another attribute's value or a comment, and a `data-` lookalike.
+    `<a href="http://e.com/#t">x</a>`,
+    `<a href="#">top</a>`,
+    `<p>see the headers for details</p>`,
+    `<p title="href=#phantom">x</p>`,
+    `<!-- <a href="#phantom">x</a> -->`,
+    `<p data-for="phantom">x</p>`,
+  ];
+  const IDREF_ATTRS = ["for", "form", "list", "headers", "aria-labelledby", "aria-describedby", "aria-details", "aria-errormessage", "aria-controls", "aria-owns", "aria-flowto", "aria-activedescendant"];
+  for (const shape of shapes) {
+    const parsed = new JSDOM(`<body>${shape}</body>`).window.document;
+    const fromParser = new Set<string>();
+    for (const el of parsed.querySelectorAll("[href^='#']")) {
+      const target = el.getAttribute("href")!.slice(1);
+      if (target) fromParser.add(target);
+    }
+    for (const attr of IDREF_ATTRS) {
+      for (const el of parsed.querySelectorAll(`[${attr}]`)) {
+        for (const token of el.getAttribute(attr)!.split(/\s+/)) if (token) fromParser.add(token);
+      }
+    }
+    assert.deepEqual([...sourceRefs(shape)].sort(), [...fromParser].sort(), `disagreed with the parser on: ${JSON.stringify(shape)}`);
   }
 });
 

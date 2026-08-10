@@ -289,7 +289,9 @@ export function sourceIds(innerHtml: string): Set<string> {
 // rather than left to a shared comment.
 //
 // `headers` and the `aria-*` list attributes are space-separated, so each token counts.
-function sourceRefs(innerHtml: string): Set<string> {
+//
+// Exported for the test that measures it against jsdom, for the same reason `sourceIds` is.
+export function sourceRefs(innerHtml: string): Set<string> {
   const refs = new Set<string>();
   const attrs = sourceAttrs(innerHtml);
   for (const value of attrs.get("href") ?? []) {
