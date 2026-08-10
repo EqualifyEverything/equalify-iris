@@ -915,6 +915,78 @@ test("a skipped owner does not suppress pinning for a DIFFERENT id", () => {
   }
 });
 
+// A fragment jsdom cannot parse at all. The `JSDOM` constructor builds its tree
+// recursively, so nesting past its stack depth throws `RangeError` — measured at between
+// 8,000 and 16,000 nested elements, so 20,000 is comfortably over. This is the only known
+// route to `parseFragment` returning null: malformed markup does NOT get there, because the
+// HTML parser has a recovery rule for everything and raises nothing.
+//
+// Real input, not a stub. Stubbing was tried and abandoned: `anchors.ts` imports `JSDOM`
+// directly and ESM namespace objects are read-only, so a test that reassigned it would have
+// exercised nothing while appearing to pass.
+const tooDeepToParse = "<div>".repeat(20000);
+
+test("an unparseable OWNER suppresses the pin, so no duplicate ships", () => {
+  // The pin leaves a colliding id's first owner bare for the sake of a frozen reference. An
+  // unparseable owner is ALREADY keeping that bare id, so pinning on top of it ships two
+  // copies — the duplicate the pin's own condition exists to rule out, reached by the one
+  // route that used to report nothing. Page 3 is guard-skipped and refers to `q1`; page 4
+  // cannot be parsed and owns `q1`.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<input id="q1" type="text">`),
+    frag(2, `<input id="q1" type="text">`),
+    frag(3, `<label for="q1">Name</label><tr><td>DATA</td></tr>`),
+    frag(4, `${tooDeepToParse}<input id="q1" type="text">`),
+  ]);
+  assert.deepEqual(anchors.pinned_ids, [], "the pin fired even though an owner was unparseable");
+  assert.deepEqual(anchors.skipped_pages, [3, 4]);
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `duplicate ids survived: ${ids.join(", ")}`);
+  // Page 4's bare copy is the one page 3's frozen `for="q1"` finds, so the reference still
+  // resolves without any pin.
+  assert.deepEqual(ids, ["p1-q1", "p2-q1", "q1"]);
+  const idSet = new Set(ids);
+  for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+    assert.ok(idSet.has(m[1]), `for="${m[1]}" resolves to nothing`);
+  }
+});
+
+test("an unparseable page's REFERENCES still pin their first owner", () => {
+  // The mirror, and the direction with an accessibility cost rather than a lint one. An
+  // unparseable page's `for="q1"` is frozen in bare form exactly like a guard-skipped page's,
+  // so if every owner is renamed the field loses its accessible name (1.3.1/4.1.2). Its
+  // references have to be read from the source for the same reason its ids are: there is no
+  // DOM to read them from and there never will be.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<input id="q1" type="text">`),
+    frag(2, `<label for="q1">Second</label><input id="q1" type="text">`),
+    frag(3, `${tooDeepToParse}<label for="q1">Name</label>`),
+  ]);
+  assert.deepEqual(anchors.pinned_ids, ["q1"], "the frozen reference did not pin its first owner");
+  assert.deepEqual(anchors.ambiguous, [{ page: 3, ref: "q1" }]);
+  assert.deepEqual(anchors.skipped_pages, [3]);
+  const ids = idsOf(body);
+  assert.deepEqual(ids, ["q1", "p2-q1"]);
+  const idSet = new Set(ids);
+  for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+    assert.ok(idSet.has(m[1]), `for="${m[1]}" resolves to nothing`);
+  }
+});
+
+test("an unparseable page with nothing at stake is not named in the report", () => {
+  // `skipped_pages` is documented as "may still carry a collision or a stranded reference"
+  // and a human is asked to act on it. A page that fails to parse while owning no colliding
+  // id and referring to none carries neither, so naming it would be noise.
+  const { anchors } = assembleBodyWithReport([
+    frag(1, `<p id="fn-1">one</p>`),
+    frag(2, `<p id="fn-1">two</p>`),
+    frag(3, `${tooDeepToParse}<a href="#elsewhere">x</a>`),
+  ]);
+  assert.deepEqual(anchors.collisions, ["fn-1"]);
+  assert.deepEqual(anchors.skipped_pages, []);
+  assert.deepEqual(anchors.ambiguous, []);
+});
+
 test("parsing that legitimately adds elements is not mistaken for a loss", () => {
   // Two shapes where the parse produces MORE than the source wrote, both harmless:
   //

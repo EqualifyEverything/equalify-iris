@@ -71,8 +71,10 @@ export interface AnchorReport {
   // wrote it is a document worth a human's attention. Named `ambiguous` and not
   // `unresolved`: they do resolve, just not on the page's own authority.
   ambiguous: { page: number; ref: string }[];
-  // Pages left exactly as written because rewriting them would have lost markup (see
-  // `wouldChangeMarkup`). Either the page's own colliding ids keep their bare form — in
+  // Pages left exactly as written, either because rewriting them would have lost markup
+  // (see `wouldChangeMarkup`) or because they could not be parsed at all (see
+  // `parseFragment`), and which are relevant to the join: they own a colliding id or refer
+  // to one. Either the page's own colliding ids keep their bare form — in
   // which case lint's `duplicate-id` / `duplicate-id-active` names the collision — or
   // an ambiguous reference on it keeps pointing at a bare id that other pages
   // renamed away, which is why the page is named here as well as in `ambiguous`.
@@ -228,12 +230,73 @@ function ownedIds(document: Document): Set<string> {
   return ids;
 }
 
+// Null when the page cannot be parsed at all. Reachable: jsdom builds its tree
+// recursively, so a deeply nested fragment throws `RangeError: Maximum call stack size
+// exceeded` somewhere between 8,000 and 16,000 nested elements. Malformed markup does NOT
+// get here — the HTML parser has a recovery rule for everything and raises nothing — so
+// this is the depth case and cases like it, not the ordinary bad-input case.
 function parseFragment(innerHtml: string): JSDOM | null {
   try {
     return new JSDOM(`<body>${innerHtml}</body>`, { virtualConsole: new VirtualConsole() });
   } catch {
     return null;
   }
+}
+
+// The ids a page's SOURCE claims, read without parsing. Used only when the parse failed,
+// where the alternative is recording that the page owns nothing — and that is not a
+// neutral default but a false statement with teeth. An unparseable page is delivered
+// byte-for-byte, so every id in its source is in the output; a page missing from `claims`
+// is invisible as an owner to both readers of `skipped`, so the collision goes undetected
+// AND the pin below sees no skipped owner and fires, putting a second bare copy of the id
+// in the document. The duplicate that whole condition exists to prevent, reached by the
+// one route that reports nothing.
+//
+// Over-inclusive in the same direction as `sourceSequence`: an `id="x"` inside a comment or
+// an attribute value is counted. The cost is a collision that is not one, which renames
+// some other page's id unnecessarily — cosmetic, and every reference still resolves,
+// because `resolve` repoints them. The cost of MISSING one is the duplicate above.
+function sourceIds(innerHtml: string): Set<string> {
+  return sourceAttr(innerHtml, "id");
+}
+
+// The references a page's SOURCE makes, read without parsing — the mirror of `sourceIds`,
+// needed for the same reason. An unparseable page is delivered as written, so its
+// `for="q1"` is frozen in bare form exactly like a page the reserialization guard skipped.
+// Without this the pin never learns the reference exists, every owner of `q1` is renamed,
+// and the reference names nothing — an unnamed field, 1.3.1/4.1.2, which is the trade this
+// file's header refuses and the defect the pin was added to fix. It was fixed for the guard
+// route and left open for this one.
+//
+// `headers` and the `aria-*` list attributes are space-separated, so each token counts.
+function sourceRefs(innerHtml: string): Set<string> {
+  const refs = new Set<string>();
+  for (const m of innerHtml.matchAll(/href\s*=\s*(?:"#([^"]*)"|'#([^']*)'|#([^\s>]+))/gi)) {
+    const target = m[1] ?? m[2] ?? m[3];
+    if (target) refs.add(target);
+  }
+  for (const attr of IDREF_ATTRS) {
+    for (const value of sourceAttr(innerHtml, attr)) {
+      for (const token of value.split(/\s+/)) if (token) refs.add(token);
+    }
+  }
+  return refs;
+}
+
+// One attribute's values across a source string, quoted or bare. Over-inclusive in the same
+// direction as `sourceSequence`: a match inside a comment or another attribute's value
+// counts. For ids the cost is a collision that is not one — some other page's id renamed
+// unnecessarily, cosmetic, and every reference still resolves. For references the cost is a
+// pin that was not needed, which leaves one colliding id bare. Both are the safe direction;
+// MISSING one is the duplicate id or the dangling reference above.
+function sourceAttr(innerHtml: string, attr: string): Set<string> {
+  const out = new Set<string>();
+  const pattern = new RegExp(`(?:^|${ATTR_SEP})${attr}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "gi");
+  for (const m of innerHtml.matchAll(pattern)) {
+    const value = m[1] ?? m[2] ?? m[3];
+    if (value) out.add(value);
+  }
+  return out;
 }
 
 // Every reference a page makes, so the report can name the ones left dangling.
@@ -273,6 +336,13 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
   // needs no parse for the rewrite either, so most documents stop here.
   const doms: (JSDOM | null)[] = [];
   const owned: Set<string>[] = [];
+  // Pages whose parse was ATTEMPTED and failed, as against merely not attempted. Both leave
+  // `doms[i]` null and pass 2 must not conflate them: a page pass 1 skipped for owning no id
+  // can still be parsed there for its references, while one that already failed cannot be
+  // parsed at all and is delivered as written. The first version of pass 2 ran the second
+  // kind through the first kind's path, so it exited at the reference sniff and was never
+  // recorded as skipped — the duplicate id survived with an empty report.
+  const unparseable = new Set<number>();
   // Bare id -> the pages claiming it, in document order, identified by ARRAY INDEX
   // and not by `order`. The FIRST entry is what a browser resolves that bare id to in
   // the un-namespaced document, which is what a reference from a non-owning page has
@@ -298,7 +368,11 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       continue;
     }
     const dom = parseFragment(page.innerHtml);
-    const ids = dom ? ownedIds(dom.window.document) : new Set<string>();
+    // A failed parse still owns its ids: the page is delivered as written, so they are in
+    // the document whether or not anything here could read them from a DOM. See `sourceIds`
+    // for why recording nothing is worse than recording an over-inclusive set.
+    const ids = dom ? ownedIds(dom.window.document) : sourceIds(page.innerHtml);
+    if (!dom) unparseable.add(i);
     doms.push(dom);
     owned.push(ids);
     for (const id of ids) claims.set(id, [...(claims.get(id) ?? []), i]);
@@ -385,7 +459,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       const mine = owned[i];
       const ownsCollision = [...mine].some((id) => colliding.has(id));
       let dom = doms[i];
-      if (!dom) {
+      if (!dom && !unparseable.has(i)) {
         // No `id=` at all, so pass 1 skipped it. It can still hold a reference, so it is
         // parsed unless the source contains nothing that could be one.
         //
@@ -409,30 +483,37 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
         // each one a page whose references went unrepointed.
         if (!new RegExp(`href\\s*=\\s*["']?#|${ATTR_SEP}(?:for|form|list|headers|aria-)`, "i").test(page.innerHtml)) continue;
         dom = parseFragment(page.innerHtml);
+        if (!dom) unparseable.add(i);
         reportOnly.push(dom);
       }
       if (!dom) {
         // The parse failed, so this page cannot be rewritten and is delivered byte-for-byte
         // — the same OUTCOME as tripping the reserialization guard below, so it joins the
-        // same set. Two rules read `skipped` as "delivered as written": `resolve` keeps a
-        // reference to a skipped owner bare, and the pin refuses to fire when an owner was
-        // skipped. A page reaching here unrecorded could let a pinned first owner and this
-        // page both ship the bare id — the duplicate the pin's condition exists to prevent.
+        // same set. Two rules read `skipped` that way: `resolve` keeps a reference to a
+        // skipped owner bare, and the pin refuses to fire when an owner was skipped.
         //
-        // What those two readers need is narrower than "every page delivered as written",
-        // which is just as well, because the `continue` above does not record its pages
-        // either. They need every page that is delivered as written AND owns a colliding id
-        // or refers to one. That `continue` is unreachable for such a page: owning a
-        // colliding id means pass 1 parsed it and `doms[i]` is non-null, and referring to
-        // one means the sniff matched. So the two sets coincide exactly where it matters.
+        // Membership in `skipped` is not by itself enough to reach either reader, which was
+        // the bug in the first version of this branch: both reach a page THROUGH `claims`,
+        // so a page absent from `claims` is invisible as an owner no matter what this set
+        // says. Hence pass 1's `sourceIds` fallback. The record here is one of three halves.
         //
-        // Not reachable today at all: jsdom recovers from malformed fragments rather than
-        // throwing, so `parseFragment` effectively never returns null — which is also why
-        // there is no test below pinning this branch, only the readers' behaviour on the
-        // guard route. Recorded anyway; the alternative is a second unrecorded route into
-        // the exact state the pin's condition rules out.
+        // Everything this page contributes is therefore read from its SOURCE — ids in pass
+        // 1, references here. There is no DOM and there never will be one, so the
+        // alternative is not a degraded answer but no answer: the page's frozen `for="q1"`
+        // would be unknown to the pin, every owner of `q1` would be renamed, and the
+        // reference would name nothing. That is the mirror defect the pin exists to prevent,
+        // fixed for the reserialization-guard route and left open for this one.
+        //
+        // Recorded only when the page is relevant to the join: it owns a colliding id, or it
+        // refers to one it does not own. `skipped_pages` is documented as "may still carry a
+        // collision or a stranded reference" and a human is asked to act on it, so a page
+        // that fails to parse while doing neither is noise there.
+        const frozenRefs = new Set([...sourceRefs(page.innerHtml)].filter((r) => colliding.has(r) && !mine.has(r)));
+        if (!ownsCollision && frozenRefs.size === 0) continue;
+        for (const ref of frozenRefs) report.ambiguous.push({ page: page.order, ref });
         skipped.add(i);
         report.skipped_pages.push(page.order);
+        if (frozenRefs.size > 0) refsOfSkipped.set(i, frozenRefs);
         continue;
       }
       const { document } = dom.window;

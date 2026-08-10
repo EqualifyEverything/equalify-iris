@@ -429,7 +429,12 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   copy would ship a duplicate. Any id pinned this way is listed in the same log line as
   `pinned_ids`: it is a colliding id that deliberately was *not* renamed, so without it a bare
   colliding id in the delivered document would be indistinguishable from namespacing that
-  silently failed. That covers foster parenting in
+  silently failed. A page that cannot be *parsed* at all — jsdom's tree construction recurses,
+  so past roughly 10,000 nested elements it overflows the stack — is delivered as written for
+  the same reason and takes the same treatment: its ids and its references are read straight
+  from the source, so it counts as an owner (or the collision would go undetected for its copy,
+  and the pin would fire on top of the bare id it is already keeping) and its frozen references
+  pin their first owner. That covers foster parenting in
   both directions: a `<tr>` outside a `<table>` is dropped to bare text, and content inside one is
   *hoisted out past the table* — a reading-order change, worse than the duplicate id it would be
   fixing. The guard compares the source's sequence of tags **and text** against the parsed document
