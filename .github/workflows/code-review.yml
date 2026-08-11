@@ -155,6 +155,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.ctx.outputs.head_sha }}
           BASE_REF: ${{ steps.ctx.outputs.base_ref }}
           BASE_SHA: ${{ steps.ctx.outputs.base_sha }}
         run: |
@@ -199,6 +200,83 @@ jobs:
             gh pr view "$PR_NUMBER" --json number,title,author,body,baseRefName,headRefName
             echo '```'
           } > "$OUT"
+
+          # Earlier claude[bot] reviews on *previous* commits of this PR. Without these
+          # every push re-derives the review from zero: PR #56 collected four
+          # `--request-changes` reviews in six hours, each re-arguing ground the last one
+          # had covered, and PR #49 took 13 reviews to reach 1 approval. The reviewer
+          # cannot tell "the author ignored this" from "the author fixed this" unless it
+          # can see what was already said.
+          #
+          # Reviews on the CURRENT sha are excluded: if one exists the guard above has
+          # already skipped this whole job, so any match here would be a workflow-review
+          # post or a race, and feeding the model its own verdict invites it to restate it.
+          #
+          # Bounded two ways, because this section competes with the diff for context.
+          # PR #49 accumulated 13 reviews totalling 59KB — a 45% increase on a ~131KB
+          # context that was calibrated against the PR #38 timeout.
+          #   PRIOR_REVIEWS_MAX: how many to include. The API returns them oldest-first, so
+          #     a byte cap on the concatenation would keep the STALEST and truncate the
+          #     newest — backwards. `tail -n` picks the most recent instead, and they stay
+          #     in chronological order, which is the readable direction.
+          #   PRIOR_BODY_MAX: per-review character cap, applied in jq. These bodies carry
+          #     full repro scripts and measurement tables; the verdict and the headings are
+          #     what a re-review needs, not every byte of evidence it already published.
+          PRIOR_REVIEWS_MAX=3
+          PRIOR_BODY_MAX=8000
+          # One compact JSON object per line, so "most recent N" is a `tail -n` on a FILE.
+          # Not a pipe into `tail`/`head`: the producer would take SIGPIPE, exit 141, and
+          # `set -o pipefail` would abort this step before the review is posted (PR #39).
+          PRIOR_LINES=/tmp/prior-reviews.jsonl
+          PRIOR_RECENT=/tmp/prior-reviews-recent.jsonl
+          if gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
+               --jq ".[] | select(.user.login==\"claude[bot]\") | select(.commit_id!=\"$HEAD_SHA\")
+                        | select(((.body // \"\") | startswith(\"Scope: CI/workflow security review\")) | not)
+                        | {sha: .commit_id[0:7], state: .state, body: (.body // \"(empty)\")}
+                        | @json" \
+               > "$PRIOR_LINES" 2>/dev/null && [ -s "$PRIOR_LINES" ]; then
+            TOTAL_PRIOR=$(wc -l < "$PRIOR_LINES" | tr -d ' ')
+            tail -n "$PRIOR_REVIEWS_MAX" "$PRIOR_LINES" > "$PRIOR_RECENT"
+            {
+              echo
+              echo "## Your earlier reviews of this PR (previous commits)"
+              echo
+              echo "You have already reviewed earlier pushes to this branch. Read these before"
+              echo "reviewing the diff, and treat them as follows:"
+              echo
+              echo "- A finding that is **fixed** in the current head: say so in one line, do not"
+              echo "  re-explain it. Confirming a fix is useful; re-litigating it is not."
+              echo "- A finding that is **still present**: say it is unchanged since"
+              echo "  \`<sha>\` and keep it short — do not rebuild the repro you already posted."
+              echo "  If you have raised the same blocking point twice and the author has pushed"
+              echo "  past it without addressing it, state that plainly once and leave it to a"
+              echo "  human; do not escalate and do not repeat it a third time."
+              echo "- A finding you now believe was **wrong**: withdraw it explicitly. That is"
+              echo "  more valuable than quietly dropping it."
+              echo "- Do NOT hunt for new findings just because the diff changed. If the push"
+              echo "  fixed what you raised and introduced nothing new, approve it."
+              echo
+              echo "Each review below starts at a \`=== REVIEW <state> on commit <sha> ===\` line."
+              echo "Any \`##\`/\`###\` headings inside one are that review's own findings, not"
+              echo "sections of this context."
+              if [ "$TOTAL_PRIOR" -gt "$PRIOR_REVIEWS_MAX" ]; then
+                echo
+                echo "_Showing the $PRIOR_REVIEWS_MAX most recent of $TOTAL_PRIOR earlier reviews,"
+                echo "oldest first. Bodies over ${PRIOR_BODY_MAX} characters are truncated — the"
+                echo "full text is on the PR if you need it._"
+              fi
+              echo
+            } >> "$OUT"
+            # jq reads the file directly and does the unescaping; a shell `while read`
+            # loop would have to unescape JSON string bodies itself. The per-body cap is
+            # applied here rather than in the `gh api --jq` above: that flag takes no
+            # `--argjson`, so a `$PRIOR_BODY_MAX` there is an undefined *jq* variable
+            # (not a shell expansion) and the whole call fails with "variable not defined".
+            jq -r --argjson max "$PRIOR_BODY_MAX" \
+              '"=== REVIEW \(.state) on commit \(.sha) ===\n\n\(.body[:$max])\n"
+               + (if (.body | length) > $max then "\n_[body truncated]_\n" else "" end)' \
+              "$PRIOR_RECENT" >> "$OUT"
+          fi
 
           # Every check below records pass/fail into the context instead of
           # aborting the step — a red build is exactly what the reviewer needs to
@@ -508,7 +586,10 @@ jobs:
 
             Read `/tmp/review-context.md` FIRST — it already contains the PR metadata, the
             install/typecheck/unit/e2e output (see its "Check summary" section), the full diff,
-            and the full source of files that are new or substantially rewritten. Lightly-touched
+            and the full source of files that are new or substantially rewritten. If it has a
+            section titled "Your earlier reviews of this PR", read that section before the diff
+            and follow its instructions — this is a re-review, and repeating a point you already
+            made costs the author more than it gains. Lightly-touched
             files appear as diff only; Read them from the checkout if the hunk is not
             self-explanatory. Do not re-run the checks. Otherwise use Read/Glob/Grep only to
             inspect what the diff touches but the context omitted (e.g. the other side of a
@@ -548,6 +629,39 @@ jobs:
             gate. State lives in SQLite plus per-session directories on disk. Model calls go
             through a `ModelProvider` abstraction (`src/providers/`) with Bedrock and OpenRouter
             adapters. The project is AGPL-3.0-or-later.
+
+            ## The severity bar — apply this to every finding before you post
+
+            The "Must flag" list below says what to *look at*. It does not say that everything
+            you find there is blocking. Decide blocking-ness by **reachability**, then say which
+            you concluded and why:
+
+            - **Blocking** — a real user, a real request, or CI hits this on input the code
+              accepts today. A shipped accessibility regression, a wrong verdict on real page
+              content, a failing check, a broken route, a cross-session data path.
+            - **Non-blocking note** — the defect is real and correctly reasoned, but nothing
+              reaches it on today's inputs: an unreachable branch, a guard that is redundant
+              with an existing one, a comment that overstates its own invariant, a latent bug
+              behind a condition that does not occur. Say it is latent, say what would have to
+              change to reach it, and post it as a note on an **approval**.
+
+            If you write "this is latent", "nothing here regresses a delivered document", "not
+            reachable in practice", or "no delivered output changes" about every finding you
+            have, then you do not have a blocking review — you have an approval with notes.
+            Post that. Requesting changes on a PR whose delivered behaviour is correct spends
+            the author's attention without protecting a user, and it trains them to discount the
+            next review, including the one that matters.
+
+            Three exceptions stay blocking even when you cannot reach them today, because their
+            whole value is holding when something else breaks:
+
+            - anything under **Must flag #3** (auth, tokens, secrets, cross-session access);
+            - **publishing under the wrong identity** (Must flag #2);
+            - **path handling that could escape the data dir** (`src/store/paths.ts`).
+
+            Depth is not what is being trimmed here. Investigate exactly as hard as you do now —
+            the repro, the measurement and the `path:line` are what make a finding worth reading.
+            This bar governs the *verdict* you attach to what you found, not how far you dig.
 
             ## Must flag (blocking)
 
@@ -630,9 +744,15 @@ jobs:
 
             Post **exactly ONE** review with `gh pr review ${{ steps.ctx.outputs.pr_number }}`:
 
-            - `--request-changes` if any check in the summary failed, or you found a blocking issue.
-            - `--approve` if it is clean.
+            - `--request-changes` if any check in the summary failed, or you found a blocking
+              issue as defined by the severity bar above.
+            - `--approve` otherwise — including when you found real but latent defects. Put them
+              under a `### Non-blocking notes` heading in the same review body. An approval with
+              three sharp latent notes is a more useful review than a `--request-changes` that
+              the author has to argue their way out of.
             - Reference concrete `path:line` locations. Quote the code you are objecting to.
+            - For each blocking finding, state in one line what input reaches it. If you cannot
+              name one, it belongs in the non-blocking notes.
             - Be concise. No praise sections, no restating the diff.
             - End the body with a single line: `Accessibility impact: <one sentence>` — what this
               change does to the accessibility of Iris's output, or "none" if it cannot affect it.
