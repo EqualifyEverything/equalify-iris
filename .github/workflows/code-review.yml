@@ -394,9 +394,10 @@ jobs:
              && echo "${ACTIONLINT_SHA256}  /tmp/actionlint.tgz" | sha256sum -c - >/dev/null 2>&1 \
              && tar -xzf /tmp/actionlint.tgz -C /tmp actionlint; then
             # shellcheck/pyflakes disabled: this gate is about Actions-expression and
-            # workflow-schema errors. Shell style in the review workflows is reviewed
-            # by a human and by the CI-security reviewer, and shellcheck on these
-            # heavily-templated blocks is mostly false positives.
+            # workflow-schema errors. Shell style in this workflow is reviewed by a
+            # human — the CI-security reviewer that used to share the job was deleted
+            # in PR #63 — and shellcheck on these heavily-templated blocks is mostly
+            # false positives.
             if /tmp/actionlint -shellcheck= -pyflakes= .github/workflows/*.yml 2>&1 | tail -40 >> "$OUT"; then
               WFLINT=pass
             else

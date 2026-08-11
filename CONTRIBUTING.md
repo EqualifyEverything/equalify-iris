@@ -45,6 +45,28 @@ should report **0 violations**.
 - New runtime dependencies should be justified — Iris aims to stay portable and lightweight.
 - AGPL-3.0: contributions are licensed under the same terms.
 
+### What the automated review will say
+
+Your PR gets a review from Claude in CI before a maintainer reads it
+([details](README.md#automated-code-review)). Useful things to know:
+
+- **It runs the checks itself** and quotes their real output, so a failing `typecheck` or `e2e`
+  comes back as a blocking finding with the relevant lines.
+- **It will not nit-pick style, formatting or naming.** There's no linter or formatter in this
+  repo on purpose. It's also told not to suggest alternatives when your approach is correct, and
+  not to raise pre-existing issues your PR doesn't touch. If it does one of those anyway, that's a
+  bug in the prompt — say so on the PR.
+- **`### Non-blocking notes` means "merge-ready".** A finding only blocks if something reaches it
+  on input the code accepts today; real-but-unreachable findings are notes on an *approval*. You
+  don't have to resolve them to merge, and you don't have to argue your way out of them.
+- **Its verdict is advisory.** A human merges. If you think a blocking finding is wrong, reply on
+  the PR — the reviewer sees its earlier reviews on re-runs, but it is the maintainer you're
+  actually talking to.
+- **Fork PRs aren't reviewed automatically** (a fork PR gets no CI secrets). A maintainer
+  dispatches the review manually; nothing is needed from you.
+- **Editing `.github/workflows/code-review.yml` disables its own review.** Expect a warning
+  saying so and a slower human read.
+
 ## Architecture (orientation)
 
 `src/pipeline` (extraction → assembly → review), `src/providers` (LLM provider abstraction),
