@@ -122,8 +122,12 @@ jobs:
           # sha, don't post again. A new push (new sha) is reviewed as normal.
           #
           # Excluding the workflow-review marker is load-bearing, not tidiness.
-          # .github/workflows/workflow-review.yml posts as claude[bot] on the same
-          # commit_id, and this guard gates EVERY step below it — including npm ci,
+          # .github/workflows/workflow-review.yml posts on the same commit_id — as
+          # github-actions[bot] since PR #62 gave it an explicit `github_token` (it can no
+          # longer obtain a claude[bot] App token under `pull_request_target`), so the
+          # login filter alone would now exclude it. Keep the marker filter anyway: it is
+          # what makes this guard correct regardless of which identity that job posts
+          # under, and this guard gates EVERY step below it — including npm ci,
           # typecheck, unit and e2e. Counting that review would mean a re-run or
           # workflow_dispatch of this workflow on the same sha silently skips the whole
           # suite and reports success, because a *different* workflow had posted about
