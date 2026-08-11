@@ -38,7 +38,7 @@ The deeper difficulty is content variety. PDFs in the wild contain an open-ended
 
 - **Styling**: no CSS, no visual fidelity to the source. Content and semantics only.
 - **Pixel-perfect layout reproduction**: a two-column source becomes linear semantic HTML.
-- **Auth providers other than GitHub (v1.2)**: no API keys, no pasted PATs, no basic auth, no second SSO provider, and no anonymous mode. This is a design boundary rather than deferred work — the GitHub token is what files each session's contributions under the user's identity, so any credential that cannot do that would admit callers who consume the agent library without refilling it (§12, §9.1 v1.2).
+- **Auth providers other than GitHub (v1.2)**: no API keys, no pasted PATs, no basic auth, no second SSO provider, and no anonymous mode. This is a design boundary rather than deferred work — the GitHub token is what files each session's contributions under the user's identity, so any credential that cannot do that would admit callers who consume the agent library without refilling it (§12, §9.1).
 - **Opting out of contributing (v1.2)**: there is no parameter, config key or account setting that finalizes a session without filing what it produced. See §7.13 v1.2.
 
 ## 5. Users and Use Cases
@@ -60,7 +60,7 @@ The pipeline runs in five phases:
 
 After phase 5, the document is returned to the user, who may submit feedback (re-running phases 1–5 with feedback injected) or accept the result and optionally submit any newly built agents as a PR.
 
-**Amended (v1.2): contribution is not a step the user takes at the end.** Newly built agents and generalizable feedback are filed as labeled GitHub issues *during* the run, by the phase that produced them, using the user's own token (§7.13 v1.2, §12). Accepting the document (`/close`) locks the HTML and cleans up `tmp/`; it opens nothing and offers no choice about contributing.
+**Amended (v1.2): contribution is not a step the user takes at the end.** Newly built agents and generalizable feedback are filed as GitHub issues *during* the run, by the phase that produced them, using the user's own token (§7.13 v1.2, §12). Accepting the document (`/close`) locks the HTML and cleans up `tmp/`; it opens nothing and offers no choice about contributing.
 
 ```
        ┌─────────────────────────────────────────────────────────────┐
@@ -478,7 +478,7 @@ The workflow is automatic on session close:
 
 **Auth and configuration**:
 
-- The user's GitHub credential is the same credential they authenticated with (see §9.1). OAuth requires `repo` scope, so every authenticated user can open PRs. **Amended (v1.1): the requested scope defaults to `public_repo` and is per-deployment — see §9.1 "What the token grants". Further amended (v1.3): no scope is requested at all, and none can be — Iris is a GitHub App, whose permissions come from its installation (`issues: write`).** Nothing in this section is implemented (contributions are filed as labeled issues), so the write access it assumes is not held; a deployment that later builds this flow has to add `contents: write` and `pull_requests: write` to the app deliberately.
+- The user's GitHub credential is the same credential they authenticated with (see §9.1). This section's premise — that authenticating grants `repo`, so every authenticated user can push — no longer holds in any form: **no scope is requested, and none can be.** Iris is a GitHub App, and its permissions come from its installation, which grants `issues: write` and nothing else (§9.1 "What the token grants"). Nothing in this section is implemented, so the write access it assumes is not held; a deployment that later builds this flow has to add `contents: write` and `pull_requests: write` to the app's installation deliberately.
 - The upstream repository is determined by the service's `agents/` git checkout — its `origin` remote is the PR target. This is a per-deployment setting, not a per-user one.
 - PRs are opened from the user's fork of the upstream. The service creates the fork on the user's account on first close, if it does not already exist.
 - All PR activity is logged in the session record. Closing or rejecting a PR upstream does not affect the produced HTML — the HTML has already been generated using the session-built agent recorded inline in `log.jsonl`.
@@ -487,24 +487,24 @@ The workflow is automatic on session close:
 
 - A user who does not want to contribute the agents from a given session can pass `?skip_prs=true` to `/close`. The HTML is finalized and the session-built agents are discarded without PRs being opened.
 
-**Amended (v1.2): contributions are labeled issues filed during the run, and there is no opt-out.** This section is superseded in its mechanism *and* in its "Opt-out" clause. What ships:
+**Amended: contributions are issues filed during the run, and there is no opt-out.** This section is superseded in its mechanism *and* in its "Opt-out" clause. What ships:
 
-- **Issues, not PRs.** When the extractor meets content a specialist agent would handle better, the drafted agent is filed as an `iris-agent-suggestion` issue on `upstream_repo` with the agent code and context; feedback that generalizes past its own document is filed as an `iris-agent-update` issue with the diff, once it has passed the agent's regression fixtures. Nothing forks, nothing pushes, no branch is created. Simpler for a maintainer to triage, and it needs no write access to a fork. **(v1.3: the two labels are gone — see the amendment at the end of this section. The rest of this bullet stands.)**
+- **Issues, not PRs.** When the extractor meets content a specialist agent would handle better, the drafted agent is filed on `upstream_repo` as an issue titled `New agent suggestion: <type>`, carrying the agent code and context; feedback that generalizes past its own document is filed as `Agent update proposal: <agent>` with the diff, once it has passed the agent's regression fixtures. Nothing forks, nothing pushes, no branch is created. Simpler for a maintainer to triage, and it needs no write access to a fork. **The title prefix is the issue's identity** — see the amendment at the end of this section for why it is not a label.
 - **Filed during the run, not on `/close`.** Contribution is a side effect of the phase that produced it, so it does not depend on a client reaching the close endpoint.
 - **Filed under the user's own GitHub identity**, which is the point rather than an implementation choice (§12) — the user's token is required on every call precisely so that this can happen, and the credit for the contribution is theirs.
-- **No `skip_prs`, and no equivalent.** The opt-out above is withdrawn deliberately, not dropped for lack of time: an opt-out is exactly the mode §12 exists to prevent, since it lets a session take from the agent library without refilling it. There is no request parameter, config key or account setting that disables filing. `github.oauth_scope` is not a back door either — the key no longer exists, and a user's authorization carries no repository permission to withhold (§9.1 v1.3).
-- **Failure is soft in one direction only.** A GitHub outage or a permissions problem is logged as `agent_issue_failed` (with a diagnostic `hint` when the failure looks like a scope problem) and never fails a document the user has already paid for. That is a failure-handling property, not an opt-out.
-- Consequently the `pending_prs` and `prs_opened` response fields (§9.2) and the `skip_prs` parameter are not part of the API. `github.issue_token` is an optional service-account override for *who authors* the issues, documented as not recommended (§9.1 v1.2).
+- **No `skip_prs`, and no equivalent.** The opt-out above is withdrawn deliberately, not dropped for lack of time: an opt-out is exactly the mode §12 exists to prevent, since it lets a session take from the agent library without refilling it. There is no request parameter, config key or account setting that disables filing. There is no back door through the credential either: a user's authorization carries no repository permission to withhold, since filing comes from the app's installation (§9.1 "What the token grants").
+- **Failure is soft in one direction only.** A GitHub outage or a permissions problem is logged as `agent_issue_failed` (with a diagnostic `hint` when the failure looks like a permissions problem — usually the app not being installed on `upstream_repo`) and never fails a document the user has already paid for. That is a failure-handling property, not an opt-out.
+- Consequently the `pending_prs` and `prs_opened` response fields (§9.2) and the `skip_prs` parameter are not part of the API. `github.issue_token` is an optional service-account override for *who authors* the issues, documented as not recommended (§12).
 
 The framing sentence at the top of this section still holds, with "upstream merge" reached by issue rather than by PR: an agent becomes available outside its session only via upstream merge plus a subsequent `git pull`.
 
-**Amended (v1.3): the issues carry no label, and their TITLE PREFIX is their identity.** `iris-agent-suggestion` and `iris-agent-update` are gone, along with the read-or-create label call that preceded each filing. The labels could not survive contact with the users this section is about.
+**Amended: the issues carry no label, and their TITLE PREFIX is their identity.** An earlier revision labeled them `iris-agent-suggestion` and `iris-agent-update`, and read-or-created the label before each filing. Both are gone. The labels could not survive contact with the users this section is about.
 
 GitHub documents that "any user with pull access to a repository can create an issue" — so filing itself works for any authenticated user, and §12's model is sound — but also that "only users with push access can set labels for new issues. Labels are silently dropped otherwise." Every ordinary contributor is in the second group. Filing returned `201`, the issue appeared under the user's own name, and the label was discarded with nothing in the response to say so.
 
 That made both purposes of the label fail silently, and only for the majority:
 
-| | With labels (v1.2) | Without (v1.3) |
+| | With labels | Without |
 | --- | --- | --- |
 | Maintainer triage | `label:iris-agent-suggestion` — misses every issue filed by a non-collaborator | search the title prefix, or apply labels with a repo-side rule keyed on it |
 | Dedupe | filtered on the label, so it could never match an unlabeled issue: **every later session refiled the same suggestion, under a different real person's name** | exact-title comparison over an `in:title` search — behaves the same for every filer |
@@ -576,133 +576,67 @@ POST /v1/sessions/{id}/close               → accept output, open PRs, clean tm
 GET  /v1/sessions/{id}/logs                → fetch the run log
 ```
 
-GitHub OAuth is the only auth mechanism. See §9.1 for why.
+GitHub is the only auth mechanism. See §9.1 for why.
 
 ### 9.1 Authentication
 
-Authentication is GitHub OAuth. A user *is* their GitHub account. The first time a GitHub user authenticates, an account is provisioned automatically — login is signup. There is no separate signup form, no email or password, and no service-issued credential to manage.
+Authentication is GitHub, and Iris is registered as a **GitHub App** — not an OAuth App. A user *is* their GitHub account. The first time a GitHub user authenticates, an account is provisioned automatically: login is signup. There is no separate signup form, no email or password, and no service-issued credential to manage.
 
-**OAuth is required, not optional.** The token that authenticates a request is the same token used to open pull requests on `/close`. Without OAuth the service has no way to push a PR on the user's behalf, and PR push is the only path by which agents persist (§7.13). Alternative auth schemes (API keys, pasted PATs, basic auth) would either skip the PR step or require the user to manage a credential manually — both are non-goals.
+**A GitHub token is required on every API call, and that requirement is load-bearing rather than incidental.** The user's token is what files their session's contributions under their own identity (§7.13, §12), which makes authenticating and contributing the same act. Alternative auth schemes — API keys, pasted PATs, basic auth, a second SSO provider, anonymous mode — are non-goals for that reason and not for lack of time: any credential that cannot file would admit callers who consume the agent library without refilling it, and refilling it is the only reason the library improves.
 
-**Amended (v1.2): still required, for a stronger reason.** The mechanism above changed — nothing opens PRs; contributions are filed as labeled issues (§7.13) — but the requirement did not, and it is now load-bearing rather than incidental. **GitHub is the only SSO layer, and a GitHub token is required on every API call, so that every user gives back to the shared agent library under their own identity (§12).** The user's token is what files their session's contributions, which makes authenticating and contributing the same act. Alternative auth schemes are non-goals for the same reason as before, restated: an API key or a pasted PAT would let a caller consume the agent library without refilling it, and refilling it is the only reason the library improves. A deployment configured so that a user's token *cannot* file (see "What the token grants") fails at startup rather than running as a consumer-only instance.
-
-#### OAuth flow (web clients)
+#### Web redirect flow
 
 1. Client redirects the user to `GET /v1/auth/github/start`.
-2. Server redirects to the GitHub consent screen requesting `github.oauth_scope` (`public_repo` by default — see "What the token grants" below; `repo` in the original spec). **Superseded (v1.3): no scope is requested.** `github.oauth_scope` is gone and Iris is a GitHub App — the consent screen asks for no repository access at all. See the v1.3 amendment under "What the token grants".
+2. Server redirects to the GitHub consent screen. **No scope is requested** — see "What the token grants".
 3. User approves; GitHub redirects to `GET /v1/auth/github/callback?code=…`.
-4. Server exchanges the code for a GitHub access token, calls `GET https://api.github.com/user` to identify the user, provisions the account if new, and returns the token to the client.
+4. Server exchanges the code for a user access token, calls `GET /user` to identify the user, provisions the account if new, and returns the token to the client.
 5. Subsequent requests use `Authorization: Bearer <github_token>`.
 
-#### OAuth device flow (CLI clients)
+This flow needs `github.client_secret`. The device flow below does not, which is why it is the default deployment's path.
 
-CLI clients without a browser use GitHub's OAuth device flow, surfaced by the service:
+#### Device flow (CLI clients)
 
 1. Client calls `POST /v1/auth/github/device`. Server initiates the device flow with GitHub and returns a `user_code` and `verification_uri`.
-2. Client displays both to the user and instructs them to visit the URL in a browser and enter the code.
+2. Client displays both and instructs the user to visit the URL and enter the code.
 3. Client polls `POST /v1/auth/github/device/poll` until the user approves or the request times out.
-4. On approval, the polling endpoint returns a GitHub access token. The CLI stores it locally.
+4. On approval, the polling endpoint returns a user access token. The CLI stores it locally.
 5. Subsequent requests use `Authorization: Bearer <github_token>`.
 
-This is the same pattern GitHub's own CLI uses.
+The same pattern GitHub's own CLI uses, and the same reason: no browser redirect to receive, and no client secret to distribute.
 
 #### What the token grants
 
-The token authenticates the caller (via GitHub's user endpoint) and opens PRs on `/close`. Required scope is `repo`. The consent screen requests it; a user who declines `repo` cannot complete OAuth, and therefore cannot use the service. This is deliberate — the system has no useful mode for an authenticated user who cannot contribute back.
+**No repository access, because the consent screen requests none.** A GitHub App's repository permission does not come from the user at all — it comes from the app's **installation** on `upstream_repo`, which grants exactly `issues: write` on exactly that repository. The user's authorization contributes only their **identity**: a user-to-server token acts as the user, so an issue Iris files appears under that person's own account and each contribution is credited to whoever's session produced it (§12). That is the whole reason users authorize the app rather than the app filing everything as itself.
 
-**Amended (v1.1): the requested scope is per-deployment and defaults to `public_repo`.** This section derives `repo` from a premise that no longer holds: nothing opens PRs or pushes (§7.13's fork-and-PR flow was never built — contributions are filed as issues), so the token needs only two things. Identifying the caller via `GET /user` requires **no scope at all** — `id` and `login` are public fields. Filing an agent-suggestion issue on a public upstream requires `public_repo`. `repo` additionally grants read *and write* to every private repository the user can reach, for a capability the service does not have.
+This is why there is no scope configuration and nothing about the credential's breadth to validate. An OAuth App could not express "file an issue on one repository": the narrowest scope that can file is `public_repo`, which grants read *and write* to every public repository the user can reach — code, commit statuses, collaborators, webhooks — none of which this service touches. That gap was a property of OAuth scopes, not of how the app was configured, so it was not fixable by configuration.
 
-The scope is therefore configurable per deployment (`github.oauth_scope`) with three intended settings:
-
-> **Superseded by the v1.2 amendment below.** The first row is wrong now: `none` is
-> rejected at startup and there is no configuration in which it is valid. Read the v1.2
-> table before acting on this one.
-
-| Value | Rationale | Status in v1.2 |
+| | What Iris needs | What it asks the user for |
 | --- | --- | --- |
-| `none` | The deployment sets `github.issue_token`, so the user's token only ever identifies them. Recommended for production. | **Withdrawn — rejected at startup.** |
-| `public_repo` | Default. Public upstream; each user files their own issues. | Still the default, and now the floor. |
-| `repo` | Required only when the upstream repository is private. | Unchanged. |
+| Identify the caller (`GET /user`) | `id` and `login` | nothing — they are public fields |
+| File an issue on `upstream_repo` | `issues: write` on one repo | nothing — it comes from the installation |
+| Everything else | — | — |
 
-`none` is sent as **no** `scope` parameter rather than as `scope=`, which is the form GitHub documents for requesting no scopes. It is a word rather than an empty string because `${VAR}` expansion turns an unset variable into `""` before the config is normalized, so an empty value cannot be distinguished from a missing one — every empty form falls back to `public_repo`, and only the literal `none` disables the scope. And narrowing what is requested does not narrow a grant already made: tokens issued under `repo` retain it until the user revokes the authorization, so a deployment that has been running with `repo` should treat existing rows as `repo`-scoped.
+Five consequences, each of which the implementation depends on:
 
-> **Superseded by the v1.3 amendment below.** `github.oauth_scope` no longer exists: Iris
-> is a GitHub App and requests no scope, so both this table and the v1.1 one describe a
-> knob that is gone. The §12 requirement they protect is intact — read v1.3 before acting
-> on either.
+- **The one misconfiguration that matters is not in config, and this is a real loss.** If the app is not installed on `upstream_repo` — never installed, installation removed, or Issues write revoked — filing breaks for *every user at once*, and startup cannot catch it, because the install state lives on github.com. It surfaces during filing as a 403, or (since GitHub does not reveal repositories a credential cannot see) a **404**, diagnosed in the log line by `installHintFor`. Under a scope this was a config value a startup check could read; now it is not.
+- **What config CAN check, it does.** An `Ov…` `client_id` is an OAuth App and is **refused at startup**: it would authenticate users perfectly and then be unable to file a single issue, with the service answering `200` throughout — a silent consumer-only deployment, which §12 exists to prevent. Any other non-`Iv…` id gets a boot warning instead of a refusal, since GitHub Enterprise Server mints its own id formats and refusing an unrecognized shape could break a working deployment.
+- **`upstream_repo` is no longer independent of `client_id`.** An installation is per-repository, so the bundled Equalify Iris app can only file on the repository it is installed on. Leaving `client_id` blank while pointing `upstream_repo` at your own agent library therefore files nothing, for anyone — and `upstream_repo` is a first-class documented knob, so that edit is an easy one to make alone. It **warns at startup** rather than failing, because the state is legitimately reachable: Equalify can install the bundled app on another organization's repo, and no config value could reveal that it did.
+- **A private `upstream_repo` needs more than the installation.** A user-to-server token is the *intersection* of the installation's permissions and the authorizing user's own access — GitHub will not let an installation grant a user access they lack — so on a private upstream, filing succeeds for users who can already see the repo and 404s for everyone else. Per-user rather than deployment-wide, which is how it is told apart from a missing installation. The remedy is `github.issue_token`, and it costs §12 attribution. The public-upstream case, which this design assumes, is unaffected.
+- **Two registration settings are load-bearing and invisible from the code.** Device flow must be **enabled** (off by default for a new app, and the device flow is the default deployment's only login path). User-token expiry must be **off** (GitHub's default is an 8-hour token plus a refresh token; nothing here persists or refreshes a credential — see "How the token is stored" — so enabling expiry means building refresh plumbing first). Neither is checkable at startup either, so both flows log a warning when GitHub returns an `expires_in`, which is the one observable symptom of the second.
 
-**Amended (v1.2): the scope has a FLOOR, and `none` is rejected at startup.** The table above is superseded on its first row. It optimizes for one thing — minimizing what a stolen token is worth — and the amendment below ("How the token is stored") removes that pressure entirely by not storing tokens at all. What remains is the requirement it was trading against: filing is what every user owes the library, and a token that cannot file is not a mode this service has (§12).
+#### How the token is stored
 
-| Value | Rationale (v1.2) |
-| --- | --- |
-| `public_repo` *(default)* | **The floor.** Exactly enough to file an issue on a public `upstream_repo`, and no more. |
-| `repo` | **Only** when `upstream_repo` is private. Also grants read *and write* to every private repo the user can reach, which nothing here uses. |
-| `none` | **Rejected — the service refuses to start**, with a message naming the fix. |
+**It is not stored.** There is no `users.github_token` column, no token file, and therefore no encryption question to answer. The user's token arrives in the `Authorization` header, is held in memory for the request and for the pipeline run it authorizes, and is discarded when that run ends. **A copy of `data/iris.sqlite` is a list of GitHub user IDs, logins and session metadata — it is not GitHub access.**
 
-Three consequences worth stating explicitly:
+This was not always true, and the reasoning is worth keeping because it explains why the fix was so small. An earlier revision stored the token in plaintext, on the grounds that a credential used to call GitHub on the user's behalf has to be replayable and so cannot be hashed. The consequence followed directly: read access to the database file was GitHub API access as every user who had ever authenticated — a backup, a synced directory, another process on a shared host, or a lost laptop all sufficient. Encryption at rest was no answer, because §10.1 requires a deployment to run on a laptop with no managed dependencies, so the key would live beside the database. What made the problem dissolve instead was noticing that **nothing ever read the stored token**: it was written on every authenticated request and read by no code path, since every GitHub call already uses the token from the current request, threaded through the run in memory. The column was a liability maintained in exchange for nothing.
 
-- **`github.issue_token` does not make `none` valid.** There is no pairing rule between the two keys any more: `none` is rejected identically with or without a service token. (§9.1 v1.1 and the earlier implementation validated them as a pair; that rule is withdrawn.) Be precise about why, because the mechanics point the other way — both filing paths resolve `issue_token || <the request's token>`, so *while the PAT is set* filing works and the user's scope is never exercised. The floor is not a functional requirement in that state; it is required so that **leaving** that state cannot be silent. Unset the PAT — rotated, expired, moved to another deployment — and the user tokens become the credential that files, and scopeless ones cannot: contribution stops with one `agent_issue_failed` per run while the service keeps answering `200`. The floor makes that transition a startup error instead of a quiet one. What a PAT does change is *who gets the credit*, which §12 has its own view on.
-- **A consumer-only deployment is not configurable.** "Users identified, nothing ever filed on their behalf" was reachable in v1.1 via `issue_token` + `none`, and was even the recommended production shape. It is now a startup error. This is deliberate: it was the one supported way to run an instance that took from the agent library without refilling it.
-- **Empty is still not `none`.** Every empty form (absent key, valueless key, quoted `""`, unset `${VAR}`) falls back to `public_repo`, for the reason the previous paragraph gives — expansion makes a typo indistinguishable from intent, and a typo must not be able to strip the scope out of a deployment. `none` is recognized *only* in order to be rejected by name, rather than being forwarded to GitHub as a literal scope and failing at the consent screen.
-
-The last sentence of the v1.1 amendment still holds in spirit — a user who declines cannot use the service — but the thing being declined is now much smaller.
-
-#### Amended (v1.3): there is no scope, because Iris is a GitHub App
-
-Everything above — the v1.1 table, the v1.2 floor, `github.oauth_scope`, and the startup rejection of `none` — is superseded. Those amendments were an argument about *which* OAuth scope to request, conducted between a floor (a token must be able to file) and a ceiling (no grant wider than filing needs). The v1.2 outcome, `public_repo`, satisfied the floor and missed the ceiling badly, and this was not fixable by configuration: **no OAuth scope means "open issues on one repository."** `public_repo` is the narrowest scope that can file an issue, and it grants read *and write* to every public repository the user can reach — code, commit statuses, collaborators, webhooks. Nothing in the service touches any of it. The consent screen was asking for orders of magnitude more than the service uses, and the previous two amendments could only document that, not fix it.
-
-Iris is therefore registered as a **GitHub App** rather than an OAuth App, and requests **no scope at all**:
-
-| | OAuth App (v1.2) | GitHub App (v1.3) |
-| --- | --- | --- |
-| Where repository permission lives | the user's authorization | the app's **installation** on `upstream_repo` |
-| What the consent screen requests | `public_repo` — read/write to all the user's public repos | **no repository access** |
-| Permission actually granted | account-wide | `issues: write`, on the installed repo only |
-| Private `upstream_repo` | needs `repo` (read/write to all private repos) | files for users who can see the repo; needs `issue_token` for the rest (see below) |
-| Config surface | `github.oauth_scope`, with a floor enforced at startup | none |
-
-What the user's token still carries is their **identity**: a user-to-server token acts as the user, so issues are filed under their own account and each contribution is credited to the person whose session produced it (§12). That is why users authorize the app at all, rather than the app filing everything as itself. The §12 requirement the v1.2 floor existed to protect is therefore unchanged and no longer needs protecting by config — a user's authorization cannot be too narrow to file, because it is not what grants filing.
-
-Consequences that replace the v1.2 bullets:
-
-- **`github.oauth_scope` is gone**, and with it the startup rejection of `none`. A config that still sets the key starts fine and ignores it. There is no scope to get wrong, so there is nothing to validate.
-- **The one misconfiguration moved out of config**, and this is a real loss the v1.2 shape did not have: the app not being installed on `upstream_repo` (or its installation losing Issues write) breaks filing for *every user at once*, and cannot be caught at startup because the install state lives on github.com. It surfaces as a 403 — or, since GitHub does not reveal repositories a credential cannot see, a **404** — on filing, diagnosed in the log line by `installHintFor`. What config *can* still check is the credential's shape: an `Ov…` id is an OAuth App and is rejected at startup, because it would authenticate users and then be unable to file, with the service answering `200` throughout — precisely the silent state the v1.2 floor existed to prevent. Any other non-`Iv…` id gets a boot warning rather than a refusal, since GitHub Enterprise Server mints its own formats.
-- **A private `upstream_repo` is the one case that needs more than the installation.** A user-to-server token is the *intersection* of the installation's permissions and the authorizing user's own access — GitHub does not let an installation grant a user access they lack — so on a private upstream, filing succeeds for users who can already see the repo and 404s for everyone else. This is per-user rather than deployment-wide, which is how it is told apart from a missing installation. The remedy is `github.issue_token`, and it costs §12 attribution. The public-upstream case, which is the design's assumption, is unaffected.
-- **`github.issue_token` is unaffected.** It remains an override for who authors issues (§12 has its own view on that), and the app's installation governs only tokens issued to users.
-- **Two registration settings are load-bearing and invisible from the code:** device flow must be ENABLED (it is off by default for a new app, and the device flow is the default deployment's only login path), and user-token expiry must be OFF (GitHub's default is an 8-hour token plus a refresh token; nothing here persists or refreshes a credential, per the v1.2 storage amendment, so enabling expiry means building refresh plumbing first).
-- **No migration.** Nobody had authorized the OAuth App, so there are no grants to unwind; any that exist can be revoked at github.com/settings/applications. The v1.2 note that narrowing a request does not narrow a grant already made still applies to those.
-
-#### How the token is stored (v1.1)
-
-> **Superseded in its entirety by the v1.2 amendment below.** The token is not stored at
-> all — the column is gone and startup refuses a database that still has it. Everything
-> in this subsection describes a state the service can no longer be in, including the
-> `oauth_scope: none` recommendation in its last bullet. It is kept because the reasoning
-> that led away from it is the reason the fix was so small.
-
-This specification never said, and the implementation's answer is worth stating rather than leaving to be discovered: **the user's access token is stored in plaintext**, in `users.github_token` in the service's SQLite database. It has to be replayable, because it *is* the credential used to call GitHub on the user's behalf, so it is not hashed.
-
-The consequence follows directly: **read access to the database file is GitHub API access as every user who has ever authenticated**, at whatever scope those tokens carry. A backup, a synced directory, another process on a shared host, or a lost laptop are all sufficient.
-
-This is an accepted v1 limitation, not an oversight, and it is why the scope default above matters as much as it does:
-
-- **Encryption at rest does not fix it here.** §10.1 requires a deployment to run on a laptop with no managed dependencies, so the key would live on the same machine as the database — which is most of the way back to plaintext. A real fix needs a KMS or an operator-managed secret, and therefore a dependency §10.1 forbids requiring.
-- **Not holding the credential is the actual fix.** Short-lived tokens need a refresh credential, which needs the same key management. Moving the GitHub surface out of this service (so it holds no long-lived user credential at all) removes the reason to store anything — storing nothing beats encrypting something.
-- **What v1 does instead**, and what an operator must be told: request the narrowest scope that works (above), and state the exposure in the deployment documentation so the risk can be weighed rather than discovered. A deployment that sets `github.issue_token` and `oauth_scope: none` stores tokens that grant nothing beyond reading a public profile, which is the recommended shape. Those two keys are validated as a pair at startup, since `none` without a service token leaves issue filing unable to work and GitHub's 403 would otherwise surface only in a run log.
-
-#### Amended (v1.2): the token is not stored at all
-
-The section above is obsolete in its entirety. It took "storing nothing beats encrypting something" to require moving the GitHub surface out of the service — a redesign — when in fact **nothing ever read the stored token**. It was written on every authenticated request and read by no code path: every GitHub call in the pipeline uses the token from the current request's `Authorization` header, threaded through the run in memory. The plaintext column was a liability maintained in exchange for nothing.
-
-So it is gone. There is no `users.github_token` column, no token file, and no encryption question to answer. The user's token arrives in the `Authorization` header, is held in memory for the request and for the pipeline run it authorizes, and is discarded when that run ends. **A copy of `data/iris.sqlite` is a list of GitHub user IDs, logins and session metadata — it is not GitHub access.** The "backup, synced directory, shared host, lost laptop" exposure above no longer exists, and neither does the trade-off it forced against the scope floor.
-
-Two properties follow, both worth specifying rather than leaving to the implementation:
+Three properties follow, all worth specifying rather than leaving to the implementation:
 
 - **Identity lookups are cached in memory, keyed by the token, for 5 minutes.** This is what keeps `GET /user` off every request. It means a token revoked at github.com keeps working here for up to that long, which is the reason not to raise the TTL — the only cost of a miss is one API call. The cache is bounded (10,000 entries; oldest insertions evicted first) because it holds live credentials, and entries are **not** renewed on read: a busy token must not be able to outlive its revocation indefinitely, which is the failure the TTL exists to bound. It is empty on restart.
 - **There is nothing to rotate, re-encrypt or purge**, and no cleanup owed when a user revokes access. Revocation at [github.com/settings/applications](https://github.com/settings/applications) is the entire mechanism.
-- **A database created before this change is refused at startup, not migrated.** Every user starts from scratch, so a pre-existing `data/iris.sqlite` is a leftover rather than a deployment to upgrade — but the check is required, because `CREATE TABLE IF NOT EXISTS` keeps the old table silently. Two failures would follow, and neither names its cause: `github_token TEXT NOT NULL` makes every FIRST-TIME login throw a constraint error that the auth middleware returns as `401 unauthorized` (while anyone with an existing row keeps working, so it reads as flaky GitHub auth), and the file's plaintext tokens remain — never refreshed, never cleared, still returned by `getUser`'s `SELECT *` — so the claim above would be false for exactly that deployment. The startup error names the fix (delete the file, do not archive it). Refusing rather than rebuilding-and-vacuuming is deliberate: erasing live credentials is the operator's decision, not something the service should do to a file it was pointed at.
+- **A database carrying the old token column is refused at startup, not migrated.** Every user starts from scratch, so such a file is a leftover rather than a deployment to upgrade — but the check is required, because `CREATE TABLE IF NOT EXISTS` keeps the old table silently. Two failures would follow, and neither names its cause: `github_token TEXT NOT NULL` makes every FIRST-TIME login throw a constraint error that the auth middleware returns as `401 unauthorized` (while anyone with an existing row keeps working, so it reads as flaky GitHub auth), and the file's plaintext tokens remain — never refreshed, never cleared, still returned by `getUser`'s `SELECT *` — so the claim above would be false for exactly that deployment. The startup error names the fix (delete the file, do not archive it). Refusing rather than rebuilding-and-vacuuming is deliberate: erasing live credentials is the operator's decision, not something the service should do to a file it was pointed at.
 
-This does not resolve §9.1's dependency on GitHub (see §10.5), and it is not a substitute for the scope floor: a token in flight is still a real credential, and `repo` on a deployment that does not need it still over-grants at the consent screen. It removes one specific hazard — the one that was persistent and silent.
+This does not resolve §9.1's dependency on GitHub (see §10.5), and it is not a claim that the credential is harmless: a token in flight is still a real credential, and it still acts as the user for as long as it is valid. It removes one specific hazard — the one that was persistent and silent. What bounds the rest is that the token grants no repository access to begin with (see "What the token grants").
 
 #### User identity and isolation
 
@@ -1040,7 +974,7 @@ GitHub itself is a non-replaceable dependency in v1 because the agent contributi
 - **Agent library growth**: number of community-contributed agents and agent updates merged upstream per quarter.
 - **Review loop efficiency**: distribution of iterations-to-clean across sessions; target median ≤ 2.
 - **Feedback re-run rate**: fraction of sessions requiring a user feedback re-run; should trend down as agents mature.
-- **PR-to-merge rate**: fraction of opened PRs that get merged upstream — signal for Builder Agent quality. **Amended (v1.2):** contributions are filed as issues, not PRs (§7.13), so the measurable form is **issue-to-merge rate** — the fraction of `iris-agent-suggestion` / `iris-agent-update` issues that result in a merged change. **(v1.3: those labels no longer exist — count by title prefix, `New agent suggestion:` / `Agent update proposal:`. Counting by label would have undercounted to begin with, since the label was dropped for any filer without push access; see §7.13 v1.3.)**
+- **PR-to-merge rate**: fraction of opened PRs that get merged upstream — signal for Builder Agent quality. **Amended:** contributions are filed as issues, not PRs (§7.13), so the measurable form is **issue-to-merge rate** — the fraction of filed suggestion/update issues that result in a merged change. Counted by **title prefix** (`New agent suggestion:` / `Agent update proposal:`), not by label: the issues carry no label, and counting by one would have undercounted anyway, since GitHub dropped it for any filer without push access (§7.13).
 - **Contribution rate (v1.2)**: fraction of sessions that file at least one issue when the pipeline produced one to file. This measures §12's central claim — that using Iris and improving it are the same act — and separates "nothing to contribute" from "could not contribute": a deployment trending to zero here is misconfigured (a scope too narrow for a private upstream, a revoked service PAT), and the failures are otherwise only visible as `agent_issue_failed` lines in individual run logs.
 - **Deployment reach**: number of distinct self-hosted deployments contributing PRs upstream — signal that the portability goal is being realized in practice.
 
@@ -1053,26 +987,26 @@ Equalify Iris is Open Source. Continued development, security review, and access
 - Commercial hosting and support are offered by **[Equalify Inc.](https://equalify.app/)** and fund its share of continued development.
 - The hosted and self-hosted versions are functionally identical. A commercial maintainer's value to paying customers is operational (managed deployment, monitoring, accessibility consulting), not feature gating.
 
-#### Every user contributes (v1.2)
+#### Every user contributes
 
 Money is one input; the other is **the agent library itself**, and that one cannot be bought. The agents in `agents/` improve because real sessions run against real documents and real corrections — a page the general extractor handled badly, a piece of feedback that generalizes past the document that produced it. Nothing else supplies that signal.
 
-So it is not left to goodwill. **GitHub is the only SSO layer, and a user's GitHub token is required on every API call**, because that token is what files the session's contributions (§7.13 as implemented: labeled issues, not PRs) under the user's own GitHub identity. Three things follow, and they are requirements on the implementation rather than observations about it:
+So it is not left to goodwill. **GitHub is the only SSO layer, and a user's GitHub token is required on every API call**, because that token is what files the session's contributions (§7.13 as implemented: issues, not PRs) under the user's own GitHub identity. Three things follow, and they are requirements on the implementation rather than observations about it:
 
-- **There is no anonymous or API-key mode, and there will not be one.** An alternative credential would let a caller consume the library without refilling it, which is exactly the mode this design exists to prevent. This is why §9.1's "OAuth is required, not optional" survives even though its original justification (PR pushes) does not.
-- **A token that cannot contribute is not a supported configuration.** The requested OAuth scope has a floor — enough to file an issue on `upstream_repo` and no more (§9.1 "What the token grants"). A deployment configured to request no scope **fails at startup** rather than running as a consumer-only instance, because the symptom otherwise is a swallowed 403 in a run log while the deployment looks healthy.
-- **Contributions are credited to the user who produced them.** Filing under the user's own identity is the reciprocity being asked for: the issue carries their name, and the library's growth is visibly the work of the people using it. `github.issue_token` (a service PAT that files everything under one bot account) is an override for deployments an org policy forbids from filing as users; it is off by default, is documented as not recommended, and does not lower the scope floor.
+- **There is no anonymous or API-key mode, and there will not be one.** An alternative credential would let a caller consume the library without refilling it, which is exactly the mode this design exists to prevent. This is why §9.1's "a GitHub token is required" survives even though its original justification (PR pushes) does not.
+- **A deployment that cannot contribute is not a supported configuration**, and what enforces that has moved. There is no scope to set a floor on — a user's authorization carries no repository permission at all (§9.1 "What the token grants") — so a token can no longer be *configured* too narrowly to file. What can be wrong is the app: an OAuth App `client_id` is **refused at startup**, and the bundled app pointed at an `upstream_repo` it is not installed on **warns at startup**. Both exist for the reason the old scope floor did: the alternative symptom is a swallowed 403/404 in a run log while the deployment answers `200` and looks healthy. The one state neither can catch — the app not installed at all — is diagnosed at filing time instead.
+- **Contributions are credited to the user who produced them.** Filing under the user's own identity is the reciprocity being asked for: the issue carries their name, and the library's growth is visibly the work of the people using it. It is also the *only* thing the user's authorization provides, which is why they authorize the app rather than it filing as itself. `github.issue_token` (a service PAT that files everything under one bot account) is an override for deployments an org policy forbids from filing as users; it is off by default and documented as not recommended.
 
 Filing is a **soft** side effect in the failure direction only: a GitHub outage is logged (`agent_issue_failed`) and never fails a document the user has already paid for. It is not soft in the configuration direction — there is no request parameter, config key, or account setting that turns contribution off.
 
 **Success metric (§11):** contribution rate — the fraction of sessions that produce at least one filed issue when the pipeline generated one to file. A deployment where that trends to zero is misconfigured, not frugal.
 
-**Amended (v1.2): the README requirement is about the contribution model, not a marketing notice.** This section used to require a "Sustainability notice" above the install instructions, with suggested copy pitching Equalify's hosting. That top-of-README notice was **removed deliberately** (commit `874e665`), and this amendment follows the decision rather than treating the README as out of compliance: whether the repo opens with a pitch is an editorial call for whoever owns the README, and a PRD that hardcodes promotional copy makes an ordinary edit look like a spec violation.
+**Amended: the README requirement is about the contribution model, not a marketing notice.** This section used to require a "Sustainability notice" above the install instructions, with suggested copy pitching Equalify's hosting. That top-of-README notice was **removed deliberately** (commit `874e665`), and this amendment follows the decision rather than treating the README as out of compliance: whether the repo opens with a pitch is an editorial call for whoever owns the README, and a PRD that hardcodes promotional copy makes an ordinary edit look like a spec violation.
 
 What the PRD does still require of the documentation, because these are claims about how the service behaves rather than positioning:
 
 - **The token requirement and its reason must be documented where an operator will hit them** — that a GitHub token is required on every call, that it is required *so that every session contributes*, and that there is no way to opt out. Currently satisfied by the README's "GitHub is the only SSO layer, and tokens are required" section, `docs/API.md` §1, and `config.example.yaml`.
-- **The absence of a scope must be documented as deliberate** (§9.1 v1.3): the consent screen requests no repository access because `issues: write` comes from the app's installation, and the operator-facing failure to document is the app not being installed on `upstream_repo`, not a misconfigured scope.
+- **The absence of a scope must be documented as deliberate** (§9.1 "What the token grants"): the consent screen requests no repository access because `issues: write` comes from the app's installation. The operator-facing failures to document are consequences of that, not of a misconfigured scope — the app not being installed on `upstream_repo`, and `upstream_repo` pointed somewhere the app in use is not installed.
 - **Maintainership and the funding model must be stated somewhere in the repo** — that Iris is maintained by Equalify Inc., the University of Illinois Chicago, and California State University; that commercial hosting and support fund Equalify's share; and that hosted and self-hosted are functionally identical with no feature gating. Currently in the README's License section and `CONTRIBUTING.md`. Placement and tone are not specified here, but the three maintainers should be named together wherever any one of them is.
 
 A hosted UI should surface the contribution model at the point of login, where it is a fact the user needs (their token files issues under their name), not in a footer.

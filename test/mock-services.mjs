@@ -23,7 +23,12 @@ const forks = new Set(); // repos that have been forked to the test user
 let prNumber = 140;
 // Body of the most recent POST /login/device/code, readable via
 // GET /__last_device_scope so e2e.sh can assert that the service requested NO scope.
-let lastDeviceBody = {};
+//
+// `null` until the route is actually hit, NOT `{}`: with `{}` the reported
+// `present:false` would be indistinguishable from "the device flow was never started",
+// so the no-scope assertion could pass without the service having sent anything. The
+// probe reports `recorded` separately for exactly that reason.
+let lastDeviceBody = null;
 
 const gh = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${GH_PORT}`);
@@ -34,8 +39,16 @@ const gh = createServer(async (req, res) => {
   // asserted here so e2e.sh can check what the SERVICE sends — the request
   // body is otherwise invisible from outside, and a reintroduced scope is a silent
   // problem: the flow succeeds either way.
+  //
+  // `recorded` is what makes the assertion non-vacuous: "no scope was sent" and "no
+  // request was sent" are otherwise the same answer, so a break that stopped the flow
+  // reaching here would read as a pass.
   if (m === "GET" && p === "/__last_device_scope")
-    return json(res, 200, { present: "scope" in lastDeviceBody, scope: lastDeviceBody.scope ?? null });
+    return json(res, 200, {
+      recorded: lastDeviceBody !== null,
+      present: lastDeviceBody !== null && "scope" in lastDeviceBody,
+      scope: lastDeviceBody?.scope ?? null,
+    });
 
   // OAuth / device flow
   if (m === "POST" && p === "/login/device/code") {

@@ -2,7 +2,7 @@ import express from "express";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { clientIdWarning, loadConfig } from "./config.ts";
+import { bundledAppWarning, clientIdWarning, loadConfig } from "./config.ts";
 import { Store } from "./store/db.ts";
 import { makeAuthMiddleware } from "./auth/middleware.ts";
 import { authRouter } from "./routes/auth.ts";
@@ -16,6 +16,11 @@ const cfg = loadConfig();
 // clientIdWarning; the unambiguous `Ov…` case is a startup error in validateConfig).
 const cidWarning = clientIdWarning(cfg.github.client_id);
 if (cidWarning) console.warn(`WARNING: ${cidWarning}`);
+
+// The other one: the bundled app is installed on one repo, so pointing upstream_repo
+// elsewhere without registering your own app files nothing for anyone.
+const appWarning = bundledAppWarning(cfg.github.client_id, cfg.github.upstream_repo);
+if (appWarning) console.warn(`WARNING: ${appWarning}`);
 
 // Ensure the on-disk layout exists (PRD §8.1).
 mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });

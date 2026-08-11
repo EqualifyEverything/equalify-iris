@@ -206,6 +206,45 @@ export function clientIdWarning(clientId: string): string | undefined {
   );
 }
 
+// A boot-time warning for the other combination config can see is broken: the bundled
+// app plus an `upstream_repo` it is not installed on.
+//
+// This became possible to get wrong only by moving to a GitHub App. `issues: write`
+// used to come from the user's `public_repo` scope, which reached any public repo, so
+// leaving `client_id` blank and repointing `upstream_repo` at your own agent library
+// worked. Now the permission comes from an installation on one specific repository,
+// and the bundled app is installed on Equalify's. So that same edit — one documented,
+// first-class knob (`IRIS_UPSTREAM_REPO`), changed on its own — yields a deployment
+// where every login succeeds and no contribution can ever be filed, for anyone.
+//
+// Warned rather than refused, and this is the whole reason it is not fatal: a
+// deployment can legitimately be in this state. Equalify can install the bundled app
+// on someone else's repo, and an operator can ask them to; nothing in config could
+// tell. Refusing would break that. But the failure is invisible at boot and silent at
+// runtime, so it gets a line — the property the deleted `oauth_scope` check used to
+// provide, restored for the case that replaced it.
+//
+// Deliberately not comparing against `api_base_url`: on GitHub Enterprise Server the
+// bundled app does not exist at all, `client_id` must be set, and this warning cannot
+// fire because the bundled default is not in use.
+export function bundledAppWarning(clientId: string, upstreamRepo: string): string | undefined {
+  if (clientId !== DEFAULT_CLIENT_ID) return undefined;
+  // Compared on owner/repo rather than on the URL: `upstream_repo` is documented as a
+  // URL and accepts the shapes parseRepo does (with or without `.git`, ssh or https),
+  // so a string compare would warn about a spelling of the right repo.
+  const m = upstreamRepo?.replace(/\.git$/, "").match(/github\.com[/:]([^/]+)\/([^/]+)/);
+  const slug = m ? `${m[1]}/${m[2]}` : undefined;
+  if (slug?.toLowerCase() === BUNDLED_APP_REPO.toLowerCase()) return undefined;
+  return (
+    `github.upstream_repo is "${upstreamRepo}" while github.client_id is unset, so Iris is using the bundled ` +
+    `Equalify Iris GitHub App — which is installed on ${BUNDLED_APP_REPO}, not on your repo. A GitHub App's ` +
+    `issues:write comes from its INSTALLATION, so logins will work and every issue filing will fail for every ` +
+    `user, logged once per run as agent_issue_failed. Either register your own GitHub App (device flow enabled, ` +
+    `user-token expiry off) and install it on ${slug ?? "your upstream_repo"}, then set github.client_id to its ` +
+    `id — or ask Equalify to install the bundled app there, and ignore this.`
+  );
+}
+
 // Coerce a configured max_tokens into a usable integer. Same "absent means the
 // default, not zero" trap as normalizeConcurrency: YAML parses a valueless
 // `max_tokens:` as null, and Number(null) is 0 — which would cap every call at
@@ -264,7 +303,15 @@ export function normalizeConcurrency(value: unknown): number {
 //
 // Pointing this at your own app means registering a GitHub App with device flow
 // enabled and user-token expiry off, and installing it on your `upstream_repo`.
-const DEFAULT_CLIENT_ID = "Iv23liv73tlbX0VfoEkr";
+export const DEFAULT_CLIENT_ID = "Iv23liv73tlbX0VfoEkr";
+
+// The one repository the bundled app above is installed on. Its only purpose is
+// bundledAppWarning below: `issues: write` now comes from an installation, and an
+// installation is per-repository, so "which repo" is part of whether the bundled
+// credential works at all. Under the old OAuth App it was not — `public_repo` filed
+// on any public repo the user could reach, so `upstream_repo` and `client_id` were
+// independent knobs and a self-hoster could repoint the upstream alone.
+const BUNDLED_APP_REPO = "EqualifyEverything/equalify-iris";
 
 let cached: { path: string; config: IrisConfig } | null = null;
 

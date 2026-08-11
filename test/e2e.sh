@@ -137,10 +137,15 @@ AUTH=(-H "Authorization: Bearer $TOKEN")
 # added back would be silently ignored by GitHub rather than breaking anything, so
 # nothing but this assertion would notice the service going back to asking every user
 # for account-wide access to their public repos.
+#
+# `.recorded` is asserted alongside `.present`: "the body carried no scope" and "the
+# route was never hit" would otherwise be the same answer, so this assertion — the only
+# thing standing between the repo and a silently reintroduced scope — could pass
+# vacuously if the service stopped starting the flow at all.
 scope=$(curl -s "http://localhost:$GH_PORT/__last_device_scope")
-echo "$scope" | jq -e '.present==false' >/dev/null \
-  && pass "the device flow requested no scope" \
-  || fail "oauth scope" "expected no scope in the device-flow body, got $scope"
+echo "$scope" | jq -e '.recorded==true and .present==false' >/dev/null \
+  && pass "the device flow requested no scope (and a request was actually recorded)" \
+  || fail "oauth scope" "expected a recorded device-flow body carrying no scope, got $scope"
 
 echo "==> 4. GET /v1/me"
 me=$(curl -s "${AUTH[@]}" "$BASE/me")

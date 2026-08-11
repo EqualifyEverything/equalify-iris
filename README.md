@@ -55,7 +55,7 @@ git clone https://github.com/EqualifyEverything/equalify-iris
 cd equalify-iris
 npm install
 
-cp .env.example .env          # fill in GitHub OAuth + a model provider key
+cp .env.example .env          # a model provider key; GitHub App settings are optional
 cp config.example.yaml config.yaml
 
 # load env and run
@@ -173,10 +173,25 @@ rather than as a permissions error. (A misspelled `upstream_repo` looks identica
 so rather than blaming the installation.) When `issue_token` is set, the hint names the **service
 PAT** instead, since the installation governs only tokens issued to users.
 
-**If you are coming from an earlier build,** `github.oauth_scope` is gone. A config that still sets
-it — including `oauth_scope: none`, which used to be a startup error — now starts fine and ignores
-the key. Delete it. There is no user-facing migration: no one had authorized the OAuth App, and any
-existing authorization can be revoked at
+**If you are coming from an earlier build,** three things changed, and two of them can stop a
+working deployment:
+
+- **A configured OAuth App id is now a hard startup failure.** An `Ov…` `client_id` is refused,
+  because Iris no longer sends any OAuth scope: such an app would authenticate users and then be
+  unable to file a single issue. Register a GitHub App (`Iv…`) and install it on your
+  `upstream_repo`, or leave `client_id` blank for the bundled one.
+- **`upstream_repo` is no longer independent of `client_id`.** Under the old OAuth App, the
+  `public_repo` scope could file on any public repo, so leaving `client_id` blank and repointing
+  `upstream_repo` at your own agent library worked. A GitHub App's `issues: write` comes from its
+  *installation* on one specific repository, and the bundled app is installed on this repo — so that
+  same config now files nothing, for anyone. You need your own app installed on your repo (or ask us
+  to install ours there). This combination warns at startup rather than failing, since we cannot see
+  from config whether the bundled app was installed on your repo.
+- **`github.oauth_scope` is gone.** A config that still sets it — including `oauth_scope: none`,
+  which used to be a startup error — now starts fine and ignores the key. Delete it.
+
+There is no user-facing migration: no one had authorized the OAuth App, and any existing
+authorization can be revoked at
 [github.com/settings/applications](https://github.com/settings/applications).
 
 **2. `github.issue_token` is an override, and not a recommended one.** Set it to a service-account

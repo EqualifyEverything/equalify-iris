@@ -9,7 +9,13 @@ import {
   pollDeviceFlow,
   startDeviceFlow,
 } from "../src/auth/github.ts";
-import { clientIdWarning, loadConfig, type IrisConfig } from "../src/config.ts";
+import {
+  bundledAppWarning,
+  clientIdWarning,
+  DEFAULT_CLIENT_ID,
+  loadConfig,
+  type IrisConfig,
+} from "../src/config.ts";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -338,6 +344,46 @@ test("loadConfig accepts an unrecognized client_id, and warns", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- the bundled app is installed on ONE repo --------------------------------
+//
+// The failure this pins is the one moving to a GitHub App created: `issues: write` now
+// comes from an installation on a specific repository, so the bundled credential and
+// `upstream_repo` stopped being independent knobs. Changing only `upstream_repo` — a
+// documented, first-class setting — yields a deployment where every login succeeds and
+// nothing can ever be filed, by anyone.
+
+test("the bundled app warns when upstream_repo is not the repo it is installed on", () => {
+  const w = bundledAppWarning(DEFAULT_CLIENT_ID, "https://github.com/someorg/their-agents");
+  assert.match(String(w), /installation/i, "the warning did not name the cause");
+  assert.match(String(w), /every user/i, "the warning did not say how wide the failure is");
+  // The way out must be in the message: this is the only place an operator learns it.
+  assert.match(String(w), /client_id/, "the warning did not say how to fix it");
+  assert.match(String(w), /someorg\/their-agents/, "the warning did not name the repo it checked");
+});
+
+test("the bundled app stays quiet on the repo it IS installed on, in any URL shape", () => {
+  // `upstream_repo` is a URL, and parseRepo accepts these shapes, so a string compare
+  // against one canonical spelling would warn about the correct repo.
+  for (const url of [
+    "https://github.com/EqualifyEverything/equalify-iris",
+    "https://github.com/EqualifyEverything/equalify-iris.git",
+    "git@github.com:EqualifyEverything/equalify-iris.git",
+    "https://github.com/equalifyeverything/EQUALIFY-IRIS",
+  ]) {
+    assert.equal(bundledAppWarning(DEFAULT_CLIENT_ID, url), undefined, `warned on ${url}`);
+  }
+});
+
+test("an operator's own client_id silences the bundled-app warning entirely", () => {
+  // With their own app, where it is installed is their business and this code cannot
+  // know it — warning would be noise on a correct deployment. The uncatchable-install
+  // case is diagnosed at filing time by installHintFor instead.
+  assert.equal(
+    bundledAppWarning("Iv23liOTHERAPPID0000", "https://github.com/someorg/their-agents"),
+    undefined,
+  );
 });
 
 // --- the routes send no scope either -----------------------------------------
