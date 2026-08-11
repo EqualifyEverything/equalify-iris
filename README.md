@@ -29,10 +29,18 @@ The pipeline as **implemented today** runs in three phases:
    `max_review_iterations` (default 3).
 
 When Iris meets content a specialist agent would handle better than the general pass, it drafts
-that agent and **automatically files a labeled `iris-agent-suggestion` GitHub issue** (with the
-agent code + context) on the upstream repo. Maintainers triage those issues; merged agents
+that agent and **automatically files a GitHub issue titled `New agent suggestion: <type>`** (with
+the agent code + context) on the upstream repo. Maintainers triage those issues; merged agents
 become part of the shared `agents/` library. (This replaces the PRD's fork+PR-on-close flow —
 see Implementation notes.)
+
+Those issues are identified by their **title prefix**, not by a label, and deliberately so: GitHub
+silently drops labels set by anyone without push access to the repo, which is most of the people
+this is built for. A label would therefore have been missing on exactly the issues that most needed
+it, with nothing to say so — and the duplicate check that filtered on it would have refiled the same
+suggestion every session, under a different person's name each time. If you want labels on these,
+add a repository rule keyed on the title prefix; it applies them as the repo rather than as the
+filer, so it works no matter who filed.
 
 ## Quick start
 
@@ -333,9 +341,9 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
   when the review loop hits its iteration cap with issues outstanding (§7.11).
 - **Contributions are issues, not PRs (§7.13/§9.2).** Instead of fork+PR-on-close, when the
   extractor flags content a specialist would handle better, Iris drafts that agent and files a
-  labeled `iris-agent-suggestion` GitHub issue with the agent code + context; feedback that
-  generalizes files an `iris-agent-update` issue the same way. Simpler to triage, and it needs no
-  write access to a fork — so nothing forks and nothing pushes. Consequently the PRD's
+  `New agent suggestion: <type>` GitHub issue with the agent code + context; feedback that
+  generalizes files an `Agent update proposal: <agent>` issue the same way. Simpler to triage, and
+  it needs no write access to a fork — so nothing forks and nothing pushes. Consequently the PRD's
   `pending_prs` and `prs_opened` response fields, the `skip_prs` parameter and the `fork_repo`
   field on `/v1/me` are **not** part of the API.
   Issues are filed with the logged-in user's token, which is

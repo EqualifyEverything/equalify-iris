@@ -489,7 +489,7 @@ The workflow is automatic on session close:
 
 **Amended (v1.2): contributions are labeled issues filed during the run, and there is no opt-out.** This section is superseded in its mechanism *and* in its "Opt-out" clause. What ships:
 
-- **Issues, not PRs.** When the extractor meets content a specialist agent would handle better, the drafted agent is filed as an `iris-agent-suggestion` issue on `upstream_repo` with the agent code and context; feedback that generalizes past its own document is filed as an `iris-agent-update` issue with the diff, once it has passed the agent's regression fixtures. Nothing forks, nothing pushes, no branch is created. Simpler for a maintainer to triage, and it needs no write access to a fork.
+- **Issues, not PRs.** When the extractor meets content a specialist agent would handle better, the drafted agent is filed as an `iris-agent-suggestion` issue on `upstream_repo` with the agent code and context; feedback that generalizes past its own document is filed as an `iris-agent-update` issue with the diff, once it has passed the agent's regression fixtures. Nothing forks, nothing pushes, no branch is created. Simpler for a maintainer to triage, and it needs no write access to a fork. **(v1.3: the two labels are gone — see the amendment at the end of this section. The rest of this bullet stands.)**
 - **Filed during the run, not on `/close`.** Contribution is a side effect of the phase that produced it, so it does not depend on a client reaching the close endpoint.
 - **Filed under the user's own GitHub identity**, which is the point rather than an implementation choice (§12) — the user's token is required on every call precisely so that this can happen, and the credit for the contribution is theirs.
 - **No `skip_prs`, and no equivalent.** The opt-out above is withdrawn deliberately, not dropped for lack of time: an opt-out is exactly the mode §12 exists to prevent, since it lets a session take from the agent library without refilling it. There is no request parameter, config key or account setting that disables filing. `github.oauth_scope` is not a back door either — the key no longer exists, and a user's authorization carries no repository permission to withhold (§9.1 v1.3).
@@ -497,6 +497,22 @@ The workflow is automatic on session close:
 - Consequently the `pending_prs` and `prs_opened` response fields (§9.2) and the `skip_prs` parameter are not part of the API. `github.issue_token` is an optional service-account override for *who authors* the issues, documented as not recommended (§9.1 v1.2).
 
 The framing sentence at the top of this section still holds, with "upstream merge" reached by issue rather than by PR: an agent becomes available outside its session only via upstream merge plus a subsequent `git pull`.
+
+**Amended (v1.3): the issues carry no label, and their TITLE PREFIX is their identity.** `iris-agent-suggestion` and `iris-agent-update` are gone, along with the read-or-create label call that preceded each filing. The labels could not survive contact with the users this section is about.
+
+GitHub documents that "any user with pull access to a repository can create an issue" — so filing itself works for any authenticated user, and §12's model is sound — but also that "only users with push access can set labels for new issues. Labels are silently dropped otherwise." Every ordinary contributor is in the second group. Filing returned `201`, the issue appeared under the user's own name, and the label was discarded with nothing in the response to say so.
+
+That made both purposes of the label fail silently, and only for the majority:
+
+| | With labels (v1.2) | Without (v1.3) |
+| --- | --- | --- |
+| Maintainer triage | `label:iris-agent-suggestion` — misses every issue filed by a non-collaborator | search the title prefix, or apply labels with a repo-side rule keyed on it |
+| Dedupe | filtered on the label, so it could never match an unlabeled issue: **every later session refiled the same suggestion, under a different real person's name** | exact-title comparison over an `in:title` search — behaves the same for every filer |
+| Pre-filing calls | `getLabel` then `createLabel`, both needing push access, both swallowed | none |
+
+A title prefix is set by the same request that creates the issue and cannot be stripped by permissions, so it behaves identically for a maintainer and a first-time contributor. The exact-title comparison after the search is therefore load-bearing rather than defensive: GitHub's `in:title` is a full-text phrase match, not an equality test, so the search returns a superset and the comparison decides. A maintainer who wants labels can add them with a repository rule keyed on the prefix — applied as the repository rather than as the filer, so it works regardless of who filed.
+
+This is a deliberate removal of a signal, so it is worth stating what was lost: nothing that worked for the users §12 is about. The labels worked only for people who could already have labeled the issue by hand.
 
 ## 8. File and Directory Layout
 
@@ -1024,7 +1040,7 @@ GitHub itself is a non-replaceable dependency in v1 because the agent contributi
 - **Agent library growth**: number of community-contributed agents and agent updates merged upstream per quarter.
 - **Review loop efficiency**: distribution of iterations-to-clean across sessions; target median ≤ 2.
 - **Feedback re-run rate**: fraction of sessions requiring a user feedback re-run; should trend down as agents mature.
-- **PR-to-merge rate**: fraction of opened PRs that get merged upstream — signal for Builder Agent quality. **Amended (v1.2):** contributions are filed as issues, not PRs (§7.13), so the measurable form is **issue-to-merge rate** — the fraction of `iris-agent-suggestion` / `iris-agent-update` issues that result in a merged change.
+- **PR-to-merge rate**: fraction of opened PRs that get merged upstream — signal for Builder Agent quality. **Amended (v1.2):** contributions are filed as issues, not PRs (§7.13), so the measurable form is **issue-to-merge rate** — the fraction of `iris-agent-suggestion` / `iris-agent-update` issues that result in a merged change. **(v1.3: those labels no longer exist — count by title prefix, `New agent suggestion:` / `Agent update proposal:`. Counting by label would have undercounted to begin with, since the label was dropped for any filer without push access; see §7.13 v1.3.)**
 - **Contribution rate (v1.2)**: fraction of sessions that file at least one issue when the pipeline produced one to file. This measures §12's central claim — that using Iris and improving it are the same act — and separates "nothing to contribute" from "could not contribute": a deployment trending to zero here is misconfigured (a scope too narrow for a private upstream, a revoked service PAT), and the failures are otherwise only visible as `agent_issue_failed` lines in individual run logs.
 - **Deployment reach**: number of distinct self-hosted deployments contributing PRs upstream — signal that the portability goal is being realized in practice.
 

@@ -5,7 +5,7 @@ labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
-      value: "Have an idea for a new content agent? You can describe it here — but note Iris also auto-files `iris-agent-suggestion` issues when it meets content a specialist would handle better."
+      value: "Have an idea for a new content agent? You can describe it here — but note Iris also auto-files `New agent suggestion: <type>` issues when it meets content a specialist would handle better."
   - type: textarea
     id: problem
     attributes:

@@ -11,8 +11,30 @@ export function parseRepo(url: string): RepoRef {
   return { owner: m[1], repo: m[2] };
 }
 
-// Label maintainers can sort/filter agent suggestions by.
-export const AGENT_LABEL = "iris-agent-suggestion";
+// Nothing here labels the issues it files, and the TITLE PREFIX is what identifies
+// them instead — `New agent suggestion: <type>` and `Agent update proposal: <agent>`.
+//
+// There were two labels, `iris-agent-suggestion` and `iris-agent-update`, and they
+// could not work for the users this service is built around. GitHub documents that
+// "any user with pull access to a repository can create an issue" but that "only users
+// with push access can set labels for new issues — labels are silently dropped
+// otherwise". Every ordinary contributor is in the second group, so filing returned
+// 201 with an unlabeled issue and no indication the label had been discarded. That
+// broke the two things the labels existed for, silently and only for the majority of
+// users: triage by label missed those issues, and the duplicate search — which
+// filtered on the label — could never match one, so every later session refiled the
+// same suggestion under another real person's name.
+//
+// Dropping them removes the failure rather than detecting it. A title prefix is set by
+// the same 201 that creates the issue and cannot be stripped by permissions, so it
+// behaves identically for a maintainer and a first-time contributor. `is:issue
+// is:open "<full title>" in:title` is a slightly wider net than the label filter was
+// (GitHub full-text-matches the phrase), which is why the exact-title comparison after
+// the search is load-bearing rather than belt-and-braces — see the dedupe sites.
+//
+// A maintainer who wants labels can add them with a repo-side rule keyed on the title
+// prefix, which applies them as the repository rather than as the filer and therefore
+// works regardless of who filed.
 
 // Why an issue-filing failure was probably about permissions, or undefined if it
 // was not.
@@ -114,24 +136,9 @@ export function installHintFor(
   };
 }
 
-async function ensureLabel(
-  octokit: Octokit,
-  repo: RepoRef,
-  name: string = AGENT_LABEL,
-  color = "5319e7",
-  description = "Agent suggested automatically by Equalify Iris",
-): Promise<void> {
-  try {
-    await octokit.issues.getLabel({ owner: repo.owner, repo: repo.repo, name });
-  } catch {
-    try {
-      await octokit.issues.createLabel({ owner: repo.owner, repo: repo.repo, name, color, description });
-    } catch {
-      // label may have been created concurrently, or insufficient perms — the
-      // issue create below still works if the label already exists.
-    }
-  }
-}
+// `ensureLabel` is gone with the labels. It read-or-created the label before filing,
+// and both halves needed push access the typical filer does not have — so on the path
+// that mattered it was two API calls that could only fail, inside a swallow.
 
 export interface AgentIssue {
   agentName: string;
@@ -141,8 +148,8 @@ export interface AgentIssue {
   sessionId: string;
 }
 
-// File a labeled issue containing the drafted agent code + context. Returns the
-// issue URL, or null if an open issue for this agent already exists (dedupe).
+// File an issue containing the drafted agent code + context. Returns the issue URL,
+// or null if an open issue for this agent already exists (dedupe).
 export async function createAgentIssue(
   token: string,
   upstreamUrl: string,
@@ -153,35 +160,32 @@ export async function createAgentIssue(
   const repo = parseRepo(upstreamUrl);
   const title = `New agent suggestion: ${args.agentName}`;
 
-  // Dedupe: skip if an open suggestion issue with this title already exists.
+  // Dedupe: skip if an open issue with this exact title already exists.
   //
-  // The query filters on the LABEL, which is load-bearing and unverified against a
-  // typical contributor. GitHub documents that "any user with pull access can create
-  // an issue", but that "only users with push access can set labels for new issues —
-  // labels are silently dropped otherwise." So a user WITHOUT push access on
-  // `upstream_repo` — which is every ordinary contributor, and the case §12 is about —
-  // files successfully and gets an UNLABELED issue, at 201, with nothing in the
-  // response saying the label was discarded.
+  // Searched by the full title rather than by a label, because a label is not there to
+  // search on — see the note at the top of this file. The whole title is used rather
+  // than just the agent name so the phrase match stays tight (`"New agent suggestion:
+  // chartData"` does not match a `chartDataAgent` issue), but GitHub's `in:title` is a
+  // full-text phrase match and not an equality test, so the exact comparison below is
+  // what actually decides. Verified against real GitHub: the label-free query returns
+  // the intended issue plus unrelated ones the title comparison then rejects.
   //
-  // Two consequences, both silent. Maintainer triage by label misses those issues; and
-  // this dedupe never matches them, so every subsequent session refiles the same
-  // suggestion under another real person's name. `ensureLabel` below has the same
-  // shape: label creation needs push access, and its failure is deliberately swallowed.
-  //
-  // Not fixed here. It is one call to `GET /repos/:o/:r` to read
-  // `permissions.push` and drop the label filter when it is false, but it changes
-  // filing behaviour and belongs in its own change with its own e2e case rather than
-  // riding along with an auth migration.
+  // Known limitation, measured rather than assumed: GitHub's search index is not
+  // immediate, so an issue filed seconds ago is not yet findable and a session running
+  // in that window files a duplicate. Two calls one second apart both filed; a third,
+  // two minutes later, deduped. This is inherent to dedupe-by-search and was equally
+  // true of the label-filtered query — the search was always the weak link, not the
+  // filter on it. Accepted for the same reason the catch below is empty: a duplicate
+  // suggestion is cheap and a failed document is not.
   try {
     const found = await octokit.search.issuesAndPullRequests({
-      q: `repo:${repo.owner}/${repo.repo} is:issue is:open label:"${AGENT_LABEL}" "${args.agentName}" in:title`,
+      q: `repo:${repo.owner}/${repo.repo} is:issue is:open "${title}" in:title`,
     });
     if (found.data.items.some((i) => i.title === title)) return null;
   } catch {
     // search unavailable — proceed (a duplicate is acceptable; not worth failing).
   }
 
-  await ensureLabel(octokit, repo);
   const body =
     `**Content type:** \`${args.agentName}\`\n` +
     `**Why a dedicated agent:** ${args.reason}\n` +
@@ -189,19 +193,16 @@ export async function createAgentIssue(
     `_Auto-filed by Equalify Iris when a page contained content a specialist agent would handle better than the general pass._\n\n` +
     `## Proposed agent — \`agents/${args.agentName}.md\`\n\n` +
     "```markdown\n" + args.agentMarkdown + "\n```\n";
+  // No `labels`. GitHub drops them silently for a filer without push access, which is
+  // the typical filer here — see the note at the top of this file.
   const res = await octokit.issues.create({
     owner: repo.owner,
     repo: repo.repo,
     title,
     body,
-    labels: [AGENT_LABEL],
   });
   return res.data.html_url;
 }
-
-// Label for feedback-driven improvements to an EXISTING agent (distinct from new
-// agent suggestions, so maintainers can triage them separately).
-export const AGENT_UPDATE_LABEL = "iris-agent-update";
 
 export interface AgentUpdateIssue {
   agentName: string; // e.g. "page.md"
@@ -211,10 +212,14 @@ export interface AgentUpdateIssue {
   sessionId: string;
 }
 
-// File a labeled issue proposing an improvement to an existing agent, produced by
-// the feedback loop (and already gated by the agent's regression fixtures).
-// Returns the issue URL, or null if an open update issue for this agent already
-// exists (dedupe by title).
+// File an issue proposing an improvement to an existing agent, produced by the
+// feedback loop (and already gated by the agent's regression fixtures). Returns the
+// issue URL, or null if an open update issue for this agent already exists (dedupe by
+// title).
+//
+// Its title prefix differs from createAgentIssue's ("Agent update proposal:" vs "New
+// agent suggestion:"), which is what keeps the two kinds distinguishable and separately
+// dedupable now that the two labels are gone.
 export async function createAgentUpdateIssue(
   token: string,
   upstreamUrl: string,
@@ -226,23 +231,17 @@ export async function createAgentUpdateIssue(
   const name = args.agentName.replace(/\.md$/, "");
   const title = `Agent update proposal: ${name}`;
 
-  // Dedupe: skip if an open update issue with this title already exists.
+  // Dedupe by full title, for the reason createAgentIssue's does — and with the same
+  // search-index lag caveat documented there.
   try {
     const found = await octokit.search.issuesAndPullRequests({
-      q: `repo:${repo.owner}/${repo.repo} is:issue is:open label:"${AGENT_UPDATE_LABEL}" "${name}" in:title`,
+      q: `repo:${repo.owner}/${repo.repo} is:issue is:open "${title}" in:title`,
     });
     if (found.data.items.some((i) => i.title === title)) return null;
   } catch {
     // search unavailable — proceed (a duplicate is acceptable; not worth failing).
   }
 
-  await ensureLabel(
-    octokit,
-    repo,
-    AGENT_UPDATE_LABEL,
-    "0e8a16",
-    "Agent improvement proposed by Equalify Iris from user feedback",
-  );
   const body =
     `**Agent:** \`agents/${name}.md\`\n` +
     `**Proposed change:** ${args.summary}\n` +
@@ -253,12 +252,12 @@ export async function createAgentUpdateIssue(
     "```diff\n" + args.diffPreview + "\n```\n\n" +
     `## Proposed full \`agents/${name}.md\`\n\n` +
     "```markdown\n" + args.agentMarkdown + "\n```\n";
+  // No `labels`, same reason as the other path.
   const res = await octokit.issues.create({
     owner: repo.owner,
     repo: repo.repo,
     title,
     body,
-    labels: [AGENT_UPDATE_LABEL],
   });
   return res.data.html_url;
 }
