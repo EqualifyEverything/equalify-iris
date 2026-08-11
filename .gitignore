@@ -3,3 +3,7 @@ data/
 config.yaml
 .env
 *.log
+
+# Local-only: UIC test-deployment infra (Terraform code + state + secrets).
+# Not committed to the public upstream repo.
+/infra/
