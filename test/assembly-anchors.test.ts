@@ -1059,6 +1059,85 @@ test("a character-referenced for= on a skipped page still pins its owner", () =>
   assert.deepEqual(ids, ["q1", "p2-q1"]);
 });
 
+test("a too-deep page's ids come from its tree, not from a scan of its source", () => {
+  // The phantom class the source scan could not close. `sourceIds` reads attribute positions,
+  // but the parser DROPS whole elements during tree construction — an orphan `<tr>`/`<td>`, a
+  // stray `<caption>`/`<col>`/`<thead>`/`<tbody>`/`<colgroup>`, and everything after
+  // `<plaintext>`. A page-break transcription that starts mid-table emits the orphan-row shape
+  // directly, so this was reachable on ordinary input.
+  //
+  // Each dropped id made the too-deep page a phantom `claims` owner: the collision it
+  // manufactured was on an id no delivered element had, the phantom owner suppressed the pin,
+  // the REAL owner was renamed, and page 1's `<label for>` named nothing — the 1.3.1/4.1.2
+  // failure the pin exists to prevent, on an id that never collided.
+  //
+  // The fix is not more parser rules: `parseFragment` keeps the DOM of a page too deep to
+  // REWRITE, because `querySelectorAll` is iterative and reads it exactly. So these shapes are
+  // asserted end to end, where the phantom used to do its damage.
+  const dropped = [
+    `<tr><td id="x">cell</td></tr>`, // orphan row: no table, so both elements are dropped
+    `<caption id="x">Totals`,
+    `<col id="x">`,
+    `<thead id="x">`,
+    `<tbody id="x">`,
+    `<colgroup id="x">`,
+    `<p>text<plaintext><p id="x">`, // everything after <plaintext> is text
+  ];
+  for (const shape of dropped) {
+    const { body, anchors } = assembleBodyWithReport([
+      frag(1, `<label for="x">Name</label>`),
+      frag(2, `${tooDeepToParse}${shape}`),
+      frag(3, `<input id="x" type="text">`),
+    ]);
+    const label = JSON.stringify(shape);
+    assert.deepEqual(anchors.collisions, [], `a dropped element was read as an id claim: ${label}`);
+    assert.deepEqual(anchors.skipped_pages, [], label);
+    assert.match(body, /<input id="x"/, `the real owner was renamed for a phantom: ${label}`);
+    const idSet = new Set(idsOf(body));
+    for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+      assert.ok(idSet.has(m[1]), `for="${m[1]}" resolves to nothing: ${label}`);
+    }
+  }
+
+  // The other direction, on the same route: an id the parser DOES keep on a too-deep page is
+  // still an owner, so reading the tree must not have traded the phantoms for misses. If this
+  // page stopped claiming `x`, the pin would not fire, both copies would be renamed, and its
+  // frozen bare `id="x"` would collide with nothing — or worse, be left duplicated.
+  const kept = assembleBodyWithReport([
+    frag(1, `${tooDeepToParse}<select><option id="x">Platform</option></select>`),
+    frag(2, `<input id="x" type="text">`),
+  ]);
+  assert.deepEqual(kept.anchors.collisions, ["x"], "a real id on a too-deep page was missed");
+  assert.deepEqual(kept.anchors.skipped_pages, [1]);
+  const keptIds = idsOf(kept.body);
+  assert.equal(new Set(keptIds).size, keptIds.length, `duplicate ids survived: ${keptIds.join(", ")}`);
+});
+
+test("a too-deep page's references come from its tree as well", () => {
+  // The mirror of the test above on the reference side, and it fails for a shape the id side
+  // does not: `sourceRefs` skips a `<select>` whole, because the parser drops most tags inside
+  // one — but `<option>`, `<optgroup>` and `<hr>` ARE kept, along with their attributes. So a
+  // real `aria-describedby` on an option is a reference the scan cannot see.
+  //
+  // Missing a reference is `sourceRefs`' dangerous direction: the pin never learns the frozen
+  // reference exists, every owner of `q1` is renamed, and the reference on the page delivered
+  // as-written names nothing — the 1.3.1/4.1.2 dangling reference the pin was added to prevent.
+  // Reading the tree instead closes it, since `querySelectorAll` works at any parseable depth.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<input id="q1" type="text">`),
+    frag(2, `<input id="q1" type="text">`),
+    frag(3, `${tooDeepToParse}<select><option aria-describedby="q1">A</option></select>`),
+  ]);
+  assert.deepEqual(anchors.collisions, ["q1"]);
+  assert.deepEqual(anchors.pinned_ids, ["q1"], "a reference inside <select> did not pin its owner");
+  assert.deepEqual(anchors.skipped_pages, [3]);
+  assert.deepEqual(anchors.ambiguous, [{ page: 3, ref: "q1" }]);
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `duplicate ids survived: ${ids.join(", ")}`);
+  // Page 1 keeps `q1` bare so page 3's frozen reference resolves; page 2's copy is renamed.
+  assert.deepEqual(ids, ["q1", "p2-q1"]);
+});
+
 test("a page too deep to rewrite is delivered as written rather than throwing", async () => {
   // Every step of the rewrite recurses per level of nesting, and they do not all give up at
   // the same depth: measured, jsdom's serializer and `window.close()` overflow from about

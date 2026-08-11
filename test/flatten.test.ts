@@ -481,6 +481,62 @@ test("every marker the Reader prompt advertises is one flatten emits", () => {
   assertNoTextLost(`<select><option>Platform</option><option>Design</option></select>`, "select options");
 });
 
+test("a page too deep for the recursive walk keeps its text instead of throwing", () => {
+  // `block` and `inlineText` both recurse, so a pathologically nested page overflowed the
+  // stack and threw `RangeError` — dropping ALL the text, the worst version of the failure
+  // this file exists to prevent, and failing the session from a helper the caller expects
+  // to always return. The depth is reachable: `anchors.ts` deliberately DELIVERS a page too
+  // deep to rewrite rather than dropping it, so it arrives in the body that `review.ts`
+  // flattens for the Reader and that `contentCoverage` flattens on both sides of the gate.
+  //
+  // Depths straddle where the recursive walk gives out (~5,000 here) so both the ordinary
+  // path and the fallback are covered by the same assertions. Every threshold moves with
+  // how much stack the caller already spent, which is why the assertion is "the words
+  // survived" and not "the fallback ran at depth N".
+  for (const depth of [600, 5000, 9000, 10000]) {
+    const content = `<p>hello</p><ul><li>apple</li><li>pear</li></ul><img alt="Bar chart"><input value="Ada">`;
+    const html = "<div>".repeat(depth) + content;
+    let view: string;
+    try {
+      view = flatten(html);
+    } catch (e) {
+      assert.fail(`depth ${depth}: flatten threw ${(e as Error).constructor.name}`);
+    }
+    // Structure may be lost at these depths; text may not.
+    const got = wordsOf(view.replace(/\[[^\]]*\]/g, " "));
+    for (const w of ["hello", "apple", "pear", "bar", "chart", "ada"]) {
+      assert.ok(got.has(w), `depth ${depth}: lost "${w}" from the view:\n${view.slice(0, 200)}`);
+    }
+    // Not doubled: the recursive attempt dies mid-document, and its partial lines have to
+    // be discarded rather than prepended to the pass that replaces them.
+    assert.equal(view.match(/apple/g)?.length, 1, `depth ${depth}: partial output was repeated`);
+  }
+});
+
+test("the coverage gate still measures dropped content at fallback depth", () => {
+  // The fallback would be worthless if it fixed the throw and broke the measurement:
+  // structure-free output that scores every candidate 1.0 is the silent-success failure
+  // in the header, just reached by a different route. A word missing from the candidate
+  // must still register as missing when the page is deep enough to take the fallback.
+  const deep = "<div>".repeat(6000);
+  const accepted = `${deep}<p>alpha bravo charlie delta echo foxtrot golf hotel india</p>`;
+  assert.equal(contentCoverage(accepted, accepted), 1, "identical deep documents must score 1.0");
+
+  // One word of nine missing: detected at all. It scores 0.889, which is ABOVE the 0.85 bar
+  // by design — the gate tolerates small differences, and asserting otherwise here would be
+  // asserting a threshold this test does not own.
+  const one = contentCoverage(accepted, `${deep}<p>alpha bravo charlie delta echo foxtrot golf hotel</p>`);
+  assert.ok(one !== null && one < 1, `a dropped word went unmeasured at fallback depth: scored ${one}`);
+
+  // Enough missing to actually fail the gate, which is the property that matters: the
+  // fallback must not merely register a difference but let a real regression be blocked.
+  const many = contentCoverage(accepted, `${deep}<p>alpha bravo charlie delta</p>`);
+  assert.ok(
+    many !== null && many < MIN_CONTENT_COVERAGE,
+    `losing five words of nine must fail the ${MIN_CONTENT_COVERAGE} bar, but scored ${many}`,
+  );
+});
+
 test("a decorative image is distinguished from a missing alt", () => {
   // alt="" is correct markup for a decorative image; a missing alt is a defect. The
   // Reader is told to treat only the second as one, so they must not flatten alike.

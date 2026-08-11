@@ -432,15 +432,21 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   silently failed. A page too deeply *nested* to rewrite — rewriting recurses per level in three
   places, so past 500 levels, measured on the parsed tree, the page is refused rather than allowed
   to overflow one of them — is delivered as written for
-  the same reason and takes the same treatment: its ids and its references are read straight
-  from the source, so it counts as an owner (or the collision would go undetected for its copy,
-  and the pin would fire on top of the bare id it is already keeping) and its frozen references
-  pin their first owner. That source scan follows the parser's own rules — it reads attributes only
-  from real tag positions, skips elements whose content is not markup (`<textarea>`, `<script>`,
-  `<template>` and the rest), decodes character references, and takes the first of a repeated
-  attribute — because a *phantom* id read out of non-markup text is worse than a missed one: it
-  suppresses the pin, the real owner is renamed, and a `<label for>` elsewhere is left naming
-  nothing. That covers foster parenting in
+  the same reason and takes the same treatment: it counts as an owner (or the collision would go
+  undetected for its copy, and the pin would fire on top of the bare id it is already keeping) and
+  its frozen references pin their first owner. Its ids and references are read from its **DOM**,
+  which such a page keeps: `querySelectorAll` does not recurse, so it works at any depth the parse
+  survived, and the reading is exact. Only a page whose *parse* threw falls back to scanning the
+  source, and that scan follows the parser's own rules — attributes only from real tag positions,
+  elements whose content is not markup (`<textarea>`, `<script>`, `<template>` and the rest)
+  skipped, character references decoded, first of a repeated attribute — because a *phantom* id
+  read out of non-markup text is worse than a missed one: it suppresses the pin, the real owner is
+  renamed, and a `<label for>` elsewhere is left naming nothing. Reading the tree is what closed
+  that class rather than modelling more of the parser: the scan cannot see tree *construction*, so
+  it invented owners for markup the parser drops outright (an orphan `<tr>`/`<td>`, a stray
+  `<caption>`/`<col>`/`<thead>`, anything after `<plaintext>`) and missed real references inside a
+  `<select>`, whose `<option>` children survive parsing even though most tags in there do not.
+  That covers foster parenting in
   both directions: a `<tr>` outside a `<table>` is dropped to bare text, and content inside one is
   *hoisted out past the table* — a reading-order change, worse than the duplicate id it would be
   fixing. The guard compares the source's sequence of tags **and text** against the parsed document
@@ -466,7 +472,13 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   a table's `<caption>` and returned. Inline elements (`a`, `img`, `em`, …) are now announced
   within the surrounding phrase and block elements are separate stops, with tables expanded row
   by row; `test/flatten.test.ts` asserts the invariant mechanically by deriving the expected word
-  set from the DOM independently of `flatten`.
+  set from the DOM independently of `flatten`. Both halves of that inline/block split recurse, so
+  the same pathological nesting the assembler delivers rather than drops would overflow the stack
+  here and throw — losing *all* the text, the worst form of the failure. The walk therefore falls
+  back to an iterative pass that keeps words and reading order and gives up structure, which is
+  the trade the view already makes for a block inside a table cell. Role markers are stripped
+  before the coverage comparison anyway, so a marker-free view scores identically while a dropped
+  word still registers.
 
   Two rules follow from `contentCoverage` stripping `[...]` before it compares words, and both
   are easy to break by accident. **Everything `flatten` adds itself must be inside brackets** —
