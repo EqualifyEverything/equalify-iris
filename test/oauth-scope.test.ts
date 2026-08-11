@@ -2,7 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import type { AddressInfo } from "node:net";
-import { authorizeUrl, startDeviceFlow } from "../src/auth/github.ts";
+import {
+  authorizeUrl,
+  exchangeCode,
+  expiringTokenWarning,
+  pollDeviceFlow,
+  startDeviceFlow,
+} from "../src/auth/github.ts";
 import { clientIdWarning, loadConfig, type IrisConfig } from "../src/config.ts";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -145,6 +151,70 @@ test("an unparseable body does not mask the failure", async () => {
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+// --- the other registration setting, on BOTH flows ----------------------------
+//
+// "Expire user authorization tokens" must be OFF. Nothing here persists or refreshes
+// a credential, so with it on every user is logged out mid-use and their requests 401
+// eight hours after a login that worked — the least guessable symptom this service
+// has, and hours from its cause. The token itself is valid, so there is no failure to
+// hang the diagnosis on: the only moment it can be caught is when GitHub hands over
+// an `expires_in`, in whichever flow did the handing.
+//
+// Which is why both flows are pinned. The device flow had this warning and the web
+// flow did not, which is worse than neither having it: the gap is invisible until a
+// web-flow deployment hits the exact case the other flow diagnoses.
+
+test("both login flows carry an expiry out of GitHub's response", async () => {
+  const realFetch = globalThis.fetch;
+  const withExpiry = (async () =>
+    new Response(JSON.stringify({ access_token: "ghu_t", token_type: "bearer", expires_in: 28800 }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof globalThis.fetch;
+  try {
+    globalThis.fetch = withExpiry;
+    const exchanged = await exchangeCode("cid", "secret", "code", "https://iris.test/cb", "https://github.test");
+    assert.equal(exchanged.expires_in, 28800, "the web flow dropped the expiry");
+    const polled = await pollDeviceFlow("cid", "dc", "https://github.test");
+    assert.equal(polled.status === "approved" && polled.expires_in, 28800, "the device flow dropped the expiry");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("a token with no expiry warns about nothing", async () => {
+  // The correct registration, which is also the bundled app's: GitHub omits
+  // `expires_in` entirely. A warning here would fire on every login of every healthy
+  // deployment, which is how a warning stops being read.
+  assert.equal(expiringTokenWarning(undefined), undefined);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ access_token: "ghu_t", token_type: "bearer" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof globalThis.fetch;
+  try {
+    const exchanged = await exchangeCode("cid", "secret", "code", "https://iris.test/cb", "https://github.test");
+    assert.equal(exchanged.expires_in, undefined);
+    assert.equal(expiringTokenWarning(exchanged.expires_in), undefined);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("the expiry warning names the setting to change", () => {
+  // An operator reading this has a working login and a 401 hours later, and the fix
+  // is a checkbox they have probably never seen. Naming it by its exact label is most
+  // of the value; a bare "token expired" would send them looking at Iris.
+  const w = String(expiringTokenWarning(28800));
+  assert.match(w, /28800/, "did not say how long the token lasts");
+  assert.match(w, /Expire user authorization tokens/, "did not name the setting by its label");
+  assert.match(w, /401/, "did not connect it to the symptom the operator will see");
+  // Zero is a real value and must not read as "no expiry" — `if (expiresIn)` would
+  // drop it, which is the falsy-zero trap this codebase's normalizers keep hitting.
+  assert.match(String(expiringTokenWarning(0)), /Expire user authorization tokens/);
 });
 
 // --- the config side ---------------------------------------------------------

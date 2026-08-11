@@ -74,22 +74,59 @@ export function authorizeUrl(
   return `${oauthBase}/login/oauth/authorize?${params.toString()}`;
 }
 
+// The warning text for a token GitHub issued with an expiry, or undefined if it has
+// none. Shared by both login flows rather than written at each: BOTH must diagnose
+// this, and the device flow having a warning the web flow lacked was the whole defect
+// — a web-flow deployment that left "Expire user authorization tokens" at GitHub's
+// default got no signal at all, and the symptom (every user 401s, eight hours later,
+// nowhere near the cause) is the least guessable one this service has.
+//
+// Returned rather than logged so the callers decide where it goes and so it is
+// testable. Nothing here persists or refreshes a credential — src/auth/middleware.ts
+// caches only a token->id mapping, in memory — so an expiring token is not a mode
+// this service supports, which is why it warns rather than adapting.
+export function expiringTokenWarning(expiresIn: number | undefined): string | undefined {
+  if (expiresIn === undefined) return undefined;
+  return (
+    `GitHub issued a user token expiring in ${expiresIn}s. Iris does not refresh tokens, so users will be ` +
+    `logged out and their requests will 401 after that. Turn OFF "Expire user authorization tokens" in the ` +
+    `GitHub App's settings.`
+  );
+}
+
+export interface TokenResult {
+  access_token: string;
+  // Present only when the app has user-token expiry ON, which this service is not
+  // built for. See expiringTokenWarning.
+  expires_in?: number;
+}
+
 // Exchange an OAuth code (web flow) for an access token.
+//
+// Returns the expiry alongside the token, for the same reason pollDeviceFlow does:
+// it is the only observable difference between an app registered with user-token
+// expiry off and one left at GitHub's default, and the web flow needs that diagnosis
+// as much as the device flow does.
 export async function exchangeCode(
   clientId: string,
   clientSecret: string,
   code: string,
   redirectUri: string,
   oauthBase: string,
-): Promise<string> {
+): Promise<TokenResult> {
   const res = await fetch(`${oauthBase}/login/oauth/access_token`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code, redirect_uri: redirectUri }),
   });
-  const json = (await res.json()) as { access_token?: string; error?: string; error_description?: string };
+  const json = (await res.json()) as {
+    access_token?: string;
+    error?: string;
+    error_description?: string;
+    expires_in?: number;
+  };
   if (!json.access_token) throw new Error(json.error_description ?? json.error ?? "token exchange failed");
-  return json.access_token;
+  return { access_token: json.access_token, expires_in: json.expires_in };
 }
 
 export interface DeviceCodeResponse {

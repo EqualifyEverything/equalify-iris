@@ -306,8 +306,9 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
     const b = block as ProviderBlock;
     b.max_tokens = normalizeMaxTokens(b.max_tokens);
   }
-  // Fall back to the bundled OAuth App so the default device-flow deployment
-  // works with no per-operator app setup (PRD §9.1).
+  // Fall back to the bundled GitHub App so the default device-flow deployment
+  // works with no per-operator app setup (PRD §9.1). Applied BEFORE validateConfig,
+  // so its client_id check sees the effective value rather than an empty string.
   parsed.github.client_id = parsed.github.client_id || DEFAULT_CLIENT_ID;
   validateConfig(parsed, unset, path);
   cached = { path: resolved, config: parsed };

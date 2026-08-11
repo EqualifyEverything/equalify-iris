@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { randomBytes } from "node:crypto";
 import type { IrisConfig } from "../config.ts";
-import { authorizeUrl, exchangeCode, startDeviceFlow, pollDeviceFlow } from "../auth/github.ts";
+import { authorizeUrl, exchangeCode, expiringTokenWarning, startDeviceFlow, pollDeviceFlow } from "../auth/github.ts";
 import { sendError } from "./errors.ts";
 
 export function authRouter(cfg: IrisConfig): Router {
@@ -52,7 +52,10 @@ export function authRouter(cfg: IrisConfig): Router {
     }
     try {
       const token = await exchangeCode(cfg.github.client_id, cfg.github.client_secret, code, callbackUrl, cfg.github.oauth_base_url);
-      res.json({ access_token: token, token_type: "bearer" });
+      // Both login flows warn on an expiring token; see expiringTokenWarning.
+      const warning = expiringTokenWarning(token.expires_in);
+      if (warning) console.warn(`WARNING: ${warning}`);
+      res.json({ access_token: token.access_token, token_type: "bearer" });
     } catch (e) {
       sendError(res, 400, "oauth_failed", (e as Error).message);
     }
@@ -92,13 +95,8 @@ export function authRouter(cfg: IrisConfig): Router {
         // is not built for: nothing persists or refreshes a credential, so every
         // token silently 401s after its window. Warned here because the token itself
         // works, so there is no failure to attach it to until hours later.
-        if (result.expires_in !== undefined) {
-          console.warn(
-            `WARNING: GitHub issued a user token expiring in ${result.expires_in}s. Iris does not refresh ` +
-              `tokens, so users will be logged out and requests will 401 after that. Turn OFF "Expire user ` +
-              `authorization tokens" in the GitHub App's settings.`,
-          );
-        }
+        const warning = expiringTokenWarning(result.expires_in);
+        if (warning) console.warn(`WARNING: ${warning}`);
         res.json({ access_token: result.access_token, token_type: "bearer" });
       } else {
         // 202: still pending (authorization_pending / slow_down / etc.)

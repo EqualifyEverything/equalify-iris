@@ -33,9 +33,14 @@ storage:
 # stays in memory for the run it authorizes, and is gone when the run ends — so a
 # copy of the SQLite database is not GitHub access.
 github:
-  # Leave blank to use the bundled "Equalify Iris" OAuth App via the device flow
-  # (no per-operator app setup needed — like the GitHub CLI). Set it only to
-  # point at your own OAuth App. The client_id is not a secret.
+  # Leave blank to use the bundled Equalify Iris GITHUB APP via the device flow
+  # (no per-operator app setup needed — like the GitHub CLI). Set it only to point
+  # at your own GitHub App; its id starts `Iv`, and the id is not a secret.
+  #
+  # It must be a GitHub App, not an OAuth App: an `Ov…` id is refused at startup,
+  # because Iris requests no OAuth scope and an OAuth App would therefore
+  # authenticate users fine and then fail every issue filing. See the note under
+  # `oauth_scope` below for the registration settings your own app needs.
   client_id: ${GITHUB_CLIENT_ID}
   # Only required for the WEB redirect flow (/auth/github/start + /callback). The
   # device flow (CLI/Postman) needs no secret. Never commit a real secret.

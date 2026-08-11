@@ -154,6 +154,24 @@ export async function createAgentIssue(
   const title = `New agent suggestion: ${args.agentName}`;
 
   // Dedupe: skip if an open suggestion issue with this title already exists.
+  //
+  // The query filters on the LABEL, which is load-bearing and unverified against a
+  // typical contributor. GitHub documents that "any user with pull access can create
+  // an issue", but that "only users with push access can set labels for new issues —
+  // labels are silently dropped otherwise." So a user WITHOUT push access on
+  // `upstream_repo` — which is every ordinary contributor, and the case §12 is about —
+  // files successfully and gets an UNLABELED issue, at 201, with nothing in the
+  // response saying the label was discarded.
+  //
+  // Two consequences, both silent. Maintainer triage by label misses those issues; and
+  // this dedupe never matches them, so every subsequent session refiles the same
+  // suggestion under another real person's name. `ensureLabel` below has the same
+  // shape: label creation needs push access, and its failure is deliberately swallowed.
+  //
+  // Not fixed here. It is one call to `GET /repos/:o/:r` to read
+  // `permissions.push` and drop the label filter when it is false, but it changes
+  // filing behaviour and belongs in its own change with its own e2e case rather than
+  // riding along with an auth migration.
   try {
     const found = await octokit.search.issuesAndPullRequests({
       q: `repo:${repo.owner}/${repo.repo} is:issue is:open label:"${AGENT_LABEL}" "${args.agentName}" in:title`,
