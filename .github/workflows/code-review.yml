@@ -108,19 +108,30 @@ jobs:
             # accepted tradeoff — it also removed the repo's only
             # `pull_request_target` + `id-token: write` job — but it must not be silent,
             # because every other signal on such a PR still goes green.
+            # Single-quoted, and that is load-bearing on the last line. Two layers of
+            # escaping stack there, and each one bites in a different place:
+            #   1. Actions substitutes `${{ '${{' }}` textually before any shell sees
+            #      the script. An open-expression sequence left bare anywhere in this
+            #      file — including in a comment like this one — is parsed as an
+            #      expression, and the resulting error does not degrade the workflow,
+            #      it disables the whole FILE. That is why this comment escapes it too.
+            #   2. What that substitution leaves behind is a bare open-expression
+            #      sequence, which bash then reads as a parameter expansion. Inside
+            #      double quotes that is `bad substitution` and the step exits 1 —
+            #      exactly how this block failed on the PR that introduced it.
+            # Single quotes stop bash expanding it while Actions still escapes it, and
+            # they make the backticks literal as a bonus. See the actionlint rationale
+            # further down for why an expression error here is unrecoverable.
             {
-              echo "### ⚠️ This PR changes \`code-review.yml\` — it will not be reviewed by Claude"
+              echo '### ⚠️ This PR changes `code-review.yml` — it will not be reviewed by Claude'
               echo
-              echo "\`claude-code-action\` refuses to run when its own workflow file differs from"
-              echo "the copy on the default branch, so the review step self-skips. The checks below"
+              echo '`claude-code-action` refuses to run when its own workflow file differs from'
+              echo 'the copy on the default branch, so the review step self-skips. The checks below'
               echo "(install, typecheck, unit, e2e, actionlint) still ran against this PR's head."
               echo
-              echo "**This diff needs a human read before merge** — in particular whether it lets"
-              echo "PR-authored code run with secrets, widens \`permissions:\`, or interpolates"
-              # Escaped: an unescaped ${{ '${{' }} here is parsed by Actions as an
-              # expression even inside a quoted shell string, and the resulting error
-              # disables the whole file. See the actionlint rationale further down.
-              echo "attacker-controlled \`${{ '${{' }} github.event.* }}\` into a \`run:\` block."
+              echo '**This diff needs a human read before merge** — in particular whether it lets'
+              echo 'PR-authored code run with secrets, widens `permissions:`, or interpolates'
+              echo 'attacker-controlled `${{ '${{' }} github.event.* }}` into a `run:` block.'
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::warning::This PR changes code-review.yml, so the Claude review step self-skips and the PR gets NO automated review. Read the workflow diff by hand before merging."
           else
