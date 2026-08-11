@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parse } from "yaml";
-import { DEFAULT_OAUTH_SCOPE } from "./auth/github.ts";
 
 export type Capability = "text" | "vision" | "structured_output";
 
@@ -36,16 +35,6 @@ export interface IrisConfig {
     // account erases that attribution. Set it only when a deployment cannot file as
     // its users — e.g. an org policy that forbids it.
     issue_token?: string;
-    // OAuth scope requested from the user. `public_repo` (the default) is the FLOOR,
-    // not a starting point to lower: it is exactly what filing an issue on a public
-    // upstream needs, and filing is required of every user, not optional. Raise it
-    // to `repo` only for a PRIVATE upstream.
-    //
-    // There is no "request nothing" setting. A scopeless token can identify a user
-    // but cannot contribute, which is not a mode this service has (see
-    // validateConfig). loadConfig normalizes this, so by the time anything reads it,
-    // it is a non-empty string.
-    oauth_scope: string;
   };
   providers: {
     default: string;
@@ -140,37 +129,33 @@ function expandEnv(value: unknown, unset: Set<string>): unknown {
 function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void {
   const problems: string[] = [];
 
-  // A scopeless token is rejected outright rather than paired with anything.
+  // The scope validation this function used to do is gone: it rejected a scopeless
+  // `github.oauth_scope` at startup, because a token that could identify a user but
+  // not file on their behalf broke the contribution model (PRD §12) and failed
+  // silently — one swallowed `agent_issue_failed` line per run while the service kept
+  // answering 200. Iris now authenticates as a GitHub App, so a user's authorization
+  // carries no repository permission to get wrong: `issues: write` comes from
+  // INSTALLING the app on `upstream_repo` (see src/auth/github.ts).
   //
-  // Iris authenticates with GitHub so that using it and contributing back to the
-  // shared agent library are the same act (PRD §12): every session's feedback is
-  // filed as an issue under the user's own identity. A token that can identify a
-  // user but not file on their behalf breaks that, and GitHub's 403 would show up
-  // only as one `agent_issue_failed` line in a run log — the deployment would look
-  // healthy while the thing it exists to feed was dead.
+  // What DID survive is the failure shape, one level up. An operator who points
+  // `client_id` at an OAuth App gets exactly the state the old check existed to
+  // prevent: no scope is requested (this code no longer has one to send), so the
+  // token identifies users and cannot file, `GET /user` keeps working, the service
+  // keeps answering 200, and contribution is dead with one log line per run. So the
+  // one thing about the credential that config CAN see is checked here.
   //
-  // `github.issue_token` does NOT rescue this configuration, and the rejection is
-  // unconditional — there is no pairing check here any more. Note what that means
-  // precisely, because the mechanics point the other way: both filing paths resolve
-  // `issue_token || ctx.githubToken`, so while the PAT is set, filing works and the
-  // user's scope is never used. The floor is not a functional requirement in that
-  // state; it is required so that leaving that state cannot be silent. Unset the PAT
-  // (rotated, expired, moved to another deployment) and every user token in the
-  // database is suddenly the credential that files — and a fleet of scopeless tokens
-  // cannot, so contribution stops with one `agent_issue_failed` line per run while
-  // the service keeps answering 200. Rejecting the scope at startup makes that
-  // transition impossible instead of quiet, at the cost of storing tokens with
-  // `public_repo` in a deployment that does not currently need it (§9.1 v1.2 weighs
-  // that trade the other way for the token store, which is why nothing is persisted).
-  //
-  // Checked after normalizeScope, which never produces "" from a valid config, so
-  // reaching this means the operator wrote something that meant "no scope".
-  if (cfg.github?.oauth_scope === "") {
+  // Only the unambiguous case is fatal. `Ov`-prefixed ids are OAuth Apps on
+  // github.com and nothing else, and no GitHub App has that prefix. Everything else
+  // non-`Iv` gets a warning instead (see clientIdWarning) rather than a refusal —
+  // legacy OAuth App ids are bare hex, GitHub Enterprise Server mints its own, and
+  // refusing a format this code has not seen would break a deployment that works.
+  if (cfg.github?.client_id?.startsWith("Ov")) {
     problems.push(
-      `github.oauth_scope requests no scope, which cannot work — a scopeless token can ` +
-        `identify a user but not file the feedback issues every session contributes ` +
-        `(GitHub answers 403). The minimum is "${DEFAULT_OAUTH_SCOPE}" (the default; ` +
-        `remove the key to get it), or "repo" for a private upstream_repo`,
+      `github.client_id "${cfg.github.client_id}" is an OAuth App (Ov…), and Iris needs a GitHub App (Iv…). ` +
+        `An OAuth App would authenticate users fine and then be unable to file issues: Iris requests no OAuth ` +
+        `scope, because a GitHub App takes its issues:write from being INSTALLED on upstream_repo. Register a ` +
+        `GitHub App (device flow enabled, user-token expiry off), install it on upstream_repo, and use its ` +
+        `client id — or leave github.client_id unset to use the bundled app.`,
     );
   }
 
@@ -200,6 +185,64 @@ function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void
   if (problems.length === 0) return;
   const hint = unset.size > 0 ? ` Unset environment variables: ${[...unset].sort().join(", ")}.` : "";
   throw new Error(`Invalid config ${path}:\n  - ${problems.join("\n  - ")}\n${hint}`);
+}
+
+// A boot-time warning for a `client_id` that is probably not a GitHub App, or
+// undefined if it looks fine. Returned rather than logged so this is testable and so
+// the caller decides where it goes; src/index.ts prints it.
+//
+// Not an error, unlike the `Ov` case validateConfig rejects: GitHub Enterprise
+// Server mints its own id formats and pre-2022 OAuth Apps used bare hex, so a
+// refusal here could break a working deployment over a format this code has not
+// seen. But the consequence of being wrong is invisible at boot and expensive — an
+// OAuth App files nothing while looking healthy — so it is worth a line.
+export function clientIdWarning(clientId: string): string | undefined {
+  if (!clientId || clientId.startsWith("Iv")) return undefined;
+  return (
+    `github.client_id "${clientId}" does not look like a GitHub App id (those start "Iv"). ` +
+    `If it is an OAuth App, logins will work and issue filing will fail on every run: Iris requests no OAuth ` +
+    `scope, because a GitHub App gets issues:write from its installation on upstream_repo. Ignore this if you ` +
+    `are on GitHub Enterprise Server, where id formats differ.`
+  );
+}
+
+// A boot-time warning for the other combination config can see is broken: the bundled
+// app plus an `upstream_repo` it is not installed on.
+//
+// This became possible to get wrong only by moving to a GitHub App. `issues: write`
+// used to come from the user's `public_repo` scope, which reached any public repo, so
+// leaving `client_id` blank and repointing `upstream_repo` at your own agent library
+// worked. Now the permission comes from an installation on one specific repository,
+// and the bundled app is installed on Equalify's. So that same edit — one documented,
+// first-class knob (`IRIS_UPSTREAM_REPO`), changed on its own — yields a deployment
+// where every login succeeds and no contribution can ever be filed, for anyone.
+//
+// Warned rather than refused, and this is the whole reason it is not fatal: a
+// deployment can legitimately be in this state. Equalify can install the bundled app
+// on someone else's repo, and an operator can ask them to; nothing in config could
+// tell. Refusing would break that. But the failure is invisible at boot and silent at
+// runtime, so it gets a line — the property the deleted `oauth_scope` check used to
+// provide, restored for the case that replaced it.
+//
+// Deliberately not comparing against `api_base_url`: on GitHub Enterprise Server the
+// bundled app does not exist at all, `client_id` must be set, and this warning cannot
+// fire because the bundled default is not in use.
+export function bundledAppWarning(clientId: string, upstreamRepo: string): string | undefined {
+  if (clientId !== DEFAULT_CLIENT_ID) return undefined;
+  // Compared on owner/repo rather than on the URL: `upstream_repo` is documented as a
+  // URL and accepts the shapes parseRepo does (with or without `.git`, ssh or https),
+  // so a string compare would warn about a spelling of the right repo.
+  const m = upstreamRepo?.replace(/\.git$/, "").match(/github\.com[/:]([^/]+)\/([^/]+)/);
+  const slug = m ? `${m[1]}/${m[2]}` : undefined;
+  if (slug?.toLowerCase() === BUNDLED_APP_REPO.toLowerCase()) return undefined;
+  return (
+    `github.upstream_repo is "${upstreamRepo}" while github.client_id is unset, so Iris is using the bundled ` +
+    `Equalify Iris GitHub App — which is installed on ${BUNDLED_APP_REPO}, not on your repo. A GitHub App's ` +
+    `issues:write comes from its INSTALLATION, so logins will work and every issue filing will fail for every ` +
+    `user, logged once per run as agent_issue_failed. Either register your own GitHub App (device flow enabled, ` +
+    `user-token expiry off) and install it on ${slug ?? "your upstream_repo"}, then set github.client_id to its ` +
+    `id — or ask Equalify to install the bundled app there, and ignore this.`
+  );
 }
 
 // Coerce a configured max_tokens into a usable integer. Same "absent means the
@@ -232,45 +275,6 @@ export function normalizeMaxConcurrentRuns(value: unknown): number {
   return Math.min(MAX_CONCURRENT_RUNS_CEILING, Math.max(1, Math.floor(n)));
 }
 
-// The word an operator might reach for to turn the scope off. There is no such
-// setting — a scopeless token cannot file the feedback issues every session
-// contributes (PRD §12), so this is recognized only in order to be REJECTED with an
-// explanation by validateConfig, rather than passed to GitHub as a literal scope
-// named "none" and failing later at the consent screen.
-//
-// Recognized case-insensitively because YAML parses `None`/`NONE` as strings, not as
-// null (only `null`, `Null`, `NULL`, `~` and empty are null), so all three spellings
-// arrive here as text.
-export const NO_OAUTH_SCOPE = "none";
-
-// Coerce a configured github.oauth_scope into the string to send to GitHub:
-//
-//   (key absent)          -> DEFAULT_OAUTH_SCOPE  ("didn't say" — take the floor)
-//   oauth_scope:          -> DEFAULT_OAUTH_SCOPE  (null; a valueless key is a typo)
-//   oauth_scope: ${UNSET} -> DEFAULT_OAUTH_SCOPE  (expandEnv already made it "")
-//   oauth_scope: ""       -> DEFAULT_OAUTH_SCOPE  (same, and not distinguishable)
-//   oauth_scope: none     -> ""                   -> REJECTED by validateConfig
-//
-// Every empty form becomes the default rather than "no scope", which is the
-// convention every other key in this block follows (`api_base_url` a few lines down
-// in loadConfig). It matters here beyond consistency: `expandEnv` turns an unset
-// `${VAR}` into `""` before this runs, and `config.example.yaml`'s house style is the
-// `${...}` form — so a mistyped variable name must not be able to quietly strip the
-// scope out of a deployment. `none` returns "" rather than throwing here so that
-// validateConfig can report it with the full reason; this function has no error
-// channel.
-//
-// Exported for tests.
-export function normalizeScope(value: unknown): string {
-  if (typeof value !== "string") return DEFAULT_OAUTH_SCOPE;
-  // Trimmed because " repo " in YAML would otherwise be sent verbatim in the
-  // scope parameter and GitHub would reject it.
-  const trimmed = value.trim();
-  if (!trimmed) return DEFAULT_OAUTH_SCOPE;
-  if (trimmed.toLowerCase() === NO_OAUTH_SCOPE) return "";
-  return trimmed;
-}
-
 // Coerce a configured extraction_concurrency into a usable integer: missing or
 // non-numeric falls back to the default, and anything valid is clamped to
 // [1, MAX_EXTRACTION_CONCURRENCY]. Exported for tests.
@@ -286,17 +290,28 @@ export function normalizeConcurrency(value: unknown): number {
   return Math.min(MAX_EXTRACTION_CONCURRENCY, Math.max(1, Math.floor(n)));
 }
 
-// Bundled OAuth App client_id for the device flow (PRD §9.1). This is the
-// single place to embed Equalify's registered "Equalify Iris" OAuth App so the
-// default deployment needs no per-operator app setup — the same pattern the
-// GitHub CLI uses. The client_id is NOT a secret (it is sent openly in every
-// OAuth flow); the client secret is never bundled and is only needed for the
-// web redirect flow. A deployment can override this via config/env.
+// Bundled GitHub App client_id for the device flow (PRD §9.1). This is the single
+// place to embed Equalify's registered "Equalify Iris" GitHub App so the default
+// deployment needs no per-operator app setup — the same pattern the GitHub CLI uses.
+// The client_id is NOT a secret (it is sent openly in every authorization flow); the
+// client secret is never bundled and is only needed for the web redirect flow. A
+// deployment can override this via config/env.
 //
-// Equalify's "Equalify Iris" OAuth App client_id. Non-secret; ships embedded so
-// the default device-flow deployment needs no per-operator app setup. Override
-// via config/env to point at your own app.
-const DEFAULT_CLIENT_ID = "Ov23liGG4MfEn0DM4vTA";
+// A GitHub App, not an OAuth App — the `Iv23` prefix rather than `Ov23`. That is what
+// keeps the consent screen free of any repository grant: `issues: write` comes from
+// installing the app on `upstream_repo`, not from the user (see src/auth/github.ts).
+//
+// Pointing this at your own app means registering a GitHub App with device flow
+// enabled and user-token expiry off, and installing it on your `upstream_repo`.
+export const DEFAULT_CLIENT_ID = "Iv23liv73tlbX0VfoEkr";
+
+// The one repository the bundled app above is installed on. Its only purpose is
+// bundledAppWarning below: `issues: write` now comes from an installation, and an
+// installation is per-repository, so "which repo" is part of whether the bundled
+// credential works at all. Under the old OAuth App it was not — `public_repo` filed
+// on any public repo the user could reach, so `upstream_repo` and `client_id` were
+// independent knobs and a self-hoster could repoint the upstream alone.
+const BUNDLED_APP_REPO = "EqualifyEverything/equalify-iris";
 
 let cached: { path: string; config: IrisConfig } | null = null;
 
@@ -315,7 +330,6 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   // GitHub host defaults (overridable for GitHub Enterprise / testing).
   parsed.github.api_base_url = parsed.github.api_base_url || "https://api.github.com";
   parsed.github.oauth_base_url = parsed.github.oauth_base_url || "https://github.com";
-  parsed.github.oauth_scope = normalizeScope(parsed.github.oauth_scope);
   // Normalize the extraction concurrency knob once, here, so every consumer can
   // trust it: absent/garbage -> default, out-of-range -> clamped. A deployment
   // that sets 0 or a negative value means "don't parallelize" -> 1.
@@ -339,8 +353,9 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
     const b = block as ProviderBlock;
     b.max_tokens = normalizeMaxTokens(b.max_tokens);
   }
-  // Fall back to the bundled OAuth App so the default device-flow deployment
-  // works with no per-operator app setup (PRD §9.1).
+  // Fall back to the bundled GitHub App so the default device-flow deployment
+  // works with no per-operator app setup (PRD §9.1). Applied BEFORE validateConfig,
+  // so its client_id check sees the effective value rather than an empty string.
   parsed.github.client_id = parsed.github.client_id || DEFAULT_CLIENT_ID;
   validateConfig(parsed, unset, path);
   cached = { path: resolved, config: parsed };

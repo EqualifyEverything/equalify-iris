@@ -29,10 +29,18 @@ The pipeline as **implemented today** runs in three phases:
    `max_review_iterations` (default 3).
 
 When Iris meets content a specialist agent would handle better than the general pass, it drafts
-that agent and **automatically files a labeled `iris-agent-suggestion` GitHub issue** (with the
-agent code + context) on the upstream repo. Maintainers triage those issues; merged agents
+that agent and **automatically files a GitHub issue titled `New agent suggestion: <type>`** (with
+the agent code + context) on the upstream repo. Maintainers triage those issues; merged agents
 become part of the shared `agents/` library. (This replaces the PRD's fork+PR-on-close flow —
 see Implementation notes.)
+
+Those issues are identified by their **title prefix**, not by a label, and deliberately so: GitHub
+silently drops labels set by anyone without push access to the repo, which is most of the people
+this is built for. A label would therefore have been missing on exactly the issues that most needed
+it, with nothing to say so — and the duplicate check that filtered on it would have refiled the same
+suggestion every session, under a different person's name each time. If you want labels on these,
+add a repository rule keyed on the title prefix; it applies them as the repo rather than as the
+filer, so it works no matter who filed.
 
 ## Quick start
 
@@ -47,7 +55,7 @@ git clone https://github.com/EqualifyEverything/equalify-iris
 cd equalify-iris
 npm install
 
-cp .env.example .env          # fill in GitHub OAuth + a model provider key
+cp .env.example .env          # a model provider key; GitHub App settings are optional
 cp config.example.yaml config.yaml
 
 # load env and run
@@ -102,14 +110,13 @@ from the environment at startup; changes require a restart.
   is rejected — the upload is already received and on disk, so a 429 would discard work the user
   has already paid for. The cap is global rather than per user because the resources it protects
   (memory, jsdom, the provider's rate limit) are global.
-- **GitHub** (§9.1): OAuth is the auth mechanism — a user *is* their GitHub account, and a token
+- **GitHub** (§9.1): GitHub is the auth mechanism — a user *is* their GitHub account, and a token
   is **required** on every call. By default the
-  service uses a **bundled OAuth App via the device flow** — no per-operator app setup, no
+  service uses a **bundled GitHub App via the device flow** — no per-operator app setup, no
   secret (the same approach the `gh` CLI uses). Set `github.client_id` only to point at your
-  own OAuth App; `client_secret` is needed only if you enable the web redirect flow.
-  `github.oauth_scope` is the scope requested from the user, **`public_repo`** by default —
-  see [GitHub is the only SSO layer](#github-is-the-only-sso-layer-and-tokens-are-required) for
-  why that is a floor rather than a default, and when to raise it.
+  own GitHub App; `client_secret` is needed only if you enable the web redirect flow.
+  **No OAuth scope is requested at all** — the app's one permission comes from installing it on
+  `upstream_repo` — see [GitHub is the only SSO layer](#github-is-the-only-sso-layer-and-tokens-are-required).
 
 ### GitHub is the only SSO layer, and tokens are required
 
@@ -126,53 +133,66 @@ contribute, this is not the service to deploy.
 
 Two consequences an operator should know before deploying:
 
-**1. The scope is a floor.** The token does exactly two things: `GET /user` to identify the caller
-(no scope needed) and file issues on `upstream_repo` (`public_repo` for a public upstream, which is
-the default). Filing is not optional, so:
+**1. The permission lives with the installation, not with your users.** The token does exactly two
+things: `GET /user` to identify the caller, and file issues on `upstream_repo`. Iris is registered as
+a **GitHub App**, so the second one is granted once — by installing the app on `upstream_repo` with
+`issues: write` — and users only *authorize*. Their consent screen requests **no repository access
+at all**, because there is nothing left for it to ask for.
 
-| `oauth_scope` | When to use it |
-| --- | --- |
-| `public_repo` *(default)* | The floor. A public `upstream_repo` — the normal case. |
-| `repo` | **Only** if `upstream_repo` is private. Also grants read *and write* to every private repo the user can reach, which nothing here uses. |
-| `none` | **Not supported — the service refuses to start.** |
+One limit worth knowing if your `upstream_repo` is **private**: a user's token is the *intersection*
+of the installation's permissions and that user's own access, so installing the app does not give a
+user access they did not already have. On a private upstream, filing works for users who can see the
+repo and 404s for everyone else. Set `github.issue_token` if you need a private upstream to accept
+contributions from users who are not collaborators — it files everything under one account, which
+trades away the per-user attribution below. A public `upstream_repo` (the assumption here, since the
+agent library is meant to be shared) has no such limit.
 
-`oauth_scope: none` is recognized only in order to be rejected, with a message naming the fix. A
-token that identifies a user but cannot file on their behalf would leave the deployment looking
-healthy while the thing it exists to feed was dead: GitHub answers 403 and the failure is swallowed
-as one `agent_issue_failed` line per run. Setting `github.issue_token` does **not** make it valid,
-and it is worth being exact about why, because the mechanics point the other way: filing uses
-`issue_token` when it is set and the user's token otherwise, so *while the PAT is there*, filing
-works and the user's scope is never used. The floor is not what makes that deployment run — it is
-what makes **losing** the PAT visible. Rotate it, let it expire, or move it to another instance and
-the user tokens become the credential that files; scopeless ones cannot, so contribution stops while
-the service still answers `200`. The scope floor turns that into a startup error instead of a silent
-one. (A PAT does change who gets the credit — see below.)
+This replaced an OAuth App requesting `public_repo`, and the reason is worth stating plainly: there
+is no OAuth scope meaning "open issues on one repository". `public_repo` was the narrowest one that
+could file, and it grants read **and write** to every public repository the user can reach —
+code, commit statuses, collaborators, webhooks — none of which Iris touches. Nothing pushes and
+nothing opens pull requests. So the old consent screen asked for orders of magnitude more than the
+service uses, and the app is the only way to fix that rather than merely document it.
 
-Every *empty* form is a different case and falls back to `public_repo`: an absent key, a valueless
-key, a quoted `""`, and an unset `${VAR}`. That last one is why "no scope" needs a word at all —
-`${IRIS_SCOPE}` with the variable missing expands to `""` before the config is read, and a typo in a
-variable name must not be able to strip the scope out of a deployment.
+What the user's token still carries is their **identity**. A user-to-server token acts as the user,
+so issues are filed under their own account and each contribution is credited to the person whose
+session produced it — the whole reason users authorize at all instead of the app filing as itself.
 
-The one misconfiguration startup *cannot* see is a private `upstream_repo` left on the
-`public_repo` default (or a token issued before you changed the scope). For those, a **403 or 404**
-during filing is logged with a `hint` naming the configured scope. Both statuses, because GitHub
-does not reveal that a private repository exists: a token that cannot see your private
-`upstream_repo` gets `404 Not Found`, not a permissions error — so 404 is the status the
-private-upstream case actually produces. (A misspelled `upstream_repo` looks identical, and the hint
-says so rather than blaming the scope.) When `issue_token` is set, the hint names the **service
-PAT** instead, since `oauth_scope` governs only tokens issued to users.
+Two registration settings the service depends on, if you point `client_id` at your own app:
 
-Changing this key does not shrink a grant a user already made — an existing token keeps its old
-scope until revoked at
-[github.com/settings/applications](https://github.com/settings/applications). Only new
-authorizations are affected.
+| Setting | Value | Why |
+| --- | --- | --- |
+| **Enable Device Flow** | on | Off by default for a new app, and the device flow is the default deployment's only login path (it returns `device_flow_disabled` without it). |
+| **Expire user authorization tokens** | **off** | With expiry on, user tokens last 8 hours and come with a refresh token. Nothing here persists or refreshes a credential, so turning expiry on means building refresh plumbing first. |
 
-**If you are coming from an earlier build, `oauth_scope: none` used to be the recommendation.** It
-was paired with `github.issue_token` to minimize what a stolen token was worth back when tokens were
-stored in the database. Tokens are no longer stored at all, so that trade no longer buys anything —
-and what it cost is the requirement above: a token that cannot file cannot contribute. Such a config
-now **fails at startup** with a message naming the fix. Remove the key (or set `public_repo`); keep
-`issue_token` if you were relying on it, since it is independent of the scope floor.
+The misconfiguration this *cannot* catch at startup is the app not being installed on
+`upstream_repo` — that state lives on github.com, not in config. It surfaces as a **403 or 404**
+during filing, logged with a `hint` saying so. Both statuses, because GitHub does not reveal
+repositories a credential cannot see: an app that was never installed reads as `404 Not Found`
+rather than as a permissions error. (A misspelled `upstream_repo` looks identical, and the hint says
+so rather than blaming the installation.) When `issue_token` is set, the hint names the **service
+PAT** instead, since the installation governs only tokens issued to users.
+
+**If you are coming from an earlier build,** three things changed, and two of them can stop a
+working deployment:
+
+- **A configured OAuth App id is now a hard startup failure.** An `Ov…` `client_id` is refused,
+  because Iris no longer sends any OAuth scope: such an app would authenticate users and then be
+  unable to file a single issue. Register a GitHub App (`Iv…`) and install it on your
+  `upstream_repo`, or leave `client_id` blank for the bundled one.
+- **`upstream_repo` is no longer independent of `client_id`.** Under the old OAuth App, the
+  `public_repo` scope could file on any public repo, so leaving `client_id` blank and repointing
+  `upstream_repo` at your own agent library worked. A GitHub App's `issues: write` comes from its
+  *installation* on one specific repository, and the bundled app is installed on this repo — so that
+  same config now files nothing, for anyone. You need your own app installed on your repo (or ask us
+  to install ours there). This combination warns at startup rather than failing, since we cannot see
+  from config whether the bundled app was installed on your repo.
+- **`github.oauth_scope` is gone.** A config that still sets it — including `oauth_scope: none`,
+  which used to be a startup error — now starts fine and ignores the key. Delete it.
+
+There is no user-facing migration: no one had authorized the OAuth App, and any existing
+authorization can be revoked at
+[github.com/settings/applications](https://github.com/settings/applications).
 
 **2. `github.issue_token` is an override, and not a recommended one.** Set it to a service-account
 PAT and every issue is filed under that bot account instead of under the user who produced it. It is
@@ -336,9 +356,9 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
   when the review loop hits its iteration cap with issues outstanding (§7.11).
 - **Contributions are issues, not PRs (§7.13/§9.2).** Instead of fork+PR-on-close, when the
   extractor flags content a specialist would handle better, Iris drafts that agent and files a
-  labeled `iris-agent-suggestion` GitHub issue with the agent code + context; feedback that
-  generalizes files an `iris-agent-update` issue the same way. Simpler to triage, and it needs no
-  write access to a fork — so nothing forks and nothing pushes. Consequently the PRD's
+  `New agent suggestion: <type>` GitHub issue with the agent code + context; feedback that
+  generalizes files an `Agent update proposal: <agent>` issue the same way. Simpler to triage, and
+  it needs no write access to a fork — so nothing forks and nothing pushes. Consequently the PRD's
   `pending_prs` and `prs_opened` response fields, the `skip_prs` parameter and the `fork_repo`
   field on `/v1/me` are **not** part of the API.
   Issues are filed with the logged-in user's token, which is

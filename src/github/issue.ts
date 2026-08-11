@@ -11,43 +11,72 @@ export function parseRepo(url: string): RepoRef {
   return { owner: m[1], repo: m[2] };
 }
 
-// Label maintainers can sort/filter agent suggestions by.
-export const AGENT_LABEL = "iris-agent-suggestion";
+// Nothing here labels the issues it files, and the TITLE PREFIX is what identifies
+// them instead — `New agent suggestion: <type>` and `Agent update proposal: <agent>`.
+//
+// There were two labels, `iris-agent-suggestion` and `iris-agent-update`, and they
+// could not work for the users this service is built around. GitHub documents that
+// "any user with pull access to a repository can create an issue" but that "only users
+// with push access can set labels for new issues — labels are silently dropped
+// otherwise". Every ordinary contributor is in the second group, so filing returned
+// 201 with an unlabeled issue and no indication the label had been discarded. That
+// broke the two things the labels existed for, silently and only for the majority of
+// users: triage by label missed those issues, and the duplicate search — which
+// filtered on the label — could never match one, so every later session refiled the
+// same suggestion under another real person's name.
+//
+// Dropping them removes the failure rather than detecting it. A title prefix is set by
+// the same 201 that creates the issue and cannot be stripped by permissions, so it
+// behaves identically for a maintainer and a first-time contributor. `is:issue
+// is:open "<full title>" in:title` is a slightly wider net than the label filter was
+// (GitHub full-text-matches the phrase), which is why the exact-title comparison after
+// the search is load-bearing rather than belt-and-braces — see the dedupe sites.
+//
+// A maintainer who wants labels can add them with a repo-side rule keyed on the title
+// prefix, which applies them as the repository rather than as the filer and therefore
+// works regardless of who filed.
 
-// Why an issue-filing failure was probably about the token's permissions, or
-// undefined if it was not.
+// Why an issue-filing failure was probably about permissions, or undefined if it
+// was not.
 //
 // Both filing paths (a new-agent suggestion and an agent-update proposal) fail
 // softly — a contribution is a side effect and a GitHub outage must not fail a
 // document the user already paid for — so the log line is the only place the cause
-// can appear. And the cause is several steps away from the failure: which token
-// was used depends on config, and what that token may do was decided elsewhere
-// (at consent time for a user's, on github.com for a service PAT). Neither of the
-// two user-token cases can be seen from config alone, which is why this lives at
-// the failure rather than at startup:
+// can appear. And the cause is several steps away from the failure: which credential
+// was used depends on config, and what it may do was decided elsewhere, on
+// github.com, in a place no config file can show.
 //
-//   - `oauth_scope` narrower than a PRIVATE `upstream_repo` needs. `public_repo`
-//     is the default, so an existing private-upstream deployment can acquire this
-//     on upgrade without touching its config.
-//   - A token issued BEFORE the requested scope was narrowed, which keeps the old
-//     scope until the user re-authorizes.
+// Under a GitHub App there are two such causes on the user path, which replaced two
+// scope-related ones:
 //
-// Both 403 and 404 are diagnosed, and the FIRST case above is the 404 one: GitHub
-// does not leak the existence of a private repository, so a token without access
-// to one gets `404 Not Found` rather than a permissions error. Treating 403 as the
-// only permissions signal would have missed exactly the case this hint was written
-// for. 404 is genuinely ambiguous, though — a misspelled `upstream_repo` produces
-// the same status — so that wording names both possibilities instead of asserting
-// one.
+//   - The app is NOT INSTALLED on `upstream_repo` (or its installation was removed,
+//     or `issues` was never granted write). A user-to-server token carries the
+//     user's identity but takes its repository permission from the installation, so
+//     with no installation there is no permission — for every user at once. This is
+//     the misconfiguration to suspect first, and it cannot be caught at startup: the
+//     app's install state lives on github.com, not in config.
 //
-// `usingServiceToken` is load-bearing, not decoration: when `github.issue_token`
-// is set it is that PAT that failed, and `oauth_scope` has nothing to do with it.
-// Naming `oauth_scope` there would send an operator to widen the user grant this
-// service is trying to keep narrow, to fix a failure widening it cannot touch —
-// and that is the shape the README recommends for production.
-export function scopeHintFor(
+//   - The USER cannot see `upstream_repo`. A user-to-server token is the intersection
+//     of the installation's permissions and that user's own access, so on a private
+//     upstream, filing works for collaborators and 404s for everyone else however
+//     correctly the app is installed. Distinguishable from the case above by shape
+//     rather than by status: it is per-user, not deployment-wide.
+//
+// Both 403 and 404 are diagnosed, and both user-path causes are usually 404: GitHub
+// does not reveal repositories a credential cannot see, so neither reads as a
+// permissions error. Treating 403 as the only permissions signal would miss the case
+// this hint exists for. That leaves 404 genuinely ambiguous three ways — a misspelled
+// `upstream_repo` is identical on the wire too — so the wording names the
+// possibilities instead of asserting one.
+//
+// `usingServiceToken` is load-bearing, not decoration: when `github.issue_token` is
+// set it is that PAT that failed, and the app's installation has nothing to do with
+// it. Sending an operator to re-install the app to fix a PAT failure would waste the
+// one clue they have — and the service-token shape is what the README recommends for
+// deployments that cannot file as their users.
+export function installHintFor(
   e: unknown,
-  opts: { scope: string; usingServiceToken: boolean },
+  opts: { usingServiceToken: boolean },
 ): { hint: string } | undefined {
   // Octokit's RequestError carries the code on `.status`, and only calls that
   // actually reached GitHub produce one. Deliberately NOT falling back to
@@ -60,8 +89,8 @@ export function scopeHintFor(
   const status = (e as { status?: number } | null)?.status;
   if (status !== 403 && status !== 404) return undefined;
   // GitHub also answers 403 for primary and secondary rate limits, where
-  // permissions are irrelevant and this hint would send an operator to the wrong
-  // config key. Checked on the response headers first (`x-ratelimit-remaining: 0`
+  // permissions are irrelevant and this hint would send an operator to re-install a
+  // working app. Checked on the response headers first (`x-ratelimit-remaining: 0`
   // is the primary-limit signal) and on the message text for the secondary limit,
   // which says so in prose rather than in a header.
   const message = (e as Error | null)?.message ?? "";
@@ -78,42 +107,38 @@ export function scopeHintFor(
         `${status} while filing as the service account: github.issue_token is set, so the failing ` +
         `credential is that PAT — check its scopes and its access to upstream_repo on github.com` +
         (notFound ? `, and check that upstream_repo is spelled correctly (GitHub answers 404 for a repo a token cannot see)` : ``) +
-        `. github.oauth_scope is not involved; it only governs tokens issued to users.`,
+        `. The GitHub App's installation is not involved; it only governs tokens issued to users.`,
     };
   }
   return {
     hint:
       (notFound
-        ? // The private-upstream case. GitHub hides the repo rather than refusing,
-          // so this reads as "no such repo" until you know to suspect the scope.
-          `404 on a repo that exists means the user's token cannot see it: a PRIVATE upstream_repo needs "repo". ` +
-          `(A misspelled upstream_repo gives the same 404.) `
-        : `403 usually means the user's token lacks the scope this repo needs. `) +
-      // Never empty: a scopeless deployment is rejected at startup, so whatever is
-      // here is a real scope an operator configured (or the default).
-      `github.oauth_scope is "${opts.scope}". ` +
-      `Tokens issued before a scope change keep the old scope until the user re-authorizes.`,
+        ? // The uninstalled case. GitHub hides the repo rather than refusing, so
+          // this reads as "no such repo" until you know to suspect the installation.
+          //
+          // Two other causes produce an identical 404 and are named rather than
+          // assumed away. A misspelled `upstream_repo` is the cheap one. The other is
+          // that a user-to-server token is the intersection of the installation's
+          // permissions and THIS USER's own access: on a private upstream, a user who
+          // cannot see the repo 404s no matter how correctly the app is installed —
+          // and that one is per-user, not deployment-wide, so it must not be reported
+          // with the "affects every user" framing below.
+          `404 on a repo that exists means this user's token cannot see it: the GitHub App is probably not ` +
+          `installed on upstream_repo. (A misspelled upstream_repo gives the same 404. So does a PRIVATE ` +
+          `upstream_repo that this particular user cannot access — a user's token is limited to their own ` +
+          `access as well as the installation's, so a private upstream needs github.issue_token to file for ` +
+          `everyone; if filing works for some users and not others, that is this.) `
+        : `403 usually means the GitHub App's installation lacks Issues write on this repo. `) +
+      `Install the app on upstream_repo — or check that its installation still grants Issues: Read and write — ` +
+      `at github.com/settings/installations. A user's authorization carries no repository access on its own; ` +
+      `permission comes from the installation, so if the installation is the cause this affects every user ` +
+      `until it is fixed.`,
   };
 }
 
-async function ensureLabel(
-  octokit: Octokit,
-  repo: RepoRef,
-  name: string = AGENT_LABEL,
-  color = "5319e7",
-  description = "Agent suggested automatically by Equalify Iris",
-): Promise<void> {
-  try {
-    await octokit.issues.getLabel({ owner: repo.owner, repo: repo.repo, name });
-  } catch {
-    try {
-      await octokit.issues.createLabel({ owner: repo.owner, repo: repo.repo, name, color, description });
-    } catch {
-      // label may have been created concurrently, or insufficient perms — the
-      // issue create below still works if the label already exists.
-    }
-  }
-}
+// `ensureLabel` is gone with the labels. It read-or-created the label before filing,
+// and both halves needed push access the typical filer does not have — so on the path
+// that mattered it was two API calls that could only fail, inside a swallow.
 
 export interface AgentIssue {
   agentName: string;
@@ -123,8 +148,8 @@ export interface AgentIssue {
   sessionId: string;
 }
 
-// File a labeled issue containing the drafted agent code + context. Returns the
-// issue URL, or null if an open issue for this agent already exists (dedupe).
+// File an issue containing the drafted agent code + context. Returns the issue URL,
+// or null if an open issue for this agent already exists (dedupe).
 export async function createAgentIssue(
   token: string,
   upstreamUrl: string,
@@ -135,17 +160,32 @@ export async function createAgentIssue(
   const repo = parseRepo(upstreamUrl);
   const title = `New agent suggestion: ${args.agentName}`;
 
-  // Dedupe: skip if an open suggestion issue with this title already exists.
+  // Dedupe: skip if an open issue with this exact title already exists.
+  //
+  // Searched by the full title rather than by a label, because a label is not there to
+  // search on — see the note at the top of this file. The whole title is used rather
+  // than just the agent name so the phrase match stays tight (`"New agent suggestion:
+  // chartData"` does not match a `chartDataAgent` issue), but GitHub's `in:title` is a
+  // full-text phrase match and not an equality test, so the exact comparison below is
+  // what actually decides. Verified against real GitHub: the label-free query returns
+  // the intended issue plus unrelated ones the title comparison then rejects.
+  //
+  // Known limitation, measured rather than assumed: GitHub's search index is not
+  // immediate, so an issue filed seconds ago is not yet findable and a session running
+  // in that window files a duplicate. Two calls one second apart both filed; a third,
+  // two minutes later, deduped. This is inherent to dedupe-by-search and was equally
+  // true of the label-filtered query — the search was always the weak link, not the
+  // filter on it. Accepted for the same reason the catch below is empty: a duplicate
+  // suggestion is cheap and a failed document is not.
   try {
     const found = await octokit.search.issuesAndPullRequests({
-      q: `repo:${repo.owner}/${repo.repo} is:issue is:open label:"${AGENT_LABEL}" "${args.agentName}" in:title`,
+      q: `repo:${repo.owner}/${repo.repo} is:issue is:open "${title}" in:title`,
     });
     if (found.data.items.some((i) => i.title === title)) return null;
   } catch {
     // search unavailable — proceed (a duplicate is acceptable; not worth failing).
   }
 
-  await ensureLabel(octokit, repo);
   const body =
     `**Content type:** \`${args.agentName}\`\n` +
     `**Why a dedicated agent:** ${args.reason}\n` +
@@ -153,19 +193,16 @@ export async function createAgentIssue(
     `_Auto-filed by Equalify Iris when a page contained content a specialist agent would handle better than the general pass._\n\n` +
     `## Proposed agent — \`agents/${args.agentName}.md\`\n\n` +
     "```markdown\n" + args.agentMarkdown + "\n```\n";
+  // No `labels`. GitHub drops them silently for a filer without push access, which is
+  // the typical filer here — see the note at the top of this file.
   const res = await octokit.issues.create({
     owner: repo.owner,
     repo: repo.repo,
     title,
     body,
-    labels: [AGENT_LABEL],
   });
   return res.data.html_url;
 }
-
-// Label for feedback-driven improvements to an EXISTING agent (distinct from new
-// agent suggestions, so maintainers can triage them separately).
-export const AGENT_UPDATE_LABEL = "iris-agent-update";
 
 export interface AgentUpdateIssue {
   agentName: string; // e.g. "page.md"
@@ -175,10 +212,14 @@ export interface AgentUpdateIssue {
   sessionId: string;
 }
 
-// File a labeled issue proposing an improvement to an existing agent, produced by
-// the feedback loop (and already gated by the agent's regression fixtures).
-// Returns the issue URL, or null if an open update issue for this agent already
-// exists (dedupe by title).
+// File an issue proposing an improvement to an existing agent, produced by the
+// feedback loop (and already gated by the agent's regression fixtures). Returns the
+// issue URL, or null if an open update issue for this agent already exists (dedupe by
+// title).
+//
+// Its title prefix differs from createAgentIssue's ("Agent update proposal:" vs "New
+// agent suggestion:"), which is what keeps the two kinds distinguishable and separately
+// dedupable now that the two labels are gone.
 export async function createAgentUpdateIssue(
   token: string,
   upstreamUrl: string,
@@ -190,23 +231,17 @@ export async function createAgentUpdateIssue(
   const name = args.agentName.replace(/\.md$/, "");
   const title = `Agent update proposal: ${name}`;
 
-  // Dedupe: skip if an open update issue with this title already exists.
+  // Dedupe by full title, for the reason createAgentIssue's does — and with the same
+  // search-index lag caveat documented there.
   try {
     const found = await octokit.search.issuesAndPullRequests({
-      q: `repo:${repo.owner}/${repo.repo} is:issue is:open label:"${AGENT_UPDATE_LABEL}" "${name}" in:title`,
+      q: `repo:${repo.owner}/${repo.repo} is:issue is:open "${title}" in:title`,
     });
     if (found.data.items.some((i) => i.title === title)) return null;
   } catch {
     // search unavailable — proceed (a duplicate is acceptable; not worth failing).
   }
 
-  await ensureLabel(
-    octokit,
-    repo,
-    AGENT_UPDATE_LABEL,
-    "0e8a16",
-    "Agent improvement proposed by Equalify Iris from user feedback",
-  );
   const body =
     `**Agent:** \`agents/${name}.md\`\n` +
     `**Proposed change:** ${args.summary}\n` +
@@ -217,12 +252,12 @@ export async function createAgentUpdateIssue(
     "```diff\n" + args.diffPreview + "\n```\n\n" +
     `## Proposed full \`agents/${name}.md\`\n\n` +
     "```markdown\n" + args.agentMarkdown + "\n```\n";
+  // No `labels`, same reason as the other path.
   const res = await octokit.issues.create({
     owner: repo.owner,
     repo: repo.repo,
     title,
     body,
-    labels: [AGENT_UPDATE_LABEL],
   });
   return res.data.html_url;
 }

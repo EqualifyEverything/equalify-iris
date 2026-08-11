@@ -11,7 +11,7 @@ By participating you agree to our [Code of Conduct](CODE_OF_CONDUCT.md).
 - **Report an accessibility barrier** — in the app/demo or in the HTML Iris produces. Use the
   **Accessibility issue** template. These are our highest priority.
 - **Report a bug / request a feature** — use the matching issue template.
-- **Suggest or improve a content agent** — Iris automatically opens `iris-agent-suggestion`
+- **Suggest or improve a content agent** — Iris automatically opens `New agent suggestion: <type>`
   issues when it meets content a specialist agent would handle better. You're welcome to open
   one yourself, or send a PR adding/improving a file in [`agents/`](agents/).
 - **Code** — bug fixes and improvements via pull request.

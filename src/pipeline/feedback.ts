@@ -6,7 +6,7 @@ import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { flatten } from "./flatten.ts";
 import { knownPages, pageIndex } from "./pageindex.ts";
-import { createAgentUpdateIssue, scopeHintFor } from "../github/issue.ts";
+import { createAgentUpdateIssue, installHintFor } from "../github/issue.ts";
 import { recordExample, type LessonKind } from "./memory.ts";
 import type { FixtureCase } from "./regression.ts";
 
@@ -675,12 +675,12 @@ export async function proposeAgentUpdatesFromFeedback(
       ctx.log.event("agent_update_issue", { agent: proposal.agent_name, url: url ?? "(duplicate — skipped)" });
     } catch (e) {
       // Same soft failure and the same likely cause as runContribution's filing
-      // path, so the same diagnosis — an operator debugging a dead
-      // `iris-agent-update` label needs it as much as the suggestion one.
+      // path, so the same diagnosis — an operator debugging a dead update-proposal
+      // path needs it as much as the suggestion one.
       ctx.log.event("agent_update_issue_failed", {
         agent: proposal.agent_name,
         error: (e as Error)?.message ?? String(e),
-        ...scopeHintFor(e, { scope: ctx.cfg.github.oauth_scope, usingServiceToken }),
+        ...installHintFor(e, { usingServiceToken }),
       });
     }
   } else {

@@ -33,14 +33,25 @@ storage:
 # stays in memory for the run it authorizes, and is gone when the run ends — so a
 # copy of the SQLite database is not GitHub access.
 github:
-  # Leave blank to use the bundled "Equalify Iris" OAuth App via the device flow
-  # (no per-operator app setup needed — like the GitHub CLI). Set it only to
-  # point at your own OAuth App. The client_id is not a secret.
+  # Leave blank to use the bundled Equalify Iris GITHUB APP via the device flow
+  # (no per-operator app setup needed — like the GitHub CLI). Set it only to point
+  # at your own GitHub App; its id starts `Iv`, and the id is not a secret.
+  #
+  # It must be a GitHub App, not an OAuth App: an `Ov…` id is refused at startup,
+  # because Iris requests no OAuth scope and an OAuth App would therefore
+  # authenticate users fine and then fail every issue filing. See the note below
+  # `issue_token` for the registration settings your own app needs.
+  #
+  # Leaving this blank and changing `upstream_repo` is NOT enough on its own: the
+  # bundled app is installed on EqualifyEverything/equalify-iris, and an app's
+  # `issues: write` comes from its installation, so filing would fail for every user.
+  # That combination warns at startup.
   client_id: ${GITHUB_CLIENT_ID}
   # Only required for the WEB redirect flow (/auth/github/start + /callback). The
   # device flow (CLI/Postman) needs no secret. Never commit a real secret.
   client_secret: ${GITHUB_CLIENT_SECRET}
   # The upstream agent library repo — where agent-suggestion issues are filed.
+  # Changing this requires a GitHub App installed on THAT repo: see `client_id` above.
   upstream_repo: ${IRIS_UPSTREAM_REPO}
   # GitHub host base URLs. Override for GitHub Enterprise (e.g.
   # https://github.example.com/api/v3 and https://github.example.com). Defaults
@@ -52,34 +63,25 @@ github:
   # each contribution is credited to the person whose session produced it. A PAT here
   # files everything under one bot account instead and erases that attribution, so
   # set it only where a deployment genuinely cannot file as its users (e.g. an org
-  # policy that forbids it). It does NOT let you narrow `oauth_scope` below.
+  # policy that forbids it).
   issue_token: ${IRIS_GITHUB_TOKEN}
-  # OAuth scope requested from each user. The token does two things: GET /user to
-  # identify them (no scope needed) and file issues on `upstream_repo` (which is
-  # required of every user, not optional). So:
+  # No `oauth_scope` key: Iris authenticates as a GITHUB APP, which does not use
+  # OAuth scopes. Its one permission — `issues: write` — comes from INSTALLING the app
+  # on `upstream_repo`, so the consent screen users see requests no repository access
+  # at all.
   #
-  #   public_repo  (default)  public upstream. The FLOOR, not a starting point to
-  #                           lower — exactly enough to file an issue, nothing more.
-  #   repo                    ONLY if `upstream_repo` is private. Also grants read
-  #                           AND WRITE to every private repo the user can reach,
-  #                           which nothing here uses — so do not set it otherwise.
+  # If `upstream_repo` is PRIVATE, note that a user's token is limited to that user's
+  # own access as well as the installation's: filing then works only for users who can
+  # already see the repo, and 404s for the rest. Set `issue_token` above for a private
+  # upstream that must accept contributions from non-collaborators.
   #
-  # There is no "request nothing" setting. `oauth_scope: none` is recognized only in
-  # order to be REJECTED at startup with an explanation: a token that can identify a
-  # user but not file on their behalf breaks the contribution model, and GitHub's 403
-  # would surface as one swallowed log line per run. `issue_token` above does not
-  # change that — while a PAT is set it does the filing and the user's scope goes
-  # unused, but unset it (rotation, expiry, a copied config) and the user tokens
-  # become the credential that files. Scopeless ones cannot, and the service keeps
-  # answering 200 while contribution stops. The floor is what makes that loud.
+  # (An OAuth App could only express "file an issue" as `public_repo`: read AND write
+  # to every public repo the user can reach, account-wide. That is what this replaced.)
   #
-  # Every EMPTY form (key absent, valueless key, "", an unset ${VAR}) falls back to
-  # public_repo rather than to nothing — a typo in a variable name must not be able to
-  # strip the scope out of a deployment.
-  #
-  # Changing this does not narrow tokens already issued — those keep their old
-  # scope until revoked at github.com/settings/applications.
-  oauth_scope: public_repo
+  # Pointing `client_id` at your own app therefore means registering a GitHub App with
+  # device flow ENABLED and user-token expiry OFF, then installing it on your
+  # `upstream_repo`. If filing logs a 403/404, the app is probably not installed — the
+  # log line's `hint` says so.
 
 # LLM provider abstraction (PRD §10.3). Each agent declares a capability;
 # the deployment decides which provider serves it.

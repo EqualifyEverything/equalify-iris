@@ -19,20 +19,20 @@ curl -s "$BASE/health"
 
 ## 1. Authenticate (get a token)
 
-GitHub OAuth is the only auth mechanism, and a GitHub token is **required** on every API call —
+GitHub is the only auth mechanism, and a GitHub token is **required** on every API call —
 there is no anonymous mode, no API key and no second SSO provider. That is a design decision, not
 a gap: your token is what files your session's feedback back to the shared agent library, under
 your own GitHub identity. Using Iris and improving it for the next person are the same act
 (PRD §12). If you would rather not contribute, this is not the service to run.
 
-By default the service uses a **bundled OAuth App** — you don't create or configure anything;
+By default the service uses a **bundled GitHub App** — you don't create or configure anything;
 just run the device flow below and approve in your browser.
 
-The consent screen requests **`public_repo`**, which is exactly enough to file an issue on a
-public upstream and nothing more. It is the floor, not a default to trim: the scope is
-`github.oauth_scope` in the deployment's config, a private upstream repo needs `repo`, and a
-deployment that requests no scope **does not start** — a token that can identify you but not file
-on your behalf is not a supported configuration.
+The consent screen requests **no repository access at all.** Iris is a GitHub App, so the one
+permission it needs — write access to issues on the upstream repo — comes from the app being
+*installed* on that repo, not from your authorization. What your token grants is your **identity**,
+which is what puts your name on the feedback your session contributes. It cannot read your code, and
+it cannot touch any repository other than the upstream one the app is installed on.
 
 Your token is never written to disk. It is read from the `Authorization` header, held in memory
 for the duration of the run it authorizes, and discarded — revoke it any time at
@@ -326,21 +326,29 @@ curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/close"
 Every session gives something back, and there is no opt-out. This is why the API requires a GitHub
 token at all (PRD §12).
 
-Two things get filed as labeled GitHub issues on the upstream repo, server-side during the run:
+Two things get filed as GitHub issues on the upstream repo, server-side during the run. Each is
+identified by its title prefix rather than by a label, because GitHub silently drops labels set by a
+filer without push access — which is most filers here:
 
-- **New agent suggestions** (`iris-agent-suggestion`) — when the extractor meets content a
+- **New agent suggestions** (`New agent suggestion: <type>`) — when the extractor meets content a
   dedicated specialist agent would handle better than the general pass, Iris drafts that agent and
   files it with the code + context.
-- **Agent improvements** (`iris-agent-update`) — when your `/feedback` produces a change that
-  generalizes beyond your document, and it survives the agent's regression fixtures.
+- **Agent improvements** (`Agent update proposal: <agent>`) — when your `/feedback` produces a
+  change that generalizes beyond your document, and it survives the agent's regression fixtures.
 
 Both are filed with **your** token, so the issue carries your GitHub identity and the credit is
 yours. There is no PR/fork flow (deviation from PRD §7.13): `/close` returns no `prs_opened` and
 requests accept no `skip_prs`.
 
+Both skip filing if an open issue with the same title already exists, found by searching GitHub. That
+search is the only dedupe, and GitHub's search index is not immediate — two sessions that suggest the
+same thing within a minute or two of each other can each file one. Deliberate: a duplicate suggestion
+costs a maintainer one click, and hard-failing the check would cost you your document.
+
 Filing never fails your run — a contribution is a side effect, and a GitHub outage must not cost
 you a document you already paid for. It is logged as `agent_issue_failed` instead, with a hint
-naming the likely cause when the failure looks like a permissions problem.
+naming the likely cause when the failure looks like a permissions problem (usually: the GitHub App
+is not installed on `upstream_repo`).
 
 A deployment can set `github.issue_token` to a service-account PAT to file everything under one bot
 account instead. That is **not recommended** and it is off by default: it erases the attribution

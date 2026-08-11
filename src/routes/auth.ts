@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { randomBytes } from "node:crypto";
 import type { IrisConfig } from "../config.ts";
-import { authorizeUrl, exchangeCode, startDeviceFlow, pollDeviceFlow } from "../auth/github.ts";
+import { authorizeUrl, exchangeCode, expiringTokenWarning, startDeviceFlow, pollDeviceFlow } from "../auth/github.ts";
 import { sendError } from "./errors.ts";
 
 export function authRouter(cfg: IrisConfig): Router {
@@ -16,10 +16,10 @@ export function authRouter(cfg: IrisConfig): Router {
     for (const [s, exp] of states) if (exp < now) states.delete(s);
   };
 
-  // Web flow: redirect to the GitHub consent screen (requesting
-  // `github.oauth_scope` — `public_repo` unless the deployment says otherwise).
-  // Unlike the device flow, the web flow's code exchange needs the client
-  // secret, so both are required here.
+  // Web flow: redirect to the GitHub consent screen. No scope is requested — Iris
+  // is a GitHub App, so repository access comes from the installation rather than
+  // from the user's authorization (see src/auth/github.ts). Unlike the device flow,
+  // the web flow's code exchange needs the client secret, so both are required here.
   r.get("/github/start", (_req, res) => {
     if (!cfg.github.client_id || !cfg.github.client_secret) {
       sendError(res, 500, "github_not_configured", "Web OAuth flow requires both client_id and client_secret. Use the device flow if only a client_id is configured.");
@@ -28,7 +28,7 @@ export function authRouter(cfg: IrisConfig): Router {
     const state = randomBytes(16).toString("hex");
     states.set(state, Date.now() + STATE_TTL);
     res.redirect(
-      authorizeUrl(cfg.github.client_id, callbackUrl, state, cfg.github.oauth_base_url, cfg.github.oauth_scope),
+      authorizeUrl(cfg.github.client_id, callbackUrl, state, cfg.github.oauth_base_url),
     );
   });
 
@@ -52,7 +52,10 @@ export function authRouter(cfg: IrisConfig): Router {
     }
     try {
       const token = await exchangeCode(cfg.github.client_id, cfg.github.client_secret, code, callbackUrl, cfg.github.oauth_base_url);
-      res.json({ access_token: token, token_type: "bearer" });
+      // Both login flows warn on an expiring token; see expiringTokenWarning.
+      const warning = expiringTokenWarning(token.expires_in);
+      if (warning) console.warn(`WARNING: ${warning}`);
+      res.json({ access_token: token.access_token, token_type: "bearer" });
     } catch (e) {
       sendError(res, 400, "oauth_failed", (e as Error).message);
     }
@@ -65,7 +68,7 @@ export function authRouter(cfg: IrisConfig): Router {
       return;
     }
     try {
-      const d = await startDeviceFlow(cfg.github.client_id, cfg.github.oauth_base_url, cfg.github.oauth_scope);
+      const d = await startDeviceFlow(cfg.github.client_id, cfg.github.oauth_base_url);
       res.json({
         device_code: d.device_code,
         user_code: d.user_code,
@@ -88,6 +91,12 @@ export function authRouter(cfg: IrisConfig): Router {
     try {
       const result = await pollDeviceFlow(cfg.github.client_id, deviceCode, cfg.github.oauth_base_url);
       if (result.status === "approved") {
+        // An `expires_in` means the app has user-token expiry ON, which this service
+        // is not built for: nothing persists or refreshes a credential, so every
+        // token silently 401s after its window. Warned here because the token itself
+        // works, so there is no failure to attach it to until hours later.
+        const warning = expiringTokenWarning(result.expires_in);
+        if (warning) console.warn(`WARNING: ${warning}`);
         res.json({ access_token: result.access_token, token_type: "bearer" });
       } else {
         // 202: still pending (authorization_pending / slow_down / etc.)
