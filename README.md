@@ -661,11 +661,73 @@ PostgreSQL and S3 backends (§10.2 — "supported alternative," SQLite + local F
 reference), the per-user config endpoint (§9.1 — "not specified in v1"), and webhooks (§9.4 —
 out of scope). The only endpoint beyond the PRD is `GET /v1/health`, a standard liveness probe.
 
+## Automated code review
+
+Every PR is reviewed by Claude in CI before a human reads it
+([`.github/workflows/code-review.yml`](.github/workflows/code-review.yml), PRD §7.14). This is
+not convenience tooling. Iris's agent library only improves through upstream merge (§7.13), so
+review capacity is the bottleneck on the whole contribution model — and a three-institution
+maintainership with no full-time reviewer cannot be the only thing between a contributed prompt
+and every future session.
+
+What it does, in order:
+
+1. Runs `npm ci`, `tsc --noEmit`, the unit suite, `./test/e2e.sh`, and `actionlint`, and hands
+   the model their **actual output**. The reviewer is told not to re-run them, so a claim that a
+   check failed is quoted rather than predicted.
+2. Builds a context file: the diff, plus full source for files that are new or substantially
+   rewritten, plus up to the 3 most recent prior reviews on **earlier commits of the same PR** —
+   so a re-review knows what it already said instead of repeating it.
+3. Reviews against a ranked list: accessibility of the output, upstream side effects and filing
+   identity, auth/tokens/secrets, provider routing and cost, correctness, failing checks, missing
+   tests, and the PR template's own contract.
+4. Posts exactly one review ending with a one-line `Accessibility impact:`.
+
+**Blocking is decided by reachability, not by category.** A finding blocks only if a real user, a
+real request, or CI reaches it on input the code accepts today, and each blocking finding has to
+name that input. A defect that's real but unreachable is a note on an **approval**, with what
+would have to change to reach it. This was tuned in response to a measured problem: the findings
+were reproduced and specific, but *everything* arrived as blocking — 34 `CHANGES_REQUESTED` to 17
+`APPROVED` across the repo's history, individual PRs at 12-to-1, including reviews that called
+their own finding latent and requested changes anyway. `main` has no branch protection, so the
+cost was never blocked merges; it was author attention, and a reviewer that always blocks trains
+you to skim the one time it matters. Three things stay blocking even when unreachable, because
+their value is holding when something else breaks: auth/token/secret handling, publishing under
+the wrong identity, and path handling that could escape the data dir.
+
+**Depth was not what got trimmed.** The model gets ~19 minutes and is told to dig exactly as hard
+as before; the bar governs the verdict, not the investigation. It appends findings as it confirms
+them, so if it's cut off, a fallback step posts the partial findings plus the check summary as a
+`--request-changes` — an incomplete review must not read as a pass. A final step fails the job if
+no review was posted at all, since the action can exit 0 without posting one.
+
+Two gaps worth knowing:
+
+- **A PR that modifies `code-review.yml` gets no automated review.** `claude-code-action` refuses
+  to run when its own workflow file differs from the copy on `main`. Everything else on such a PR
+  still goes green, so the workflow says so loudly — a step-summary block and an Actions warning
+  naming what to check by hand (does it let PR-authored code run with secrets, widen
+  `permissions:`, or interpolate `github.event.*` into a `run:` block). A second workflow used to
+  cover this on `pull_request_target`; it never produced a review in six runs and was the repo's
+  only PR-triggered job holding `id-token: write`, so it was deleted and the gap accepted.
+- **Fork PRs are skipped.** `pull_request` from a fork gets no secrets, so the OIDC role
+  assumption would fail confusingly. Review one with
+  `gh workflow run code-review.yml -f pr_number=<n>` — which runs the fork's code in a job
+  holding the Bedrock role, so read the diff first.
+
+The verdict is advisory: `main` is unprotected and a human still merges. What changes is what
+that human is reading, not whether they read it.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md). Found an
 accessibility barrier — in the app or in the HTML it produces? Please open an
 [Accessibility issue](.github/ISSUE_TEMPLATE/accessibility.yml); those are our top priority.
+
+PRs get an automated review before a human reads them — see
+[Automated code review](#automated-code-review) above for what it looks at and, more usefully,
+what it deliberately does **not** flag (style, formatting, naming, "you could also do X",
+pre-existing issues your PR doesn't touch).
 
 ## License
 

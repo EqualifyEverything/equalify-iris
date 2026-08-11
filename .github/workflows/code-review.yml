@@ -101,6 +101,39 @@ jobs:
           if gh pr diff "$PR_NUMBER" --name-only | grep -qx '.github/workflows/code-review.yml'; then
             echo "changed_workflow=code-review.yml" >> "$GITHUB_OUTPUT"
             echo "This PR modifies code-review.yml — the action will self-skip until it is on the default branch."
+            # Say it on the PR itself, not just in a log nobody opens. Between PR #43 and
+            # PR #63 a second workflow (workflow-review.yml, on pull_request_target)
+            # covered this gap; it never once succeeded in 6 runs and was deleted, so a PR
+            # touching this file now genuinely gets NO automated review. That is an
+            # accepted tradeoff — it also removed the repo's only
+            # `pull_request_target` + `id-token: write` job — but it must not be silent,
+            # because every other signal on such a PR still goes green.
+            # Single-quoted, and that is load-bearing on the last line. Two layers of
+            # escaping stack there, and each one bites in a different place:
+            #   1. Actions substitutes `${{ '${{' }}` textually before any shell sees
+            #      the script. An open-expression sequence left bare anywhere in this
+            #      file — including in a comment like this one — is parsed as an
+            #      expression, and the resulting error does not degrade the workflow,
+            #      it disables the whole FILE. That is why this comment escapes it too.
+            #   2. What that substitution leaves behind is a bare open-expression
+            #      sequence, which bash then reads as a parameter expansion. Inside
+            #      double quotes that is `bad substitution` and the step exits 1 —
+            #      exactly how this block failed on the PR that introduced it.
+            # Single quotes stop bash expanding it while Actions still escapes it, and
+            # they make the backticks literal as a bonus. See the actionlint rationale
+            # further down for why an expression error here is unrecoverable.
+            {
+              echo '### ⚠️ This PR changes `code-review.yml` — it will not be reviewed by Claude'
+              echo
+              echo '`claude-code-action` refuses to run when its own workflow file differs from'
+              echo 'the copy on the default branch, so the review step self-skips. The checks below'
+              echo "(install, typecheck, unit, e2e, actionlint) still ran against this PR's head."
+              echo
+              echo '**This diff needs a human read before merge** — in particular whether it lets'
+              echo 'PR-authored code run with secrets, widens `permissions:`, or interpolates'
+              echo 'attacker-controlled `${{ '${{' }} github.event.* }}` into a `run:` block.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::This PR changes code-review.yml, so the Claude review step self-skips and the PR gets NO automated review. Read the workflow diff by hand before merging."
           else
             echo "changed_workflow=none" >> "$GITHUB_OUTPUT"
           fi
@@ -121,18 +154,13 @@ jobs:
           # Per-commit idempotency: if claude[bot] already reviewed this exact
           # sha, don't post again. A new push (new sha) is reviewed as normal.
           #
-          # Excluding the workflow-review marker is load-bearing, not tidiness.
-          # .github/workflows/workflow-review.yml posts on the same commit_id — as
-          # github-actions[bot] since PR #62 gave it an explicit `github_token` (it can no
-          # longer obtain a claude[bot] App token under `pull_request_target`), so the
-          # login filter alone would now exclude it. Keep the marker filter anyway: it is
-          # what makes this guard correct regardless of which identity that job posts
-          # under, and this guard gates EVERY step below it — including npm ci,
-          # typecheck, unit and e2e. Counting that review would mean a re-run or
-          # workflow_dispatch of this workflow on the same sha silently skips the whole
-          # suite and reports success, because a *different* workflow had posted about
-          # the CI config. The marker is the first line workflow-review.yml mandates for
-          # its output; keep the two in sync.
+          # The marker filter is retained after workflow-review.yml was deleted (PR #63).
+          # Reviews carrying that marker still exist on PRs #58, #61 and #62, so a re-run or
+          # workflow_dispatch against one of those shas would still see one. This guard
+          # gates EVERY step below it — including npm ci, typecheck, unit and e2e — so
+          # counting a foreign review here means the whole suite is skipped while the job
+          # reports success. Cheap to keep, and it is what makes the guard correct
+          # independently of which identity posted.
           MARKER='Scope: CI/workflow security review'
           COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
             | jq --arg m "$MARKER" --arg sha "$HEAD_SHA" \
@@ -213,8 +241,8 @@ jobs:
           # can see what was already said.
           #
           # Reviews on the CURRENT sha are excluded: if one exists the guard above has
-          # already skipped this whole job, so any match here would be a workflow-review
-          # post or a race, and feeding the model its own verdict invites it to restate it.
+          # already skipped this whole job, so any match here would be a race, and feeding
+          # the model its own verdict for the commit under review invites it to restate it.
           #
           # Bounded two ways, because this section competes with the diff for context.
           # PR #49 accumulated 13 reviews totalling 59KB — a 45% increase on a ~131KB
@@ -359,8 +387,7 @@ jobs:
           # instead of its `name:`, and every run fails instantly with no jobs and no
           # logs, which reads like an infrastructure blip. YAML parsing, `bash -n` and
           # the test suite all pass on such a file; nothing here would have caught it.
-          # Escape it as this comment does — see the two occurrences in
-          # workflow-review.yml's prompt.
+          # Escape it as this comment does.
           #
           # Pinned by version, and the download is verified: an unpinned installer for
           # a linter is a supply-chain path into a job that holds id-token: write.
@@ -378,9 +405,10 @@ jobs:
              && echo "${ACTIONLINT_SHA256}  /tmp/actionlint.tgz" | sha256sum -c - >/dev/null 2>&1 \
              && tar -xzf /tmp/actionlint.tgz -C /tmp actionlint; then
             # shellcheck/pyflakes disabled: this gate is about Actions-expression and
-            # workflow-schema errors. Shell style in the review workflows is reviewed
-            # by a human and by the CI-security reviewer, and shellcheck on these
-            # heavily-templated blocks is mostly false positives.
+            # workflow-schema errors. Shell style in this workflow is reviewed by a
+            # human — the CI-security reviewer that used to share the job was deleted
+            # in PR #63 — and shellcheck on these heavily-templated blocks is mostly
+            # false positives.
             if /tmp/actionlint -shellcheck= -pyflakes= .github/workflows/*.yml 2>&1 | tail -40 >> "$OUT"; then
               WFLINT=pass
             else
@@ -401,10 +429,10 @@ jobs:
           # streams ~130KB into a 20-line reader, takes SIGPIPE, and exits 141,
           # which `set -o pipefail` turns into a step abort *before* the review is
           # posted. A dedicated file needs no pipe at all.
-          # workflow-review.yml greps these four lines out of this job's log, so their
-          # text is load-bearing — see the grep in that file's build step. actionlint is
-          # appended after them for that reason: a format change there breaks the
-          # sibling's parse, and the four originals are what it matches on.
+          # The four original lines are no longer parsed by anything outside this file
+          # (workflow-review.yml, which grepped them out of this job's log, was deleted in
+          # PR #63), so the format is now free to change — but the fallback step below and
+          # the run summary both render it, so keep it readable.
           SUMMARY=$(printf '## Check summary\n- npm ci: %s\n- typecheck: %s\n- unit (`npm test`): %s\n- e2e (`./test/e2e.sh`): %s\n- workflow lint (`actionlint`): %s\n' \
             "$INSTALL" "$TYPECHECK" "$UNIT" "$E2E" "$WFLINT")
           { echo; echo "$SUMMARY"; } >> "$OUT"

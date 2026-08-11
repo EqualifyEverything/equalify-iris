@@ -382,3 +382,10 @@ forms are the usual trigger.
 ```bash
 ./test/e2e.sh      # boots mocks + Iris, runs all of the above via curl, asserts each step
 ```
+
+This is the same script CI runs on every PR, and its output is handed to the automated reviewer as
+evidence rather than re-run by it (PRD §7.14, and
+[Automated code review](../README.md#automated-code-review)). So a change that breaks a request or
+response documented above surfaces as a blocking review finding quoting the failure — which is why
+this file is in the reviewer's scope: the API docs are part of the contract, and docs that now
+contradict the code are treated as a real defect.
