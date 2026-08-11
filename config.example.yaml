@@ -57,7 +57,12 @@ github:
   # No `oauth_scope` key: Iris authenticates as a GITHUB APP, which does not use
   # OAuth scopes. Its one permission — `issues: write` — comes from INSTALLING the app
   # on `upstream_repo`, so the consent screen users see requests no repository access
-  # at all, and a private `upstream_repo` needs no escalation.
+  # at all.
+  #
+  # If `upstream_repo` is PRIVATE, note that a user's token is limited to that user's
+  # own access as well as the installation's: filing then works only for users who can
+  # already see the repo, and 404s for the rest. Set `issue_token` above for a private
+  # upstream that must accept contributions from non-collaborators.
   #
   # (An OAuth App could only express "file an issue" as `public_repo`: read AND write
   # to every public repo the user can reach, account-wide. That is what this replaced.)

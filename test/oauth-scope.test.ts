@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import express from "express";
 import type { AddressInfo } from "node:net";
 import { authorizeUrl, startDeviceFlow } from "../src/auth/github.ts";
-import { loadConfig, type IrisConfig } from "../src/config.ts";
+import { clientIdWarning, loadConfig, type IrisConfig } from "../src/config.ts";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -70,6 +70,83 @@ test("the device flow requests no scope either", async () => {
   assert.equal(bodies[0].client_id, "cid");
 });
 
+// --- the one registration setting this flow can diagnose ----------------------
+//
+// "Enable Device Flow" is OFF for a newly registered GitHub App, and the device flow
+// is the default deployment's ONLY login path — so this is the first thing wrong with
+// a fresh app, and the string `device_flow_disabled` is the only place it is named.
+// It arrives in the response BODY, which the route turns into the operator's error
+// message. Dropping it leaves "device flow start failed: 400", which is unguessable.
+
+test("a disabled device flow reaches the operator by name", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        error: "device_flow_disabled",
+        error_description: "Device flow is not enabled for this app.",
+      }),
+      { status: 400, headers: { "content-type": "application/json" } },
+    )) as unknown as typeof globalThis.fetch;
+  try {
+    await assert.rejects(
+      () => startDeviceFlow("cid", "https://github.test"),
+      (e: Error) => {
+        assert.match(e.message, /device flow is not enabled/i, "GitHub's explanation was discarded");
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("an error delivered with a 200 is still an error", async () => {
+  // GitHub's OAuth endpoints answer some errors at HTTP 200 with the failure in the
+  // body. A status-only check read that as success and returned a DeviceCodeResponse
+  // of undefineds, so the route replied 200 with `device_code: null` — a client then
+  // polls forever against a flow that never started, which is worse than a 502.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: "device_flow_disabled" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof globalThis.fetch;
+  try {
+    await assert.rejects(
+      () => startDeviceFlow("cid", "https://github.test"),
+      (e: Error) => {
+        assert.match(e.message, /device_flow_disabled/, "a 200 with an error body was reported as success");
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("an unparseable body does not mask the failure", async () => {
+  // An HTML error page from a proxy, or an empty body. The status is all there is;
+  // the point is that reading the body cannot itself throw and lose it.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response("<html>502 Bad Gateway</html>", {
+      status: 502,
+      headers: { "content-type": "text/html" },
+    })) as unknown as typeof globalThis.fetch;
+  try {
+    await assert.rejects(
+      () => startDeviceFlow("cid", "https://github.test"),
+      (e: Error) => {
+        assert.match(e.message, /502/, "the status was lost while parsing the body");
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 // --- the config side ---------------------------------------------------------
 //
 // `github.oauth_scope` is gone, along with the startup rejection of a scopeless
@@ -128,6 +205,66 @@ test("the bundled client_id is a GitHub App, not an OAuth App", () => {
     // to an OAuth App does — which is the change that would silently restore the
     // account-wide consent screen this whole design exists to avoid.
     assert.match(loadConfig(p).github.client_id, /^Iv/, "the bundled app is not a GitHub App");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- an operator's OWN client_id ----------------------------------------------
+//
+// The bundled id above is the one value that cannot be wrong. A CONFIGURED one can,
+// and in exactly the way the deleted `oauth_scope` floor existed to prevent: point
+// `client_id` at an OAuth App and this code requests no scope (it has none left to
+// send), so tokens identify users, `GET /user` works, every request answers 200, and
+// issue filing 403s once per run forever. Nothing at runtime recovers from it, and the
+// deployment looks healthy. So the shape of the credential is checked at boot.
+
+function cfgWithClientId(dir: string, clientId: string): string {
+  const p = join(dir, `cfg-${clientId || "empty"}.yaml`);
+  writeFileSync(
+    p,
+    `server: { port: 3000, base_url: "http://localhost:3000" }\n` +
+      `storage:\n  data_dir: ${dir}\n  agents_dir: ${dir}/agents\n  database: ${dir}/iris.sqlite\n` +
+      `github:\n  client_id: "${clientId}"\n` +
+      `providers:\n  default: openrouter\n  openrouter: { api_key: k, default_model: m }\n`,
+  );
+  return p;
+}
+
+test("loadConfig rejects an OAuth App client_id", () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-ov-"));
+  try {
+    // `Ov` is an OAuth App on github.com and nothing else, so this case is
+    // unambiguous enough to refuse rather than warn about.
+    assert.throws(
+      () => loadConfig(cfgWithClientId(dir, "Ov23liGG4MfEn0DM4vTA")),
+      (e: Error) => {
+        assert.match(e.message, /OAuth App/, "the error did not say what was wrong with the id");
+        assert.match(e.message, /GitHub App/, "the error did not say what is needed instead");
+        return true;
+      },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig accepts an unrecognized client_id, and warns", () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-ghes-"));
+  try {
+    // GitHub Enterprise Server mints its own id formats and pre-2022 OAuth Apps used
+    // bare hex, so an unrecognized prefix must NOT be fatal — refusing here would
+    // break a deployment that works. The warning is the whole diagnosis in that case.
+    const cfg = loadConfig(cfgWithClientId(dir, "abc123def456"));
+    assert.equal(cfg.github.client_id, "abc123def456");
+    assert.match(String(clientIdWarning("abc123def456")), /GitHub App/);
+    assert.match(String(clientIdWarning("abc123def456")), /filing/i, "the warning did not name the consequence");
+    // A GitHub App id is the expected case and must stay quiet, or the warning
+    // becomes noise every operator learns to ignore.
+    assert.equal(clientIdWarning("Iv23liv73tlbX0VfoEkr"), undefined);
+    // Empty means "fall back to the bundled app", which loadConfig does before this
+    // runs — warning there would fire on the default deployment.
+    assert.equal(clientIdWarning(""), undefined);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

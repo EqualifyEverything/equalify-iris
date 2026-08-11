@@ -129,8 +129,15 @@ Two consequences an operator should know before deploying:
 things: `GET /user` to identify the caller, and file issues on `upstream_repo`. Iris is registered as
 a **GitHub App**, so the second one is granted once — by installing the app on `upstream_repo` with
 `issues: write` — and users only *authorize*. Their consent screen requests **no repository access
-at all**, because there is nothing left for it to ask for. A private `upstream_repo` needs no
-escalation either; the installation covers it.
+at all**, because there is nothing left for it to ask for.
+
+One limit worth knowing if your `upstream_repo` is **private**: a user's token is the *intersection*
+of the installation's permissions and that user's own access, so installing the app does not give a
+user access they did not already have. On a private upstream, filing works for users who can see the
+repo and 404s for everyone else. Set `github.issue_token` if you need a private upstream to accept
+contributions from users who are not collaborators — it files everything under one account, which
+trades away the per-user attribution below. A public `upstream_repo` (the assumption here, since the
+agent library is meant to be shared) has no such limit.
 
 This replaced an OAuth App requesting `public_repo`, and the reason is worth stating plainly: there
 is no OAuth scope meaning "open issues on one repository". `public_repo` was the narrowest one that

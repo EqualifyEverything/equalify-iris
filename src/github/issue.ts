@@ -24,8 +24,8 @@ export const AGENT_LABEL = "iris-agent-suggestion";
 // was used depends on config, and what it may do was decided elsewhere, on
 // github.com, in a place no config file can show.
 //
-// Under a GitHub App there is exactly one such cause on the user path, and it
-// replaced two scope-related ones:
+// Under a GitHub App there are two such causes on the user path, which replaced two
+// scope-related ones:
 //
 //   - The app is NOT INSTALLED on `upstream_repo` (or its installation was removed,
 //     or `issues` was never granted write). A user-to-server token carries the
@@ -34,12 +34,18 @@ export const AGENT_LABEL = "iris-agent-suggestion";
 //     the misconfiguration to suspect first, and it cannot be caught at startup: the
 //     app's install state lives on github.com, not in config.
 //
-// Both 403 and 404 are diagnosed, and the uninstalled case is usually the 404 one:
-// GitHub does not reveal repositories a credential cannot see, so no-installation
-// reads as "no such repo" rather than as a permissions error. Treating 403 as the
-// only permissions signal would miss the case this hint exists for. 404 stays
-// genuinely ambiguous — a misspelled `upstream_repo` is identical on the wire — so
-// the wording names both possibilities instead of asserting one.
+//   - The USER cannot see `upstream_repo`. A user-to-server token is the intersection
+//     of the installation's permissions and that user's own access, so on a private
+//     upstream, filing works for collaborators and 404s for everyone else however
+//     correctly the app is installed. Distinguishable from the case above by shape
+//     rather than by status: it is per-user, not deployment-wide.
+//
+// Both 403 and 404 are diagnosed, and both user-path causes are usually 404: GitHub
+// does not reveal repositories a credential cannot see, so neither reads as a
+// permissions error. Treating 403 as the only permissions signal would miss the case
+// this hint exists for. That leaves 404 genuinely ambiguous three ways — a misspelled
+// `upstream_repo` is identical on the wire too — so the wording names the
+// possibilities instead of asserting one.
 //
 // `usingServiceToken` is load-bearing, not decoration: when `github.issue_token` is
 // set it is that PAT that failed, and the app's installation has nothing to do with
@@ -87,12 +93,24 @@ export function installHintFor(
       (notFound
         ? // The uninstalled case. GitHub hides the repo rather than refusing, so
           // this reads as "no such repo" until you know to suspect the installation.
-          `404 on a repo that exists means the user's token cannot see it: the GitHub App is probably not ` +
-          `installed on upstream_repo. (A misspelled upstream_repo gives the same 404.) `
+          //
+          // Two other causes produce an identical 404 and are named rather than
+          // assumed away. A misspelled `upstream_repo` is the cheap one. The other is
+          // that a user-to-server token is the intersection of the installation's
+          // permissions and THIS USER's own access: on a private upstream, a user who
+          // cannot see the repo 404s no matter how correctly the app is installed —
+          // and that one is per-user, not deployment-wide, so it must not be reported
+          // with the "affects every user" framing below.
+          `404 on a repo that exists means this user's token cannot see it: the GitHub App is probably not ` +
+          `installed on upstream_repo. (A misspelled upstream_repo gives the same 404. So does a PRIVATE ` +
+          `upstream_repo that this particular user cannot access — a user's token is limited to their own ` +
+          `access as well as the installation's, so a private upstream needs github.issue_token to file for ` +
+          `everyone; if filing works for some users and not others, that is this.) `
         : `403 usually means the GitHub App's installation lacks Issues write on this repo. `) +
       `Install the app on upstream_repo — or check that its installation still grants Issues: Read and write — ` +
       `at github.com/settings/installations. A user's authorization carries no repository access on its own; ` +
-      `permission comes from the installation, so this affects every user until it is fixed.`,
+      `permission comes from the installation, so if the installation is the cause this affects every user ` +
+      `until it is fixed.`,
   };
 }
 

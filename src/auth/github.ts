@@ -25,7 +25,17 @@
 // granted once, by INSTALLING the app on `upstream_repo`, and it is scoped to the
 // repositories of that installation. Users only authorize; the consent screen
 // requests no repository access at all, because there is nothing left for it to ask
-// for. A private `upstream_repo` needs no escalation either — installation covers it.
+// for.
+//
+// One limit of that, because it is easy to state too strongly: a user-to-server token
+// is the INTERSECTION of the installation's permissions and the authorizing user's own
+// access. Installing the app does not hand a user access they did not have — GitHub is
+// explicit that "if a user does not have access to a repository, your app cannot access
+// that repository on their behalf even if the app is installed on that repository." So
+// a PUBLIC `upstream_repo` (the design's assumption — the agent library is public) files
+// for everyone, while a PRIVATE one files only for users who can already see it and
+// 404s for everyone else. A private upstream that anyone can contribute to therefore
+// needs `github.issue_token`, which trades away §12 attribution.
 //
 // What the user's token still carries is their IDENTITY: a user-to-server token acts
 // as the user, so issues are filed under their own account and each contribution is
@@ -101,17 +111,40 @@ export async function startDeviceFlow(
     // No `scope`, same reason as authorizeUrl.
     body: JSON.stringify({ client_id: clientId }),
   });
-  // A `device_flow_disabled` error here means the app was registered without the
-  // "Enable Device Flow" checkbox — the one setting this default login path needs.
-  if (!res.ok) throw new Error(`device flow start failed: ${res.status}`);
-  return (await res.json()) as DeviceCodeResponse;
+  // The body is read on BOTH paths, and the error inside it is the point. GitHub
+  // answers `device_flow_disabled` when the app was registered without the "Enable
+  // Device Flow" checkbox — the one setting this default login path needs, invisible
+  // from here, and the single most likely thing to be wrong on a fresh app. The route
+  // turns whatever this throws into the operator's error message, so dropping the
+  // body left them with "device flow start failed: 400" and no way to guess.
+  //
+  // And an error can arrive with a 200: GitHub's OAuth endpoints return `{"error":
+  // "..."}` at 200 in some cases, which a status-only check reads as success. That
+  // returned a DeviceCodeResponse of undefineds and the route answered 200 with
+  // `device_code: null` — a client polling forever against a flow that never started.
+  // So success requires a `device_code`, not a 2xx.
+  const body = (await res.json().catch(() => null)) as
+    | (Partial<DeviceCodeResponse> & { error?: string; error_description?: string })
+    | null;
+  if (!res.ok || !body?.device_code) {
+    const detail = body?.error_description ?? body?.error;
+    throw new Error(`device flow start failed: ${res.status}${detail ? ` ${detail}` : ""}`);
+  }
+  return body as DeviceCodeResponse;
 }
 
 export type DevicePoll =
-  | { status: "approved"; access_token: string }
+  | { status: "approved"; access_token: string; expires_in?: number }
   | { status: "pending"; error: string };
 
 // Poll for device-flow approval. Returns pending until the user approves.
+//
+// `expires_in` is carried out of the response for one reason: it is the only
+// observable difference between an app registered with user-token expiry OFF (the
+// setting this code requires) and one left at GitHub's default. Nothing here
+// persists or refreshes a credential, so a deployment that missed that checkbox
+// works for eight hours and then 401s every request with nothing to explain it. The
+// route logs it; see routes/auth.ts.
 export async function pollDeviceFlow(
   clientId: string,
   deviceCode: string,
@@ -126,8 +159,10 @@ export async function pollDeviceFlow(
       grant_type: "urn:ietf:params:oauth:grant-type:device_code",
     }),
   });
-  const json = (await res.json()) as { access_token?: string; error?: string };
-  if (json.access_token) return { status: "approved", access_token: json.access_token };
+  const json = (await res.json()) as { access_token?: string; error?: string; expires_in?: number };
+  if (json.access_token) {
+    return { status: "approved", access_token: json.access_token, expires_in: json.expires_in };
+  }
   return { status: "pending", error: json.error ?? "authorization_pending" };
 }
 

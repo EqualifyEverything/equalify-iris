@@ -145,6 +145,21 @@ test("a missing installation is diagnosed on its 404, which is how GitHub report
   // 404 is genuinely ambiguous — a typo in upstream_repo looks identical — so the
   // hint must offer that too rather than asserting the installation confidently.
   assert.match(hint, /misspelled|spelled/i, "the hint asserted the installation for an ambiguous 404");
+  // And the third cause, which is NOT a misconfiguration of the app at all: a user's
+  // token is the intersection of the installation's permissions and that user's own
+  // access, so a private upstream 404s for a user who cannot see it however correctly
+  // the app is installed. Without this the hint sends a private-upstream operator to
+  // re-install a working installation, and never names the fix (issue_token).
+  assert.match(hint, /private/i, "the hint omitted the private-upstream cause of a 404");
+  assert.match(hint, /issue_token/, "named the private-upstream cause without its remedy");
+  // The "affects every user" framing is shared with the 403 branch, so on a 404 it has
+  // to be CONDITIONAL rather than dropped: an operator told flatly that every user is
+  // broken, while some of their users file fine, discards the whole hint as wrong.
+  assert.match(
+    hint,
+    /if the installation is the cause/,
+    "asserted a deployment-wide failure for a 404 that can be one user's own access",
+  );
 });
 
 test("a 404 under a service token still points at the PAT", async () => {

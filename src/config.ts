@@ -129,19 +129,35 @@ function expandEnv(value: unknown, unset: Set<string>): unknown {
 function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void {
   const problems: string[] = [];
 
-  // No scope validation here any more, and nothing replaces it.
+  // The scope validation this function used to do is gone: it rejected a scopeless
+  // `github.oauth_scope` at startup, because a token that could identify a user but
+  // not file on their behalf broke the contribution model (PRD §12) and failed
+  // silently — one swallowed `agent_issue_failed` line per run while the service kept
+  // answering 200. Iris now authenticates as a GitHub App, so a user's authorization
+  // carries no repository permission to get wrong: `issues: write` comes from
+  // INSTALLING the app on `upstream_repo` (see src/auth/github.ts).
   //
-  // This function used to reject a scopeless `github.oauth_scope` at startup, because
-  // a token that could identify a user but not file on their behalf broke the
-  // contribution model (PRD §12) and failed silently — one swallowed
-  // `agent_issue_failed` line per run while the service kept answering 200.
+  // What DID survive is the failure shape, one level up. An operator who points
+  // `client_id` at an OAuth App gets exactly the state the old check existed to
+  // prevent: no scope is requested (this code no longer has one to send), so the
+  // token identifies users and cannot file, `GET /user` keeps working, the service
+  // keeps answering 200, and contribution is dead with one log line per run. So the
+  // one thing about the credential that config CAN see is checked here.
   //
-  // Iris now authenticates as a GitHub App, so a user's authorization carries no
-  // repository permission to get wrong: `issues: write` comes from INSTALLING the app
-  // on `upstream_repo` (see src/auth/github.ts). The equivalent misconfiguration is
-  // therefore no longer in config at all — it is "the app was never installed", which
-  // lives on github.com and cannot be seen from here. It surfaces as a 404 on issue
-  // filing and is diagnosed there, by `installHintFor` in src/github/issue.ts.
+  // Only the unambiguous case is fatal. `Ov`-prefixed ids are OAuth Apps on
+  // github.com and nothing else, and no GitHub App has that prefix. Everything else
+  // non-`Iv` gets a warning instead (see clientIdWarning) rather than a refusal —
+  // legacy OAuth App ids are bare hex, GitHub Enterprise Server mints its own, and
+  // refusing a format this code has not seen would break a deployment that works.
+  if (cfg.github?.client_id?.startsWith("Ov")) {
+    problems.push(
+      `github.client_id "${cfg.github.client_id}" is an OAuth App (Ov…), and Iris needs a GitHub App (Iv…). ` +
+        `An OAuth App would authenticate users fine and then be unable to file issues: Iris requests no OAuth ` +
+        `scope, because a GitHub App takes its issues:write from being INSTALLED on upstream_repo. Register a ` +
+        `GitHub App (device flow enabled, user-token expiry off), install it on upstream_repo, and use its ` +
+        `client id — or leave github.client_id unset to use the bundled app.`,
+    );
+  }
 
   if (!cfg.providers?.default) problems.push("providers.default is not set");
 
@@ -169,6 +185,25 @@ function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void
   if (problems.length === 0) return;
   const hint = unset.size > 0 ? ` Unset environment variables: ${[...unset].sort().join(", ")}.` : "";
   throw new Error(`Invalid config ${path}:\n  - ${problems.join("\n  - ")}\n${hint}`);
+}
+
+// A boot-time warning for a `client_id` that is probably not a GitHub App, or
+// undefined if it looks fine. Returned rather than logged so this is testable and so
+// the caller decides where it goes; src/index.ts prints it.
+//
+// Not an error, unlike the `Ov` case validateConfig rejects: GitHub Enterprise
+// Server mints its own id formats and pre-2022 OAuth Apps used bare hex, so a
+// refusal here could break a working deployment over a format this code has not
+// seen. But the consequence of being wrong is invisible at boot and expensive — an
+// OAuth App files nothing while looking healthy — so it is worth a line.
+export function clientIdWarning(clientId: string): string | undefined {
+  if (!clientId || clientId.startsWith("Iv")) return undefined;
+  return (
+    `github.client_id "${clientId}" does not look like a GitHub App id (those start "Iv"). ` +
+    `If it is an OAuth App, logins will work and issue filing will fail on every run: Iris requests no OAuth ` +
+    `scope, because a GitHub App gets issues:write from its installation on upstream_repo. Ignore this if you ` +
+    `are on GitHub Enterprise Server, where id formats differ.`
+  );
 }
 
 // Coerce a configured max_tokens into a usable integer. Same "absent means the
