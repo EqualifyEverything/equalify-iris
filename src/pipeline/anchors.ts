@@ -53,8 +53,17 @@ const IDREF_ATTRS = [
 ];
 
 export interface AnchorReport {
-  // Bare ids that more than one page claimed, and were therefore namespaced.
+  // Bare ids that more than one page claimed. Namespaced, EXCEPT for whatever appears in
+  // `pinned_ids` — see there, and do not read this field as "every one of these was
+  // rewritten".
   collisions: string[];
+  // Colliding ids whose first owner was deliberately left bare, because a page that could
+  // not be rewritten holds a reference to it and a frozen reference can only find a bare
+  // id. Reported for the same reason `skipped_pages` is: without it, a bare colliding id in
+  // the delivered document is indistinguishable in the run log from the namespacing having
+  // silently failed. The other owners of a pinned id are still renamed, so the id appears
+  // here AND in `collisions`.
+  pinned_ids: string[];
   // References that name a colliding id from a page that does not own it, so no page
   // can say which copy was meant. They are repointed at the first owner in document
   // order — what the un-namespaced document resolved them to — and reported here
@@ -62,15 +71,17 @@ export interface AnchorReport {
   // wrote it is a document worth a human's attention. Named `ambiguous` and not
   // `unresolved`: they do resolve, just not on the page's own authority.
   ambiguous: { page: number; ref: string }[];
-  // Pages left exactly as written because rewriting them would have lost markup (see
-  // `wouldChangeMarkup`). Either the page's own colliding ids keep their bare form — in
+  // Pages left exactly as written, either because rewriting them would have lost markup
+  // (see `wouldChangeMarkup`) or because they could not be parsed at all (see
+  // `parseFragment`), and which are relevant to the join: they own a colliding id or refer
+  // to one. Either the page's own colliding ids keep their bare form — in
   // which case lint's `duplicate-id` / `duplicate-id-active` names the collision — or
   // an ambiguous reference on it keeps pointing at a bare id that other pages
   // renamed away, which is why the page is named here as well as in `ambiguous`.
   skipped_pages: number[];
 }
 
-const EMPTY_REPORT: AnchorReport = { collisions: [], ambiguous: [], skipped_pages: [] };
+const EMPTY_REPORT: AnchorReport = { collisions: [], pinned_ids: [], ambiguous: [], skipped_pages: [] };
 
 // The characters that can sit immediately before an attribute name in source HTML, as a
 // regex character class. Both passes below use a cheap regex over the unparsed source to
@@ -219,13 +230,290 @@ function ownedIds(document: Document): Set<string> {
   return ids;
 }
 
-function parseFragment(innerHtml: string): JSDOM | null {
-  try {
-    return new JSDOM(`<body>${innerHtml}</body>`, { virtualConsole: new VirtualConsole() });
-  } catch {
-    return null;
+// How deeply a page's PARSED tree may nest before this module refuses to rewrite it.
+//
+// Rewriting a page recurses per level of nesting in three places — jsdom's serializer
+// (`body.innerHTML`), its `window.close()`, and this file's own `parsedSequence` — so a deep
+// enough page overflows the stack in one of them. Which one goes first is not worth relying
+// on: measured, serialization and `close()` throw from about 4,000 levels while the parse
+// itself survives past 10,000, so the band between them PARSED and then threw out of the
+// rewrite, while a DEEPER page whose parse failed cleanly was delivered fine. Behaviour that
+// was non-monotonic in depth, with the worse outcome on the shallower input. And each
+// threshold moves with how much stack the caller has already used, so none of them is a
+// number to build on.
+//
+// Hence one limit, far below all of them. Past it the page is delivered exactly as written,
+// which is the same outcome as tripping the reserialization guard and is handled by the same
+// code. Real documents do not nest 500 elements deep; the limit is for pathological input,
+// and refusing a page that did not need refusing costs a duplicate id that lint reports —
+// the trade this file's header makes in that direction.
+//
+// With one qualification worth stating where the number is chosen, because it is the one
+// place the trade is weaker than it sounds: axe overflows on a deep document too, from a few
+// thousand levels, and `runAxe` degrades to `ok: true` with an `error` rather than failing the
+// session. So past that depth the duplicate id ships with no lint finding naming it. That is
+// not a reason to fail the run over nesting — a delivered document with a duplicate id beats
+// no document — but it does mean the fallback reporter is silent exactly where this guard is
+// most likely to fire, which is why `runAssembly` logs `lint_error` alongside `lint_ok`.
+const MAX_NESTING = 500;
+
+// The exact depth of the PARSED tree, measured with an explicit stack rather than recursion
+// (the recursion is what is being guarded against) and stopping as soon as the limit is
+// passed.
+//
+// The parsed tree and not the source, because the source cannot be counted. The first
+// version of this guard counted start tags that had not been closed, which is not a depth:
+// void elements and implied end tags never came back down, so a 120-row table written
+// `<tr><td>a<td>b` — real depth 4 — and a page with 600 `<br>` — real depth 1 — were both
+// refused. Both are ordinary page-agent output, and refusing them shipped the duplicate id
+// this module exists to remove. A table continued across a page break is the very scenario
+// that produces these collisions, so that regression was not a corner case. Estimating
+// depth from source means modelling the parser's implied-end-tag and void-element rules,
+// which is exactly what `sourceAttrs` had to stop doing; measuring the tree needs no model.
+function exceedsNesting(document: Document): boolean {
+  // Depth of `body`'s children is 1, matching "how deeply nested is this page".
+  const stack: { node: Element; depth: number }[] = [...document.body.children].map((node) => ({ node, depth: 1 }));
+  while (stack.length > 0) {
+    const { node, depth } = stack.pop()!;
+    if (depth > MAX_NESTING) return true;
+    for (const child of node.children) stack.push({ node: child, depth: depth + 1 });
   }
+  return false;
 }
+
+// What parsing a page yielded. Three outcomes, and the middle one is the reason this is a
+// result type rather than `JSDOM | null`:
+//
+//   * `dom` set and `rewritable` true — the ordinary page.
+//   * `dom` set and `rewritable` FALSE — too deep to rewrite, but its tree can still be
+//     READ. Reading it is exact, where scanning its source is a guess (see `readable`).
+//   * `dom` null — the parse itself threw, so there is no tree at all and the source scan is
+//     the only reading available.
+type ParsedPage = { dom: JSDOM | null; rewritable: boolean };
+
+// Parse a page and decide what may be done with it.
+//
+// Parsing FIRST and measuring the tree is deliberate. The parse is not what overflows first
+// — it survives to roughly twice the depth the serializer does — so it is the one step that
+// can be run in order to find out how deep the page really is. Malformed markup reaches
+// neither failure exit: the HTML parser has a recovery rule for everything and raises
+// nothing.
+//
+// A too-deep page KEEPS its DOM rather than discarding it, which is the point. The recursive
+// steps are serialization, `window.close()` and this file's `parsedSequence`; `querySelectorAll`
+// is iterative and works at any depth, so ids and references can be read off the tree exactly.
+// The earlier version threw the DOM away and fell back to `sourceIds`, which reads the source
+// without the parser's tree-construction rules and so invented owners for markup the parser
+// DROPS — an orphan `<tr><td id="c">`, a stray `<caption>`, a `<col>`, anything after
+// `<plaintext>`. Each phantom manufactured a collision no delivered element had, renamed the
+// real owner, suppressed the pin and left a `<label for>` naming nothing: the 1.3.1/4.1.2
+// failure the pin exists to prevent, on an id that never collided. Modelling more of the
+// parser was the wrong direction — reading the tree it already built needs no model.
+function parseFragment(innerHtml: string): ParsedPage {
+  let dom: JSDOM;
+  try {
+    dom = new JSDOM(`<body>${innerHtml}</body>`, { virtualConsole: new VirtualConsole() });
+  } catch {
+    return { dom: null, rewritable: false };
+  }
+  return { dom, rewritable: !exceedsNesting(dom.window.document) };
+}
+
+// The ids a page's SOURCE claims, read without parsing. Used only when `parseFragment`
+// refused the page (nested past `MAX_NESTING`, or the parse threw), where the alternative is
+// recording that the page owns nothing — and that is not a
+// neutral default but a false statement with teeth. Such a page is delivered
+// byte-for-byte, so every id in its source is in the output; a page missing from `claims`
+// is invisible as an owner to both readers of `skipped`, so the collision goes undetected
+// AND the pin below sees no skipped owner and fires, putting a second bare copy of the id
+// in the document. The duplicate that whole condition exists to prevent, reached by the
+// one route that reports nothing.
+//
+// This one must NOT be over-inclusive, which is the opposite of the rule everywhere else in
+// this file, because a phantom owner is worse than a missed one. Both readers of `skipped`
+// rest on "a skipped owner is ALREADY keeping the bare id", and a phantom owner never had
+// one: an `id=x` read out of prose on an unparseable page made that page a `claims` owner,
+// so the pin declined to fire and every REAL owner was renamed — leaving a `<label for="x">`
+// on another page pointing at nothing, the unnamed-field failure (1.3.1/4.1.2) the pin
+// exists to prevent, on an id that was never a collision in the first place. Missing a real
+// id costs a duplicate id that lint's `duplicate-id` reports, which is the trade this file's
+// header makes in that direction and only that direction.
+//
+// So ids are read from real attribute positions only — see `sourceAttrs`.
+//
+// Exported for the test that measures it against jsdom, for the same reason `ATTR_SEP` is:
+// reaching it through `namespaceAnchors` needs a fragment too deep for jsdom to parse, which
+// costs ~10s per shape, so an enumeration would dominate the suite. The end-to-end route has
+// its own tests; this export is what lets the scan's agreement with the parser be checked
+// shape by shape.
+export function sourceIds(innerHtml: string): Set<string> {
+  return new Set(sourceAttrs(innerHtml).get("id") ?? []);
+}
+
+// The references a page's SOURCE makes, read without parsing — the mirror of `sourceIds`,
+// needed for the same reason. An unparseable page is delivered as written, so its
+// `for="q1"` is frozen in bare form exactly like a page the reserialization guard skipped.
+// Without this the pin never learns the reference exists, every owner of `q1` is renamed,
+// and the reference names nothing — an unnamed field, 1.3.1/4.1.2, which is the trade this
+// file's header refuses and the defect the pin was added to fix. It was fixed for the guard
+// route and left open for this one.
+//
+// Here over-inclusiveness IS the safe direction, unlike `sourceIds` above: a reference that
+// is not really there pins a first owner that did not need pinning, which leaves one
+// colliding id bare and renames the rest — no duplicate, no dangling reference. Missing one
+// is the dangling reference. The two functions read the same source through the same scan
+// and want opposite error directions, which is why that asymmetry is stated at both ends
+// rather than left to a shared comment.
+//
+// `headers` and the `aria-*` list attributes are space-separated, so each token counts.
+//
+// Exported for the test that measures it against jsdom, for the same reason `sourceIds` is.
+export function sourceRefs(innerHtml: string): Set<string> {
+  const refs = new Set<string>();
+  const attrs = sourceAttrs(innerHtml);
+  for (const value of attrs.get("href") ?? []) {
+    if (value.startsWith("#") && value.length > 1) refs.add(value.slice(1));
+  }
+  for (const attr of IDREF_ATTRS) {
+    for (const value of attrs.get(attr) ?? []) {
+      for (const token of value.split(/\s+/)) if (token) refs.add(token);
+    }
+  }
+  return refs;
+}
+
+// Elements whose CONTENT the parser does not build a tree from, so a tag-shaped string
+// inside one is text and its attributes are not attributes. Measured, not listed from the
+// spec: for every element name a `<b id="phantom">` was placed inside it and the parsed
+// document was asked whether `phantom` came back. These are the ones where it did not.
+//
+// `template` is in here for a different reason than the rest — its content IS parsed, into
+// a separate document fragment `querySelectorAll` on the body never sees — but the
+// consequence for this scan is identical, so the distinction does not earn a branch.
+//
+// `select` is here too, and it is the odd one: the parser drops most tags inside it rather
+// than treating them as text, so `<select><b id="x"></select>` yields no `x` — but
+// `<option id="x">`, `<optgroup>` and `<hr>` ARE kept. Skipping the whole element therefore
+// MISSES real ids rather than inventing phantoms, which is `sourceIds`' safe direction and
+// `sourceRefs`' unsafe one; both are the same trade the unmatched-tag case already makes
+// below, and a scan that modelled select's content rules would be modelling the parser.
+//
+// `plaintext` and `noscript` are deliberately absent, for opposite reasons.
+//
+// `plaintext` never ends: everything after it is text, so the parser keeps no id that
+// follows one. Omitting it here therefore invents a phantom for every such id — the unsafe
+// direction for `sourceIds`, and a real gap while this scan was the only reading of a
+// too-deep page. Adding it would be the safe (miss) direction, since the skip would run to a
+// `</plaintext>` that cannot exist and so to the end of the page. It stays out because that
+// choice no longer decides anything: `parseFragment` keeps the too-deep DOM and ids are read
+// from the tree, so this scan now runs only for a page with no tree at all, where the id
+// count is a guess either way. Left as-is rather than "fixed" in a function whose remaining
+// caller cannot tell the difference.
+//
+// `noscript` is absent because its content IS parsed when scripting is disabled, which is how
+// jsdom parses these fragments — skipping it would miss ids the parser really kept.
+const RAW_CONTENT = new Set([
+  "script",
+  "style",
+  "textarea",
+  "title",
+  "template",
+  "xmp",
+  "noembed",
+  "noframes",
+  "iframe",
+  "select",
+]);
+
+// Attribute name (lowercased) -> every value the source gives it, read without parsing.
+//
+// Tag-aware, not a bare regex over the whole string, because `sourceIds` needs a name that
+// is really in attribute position: a plain `id\s*=` scan matched `id=x` in prose and
+// `title='id="x"'`, and each phantom cost a dangling reference (see `sourceIds`). Tags are
+// found with the same SOURCE_TOKEN the reserialization guard uses — so comments are skipped
+// and a quoted value containing `>` does not end the tag — and each tag's attributes are
+// then walked in order, so a value is consumed by the name it belongs to and can never be
+// re-read as a name itself.
+//
+// Being in a tag is not sufficient, though: a tag inside a `<textarea>` or `<script>` is
+// TEXT, and the tag-aware version still walked it. `<textarea><p id="x"></textarea>` on an
+// unparseable page made that page a phantom owner of `x`, suppressing the pin and renaming
+// the real owner — the manufactured dangling `for=` that `sourceIds` describes, reached
+// through markup a page agent transcribing a form field plausibly emits. So RAW_CONTENT
+// elements are skipped to their close tag.
+//
+// Values are DECODED, because the parser decodes them: `for="q&#49;"` is a reference to
+// `q1`, and reading it literally left the frozen reference unseen, every owner of `q1`
+// renamed, and nothing in the report — `sourceRefs`' unsafe direction. `id="fn&#45;1"` is
+// the mirror on the id side, where an undecoded value is a phantom.
+//
+// First value wins per name, because that is the parser's rule for a repeated attribute:
+// `<p id="a" id="b">` is `a`, and collecting both made `b` a phantom.
+//
+// A tag SOURCE_TOKEN cannot match (an unbalanced quote, say) contributes nothing. For
+// references that is the unsafe direction and is why `sourceRefs` is only ever consulted for
+// pages already being delivered as written, where a missed reference leaves the same
+// wrong-target it had before assembly rather than a new dangling one; for ids it is the safe
+// direction, per `sourceIds`.
+function sourceAttrs(innerHtml: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  // A scratch document, only to decode attribute values. One per call, not one per value.
+  const scratch = new JSDOM("<body></body>", { virtualConsole: new VirtualConsole() });
+  try {
+    const holder = scratch.window.document.createElement("div");
+    // Re-parsed in attribute position, which is where the value came from and where the
+    // decoding rules differ from text: `a&ampb` stays literal in an attribute and becomes
+    // `a&b` in text. A raw `"` can only have arrived from a single-quoted or unquoted value,
+    // so re-encoding it round-trips. Measured against the parser over every quoting style.
+    const decode = (raw: string) => {
+      if (!raw.includes("&")) return raw;
+      holder.innerHTML = `<i x="${raw.replace(/"/g, "&#34;")}">`;
+      return holder.firstElementChild?.getAttribute("x") ?? raw;
+    };
+    let skipTo = 0;
+    for (const tag of innerHtml.matchAll(SOURCE_TOKEN)) {
+      if (tag.index < skipTo) continue;
+      if (tag[0].startsWith("<!--")) continue;
+      const name = tag[2].toLowerCase();
+      // Past the tag name: `<` + optional `/` + the name.
+      const interior = tag[0].slice(1 + tag[1].length + tag[2].length, -1);
+      // The element's own attributes are real either way — it is its CONTENT that is not
+      // markup — so they are read before skipping. A close tag has none to read.
+      if (tag[1] === "") {
+        // Per TAG, so a repeated name keeps this tag's first value — the parser's rule.
+        // Accumulated across tags, because every tag's `id` is a separate id.
+        const seen = new Set<string>();
+        for (const attr of interior.matchAll(TAG_ATTR)) {
+          const attrName = attr[1].toLowerCase();
+          const value = attr[2] ?? attr[3] ?? attr[4];
+          if (value === undefined || value === "") continue;
+          if (seen.has(attrName)) continue;
+          seen.add(attrName);
+          out.set(attrName, [...(out.get(attrName) ?? []), decode(value)]);
+        }
+      }
+      if (tag[1] === "" && RAW_CONTENT.has(name)) {
+        // To the matching close tag, which the parser accepts with trailing junk
+        // (`</textarea foo>`) and in any case. No close tag means the element runs to the
+        // end of the page — the parser's rule, and the miss rather than phantom direction.
+        // Not nesting-aware, which matches the parser: raw text ends at its first close tag,
+        // and a nested `<template>` inside one already-skipped `<template>` only widens the
+        // skip, never narrows it.
+        const close = new RegExp(`</${name}(?:${ATTR_SEP}[^>]*)?>`, "i");
+        const rest = innerHtml.slice(tag.index + tag[0].length);
+        const found = rest.search(close);
+        skipTo = found === -1 ? innerHtml.length : tag.index + tag[0].length + found;
+      }
+    }
+  } finally {
+    scratch.window.close();
+  }
+  return out;
+}
+
+// One attribute inside a tag: a name, then optionally `=` and a quoted or bare value.
+// Matched repeatedly over a tag's interior so each value is consumed by its own name.
+const TAG_ATTR = /([^\s/>="']+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*)))?/g;
 
 // Every reference a page makes, so the report can name the ones left dangling.
 function referencesIn(document: Document): string[] {
@@ -264,6 +552,16 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
   // needs no parse for the rewrite either, so most documents stop here.
   const doms: (JSDOM | null)[] = [];
   const owned: Set<string>[] = [];
+  // Pages that were parsed and CANNOT be rewritten — the parse threw, or the tree is deeper
+  // than `MAX_NESTING`. As against merely not parsed yet: a page pass 1 skipped for owning no
+  // id can still be parsed in pass 2 for its references, while one of these is delivered as
+  // written whatever pass 2 finds. The first version of pass 2 ran the second kind through the
+  // first kind's path, so it exited at the reference sniff and was never recorded as skipped —
+  // the duplicate id survived with an empty report.
+  //
+  // Not the same as `doms[i] == null`, which is why it is its own set: a too-deep page keeps a
+  // readable DOM (see `parseFragment`), so it is in here WITH a `doms` entry.
+  const unrewritable = new Set<number>();
   // Bare id -> the pages claiming it, in document order, identified by ARRAY INDEX
   // and not by `order`. The FIRST entry is what a browser resolves that bare id to in
   // the un-namespaced document, which is what a reference from a non-owning page has
@@ -288,8 +586,14 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       owned.push(new Set());
       continue;
     }
-    const dom = parseFragment(page.innerHtml);
-    const ids = dom ? ownedIds(dom.window.document) : new Set<string>();
+    const { dom, rewritable } = parseFragment(page.innerHtml);
+    // A page that cannot be REWRITTEN still owns its ids: it is delivered as written, so they
+    // are in the document either way, and recording nothing would be a false statement with
+    // teeth (see `sourceIds`). Read from the tree whenever there is one — exact, and available
+    // even for a too-deep page, since `querySelectorAll` does not recurse. The source scan is
+    // only for a page that has no tree at all.
+    const ids = dom ? ownedIds(dom.window.document) : sourceIds(page.innerHtml);
+    if (!rewritable) unrewritable.add(i);
     doms.push(dom);
     owned.push(ids);
     for (const id of ids) claims.set(id, [...(claims.get(id) ?? []), i]);
@@ -313,7 +617,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     }
 
     const colliding = new Set(collisions);
-    const report: AnchorReport = { collisions: collisions.sort(), ambiguous: [], skipped_pages: [] };
+    const report: AnchorReport = { collisions: collisions.sort(), pinned_ids: [], ambiguous: [], skipped_pages: [] };
     const out = pages.map((p) => p.innerHtml);
 
     // The prefix has to be one no id in the document already uses, or the rename
@@ -376,7 +680,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       const mine = owned[i];
       const ownsCollision = [...mine].some((id) => colliding.has(id));
       let dom = doms[i];
-      if (!dom) {
+      if (!dom && !unrewritable.has(i)) {
         // No `id=` at all, so pass 1 skipped it. It can still hold a reference, so it is
         // parsed unless the source contains nothing that could be one.
         //
@@ -399,8 +703,44 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
         // ATTR_SEP class rather than `\s`. Both of those were bugs found one at a time,
         // each one a page whose references went unrepointed.
         if (!new RegExp(`href\\s*=\\s*["']?#|${ATTR_SEP}(?:for|form|list|headers|aria-)`, "i").test(page.innerHtml)) continue;
-        dom = parseFragment(page.innerHtml);
+        const parsed = parseFragment(page.innerHtml);
+        dom = parsed.dom;
+        if (!parsed.rewritable) unrewritable.add(i);
         reportOnly.push(dom);
+      }
+      if (unrewritable.has(i)) {
+        // This page cannot be rewritten — the parse threw, or its tree is deeper than
+        // `MAX_NESTING` — so it is delivered byte-for-byte. That is the same OUTCOME as
+        // tripping the reserialization guard below, so it joins the same set. Two rules read
+        // `skipped` that way: `resolve` keeps a reference to a skipped owner bare, and the pin
+        // refuses to fire when an owner was skipped.
+        //
+        // Membership in `skipped` is not by itself enough to reach either reader, which was
+        // the bug in the first version of this branch: both reach a page THROUGH `claims`,
+        // so a page absent from `claims` is invisible as an owner no matter what this set
+        // says. Hence pass 1 records its ids either way. The record here is one of three halves.
+        //
+        // References come from the TREE when there is one, even though it is too deep to
+        // rewrite: `querySelectorAll` does not recurse, so the reading is exact. Only a page
+        // whose parse threw has no tree, and there the source scan is the sole option —
+        // without it the page's frozen `for="q1"` would be unknown to the pin, every owner of
+        // `q1` would be renamed, and the reference would name nothing. That is the mirror
+        // defect the pin exists to prevent, fixed for the guard route and left open for this
+        // one. What this branch must NOT do is fall through to `wouldChangeMarkup`, which
+        // walks the tree recursively and is one of the steps that overflows at this depth.
+        //
+        // Recorded only when the page is relevant to the join: it owns a colliding id, or it
+        // refers to one it does not own. `skipped_pages` is documented as "may still carry a
+        // collision or a stranded reference" and a human is asked to act on it, so a page
+        // that cannot be rewritten while doing neither is noise there.
+        const readRefs = dom ? referencesIn(dom.window.document) : [...sourceRefs(page.innerHtml)];
+        const frozenRefs = new Set(readRefs.filter((r) => colliding.has(r) && !mine.has(r)));
+        if (!ownsCollision && frozenRefs.size === 0) continue;
+        for (const ref of frozenRefs) report.ambiguous.push({ page: page.order, ref });
+        skipped.add(i);
+        report.skipped_pages.push(page.order);
+        if (frozenRefs.size > 0) refsOfSkipped.set(i, frozenRefs);
+        continue;
       }
       if (!dom) continue;
       const { document } = dom.window;
@@ -452,6 +792,10 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
         pinned.add(ref);
       }
     }
+    // Reported, because a pinned id is a colliding id that was deliberately NOT renamed.
+    // `collisions` alone would say it was, so the run log could not tell an intentional
+    // bare id from namespacing that silently failed.
+    report.pinned_ids = [...pinned].sort();
 
     // What each colliding id becomes, from the point of view of the page naming it.
     //
@@ -521,6 +865,17 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     report.skipped_pages.sort((a, b) => a - b);
     return { pages: out, report };
   } finally {
-    for (const dom of [...doms, ...reportOnly]) dom?.window.close();
+    for (const dom of [...doms, ...reportOnly]) {
+      // `close()` walks the tree recursively, so it overflows on a page kept for reading but
+      // too deep to rewrite. A throw from a `finally` would replace this function's return
+      // value with a `RangeError`, turning a document the caller had already been handed into
+      // a failed run — so cleanup is allowed to fail. What it releases early is otherwise left
+      // to the collector.
+      try {
+        dom?.window.close();
+      } catch {
+        // Deliberately empty: see above.
+      }
+    }
   }
 }

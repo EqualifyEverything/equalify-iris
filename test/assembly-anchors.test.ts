@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { assembleBody, assembleBodyWithReport, runAssembly, wrapDocument } from "../src/pipeline/assembly.ts";
 import { runAxe } from "../src/pipeline/lint.ts";
-import { ATTR_SEP } from "../src/pipeline/anchors.ts";
+import { ATTR_SEP, sourceIds, sourceRefs } from "../src/pipeline/anchors.ts";
 import type { Fragment } from "../src/pipeline/fragment.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 
@@ -308,6 +308,45 @@ test("runAssembly logs what the join did, and only when it did something", async
   assert.equal(logged.length, 1, "the namespacing was not reported");
   assert.deepEqual(logged[0].data.collisions, ["fn-1"]);
   assert.deepEqual(logged[0].data.ambiguous, ["page 3: #fn-1"], "the ambiguous reference was not named");
+});
+
+test("a lint gate that could not run says so in the log", async () => {
+  // `lint_ok: true` means two different things, and the log used to collapse them.
+  // `runAxe` degrades to `ok: true, violations: []` with `error` set when axe cannot run
+  // rather than failing the session — so a document axe never examined was recorded exactly
+  // like one it cleared.
+  //
+  // Reachable on the route this module creates: a page too deeply nested to rewrite is
+  // delivered as written, its nesting reaches the linted document, and axe overflows on it
+  // from a few thousand levels. That is precisely the document that may still carry the
+  // duplicate ids the join could not fix — reported as clean, with the reason surviving only
+  // in the Reader's prompt. Same argument as `pinned_ids`: a gate that passed for a reason
+  // has to be distinguishable from a gate that found nothing.
+  const events: { type: string; data: Record<string, unknown> }[] = [];
+  const ctx = {
+    log: { event: (type: string, data: Record<string, unknown> = {}) => events.push({ type, data }) },
+  } as unknown as PipelineContext;
+
+  // An ordinary document: no `lint_error` key at all, so the common run gains no noise.
+  await runAssembly(ctx, [frag(1, `<h1>Report</h1><p id="intro">Clean</p>`)]);
+  const clean = events.find((e) => e.type === "assembly")!;
+  assert.ok(!("lint_error" in clean.data), `an ordinary run logged a lint error: ${JSON.stringify(clean.data)}`);
+
+  // Deep enough that axe overflows. If it manages to run here the degradation never
+  // happened, so there is nothing to disclose and the assertion would be measuring the
+  // wrong thing — every threshold here moves with the stack the caller already spent.
+  events.length = 0;
+  const deep = "<div>".repeat(6000);
+  const { lint } = await runAssembly(ctx, [frag(1, `${deep}<p id="fn-1">A</p>`), frag(2, `<p id="fn-1">B</p>`)]);
+  const logged = events.find((e) => e.type === "assembly")!;
+  if (lint.error === undefined) {
+    assert.ok(!("lint_error" in logged.data), "a gate that ran logged an error anyway");
+    return;
+  }
+  assert.equal(logged.data.lint_error, lint.error, "the gate could not run and the log did not say so");
+  // The pairing that made this worth fixing: reported clean, and only the error explains why.
+  assert.equal(logged.data.lint_ok, true);
+  assert.equal(logged.data.violations, 0);
 });
 
 test("a page that would lose markup on reserialization is left as the agent wrote it", () => {
@@ -783,6 +822,13 @@ test("a REFERRING page left as written keeps its first owner bare, so its idref 
   ]);
   assert.deepEqual(anchors.skipped_pages, [3]);
   assert.deepEqual(anchors.ambiguous, [{ page: 3, ref: "q1" }]);
+  // And the pin is disclosed. `collisions` on its own says `q1` was claimed twice and would
+  // be read as "so it was renamed" — which the pin makes false for the first owner on
+  // purpose. Without this field, the bare `q1` two assertions down is indistinguishable in
+  // the run log from the namespacing having silently failed. `q1` appears in BOTH lists:
+  // it collided, and one of its owners was deliberately left alone.
+  assert.deepEqual(anchors.collisions, ["q1"]);
+  assert.deepEqual(anchors.pinned_ids, ["q1"], "the pin was not disclosed");
   assert.match(body, /<label for="q1">Name<\/label>/, "the skipped page was rewritten after all");
   // Page 2 owns its `q1`, so its own label follows its own renamed copy.
   assert.match(body, /<label for="p2-q1">Second<\/label>/, "page 2's own label did not follow its own input");
@@ -863,6 +909,9 @@ test("nothing is pinned when an OWNER of the id was itself skipped", async () =>
   ]);
   assert.deepEqual(anchors.skipped_pages, [2, 3]);
   assert.deepEqual(anchors.collisions, ["q1"]);
+  // Nothing was pinned, so the report says so — the bare `q1` in the output is page 2's own,
+  // not a pin.
+  assert.deepEqual(anchors.pinned_ids, []);
   const ids = idsOf(body);
   assert.equal(new Set(ids).size, ids.length, `duplicate ids survived assembly: ${ids.join(", ")}`);
   // Page 1 is the only owner that CAN be renamed, so it is — the skipped owner keeps the
@@ -902,6 +951,427 @@ test("a skipped owner does not suppress pinning for a DIFFERENT id", () => {
   const idSet = new Set(ids);
   for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
     assert.ok(idSet.has(m[1]), `for="${m[1]}" resolves to nothing`);
+  }
+});
+
+// A fragment `parseFragment` refuses to give a DOM: it nests past `MAX_NESTING` (500), so
+// the page is delivered exactly as written and everything it contributes is read from its
+// source. That is the live route to a null DOM; the parser's own `RangeError` is a backstop
+// behind it. See `MAX_NESTING` for why the guard exists rather than letting the parse fail:
+// between roughly 4,000 and 10,000 levels jsdom PARSES and then overflows in
+// serialization or `window.close()`, throwing out of assembly and failing the session, so
+// the depth at which the parse itself gives up was never a boundary worth relying on.
+//
+// Real input, not a stub. Stubbing was tried and abandoned: `anchors.ts` imports `JSDOM`
+// directly and ESM namespace objects are read-only, so a test that reassigned it would have
+// exercised nothing while appearing to pass.
+const tooDeepToParse = "<div>".repeat(600);
+
+test("an unparseable OWNER suppresses the pin, so no duplicate ships", () => {
+  // The pin leaves a colliding id's first owner bare for the sake of a frozen reference. An
+  // unparseable owner is ALREADY keeping that bare id, so pinning on top of it ships two
+  // copies — the duplicate the pin's own condition exists to rule out, reached by the one
+  // route that used to report nothing. Page 3 is guard-skipped and refers to `q1`; page 4
+  // cannot be parsed and owns `q1`.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<input id="q1" type="text">`),
+    frag(2, `<input id="q1" type="text">`),
+    frag(3, `<label for="q1">Name</label><tr><td>DATA</td></tr>`),
+    frag(4, `${tooDeepToParse}<input id="q1" type="text">`),
+  ]);
+  assert.deepEqual(anchors.pinned_ids, [], "the pin fired even though an owner was unparseable");
+  assert.deepEqual(anchors.skipped_pages, [3, 4]);
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `duplicate ids survived: ${ids.join(", ")}`);
+  // Page 4's bare copy is the one page 3's frozen `for="q1"` finds, so the reference still
+  // resolves without any pin.
+  assert.deepEqual(ids, ["p1-q1", "p2-q1", "q1"]);
+  const idSet = new Set(ids);
+  for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+    assert.ok(idSet.has(m[1]), `for="${m[1]}" resolves to nothing`);
+  }
+});
+
+test("an unparseable page's REFERENCES still pin their first owner", () => {
+  // The mirror, and the direction with an accessibility cost rather than a lint one. An
+  // unparseable page's `for="q1"` is frozen in bare form exactly like a guard-skipped page's,
+  // so if every owner is renamed the field loses its accessible name (1.3.1/4.1.2). Its
+  // references have to be read from the source for the same reason its ids are: there is no
+  // DOM to read them from and there never will be.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<input id="q1" type="text">`),
+    frag(2, `<label for="q1">Second</label><input id="q1" type="text">`),
+    frag(3, `${tooDeepToParse}<label for="q1">Name</label>`),
+  ]);
+  assert.deepEqual(anchors.pinned_ids, ["q1"], "the frozen reference did not pin its first owner");
+  assert.deepEqual(anchors.ambiguous, [{ page: 3, ref: "q1" }]);
+  assert.deepEqual(anchors.skipped_pages, [3]);
+  const ids = idsOf(body);
+  assert.deepEqual(ids, ["q1", "p2-q1"]);
+  const idSet = new Set(ids);
+  for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+    assert.ok(idSet.has(m[1]), `for="${m[1]}" resolves to nothing`);
+  }
+});
+
+test("an unparseable page with nothing at stake is not named in the report", () => {
+  // `skipped_pages` is documented as "may still carry a collision or a stranded reference"
+  // and a human is asked to act on it. A page that fails to parse while owning no colliding
+  // id and referring to none carries neither, so naming it would be noise.
+  const { anchors } = assembleBodyWithReport([
+    frag(1, `<p id="fn-1">one</p>`),
+    frag(2, `<p id="fn-1">two</p>`),
+    frag(3, `${tooDeepToParse}<a href="#elsewhere">x</a>`),
+  ]);
+  assert.deepEqual(anchors.collisions, ["fn-1"]);
+  assert.deepEqual(anchors.skipped_pages, []);
+  assert.deepEqual(anchors.ambiguous, []);
+});
+
+test("an id-shaped string that is not an attribute does not make an unparseable page an owner", () => {
+  // The source scan that reads an unparseable page's ids must not be over-inclusive, which
+  // is the opposite of the rule everywhere else here — a PHANTOM owner is worse than a
+  // missed one.
+  //
+  // Both readers of `skipped` rest on "a skipped owner is ALREADY keeping the bare id", and
+  // a phantom owner never had one. A first version scanned for `id\s*=` anywhere in the
+  // source, so `id=x` in prose made page 2 an owner of `x`: `x` became a collision that no
+  // element had twice, the pin declined to fire because an owner was skipped, page 3's real
+  // id was renamed to `p3-x`, and page 1's `<label for="x">` pointed at nothing. An unnamed
+  // field — 1.3.1/4.1.2 — manufactured out of prose.
+  //
+  // One end-to-end proof, with the delivered document as the evidence. The exhaustive
+  // position-by-position check is the test below, which does not pay for a parse per shape.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<label for="x">Name</label>`),
+    frag(2, `${tooDeepToParse}<p>the field labelled id=x on the form</p>`),
+    frag(3, `<input id="x" type="text">`),
+  ]);
+  assert.deepEqual(anchors.collisions, [], "`id=x` in prose was read as a claim on `x`");
+  assert.deepEqual(anchors.skipped_pages, []);
+  // Nothing collided, so nothing is renamed and the label keeps the field it named before
+  // assembly ran.
+  assert.match(body, /<input id="x"/, "the input's id was renamed");
+  const idSet = new Set(idsOf(body));
+  for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+    assert.ok(idSet.has(m[1]), `for="${m[1]}" resolves to nothing`);
+  }
+});
+
+test("a tag inside a <textarea> is text, so it does not make a skipped page an owner", () => {
+  // The same manufactured-dangling-reference defect as the test above, reached through markup
+  // rather than prose: the tag-aware scan walked a `<p id="x">` sitting INSIDE a `<textarea>`,
+  // which the parser treats as text. A page agent transcribing a filled-in form field emits
+  // exactly this. `x` became a collision no element had twice, the phantom owner suppressed
+  // the pin, page 3's real id was renamed, and page 1's label named nothing.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<label for="x">Name</label>`),
+    frag(2, `${tooDeepToParse}<textarea><p id="x"></textarea>`),
+    frag(3, `<input id="x" type="text">`),
+  ]);
+  assert.deepEqual(anchors.collisions, [], "a tag inside <textarea> was read as an id claim");
+  assert.deepEqual(anchors.skipped_pages, []);
+  assert.match(body, /<input id="x"/, "the input's id was renamed");
+  const idSet = new Set(idsOf(body));
+  for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+    assert.ok(idSet.has(m[1]), `for="${m[1]}" resolves to nothing`);
+  }
+});
+
+test("a character-referenced for= on a skipped page still pins its owner", () => {
+  // The mirror direction, on the reference side. `for="q&#49;"` IS a reference to `q1` — the
+  // parser decodes attribute values — but the scan read it literally, so the pin never learned
+  // the reference existed. Both owners of `q1` were renamed, page 3's frozen `for` named
+  // nothing, and the report was empty: the defect the pin was added to fix, reached through
+  // the route that reports least.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<input id="q1" type="text">`),
+    frag(2, `<label for="q1">Second</label><input id="q1" type="text">`),
+    frag(3, `${tooDeepToParse}<label for="q&#49;">Name</label>`),
+  ]);
+  assert.deepEqual(anchors.collisions, ["q1"]);
+  assert.deepEqual(anchors.pinned_ids, ["q1"], "the decoded reference did not pin its owner");
+  assert.deepEqual(anchors.skipped_pages, [3]);
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `duplicate ids survived: ${ids.join(", ")}`);
+  // Page 1 keeps `q1` bare so page 3's frozen reference finds it; page 2's copy is renamed.
+  assert.deepEqual(ids, ["q1", "p2-q1"]);
+});
+
+test("a too-deep page's ids come from its tree, not from a scan of its source", () => {
+  // The phantom class the source scan could not close. `sourceIds` reads attribute positions,
+  // but the parser DROPS whole elements during tree construction — an orphan `<tr>`/`<td>`, a
+  // stray `<caption>`/`<col>`/`<thead>`/`<tbody>`/`<colgroup>`, and everything after
+  // `<plaintext>`. A page-break transcription that starts mid-table emits the orphan-row shape
+  // directly, so this was reachable on ordinary input.
+  //
+  // Each dropped id made the too-deep page a phantom `claims` owner: the collision it
+  // manufactured was on an id no delivered element had, the phantom owner suppressed the pin,
+  // the REAL owner was renamed, and page 1's `<label for>` named nothing — the 1.3.1/4.1.2
+  // failure the pin exists to prevent, on an id that never collided.
+  //
+  // The fix is not more parser rules: `parseFragment` keeps the DOM of a page too deep to
+  // REWRITE, because `querySelectorAll` is iterative and reads it exactly. So these shapes are
+  // asserted end to end, where the phantom used to do its damage.
+  const dropped = [
+    `<tr><td id="x">cell</td></tr>`, // orphan row: no table, so both elements are dropped
+    `<caption id="x">Totals`,
+    `<col id="x">`,
+    `<thead id="x">`,
+    `<tbody id="x">`,
+    `<colgroup id="x">`,
+    `<p>text<plaintext><p id="x">`, // everything after <plaintext> is text
+  ];
+  for (const shape of dropped) {
+    const { body, anchors } = assembleBodyWithReport([
+      frag(1, `<label for="x">Name</label>`),
+      frag(2, `${tooDeepToParse}${shape}`),
+      frag(3, `<input id="x" type="text">`),
+    ]);
+    const label = JSON.stringify(shape);
+    assert.deepEqual(anchors.collisions, [], `a dropped element was read as an id claim: ${label}`);
+    assert.deepEqual(anchors.skipped_pages, [], label);
+    assert.match(body, /<input id="x"/, `the real owner was renamed for a phantom: ${label}`);
+    const idSet = new Set(idsOf(body));
+    for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+      assert.ok(idSet.has(m[1]), `for="${m[1]}" resolves to nothing: ${label}`);
+    }
+  }
+
+  // The other direction, on the same route: an id the parser DOES keep on a too-deep page is
+  // still an owner, so reading the tree must not have traded the phantoms for misses. If this
+  // page stopped claiming `x`, the pin would not fire, both copies would be renamed, and its
+  // frozen bare `id="x"` would collide with nothing — or worse, be left duplicated.
+  const kept = assembleBodyWithReport([
+    frag(1, `${tooDeepToParse}<select><option id="x">Platform</option></select>`),
+    frag(2, `<input id="x" type="text">`),
+  ]);
+  assert.deepEqual(kept.anchors.collisions, ["x"], "a real id on a too-deep page was missed");
+  assert.deepEqual(kept.anchors.skipped_pages, [1]);
+  const keptIds = idsOf(kept.body);
+  assert.equal(new Set(keptIds).size, keptIds.length, `duplicate ids survived: ${keptIds.join(", ")}`);
+});
+
+test("a too-deep page's references come from its tree as well", () => {
+  // The mirror of the test above on the reference side, and it fails for a shape the id side
+  // does not: `sourceRefs` skips a `<select>` whole, because the parser drops most tags inside
+  // one — but `<option>`, `<optgroup>` and `<hr>` ARE kept, along with their attributes. So a
+  // real `aria-describedby` on an option is a reference the scan cannot see.
+  //
+  // Missing a reference is `sourceRefs`' dangerous direction: the pin never learns the frozen
+  // reference exists, every owner of `q1` is renamed, and the reference on the page delivered
+  // as-written names nothing — the 1.3.1/4.1.2 dangling reference the pin was added to prevent.
+  // Reading the tree instead closes it, since `querySelectorAll` works at any parseable depth.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<input id="q1" type="text">`),
+    frag(2, `<input id="q1" type="text">`),
+    frag(3, `${tooDeepToParse}<select><option aria-describedby="q1">A</option></select>`),
+  ]);
+  assert.deepEqual(anchors.collisions, ["q1"]);
+  assert.deepEqual(anchors.pinned_ids, ["q1"], "a reference inside <select> did not pin its owner");
+  assert.deepEqual(anchors.skipped_pages, [3]);
+  assert.deepEqual(anchors.ambiguous, [{ page: 3, ref: "q1" }]);
+  const ids = idsOf(body);
+  assert.equal(new Set(ids).size, ids.length, `duplicate ids survived: ${ids.join(", ")}`);
+  // Page 1 keeps `q1` bare so page 3's frozen reference resolves; page 2's copy is renamed.
+  assert.deepEqual(ids, ["q1", "p2-q1"]);
+});
+
+test("a page too deep to rewrite is delivered as written rather than throwing", async () => {
+  // Every step of the rewrite recurses per level of nesting, and they do not all give up at
+  // the same depth: measured, jsdom's serializer and `window.close()` overflow from about
+  // 4,000 levels while the parse survives past 10,000. So the band in between used to
+  // PARSE and then throw `RangeError` out of the rewrite — while a DEEPER page, whose parse
+  // failed cleanly, was delivered fine. Non-monotonic in depth, and the worse outcome was
+  // the shallower one.
+  //
+  // `MAX_NESTING` (500) makes the whole band one behaviour. The depths here span it: just
+  // over the limit, the old serializer/close band, and past the old parse threshold.
+  //
+  // Carried through `runAxe`, not stopped at assembly, because assembly is not where the
+  // session ends. A page too deep to rewrite is delivered as written, so its nesting reaches
+  // the linted document — and `runAxe` closes its own jsdom in a `finally`, which is one of
+  // the recursive steps. It threw from there and replaced the graceful degradation in the
+  // `catch` above it, so the band still failed the session one module later. A test that
+  // stopped at `assembleBodyWithReport` could not see that, and did not.
+  for (const depth of [600, 5000, 9000, 12000]) {
+    const deep = "<div>".repeat(depth);
+    const { body, anchors } = assembleBodyWithReport([
+      frag(1, `<input id="q1" type="text">`),
+      frag(2, `<input id="q1" type="text">`),
+      frag(3, `${deep}<label for="q1">Name</label>`),
+    ]);
+    assert.deepEqual(anchors.skipped_pages, [3], `depth ${depth}`);
+    assert.deepEqual(anchors.pinned_ids, ["q1"], `depth ${depth}`);
+    const ids = idsOf(body);
+    assert.equal(new Set(ids).size, ids.length, `duplicate ids survived at depth ${depth}`);
+    // The page is delivered byte-for-byte, so its nesting is still in the output.
+    assert.ok(body.includes(deep), `depth ${depth}: the page was not delivered as written`);
+    const idSet = new Set(ids);
+    for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
+      assert.ok(idSet.has(m[1]), `depth ${depth}: for="${m[1]}" resolves to nothing`);
+    }
+    // The gate must return a verdict rather than throw. Whether axe can run at this depth is
+    // not asserted — it overflows too, and degrades to `ok: true` with an `error`, which is
+    // this gate's documented behaviour for an environment it cannot run in.
+    const lint = await runAxe(wrapDocument(body));
+    assert.equal(typeof lint.ok, "boolean", `depth ${depth}: lint did not return a verdict`);
+  }
+});
+
+test("nesting is measured as depth, not as a count of unclosed tags", () => {
+  // The first version of the depth guard counted start tags that had not been closed, which
+  // is not a depth: void elements and implied end tags never bring the count down. So two
+  // shapes that page agents emit constantly were refused a DOM and delivered as written,
+  // shipping the duplicate id this module exists to remove.
+  //
+  // A table continued across a page break is named throughout this file as the scenario that
+  // PRODUCES these collisions, and `</td>`/`</tr>` are exactly the tags a transcription
+  // omits — so this was reachable on ordinary input, not a corner case. Real depths here are
+  // 4 and 1; the old guard saw 601 and 601.
+  const table = (id: string) =>
+    `<table><caption id="${id}">Totals</caption>` +
+    Array.from({ length: 120 }, () => `<tr><td>a<td>b<td>c<td>d<td>e`).join("") +
+    `</table>`;
+  const wide = assembleBodyWithReport([frag(1, table("t1")), frag(2, table("t1"))]);
+  assert.deepEqual(wide.anchors.skipped_pages, [], "a table with implied end tags was refused a DOM");
+  assert.deepEqual(idsOf(wide.body), ["p1-t1", "p2-t1"], "the table's colliding id was not namespaced");
+
+  const brs = (id: string) => `<p id="${id}">note</p>${"<br>".repeat(600)}`;
+  const voids = assembleBodyWithReport([frag(1, brs("fn-1")), frag(2, brs("fn-1"))]);
+  assert.deepEqual(voids.anchors.skipped_pages, [], "a page of void elements was refused a DOM");
+  assert.deepEqual(idsOf(voids.body), ["p1-fn-1", "p2-fn-1"], "the colliding id was not namespaced");
+});
+
+test("the source id scan agrees with the parser on where an attribute is", () => {
+  // Both directions of the scan `sourceIds` uses, measured against jsdom rather than
+  // asserted from a list, since the whole question is what the parser considers an
+  // attribute. Every shape is checked in both directions at once: the ids the parser found
+  // must be exactly the ids the scan found.
+  //
+  // `sourceIds` directly rather than through `assembleBodyWithReport`: the end-to-end route
+  // needs a collision and a deep page per shape, and what is being measured here is the scan
+  // against the parser, one shape at a time, with the disagreement named in the failure. The
+  // route itself is covered end to end by the unparseable-page tests above. And it is the
+  // real function, not a copy of its regex: a copy would keep passing while the original
+  // drifted.
+  //
+  // The over-inclusive direction is the one with teeth (see the test above), but a MISS is
+  // the pin's premise failing too, so both are errors here.
+  const shapes = [
+    // Ids the parser does see, in every position it accepts one.
+    `<p id="x">t</p>`,
+    `<p id='x'>t</p>`,
+    `<p id=x>t</p>`,
+    `<p class="note"id="x">t</p>`, // quote-adjacent — what ATTR_SEP exists for
+    `<p/id="x">t</p>`, // slash-separated
+    `<p\tid="x">t</p>`,
+    `<p\nid="x">t</p>`,
+    `<p ID="x">t</p>`, // attribute names are case-insensitive
+    `<p id = "x">t</p>`,
+    `<img id="x"/>`,
+    `<p title="a > b" id="x">t</p>`, // a `>` inside a quoted value does not end the tag
+    `<p id="fn&#45;1">t</p>`, // a character reference: the parser decodes, so this must too
+    `<p id="a&amp;b">t</p>`,
+    `<p id="a&ampb">t</p>`, // NOT decoded in attribute position, unlike in text
+    `<p id="&#x41;x">t</p>`,
+    // And the phantoms: id-shaped strings in positions that are not attributes.
+    `<p>id=phantom in prose</p><p id="x">t</p>`,
+    `<!-- <p id="phantom"> --><p id="x">t</p>`,
+    `<p title='id="phantom"' id="x">t</p>`,
+    `<p data-id="phantom" id="x">t</p>`, // `data-id` is not `id`
+    `<p id="a" id="b">t</p>`, // repeated name: the parser keeps the first
+    // Elements whose content is not markup, so a tag inside one is text. The plausible one
+    // is `<textarea>`: a page agent transcribing a filled-in form field emits exactly this.
+    `<textarea><p id="phantom"></textarea><p id="x">t</p>`,
+    `<script>var s='<p id="phantom">'</script><p id="x">t</p>`,
+    `<style>/* <p id="phantom"> */</style><p id="x">t</p>`,
+    `<title><p id="phantom"></title><p id="x">t</p>`,
+    `<template><p id="phantom"></template><p id="x">t</p>`,
+    `<xmp><p id="phantom"></xmp><p id="x">t</p>`,
+    `<iframe><p id="phantom"></iframe><p id="x">t</p>`,
+    `<noembed><p id="phantom"></noembed><p id="x">t</p>`,
+    `<noframes><p id="phantom"></noframes><p id="x">t</p>`,
+    `<select><b id="phantom"></select><p id="x">t</p>`,
+    `<textarea rows="2"><p id="phantom"></textarea><p id="x">t</p>`, // its OWN attributes are real
+    `<textarea id="real"><p id="phantom"></textarea><p id="x">t</p>`,
+    `<textarea><p id="phantom"></textarea foo="bar"><p id="x">t</p>`, // junk in the close tag
+    `<TEXTAREA><p id="phantom"></TEXTAREA><p id="x">t</p>`,
+    `<textarea><textarea><p id="phantom"></textarea><p id="x">t</p>`, // raw text does not nest
+    // A raw-text element with no close tag runs to the end of the page, so the ids after it
+    // are MISSED rather than invented — `sourceIds`' safe direction, asserted so a change
+    // that flipped it to the phantom direction would fail here.
+    `<textarea><p id="missed">`,
+    // `noscript` content IS parsed (scripting is disabled in these fragments), so it is not
+    // in RAW_CONTENT and its ids are real.
+    `<noscript><p id="real"></noscript><p id="x">t</p>`,
+  ];
+  for (const shape of shapes) {
+    const parsed = new JSDOM(`<body>${shape}</body>`).window.document;
+    const fromParser = [...parsed.querySelectorAll("[id]")].map((el) => el.getAttribute("id")!).sort();
+    assert.deepEqual([...sourceIds(shape)].sort(), fromParser, `disagreed with the parser on: ${JSON.stringify(shape)}`);
+  }
+});
+
+test("the source reference scan agrees with the parser too", () => {
+  // The other half of what an unparseable page contributes. Same method as the id scan
+  // above, and it matters for the same reason: this is the only reading of that page's
+  // references there will ever be, so a miss leaves a frozen `for=`/`aria-*` unpinned and
+  // its owners renamed out from under it — the dangling reference this whole mechanism
+  // exists to avoid.
+  //
+  // Over-inclusiveness is the SAFE direction here, unlike ids (a reference that is not
+  // really there pins a first owner that did not need pinning: one colliding id left bare,
+  // no duplicate). The exact agreement is asserted anyway — a phantom reference is still a
+  // collision left half-fixed, and asserting equality is what makes a drift in either
+  // direction visible.
+  const shapes = [
+    `<a href="#t">a</a>`,
+    `<a href='#t'>a</a>`,
+    `<a href=#t>a</a>`,
+    `<a/href="#t">a</a>`,
+    `<label for="t">L</label>`,
+    `<label for=t>L</label>`,
+    `<p aria-describedby="t">x</p>`,
+    `<p/aria-labelledby="t">x</p>`,
+    `<p class="note"aria-details="t">x</p>`, // quote-adjacent
+    `<p class='note'aria-controls='t'>x</p>`,
+    `<p aria-labelledby="a b c">x</p>`, // space-separated token list
+    // And the non-references: an external URL's fragment, a bare `#`, prose, a reference
+    // inside another attribute's value or a comment, and a `data-` lookalike.
+    `<a href="http://e.com/#t">x</a>`,
+    `<a href="#">top</a>`,
+    `<p>see the headers for details</p>`,
+    `<p title="href=#phantom">x</p>`,
+    `<!-- <a href="#phantom">x</a> -->`,
+    `<p data-for="phantom">x</p>`,
+    // Character references, which the parser decodes. Reading these literally left a frozen
+    // `for=` unseen, so its owners were renamed and the reference named nothing — the exact
+    // defect the pin exists to prevent, and `sourceRefs`' unsafe direction.
+    `<label for="q&#49;">L</label>`,
+    `<a href="&#35;t">a</a>`,
+    `<p aria-labelledby="a&#32;b">x</p>`,
+    `<label for="a&amp;b">L</label>`,
+    // And references inside elements whose content is not markup.
+    `<textarea><label for="phantom"></textarea>`,
+    `<script>var s='<label for="phantom">'</script>`,
+    `<template><a href="#phantom">x</a></template>`,
+    `<label for="a" for="b">L</label>`, // repeated name: first wins
+  ];
+  const IDREF_ATTRS = ["for", "form", "list", "headers", "aria-labelledby", "aria-describedby", "aria-details", "aria-errormessage", "aria-controls", "aria-owns", "aria-flowto", "aria-activedescendant"];
+  for (const shape of shapes) {
+    const parsed = new JSDOM(`<body>${shape}</body>`).window.document;
+    const fromParser = new Set<string>();
+    for (const el of parsed.querySelectorAll("[href^='#']")) {
+      const target = el.getAttribute("href")!.slice(1);
+      if (target) fromParser.add(target);
+    }
+    for (const attr of IDREF_ATTRS) {
+      for (const el of parsed.querySelectorAll(`[${attr}]`)) {
+        for (const token of el.getAttribute(attr)!.split(/\s+/)) if (token) fromParser.add(token);
+      }
+    }
+    assert.deepEqual([...sourceRefs(shape)].sort(), [...fromParser].sort(), `disagreed with the parser on: ${JSON.stringify(shape)}`);
   }
 });
 

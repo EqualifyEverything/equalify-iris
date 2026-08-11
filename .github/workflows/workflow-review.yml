@@ -478,6 +478,33 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           use_bedrock: "true"
+          # Load-bearing, and the reason this step used to fail on EVERY run.
+          #
+          # Left unset, the action calls `setupGitHubToken()`, which exchanges the job's
+          # OIDC token for a Claude-GitHub-App installation token. That exchange is
+          # accepted for `pull_request` but 401s for `pull_request_target`:
+          #
+          #   App token exchange failed: 401 Unauthorized - Invalid OIDC token
+          #
+          # It retried three times and the step died, so from the day this file was added
+          # (PR #43) until PR #62 the model NEVER posted a review — the only two outputs
+          # this workflow ever produced were fallback "could not review" notices, posted
+          # by the step below under the github-actions[bot] identity. The sibling
+          # code-review.yml is unaffected because it is a plain `pull_request` job, which
+          # is why the same `use_bedrock` setup works there and failed here.
+          #
+          # `OVERRIDE_GITHUB_TOKEN` short-circuits that exchange (src/github/token.ts:160
+          # returns the provided token before requesting any OIDC token), so passing the
+          # job's own GITHUB_TOKEN removes the App dependency entirely. The scopes this
+          # step needs are already declared in `permissions:` above; the App token was
+          # never adding any. `id-token: write` is still required — Bedrock's OIDC role
+          # assumption is a separate exchange, and it was always succeeding.
+          #
+          # Side effect: the review posts as github-actions[bot] rather than claude[bot].
+          # The `Verify` step at the end greps the `Scope:` marker line, not the author,
+          # so it is satisfied either way — but the sibling's per-commit guard keys on
+          # claude[bot], which is what keeps the two from cross-counting.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           # NOT Bash(*). This step holds id-token: write and pull-requests: write on a
           # trigger fired by PR content the model is about to read, so its tools are
           # allowlisted to reading and posting one review. No Write/Edit, no git, no
@@ -672,8 +699,10 @@ jobs:
           set -euo pipefail
           # It may have posted and then failed on a later turn. Don't double-post.
           #
-          # Count by MARKER, not by bot identity. Both this workflow and code-review.yml
-          # post as claude[bot] (model) or github-actions[bot] (fallback), and for a PR
+          # Count by MARKER, not by bot identity. This workflow now posts as
+          # github-actions[bot] from both paths (the model step takes an explicit
+          # `github_token`, so it no longer gets a claude[bot] App token), while
+          # code-review.yml still posts as claude[bot] from its model step — and for a PR
           # touching only workflow-review.yml the sibling Code Review run posts a full
           # review at this same commit_id — it self-skips only for changes to *itself*.
           # An identity match therefore sees that foreign review, concludes "already
@@ -768,9 +797,11 @@ jobs:
           set -euo pipefail
           # The action can exit 0 without ever calling `gh pr review`. Fail loudly.
           #
-          # Match on the marker, not on the bot identity. Identity cannot distinguish
-          # this job's review from the sibling `Code Review` one: both post as
-          # claude[bot] (model) or github-actions[bot] (fallback), at the same commit_id.
+          # Match on the marker, not on the bot identity. Identity cannot reliably
+          # distinguish this job's review from the sibling `Code Review` one: both can post
+          # as github-actions[bot] at the same commit_id (this job from either path now
+          # that the model step takes an explicit `github_token`, the sibling from its
+          # fallback).
           # For a PR touching only workflow-review.yml the sibling posts a real review —
           # it self-skips only on changes to *itself* — so an identity match would report
           # "review exists" and exit green even if this job posted nothing at all.

@@ -27,6 +27,12 @@ import { JSDOM } from "jsdom";
 // The fix is an inline/block split, which is also closer to how a screen reader
 // actually works: inline elements are announced *within* the surrounding phrase,
 // block elements are separate stops.
+//
+// Both halves of that split recurse, so the invariant needs one more thing to hold on a
+// pathologically nested page — the walk overflows the stack there, and a thrown
+// `RangeError` drops ALL the text, the worst version of the failure above. The bottom of
+// `flatten` catches it and finishes iteratively, keeping words and order and giving up
+// structure. See the comment there for what that costs and what it does not cover.
 
 // Announced as part of the surrounding line rather than as a stop of their own.
 // `a` and `img` are here because their whole point is appearing mid-sentence: an
@@ -310,7 +316,75 @@ export function flatten(html: string): string {
     flush();
   };
 
-  block(asEl(doc.body), null);
-  dom.window.close();
+  // Every walk above this line is recursive — `block` descends into block children and
+  // `inlineText` into inline ones — so a pathologically deep page overflows the stack
+  // partway through. `anchors.ts` (`MAX_NESTING`) deliberately DELIVERS such a page
+  // rather than dropping it, so that depth reaches the body this function is handed:
+  // `review.ts` flattens each chunk for the Reader and `contentCoverage` flattens both
+  // sides of the regression gate. An uncaught `RangeError` there fails the session in a
+  // helper whose whole contract is "lose no text".
+  //
+  // So the depth is met with a second, iterative pass rather than an error. `out` is
+  // emptied first because the recursive attempt died mid-document and its partial lines
+  // would otherwise be repeated by the pass that replaces them.
+  //
+  // The fallback keeps WORDS and ORDER and gives up on STRUCTURE, which is the trade
+  // `inlineText` already makes for a block inside a table cell: role markers, table
+  // geometry and field roles are absent, and every text node plus every attribute that
+  // carries an accessible name is emitted in document order. That is what the invariant
+  // asks for — `contentCoverage` compares word sets with `[...]` markers stripped, so a
+  // marker-free view scores identically, while a missing word is exactly what it exists
+  // to catch. `SILENT` is still honoured: CSS and script text are not content, and
+  // counting them would make the gate read as healthier the more of it an agent leaks.
+  //
+  // What this does NOT cover is the parse on the first line of this function, which
+  // overflows too — around 11,000 levels here, where the walk it replaces gave out
+  // around 5,000. That ceiling is left unguarded because it is unreachable from the
+  // consumer that sees delivered markup and unrecoverable from the other: `review.ts`
+  // slices the body into 24,000-character chunks, and the deepest a chunk can be is
+  // ~8,000 (`<b>` is three characters), so the Reader path cannot reach it; and if the
+  // parse fails there is no tree, so there is no text to keep — only a source scan,
+  // which is the guessing `anchors.ts` was just rewritten to stop doing. Every
+  // threshold in this paragraph also moves with how much stack the caller already
+  // spent, so they are bounds observed here, not constants to rely on.
+  try {
+    block(asEl(doc.body), null);
+  } catch (e) {
+    if (!(e instanceof RangeError)) throw e;
+    out.length = 0;
+    // Explicit stack, reversed at each level to keep document order on a LIFO.
+    const stack: Node[] = Array.from(doc.body.childNodes).reverse();
+    while (stack.length > 0) {
+      const node = stack.pop()!;
+      if (node.nodeType === TEXT) {
+        const t = norm(node.textContent ?? "");
+        if (t) out.push(t);
+        continue;
+      }
+      if (node.nodeType !== ELEMENT) continue;
+      const el = asEl(node);
+      if (SILENT.has(tagOf(el))) continue;
+      // Attribute-borne text, in the order a screen reader would reach it: an `<input>`
+      // has no children at all and an icon-only `<img>` or `<button>` carries its entire
+      // announcement here, so skipping these drops content the recursive path keeps.
+      for (const attr of ["alt", "aria-label", "title", "placeholder", "value"]) {
+        const v = norm(el.getAttribute(attr) ?? "");
+        if (v) out.push(v);
+      }
+      for (const child of Array.from(el.childNodes).reverse()) stack.push(child);
+    }
+  } finally {
+    // `close()` recurses over the tree too, so at these depths it throws as well — and a
+    // throw from a `finally` would replace the text this function had just successfully
+    // produced with a `RangeError`, undoing the fallback one line after it worked. Same
+    // rule as `lint.ts`: cleanup releases early what the collector would reclaim anyway,
+    // so it is never allowed to be the thing that fails the run. It was also outside any
+    // `finally` before, which leaked the window on every throw.
+    try {
+      dom.window.close();
+    } catch {
+      // Deliberately empty: see above.
+    }
+  }
   return out.join("\n");
 }

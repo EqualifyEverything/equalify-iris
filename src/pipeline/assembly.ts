@@ -63,7 +63,22 @@ export async function runAssembly(
   const { body, anchors } = assembleBodyWithReport(fragments);
   const html = wrapDocument(body, opts);
   const lint = await runAxe(html);
-  ctx.log.event("assembly", { pages: fragments.length, lint_ok: lint.ok, violations: lint.violations.length });
+  // `lint_error` is logged because `lint_ok: true` means two different things. When axe
+  // cannot run, `runAxe` degrades to `ok: true, violations: []` with `error` set rather than
+  // failing the session — so without this field a document axe never examined is recorded
+  // exactly like one it cleared. That is reachable, not theoretical: `anchors.ts` delivers a
+  // page too deeply nested to rewrite, its nesting reaches the linted document, and axe
+  // overflows on it from a few thousand levels — precisely the document whose delivered-as-
+  // written page may still carry the duplicate ids the join could not fix, recorded as clean.
+  // Same disclosure argument as `pinned_ids` below: the reason a gate passed has to be
+  // distinguishable from the gate having found nothing.
+  const lintError = lint.error === undefined ? {} : { lint_error: lint.error };
+  ctx.log.event("assembly", {
+    pages: fragments.length,
+    lint_ok: lint.ok,
+    violations: lint.violations.length,
+    ...lintError,
+  });
   // Logged only when the join actually had to do something, so the ordinary run adds
   // no line. `ambiguous` is the one that matters to a human: a reference naming an id
   // that two pages claimed is repointed at the first of them, which is what the
@@ -72,10 +87,14 @@ export async function runAssembly(
   // `skipped_pages` means a page was left exactly as written rather than risk losing
   // markup on reserialization, so it may still carry a collision (lint's
   // `duplicate-id` / `duplicate-id-active` names that) or a reference that others
-  // renamed away from.
+  // renamed away from. `pinned_ids` is the same kind of disclosure one level down: those
+  // ids collided and their FIRST owner was left bare on purpose, so that a reference
+  // frozen on an unrewritable page keeps resolving. Without it, `collisions` would claim
+  // an id was namespaced when it deliberately was not.
   if (anchors.collisions.length > 0 || anchors.ambiguous.length > 0) {
     ctx.log.event("assembly_anchors", {
       collisions: anchors.collisions,
+      pinned_ids: anchors.pinned_ids,
       ambiguous: anchors.ambiguous.map((u) => `page ${u.page}: #${u.ref}`),
       skipped_pages: anchors.skipped_pages,
     });
