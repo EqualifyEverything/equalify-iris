@@ -63,7 +63,22 @@ export async function runAssembly(
   const { body, anchors } = assembleBodyWithReport(fragments);
   const html = wrapDocument(body, opts);
   const lint = await runAxe(html);
-  ctx.log.event("assembly", { pages: fragments.length, lint_ok: lint.ok, violations: lint.violations.length });
+  // `lint_error` is logged because `lint_ok: true` means two different things. When axe
+  // cannot run, `runAxe` degrades to `ok: true, violations: []` with `error` set rather than
+  // failing the session — so without this field a document axe never examined is recorded
+  // exactly like one it cleared. That is reachable, not theoretical: `anchors.ts` delivers a
+  // page too deeply nested to rewrite, its nesting reaches the linted document, and axe
+  // overflows on it from a few thousand levels — precisely the document whose delivered-as-
+  // written page may still carry the duplicate ids the join could not fix, recorded as clean.
+  // Same disclosure argument as `pinned_ids` below: the reason a gate passed has to be
+  // distinguishable from the gate having found nothing.
+  const lintError = lint.error === undefined ? {} : { lint_error: lint.error };
+  ctx.log.event("assembly", {
+    pages: fragments.length,
+    lint_ok: lint.ok,
+    violations: lint.violations.length,
+    ...lintError,
+  });
   // Logged only when the join actually had to do something, so the ordinary run adds
   // no line. `ambiguous` is the one that matters to a human: a reference naming an id
   // that two pages claimed is repointed at the first of them, which is what the

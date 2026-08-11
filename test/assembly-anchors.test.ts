@@ -310,6 +310,45 @@ test("runAssembly logs what the join did, and only when it did something", async
   assert.deepEqual(logged[0].data.ambiguous, ["page 3: #fn-1"], "the ambiguous reference was not named");
 });
 
+test("a lint gate that could not run says so in the log", async () => {
+  // `lint_ok: true` means two different things, and the log used to collapse them.
+  // `runAxe` degrades to `ok: true, violations: []` with `error` set when axe cannot run
+  // rather than failing the session — so a document axe never examined was recorded exactly
+  // like one it cleared.
+  //
+  // Reachable on the route this module creates: a page too deeply nested to rewrite is
+  // delivered as written, its nesting reaches the linted document, and axe overflows on it
+  // from a few thousand levels. That is precisely the document that may still carry the
+  // duplicate ids the join could not fix — reported as clean, with the reason surviving only
+  // in the Reader's prompt. Same argument as `pinned_ids`: a gate that passed for a reason
+  // has to be distinguishable from a gate that found nothing.
+  const events: { type: string; data: Record<string, unknown> }[] = [];
+  const ctx = {
+    log: { event: (type: string, data: Record<string, unknown> = {}) => events.push({ type, data }) },
+  } as unknown as PipelineContext;
+
+  // An ordinary document: no `lint_error` key at all, so the common run gains no noise.
+  await runAssembly(ctx, [frag(1, `<h1>Report</h1><p id="intro">Clean</p>`)]);
+  const clean = events.find((e) => e.type === "assembly")!;
+  assert.ok(!("lint_error" in clean.data), `an ordinary run logged a lint error: ${JSON.stringify(clean.data)}`);
+
+  // Deep enough that axe overflows. If it manages to run here the degradation never
+  // happened, so there is nothing to disclose and the assertion would be measuring the
+  // wrong thing — every threshold here moves with the stack the caller already spent.
+  events.length = 0;
+  const deep = "<div>".repeat(6000);
+  const { lint } = await runAssembly(ctx, [frag(1, `${deep}<p id="fn-1">A</p>`), frag(2, `<p id="fn-1">B</p>`)]);
+  const logged = events.find((e) => e.type === "assembly")!;
+  if (lint.error === undefined) {
+    assert.ok(!("lint_error" in logged.data), "a gate that ran logged an error anyway");
+    return;
+  }
+  assert.equal(logged.data.lint_error, lint.error, "the gate could not run and the log did not say so");
+  // The pairing that made this worth fixing: reported clean, and only the error explains why.
+  assert.equal(logged.data.lint_ok, true);
+  assert.equal(logged.data.violations, 0);
+});
+
 test("a page that would lose markup on reserialization is left as the agent wrote it", () => {
   // A stray `<tr>` outside a `<table>` — a plausible emission for a table continuing
   // across a page break — is foster-parented by the HTML parser: the row and cell

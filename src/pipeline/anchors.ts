@@ -247,6 +247,14 @@ function ownedIds(document: Document): Set<string> {
 // code. Real documents do not nest 500 elements deep; the limit is for pathological input,
 // and refusing a page that did not need refusing costs a duplicate id that lint reports —
 // the trade this file's header makes in that direction.
+//
+// With one qualification worth stating where the number is chosen, because it is the one
+// place the trade is weaker than it sounds: axe overflows on a deep document too, from a few
+// thousand levels, and `runAxe` degrades to `ok: true` with an `error` rather than failing the
+// session. So past that depth the duplicate id ships with no lint finding naming it. That is
+// not a reason to fail the run over nesting — a delivered document with a duplicate id beats
+// no document — but it does mean the fallback reporter is silent exactly where this guard is
+// most likely to fire, which is why `runAssembly` logs `lint_error` alongside `lint_ok`.
 const MAX_NESTING = 500;
 
 // The exact depth of the PARSED tree, measured with an explicit stack rather than recursion
