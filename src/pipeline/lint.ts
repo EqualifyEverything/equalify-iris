@@ -101,6 +101,17 @@ export async function runAxe(html: string): Promise<LintResult> {
   } catch (e) {
     return { ok: true, violations: [], error: `axe-core could not run in this environment: ${(e as Error).message}` };
   } finally {
-    dom.window.close();
+    // `close()` walks the tree recursively, so a pathologically deep document overflows the
+    // stack in here — and a throw from a `finally` replaces whatever the `try` returned,
+    // including the graceful degradation above it. That turned a document assembly had
+    // already decided to deliver (anchors.ts `MAX_NESTING` skips a page too deep to rewrite,
+    // so its nesting reaches the delivered body) into a failed session, one function after
+    // the module that made the decision. Cleanup cannot be the thing that fails the run:
+    // what it releases early is otherwise left to the collector.
+    try {
+      dom.window.close();
+    } catch {
+      // Deliberately empty: see above.
+    }
   }
 }
