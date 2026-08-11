@@ -230,62 +230,76 @@ function ownedIds(document: Document): Set<string> {
   return ids;
 }
 
-// How deeply a page may nest before this module refuses to give it a DOM at all.
+// How deeply a page's PARSED tree may nest before this module refuses to rewrite it.
 //
-// Every step of the rewrite recurses per level of nesting — jsdom's parser, its
-// serializer, its `window.close()`, and this file's own `parsedSequence` — so a deep enough
-// page overflows the stack in one of them. Which one comes first is not a fact worth
-// relying on: measured on this machine, `body.innerHTML` and `window.close()` throw from
-// about 4,000 levels while the parse itself survives to about 10,000, so the band in
-// between PARSES and then throws out of assembly, failing the whole session — strictly
-// worse than the duplicate id the page would have shipped. Above that band the parse fails
-// and the page is delivered as written, so the behaviour was non-monotonic in depth: deeper
-// input succeeded where shallower input crashed. And every threshold moves with how much
-// stack the caller has already used, so none of them is a number to document.
+// Rewriting a page recurses per level of nesting in three places — jsdom's serializer
+// (`body.innerHTML`), its `window.close()`, and this file's own `parsedSequence` — so a deep
+// enough page overflows the stack in one of them. Which one goes first is not worth relying
+// on: measured, serialization and `close()` throw from about 4,000 levels while the parse
+// itself survives past 10,000, so the band between them PARSED and then threw out of the
+// rewrite, while a DEEPER page whose parse failed cleanly was delivered fine. Behaviour that
+// was non-monotonic in depth, with the worse outcome on the shallower input. And each
+// threshold moves with how much stack the caller has already used, so none of them is a
+// number to build on.
 //
-// Hence one limit, checked against the source before anything recursive touches the page,
-// chosen far below every measured threshold: past it the page is delivered exactly as
-// written, which is the same outcome as tripping the reserialization guard and is handled by
-// the same code. Real documents do not come near 500 levels of nesting — the guard is for
-// pathological input, and skipping a page that did not need skipping costs a duplicate id
-// that lint reports, the trade this file's header makes in that direction.
+// Hence one limit, far below all of them. Past it the page is delivered exactly as written,
+// which is the same outcome as tripping the reserialization guard and is handled by the same
+// code. Real documents do not nest 500 elements deep; the limit is for pathological input,
+// and refusing a page that did not need refusing costs a duplicate id that lint reports —
+// the trade this file's header makes in that direction.
 const MAX_NESTING = 500;
 
-// An OVER-estimate of how deep the source nests: every start tag counts, including void and
-// self-closing ones the parser never nests into. Over-estimating is the safe direction —
-// it can only refuse a page that would have been fine.
-function exceedsNesting(innerHtml: string): boolean {
-  let open = 0;
-  for (const tag of innerHtml.matchAll(SOURCE_TOKEN)) {
-    if (tag[0].startsWith("<!--")) continue;
-    if (tag[1] === "") {
-      if (++open > MAX_NESTING) return true;
-    } else if (open > 0) {
-      open--;
-    }
+// The exact depth of the PARSED tree, measured with an explicit stack rather than recursion
+// (the recursion is what is being guarded against) and stopping as soon as the limit is
+// passed.
+//
+// The parsed tree and not the source, because the source cannot be counted. The first
+// version of this guard counted start tags that had not been closed, which is not a depth:
+// void elements and implied end tags never came back down, so a 120-row table written
+// `<tr><td>a<td>b` — real depth 4 — and a page with 600 `<br>` — real depth 1 — were both
+// refused. Both are ordinary page-agent output, and refusing them shipped the duplicate id
+// this module exists to remove. A table continued across a page break is the very scenario
+// that produces these collisions, so that regression was not a corner case. Estimating
+// depth from source means modelling the parser's implied-end-tag and void-element rules,
+// which is exactly what `sourceAttrs` had to stop doing; measuring the tree needs no model.
+function exceedsNesting(document: Document): boolean {
+  // Depth of `body`'s children is 1, matching "how deeply nested is this page".
+  const stack: { node: Element; depth: number }[] = [...document.body.children].map((node) => ({ node, depth: 1 }));
+  while (stack.length > 0) {
+    const { node, depth } = stack.pop()!;
+    if (depth > MAX_NESTING) return true;
+    for (const child of node.children) stack.push({ node: child, depth: depth + 1 });
   }
   return false;
 }
 
-// Null when the page cannot be given a DOM — either because it nests past `MAX_NESTING`, or
-// because the parse itself threw. Both mean the same thing to every caller: there is no DOM
-// and there never will be one, so the page is delivered byte-for-byte and everything it
-// contributes has to be read from its source (`sourceIds`, `sourceRefs`).
+// Null when the page cannot be given a DOM the rest of this module may use — because it
+// nests past `MAX_NESTING`, or because the parse itself threw. Both mean the same thing to
+// every caller: the page is delivered byte-for-byte and everything it contributes has to be
+// read from its source (`sourceIds`, `sourceRefs`).
 //
-// The depth check comes FIRST and is why the second case is now a backstop rather than the
-// live route. It used to be the live one: jsdom builds its tree recursively, so a fragment
-// nested past its stack depth threw `RangeError`. That is still true, but the depth guard
-// stops such a page well before the parser sees it — and it has to, because the failures
-// that arrive BETWEEN the two thresholds are throws out of assembly rather than a clean
-// null. Malformed markup does not reach the catch either: the HTML parser has a recovery
-// rule for everything and raises nothing.
+// Parsing FIRST and measuring the tree is deliberate. The parse is not what overflows first
+// — it survives to roughly twice the depth the serializer does — so it is the one step that
+// can be run in order to find out how deep the page really is. The `catch` remains for the
+// pages beyond even that, where the tree is never built. Malformed markup reaches neither
+// exit: the HTML parser has a recovery rule for everything and raises nothing.
 function parseFragment(innerHtml: string): JSDOM | null {
-  if (exceedsNesting(innerHtml)) return null;
+  let dom: JSDOM;
   try {
-    return new JSDOM(`<body>${innerHtml}</body>`, { virtualConsole: new VirtualConsole() });
+    dom = new JSDOM(`<body>${innerHtml}</body>`, { virtualConsole: new VirtualConsole() });
   } catch {
     return null;
   }
+  if (!exceedsNesting(dom.window.document)) return dom;
+  // Too deep to rewrite, so the DOM is discarded — and `close()` is one of the steps that
+  // overflows at this depth, so it is allowed to fail. Nothing else refers to this window;
+  // what `close()` would have released early is left to the collector.
+  try {
+    dom.window.close();
+  } catch {
+    // Deliberately empty: see above.
+  }
+  return null;
 }
 
 // The ids a page's SOURCE claims, read without parsing. Used only when `parseFragment`

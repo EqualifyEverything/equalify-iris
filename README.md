@@ -429,9 +429,9 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   copy would ship a duplicate. Any id pinned this way is listed in the same log line as
   `pinned_ids`: it is a colliding id that deliberately was *not* renamed, so without it a bare
   colliding id in the delivered document would be indistinguishable from namespacing that
-  silently failed. A page too deeply *nested* to rewrite — every step of the rewrite recurses per
-  level, so past a fixed limit of 500 the page is refused a DOM outright rather than allowed to
-  overflow one of them — is delivered as written for
+  silently failed. A page too deeply *nested* to rewrite — rewriting recurses per level in three
+  places, so past 500 levels, measured on the parsed tree, the page is refused rather than allowed
+  to overflow one of them — is delivered as written for
   the same reason and takes the same treatment: its ids and its references are read straight
   from the source, so it counts as an owner (or the collision would go undetected for its copy,
   and the pin would fire on top of the bare id it is already keeping) and its frozen references

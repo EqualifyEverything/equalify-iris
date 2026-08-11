@@ -1059,17 +1059,23 @@ test("a character-referenced for= on a skipped page still pins its owner", () =>
   assert.deepEqual(ids, ["q1", "p2-q1"]);
 });
 
-test("a page too deep to rewrite is delivered as written rather than throwing", () => {
+test("a page too deep to rewrite is delivered as written rather than throwing", async () => {
   // Every step of the rewrite recurses per level of nesting, and they do not all give up at
   // the same depth: measured, jsdom's serializer and `window.close()` overflow from about
-  // 4,000 levels while the parse survives to about 10,000. So the band in between used to
-  // PARSE and then throw `RangeError` out of assembly, failing the session — while a DEEPER
-  // page, whose parse failed cleanly, was delivered fine. Non-monotonic in depth, and the
-  // worse outcome was the shallower one.
+  // 4,000 levels while the parse survives past 10,000. So the band in between used to
+  // PARSE and then throw `RangeError` out of the rewrite — while a DEEPER page, whose parse
+  // failed cleanly, was delivered fine. Non-monotonic in depth, and the worse outcome was
+  // the shallower one.
   //
-  // `MAX_NESTING` (500) is checked before anything recursive runs, so the whole band is now
-  // one behaviour. The depths here span it: just over the limit, the old serializer/close
-  // band, and past the old parse threshold.
+  // `MAX_NESTING` (500) makes the whole band one behaviour. The depths here span it: just
+  // over the limit, the old serializer/close band, and past the old parse threshold.
+  //
+  // Carried through `runAxe`, not stopped at assembly, because assembly is not where the
+  // session ends. A page too deep to rewrite is delivered as written, so its nesting reaches
+  // the linted document — and `runAxe` closes its own jsdom in a `finally`, which is one of
+  // the recursive steps. It threw from there and replaced the graceful degradation in the
+  // `catch` above it, so the band still failed the session one module later. A test that
+  // stopped at `assembleBodyWithReport` could not see that, and did not.
   for (const depth of [600, 5000, 9000, 12000]) {
     const deep = "<div>".repeat(depth);
     const { body, anchors } = assembleBodyWithReport([
@@ -1087,7 +1093,36 @@ test("a page too deep to rewrite is delivered as written rather than throwing", 
     for (const m of body.matchAll(/\sfor="([^"]+)"/g)) {
       assert.ok(idSet.has(m[1]), `depth ${depth}: for="${m[1]}" resolves to nothing`);
     }
+    // The gate must return a verdict rather than throw. Whether axe can run at this depth is
+    // not asserted — it overflows too, and degrades to `ok: true` with an `error`, which is
+    // this gate's documented behaviour for an environment it cannot run in.
+    const lint = await runAxe(wrapDocument(body));
+    assert.equal(typeof lint.ok, "boolean", `depth ${depth}: lint did not return a verdict`);
   }
+});
+
+test("nesting is measured as depth, not as a count of unclosed tags", () => {
+  // The first version of the depth guard counted start tags that had not been closed, which
+  // is not a depth: void elements and implied end tags never bring the count down. So two
+  // shapes that page agents emit constantly were refused a DOM and delivered as written,
+  // shipping the duplicate id this module exists to remove.
+  //
+  // A table continued across a page break is named throughout this file as the scenario that
+  // PRODUCES these collisions, and `</td>`/`</tr>` are exactly the tags a transcription
+  // omits — so this was reachable on ordinary input, not a corner case. Real depths here are
+  // 4 and 1; the old guard saw 601 and 601.
+  const table = (id: string) =>
+    `<table><caption id="${id}">Totals</caption>` +
+    Array.from({ length: 120 }, () => `<tr><td>a<td>b<td>c<td>d<td>e`).join("") +
+    `</table>`;
+  const wide = assembleBodyWithReport([frag(1, table("t1")), frag(2, table("t1"))]);
+  assert.deepEqual(wide.anchors.skipped_pages, [], "a table with implied end tags was refused a DOM");
+  assert.deepEqual(idsOf(wide.body), ["p1-t1", "p2-t1"], "the table's colliding id was not namespaced");
+
+  const brs = (id: string) => `<p id="${id}">note</p>${"<br>".repeat(600)}`;
+  const voids = assembleBodyWithReport([frag(1, brs("fn-1")), frag(2, brs("fn-1"))]);
+  assert.deepEqual(voids.anchors.skipped_pages, [], "a page of void elements was refused a DOM");
+  assert.deepEqual(idsOf(voids.body), ["p1-fn-1", "p2-fn-1"], "the colliding id was not namespaced");
 });
 
 test("the source id scan agrees with the parser on where an attribute is", () => {
