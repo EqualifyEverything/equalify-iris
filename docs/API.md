@@ -381,17 +381,25 @@ filer without push access — which is most filers here:
 - **New agent suggestions** (`New agent suggestion: <type>`) — when the extractor meets content a
   dedicated specialist agent would handle better than the general pass, Iris drafts that agent and
   files it with the code + context.
-- **Agent improvements** (`Agent update proposal: <agent>`) — when your `/feedback` produces a
-  change that generalizes beyond your document, and it survives the agent's regression fixtures.
+- **Agent improvements** (`Agent update proposal: <agent> — <lesson>`) — when your `/feedback`
+  produces a change that generalizes beyond your document, and it survives the agent's regression
+  fixtures. The title carries a short slug of the lesson as well as the agent, and the issue body
+  carries the lesson, how many sessions have reported it, and your feedback verbatim.
 
 Both are filed with **your** token, so the issue carries your GitHub identity and the credit is
 yours. There is no PR/fork flow (deviation from PRD §7.13): `/close` returns no `prs_opened` and
 requests accept no `skip_prs`.
 
-Both skip filing if an open issue with the same title already exists, found by searching GitHub. That
-search is the only dedupe, and GitHub's search index is not immediate — two sessions that suggest the
-same thing within a minute or two of each other can each file one. Deliberate: a duplicate suggestion
-costs a maintainer one click, and hard-failing the check would cost you your document.
+Both dedupe against an open issue with the same title, found by searching GitHub — a new agent
+suggestion skips, an agent improvement **comments on the existing issue** with your session and the
+updated proposal. The improvement path has to do more than skip because its title is not unique per
+document: every proposal targets the same `page.md`, so before the lesson slug was in the title, one
+open issue silently discarded every later lesson from every user for as long as it stayed open. A
+lesson never disappears now — worst case it lands as a comment on a related issue.
+
+That search is the only dedupe, and GitHub's search index is not immediate — two sessions that report
+the same thing within a minute or two of each other can each file one. Deliberate: a duplicate costs
+a maintainer one click, and hard-failing the check would cost you your document.
 
 Filing never fails your run — a contribution is a side effect, and a GitHub outage must not cost
 you a document you already paid for. It is logged as `agent_issue_failed` instead, with a hint

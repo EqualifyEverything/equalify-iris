@@ -7,7 +7,7 @@ import { loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { flatten } from "./flatten.ts";
 import { knownPages, pageIndex } from "./pageindex.ts";
 import { createAgentUpdateIssue, installHintFor } from "../github/issue.ts";
-import { recordExample, type LessonKind } from "./memory.ts";
+import { lessonSlug, recordExample, type CorrectionExample, type LessonKind } from "./memory.ts";
 import type { FixtureCase } from "./regression.ts";
 
 // Previously imported from github/contributions.ts, which was removed when the
@@ -539,9 +539,20 @@ export async function evalAgent(ctx: PipelineContext, agentFile: string, content
 // as a GitHub issue (the contribution model uses issues, not close-time PRs),
 // while also being recorded in agent-updates.md; a session-built agent is trained
 // in place so its new-agent contribution carries the fix.
+//
+// `lesson` is what `learnFromFeedback` recorded for this same correction, when it
+// recorded anything. It is what the filed issue is titled and deduped by (see
+// `lessonSlug`), so passing it is what keeps one open issue from swallowing every later
+// proposal — pass it whenever the caller has it.
 export async function proposeAgentUpdatesFromFeedback(
   ctx: PipelineContext,
-  args: { agentFile: string; before: string; after: string; feedback: string },
+  args: {
+    agentFile: string;
+    before: string;
+    after: string;
+    feedback: string;
+    lesson?: CorrectionExample | null;
+  },
 ): Promise<AgentUpdateContribution[]> {
   const feedbackAgent = loadFeedbackAgent(ctx);
   if (!feedbackAgent) {
@@ -664,15 +675,39 @@ export async function proposeAgentUpdatesFromFeedback(
   const usingServiceToken = Boolean(ctx.cfg.github.issue_token);
   const token = ctx.cfg.github.issue_token || ctx.githubToken;
   if (token) {
+    // What the issue is titled and therefore deduped by. Prefer the recorded lesson's
+    // instruction: it is the string the memory bank corroborates across sessions, so it
+    // is stable, and the same lesson reported twice reaches the same issue. The summary
+    // is the fallback for a proposal with no recorded lesson (the correction classified
+    // as a one-off but still trained the prompt) — the model re-words it every run, so
+    // it discriminates between lessons without reliably matching itself. Both beat the
+    // bare title, which could only ever match the one issue already open.
+    const slug = lessonSlug(args.lesson?.instruction || proposal.summary);
     try {
-      const url = await createAgentUpdateIssue(token, ctx.cfg.github.upstream_repo, ctx.cfg.github.api_base_url, {
+      const filed = await createAgentUpdateIssue(token, ctx.cfg.github.upstream_repo, ctx.cfg.github.api_base_url, {
         agentName: proposal.agent_name,
         agentMarkdown: proposal.content,
         summary: proposal.summary,
         diffPreview: proposal.diff_preview,
         sessionId: ctx.sessionId,
+        lessonSlug: slug || undefined,
+        lesson: args.lesson
+          ? {
+              instruction: args.lesson.instruction,
+              feedback: args.lesson.feedback,
+              count: args.lesson.count,
+            }
+          : undefined,
       });
-      ctx.log.event("agent_update_issue", { agent: proposal.agent_name, url: url ?? "(duplicate — skipped)" });
+      // `action` distinguishes a new issue from a comment on the one that already tracks
+      // this lesson. Both are successes; the log line said "(duplicate — skipped)" for
+      // the second case, which was the only trace of a lesson that went nowhere.
+      ctx.log.event("agent_update_issue", {
+        agent: proposal.agent_name,
+        action: filed.action,
+        url: filed.url,
+        lesson_slug: slug || null,
+      });
     } catch (e) {
       // Same soft failure and the same likely cause as runContribution's filing
       // path, so the same diagnosis — an operator debugging a dead update-proposal
@@ -696,13 +731,18 @@ export async function proposeAgentUpdatesFromFeedback(
 // and record it to the agent's example bank (memory.ts). Recorded lessons are
 // corroborated across sessions and injected into the agent's prompt at run time —
 // the agent file itself stays stable.
+//
+// Returns the stored lesson so the caller can hand it to
+// `proposeAgentUpdatesFromFeedback`, whose issue title is keyed on it (see
+// `lessonSlug`); null whenever nothing was recorded — no feedback, nothing changed, or
+// the correction classified as a one-off.
 export async function learnFromFeedback(
   ctx: PipelineContext,
   args: { agentFile: string; before: string; after: string; feedback: string },
-): Promise<void> {
+): Promise<CorrectionExample | null> {
   const fb = loadFeedbackAgent(ctx);
-  if (!fb || !args.feedback.trim()) return;
-  if (args.before.trim() === args.after.trim()) return; // nothing changed this run
+  if (!fb || !args.feedback.trim()) return null;
+  if (args.before.trim() === args.after.trim()) return null; // nothing changed this run
 
   const correction = diffPreview(args.before, args.after);
   const user =
@@ -719,7 +759,7 @@ export async function learnFromFeedback(
   const raw = parsed?.kind;
   if (!parsed || !parsed.instruction?.trim() || (raw !== "generalizable" && raw !== "a11y_policy")) {
     ctx.log.event("feedback_classified", { kind: raw ?? "unknown", recorded: false });
-    return;
+    return null;
   }
   const kind: LessonKind = raw;
   const entry = recordExample(ctx.paths, {
@@ -732,4 +772,5 @@ export async function learnFromFeedback(
     session: ctx.sessionId,
   });
   ctx.log.event("feedback_learned", { agent: entry.agent, kind: entry.kind, count: entry.count, instruction: entry.instruction });
+  return entry;
 }

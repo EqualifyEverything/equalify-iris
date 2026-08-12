@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createAgentIssue, createAgentUpdateIssue } from "../src/github/issue.ts";
+import { lessonSlug } from "../src/pipeline/memory.ts";
 
 // Both filing paths dedupe by issue TITLE against an open-issue search, and both
 // swallow a failure of that search and file anyway. That trade is deliberate — a
@@ -27,8 +28,13 @@ interface Call {
   body: unknown;
 }
 
-// A GitHub that answers the search with `items` and records what it was asked.
-function mockGitHub(items: { title: string }[], opts: { searchStatus?: number } = {}): {
+// A GitHub that answers the search with `items` and records what it was asked. Search
+// items carry a `number`/`html_url` as the real API's do, because the update path now
+// COMMENTS on a match rather than skipping it, and it needs the issue number to do so.
+function mockGitHub(
+  items: { title: string; number?: number; html_url?: string }[],
+  opts: { searchStatus?: number } = {},
+): {
   fetch: typeof globalThis.fetch;
   calls: Call[];
   restore: () => void;
@@ -51,10 +57,18 @@ function mockGitHub(items: { title: string }[], opts: { searchStatus?: number } 
 
     if (url.pathname === "/search/issues") {
       if (opts.searchStatus) return j(opts.searchStatus, { message: "nope" });
-      return j(200, { total_count: items.length, incomplete_results: false, items });
+      const withDefaults = items.map((i, n) => ({
+        number: n + 7,
+        html_url: `https://github.com/example/iris/issues/${n + 7}`,
+        ...i,
+      }));
+      return j(200, { total_count: withDefaults.length, incomplete_results: false, items: withDefaults });
     }
     // Deliberately NO handler for /labels/ — nothing may touch it any more, and an
     // unhandled path 404s loudly through `calls` if something does.
+    if (url.pathname.endsWith("/comments")) {
+      return j(201, { html_url: "https://github.com/example/iris/issues/7#issuecomment-1" });
+    }
     if (url.pathname.endsWith("/issues")) return j(201, { html_url: "https://github.com/example/iris/issues/1" });
     return j(404, { message: `unhandled ${method} ${url.pathname}` });
   }) as unknown as typeof globalThis.fetch;
@@ -73,6 +87,7 @@ const newAgentArgs = {
   sessionId: "ses_test",
 };
 
+// No `lessonSlug`: the fallback shape, for a proposal with no recorded lesson to key on.
 const updateArgs = {
   agentName: "page.md",
   agentMarkdown: "# Page Agent\n",
@@ -80,6 +95,31 @@ const updateArgs = {
   diffPreview: "- old\n+ new",
   sessionId: "ses_test",
 };
+
+// The normal shape, and the one the dedupe is meant to work on. `createAgentUpdateIssue`
+// takes the slug from its caller and never recomputes it, so the literal below pins the
+// title FORMAT rather than the slug rule — a change to the title shape fails these tests
+// instead of deduping against nothing forever. The fixture is still the genuine output of
+// `lessonSlug` for this instruction, which the next test checks rather than assumes.
+const LESSON_INSTRUCTION = "Preserve all hyperlinks from the source document, including inline links in body text.";
+const LESSON_SLUG = "preserve all hyperlinks from the source document";
+const SLUGGED_TITLE = `Agent update proposal: page — ${LESSON_SLUG}`;
+
+const updateArgsWithLesson = {
+  ...updateArgs,
+  lessonSlug: LESSON_SLUG,
+  lesson: {
+    instruction: LESSON_INSTRUCTION,
+    feedback: "Links from original document need to be inherited. They were not.",
+    count: 2,
+  },
+};
+
+test("the fixtures below use the slug the rule actually produces", () => {
+  // Without this, every test here could pass on a slug no real caller would ever pass in,
+  // and a slug rule that stopped fitting an issue title would go unnoticed.
+  assert.equal(lessonSlug(LESSON_INSTRUCTION), LESSON_SLUG);
+});
 
 test("a new-agent suggestion that already has an open issue is not filed again", async () => {
   // The title the dedupe matches on is built inside createAgentIssue, so this pins the
@@ -163,20 +203,120 @@ test("a near-miss title is not treated as a duplicate", async () => {
   }
 });
 
-test("an update proposal that already has an open issue is not filed again", async () => {
-  // Same contract on the other path, and its title drops the `.md` the caller passes.
-  const gh = mockGitHub([{ title: "Agent update proposal: page" }]);
+test("the same lesson comments on its open issue instead of vanishing", async () => {
+  // The update path's dedupe, which no longer skips. A repeat report of the SAME lesson
+  // reaches the issue that already tracks it, carrying its session and its corroboration
+  // count — the thing a maintainer wants from a second report.
+  //
+  // Skipping was the old behaviour, and on this path it was silence: the only trace was
+  // a log line reading `url: "(duplicate — skipped)"` inside a session log nobody reads
+  // until they go looking for the issue that never appeared.
+  const gh = mockGitHub([{ title: SLUGGED_TITLE, number: 67 }]);
   try {
-    const url = await createAgentUpdateIssue("ghu_user", REPO, API, updateArgs);
-    assert.equal(url, null, "filed a duplicate update proposal");
+    const filed = await createAgentUpdateIssue("ghu_user", REPO, API, updateArgsWithLesson);
+    assert.equal(filed.action, "commented");
     assert.equal(
       gh.calls.some((c) => c.method === "POST" && c.path.endsWith("/issues")),
       false,
-      "returned null but created the issue anyway",
+      "opened a second issue for a lesson that already had one",
     );
+    const comment = gh.calls.find((c) => c.method === "POST" && c.path.endsWith("/comments"));
+    assert.ok(comment, "the repeat report was dropped: no comment and no issue");
+    assert.match(comment.path, /\/issues\/67\/comments$/, "commented on the wrong issue");
+    const body = String((comment.body as { body?: string }).body);
+    // A comment that does not say WHICH session reported it again is not corroboration,
+    // it is noise — the session id is how a maintainer gets back to the run.
+    assert.match(body, /ses_test/, "the comment does not name the session");
+    assert.match(body, /2 sessions/, "the comment does not carry the corroboration count");
+    assert.match(body, /- old\n\+ new/, "the comment does not carry the proposed diff");
+    assert.match(body, /# Page Agent/, "the comment does not carry the proposed agent text");
+  } finally {
+    gh.restore();
+  }
+});
+
+test("a different lesson for the same agent gets its own issue", async () => {
+  // The structural bug this whole slug exists for. `agentFile` on the feedback path is
+  // hardcoded to `page.md`, so before the title carried the lesson, EVERY proposal from
+  // every user computed one title — `Agent update proposal: page` — and one open issue
+  // suppressed all of them indefinitely. Two unrelated lessons must not collide.
+  const gh = mockGitHub([{ title: "Agent update proposal: page — preserve all hyperlinks from the source", number: 67 }]);
+  try {
+    const filed = await createAgentUpdateIssue("ghu_user", REPO, API, {
+      ...updateArgsWithLesson,
+      lessonSlug: "keep table headers on every page",
+    });
+    assert.equal(filed.action, "created", "an unrelated lesson was folded into another lesson's issue");
+    const created = gh.calls.find((c) => c.method === "POST" && c.path.endsWith("/issues"));
+    assert.ok(created, "the lesson was neither filed nor commented");
+    assert.equal(
+      String((created.body as { title?: string }).title),
+      "Agent update proposal: page — keep table headers on every page",
+    );
+  } finally {
+    gh.restore();
+  }
+});
+
+test("an open bare-titled issue does not suppress a slugged proposal", async () => {
+  // The state the fix has to unblock, not just avoid recreating: issues filed BEFORE the
+  // title carried a lesson are still open on the upstream repo (#67 there), and every one
+  // of them matches the bare title every future proposal used to compute. A slugged
+  // proposal must file past them rather than treat them as its own duplicate.
+  const gh = mockGitHub([{ title: "Agent update proposal: page", number: 67 }]);
+  try {
+    const filed = await createAgentUpdateIssue("ghu_user", REPO, API, updateArgsWithLesson);
+    assert.equal(filed.action, "created", "a legacy bare-titled issue still swallows new lessons");
+  } finally {
+    gh.restore();
+  }
+});
+
+test("the update search asks for the slugged title, and no label", async () => {
+  // The dedupe can only match what it searches for, so the query has to carry the same
+  // title the create does — a slug in the title and a bare title in the query would
+  // never match anything, which is the failure mode this file exists to catch (it fails
+  // nothing and files a duplicate every time).
+  const gh = mockGitHub([]);
+  try {
+    await createAgentUpdateIssue("ghu_user", REPO, API, updateArgsWithLesson);
     const q = gh.calls.find((c) => c.path === "/search/issues")?.query ?? "";
-    assert.match(q, /"Agent update proposal: page" in:title/);
+    assert.match(q, /repo:example\/iris/);
+    assert.match(q, /is:issue is:open/);
+    assert.equal(q.includes(`"${SLUGGED_TITLE}" in:title`), true, `query did not ask for the slugged title: ${q}`);
     assert.doesNotMatch(q, /label:/, "went back to filtering on a label the filer may not be able to set");
+  } finally {
+    gh.restore();
+  }
+});
+
+test("a proposal with no lesson still files, under the bare title", async () => {
+  // The fallback path: a correction that trained the prompt without recording a lesson
+  // has nothing stable to slug. It files rather than being dropped — the bare title
+  // dedupes badly, which is a worse issue list, not a lost contribution.
+  const gh = mockGitHub([]);
+  try {
+    const filed = await createAgentUpdateIssue("ghu_user", REPO, API, updateArgs);
+    assert.equal(filed.action, "created");
+    const created = gh.calls.find((c) => c.method === "POST" && c.path.endsWith("/issues"));
+    assert.equal(String((created?.body as { title?: string }).title), "Agent update proposal: page");
+  } finally {
+    gh.restore();
+  }
+});
+
+test("the user's own words reach the issue", async () => {
+  // Feedback used to reach GitHub only as a model-written summary and a diff, so a
+  // maintainer could not see what the user actually asked for. The verbatim feedback is
+  // capped and collapsed to one line (it is untrusted-length form input on a public
+  // issue), but it is present.
+  const gh = mockGitHub([]);
+  try {
+    await createAgentUpdateIssue("ghu_user", REPO, API, updateArgsWithLesson);
+    const created = gh.calls.find((c) => c.method === "POST" && c.path.endsWith("/issues"));
+    const body = String((created?.body as { body?: string }).body);
+    assert.match(body, /Links from original document need to be inherited/, "the user's feedback is not on the issue");
+    assert.match(body, /2 sessions/, "the corroboration count is not on the issue");
   } finally {
     gh.restore();
   }

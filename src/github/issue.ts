@@ -210,43 +210,109 @@ export interface AgentUpdateIssue {
   summary: string; // one-line description of the change
   diffPreview: string; // human-readable diff of the proposed change
   sessionId: string;
+  // Stable slug of the lesson behind this proposal (pipeline/memory.ts lessonSlug),
+  // which discriminates the title. Omitted only when no lesson and no summary could be
+  // slugged at all; the title then collapses to the bare form that could not dedupe.
+  lessonSlug?: string;
+  // The lesson in full, for the body: what was learned, how many sessions have now
+  // reported it, and the words the user actually typed. The last of those is the only
+  // place a user's feedback reaches GitHub at all.
+  lesson?: { instruction: string; feedback: string; count: number };
 }
 
-// File an issue proposing an improvement to an existing agent, produced by the
-// feedback loop (and already gated by the agent's regression fixtures). Returns the
-// issue URL, or null if an open update issue for this agent already exists (dedupe by
-// title).
+// What filing did. `commented` is not a failure — it is the same-lesson path, where the
+// proposal lands on the open issue that already tracks that lesson instead of opening a
+// second one. `url` points at whichever of the two the caller should look at.
+export interface FiledUpdateIssue {
+  url: string;
+  action: "created" | "commented";
+}
+
+// Cap the user's verbatim feedback in the body. It is untrusted-length free text
+// arriving from a form field, and this is a public issue.
+const MAX_FEEDBACK = 500;
+
+// File an issue proposing an improvement to an existing agent, produced by the feedback
+// loop (and already gated by the agent's regression fixtures).
 //
 // Its title prefix differs from createAgentIssue's ("Agent update proposal:" vs "New
 // agent suggestion:"), which is what keeps the two kinds distinguishable and separately
-// dedupable now that the two labels are gone.
+// dedupable now that the two labels are gone. The prefix alone was not enough to
+// dedupe ON, though — see `lessonSlug` for why the title carries the lesson too, and
+// why this path (unlike the other) could otherwise only ever skip.
+//
+// Never returns null, and that is the behaviour change: a matching open issue used to
+// mean "return null, file nothing", which on this path meant a lesson vanished with
+// only a log line to say so. A match now COMMENTS on that issue, so a repeat report
+// adds its session and its corroboration count to the thread a maintainer is already
+// looking at. Throws if both the comment and the create fail, for the caller's soft
+// failure to log (a contribution must not fail a delivered document).
 export async function createAgentUpdateIssue(
   token: string,
   upstreamUrl: string,
   apiBase: string,
   args: AgentUpdateIssue,
-): Promise<string | null> {
+): Promise<FiledUpdateIssue> {
   const octokit = new Octokit({ auth: token, baseUrl: apiBase });
   const repo = parseRepo(upstreamUrl);
   const name = args.agentName.replace(/\.md$/, "");
-  const title = `Agent update proposal: ${name}`;
+  // An em dash rather than a colon: the prefix's colon is what `New agent suggestion:`
+  // and this one are told apart by, and a second colon in the title reads as a second
+  // prefix.
+  const title = args.lessonSlug ? `Agent update proposal: ${name} — ${args.lessonSlug}` : `Agent update proposal: ${name}`;
 
   // Dedupe by full title, for the reason createAgentIssue's does — and with the same
-  // search-index lag caveat documented there.
+  // search-index lag caveat documented there. The exact-title comparison is what
+  // decides (`in:title` is a phrase match, not equality), which matters more here now
+  // that the title is long: a search for one lesson's title phrase-matches other
+  // lessons' issues for the same agent, and those must not be mistaken for this one.
+  let open: { number: number; html_url: string } | undefined;
   try {
     const found = await octokit.search.issuesAndPullRequests({
       q: `repo:${repo.owner}/${repo.repo} is:issue is:open "${title}" in:title`,
     });
-    if (found.data.items.some((i) => i.title === title)) return null;
+    open = found.data.items.find((i) => i.title === title);
   } catch {
-    // search unavailable — proceed (a duplicate is acceptable; not worth failing).
+    // search unavailable — file a fresh issue (a duplicate is acceptable; not worth
+    // failing, and not worth losing the lesson over either).
+  }
+
+  const lessonLines = args.lesson
+    ? `**Lesson:** ${args.lesson.instruction}\n` +
+      `**Reported in:** ${args.lesson.count} session${args.lesson.count === 1 ? "" : "s"} so far\n` +
+      `**In the user's words:** ${quoteFeedback(args.lesson.feedback)}\n`
+    : "";
+
+  if (open) {
+    // Same lesson, reported again. The agent markdown goes in a <details> because the
+    // point of the comment is the corroboration and the session id, not a second copy
+    // of a prompt the issue already shows — but a maintainer merging this wants the
+    // LATEST proposed text, so it has to be here rather than only in the first post.
+    const comment =
+      `Another session produced this same lesson.\n\n` +
+      `**Session:** ${args.sessionId}\n` +
+      `**Proposed change:** ${args.summary}\n` +
+      lessonLines +
+      `\n<details>\n<summary>Diff (preview) and full proposed <code>agents/${name}.md</code></summary>\n\n` +
+      "```diff\n" + args.diffPreview + "\n```\n\n" +
+      "```markdown\n" + args.agentMarkdown + "\n```\n\n</details>\n";
+    const res = await octokit.issues.createComment({
+      owner: repo.owner,
+      repo: repo.repo,
+      issue_number: open.number,
+      body: comment,
+    });
+    // Prefer the comment's own url (it anchors to the comment), but a response without
+    // one must not lose the fact that filing succeeded.
+    return { url: res.data.html_url || open.html_url, action: "commented" };
   }
 
   const body =
     `**Agent:** \`agents/${name}.md\`\n` +
     `**Proposed change:** ${args.summary}\n` +
-    `**Session:** ${args.sessionId}\n\n` +
-    `_Auto-filed by Equalify Iris when user feedback produced a generalizable improvement to this agent. ` +
+    `**Session:** ${args.sessionId}\n` +
+    lessonLines +
+    `\n_Auto-filed by Equalify Iris when user feedback produced a generalizable improvement to this agent. ` +
     `Already gated by the agent's regression fixtures._\n\n` +
     `## Diff (preview)\n\n` +
     "```diff\n" + args.diffPreview + "\n```\n\n" +
@@ -259,5 +325,14 @@ export async function createAgentUpdateIssue(
     title,
     body,
   });
-  return res.data.html_url;
+  return { url: res.data.html_url, action: "created" };
+}
+
+// The user's feedback as a markdown blockquote: collapsed to one line so it cannot
+// break out of the quote, and capped.
+function quoteFeedback(feedback: string): string {
+  const one = feedback.replace(/\s+/g, " ").trim();
+  if (!one) return "_(none recorded)_";
+  const shown = one.length > MAX_FEEDBACK ? `${one.slice(0, MAX_FEEDBACK)}…` : one;
+  return `“${shown}”`;
 }
