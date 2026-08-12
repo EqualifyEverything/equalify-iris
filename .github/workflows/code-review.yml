@@ -122,17 +122,25 @@ jobs:
             # Single quotes stop bash expanding it while Actions still escapes it, and
             # they make the backticks literal as a bonus. See the actionlint rationale
             # further down for why an expression error here is unrecoverable.
+            # Written to a file, then copied to both the step summary and a PR
+            # comment (see `Say on the PR that it will not be reviewed` below).
+            # One source for this text, because the escaping on the last line is
+            # too easy to get wrong twice.
             {
               echo '### ⚠️ This PR changes `code-review.yml` — it will not be reviewed by Claude'
               echo
               echo '`claude-code-action` refuses to run when its own workflow file differs from'
-              echo 'the copy on the default branch, so the review step self-skips. The checks below'
-              echo "(install, typecheck, unit, e2e, actionlint) still ran against this PR's head."
+              echo 'the copy on the default branch, so the review step self-skips. Every other'
+              echo "check (install, typecheck, unit, e2e, actionlint) still runs against this PR's"
+              echo 'head, and the job reports success — so nothing else on this PR goes red.'
               echo
               echo '**This diff needs a human read before merge** — in particular whether it lets'
               echo 'PR-authored code run with secrets, widens `permissions:`, or interpolates'
               echo 'attacker-controlled `${{ '${{' }} github.event.* }}` into a `run:` block.'
-            } >> "$GITHUB_STEP_SUMMARY"
+              echo
+              echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            } > /tmp/workflow-skip-notice.md
+            cat /tmp/workflow-skip-notice.md >> "$GITHUB_STEP_SUMMARY"
             echo "::warning::This PR changes code-review.yml, so the Claude review step self-skips and the PR gets NO automated review. Read the workflow diff by hand before merging."
           else
             echo "changed_workflow=none" >> "$GITHUB_OUTPUT"
@@ -172,6 +180,62 @@ jobs:
             echo "A claude[bot] review already exists for $HEAD_SHA — skipping."
           else
             echo "already_reviewed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Say on the PR that it will not be reviewed
+        # A step summary and a `::warning::` annotation are both one click off the
+        # PR page, and PR #78 shipped with neither noticed: green checks, empty
+        # timeline, and the author asking why no review arrived. Say it where the
+        # author is actually looking.
+        #
+        # continue-on-error, and deliberately: this notice is the least important
+        # thing this job does. If the comment API fails, the tests and actionlint
+        # below still have to run — failing here would throw them away to report
+        # that a courtesy comment did not post.
+        if: >-
+          steps.guard.outputs.already_reviewed != 'true' &&
+          contains(steps.ctx.outputs.changed_workflow, 'code-review.yml')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
+        run: |
+          set -euo pipefail
+          # One comment per PR, edited in place on later pushes, not a new comment
+          # on every `synchronize`. A PR iterating on this workflow pushes many
+          # times, and ten copies of the same notice reads as breakage.
+          #
+          # Not atomic, and it does not need to be: two pushes landing inside the
+          # list→create window can both create, since `cancel-in-progress` does not
+          # order these. The result is one duplicate comment, and the next push
+          # edits the first one and stops adding more. Silence was the bug being
+          # fixed here; a duplicate is not the same class of problem.
+          MARKER='<!-- code-review: workflow-self-skip -->'
+          BODY=/tmp/workflow-skip-comment.md
+          {
+            echo "$MARKER"
+            cat /tmp/workflow-skip-notice.md
+          } > "$BODY"
+
+          # --jq over the marker, not the visible text: the body is reworded
+          # whenever the notice above changes, and an edit must still find the
+          # comment it wrote last time.
+          #
+          # `first` is per-page — gh applies --jq to each page separately — so on a
+          # PR with >30 comments this can emit one id per page. Take the first line
+          # in bash rather than piping to `head`, which under `set -o pipefail`
+          # turns a SIGPIPE into a step failure.
+          IDS=$(gh api "repos/${{ github.repository }}/issues/$PR_NUMBER/comments" --paginate \
+            --jq "[.[] | select((.body // \"\") | contains(\"$MARKER\")) | .id] | first // empty")
+          ID=${IDS%%$'\n'*}
+
+          if [ -n "$ID" ]; then
+            gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$ID" \
+              -f body="$(cat "$BODY")" --silent
+            echo "updated existing self-skip comment $ID"
+          else
+            gh pr comment "$PR_NUMBER" --body-file "$BODY"
+            echo "posted self-skip comment"
           fi
 
       - uses: actions/setup-node@v7
