@@ -804,7 +804,10 @@ jobs:
         #   2. Post the check summary regardless, so a failing build is reported on
         #      the PR even when the model never got that far.
         # Posted as a review (not a comment) so the Verify step below is satisfied
-        # and branch protection sees a verdict.
+        # and the PR carries a verdict even when the model died. Not a merge gate:
+        # this check is deliberately not required on `main`, because a fork PR, a
+        # PR touching only `paths-ignore`d files, and a PR editing this workflow
+        # each produce no review at all — see CONTRIBUTING.md.
         if: >-
           steps.guard.outputs.already_reviewed != 'true' &&
           !contains(steps.ctx.outputs.changed_workflow, 'code-review.yml') &&
