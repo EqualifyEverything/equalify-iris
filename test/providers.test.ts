@@ -1,16 +1,21 @@
-// Provider-adapter behaviour, focused on the failure mode that has no downstream
-// detector: a response cut off at the output-token ceiling.
+// Provider-adapter behaviour, focused on the failure modes that have no downstream
+// detector: a response cut off at the output-token ceiling, and a call abandoned
+// because it went quiet.
 //
 // Truncation arrives as a 200 with partial content. A page of accessible HTML that
 // stops mid-tag still parses well enough to be assembled into the deliverable,
 // where it reads as content the source never had — so if the provider layer does
 // not reject it, nothing else will. Both adapters must raise instead of returning
 // the fragment.
+//
+// The Bedrock stall tests pin the distinction the streaming adapter exists to draw:
+// slow-but-progressing work must survive, silence must not.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeMaxTokens, DEFAULT_MAX_TOKENS } from "../src/config.ts";
+import { BedrockProvider } from "../src/providers/bedrock.ts";
 import { OpenRouterProvider } from "../src/providers/openrouter.ts";
-import { TruncatedResponseError } from "../src/providers/types.ts";
+import { StalledStreamError, TruncatedResponseError } from "../src/providers/types.ts";
 
 // --- normalizeMaxTokens -----------------------------------------------------
 
@@ -41,24 +46,44 @@ test("a configured max_tokens is honoured, with no upper clamp", () => {
   assert.equal(normalizeMaxTokens(200_000), 200_000);
 });
 
-// --- OpenRouter truncation + payload ----------------------------------------
+// --- OpenRouter: streaming, truncation, payload ------------------------------
 
-// Swap global fetch for one canned response, capturing the request body.
-async function withFetch<T>(
-  responder: (body: Record<string, unknown>) => { status?: number; json: unknown },
+const sseDelta = (content: string) =>
+  `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}`;
+const sseFinish = (finish_reason: string) =>
+  `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason }] })}`;
+const SSE_DONE = "data: [DONE]";
+// OpenRouter's keepalive while a request waits: an SSE comment, not an event.
+const SSE_KEEPALIVE = ": OPENROUTER PROCESSING";
+
+type Responder = (body: Record<string, unknown>) => {
+  status?: number;
+  errorBody?: string;
+  lines?: string[];
+  // Full control over framing/timing when the default one-shot body won't do.
+  body?: (signal: AbortSignal) => AsyncIterable<Uint8Array>;
+};
+
+// Swap global fetch for one canned SSE response, capturing the request bodies.
+async function withStream<T>(
+  responder: Responder,
   fn: (calls: Record<string, unknown>[]) => Promise<T>,
 ): Promise<T> {
   const original = globalThis.fetch;
   const calls: Record<string, unknown>[] = [];
-  globalThis.fetch = (async (_url: string, init: { body: string }) => {
+  globalThis.fetch = (async (_url: string, init: { body: string; signal: AbortSignal }) => {
     const body = JSON.parse(init.body) as Record<string, unknown>;
     calls.push(body);
-    const { status = 200, json } = responder(body);
+    const { status = 200, errorBody, lines = [], body: custom } = responder(body);
     return {
       ok: status >= 200 && status < 300,
       status,
-      json: async () => json,
-      text: async () => JSON.stringify(json),
+      text: async () => errorBody ?? "",
+      body: custom
+        ? custom(init.signal)
+        : (async function* () {
+            yield new TextEncoder().encode(lines.join("\n\n") + "\n\n");
+          })(),
     };
   }) as unknown as typeof fetch;
   try {
@@ -68,13 +93,19 @@ async function withFetch<T>(
   }
 }
 
-const provider = (maxTokens?: number) =>
-  new OpenRouterProvider({
-    api_key: "test-key",
-    base_url: "http://localhost:1/v1",
-    default_model: "m",
-    max_tokens: maxTokens,
-  });
+const provider = (
+  maxTokens?: number,
+  timeouts?: { firstOutputTimeoutMs?: number; idleTimeoutMs?: number; maxTotalMs?: number },
+) =>
+  new OpenRouterProvider(
+    {
+      api_key: "test-key",
+      base_url: "http://localhost:1/v1",
+      default_model: "m",
+      max_tokens: maxTokens,
+    },
+    timeouts,
+  );
 
 const req = {
   capability: "text" as const,
@@ -83,8 +114,8 @@ const req = {
 };
 
 test("a finish_reason of length is rejected, not returned as content", async () => {
-  await withFetch(
-    () => ({ json: { choices: [{ message: { content: "<table><tr><td>cut" }, finish_reason: "length" }] } }),
+  await withStream(
+    () => ({ lines: [sseDelta("<table><tr><td>cut"), sseFinish("length"), SSE_DONE] }),
     async () => {
       await assert.rejects(
         () => provider(1000).complete(req),
@@ -102,8 +133,8 @@ test("a finish_reason of length is rejected, not returned as content", async () 
 });
 
 test("a normal finish_reason returns the content untouched", async () => {
-  await withFetch(
-    () => ({ json: { choices: [{ message: { content: "<p>done</p>" }, finish_reason: "stop" }] } }),
+  await withStream(
+    () => ({ lines: [sseDelta("<p>done</p>"), sseFinish("stop"), SSE_DONE] }),
     async () => {
       const res = await provider().complete(req);
       assert.equal(res.text, "<p>done</p>");
@@ -115,22 +146,22 @@ test("a normal finish_reason returns the content untouched", async () => {
 test("a missing finish_reason is not treated as truncation", async () => {
   // Not every OpenRouter-compatible upstream returns the field. Absent must mean
   // "no evidence of truncation", not "assume the worst" — inventing a failure here
-  // would break every such provider.
-  await withFetch(
-    () => ({ json: { choices: [{ message: { content: "<p>ok</p>" } }] } }),
-    async () => {
-      const res = await provider().complete(req);
-      assert.equal(res.text, "<p>ok</p>");
-    },
-  );
+  // would break every such provider. [DONE] is the completeness signal instead.
+  await withStream(() => ({ lines: [sseDelta("<p>ok</p>"), SSE_DONE] }), async () => {
+    const res = await provider().complete(req);
+    assert.equal(res.text, "<p>ok</p>");
+  });
 });
 
-test("the configured ceiling is sent on the request", async () => {
-  await withFetch(
-    () => ({ json: { choices: [{ message: { content: "x" }, finish_reason: "stop" }] } }),
+test("the configured ceiling is sent on the request, and streaming is asked for", async () => {
+  await withStream(
+    () => ({ lines: [sseDelta("x"), sseFinish("stop"), SSE_DONE] }),
     async (calls) => {
       await provider(12345).complete(req);
       assert.equal(calls[0].max_tokens, 12345);
+      // Without this the upstream answers in one shot and every stall limit below
+      // is unreachable — the adapter would silently be back to a total-duration cap.
+      assert.equal(calls[0].stream, true);
     },
   );
 });
@@ -139,8 +170,8 @@ test("a provider built without a ceiling still sends one", async () => {
   // Guards the regression this work fixes: OpenRouter previously sent NO
   // max_tokens, leaving the limit to whatever the upstream model defaulted to —
   // different per model, and silent when reached.
-  await withFetch(
-    () => ({ json: { choices: [{ message: { content: "x" }, finish_reason: "stop" }] } }),
+  await withStream(
+    () => ({ lines: [sseDelta("x"), sseFinish("stop"), SSE_DONE] }),
     async (calls) => {
       await provider().complete(req);
       assert.equal(calls[0].max_tokens, DEFAULT_MAX_TOKENS);
@@ -151,11 +182,579 @@ test("a provider built without a ceiling still sends one", async () => {
 test("truncation is not retried as if it were a network blip", async () => {
   // It is thrown from inside the retry loop, so this pins that it exits rather
   // than re-billing the same truncated generation three times.
-  await withFetch(
-    () => ({ json: { choices: [{ message: { content: "cut" }, finish_reason: "length" }] } }),
+  await withStream(
+    () => ({ lines: [sseDelta("cut"), sseFinish("length"), SSE_DONE] }),
     async (calls) => {
       await assert.rejects(() => provider(50).complete(req), TruncatedResponseError);
       assert.equal(calls.length, 1, `expected 1 attempt, got ${calls.length}`);
+    },
+  );
+});
+
+test("events are framed by newline, not by read boundary", async () => {
+  // SSE arrives in arbitrary byte chunks: one read can split an event mid-JSON or
+  // carry several. Feeding it a byte at a time is the strongest version of that —
+  // it also splits the multi-byte characters real documents contain, which a
+  // decoder used without `stream: true` would corrupt into replacement chars.
+  const payload = [sseDelta("café — naïve"), sseDelta(" 日本語"), sseFinish("stop"), SSE_DONE].join("\n\n");
+  await withStream(
+    () => ({
+      body: () =>
+        (async function* () {
+          for (const byte of new TextEncoder().encode(payload)) yield new Uint8Array([byte]);
+        })(),
+    }),
+    async () => {
+      const res = await provider().complete(req);
+      assert.equal(res.text, "café — naïve 日本語");
+    },
+  );
+});
+
+test("a slow but progressing stream outlives the idle window", async () => {
+  // Same guarantee as Bedrock: total duration (~360ms) is well past the 200ms idle
+  // limit, but no single gap is, so the call must finish. This is the copy_editor
+  // call that died at two minutes under the old total-duration cap.
+  await withStream(
+    () => ({
+      body: (signal) =>
+        (async function* () {
+          const enc = new TextEncoder();
+          for (let i = 0; i < 6; i++) {
+            await sleepUnlessAborted(60, signal);
+            yield enc.encode(sseDelta(`chunk${i} `) + "\n\n");
+          }
+          yield enc.encode([sseFinish("stop"), SSE_DONE].join("\n\n") + "\n\n");
+        })(),
+    }),
+    async () => {
+      const res = await provider(undefined, { idleTimeoutMs: 200 }).complete(req);
+      assert.equal(res.text, "chunk0 chunk1 chunk2 chunk3 chunk4 chunk5 ");
+    },
+  );
+});
+
+test("keepalive comments do not pass for progress", async () => {
+  // `: OPENROUTER PROCESSING` says the provider is still there, not that the model
+  // is producing anything. If it re-armed the clock, a hung generation behind a
+  // chatty connection would run to the 15-minute backstop instead of failing.
+  await withStream(
+    () => ({
+      body: (signal) =>
+        (async function* () {
+          const enc = new TextEncoder();
+          for (;;) {
+            await sleepUnlessAborted(30, signal);
+            yield enc.encode(SSE_KEEPALIVE + "\n\n");
+          }
+        })(),
+    }),
+    async () => {
+      await assert.rejects(
+        () => provider(undefined, { firstOutputTimeoutMs: 150, maxTotalMs: 60_000 }).complete(req),
+        (e: Error) => {
+          assert.ok(e instanceof StalledStreamError, `expected StalledStreamError, got ${e.name}`);
+          assert.equal((e as StalledStreamError).kind, "first_output");
+          assert.match(e.message, /never started/);
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("waiting for the first token is a different failure from stalling halfway", async () => {
+  // Once output has started, the tighter idle window applies — and the error says
+  // how much had arrived, which is what distinguishes the two diagnoses.
+  await withStream(
+    () => ({
+      body: (signal) =>
+        (async function* () {
+          const enc = new TextEncoder();
+          yield enc.encode(sseDelta("half a doc") + "\n\n");
+          for (;;) {
+            await sleepUnlessAborted(30, signal);
+            yield enc.encode(SSE_KEEPALIVE + "\n\n"); // chatty, but producing nothing
+          }
+        })(),
+    }),
+    async () => {
+      await assert.rejects(
+        () =>
+          provider(undefined, {
+            firstOutputTimeoutMs: 60_000, // generous: this call DID start producing
+            idleTimeoutMs: 150,
+            maxTotalMs: 60_000,
+          }).complete(req),
+        (e: Error) => {
+          assert.ok(e instanceof StalledStreamError, `expected StalledStreamError, got ${e.name}`);
+          assert.equal((e as StalledStreamError).kind, "idle");
+          assert.match(e.message, /10 chars had streamed/);
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("an opening role delta does not spend the first-output window", async () => {
+  // The OpenAI convention, which OpenRouter forwards: the stream opens with a
+  // role-only delta as soon as the request is accepted, carrying no output. Treating
+  // an event as "generation began" would swap the generous start-up window for the
+  // tight idle one before a token existed — quietly halving the advertised budget on
+  // exactly the slow-to-start call this work exists to keep alive.
+  await withStream(
+    () => ({
+      body: (signal) =>
+        (async function* () {
+          const enc = new TextEncoder();
+          yield enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { role: "assistant", content: "" } }] })}\n\n`);
+          await sleepUnlessAborted(200, signal); // past idle, inside first-output
+          yield enc.encode([sseDelta("finally"), sseFinish("stop"), SSE_DONE].join("\n\n") + "\n\n");
+        })(),
+    }),
+    async () => {
+      const res = await provider(undefined, {
+        firstOutputTimeoutMs: 60_000,
+        idleTimeoutMs: 80,
+      }).complete(req);
+      assert.equal(res.text, "finally");
+    },
+  );
+});
+
+test("[DONE] ends the read, so a body held open cannot fail a whole document", async () => {
+  // Same rule as Bedrock's message_stop: the message ending and the connection
+  // ending are different events, and waiting for the second would let the idle clock
+  // fire on a response that is already complete.
+  await withStream(
+    () => ({
+      body: (signal) =>
+        (async function* () {
+          const enc = new TextEncoder();
+          yield enc.encode([sseDelta("<p>complete</p>"), sseFinish("stop"), SSE_DONE].join("\n\n") + "\n\n");
+          await sleepUnlessAborted(60_000, signal); // upstream never closes
+        })(),
+    }),
+    async () => {
+      const res = await provider(undefined, { idleTimeoutMs: 100 }).complete(req);
+      assert.equal(res.text, "<p>complete</p>");
+    },
+  );
+});
+
+test("a stream that ends early is not accepted as a finished document", async () => {
+  await withStream(() => ({ lines: [sseDelta("<p>half")] }), async () => {
+    await assert.rejects(
+      () => provider().complete(req),
+      (e: Error) => {
+        assert.match(e.message, /ended without completing/);
+        assert.match(e.message, /7 chars received/);
+        return true;
+      },
+    );
+  });
+});
+
+test("a failure reported mid-stream is raised, not returned as a short document", async () => {
+  await withStream(
+    () => ({ lines: [sseDelta("<p>partial"), `data: ${JSON.stringify({ error: { message: "upstream is down" } })}`] }),
+    async () => {
+      await assert.rejects(
+        () => provider().complete(req),
+        (e: Error) => {
+          assert.match(e.message, /stream error/);
+          assert.match(e.message, /upstream is down/);
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("an unreadable event fails the call rather than being skipped", async () => {
+  // A data line we cannot parse is content we cannot account for; dropping it is
+  // how a short document passes for a whole one.
+  await withStream(() => ({ lines: [sseDelta("<p>ok"), "data: {not json", SSE_DONE] }), async () => {
+    await assert.rejects(
+      () => provider().complete(req),
+      (e: Error) => {
+        assert.match(e.message, /unparseable stream event/);
+        return true;
+      },
+    );
+  });
+});
+
+test("a transient failure is retried only while nothing has been generated", async () => {
+  // The retry exists for a proxy resetting a large request body, which happens
+  // before any output. Once tokens have arrived, retrying re-bills a long
+  // generation — and the accumulator must be per-attempt, or the retry would
+  // concatenate onto the abandoned attempt and deliver the passage twice.
+  await withStream(
+    (body) => ({
+      body: () =>
+        (async function* () {
+          void body;
+          const enc = new TextEncoder();
+          yield enc.encode(sseDelta("first half") + "\n\n");
+          throw Object.assign(new Error("fetch failed"), { cause: { code: "ECONNRESET" } });
+        })(),
+    }),
+    async (calls) => {
+      await assert.rejects(() => provider().complete(req), /ECONNRESET|fetch failed/);
+      assert.equal(calls.length, 1, `expected no retry after output, got ${calls.length} attempts`);
+    },
+  );
+
+  // The mirror case: nothing streamed, so the retry still happens — and the text
+  // comes only from the attempt that succeeded.
+  let attempt = 0;
+  await withStream(
+    () => {
+      attempt++;
+      return attempt === 1
+        ? {
+            body: () =>
+              (async function* () {
+                yield* [];
+                throw Object.assign(new Error("fetch failed"), { cause: { code: "ECONNRESET" } });
+              })(),
+          }
+        : { lines: [sseDelta("clean run"), sseFinish("stop"), SSE_DONE] };
+    },
+    async (calls) => {
+      const res = await provider().complete(req);
+      assert.equal(res.text, "clean run");
+      assert.equal(calls.length, 2, `expected 1 retry, got ${calls.length} attempts`);
+    },
+  );
+});
+
+// --- Bedrock streaming: slow work vs. a stalled stream ----------------------
+
+const encode = (o: unknown) => new TextEncoder().encode(JSON.stringify(o));
+const textDelta = (text: string) => ({
+  chunk: { bytes: encode({ type: "content_block_delta", delta: { type: "text_delta", text } }) },
+});
+const messageDelta = (stop_reason: string) => ({
+  chunk: { bytes: encode({ type: "message_delta", delta: { stop_reason } }) },
+});
+const ping = () => ({ chunk: { bytes: encode({ type: "ping" }) } });
+
+// Exactly what the AWS SDK throws when an abortSignal fires: a bare Error whose
+// message is "Request aborted" (@smithy/node-http-handler/build-abort-error). The
+// tests below assert this string never reaches the caller — it is the opaque
+// failure the streaming adapter was written to replace.
+const abortError = () => Object.assign(new Error("Request aborted"), { name: "AbortError" });
+
+function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(abortError());
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortError());
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+// Replace the adapter's SDK client with one returning a scripted event stream.
+function stubStream(
+  bedrock: BedrockProvider,
+  script: (signal: AbortSignal) => AsyncIterable<unknown>,
+): void {
+  (bedrock as unknown as { client: unknown }).client = {
+    send: async (_cmd: unknown, opts: { abortSignal: AbortSignal }) => ({
+      body: script(opts.abortSignal),
+    }),
+  };
+}
+
+const bedrockReq = {
+  capability: "vision" as const,
+  model: "us.anthropic.claude-sonnet-4-6",
+  messages: [{ role: "user" as const, content: "fix this document" }],
+};
+
+test("streamed text deltas are concatenated into the result", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m", region: "us-east-2" });
+  stubStream(bedrock, async function* () {
+    yield { chunk: { bytes: encode({ type: "message_start" }) } };
+    yield textDelta("<h1>Title</h1>");
+    yield textDelta("<p>Body</p>");
+    yield messageDelta("end_turn");
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.equal(res.text, "<h1>Title</h1><p>Body</p>");
+  assert.equal(res.provider, "bedrock");
+  assert.equal(res.model, "us.anthropic.claude-sonnet-4-6");
+});
+
+test("a slow but progressing stream outlives the idle timeout", async () => {
+  // The actual regression this work fixes. Total duration (~360ms) is well past the
+  // 200ms idle limit, but no single gap is — so the call must complete. Under the
+  // old total-duration timeout this is precisely the call that got killed.
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 200 });
+  stubStream(bedrock, async function* (signal) {
+    for (let i = 0; i < 6; i++) {
+      await sleepUnlessAborted(60, signal);
+      yield textDelta(`chunk${i} `);
+    }
+    yield messageDelta("end_turn");
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.equal(res.text, "chunk0 chunk1 chunk2 chunk3 chunk4 chunk5 ");
+});
+
+test("a stream that goes quiet fails with a message that explains itself", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 120 });
+  stubStream(bedrock, async function* (signal) {
+    yield textDelta("some output");
+    await sleepUnlessAborted(60_000, signal); // silence until the idle clock fires
+    yield textDelta("never arrives");
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.ok(e instanceof StalledStreamError, `expected StalledStreamError, got ${e.name}`);
+      assert.equal((e as StalledStreamError).kind, "idle");
+      // The opaque SDK string must not be what an operator or user ends up reading.
+      assert.doesNotMatch(e.message, /Request aborted/);
+      // It must name the model, and how much had streamed — the two facts that
+      // distinguish "stalled at the start" from "stalled three quarters through".
+      assert.match(e.message, /us\.anthropic\.claude-sonnet-4-6/);
+      assert.match(e.message, /11 chars had streamed/);
+      return true;
+    },
+  );
+});
+
+test("a call that never produces anything is caught, and named as such", async () => {
+  // The clock has to start before the request, not at the first chunk: a call that
+  // sends nothing at all would otherwise run to the 15-minute backstop and report
+  // itself as work that did not converge — the opposite diagnosis.
+  const bedrock = new BedrockProvider(
+    { default_model: "m" },
+    { firstOutputTimeoutMs: 100, maxTotalMs: 60_000 },
+  );
+  stubStream(bedrock, async function* (signal) {
+    await sleepUnlessAborted(60_000, signal);
+    yield textDelta("never");
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.ok(e instanceof StalledStreamError);
+      assert.equal((e as StalledStreamError).kind, "first_output");
+      // "never started", not "stopped sending": a call that produced nothing must
+      // not be reported as one that died halfway.
+      assert.match(e.message, /before it produced anything/);
+      assert.match(e.message, /never started/);
+      assert.doesNotMatch(e.message, /Request aborted/);
+      return true;
+    },
+  );
+});
+
+test("prompt processing gets the generous window, not the idle one", async () => {
+  // Before the first token there is nothing to distinguish a slow start from a dead
+  // socket, and that phase is where a whole document plus eight page images gets
+  // processed — the request that prompted this work. If a protocol event handed over
+  // to the shorter idle window here, this call would fail after 60s: sooner than the
+  // total cap streaming replaced, on the very request it was meant to rescue.
+  const bedrock = new BedrockProvider(
+    { default_model: "m" },
+    { firstOutputTimeoutMs: 400, idleTimeoutMs: 60, maxTotalMs: 60_000 },
+  );
+  stubStream(bedrock, async function* (signal) {
+    await sleepUnlessAborted(120, signal);
+    yield { chunk: { bytes: encode({ type: "message_start" }) } };
+    await sleepUnlessAborted(120, signal); // longer than idle, shorter than first-output
+    yield { chunk: { bytes: encode({ type: "content_block_start" }) } };
+    await sleepUnlessAborted(120, signal);
+    yield textDelta("finally");
+    yield messageDelta("end_turn");
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.equal(res.text, "finally");
+});
+
+test("a stream that trickles forever is stopped by the absolute ceiling", async () => {
+  // Never idle, never done: satisfies the idle timeout indefinitely while holding a
+  // concurrency slot. The backstop must distinguish itself from a stall.
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 5_000, maxTotalMs: 150 });
+  stubStream(bedrock, async function* (signal) {
+    for (;;) {
+      await sleepUnlessAborted(20, signal);
+      yield textDelta("x");
+    }
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.ok(e instanceof StalledStreamError, `expected StalledStreamError, got ${e.name}`);
+      assert.equal((e as StalledStreamError).kind, "total");
+      assert.match(e.message, /absolute ceiling/);
+      assert.doesNotMatch(e.message, /Request aborted/);
+      return true;
+    },
+  );
+});
+
+test("truncation is still caught when the stop reason arrives mid-stream", async () => {
+  // stop_reason rides the closing message_delta rather than a top-level field now,
+  // so the guard has to read it off the stream or truncated HTML flows downstream.
+  const bedrock = new BedrockProvider({ default_model: "m", max_tokens: 32_000 });
+  stubStream(bedrock, async function* () {
+    yield textDelta("<table><tr><td>cut");
+    yield messageDelta("max_tokens");
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.ok(e instanceof TruncatedResponseError, `expected TruncatedResponseError, got ${e.name}`);
+      assert.match(e.message, /providers\.bedrock\.max_tokens/);
+      assert.equal((e as TruncatedResponseError).chars, 18);
+      return true;
+    },
+  );
+});
+
+test("keepalive pings do not pass for progress", async () => {
+  // A ping is the transport saying it is alive, not the model producing anything.
+  // If it reset the idle clock, a generation that hangs on a chatty connection
+  // would defeat the timeout entirely and run to the 15-minute backstop — and then
+  // report itself as too large, the opposite diagnosis.
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 150, maxTotalMs: 60_000 });
+  stubStream(bedrock, async function* (signal) {
+    yield textDelta("real output");
+    for (;;) {
+      await sleepUnlessAborted(30, signal); // chatty, but nothing is being produced
+      yield ping();
+    }
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.ok(e instanceof StalledStreamError, `expected StalledStreamError, got ${e.name}`);
+      assert.equal((e as StalledStreamError).kind, "idle", "a ping stream must read as idle, not as work");
+      return true;
+    },
+  );
+});
+
+test("protocol events between blocks still count as progress", async () => {
+  // The other half of the ping rule, in the phase where the tight window applies:
+  // once text has arrived a content_block_stop or a block boundary is real progress
+  // and must re-arm the idle clock, or a model that pauses between blocks is killed
+  // for being slow — the bug this work fixes, at a lower threshold.
+  const bedrock = new BedrockProvider(
+    { default_model: "m" },
+    { firstOutputTimeoutMs: 60_000, idleTimeoutMs: 150 },
+  );
+  stubStream(bedrock, async function* (signal) {
+    yield textDelta("first block");
+    await sleepUnlessAborted(100, signal);
+    yield { chunk: { bytes: encode({ type: "content_block_stop" }) } };
+    await sleepUnlessAborted(100, signal);
+    yield { chunk: { bytes: encode({ type: "content_block_start" }) } };
+    await sleepUnlessAborted(100, signal); // 300ms total, past the 150ms idle limit
+    yield textDelta(" second block");
+    yield messageDelta("end_turn");
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.equal(res.text, "first block second block");
+});
+
+test("message_stop ends the read, so a body held open cannot fail a whole document", async () => {
+  // The message being over and the connection being over are different events. If
+  // the loop waited for the body to close, anything holding it open would let the
+  // idle clock fire on a response that is already complete — discarding a finished
+  // document as a stall, and leaving a live timer on every successful call.
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 100 });
+  stubStream(bedrock, async function* (signal) {
+    yield textDelta("<p>complete</p>");
+    yield messageDelta("end_turn");
+    yield { chunk: { bytes: encode({ type: "message_stop" }) } };
+    await sleepUnlessAborted(60_000, signal); // upstream never closes
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.equal(res.text, "<p>complete</p>");
+});
+
+test("a stream that ends early is not accepted as a finished document", async () => {
+  // The iterator finishing is not the response finishing. An event stream that
+  // stops without erroring would otherwise return HTML cut mid-tag as a success,
+  // which is what TruncatedResponseError exists to prevent — same delivered
+  // failure, different road.
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  stubStream(bedrock, async function* () {
+    yield { chunk: { bytes: encode({ type: "message_start" }) } };
+    yield textDelta("<table><tr><td>half a document");
+    // no message_delta, no message_stop: the stream just ends
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.match(e.message, /ended without completing/);
+      assert.match(e.message, /30 chars received/);
+      return true;
+    },
+  );
+});
+
+test("an abort whose stream ends quietly still fails as a stall", async () => {
+  // Not every abort surfaces as a throw — a stream can respond to the signal by
+  // simply returning. `expired` is therefore re-checked after the loop, or this
+  // path returns partial output as a success with no error anywhere.
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 100 });
+  stubStream(bedrock, async function* (signal) {
+    yield textDelta("partial");
+    // Wait for the idle clock, then end the stream cleanly instead of throwing.
+    await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.ok(e instanceof StalledStreamError, `expected StalledStreamError, got ${e.name}`);
+      assert.equal((e as StalledStreamError).kind, "idle");
+      assert.match(e.message, /7 chars had streamed/);
+      return true;
+    },
+  );
+});
+
+test("a normal stream ending in message_stop needs no stop_reason", async () => {
+  // Guards the completeness check against being too strict: message_stop alone is
+  // a legitimate end, and demanding both would fail every healthy call.
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  stubStream(bedrock, async function* () {
+    yield textDelta("<p>done</p>");
+    yield { chunk: { bytes: encode({ type: "message_stop" }) } };
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.equal(res.text, "<p>done</p>");
+});
+
+test("a service failure delivered mid-stream is raised, not silently truncated", async () => {
+  // These ride an otherwise-successful 200, so ignoring them would return whatever
+  // partial text had arrived as if it were the finished document.
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  stubStream(bedrock, async function* () {
+    yield textDelta("<p>partial");
+    yield { throttlingException: { message: "Too many tokens, please wait" } };
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.match(e.message, /throttlingException/);
+      assert.match(e.message, /Too many tokens/);
+      return true;
     },
   );
 });

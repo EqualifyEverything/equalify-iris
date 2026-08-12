@@ -1,9 +1,25 @@
 import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
-import { TruncatedResponseError } from "./types.ts";
+import { StalledStreamError, TruncatedResponseError, type StallKind } from "./types.ts";
 import type { CompletionRequest, CompletionResult, ModelProvider } from "./types.ts";
 
-// Fail a model call that stalls beyond this so it can't hang a session forever.
-const REQUEST_TIMEOUT_MS = 120_000;
+// This adapter streams for the same reason the Bedrock one does: a single
+// non-streaming request cannot tell a stalled call from a slow one, so capping total
+// duration kills both, and the review phase's document-level rewrite (whole body in,
+// whole corrected body out) is the call slow enough to be killed. Streaming replaces
+// that one cap with limits that describe what actually went wrong.
+//
+// How long the call may produce NOTHING before we give up. Deliberately the old
+// total cap's value: 120s was never a bad bound on *getting started*, only on
+// finishing. Unlike Bedrock, an OpenAI-style stream has no "generation began" event
+// to lean on — before the first token the only thing on the wire is a keepalive
+// comment, which must not count (see the line handler) — so the wait for first
+// output gets its own, more generous window rather than sharing the idle one.
+const FIRST_OUTPUT_TIMEOUT_MS = 120_000;
+// Once output has started, silence this long means the stream died mid-generation.
+const IDLE_TIMEOUT_MS = 60_000;
+// Absolute backstop for a stream that never stalls and never ends: a token every
+// 30s would satisfy the idle window forever while holding a concurrency slot.
+const MAX_TOTAL_MS = 15 * 60_000;
 // Bounded retry for transient failures (connection resets, timeouts, 429/5xx).
 // Corporate proxies frequently reset large vision-request bodies mid-flight
 // (ECONNRESET); a couple of retries clears those without failing the session.
@@ -39,14 +55,25 @@ export class OpenRouterProvider implements ModelProvider {
   private apiKey: string;
   private baseUrl: string;
   private maxTokens: number;
+  private firstOutputTimeoutMs: number;
+  private idleTimeoutMs: number;
+  private maxTotalMs: number;
 
-  constructor(cfg: ProviderBlock) {
+  // `timeouts` is a test seam: the defaults are what production runs, but a test for
+  // stall handling cannot wait two minutes to observe it.
+  constructor(
+    cfg: ProviderBlock,
+    timeouts: { firstOutputTimeoutMs?: number; idleTimeoutMs?: number; maxTotalMs?: number } = {},
+  ) {
     if (!cfg.api_key) throw new Error("openrouter: api_key is not configured");
     this.apiKey = cfg.api_key;
     this.baseUrl = cfg.base_url ?? "https://openrouter.ai/api/v1";
     // loadConfig normalizes this, but a directly-constructed provider (tests,
     // embedders) may pass a raw block — so fall back rather than send undefined.
     this.maxTokens = cfg.max_tokens ?? DEFAULT_MAX_TOKENS;
+    this.firstOutputTimeoutMs = timeouts.firstOutputTimeoutMs ?? FIRST_OUTPUT_TIMEOUT_MS;
+    this.idleTimeoutMs = timeouts.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
+    this.maxTotalMs = timeouts.maxTotalMs ?? MAX_TOTAL_MS;
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
@@ -70,7 +97,12 @@ export class OpenRouterProvider implements ModelProvider {
     // default the upstream model happens to apply — which differs per model and is
     // silent when reached, so the same document could truncate on one model and
     // not another with nothing in the config to explain it.
-    const body: Record<string, unknown> = { model: req.model, messages, max_tokens: this.maxTokens };
+    const body: Record<string, unknown> = {
+      model: req.model,
+      messages,
+      max_tokens: this.maxTokens,
+      stream: true,
+    };
     if (req.capability === "structured_output" && req.schema) {
       body.response_format = {
         type: "json_schema",
@@ -81,9 +113,88 @@ export class OpenRouterProvider implements ModelProvider {
 
     let lastError: unknown;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      // Abort a stalled call so it fails fast instead of hanging the session.
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      let expired: StallKind | null = null;
+      let stallTimer: ReturnType<typeof setTimeout> | undefined;
+      // One timer, re-armed with whichever window currently applies: waiting for the
+      // first output is a different failure from going quiet halfway through.
+      const arm = (kind: "first_output" | "idle", ms: number): void => {
+        clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => {
+          expired = kind;
+          controller.abort();
+        }, ms);
+      };
+      const totalTimer = setTimeout(() => {
+        expired = "total";
+        controller.abort();
+      }, this.maxTotalMs);
+
+      // Per-attempt, not per-call: a retry has to start from an empty document, or
+      // it would concatenate onto the abandoned attempt's partial output and deliver
+      // the same passage twice.
+      let text = "";
+      let finishReason: string | undefined;
+      let sawDone = false;
+      const stalled = (kind: StallKind): StalledStreamError =>
+        new StalledStreamError({
+          provider: this.name,
+          model: req.model,
+          kind,
+          limitMs:
+            kind === "first_output"
+              ? this.firstOutputTimeoutMs
+              : kind === "idle"
+                ? this.idleTimeoutMs
+                : this.maxTotalMs,
+          chars: text.length,
+        });
+
+      // One SSE line. Returns nothing; accumulates into the closure above.
+      const handleLine = (line: string): void => {
+        if (!line) return;
+        // A comment (`: OPENROUTER PROCESSING`) is the provider saying it is still
+        // there, not the model producing anything. Counting it as progress would
+        // defeat the idle window in the one case it exists for — a generation that
+        // hangs behind a chatty connection — so it is skipped without re-arming.
+        if (line.startsWith(":")) return;
+        if (!line.startsWith("data:")) return;
+        const data = line.slice("data:".length).trim();
+        if (data === "[DONE]") {
+          sawDone = true;
+          return;
+        }
+        let parsed: {
+          choices?: { delta?: { content?: string }; finish_reason?: string | null }[];
+          error?: { message?: string; code?: string | number };
+        };
+        try {
+          parsed = JSON.parse(data);
+        } catch {
+          // Not skipped: a data line we cannot read is content we cannot account
+          // for, and silently dropping it is how a short document passes for whole.
+          throw new Error(`openrouter: unparseable stream event: ${data.slice(0, 200)}`);
+        }
+        // OpenRouter reports mid-stream failures as an event on an otherwise-200
+        // response, so this is the only place such a failure is visible.
+        if (parsed.error) {
+          throw new Error(`openrouter: stream error: ${parsed.error.message ?? JSON.stringify(parsed.error)}`);
+        }
+        const choice = parsed.choices?.[0];
+        if (choice?.delta?.content) text += choice.delta.content;
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
+        // Which window this re-arms turns on whether output has actually arrived,
+        // not on an event having arrived. The OpenAI convention — which OpenRouter
+        // forwards — opens with a role-only delta as soon as the request is
+        // accepted; treating that as "generation began" would swap the deliberately
+        // generous first-output window for the shorter idle one before a single
+        // token existed, and then report a call that never started as one that
+        // stopped halfway.
+        if (text) arm("idle", this.idleTimeoutMs);
+        else arm("first_output", this.firstOutputTimeoutMs);
+      };
+
+      arm("first_output", this.firstOutputTimeoutMs);
       try {
         const res = await fetch(`${this.baseUrl}/chat/completions`, {
           method: "POST",
@@ -95,37 +206,81 @@ export class OpenRouterProvider implements ModelProvider {
           signal: controller.signal,
         });
         if (!res.ok) {
-          const text = await res.text();
+          const errText = await res.text();
           // Retry rate limits and transient server errors; fail fast on 4xx
           // (bad key/model/request) where retrying cannot help.
           if ([429, 500, 502, 503, 504].includes(res.status) && attempt < MAX_ATTEMPTS) {
-            lastError = new Error(`openrouter ${res.status}: ${text}`);
+            lastError = new Error(`openrouter ${res.status}: ${errText}`);
             await sleep(400 * 2 ** (attempt - 1));
             continue;
           }
-          throw new Error(`openrouter ${res.status}: ${text}`);
+          throw new Error(`openrouter ${res.status}: ${errText}`);
         }
-        const json = (await res.json()) as {
-          choices: { message: { content: string }; finish_reason?: string }[];
-        };
-        const text = json.choices[0]?.message?.content ?? "";
+        if (!res.body) throw new Error("openrouter: response carried no body to stream");
+
+        // SSE arrives in arbitrary byte chunks, so events are framed by newline
+        // rather than by chunk boundary: a single read can split one event or carry
+        // several. The decoder is given `stream: true` so a multi-byte character
+        // straddling two reads is not mangled into a replacement char.
+        const decoder = new TextDecoder();
+        let buffer = "";
+        // Labelled so [DONE] can stop the read itself. Without that, iteration
+        // continues until the upstream closes the body, and anything holding it open
+        // would let the idle clock — last armed by the finish_reason chunk — fire on
+        // a response that is already whole, so the check below would discard a
+        // finished document as a stall.
+        read: for await (const bytes of res.body as unknown as AsyncIterable<Uint8Array>) {
+          buffer += decoder.decode(bytes, { stream: true });
+          let nl: number;
+          while ((nl = buffer.indexOf("\n")) !== -1) {
+            const line = buffer.slice(0, nl).trim();
+            buffer = buffer.slice(nl + 1);
+            handleLine(line);
+            if (sawDone) break read;
+          }
+        }
+        // A final event with no trailing newline. Skipped after [DONE], since
+        // anything past the terminator is not part of the message.
+        if (!sawDone) handleLine(buffer.trim());
+
+        // The stream ending is not the response ending. Without this, an abort that
+        // closes the stream quietly, or a connection dropped between events, returns
+        // a half-corrected document as a success — the same delivered failure
+        // TruncatedResponseError exists to prevent, by a different road.
+        if (expired) throw stalled(expired);
+        if (!sawDone && !finishReason) {
+          throw new Error(
+            `openrouter: the response stream ended without completing (${text.length} chars ` +
+              `received, no [DONE] and no finish_reason). Treating a partial document as a whole ` +
+              `one would deliver content the source never had.`,
+          );
+        }
+
         // Same truncation guard as Bedrock: "length" means the model stopped at the
         // ceiling, not at the end of its answer. Thrown from inside the retry loop
         // deliberately — it is not transient, so isTransientNetworkError() rejects
         // it and the loop exits rather than re-billing the same truncation twice.
-        if (json.choices[0]?.finish_reason === "length") {
+        if (finishReason === "length") {
           throw new TruncatedResponseError(this.name, req.model, this.maxTokens, text.length);
         }
         return { text, model: req.model, provider: this.name };
       } catch (e) {
+        // Our own clock firing is a diagnosis, not a blip: never retried, and never
+        // reported as the opaque abort the runtime actually threw.
+        if (expired) throw stalled(expired);
         lastError = e;
-        if (attempt < MAX_ATTEMPTS && isTransientNetworkError(e)) {
+        // Retry a transient failure only while nothing has been generated yet. This
+        // is the case the retry was added for (a proxy resetting a large request
+        // body, which happens before any output), and it keeps the loop from
+        // re-billing a long generation that died three quarters of the way through.
+        if (attempt < MAX_ATTEMPTS && !text && isTransientNetworkError(e)) {
           await sleep(400 * 2 ** (attempt - 1));
           continue;
         }
         throw e;
       } finally {
-        clearTimeout(timer);
+        clearTimeout(stallTimer);
+        clearTimeout(totalTimer);
       }
     }
     throw lastError instanceof Error ? lastError : new Error(String(lastError));

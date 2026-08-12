@@ -57,3 +57,63 @@ export class TruncatedResponseError extends Error {
     this.chars = chars;
   }
 }
+
+// A streamed call was abandoned. Three ways, because they are three different
+// diagnoses and an operator reading one of these needs to know which: nothing ever
+// arrived ("first_output"), output started and then stopped ("idle"), or output kept
+// coming without the message ever finishing ("total").
+//
+// This type exists because the alternative is unreadable. Aborting a call makes the
+// underlying client throw something opaque — the AWS SDK a bare
+// `Error("Request aborted")`, fetch() a DOMException — which the orchestrator stores
+// verbatim as the session's error and the UI shows to the user, naming neither the
+// cause, the phase, nor anything to do about it. A slow document rewrite and a
+// genuinely dead connection produced the identical string.
+export type StallKind = "first_output" | "idle" | "total";
+
+export class StalledStreamError extends Error {
+  readonly provider: string;
+  readonly model: string;
+  readonly kind: StallKind;
+  readonly limitMs: number;
+  readonly chars: number;
+
+  constructor(args: {
+    provider: string;
+    model: string;
+    kind: StallKind;
+    limitMs: number;
+    chars: number;
+  }) {
+    const seconds = Math.round(args.limitMs / 1000);
+    const streamed = args.chars
+      ? `${args.chars} chars had streamed`
+      : "nothing had streamed";
+    let message: string;
+    if (args.kind === "first_output") {
+      message =
+        `${args.provider}: no output arrived within ${seconds}s on ${args.model}, so the call ` +
+        `was abandoned before it produced anything. The request was accepted and then went ` +
+        `quiet — a queue that never cleared, or a model that never started.`;
+    } else if (args.kind === "idle") {
+      message =
+        `${args.provider}: the model stopped sending output for ${seconds}s ` +
+        `(${streamed}) on ${args.model}, so the call was abandoned. The connection ` +
+        `stalled rather than the work being too slow — a healthy stream is never ` +
+        `silent this long.`;
+    } else {
+      message =
+        `${args.provider}: the call was still producing output after ${seconds}s ` +
+        `(${streamed}) on ${args.model} without ever finishing its message, and hit the ` +
+        `absolute ceiling. Nothing stalled — the work itself did not converge, which usually ` +
+        `means the document is too large to correct in one call.`;
+    }
+    super(message);
+    this.name = "StalledStreamError";
+    this.provider = args.provider;
+    this.model = args.model;
+    this.kind = args.kind;
+    this.limitMs = args.limitMs;
+    this.chars = args.chars;
+  }
+}

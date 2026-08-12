@@ -114,6 +114,29 @@ const gh = createServer(async (req, res) => {
 // ---- Mock OpenRouter (OpenAI-compatible chat completions) ----
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The adapter streams, so the mock has to as well. Deliberately not one event
+// carrying the whole answer: the content is split across several deltas so the
+// adapter's newline framing and accumulation are actually exercised, and the reply
+// opens with the keepalive COMMENT that OpenRouter really sends — which the adapter
+// must parse without treating it as output.
+function sse(res, content, finishReason) {
+  res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  res.write(": OPENROUTER PROCESSING\n\n");
+  const points = Array.from(content); // split on code points, never mid-character
+  const per = Math.max(1, Math.ceil(points.length / 3));
+  for (let i = 0; i < points.length; i += per) {
+    const piece = points.slice(i, i + per).join("");
+    res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: piece } }] })}\n\n`);
+  }
+  res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finishReason }] })}\n\n`);
+  res.write("data: [DONE]\n\n");
+  res.end();
+}
+
 // When set, every completion returns a TRUNCATED response (see below). Toggled at
 // runtime via POST /__truncate so one mock process can serve both a normal run and
 // a truncation run — the mock boots once for the whole e2e.
@@ -139,7 +162,9 @@ const or = createServer(async (req, res) => {
   let sys = "";
   let user = "";
   let imageParts = 0;
+  let wantsStream = false;
   try {
+    wantsStream = JSON.parse(body).stream === true;
     const msgs = JSON.parse(body).messages;
     sys = msgs.find((x) => x.role === "system")?.content ?? "";
     const u = msgs.find((x) => x.role === "user")?.content;
@@ -226,10 +251,12 @@ const or = createServer(async (req, res) => {
   // dangerous: without the provider-level guard it would be assembled into the
   // deliverable as if it were genuine content.
   if (truncateNext) {
-    return json(res, 200, {
-      choices: [{ message: { content: '{"html":"<table><tr><td>cut off mid' }, finish_reason: "length" }],
-    });
+    const cut = '{"html":"<table><tr><td>cut off mid';
+    return wantsStream
+      ? sse(res, cut, "length")
+      : json(res, 200, { choices: [{ message: { content: cut }, finish_reason: "length" }] });
   }
+  if (wantsStream) return sse(res, content, "stop");
   json(res, 200, { choices: [{ message: { content } }] });
 });
 
