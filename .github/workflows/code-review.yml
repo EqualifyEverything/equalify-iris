@@ -204,6 +204,12 @@ jobs:
           # One comment per PR, edited in place on later pushes, not a new comment
           # on every `synchronize`. A PR iterating on this workflow pushes many
           # times, and ten copies of the same notice reads as breakage.
+          #
+          # Not atomic, and it does not need to be: two pushes landing inside the
+          # list→create window can both create, since `cancel-in-progress` does not
+          # order these. The result is one duplicate comment, and the next push
+          # edits the first one and stops adding more. Silence was the bug being
+          # fixed here; a duplicate is not the same class of problem.
           MARKER='<!-- code-review: workflow-self-skip -->'
           BODY=/tmp/workflow-skip-comment.md
           {
