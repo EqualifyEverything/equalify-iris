@@ -10,13 +10,20 @@
 // the full HTML5 named-reference table (2000+ entries) is a dependency's worth of
 // data for characters that do not change whether two URLs match. Numeric references
 // cover the rest.
-const NAMED: Record<string, string> = {
+//
+// Null-prototype, and that is load-bearing: a plain object literal answers
+// `NAMED["constructor"]` with a function inherited from Object.prototype, so a URL
+// containing the literal text `&constructor;` would decode to `function Object() {
+// [native code] }` on one side of a comparison and stay written as it is on the
+// other — turning a link that IS in the document into a reported miss, which is the
+// exact failure this file exists to prevent.
+const NAMED: Record<string, string> = Object.assign(Object.create(null), {
   amp: "&",
   lt: "<",
   gt: ">",
   quot: '"',
   apos: "'",
-};
+});
 
 export function decodeEntities(s: string): string {
   return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, ref: string) => {

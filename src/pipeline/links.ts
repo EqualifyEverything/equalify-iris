@@ -40,6 +40,13 @@ function normalizeHref(href: string): string {
     .replace(/\/+$/, "");
 }
 
+// Does this href name a scheme? Both comparisons below are about URLs that came from
+// (or claim to have come from) the source file's annotations, and only an absolute
+// href can be one of those.
+function isAbsolute(href: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:/i.test(href);
+}
+
 // Every href in a fragment of HTML, normalized. A scan rather than a parse because
 // this runs on model output mid-pipeline, where the fragment may not be well-formed
 // yet — the same reason anchors.ts keeps a scan alongside its parser. Unquoted
@@ -129,7 +136,7 @@ export function missingLinkProblem(link: PdfLink): string {
 // work as loss and bury the case that matters.
 export function droppedHrefs(before: string, after: string): string[] {
   const kept = hrefsIn(after);
-  return [...hrefsIn(before)].filter((h) => h && !h.startsWith("#") && !kept.has(h)).sort();
+  return [...hrefsIn(before)].filter((h) => isAbsolute(h) && !kept.has(h)).sort();
 }
 
 // Absolute URLs the output links to that no annotation on this page accounts for.
@@ -143,10 +150,13 @@ export function droppedHrefs(before: string, after: string): string[] {
 // list there is no symptom — a fabricated href looks exactly like a real one in the
 // delivered document.
 //
-// In-document references (`#fn-1`) are ignored; those are the page agent's own
-// anchors and anchors.ts owns them.
+// Only hrefs with a scheme are considered. In-document references (`#fn-1`) are the
+// page agent's own anchors and anchors.ts owns them; a relative href (`page2.html`)
+// is not a URL this page's annotations could have supplied either way, and counting
+// one as unaccounted-for dilutes the single signal that is supposed to read as
+// "possibly fabricated".
 export function unexpectedHrefs(links: PdfLink[] = [], html: string): string[] {
   if (links.length === 0) return [];
   const expected = new Set(links.map((l) => normalizeHref(l.href)));
-  return [...hrefsIn(html)].filter((h) => h && !h.startsWith("#") && !expected.has(h)).sort();
+  return [...hrefsIn(html)].filter((h) => isAbsolute(h) && !expected.has(h)).sort();
 }

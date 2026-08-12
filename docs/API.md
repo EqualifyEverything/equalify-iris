@@ -164,11 +164,19 @@ over the page rather than something drawn on it, so the page image carries the l
 none of its target. The link targets are read out of the file separately and given to the page
 agent as ground truth, and the output's `<a href>`s are checked against them — the run log
 carries a `page_links` line per page that had any, and `page_links_missing` /
-`page_links_unrecovered` when one did not make it into the HTML. Two kinds are dropped on
+`page_links_unrecovered` when one did not make it into the HTML. Three kinds are dropped on
 purpose: links to a destination inside the same document (the page they point at is in the
-delivered HTML already), and any URL whose scheme is not `http(s)`, `mailto`, `tel`, or `ftp` —
-a PDF can carry a `javascript:` action, and that is not something to re-emit into a document.
-A link over an image with no text under it has nothing to attach to and is lost.
+delivered HTML already); any URL whose scheme is not `http(s)`, `mailto`, `tel`, or `ftp` — a
+PDF can carry a `javascript:` action, and that is not something to re-emit into a document —
+and any URL containing a character that would end the attribute it is written into (a quote,
+`<`, whitespace), which no legitimate URL carries unencoded. A link over an image with no text
+under it has nothing to attach to and is lost.
+
+Recovering a link never costs a page its structure. When a page passed its fidelity check and
+is re-rendered only to attach a link, the rewrite is verified in turn, and one that lost
+something — a heading level, a `<th scope>` — is discarded in favour of the fragment that
+passed, logged as `page_links_correction_rejected`. A link is additive; the accessibility of a
+page that already checked out is not something it may be paid for with.
 
 `status` is `queued` on creation and becomes `running` when the pipeline actually starts. Those are
 usually the same instant, but a deployment runs at most `defaults.max_concurrent_runs` pipelines at

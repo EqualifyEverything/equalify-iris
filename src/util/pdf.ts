@@ -53,6 +53,21 @@ function pageNum(file: string): number {
 // links for the references it can see (footnotes, see anchors.ts).
 const SAFE_SCHEME = /^(?:https?|mailto|tel|ftps?):/i;
 
+// Characters that make a URL unsafe to reproduce regardless of its scheme, because
+// they end the attribute it is written into. An allowlisted scheme is not enough on
+// its own: poppler escapes a quote inside a URI action as `&quot;` (verified against
+// poppler 26.04.0), decodeEntities faithfully restores it, and the page agent is
+// told to copy the URL EXACTLY — so `https://ok.example/a" onmouseover="alert(1)`
+// would arrive whole in a document served as text/html. Nothing downstream sanitizes
+// agent output; wrapDocument concatenates it verbatim.
+//
+// None of these can appear unencoded in a legitimate URL — a real URL percent-encodes
+// them — so dropping is not a loss of anything valid, and it holds whether or not a
+// given poppler build escapes them and whether or not the model obeys "exactly".
+// Control characters are in the set for the same reason: a newline inside an
+// attribute value is another way out of it.
+const UNSAFE_CHARS = /["'<>`\s\u0000-\u001f\u007f]/;
+
 // Bounds on what one page contributes to a prompt. A page of endnotes can carry a
 // hundred links; past a few dozen the list stops being context and starts crowding
 // out the page itself. Truncation is logged by the caller (pipeline/links.ts), never
@@ -96,8 +111,12 @@ export function parsePdfHtmlLinks(xml: string): Map<number, PdfLink[]> {
     }
     // An anchor before the first <page> marker belongs to no page we can name.
     if (page < 1) continue;
+    // Decoded before both checks, not after: an href is only safe if what finally
+    // reaches the document is safe, and `&quot;`/`&#34;` are the same character to a
+    // browser as a raw quote. Checking the still-encoded form would pass a payload
+    // that decodeEntities then unwraps.
     const href = decodeEntities(m[2]).trim();
-    if (!SAFE_SCHEME.test(href)) continue;
+    if (!SAFE_SCHEME.test(href) || UNSAFE_CHARS.test(href)) continue;
     // Inner markup (<b>, <i>) is styling on the anchor text, not part of it.
     const text = decodeEntities(m[3].replace(/<[^>]*>/g, ""));
     const links = byPage.get(page) ?? [];

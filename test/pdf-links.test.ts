@@ -69,6 +69,25 @@ test("only schemes we can safely re-emit survive", () => {
   assert.ok(!hrefs.some((h) => h.includes(".html#")), "internal GoTo destination dropped");
 });
 
+test("a URL that would break out of the attribute it is written into is dropped", () => {
+  // An allowlisted scheme is not enough. poppler escapes a quote inside a URI action
+  // as `&quot;` (verified against poppler 26.04.0, see the round trip below), so the
+  // payload arrives whole through the href regex, and decodeEntities restores the raw
+  // quote before anything writes it into a document served as text/html.
+  const xml =
+    `<page number="1">` +
+    `<text><a href="https://ok.example/a&quot; onmouseover=&quot;alert(1)">Click here</a></text>` +
+    `<text><a href="https://ok.example/b&#34;&gt;&lt;script&gt;">Numeric</a></text>` +
+    `<text><a href="https://ok.example/c and d">Spaced</a></text>` +
+    `<text><a href="https://ok.example/safe-with-hyphens_and~stuff?a=1&amp;b=2#f">Fine</a></text>` +
+    `</page>`;
+  assert.deepEqual(parsePdfHtmlLinks(xml).get(1), [
+    // The one legitimate URL survives — including its hyphens, which a careless
+    // character class would reject along with the payloads.
+    { text: "Fine", href: "https://ok.example/safe-with-hyphens_and~stuff?a=1&b=2#f" },
+  ]);
+});
+
 test("a link before any page marker is dropped rather than misattributed", () => {
   const xml = `<a href="https://example.org/orphan">Outline entry</a>\n<page number="1"><text><a href="https://example.org/real">Real</a></text></page>`;
   assert.deepEqual(parsePdfHtmlLinks(xml).get(1), [{ text: "Real", href: "https://example.org/real" }]);
@@ -197,6 +216,41 @@ test(
   },
 );
 
+test(
+  "a real PDF whose URI action carries a quote does not put that quote in the output",
+  { skip: hasPoppler() ? false : "poppler-utils not installed" },
+  async () => {
+    // The `"` needs no escaping in a PDF literal string, so this is a URI action a
+    // hostile file can simply contain. Parens are percent-encoded only because they
+    // delimit that string.
+    const payload = 'https://ok.example/a" onmouseover="alert%281%29';
+    const hostile = Buffer.from(
+      linkPdf().toString("latin1").replace("https://example.org/report?y=2026&q=1", payload),
+      "latin1",
+    );
+
+    // First, the fact the filter exists for: this poppler build escapes the quote
+    // rather than truncating the URL, so the payload really does reach the parse.
+    // If a future poppler stops doing that, this assertion is where to find out.
+    const dir = mkdtempSync(join(tmpdir(), "iris-pdf-hostile-"));
+    try {
+      const path = join(dir, "hostile.pdf");
+      writeFileSync(path, hostile);
+      const xml = execFileSync("pdftohtml", ["-xml", "-stdout", "-i", "-q", path], {
+        encoding: "utf8",
+      });
+      assert.match(xml, /onmouseover=&quot;/, "poppler escapes the quote, keeping the payload whole");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    // Second, what we do about it: the link is dropped, not sanitized and not passed on.
+    const pages = await rasterizePdf(hostile, "hostile.pdf");
+    assert.deepEqual(pages[0].links, []);
+    assert.deepEqual(pages[1].links, [{ text: "Email the team", href: "mailto:team@example.org" }]);
+  },
+);
+
 // ---------------------------------------------------------------------------
 // The prompt section and the arrival check
 // ---------------------------------------------------------------------------
@@ -281,6 +335,23 @@ test("an href no annotation accounts for is reported, but only where there is a 
   assert.deepEqual(unexpectedHrefs(LINKS, `<a href="#fn-1">1</a>`), []);
 });
 
+test("a relative href is not a URL an annotation could have supplied, so it is not reported", () => {
+  // This list is the one signal that reads as "possibly a fabricated URL". A relative
+  // href cannot be one — no annotation supplies it — and counting it dilutes the list.
+  assert.deepEqual(unexpectedHrefs(LINKS, `<a href="page2.html">next</a>`), []);
+  assert.deepEqual(unexpectedHrefs(LINKS, `<a href="/about">about</a>`), []);
+  assert.deepEqual(droppedHrefs(`<a href="page2.html">next</a>`, `<p>next</p>`), []);
+});
+
+test("an entity that names an inherited property decodes to itself, not to a function", () => {
+  // `&constructor;` matches the named-reference pattern, and a plain object literal
+  // would answer that lookup from Object.prototype — decoding the URL to
+  // "function Object() { [native code] }" on one side of the comparison only, and
+  // reporting a link that IS in the document as missing.
+  const links = [{ text: "t", href: "https://x.example/a?q=&constructor;1" }];
+  assert.deepEqual(missingLinks(links, `<a href="https://x.example/a?q=&amp;constructor;1">t</a>`), []);
+});
+
 test("a rewrite that loses a link is detectable; one that only renames anchors is not", () => {
   const before = `<p><a href="https://example.org/a">a</a> <a href="#fn-1">1</a></p>`;
   assert.deepEqual(droppedHrefs(before, `<p>a <a href="#fn-1">1</a></p>`), ["https://example.org/a"]);
@@ -315,12 +386,20 @@ function makeCtx(
   dir: string,
   links: PdfLink[],
   reply: (prompt: string, callsForImage: number) => string,
+  // Write a Feedback Agent too, so verifyAgentOutput actually runs and `reply` is
+  // asked to answer its TASK: verify prompts. Off by default: most of these tests are
+  // about the link check, and a page that has no fidelity verdict to protect is the
+  // simpler case to assert on.
+  withFeedback = false,
 ): { ctx: PipelineContext; rec: Recorded } {
   const agentsDir = join(dir, "agents");
   const fragDir = join(dir, "fragments");
   const inputDir = join(dir, "input");
   for (const d of [agentsDir, fragDir, inputDir]) mkdirSync(d, { recursive: true });
   writeFileSync(join(agentsDir, "page.md"), "# Page Agent\n\n## Required capability\nvision\n");
+  if (withFeedback) {
+    writeFileSync(join(agentsDir, "feedback.md"), "# Feedback Agent\n\n## Required capability\nvision\n");
+  }
   writeFileSync(join(inputDir, "page-001.png"), "not-a-real-png");
 
   const rec: Recorded = { events: [], prompts: [] };
@@ -424,6 +503,67 @@ test("a link still missing after the correction pass is recorded, not silently d
     await runExtraction(ctx);
     const unrecovered = rec.events.find((e) => e.type === "page_links_unrecovered");
     assert.deepEqual(unrecovered?.data.links, ["mailto:team@example.org"]);
+  });
+});
+
+// A page that PASSED its fidelity check and is re-rendered only to recover a link is
+// the case this feature introduced: before it, correctPage ran only on output already
+// known to be bad. These two tests pin what the rewrite has to earn.
+const ORIGINAL = "<h2>Annual report</h2><p>Read the annual report or email the team.</p>";
+const WITH_LINKS =
+  `<h2>Annual report</h2><p>Read the <a href="https://example.org/report?y=2026&q=1">annual report</a> ` +
+  `or <a href="mailto:team@example.org">email the team</a>.</p>`;
+
+test("a link fix that costs a verified page its structure is discarded, not delivered", async () => {
+  await withTemp(async (dir) => {
+    // The correction attaches both links but demotes the heading to a <p>. The page
+    // had passed verification, so the fragment that passed is the one kept.
+    const broken = WITH_LINKS.replace("<h2>Annual report</h2>", "<p><strong>Annual report</strong></p>");
+    const { ctx, rec } = makeCtx(
+      dir,
+      LINKS,
+      (prompt) => {
+        if (prompt.includes("TASK: verify")) {
+          return prompt.includes("<strong>Annual report</strong>")
+            ? JSON.stringify({ faithful: false, accessible: false, problems: ["The page heading is now a bold paragraph."] })
+            : JSON.stringify({ faithful: true, accessible: true, problems: [] });
+        }
+        return JSON.stringify({ html: prompt.includes("does not link to it") ? broken : ORIGINAL, log: "" });
+      },
+      true,
+    );
+    const { fragments } = await runExtraction(ctx);
+
+    assert.equal(fragments[0].innerHtml, ORIGINAL, "the fragment that passed verification is delivered");
+    const rejected = rec.events.find((e) => e.type === "page_links_correction_rejected");
+    assert.deepEqual(rejected?.data.links, [LINKS[0].href, LINKS[1].href]);
+    assert.deepEqual(rejected?.data.problems, ["The page heading is now a bold paragraph."]);
+    assert.ok(!/self-corrected/.test(fragments[0].log ?? ""), "a discarded correction is not logged as one");
+  });
+});
+
+test("a link fix that verifies clean replaces the page, and the verdict keeps its own name", async () => {
+  await withTemp(async (dir) => {
+    const { ctx, rec } = makeCtx(
+      dir,
+      LINKS,
+      (prompt) => {
+        if (prompt.includes("TASK: verify")) {
+          return JSON.stringify({ faithful: true, accessible: true, problems: [] });
+        }
+        return JSON.stringify({ html: prompt.includes("does not link to it") ? WITH_LINKS : ORIGINAL, log: "" });
+      },
+      true,
+    );
+    const { fragments } = await runExtraction(ctx);
+
+    assert.equal(fragments[0].innerHtml, WITH_LINKS);
+    assert.ok(!rec.events.some((e) => e.type === "page_links_correction_rejected"));
+    // page_verify_ok/page_verify_failed report the Feedback Agent's verdict and only
+    // that, so a missing link does not turn a page that passed into a page that failed.
+    assert.ok(rec.events.some((e) => e.type === "page_verify_ok"));
+    assert.ok(!rec.events.some((e) => e.type === "page_verify_failed"));
+    assert.ok(rec.events.some((e) => e.type === "page_links_missing"));
   });
 });
 
