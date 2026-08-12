@@ -1,5 +1,7 @@
-# Every pull request automatically requests a review from the maintainer who
-# merges it, so nothing lands on `main` unseen.
+# A contributor's pull request automatically requests a review from the
+# maintainer who merges it, so nothing of theirs lands on `main` unseen. GitHub
+# never requests a review from a PR's own author, so a maintainer-authored PR
+# arrives without one — the same rule as the paragraph below.
 #
 # This file is ROUTING, not a gate. `main`'s protection requires a pull request
 # and restricts merging to @bbertucc, but it deliberately does NOT require

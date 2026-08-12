@@ -689,8 +689,8 @@ name that input. A defect that's real but unreachable is a note on an **approval
 would have to change to reach it. This was tuned in response to a measured problem: the findings
 were reproduced and specific, but *everything* arrived as blocking — 34 `CHANGES_REQUESTED` to 17
 `APPROVED` across the repo's history, individual PRs at 12-to-1, including reviews that called
-their own finding latent and requested changes anyway. `main` has no branch protection, so the
-cost was never blocked merges; it was author attention, and a reviewer that always blocks trains
+their own finding latent and requested changes anyway. `main` carried no branch protection then, so
+the cost was never blocked merges; it was author attention, and a reviewer that always blocks trains
 you to skim the one time it matters. Three things stay blocking even when unreachable, because
 their value is holding when something else breaks: auth/token/secret handling, publishing under
 the wrong identity, and path handling that could escape the data dir.
@@ -715,8 +715,10 @@ Two gaps worth knowing:
   `gh workflow run code-review.yml -f pr_number=<n>` — which runs the fork's code in a job
   holding the Bedrock role, so read the diff first.
 
-The verdict is advisory: `main` is unprotected and a human still merges. What changes is what
-that human is reading, not whether they read it.
+The verdict is advisory: `main` is protected, but this check is deliberately not required. Three
+kinds of PR produce no review at all — a fork PR, one touching only `paths-ignore`d files, and one
+editing this workflow — so requiring it would leave all three permanently unmergeable. A human
+merges. What changes is what that human is reading, not whether they read it.
 
 ## Contributing
 
