@@ -16,6 +16,20 @@ By participating you agree to our [Code of Conduct](CODE_OF_CONDUCT.md).
   one yourself, or send a PR adding/improving a file in [`agents/`](agents/).
 - **Code** — bug fixes and improvements via pull request.
 
+A well-written issue may get a pull request without you doing anything else. A scheduled workflow
+ranks the open issues Sun–Wed and opens one PR for the most pressing one it can finish well
+([details](README.md#scheduled-issue-triage)) — accessibility barriers rank first, and small
+user-visible fixes reported against the demo rank well because they review cleanly. It never
+touches an issue labelled `no-auto-pr`, never files a second PR for an issue it has already tried,
+and stops entirely when nothing is eligible. If you'd rather own the fix yourself, say so on the
+issue and add that label.
+
+**It also stays off any issue that already has an open PR — including yours.** Open a PR for an
+issue and the workflow leaves it alone; if every open issue has one, it opens nothing at all. It
+spots the link three ways: a `Closes #<n>` in your PR body, an `issue-<n>` in your branch name, or
+just a `#<n>` in the title or body. Writing `Closes #<n>` is the reliable one, and it closes the
+issue on merge, so do that — but a plain mention is enough to claim the issue.
+
 ## Development
 
 Requires **Node 24+** (runs TypeScript directly; uses built-in `node:sqlite`), **git**, and —
@@ -77,6 +91,9 @@ Your PR gets a review from Claude in CI before a maintainer reads it
   dispatches the review manually; nothing is needed from you.
 - **Editing `.github/workflows/code-review.yml` disables its own review.** Expect a warning
   saying so and a slower human read.
+- **`iris-auto/*` PRs aren't reviewed automatically either.** Those come from the scheduled triage
+  workflow, and GitHub doesn't start workflow runs for events raised by `GITHUB_TOKEN`. Each one
+  carries a comment saying so with the dispatch command. Nothing is needed from contributors.
 
 ## Architecture (orientation)
 

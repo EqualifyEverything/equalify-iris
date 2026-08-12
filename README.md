@@ -727,6 +727,87 @@ satisfy a required check the same vacuous way — that one is GitHub's documente
 skipped job rather than something measured here. A human merges. What changes is what that human
 is reading, not whether they read it.
 
+## Scheduled issue triage
+
+[`.github/workflows/issue-to-pr.yml`](.github/workflows/issue-to-pr.yml) runs **Sun–Wed at 22:00
+UTC** (PRD §7.15). It reads the open issues, ranks them by what most improves Iris, and opens
+**one** pull request for the top issue it can finish well, with a review requested from
+**@bbertucc**.
+
+[Automated code review](#automated-code-review) raised the ceiling on how much review this
+maintainership can absorb; this spends some of that headroom on the other side of the same
+bottleneck — issues that are correct, small, and never picked up. A reported barrier that sits open
+for three months is a barrier shipped to every session in between.
+
+The schedule is built around the reviewer rather than the runner. Four runs, late afternoon
+Central, each landing a PR the day before it gets read — so the review queue is Mon–Thu and Friday
+stays clear. Thu–Sat runs would produce PRs nobody opens until Monday, by which point `main` has
+moved and the branch needs a rebase before it can be read at all. Actions cron is UTC and never
+shifts for DST, and an evening-local schedule crosses midnight UTC onto the next UTC day, so a
+naive "Sunday evening" cron would run Saturday evening Central; 22:00 UTC is before that boundary
+in both DST states.
+
+The same reasoning is why it refuses to run more often than it is useful:
+
+- **No eligible issue, no run.** The preflight step stops before Node, before OIDC, before a token
+  is spent. An automation that always finds something to change is one that invents work, and an
+  invented PR costs the same review attention as a real one.
+- **An issue an open PR already addresses is not eligible** — anyone's PR, not just this
+  workflow's. If every open issue is covered, the run does nothing. Coverage is read from three
+  signals: GitHub's own closing-issue links (`Closes #6`), an `issue-<n>` fragment in the head
+  branch, and a bare `#<n>` in the title or body. That last one is loose on purpose. It is noisy —
+  this repo's PR bodies cite numbers freely, and "related to #5 but does not fix it" reads the same
+  as a fix — but the failure modes are not symmetric: a false positive delays an issue to the next
+  run and names the PR that caused it in the run summary, while a false negative spends a review
+  slot on a duplicate. Every reference is intersected with the currently-open issues first, which
+  discards PR numbers and closed issues on its own. To overrule it, dispatch the issue by hand.
+- **Two open `iris-auto/*` PRs is the cap.** This is the pacing control and the reason the workflow
+  is worth having: a queue that grows faster than one person reads it is a backlog with a robot
+  attached. At 2, the maintainer can be a day behind without the workflow piling on, and a week of
+  no reviews caps the mess at two branches instead of four.
+- **It does not re-litigate.** An issue whose `iris-auto` PR was closed unmerged is off the list —
+  coming back with a fresh attempt every Sunday is how an automation becomes something you mute. An
+  issue whose PR *merged* is eligible again, since the next attempt starts from different code. The
+  `no-auto-pr` label is the explicit opt-out for tracking issues and discussions.
+
+Ranking, highest first: accessibility of the output or the app; a red `main` (baseline `npm ci` /
+typecheck / unit results are measured on untouched `main` and handed over, so a pre-existing failure
+is never mistaken for the diff's); correctness and data-safety bugs; small user-visible fixes
+reported against the demo; agent-library work; then docs that contradict the code. Ranking is
+filtered by *can this be finished well in one focused PR* — an open-ended issue like "Stress Test
+Iris" is not a PR, and the PR body has to name the higher-ranked issues that were passed over and
+why. Deciding nothing is worth a PR is a supported outcome, recorded in the run summary.
+
+Two things about it are worth reading closely, because they are where an automation that writes to
+the repo would go wrong:
+
+- **Issue text is untrusted input.** Anyone can open an issue, so every body and comment reaches the
+  model fenced as data, and none of it is ever interpolated into a `run:` block — a title full of
+  shell metacharacters or an Actions expression is inert. But the prompt is the layer an injected
+  issue argues with, so it is not the control. The control is a verify step that re-reads the
+  **pushed diff** against a path allowlist: a PR touching `.github/workflows/**`,
+  `.github/CODEOWNERS`, `LICENSE`, `infra/**` or `.env*` is converted to a draft with a comment
+  saying why, and the job goes red. `.github/workflows/**` is the sharp one — `code-review.yml`
+  self-skips on any PR that edits it, so a workflow-editing PR from this job would arrive with no
+  automated review and every other signal green.
+- **These PRs are not automatically reviewed.** GitHub does not start workflow runs for events
+  raised by `GITHUB_TOKEN`, so `code-review.yml` never fires on them. The verify step says so on the
+  PR itself, with the dispatch command, because the absence of a signal is not something a reader
+  notices. Configuring an `AUTO_PR_TOKEN` secret (a PAT or App token, used only for `gh pr create`)
+  closes the gap; until then, `gh workflow run code-review.yml -f pr_number=<n>`.
+
+Run it by hand with `gh workflow run issue-to-pr.yml`, optionally with `-f issue_number=<n>` to
+name the issue yourself, or `-f dry_run=true` to get the ranking and the plan with no branch, no
+commit and no PR. Naming an issue overrides the skip labels, a past rejection and the
+already-covered check — you have made those calls yourself — but not the two-open-PR cap, and the
+run still warns if the issue looks covered so you know what you are walking into.
+
+One duplicate the preflight cannot prevent is the race: a contributor opens a PR for the same issue
+during the 45 minutes the job is working. The verify step catches that afterwards, comparing the new
+PR's own target issues against every other open PR, and comments on the PR asking for the two to be
+compared. It warns rather than drafting one of them — which of the pair to keep is a judgement about
+two diffs, not something to decide by timestamp.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md). Found an
