@@ -47,6 +47,10 @@ export interface IrisConfig {
     [key: string]: unknown;
   };
   defaults: {
+    // Reader/editor rounds a document gets before the review loop stops and lists
+    // what is left in `unresolved.md`. Read once, at first auth, to seed the
+    // account default every session inherits — a session cannot override it
+    // (§9.2 "Amended"). Normalized by loadConfig, so it is always >= 1.
     max_review_iterations: number;
     // How many pages to extract in parallel within one run. Pages are
     // independent (one vision call each), so this is a pure speed knob; it is
@@ -85,6 +89,15 @@ export const DEFAULT_MAX_CONCURRENT_RUNS = 2;
 // genuinely needs more concurrency than this wants multiple instances and a
 // shared Postgres store (§10.2), which v1 does not implement.
 export const MAX_CONCURRENT_RUNS_CEILING = 32;
+
+// Reader/editor rounds a document gets when the deployment doesn't say. Since the
+// per-request override was removed (§9.2 "Amended"), this config value is the ONLY
+// input to the cap — it seeds every account default on first auth — so the values
+// it must not silently become are the ones that would quietly stop the review loop
+// from reviewing: `0` buys one reader pass with no fix ever applied, and a negative
+// skips review outright (src/pipeline/review.ts). Both are floored to 1 by the
+// normalizer below.
+export const DEFAULT_MAX_REVIEW_ITERATIONS = 3;
 
 // Output-token ceiling when a provider block doesn't set one. 8192 was the old
 // hardcoded Bedrock value and is comfortably too small for a dense page: a
@@ -290,6 +303,29 @@ export function normalizeConcurrency(value: unknown): number {
   return Math.min(MAX_EXTRACTION_CONCURRENCY, Math.max(1, Math.floor(n)));
 }
 
+// Coerce a configured max_review_iterations into a usable integer: missing or
+// non-numeric falls back to the default, and anything valid is floored to 1.
+// Exported for tests.
+export function normalizeReviewIterations(value: unknown): number {
+  // The same "absent means the default, not zero" trap as the other normalizers —
+  // YAML parses a valueless `max_review_iterations:` as null and Number(null) is 0
+  // — but here it had a second failure on top of a bad cap: null flows through
+  // makeAuthMiddleware to upsertUser, whose `= 3` parameter default only fires for
+  // `undefined`, so it reached a NOT NULL column and every first-time login on that
+  // deployment failed as `401 unauthorized: Token validation failed`. A config typo
+  // reported as the caller's token being bad.
+  if (value === null || value === undefined) return DEFAULT_MAX_REVIEW_ITERATIONS;
+  if (typeof value === "string" && value.trim() === "") return DEFAULT_MAX_REVIEW_ITERATIONS;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_REVIEW_ITERATIONS;
+  // Floored, not clamped: unlike the two concurrency knobs there is no ceiling
+  // here, deliberately. Rounds are sequential, so a big number costs the operator
+  // who chose it latency and tokens on their own deployment — it does not
+  // over-subscribe the machine and degrade every other run the way concurrency
+  // does. Silently capping a deliberate 20 would be the more surprising behavior.
+  return Math.max(1, Math.floor(n));
+}
+
 // Bundled GitHub App client_id for the device flow (PRD §9.1). This is the single
 // place to embed Equalify's registered "Equalify Iris" GitHub App so the default
 // deployment needs no per-operator app setup — the same pattern the GitHub CLI uses.
@@ -341,6 +377,12 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   // straight from config with no fallback at the construction site.
   parsed.defaults.max_concurrent_runs = normalizeMaxConcurrentRuns(
     parsed.defaults.max_concurrent_runs,
+  );
+  // And for the review cap. This one is normalized here rather than at the point of
+  // use because there is no longer a point of use to guard: the value is read once,
+  // at first auth, to seed the account default that every later session inherits.
+  parsed.defaults.max_review_iterations = normalizeReviewIterations(
+    parsed.defaults.max_review_iterations,
   );
   // Same treatment for each provider's output ceiling, so an adapter can read
   // block.max_tokens directly and never has to re-derive a default. Applied to

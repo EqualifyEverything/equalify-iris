@@ -153,7 +153,11 @@
            announcing it would repeat. Screen-reader announcements go through the
            dedicated #live region, fired once per step change (issue #18). -->
       <p id="status-live" class="status" aria-busy="true"><span class="spinner" aria-hidden="true"></span> <span id="status-text">Starting…</span></p>
-      <p class="hint">This can take a minute or two.</p>
+      <!-- "a minute or two" was written when the form asked for review passes and
+           defaulted to 1. Uploads now run at the deployment's cap (3 by default), so
+           the honest estimate is longer — and it matches what the #live region has
+           always announced to screen-reader users. -->
+      <p class="hint">This can take a few minutes — you can leave this page and come back.</p>
     </section>
 
     <!-- Step 4: result -->
