@@ -1,7 +1,8 @@
 # Equalify Iris — API Guide (bash / curl)
 
 Every endpoint is under `/v1`. All responses are JSON unless noted. Every endpoint except
-`/v1/health` and `/v1/auth/*` requires `Authorization: Bearer <github_token>` (PRD §9.1).
+`/v1/health`, `/v1/stats` and `/v1/auth/*` requires `Authorization: Bearer <github_token>`
+(PRD §9.1).
 
 These commands are copy-pasteable. They are the same calls exercised by `test/e2e.sh`, which
 runs the whole lifecycle against mock GitHub + mock model services and asserts every response.
@@ -16,6 +17,37 @@ export BASE=http://localhost:8080/v1
 curl -s "$BASE/health"
 # {"status":"ok","service":"equalify-iris"}
 ```
+
+## 0b. Public tally (unauthenticated)
+
+How much this deployment has actually made accessible. No token: the browser app shows it to
+visitors before anyone signs in, and it is the number the project celebrates with.
+
+```bash
+curl -s "$BASE/stats"
+```
+```json
+{ "pages_processed": 1284, "documents_processed": 212, "since": "2026-05-22T18:00:00.000Z" }
+```
+
+* `pages_processed` — **distinct page images** Iris has converted to accessible HTML. A session
+  counts once it has reached `ready_for_review`, so an upload that is still queued, running, or
+  failed is not in the number, and a feedback re-run does **not** count its pages again: this is a
+  tally of pages made accessible, not of model calls.
+* `documents_processed` — sessions counted, on the same basis. A 40-page PDF is one document and
+  forty pages.
+* `since` — when the earliest counted document finished, or `null` before anything has, so a
+  client can say "since May 2026" without hardcoding a launch date.
+
+The number only ever goes up. It is derived from a write-once `first_completed_at` stamp rather
+than from current `status`, precisely so that asking Iris to re-run a finished document — which
+moves it back to `queued`, and possibly on to `failed` — cannot make the public count dip. For
+databases that predate that column, sessions already in `ready_for_review`/`closed` are backfilled
+from `updated_at`, so nothing already converted is dropped from the count.
+
+Everything here is a deployment-wide aggregate: no session ids, logins, user ids or filenames, and
+no per-upload figures. Responses are cached for 60 seconds (`Cache-Control: public, max-age=60`),
+so a page you just converted may take up to a minute to appear.
 
 ## 1. Authenticate (get a token)
 

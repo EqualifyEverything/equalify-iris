@@ -212,6 +212,27 @@ fragmarks=$(jq -r '[.[].innerHtml | capture("Page marker (?<n>[0-9]+)").n] | @cs
   && pass "fragments.json in submitted order pre-sort (order=$fragorder)" \
   || fail "fragment order" "order=$fragorder markers=$fragmarks"
 
+echo "==> 7b. GET /v1/stats (public tally, no token)"
+# Deliberately WITHOUT "${AUTH[@]}": this endpoint is mounted above the auth
+# middleware so the browser app can show the tally to a visitor who has not signed
+# in, and step 2 has already established that everything else 401s without a token.
+# Exactly one 3-page session has completed at this point.
+#
+# The count is asserted only here, not again after the feedback rounds below: the
+# route caches its answer for 60s, so a second call inside this run is served from
+# that cache and would assert nothing. That the tally does not double-count a
+# re-run — or dip while one is in flight — is covered in test/stats.test.ts against
+# the store, where the clock is not in the way.
+stats=$(curl -s "$BASE/stats")
+echo "$stats" | jq -e '.pages_processed==3 and .documents_processed==1 and (.since|type=="string")' >/dev/null \
+  && pass "public tally: $(echo "$stats" | jq -r '.pages_processed') pages, $(echo "$stats" | jq -r '.documents_processed') document" \
+  || fail "stats" "expected 3 pages / 1 document / a since timestamp, got $stats"
+# Aggregate only. The response is unauthenticated, so a session id, a login or a
+# user id appearing in it is a leak, and it would be an easy one to introduce by
+# widening the query behind it.
+echo "$stats" | jq -e 'has("session_id") or has("sessions") or has("github_login") or has("github_user_id") | not' >/dev/null \
+  && pass "tally carries no per-user or per-session detail" || fail "stats shape" "$stats"
+
 echo "==> 8. GET /v1/sessions/{id}/logs (ndjson)"
 logs=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/logs")
 echo "$logs" | head -1 | jq -e '.type' >/dev/null \
