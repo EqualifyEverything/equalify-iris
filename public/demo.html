@@ -44,7 +44,7 @@
     p { margin: .5rem 0; }
     label { display: block; font-weight: 600; margin: 1rem 0 .35rem; }
     .hint { color: var(--muted); font-weight: 400; font-size: .95rem; margin: 0 0 .35rem; }
-    input[type=file], input[type=number], input[type=text], textarea {
+    input[type=file], input[type=text], textarea {
       font: inherit; width: 100%; max-width: 32rem; padding: .55rem .65rem;
       border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg);
     }
@@ -139,10 +139,6 @@
         <label for="images">Pages (images or PDF)</label>
         <p class="hint" id="images-hint">A PDF, or images (PNG, JPEG, TIFF, WebP) in reading order. A PDF is split into one page per image.</p>
         <input id="images" name="images" type="file" accept="image/png,image/jpeg,image/tiff,image/webp,application/pdf" multiple aria-describedby="images-hint" required>
-
-        <label for="iterations">Review passes</label>
-        <p class="hint" id="iter-hint">1 is fast; higher is more thorough but much slower (each pass re-runs the reviewer). 1–5.</p>
-        <input id="iterations" name="iterations" type="number" min="1" max="5" value="1" aria-describedby="iter-hint">
 
         <div class="row">
           <button id="convert-btn" type="submit" disabled>Convert to accessible HTML</button>
@@ -353,8 +349,6 @@
       sourceBase = (files[0].name.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9._-]/g, '_')) || 'document';
       const fd = new FormData();
       for (const f of files) fd.append('images', f);
-      const iters = $('iterations').value;
-      if (iters) fd.append('config', JSON.stringify({ max_review_iterations: Number(iters) }));
       const btn = $('convert-btn');
       btn.disabled = true; btn.setAttribute('aria-busy', 'true');
       try {

@@ -738,8 +738,7 @@ curl -X POST https://api.example.com/v1/sessions \
   -H "Authorization: Bearer $TOKEN" \
   -F "images=@page-001.png" \
   -F "images=@page-002.png" \
-  -F "images=@page-003.png" \
-  -F 'config={"max_review_iterations": 3}'
+  -F "images=@page-003.png"
 ```
 
 Each `-F "images=@…"` adds another image part to the request body. The server reads them in order.
@@ -747,10 +746,10 @@ Each `-F "images=@…"` adds another image part to the request body. The server 
 Request parts:
 
 - `images` (repeated): one image file per part (PNG, JPEG, TIFF, WebP). At least one required. No fixed maximum in v1; per-account limits are enforced at the account level.
-- `config` (single JSON part, optional):
-  ```json
-  { "max_review_iterations": 3 }
-  ```
+
+**Amended: the `config` part is withdrawn — `images` is the only part, and a session has no per-request options.** This section specified a single optional JSON part carrying `{ "max_review_iterations": N }`, and it shipped that way (the demo page even asked for the number, as "Review passes"). It is removed, from the endpoint and from the demo, because it asked the uploader to decide something they are not in a position to decide. **How many review rounds a document needs is a property of the document, and the loop is what discovers it** — it stops as soon as the Reader finds nothing (§7.11), so the cap is only ever reached by documents that still had issues. A caller choosing the number can therefore only do one of two things: leave it at the deployment's cap, or ask for fewer rounds than budgeted, which means asking for a document with more unresolved issues in it. Neither is a decision worth an API surface, and the second is a foot-gun the person uploading a scan has no way to evaluate. The value was also never validated — `0` bought one Reader pass with no fix ever applied, and a negative skipped review outright.
+
+The cap now comes from one place per deployment: `defaults.max_review_iterations` in config, which seeds each user's account record on first auth (§9.1) and is reported by `GET /v1/me`. A request that still sends a `config` part is **ignored, not rejected**, so an older client keeps working at the deployment's cap.
 
 Response `201 Created`:
 ```json

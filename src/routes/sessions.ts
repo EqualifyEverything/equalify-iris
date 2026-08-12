@@ -173,17 +173,18 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       }
     }
 
-    let maxIter = req.user!.max_review_iterations;
-    const configPart = (req.body as { config?: string } | undefined)?.config;
-    if (configPart) {
-      try {
-        const parsed = JSON.parse(configPart) as { max_review_iterations?: number };
-        if (typeof parsed.max_review_iterations === "number") maxIter = parsed.max_review_iterations;
-      } catch {
-        sendError(res, 400, "invalid_request", "config part is not valid JSON");
-        return;
-      }
-    }
+    // The review cap is the caller's account default (seeded from the
+    // deployment's `defaults.max_review_iterations`). A per-request `config`
+    // JSON part used to override it; it was removed because it asked the caller
+    // for a number they are not positioned to choose — how many rounds a
+    // document needs is a property of the document, discovered by the loop, and
+    // the only thing the knob could usefully express was "spend fewer rounds
+    // than this deployment budgeted", i.e. ask for a worse document. It was also
+    // unvalidated: any number was accepted, including `0` (one reader pass, no
+    // fix ever applied) and negatives (review skipped outright). A `config` part
+    // on the request is now ignored rather than rejected, so an older client
+    // still sending one keeps working, at the deployment's cap.
+    const maxIter = req.user!.max_review_iterations;
 
     // Expand uploads into ordered page images (PDF -> one PNG per page).
     const pages: { name: string; buffer: Buffer }[] = [];

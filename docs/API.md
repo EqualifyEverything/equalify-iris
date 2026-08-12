@@ -139,13 +139,16 @@ contributions are filed as issues, so no fork is ever created (deviation from PR
 ## 3. Create a session (upload images)
 
 `multipart/form-data`. Repeat `images` once per file; **the order of the parts is the
-processing order** (not the filename). `config` is an optional JSON part.
+processing order** (not the filename). `images` is the only part the endpoint reads — there are
+no per-session options. (A `config` part used to override `max_review_iterations` for one
+session; it was removed, and sending one now is ignored rather than an error. The cap comes from
+your account default, seeded from the deployment's `defaults.max_review_iterations` — see
+[`GET /v1/me`](#2-current-user).)
 
 ```bash
 create=$(curl -s -X POST -H "$AUTH" "$BASE/sessions" \
   -F "images=@page-001.png" \
-  -F "images=@page-002.png" \
-  -F 'config={"max_review_iterations":3}')
+  -F "images=@page-002.png")
 echo "$create"
 export SID=$(echo "$create" | jq -r .session_id)
 ```

@@ -258,8 +258,7 @@ Example â€” create a session (order of `images` parts is the processing order, Â
 curl -X POST http://localhost:8080/v1/sessions \
   -H "Authorization: Bearer $TOKEN" \
   -F "images=@page-001.png" \
-  -F "images=@page-002.png" \
-  -F 'config={"max_review_iterations": 3}'
+  -F "images=@page-002.png"
 ```
 
 Then poll `GET /v1/sessions/{id}` until `status` is `ready_for_review`, fetch
