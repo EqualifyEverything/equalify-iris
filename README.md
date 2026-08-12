@@ -101,14 +101,25 @@ from the environment at startup; changes require a restart.
   response that stops at the ceiling is a **failed** call, not a short one: it arrives as a 200
   with HTML cut mid-tag, which would otherwise be assembled into the deliverable as if it were
   genuine content. Both adapters reject it and the error names the knob to raise.
-  The Bedrock adapter **streams** its responses, to tell a stalled call apart from a slow one.
-  A single non-streaming request cannot: "no answer yet" describes a dead socket and a large
+  Both adapters **stream** their responses, to tell a stalled call apart from a slow one. A
+  single non-streaming request cannot: "no answer yet" describes a dead socket and a large
   document being correctly rewritten equally well, so a total-duration cap kills both — and the
   review phase's document-level rewrite (whole body in, whole corrected body out) is the call
-  slow enough to be killed. It is therefore an **idle** timeout: 60s of *silence* fails a call,
-  while work that keeps arriving runs as long as it needs, bounded only by a deliberately
-  generous 15-minute backstop for a stream that trickles without ever finishing. The two are
-  distinct errors, and each says which limit it hit and how much had streamed.
+  slow enough to be killed. The limits are therefore about *silence*, not duration: **60s** with
+  no output fails a call, while work that keeps arriving runs as long as it needs, bounded only
+  by a deliberately generous **15-minute** backstop for a stream that trickles without ever
+  finishing. OpenRouter adds a third, more generous window — **120s** to produce anything at all
+  — because an OpenAI-style stream has no "generation began" event to distinguish a model that
+  is slow to start from one that never will, where Bedrock's `message_start` does. Each limit is
+  a distinct error naming which one it hit and how much had streamed, since "never started",
+  "stopped halfway" and "never converged" call for different responses.
+  A **keepalive is not progress** in either adapter — Bedrock's `ping`, OpenRouter's
+  `: OPENROUTER PROCESSING` comment. Letting one reset the clock would defeat the timeout in the
+  one case it exists for: a generation that hangs behind a connection that stays chatty.
+  Finally, a stream **ending** is not a response completing. A terminal event (`message_stop` /
+  `[DONE]`, or a stop reason) is required, because an event stream that stops early would
+  otherwise deliver a half-corrected document as a successful result — the same failure the
+  truncation guard exists to prevent, arriving by a different road.
 - **Concurrency** (§9.4): two independent knobs under `defaults`.
   `extraction_concurrency` is *within* a run (pages in parallel);
   `max_concurrent_runs` is *across* sessions. Peak in-flight model calls is the product of the

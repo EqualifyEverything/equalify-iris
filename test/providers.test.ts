@@ -46,24 +46,44 @@ test("a configured max_tokens is honoured, with no upper clamp", () => {
   assert.equal(normalizeMaxTokens(200_000), 200_000);
 });
 
-// --- OpenRouter truncation + payload ----------------------------------------
+// --- OpenRouter: streaming, truncation, payload ------------------------------
 
-// Swap global fetch for one canned response, capturing the request body.
-async function withFetch<T>(
-  responder: (body: Record<string, unknown>) => { status?: number; json: unknown },
+const sseDelta = (content: string) =>
+  `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}`;
+const sseFinish = (finish_reason: string) =>
+  `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason }] })}`;
+const SSE_DONE = "data: [DONE]";
+// OpenRouter's keepalive while a request waits: an SSE comment, not an event.
+const SSE_KEEPALIVE = ": OPENROUTER PROCESSING";
+
+type Responder = (body: Record<string, unknown>) => {
+  status?: number;
+  errorBody?: string;
+  lines?: string[];
+  // Full control over framing/timing when the default one-shot body won't do.
+  body?: (signal: AbortSignal) => AsyncIterable<Uint8Array>;
+};
+
+// Swap global fetch for one canned SSE response, capturing the request bodies.
+async function withStream<T>(
+  responder: Responder,
   fn: (calls: Record<string, unknown>[]) => Promise<T>,
 ): Promise<T> {
   const original = globalThis.fetch;
   const calls: Record<string, unknown>[] = [];
-  globalThis.fetch = (async (_url: string, init: { body: string }) => {
+  globalThis.fetch = (async (_url: string, init: { body: string; signal: AbortSignal }) => {
     const body = JSON.parse(init.body) as Record<string, unknown>;
     calls.push(body);
-    const { status = 200, json } = responder(body);
+    const { status = 200, errorBody, lines = [], body: custom } = responder(body);
     return {
       ok: status >= 200 && status < 300,
       status,
-      json: async () => json,
-      text: async () => JSON.stringify(json),
+      text: async () => errorBody ?? "",
+      body: custom
+        ? custom(init.signal)
+        : (async function* () {
+            yield new TextEncoder().encode(lines.join("\n\n") + "\n\n");
+          })(),
     };
   }) as unknown as typeof fetch;
   try {
@@ -73,13 +93,19 @@ async function withFetch<T>(
   }
 }
 
-const provider = (maxTokens?: number) =>
-  new OpenRouterProvider({
-    api_key: "test-key",
-    base_url: "http://localhost:1/v1",
-    default_model: "m",
-    max_tokens: maxTokens,
-  });
+const provider = (
+  maxTokens?: number,
+  timeouts?: { firstOutputTimeoutMs?: number; idleTimeoutMs?: number; maxTotalMs?: number },
+) =>
+  new OpenRouterProvider(
+    {
+      api_key: "test-key",
+      base_url: "http://localhost:1/v1",
+      default_model: "m",
+      max_tokens: maxTokens,
+    },
+    timeouts,
+  );
 
 const req = {
   capability: "text" as const,
@@ -88,8 +114,8 @@ const req = {
 };
 
 test("a finish_reason of length is rejected, not returned as content", async () => {
-  await withFetch(
-    () => ({ json: { choices: [{ message: { content: "<table><tr><td>cut" }, finish_reason: "length" }] } }),
+  await withStream(
+    () => ({ lines: [sseDelta("<table><tr><td>cut"), sseFinish("length"), SSE_DONE] }),
     async () => {
       await assert.rejects(
         () => provider(1000).complete(req),
@@ -107,8 +133,8 @@ test("a finish_reason of length is rejected, not returned as content", async () 
 });
 
 test("a normal finish_reason returns the content untouched", async () => {
-  await withFetch(
-    () => ({ json: { choices: [{ message: { content: "<p>done</p>" }, finish_reason: "stop" }] } }),
+  await withStream(
+    () => ({ lines: [sseDelta("<p>done</p>"), sseFinish("stop"), SSE_DONE] }),
     async () => {
       const res = await provider().complete(req);
       assert.equal(res.text, "<p>done</p>");
@@ -120,22 +146,22 @@ test("a normal finish_reason returns the content untouched", async () => {
 test("a missing finish_reason is not treated as truncation", async () => {
   // Not every OpenRouter-compatible upstream returns the field. Absent must mean
   // "no evidence of truncation", not "assume the worst" — inventing a failure here
-  // would break every such provider.
-  await withFetch(
-    () => ({ json: { choices: [{ message: { content: "<p>ok</p>" } }] } }),
-    async () => {
-      const res = await provider().complete(req);
-      assert.equal(res.text, "<p>ok</p>");
-    },
-  );
+  // would break every such provider. [DONE] is the completeness signal instead.
+  await withStream(() => ({ lines: [sseDelta("<p>ok</p>"), SSE_DONE] }), async () => {
+    const res = await provider().complete(req);
+    assert.equal(res.text, "<p>ok</p>");
+  });
 });
 
-test("the configured ceiling is sent on the request", async () => {
-  await withFetch(
-    () => ({ json: { choices: [{ message: { content: "x" }, finish_reason: "stop" }] } }),
+test("the configured ceiling is sent on the request, and streaming is asked for", async () => {
+  await withStream(
+    () => ({ lines: [sseDelta("x"), sseFinish("stop"), SSE_DONE] }),
     async (calls) => {
       await provider(12345).complete(req);
       assert.equal(calls[0].max_tokens, 12345);
+      // Without this the upstream answers in one shot and every stall limit below
+      // is unreachable — the adapter would silently be back to a total-duration cap.
+      assert.equal(calls[0].stream, true);
     },
   );
 });
@@ -144,8 +170,8 @@ test("a provider built without a ceiling still sends one", async () => {
   // Guards the regression this work fixes: OpenRouter previously sent NO
   // max_tokens, leaving the limit to whatever the upstream model defaulted to —
   // different per model, and silent when reached.
-  await withFetch(
-    () => ({ json: { choices: [{ message: { content: "x" }, finish_reason: "stop" }] } }),
+  await withStream(
+    () => ({ lines: [sseDelta("x"), sseFinish("stop"), SSE_DONE] }),
     async (calls) => {
       await provider().complete(req);
       assert.equal(calls[0].max_tokens, DEFAULT_MAX_TOKENS);
@@ -156,11 +182,205 @@ test("a provider built without a ceiling still sends one", async () => {
 test("truncation is not retried as if it were a network blip", async () => {
   // It is thrown from inside the retry loop, so this pins that it exits rather
   // than re-billing the same truncated generation three times.
-  await withFetch(
-    () => ({ json: { choices: [{ message: { content: "cut" }, finish_reason: "length" }] } }),
+  await withStream(
+    () => ({ lines: [sseDelta("cut"), sseFinish("length"), SSE_DONE] }),
     async (calls) => {
       await assert.rejects(() => provider(50).complete(req), TruncatedResponseError);
       assert.equal(calls.length, 1, `expected 1 attempt, got ${calls.length}`);
+    },
+  );
+});
+
+test("events are framed by newline, not by read boundary", async () => {
+  // SSE arrives in arbitrary byte chunks: one read can split an event mid-JSON or
+  // carry several. Feeding it a byte at a time is the strongest version of that —
+  // it also splits the multi-byte characters real documents contain, which a
+  // decoder used without `stream: true` would corrupt into replacement chars.
+  const payload = [sseDelta("café — naïve"), sseDelta(" 日本語"), sseFinish("stop"), SSE_DONE].join("\n\n");
+  await withStream(
+    () => ({
+      body: () =>
+        (async function* () {
+          for (const byte of new TextEncoder().encode(payload)) yield new Uint8Array([byte]);
+        })(),
+    }),
+    async () => {
+      const res = await provider().complete(req);
+      assert.equal(res.text, "café — naïve 日本語");
+    },
+  );
+});
+
+test("a slow but progressing stream outlives the idle window", async () => {
+  // Same guarantee as Bedrock: total duration (~360ms) is well past the 200ms idle
+  // limit, but no single gap is, so the call must finish. This is the copy_editor
+  // call that died at two minutes under the old total-duration cap.
+  await withStream(
+    () => ({
+      body: (signal) =>
+        (async function* () {
+          const enc = new TextEncoder();
+          for (let i = 0; i < 6; i++) {
+            await sleepUnlessAborted(60, signal);
+            yield enc.encode(sseDelta(`chunk${i} `) + "\n\n");
+          }
+          yield enc.encode([sseFinish("stop"), SSE_DONE].join("\n\n") + "\n\n");
+        })(),
+    }),
+    async () => {
+      const res = await provider(undefined, { idleTimeoutMs: 200 }).complete(req);
+      assert.equal(res.text, "chunk0 chunk1 chunk2 chunk3 chunk4 chunk5 ");
+    },
+  );
+});
+
+test("keepalive comments do not pass for progress", async () => {
+  // `: OPENROUTER PROCESSING` says the provider is still there, not that the model
+  // is producing anything. If it re-armed the clock, a hung generation behind a
+  // chatty connection would run to the 15-minute backstop instead of failing.
+  await withStream(
+    () => ({
+      body: (signal) =>
+        (async function* () {
+          const enc = new TextEncoder();
+          for (;;) {
+            await sleepUnlessAborted(30, signal);
+            yield enc.encode(SSE_KEEPALIVE + "\n\n");
+          }
+        })(),
+    }),
+    async () => {
+      await assert.rejects(
+        () => provider(undefined, { firstOutputTimeoutMs: 150, maxTotalMs: 60_000 }).complete(req),
+        (e: Error) => {
+          assert.ok(e instanceof StalledStreamError, `expected StalledStreamError, got ${e.name}`);
+          assert.equal((e as StalledStreamError).kind, "first_output");
+          assert.match(e.message, /never started/);
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("waiting for the first token is a different failure from stalling halfway", async () => {
+  // Once output has started, the tighter idle window applies — and the error says
+  // how much had arrived, which is what distinguishes the two diagnoses.
+  await withStream(
+    () => ({
+      body: (signal) =>
+        (async function* () {
+          const enc = new TextEncoder();
+          yield enc.encode(sseDelta("half a doc") + "\n\n");
+          for (;;) {
+            await sleepUnlessAborted(30, signal);
+            yield enc.encode(SSE_KEEPALIVE + "\n\n"); // chatty, but producing nothing
+          }
+        })(),
+    }),
+    async () => {
+      await assert.rejects(
+        () =>
+          provider(undefined, {
+            firstOutputTimeoutMs: 60_000, // generous: this call DID start producing
+            idleTimeoutMs: 150,
+            maxTotalMs: 60_000,
+          }).complete(req),
+        (e: Error) => {
+          assert.ok(e instanceof StalledStreamError, `expected StalledStreamError, got ${e.name}`);
+          assert.equal((e as StalledStreamError).kind, "idle");
+          assert.match(e.message, /10 chars had streamed/);
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("a stream that ends early is not accepted as a finished document", async () => {
+  await withStream(() => ({ lines: [sseDelta("<p>half")] }), async () => {
+    await assert.rejects(
+      () => provider().complete(req),
+      (e: Error) => {
+        assert.match(e.message, /ended without completing/);
+        assert.match(e.message, /7 chars received/);
+        return true;
+      },
+    );
+  });
+});
+
+test("a failure reported mid-stream is raised, not returned as a short document", async () => {
+  await withStream(
+    () => ({ lines: [sseDelta("<p>partial"), `data: ${JSON.stringify({ error: { message: "upstream is down" } })}`] }),
+    async () => {
+      await assert.rejects(
+        () => provider().complete(req),
+        (e: Error) => {
+          assert.match(e.message, /stream error/);
+          assert.match(e.message, /upstream is down/);
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("an unreadable event fails the call rather than being skipped", async () => {
+  // A data line we cannot parse is content we cannot account for; dropping it is
+  // how a short document passes for a whole one.
+  await withStream(() => ({ lines: [sseDelta("<p>ok"), "data: {not json", SSE_DONE] }), async () => {
+    await assert.rejects(
+      () => provider().complete(req),
+      (e: Error) => {
+        assert.match(e.message, /unparseable stream event/);
+        return true;
+      },
+    );
+  });
+});
+
+test("a transient failure is retried only while nothing has been generated", async () => {
+  // The retry exists for a proxy resetting a large request body, which happens
+  // before any output. Once tokens have arrived, retrying re-bills a long
+  // generation — and the accumulator must be per-attempt, or the retry would
+  // concatenate onto the abandoned attempt and deliver the passage twice.
+  await withStream(
+    (body) => ({
+      body: () =>
+        (async function* () {
+          void body;
+          const enc = new TextEncoder();
+          yield enc.encode(sseDelta("first half") + "\n\n");
+          throw Object.assign(new Error("fetch failed"), { cause: { code: "ECONNRESET" } });
+        })(),
+    }),
+    async (calls) => {
+      await assert.rejects(() => provider().complete(req), /ECONNRESET|fetch failed/);
+      assert.equal(calls.length, 1, `expected no retry after output, got ${calls.length} attempts`);
+    },
+  );
+
+  // The mirror case: nothing streamed, so the retry still happens — and the text
+  // comes only from the attempt that succeeded.
+  let attempt = 0;
+  await withStream(
+    () => {
+      attempt++;
+      return attempt === 1
+        ? {
+            body: () =>
+              (async function* () {
+                yield* [];
+                throw Object.assign(new Error("fetch failed"), { cause: { code: "ECONNRESET" } });
+              })(),
+          }
+        : { lines: [sseDelta("clean run"), sseFinish("stop"), SSE_DONE] };
+    },
+    async (calls) => {
+      const res = await provider().complete(req);
+      assert.equal(res.text, "clean run");
+      assert.equal(calls.length, 2, `expected 1 retry, got ${calls.length} attempts`);
     },
   );
 });
