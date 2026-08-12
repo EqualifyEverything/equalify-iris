@@ -12,9 +12,10 @@ name: Issue to PR
 #
 # It also declines to run rather than manufacture work. With no eligible issue
 # the job stops in the preflight step, before Node, before OIDC, before a single
-# token is spent — and an issue that any open PR already addresses, anyone's,
-# is not eligible, so if every open issue has a PR on it this workflow opens
-# nothing. See `Pick an issue` for every reason a run is skipped.
+# token is spent — and an issue that any open PR claims, anyone's, is not
+# eligible, so if every open issue is claimed this workflow opens nothing.
+# "Claims" means a closing keyword or an `issue-<n>` branch, not a passing `#<n>`
+# in prose; see `Pick an issue` for why, and for every reason a run is skipped.
 #
 # Requires the same two repo settings as code-review.yml, and nothing new:
 #   - secret  AWS_BEDROCK_ROLE_ARN — the OIDC role. Its trust policy covers this
@@ -266,11 +267,16 @@ jobs:
           jq -R 'tonumber' /tmp/covered-issue-nums.txt | jq -s . > /tmp/covered.json
           # Mentioned but not covered — advisory. Excludes anything already in the
           # table above, so an issue appears in exactly one of the two lists.
+          # Every mentioning PR is listed, not just one: these are read by hand
+          # (and by the model) to decide whether the work is really taken, and
+          # "#5 is mentioned in #80" while hiding #81 is the version of that list
+          # that sends the reader to the wrong diff.
           jq -s -r --slurpfile covered /tmp/covered.json '
               [ .[] | select(.why == "mention")
                     | select((.n as $n | $covered[0] | index($n)) == null) ]
-              | group_by(.n) | map(.[0]) | sort_by(.n)
-              | .[] | "\(.n)\t\(.pr)"' /tmp/refs-open.json \
+              | group_by(.n)
+              | .[] | "\(.[0].n)\t\([.[].pr] | unique | map("#\(.)") | join(", "))"' \
+              /tmp/refs-open.json \
             > /tmp/mentioned-issues.tsv
 
           if [ -s /tmp/covered-issues.tsv ]; then
@@ -290,7 +296,7 @@ jobs:
               echo
               printf 'Also mentioned by an open PR, but **not** excluded — a mention is not a fix, '
               printf 'and this workflow'"'"'s own PR bodies list every issue they passed over: '
-              awk -F'\t' '{printf "#%s (in #%s) ", $1, $2}' /tmp/mentioned-issues.tsv
+              awk -F'\t' '{printf "#%s (in %s) ", $1, $2}' /tmp/mentioned-issues.tsv
               echo
             } >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -412,17 +418,25 @@ jobs:
           # writes list every issue they passed over, so excluding on a mention
           # would let one PR switch the workflow off. Handed over as a judgement
           # call instead: you can read both diffs, a regex cannot.
-          if [ -s /tmp/mentioned-issues.tsv ]; then
+          #
+          # Narrowed to issues actually on the candidate list. A forced dispatch
+          # puts exactly one issue there, and telling the model about mentions of
+          # ten issues it cannot pick is noise that reads like an instruction.
+          jq -r '.[].number' /tmp/candidates.json | sort -u > /tmp/candidate-nums.txt
+          awk -F'\t' 'NR == FNR { c[$1] = 1; next } ($1 in c)' \
+            /tmp/candidate-nums.txt /tmp/mentioned-issues.tsv \
+            > /tmp/mentioned-candidates.tsv
+          if [ -s /tmp/mentioned-candidates.tsv ]; then
             {
               echo "### Mentioned by an open PR — check before you pick one of these"
               echo
-              awk -F'\t' '{printf "- issue #%s is mentioned in PR #%s\n", $1, $2}' \
-                /tmp/mentioned-issues.tsv
+              awk -F'\t' '{printf "- issue #%s is mentioned in %s\n", $1, $2}' \
+                /tmp/mentioned-candidates.tsv
               echo
               echo "A mention is usually context ('\''related to'\'', '\''passed over'\''), not a fix, which is why"
-              echo "these are still eligible. But if you pick one, read that PR's diff first: if it"
-              echo "already changes the behaviour the issue asks about, stop and write the \`null\`"
-              echo "result file naming the PR."
+              echo "these are still eligible. But if you pick one, read the diff of every PR listed"
+              echo "against it first: if one of them already changes the behaviour the issue asks"
+              echo "about, stop and write the \`null\` result file naming that PR."
               echo
             } >> "$OUT"
           fi
@@ -464,22 +478,36 @@ jobs:
             echo
             echo "### Open pull requests"
             echo
-            echo "Every open PR, with the issues it links or names. These issues are already"
-            echo "excluded from the candidate list above; the list is here so that if the issue"
-            echo "you pick turns out to overlap one of these PRs once you have read the code, you"
-            echo "can stop instead of writing the second half of a change someone else is"
-            echo "already making."
+            echo "Every open PR, with the issues it references and how. The distinction matters,"
+            echo "so the tiers are tagged rather than merged into one list:"
+            echo
+            echo "  claims   — linked with a closing keyword, or named in the branch. An issue"
+            echo "             claimed by an open PR was removed from the candidate list above;"
+            echo "             you will not see it there."
+            echo "  mentions — named in prose only. Those issues are STILL ELIGIBLE and may well"
+            echo "             be in the candidate list. A mention is usually context, and the"
+            echo "             PR bodies this workflow writes name every issue they passed over."
+            echo "             Only open issues are listed here — a bare \`#<n>\` in prose is as"
+            echo "             often a PR number as an issue number, and chasing one wastes a read."
+            echo
+            echo "The list is here so that if the issue you pick turns out to overlap one of these"
+            echo "PRs once you have read the code, you can stop instead of writing the second half"
+            echo "of a change someone else is already making."
             echo
             echo '```'
-            jq -r '.[] |
+            jq -r --slurpfile open /tmp/open-issue-nums.json '.[] |
               . as $pr
-              | ( [ ($pr.closingIssuesReferences[]?.number | "#\(.)") ]
+              | ( [ ($pr.closingIssuesReferences[]?.number) ]
                   + ($pr.headRefName
-                     | [ scan("(?:^|[^a-zA-Z])issue-([0-9]+)") | "#\(.[0])" ])
-                  + ((($pr.title // "") + " " + ($pr.body // "")) | [ scan("#([0-9]+)") | "#\(.[0])" ])
-                  | unique ) as $refs
+                     | [ scan("(?:^|[^a-zA-Z])issue-([0-9]+)") | (.[0] | tonumber) ])
+                  | unique ) as $claims
+              | ( (($pr.title // "") + " " + ($pr.body // ""))
+                  | [ scan("#([0-9]+)") | (.[0] | tonumber) ] | unique
+                  | map(select(. as $n | $open[0] | index($n))) ) as $mentioned
+              | ($mentioned - $claims) as $mentions
               | "#\($pr.number) [\($pr.headRefName)]\(if $pr.isDraft then " (draft)" else "" end) \($pr.title)"
-                + "\n    issues referenced: \(if ($refs | length) > 0 then ($refs | join(", ")) else "none" end)"
+                + "\n    claims:   \(if ($claims | length) > 0 then ($claims | map("#\(.)") | join(", ")) else "nothing" end)"
+                + "\n    mentions: \(if ($mentions | length) > 0 then ($mentions | map("#\(.)") | join(", ")) else "nothing" end)"
               ' /tmp/open-prs-full.json
             echo '```'
           } >> "$OUT"
