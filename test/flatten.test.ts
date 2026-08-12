@@ -357,6 +357,45 @@ test("emptying every field of a form-as-table is visible to the regression gate"
   assert.equal(contentCoverage(accepted, accepted), 1);
 });
 
+test("a half-signed signature block keeps every transcribed value", () => {
+  // `agents/page.md` tells the page agent to render a signature block as one uniform
+  // form, with the fields that are already filled in on the source page as
+  // `<input readonly value="…">` rather than as a <dd> (issue #67). That moves
+  // transcribed text out of the document's text nodes and into an attribute, which is
+  // the direction this file exists to police: a value the flattened view cannot see is
+  // absent from both sides of the gate, so emptying it would score 1.0.
+  const block = `<form>
+    <fieldset><legend>Contractor</legend>
+      <label for="c-sig">Signature</label>
+      <input id="c-sig" readonly value="Ada Lovelace" aria-describedby="c-mark">
+      <img id="c-mark" src="sig.png" alt="Handwritten signature reading Ada Lovelace">
+      <label for="c-date">Date</label>
+      <input id="c-date" readonly value="fourth of June">
+    </fieldset>
+    <fieldset><legend>Client</legend>
+      <label for="k-sig">Signature</label><input id="k-sig" aria-required="true">
+      <label for="k-date">Date</label><input id="k-date" aria-required="true">
+    </fieldset>
+  </form>`;
+  const view = flatten(block);
+  assertNoTextLost(block, "signature block");
+  // Both legends, so the two parties are distinguishable, and the signed party's
+  // values, which live only in an attribute.
+  for (const want of ["Contractor", "Client", "Ada Lovelace", "fourth of June"]) {
+    assert.ok(view.includes(want), `"${want}" was dropped from:\n${view}`);
+  }
+  // A field left blank for the reader still announces its label. Otherwise the
+  // Reader — told that a field with nothing after its marker is a real defect —
+  // cannot tell an unlabelled control from one waiting to be filled in.
+  assert.match(view, /\[Label\] Signature\n\[Field input\]$/m, `a blank field lost its label:\n${view}`);
+  // And emptying the signed party's values is visible to the regression gate, the
+  // same way it is for the form-as-table above.
+  const gutted = block.replace(/readonly value="[^"]*"/g, "readonly");
+  const cov = contentCoverage(block, gutted);
+  assert.notEqual(cov, null, "the block must be long enough to score");
+  assert.ok(cov! < 1, `a filled-in field was emptied yet coverage was ${cov}`);
+});
+
 test("a select keeps its field marker in the ordinary block position", () => {
   // The marker used to fire only from the inline path, so it appeared when a select
   // sat in a table cell and was missing in the common case — leaving the Reader
