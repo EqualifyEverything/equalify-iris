@@ -162,14 +162,22 @@ echo "==> 5. POST /v1/sessions (upload 3 images)"
 # assertion exercises.
 png=/tmp/iris-e2e-page.png
 printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC' | base64 -d > "$png"
+# The `config` part below is deliberately stale: the per-request
+# max_review_iterations override was removed, and a client still sending one must
+# be served at the deployment's cap (1, from the config above) rather than
+# rejected — or told it got the 5 rounds it asked for.
 create=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
   -F "images=@$png;filename=page-001.png" \
   -F "images=@$png;filename=page-002.png" \
   -F "images=@$png;filename=page-003.png" \
-  -F 'config={"max_review_iterations":1}')
+  -F 'config={"max_review_iterations":5}')
 SID=$(echo "$create" | jq -r '.session_id')
 echo "$create" | jq -e '.status=="queued" and .image_count==3' >/dev/null \
   && pass "session created: $SID" || fail "create" "$create"
+capped=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID")
+echo "$capped" | jq -e '.iterations_max==1' >/dev/null \
+  && pass "a stale config part is ignored, not honored (iterations_max=1)" \
+  || fail "config ignored" "$capped"
 
 echo "==> 6. poll GET /v1/sessions/{id} until ready_for_review"
 status=""
@@ -328,7 +336,7 @@ echo "==> 9d. a truncated model response fails the run instead of shipping parti
 # real content. On a SEPARATE session so the main one stays intact.
 curl -s -X POST "http://localhost:$OR_PORT/__truncate" >/dev/null
 trunc=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
-  -F "images=@$png;filename=trunc-001.png" -F 'config={"max_review_iterations":1}')
+  -F "images=@$png;filename=trunc-001.png")
 TSID=$(echo "$trunc" | jq -r '.session_id')
 tstatus=""
 for i in $(seq 1 60); do
@@ -372,7 +380,7 @@ dispatch_run() {   # $1 = suggested agent name, $2 = label; sets DISPATCH_SID
     -d "{\"name\":\"$1\"}" "http://localhost:$OR_PORT/__suggest" >/dev/null
   local created st
   created=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
-    -F "images=@$png;filename=dispatch-001.png" -F 'config={"max_review_iterations":1}')
+    -F "images=@$png;filename=dispatch-001.png")
   DISPATCH_SID=$(echo "$created" | jq -r '.session_id')
   for i in $(seq 1 120); do
     st=$(curl -s "${AUTH[@]}" "$BASE/sessions/$DISPATCH_SID" | jq -r '.status')
@@ -426,8 +434,7 @@ echo "==> 9e. a second upload WAITS in the run queue instead of starting a secon
 qa=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
   -F "images=@$png;filename=queue-a-001.png" \
   -F "images=@$png;filename=queue-a-002.png" \
-  -F "images=@$png;filename=queue-a-003.png" \
-  -F 'config={"max_review_iterations":1}')
+  -F "images=@$png;filename=queue-a-003.png")
 QA=$(echo "$qa" | jq -r '.session_id')
 
 # A feedback re-run is subject to the same cap, and its 202 must say what actually
@@ -447,7 +454,7 @@ fbst=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID" | jq -r '.status')
   || fail "feedback queueing" "GET /sessions/\$SID says '$fbst', expected queued"
 
 qb=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
-  -F "images=@$png;filename=queue-b-001.png" -F 'config={"max_review_iterations":1}')
+  -F "images=@$png;filename=queue-b-001.png")
 QB=$(echo "$qb" | jq -r '.session_id')
 sa=$(curl -s "${AUTH[@]}" "$BASE/sessions/$QA" | jq -r '.status')
 sb=$(curl -s "${AUTH[@]}" "$BASE/sessions/$QB" | jq -r '.status')
@@ -512,7 +519,7 @@ echo "==> 11b. paginating GET /v1/sessions visits every session exactly once"
 burst=()
 for n in 1 2 3 4 5; do
   curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
-    -F "images=@$png;filename=page-burst-$n.png" -F 'config={"max_review_iterations":1}' >/dev/null &
+    -F "images=@$png;filename=page-burst-$n.png" >/dev/null &
   burst+=("$!")
 done
 # Wait on THESE pids only. A bare `wait` would also wait on the mock services and
