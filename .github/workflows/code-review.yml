@@ -772,14 +772,20 @@ jobs:
 
             2. **Upstream side effects.** `src/github/issue.ts` writes to a *third-party* repo
                from two paths: `createAgentIssue` (titled `New agent suggestion: <type>`) and
-               `createAgentUpdateIssue` (titled `Agent update proposal: <agent>`). The title
-               prefix is the only identifier these issues have — labels were removed because
+               `createAgentUpdateIssue` (titled `Agent update proposal: <agent> — <lesson slug>`).
+               The title is the only identifier these issues have — labels were removed because
                GitHub silently drops labels set by a filer without push access, which broke both
                triage and the dedupe for the majority of filers, so treat a reintroduced label as
                a defect. Both dedupe by exact title against a title search, and both swallow
-               search failures. Flag any change that widens what gets filed,
-               weakens the dedupe, files under the wrong identity, or turns a swallowed error
-               into a hard failure (or vice-versa) without saying so. Pay particular attention
+               search failures; on a match the suggestion path skips and the update path comments
+               on the issue it found. Treat the update title's lesson slug as load-bearing: the
+               agent there is always `page.md`, so a title without the slug has ONE possible value,
+               and a dedupe that skips on it discards every proposal after the first — silently,
+               for every user, until someone closes that issue. That was a real outage of the
+               learning path, not a hypothetical. Flag any change that widens what gets filed,
+               weakens the dedupe, narrows the dedupe key back toward a single value, turns the
+               update path's comment back into a silent skip, files under the wrong identity, or
+               turns a swallowed error into a hard failure (or vice-versa) without saying so. Pay particular attention
                to *whose* token is used — `src/pipeline/contribute.ts` currently falls back to
                the end user's OAuth token when no service token is configured, which is a real
                tension with the stated intent of never publishing under end users' identities.
