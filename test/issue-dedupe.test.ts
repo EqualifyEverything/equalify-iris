@@ -240,7 +240,7 @@ test("a different lesson for the same agent gets its own issue", async () => {
   // hardcoded to `page.md`, so before the title carried the lesson, EVERY proposal from
   // every user computed one title — `Agent update proposal: page` — and one open issue
   // suppressed all of them indefinitely. Two unrelated lessons must not collide.
-  const gh = mockGitHub([{ title: "Agent update proposal: page — preserve all hyperlinks from the source", number: 67 }]);
+  const gh = mockGitHub([{ title: SLUGGED_TITLE, number: 67 }]);
   try {
     const filed = await createAgentUpdateIssue("ghu_user", REPO, API, {
       ...updateArgsWithLesson,
@@ -317,6 +317,44 @@ test("the user's own words reach the issue", async () => {
     const body = String((created?.body as { body?: string }).body);
     assert.match(body, /Links from original document need to be inherited/, "the user's feedback is not on the issue");
     assert.match(body, /2 sessions/, "the corroboration count is not on the issue");
+  } finally {
+    gh.restore();
+  }
+});
+
+test("feedback cannot ping strangers or publish links from the issue it lands in", async () => {
+  // This is the first thing that puts a user's typed text into an upstream issue body,
+  // and GitHub renders markdown there. `@name` pings a real person, `#12` cross-links an
+  // unrelated issue, and a link is published — under whichever identity filed, which
+  // `github.issue_token` can make a service account rather than the person who typed it.
+  // A code span renders none of them, so the feedback has to stay inside one.
+  const gh = mockGitHub([]);
+  try {
+    await createAgentUpdateIssue("ghu_user", REPO, API, {
+      ...updateArgsWithLesson,
+      lesson: {
+        ...updateArgsWithLesson.lesson,
+        // The escape attempt is the ``` in the middle: with a fixed one-backtick fence it
+        // closes the span and everything after it renders as markdown.
+        feedback: "hey @octocat see #1 ``` @everyone [click](http://evil.test)",
+      },
+    });
+    const created = gh.calls.find((c) => c.method === "POST" && c.path.endsWith("/issues"));
+    const body = String((created?.body as { body?: string }).body);
+    const quoted = body.match(/\*\*In the user's words:\*\* (.*)/)?.[1] ?? "";
+    assert.ok(quoted, `the feedback line is missing entirely: ${body}`);
+    // The whole thing is one code span: it opens and closes with the SAME run of
+    // backticks, and that run is longer than any run the user typed.
+    const fence = quoted.match(/^`+/)?.[0] ?? "";
+    assert.ok(fence.length >= 4, `fence is not longer than the user's own backtick run: ${quoted}`);
+    assert.ok(quoted.endsWith(fence), `the span is not closed with its own fence: ${quoted}`);
+    assert.equal(
+      quoted.slice(fence.length, -fence.length).includes(fence),
+      false,
+      "the user's text closes the code span early and escapes into rendered markdown",
+    );
+    // Present, not stripped: a maintainer needs the words, mentions and all.
+    assert.match(quoted, /@octocat/);
   } finally {
     gh.restore();
   }

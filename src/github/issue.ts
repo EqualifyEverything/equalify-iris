@@ -270,6 +270,11 @@ export async function createAgentUpdateIssue(
   try {
     const found = await octokit.search.issuesAndPullRequests({
       q: `repo:${repo.owner}/${repo.repo} is:issue is:open "${title}" in:title`,
+      // 100 rather than the default 30, because the phrase match is loose enough to
+      // return every open proposal for this agent — and this agent is always page.md,
+      // so that set grows with every lesson. The exact match falling off the first page
+      // would file a duplicate issue instead of commenting on the right one.
+      per_page: 100,
     });
     open = found.data.items.find((i) => i.title === title);
   } catch {
@@ -288,8 +293,11 @@ export async function createAgentUpdateIssue(
     // point of the comment is the corroboration and the session id, not a second copy
     // of a prompt the issue already shows — but a maintainer merging this wants the
     // LATEST proposed text, so it has to be here rather than only in the first post.
+    // "came up again", not "another session found this": nothing here knows who filed
+    // the open issue, and one session can submit feedback twice. The Session line below
+    // is the claim that can actually be checked.
     const comment =
-      `Another session produced this same lesson.\n\n` +
+      `This lesson came up again.\n\n` +
       `**Session:** ${args.sessionId}\n` +
       `**Proposed change:** ${args.summary}\n` +
       lessonLines +
@@ -328,11 +336,25 @@ export async function createAgentUpdateIssue(
   return { url: res.data.html_url, action: "created" };
 }
 
-// The user's feedback as a markdown blockquote: collapsed to one line so it cannot
-// break out of the quote, and capped.
+// The user's feedback, quoted into the body of a public issue as an inline code span.
+//
+// A code span, not plain text, because this is the only string in either body that a
+// user typed by hand, and GitHub renders markdown in issue bodies: an `@name` in it
+// would ping a stranger, `#12` would cross-link an unrelated issue, and `[x](url)`
+// would publish a link — all under whichever identity filed, which `github.issue_token`
+// can make a service account rather than the person who typed it. None of that is
+// linkified inside a code span.
+//
+// Collapsed to one line (a code span cannot hold a blank line), capped, and fenced with
+// one more backtick than the longest run in the text so the user cannot close the span
+// early and escape it. Per CommonMark a span whose content starts or ends with a
+// backtick needs a space of padding, which is stripped on render.
 function quoteFeedback(feedback: string): string {
   const one = feedback.replace(/\s+/g, " ").trim();
   if (!one) return "_(none recorded)_";
   const shown = one.length > MAX_FEEDBACK ? `${one.slice(0, MAX_FEEDBACK)}…` : one;
-  return `“${shown}”`;
+  const longestRun = Math.max(0, ...[...shown.matchAll(/`+/g)].map((m) => m[0].length));
+  const fence = "`".repeat(longestRun + 1);
+  const pad = shown.startsWith("`") || shown.endsWith("`") ? " " : "";
+  return `${fence}${pad}${shown}${pad}${fence}`;
 }
