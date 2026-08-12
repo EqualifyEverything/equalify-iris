@@ -25,10 +25,11 @@ and stops entirely when nothing is eligible. If you'd rather own the fix yoursel
 issue and add that label.
 
 **It also stays off any issue that already has an open PR — including yours.** Open a PR for an
-issue and the workflow leaves it alone; if every open issue has one, it opens nothing at all. It
-spots the link three ways: a `Closes #<n>` in your PR body, an `issue-<n>` in your branch name, or
-just a `#<n>` in the title or body. Writing `Closes #<n>` is the reliable one, and it closes the
-issue on merge, so do that — but a plain mention is enough to claim the issue.
+issue and the workflow leaves it alone; if every open issue has one, it opens nothing at all. Two
+things claim an issue: **`Closes #<n>` in your PR body** (which also closes the issue on merge, so
+this is the one to use) or an `issue-<n>` in your branch name. Merely mentioning `#<n>` in prose
+does *not* claim it — too many PRs reference issues they aren't fixing — so if you are working on
+something, say `Closes #<n>` and the robot will stay out of your way.
 
 ## Development
 

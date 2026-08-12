@@ -201,19 +201,30 @@ jobs:
           #             a PR that is plainly about an issue but never wrote the
           #             keyword, which is most of them in this repo. Not preceded
           #             by a letter, so `fix/reissue-42` is not issue 42.
-          #   mention — a bare `#<n>` anywhere in the title or body.
+          #   mention — a bare `#<n>` in the title or body. REPORTED, NOT
+          #             EXCLUDED. See below; this is load-bearing.
           #
-          # `mention` is deliberately the weakest and deliberately still
-          # excluding. It is noisy on its own: this repo's PR bodies cite issue
-          # and PR numbers freely (PR #71 names six), and "related to #5 but does
-          # not fix it" reads identically to a fix. Two things keep it usable —
-          # every reference is intersected with the set of currently-open issues,
-          # which drops PR numbers and closed issues on its own, and each
-          # exclusion is printed with the PR and the reason that caused it. The
-          # asymmetry is what decides the default: a false positive delays an
-          # issue by a few days and says so in the run summary, while a false
-          # negative spends a review slot on a duplicate. A maintainer who
-          # disagrees dispatches the issue by hand, which overrides this.
+          # A mention cannot be allowed to exclude, and the first live run of this
+          # workflow proved it. `Doing the work` below requires the PR body to
+          # name the higher-ranked issues that were passed over and why — a good
+          # requirement, it is what makes the ranking auditable. PR #75 therefore
+          # listed ten issue numbers in its body, a mention-tier check read all
+          # ten as covered, and the next run found zero candidates and declined.
+          # One PR had switched the whole workflow off until it was merged.
+          #
+          # That is not a heuristic that needs tuning, it is a feedback loop: the
+          # only PRs guaranteed to enumerate the backlog are the ones this
+          # workflow writes. The same reading applies to humans more mildly —
+          # "related to #5 but does not fix it" is textually identical to a fix,
+          # and this repo's bodies cite numbers freely (PR #71 names six).
+          #
+          # So `linked` and `branch` exclude, and they are the precise two.
+          # `closingIssuesReferences` already covers every closing keyword GitHub
+          # recognises (`closes`/`fixes`/`resolves`, all tenses), so what the
+          # mention tier uniquely added was exactly the ambiguous references —
+          # the ones a maintainer, not a regex, should judge. It is still
+          # computed: it is printed in the summary and handed to the model, which
+          # can read both diffs and decide. Reported, not enforced.
           #
           # Only OPEN PRs count. A closed-unmerged PR means the work is going
           # spare again, and a merged PR that left its issue open means the merge
@@ -237,18 +248,31 @@ jobs:
               )[]
             | "\(.n)\t\($pr.number)\t\(.why)"' /tmp/open-prs-full.json \
             | sort -u > /tmp/pr-issue-refs.tsv
-          # Intersect with open issues, then keep one row per issue with the
-          # strongest reason — so the report says "linked by #91" rather than
-          # "mentioned in #91" when both are true of the same PR.
+          # Keep only references to currently-open issues. This alone discards PR
+          # numbers, closed issues and anything invented, without judgement.
           jq -rR --slurpfile open /tmp/open-issue-nums.json '
               split("\t") | {n: (.[0]|tonumber), pr: (.[1]|tonumber), why: .[2]}
               | select(.n as $n | $open[0] | index($n))' /tmp/pr-issue-refs.tsv \
-            | jq -s -r '
-                {linked: 0, branch: 1, mention: 2} as $rank
-                | group_by(.n) | map(sort_by($rank[.why])[0]) | sort_by(.n)
-                | .[] | "\(.n)\t\(.pr)\t\(.why)"' > /tmp/covered-issues.tsv
+            > /tmp/refs-open.json
+          # Excluding tiers only, one row per issue, `linked` reported over
+          # `branch` when both are true of the same PR.
+          jq -s -r '
+              {linked: 0, branch: 1} as $rank
+              | [ .[] | select(.why == "linked" or .why == "branch") ]
+              | group_by(.n) | map(sort_by($rank[.why])[0]) | sort_by(.n)
+              | .[] | "\(.n)\t\(.pr)\t\(.why)"' /tmp/refs-open.json \
+            > /tmp/covered-issues.tsv
           cut -f1 /tmp/covered-issues.tsv | sort -u > /tmp/covered-issue-nums.txt
           jq -R 'tonumber' /tmp/covered-issue-nums.txt | jq -s . > /tmp/covered.json
+          # Mentioned but not covered — advisory. Excludes anything already in the
+          # table above, so an issue appears in exactly one of the two lists.
+          jq -s -r --slurpfile covered /tmp/covered.json '
+              [ .[] | select(.why == "mention")
+                    | select((.n as $n | $covered[0] | index($n)) == null) ]
+              | group_by(.n) | map(.[0]) | sort_by(.n)
+              | .[] | "\(.n)\t\(.pr)"' /tmp/refs-open.json \
+            > /tmp/mentioned-issues.tsv
+
           if [ -s /tmp/covered-issues.tsv ]; then
             echo "covered by an open PR: $(cut -f1 /tmp/covered-issues.tsv | tr '\n' ' ')"
             {
@@ -258,6 +282,16 @@ jobs:
               echo '| Issue | Open PR | How |'
               echo '| --- | --- | --- |'
               awk -F'\t' '{printf "| #%s | #%s | %s |\n", $1, $2, $3}' /tmp/covered-issues.tsv
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -s /tmp/mentioned-issues.tsv ]; then
+            echo "mentioned by an open PR (not excluded): $(cut -f1 /tmp/mentioned-issues.tsv | tr '\n' ' ')"
+            {
+              echo
+              printf 'Also mentioned by an open PR, but **not** excluded — a mention is not a fix, '
+              printf 'and this workflow'"'"'s own PR bodies list every issue they passed over: '
+              awk -F'\t' '{printf "#%s (in #%s) ", $1, $2}' /tmp/mentioned-issues.tsv
+              echo
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -285,11 +319,12 @@ jobs:
               echo "::error::Issue #$FORCED_ISSUE is not open (or does not exist)."
               exit 1
             fi
-            # An open PR from someone else touching this issue warns but does not
-            # block. The signal is a heuristic, and a human naming the issue by
-            # number is the intended way to overrule it — but they should be told
-            # what they are walking into, because "already covered" is invisible
-            # from the issue page when the PR never wrote `Closes`.
+            # An open PR from someone else covering this issue warns but does not
+            # block. A human naming the issue by number is the intended way to
+            # overrule it — but they should be told what they are walking into,
+            # because "already covered" is invisible from the issue page when the
+            # PR never wrote `Closes`. Only the excluding tiers warn; a mention is
+            # too weak to be worth an annotation on a deliberate dispatch.
             if grep -qxF "$FORCED_ISSUE" /tmp/covered-issue-nums.txt; then
               COVER=$(awk -F'\t' -v n="$FORCED_ISSUE" '$1 == n {printf "#%s (%s)", $2, $3}' \
                 /tmp/covered-issues.tsv)
@@ -328,8 +363,8 @@ jobs:
             {
               echo 'Skipped: no eligible open issue.'
               echo
-              echo 'Every open issue is already addressed by an open pull request (anyone'"'"'s — see'
-              echo 'the table above if there is one), already attempted by this workflow (open or'
+              echo 'Every open issue is linked by an open pull request (anyone'"'"'s — see the table'
+              echo 'above if there is one), already attempted by this workflow (open or'
               echo 'previously-rejected PR), or carries a skip label. Nothing was run — no model'
               echo 'call, no PR, no comment.'
             } >> "$GITHUB_STEP_SUMMARY"
@@ -366,11 +401,31 @@ jobs:
             echo "## Candidate issues"
             echo
             echo "These are the open issues eligible for work this run. Removed already, so do"
-            echo "not go looking for them: issues an open pull request from anyone appears to"
-            echo "address, issues carrying an open or previously-rejected \`iris-auto\` PR, and"
-            echo "issues labelled wontfix/invalid/duplicate/question/no-auto-pr."
+            echo "not go looking for them: issues an open pull request from anyone links or names"
+            echo "in its branch, issues carrying an open or previously-rejected \`iris-auto\` PR,"
+            echo "and issues labelled wontfix/invalid/duplicate/question/no-auto-pr."
             echo
           } > "$OUT"
+
+          # Issues an open PR merely *mentions*. Left in the candidate list on
+          # purpose — a mention is not a fix, and the PR bodies this workflow
+          # writes list every issue they passed over, so excluding on a mention
+          # would let one PR switch the workflow off. Handed over as a judgement
+          # call instead: you can read both diffs, a regex cannot.
+          if [ -s /tmp/mentioned-issues.tsv ]; then
+            {
+              echo "### Mentioned by an open PR — check before you pick one of these"
+              echo
+              awk -F'\t' '{printf "- issue #%s is mentioned in PR #%s\n", $1, $2}' \
+                /tmp/mentioned-issues.tsv
+              echo
+              echo "A mention is usually context ('\''related to'\'', '\''passed over'\''), not a fix, which is why"
+              echo "these are still eligible. But if you pick one, read that PR's diff first: if it"
+              echo "already changes the behaviour the issue asks about, stop and write the \`null\`"
+              echo "result file naming the PR."
+              echo
+            } >> "$OUT"
+          fi
 
           # --- Untrusted input boundary -------------------------------------
           # Everything below this line is written by whoever opened the issue,
@@ -558,12 +613,13 @@ jobs:
             - **No new runtime dependencies.** Iris stays portable and lightweight on purpose.
               A dev dependency needs a sentence of justification in the PR body.
             - **One PR.** Not two small ones, not a stacked pair.
-            - **Never duplicate an open PR.** Issues that an open PR already appears to address
-              were removed from your candidate list before you saw it, but the check is a
-              heuristic on branch names and issue references — it cannot see that PR #40's diff
-              already contains the fix for the issue you picked. So once you have read the code:
-              if an open PR listed in the context is changing the same behaviour, stop, and
-              write the `null` result file naming that PR. Two PRs fixing one thing is the
+            - **Never duplicate an open PR.** Issues that an open PR *links* (`Closes #<n>`) or
+              names in its branch were removed from your candidate list before you saw it. That
+              check is deliberately narrow, so two cases are left to you, and the context marks
+              both: an issue an open PR only **mentions**, and an open PR whose diff already
+              changes the behaviour an issue asks about without referencing it at all. In either
+              case read that PR's diff before you write code, and if it is doing the same thing,
+              stop and write the `null` result file naming it. Two PRs fixing one thing is the
               specific waste of review attention this workflow exists to avoid.
             - **Keep it reviewable.** Aim under ~300 changed lines excluding tests. If the fix
               cannot be done in that space, that is a signal you picked the wrong issue.
@@ -847,12 +903,17 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Duplicate backstop. The preflight already dropped every issue an open
-          # PR appeared to address, so this is not that check again — it closes
-          # the window the preflight cannot see: a PR opened by someone else
-          # during the ~45 minutes this job was working. It compares the new PR's
-          # own target issues (its `Closes` links and its branch name, both
-          # precise) against what every *other* open PR links, names in its
-          # branch, or mentions.
+          # PR linked or named in its branch, so this is not that check again — it
+          # closes the window the preflight cannot see: a PR opened by someone
+          # else during the ~45 minutes this job was working.
+          #
+          # Both sides of the comparison use links and branch names only. A
+          # mention must not appear on either side, and especially not on the
+          # other PR's side: the PR bodies this workflow writes name every issue
+          # they passed over, so one previous auto-PR would make every future one
+          # look like a duplicate of it. Nothing is lost — GitHub's linked-issue
+          # data already covers every closing keyword, so mentions add only the
+          # references that were ambiguous in the first place.
           #
           # Warn and comment; do not draft and do not fail. Unlike the forbidden
           # -path rule this is a judgement call about two diffs, and the honest
@@ -860,18 +921,13 @@ jobs:
           # review slot, not a safety problem, and drafting the wrong one of the
           # pair would be worse than saying so out loud.
           DUP=$(jq -r --argjson me "$NEW_PR" '
-            ( [ .[] | select(.number == $me) ]
-              | .[0] as $mine
-              | [ ($mine.closingIssuesReferences[]?.number) ]
-                + ($mine.headRefName
-                   | [ scan("(?:^|[^a-zA-Z])issue-([0-9]+)") | (.[0] | tonumber) ])
-              | unique ) as $targets
+            def refs: [ (.closingIssuesReferences[]?.number) ]
+                      + (.headRefName
+                         | [ scan("(?:^|[^a-zA-Z])issue-([0-9]+)") | (.[0] | tonumber) ])
+                      | unique;
+            ( [ .[] | select(.number == $me) ] | .[0] | refs ) as $targets
             | [ .[] | select(.number != $me) as $pr
-                | ( [ ($pr.closingIssuesReferences[]?.number) ]
-                    + ($pr.headRefName
-                       | [ scan("(?:^|[^a-zA-Z])issue-([0-9]+)") | (.[0] | tonumber) ])
-                    + ((($pr.title // "") + " " + ($pr.body // ""))
-                       | [ scan("#([0-9]+)") | (.[0] | tonumber) ]) ) as $refs
+                | ($pr | refs) as $refs
                 | ($targets - ($targets - $refs)) as $shared
                 | select(($shared | length) > 0)
                 | "#\($pr.number) (issue \($shared | map("#\(.)") | join(", ")))" ]
@@ -881,11 +937,11 @@ jobs:
             {
               echo
               printf '### ⚠️ Possible duplicate\n\n'
-              printf 'PR #%s targets an issue that %s also references. Compare them before spending a review on both.\n' \
+              printf 'PR #%s targets an issue that %s also targets. Compare them before spending a review on both.\n' \
                 "$NEW_PR" "$DUP"
             } >> "$GITHUB_STEP_SUMMARY"
             gh pr comment "$NEW_PR" --body "$(printf '%s\n\n%s\n' \
-              "⚠️ **Possible duplicate.** This PR targets an issue that $DUP also references." \
+              "⚠️ **Possible duplicate.** This PR targets an issue that $DUP also targets." \
               'The scheduled `issue-to-pr` workflow skips issues that already have an open PR, so this most likely means the other PR was opened while this run was working. Please compare the two before reviewing both.')" \
               || echo "::warning::could not comment on #$NEW_PR"
           fi
