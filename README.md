@@ -751,15 +751,22 @@ The same reasoning is why it refuses to run more often than it is useful:
 - **No eligible issue, no run.** The preflight step stops before Node, before OIDC, before a token
   is spent. An automation that always finds something to change is one that invents work, and an
   invented PR costs the same review attention as a real one.
-- **An issue an open PR already addresses is not eligible** — anyone's PR, not just this
-  workflow's. If every open issue is covered, the run does nothing. Coverage is read from three
-  signals: GitHub's own closing-issue links (`Closes #6`), an `issue-<n>` fragment in the head
-  branch, and a bare `#<n>` in the title or body. That last one is loose on purpose. It is noisy —
-  this repo's PR bodies cite numbers freely, and "related to #5 but does not fix it" reads the same
-  as a fix — but the failure modes are not symmetric: a false positive delays an issue to the next
-  run and names the PR that caused it in the run summary, while a false negative spends a review
-  slot on a duplicate. Every reference is intersected with the currently-open issues first, which
-  discards PR numbers and closed issues on its own. To overrule it, dispatch the issue by hand.
+- **An issue an open PR already claims is not eligible** — anyone's PR, not just this workflow's.
+  If every open issue is claimed, the run does nothing. A PR claims an issue two ways: GitHub's
+  closing-issue link (`Closes #6`, in any of the keyword forms GitHub recognises) or an `issue-<n>`
+  fragment in its head branch. A bare `#<n>` mention is *reported but not excluded* — it appears in
+  the run summary and is handed to the model to judge against the actual diff, and it stays in the
+  candidate list.
+
+  That last distinction was learned the hard way, on the first live run. The prompt requires each
+  PR body to name the higher-ranked issues it passed over — which is what makes the ranking
+  auditable — so [#75](https://github.com/EqualifyEverything/equalify-iris/pull/75) listed ten
+  issue numbers, a mention-tier check read all ten as claimed, and the next run found zero
+  candidates and declined. One PR had switched the workflow off until it was merged. The failure
+  isn't tunable, it's a loop: the PRs guaranteed to enumerate the backlog are the ones this
+  workflow writes. Nothing is really lost by dropping it, either — GitHub's linked-issue data
+  already covers every closing keyword, so mentions only ever added the ambiguous references
+  ("related to #5 but doesn't fix it"), which are exactly the ones a person should judge.
 - **Two open `iris-auto/*` PRs is the cap.** This is the pacing control and the reason the workflow
   is worth having: a queue that grows faster than one person reads it is a backlog with a robot
   attached. At 2, the maintainer can be a day behind without the workflow piling on, and a week of
@@ -798,8 +805,8 @@ the repo would go wrong:
 Run it by hand with `gh workflow run issue-to-pr.yml`, optionally with `-f issue_number=<n>` to
 name the issue yourself, or `-f dry_run=true` to get the ranking and the plan with no branch, no
 commit and no PR. Naming an issue overrides the skip labels, a past rejection and the
-already-covered check — you have made those calls yourself — but not the two-open-PR cap, and the
-run still warns if the issue looks covered so you know what you are walking into.
+already-claimed check — you have made those calls yourself — but not the two-open-PR cap, and the
+run still warns if the issue looks claimed so you know what you are walking into.
 
 One duplicate the preflight cannot prevent is the race: a contributor opens a PR for the same issue
 during the 45 minutes the job is working. The verify step catches that afterwards, comparing the new
