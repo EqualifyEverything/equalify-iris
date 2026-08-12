@@ -4,12 +4,12 @@ import {
   type ResponseStream,
 } from "@aws-sdk/client-bedrock-runtime";
 import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
-import { StalledStreamError, TruncatedResponseError } from "./types.ts";
+import { StalledStreamError, TruncatedResponseError, type StallKind } from "./types.ts";
 import type { CompletionRequest, CompletionResult, ModelProvider } from "./types.ts";
 
 // How long a call may send NOTHING before we give up on it.
 //
-// This is an IDLE timeout, not a total one, and the distinction is the whole reason
+// These are IDLE timeouts, not total ones, and the distinction is the whole reason
 // this adapter streams. A single non-streaming InvokeModel gives you one datum —
 // "the answer has not arrived yet" — which is equally true of a dead socket and of a
 // large document being correctly rewritten. Capping total duration therefore kills
@@ -17,6 +17,18 @@ import type { CompletionRequest, CompletionResult, ModelProvider } from "./types
 // corrected body out, up to max_tokens) is slow enough to be the one that dies.
 // Streaming separates the two cases: work in progress keeps arriving, a stall does
 // not. A healthy stream is never silent for a minute.
+//
+// Getting started gets its own, more generous window, matching OpenRouter's. Nothing
+// about message_start helps before message_start arrives: ahead of the first event a
+// stream is as silent as a dead one, and that phase is where the whole prompt is
+// processed — for the call that prompted this fix, an entire document plus eight page
+// images. 60s there would fail that call sooner than the total cap it replaced, on
+// the exact adapter and request the incident happened on. 120s is the old cap's
+// value, which was never a bad bound on getting started, only on finishing.
+const FIRST_OUTPUT_TIMEOUT_MS = 120_000;
+
+// Once text is actually arriving, silence this long means the stream died
+// mid-generation. A healthy stream mid-answer is never quiet for a minute.
 const IDLE_TIMEOUT_MS = 60_000;
 
 // Absolute backstop for a stream that never stalls but never ends either — a token
@@ -73,16 +85,21 @@ export class BedrockProvider implements ModelProvider {
 
   private client: BedrockRuntimeClient;
   private maxTokens: number;
+  private firstOutputTimeoutMs: number;
   private idleTimeoutMs: number;
   private maxTotalMs: number;
 
   // `timeouts` is a test seam: the defaults are what production runs, but a test
   // for stall handling cannot wait a minute to observe it.
-  constructor(cfg: ProviderBlock, timeouts: { idleTimeoutMs?: number; maxTotalMs?: number } = {}) {
+  constructor(
+    cfg: ProviderBlock,
+    timeouts: { firstOutputTimeoutMs?: number; idleTimeoutMs?: number; maxTotalMs?: number } = {},
+  ) {
     this.client = new BedrockRuntimeClient({ region: cfg.region ?? "us-east-1" });
     // loadConfig normalizes this, but a directly-constructed provider (tests,
     // embedders) may pass a raw block — so fall back rather than send undefined.
     this.maxTokens = cfg.max_tokens ?? DEFAULT_MAX_TOKENS;
+    this.firstOutputTimeoutMs = timeouts.firstOutputTimeoutMs ?? FIRST_OUTPUT_TIMEOUT_MS;
     this.idleTimeoutMs = timeouts.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
     this.maxTotalMs = timeouts.maxTotalMs ?? MAX_TOTAL_MS;
   }
@@ -130,14 +147,16 @@ export class BedrockProvider implements ModelProvider {
     // Both clocks abort the same controller; `expired` records which one fired so
     // the failure can say so. Without it we would be back to "Request aborted".
     const controller = new AbortController();
-    let expired: "idle" | "total" | null = null;
-    let idleTimer: ReturnType<typeof setTimeout> | undefined;
-    const resetIdle = (): void => {
-      clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => {
-        expired = "idle";
+    let expired: StallKind | null = null;
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    // One timer, re-armed with whichever window currently applies: never producing
+    // anything is a different failure from going quiet halfway through.
+    const arm = (kind: "first_output" | "idle", ms: number): void => {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        expired = kind;
         controller.abort();
-      }, this.idleTimeoutMs);
+      }, ms);
     };
     const totalTimer = setTimeout(() => {
       expired = "total";
@@ -147,18 +166,32 @@ export class BedrockProvider implements ModelProvider {
     let text = "";
     let stopReason: string | undefined;
     let sawStop = false;
-    const stalled = (kind: "idle" | "total"): StalledStreamError =>
+    // Which window an event re-arms is decided by whether any text has arrived, not
+    // by the event's own type. Protocol events (message_start, content_block_start)
+    // are real progress and must keep the call alive, but they are not output, and
+    // letting one of them hand over to the shorter window would quietly spend the
+    // generous start-up budget before a single token existed.
+    const progressed = (): void => {
+      if (text) arm("idle", this.idleTimeoutMs);
+      else arm("first_output", this.firstOutputTimeoutMs);
+    };
+    const stalled = (kind: StallKind): StalledStreamError =>
       new StalledStreamError({
         provider: this.name,
         model: req.model,
         kind,
-        limitMs: kind === "idle" ? this.idleTimeoutMs : this.maxTotalMs,
+        limitMs:
+          kind === "first_output"
+            ? this.firstOutputTimeoutMs
+            : kind === "idle"
+              ? this.idleTimeoutMs
+              : this.maxTotalMs,
         chars: text.length,
       });
 
-    // The idle clock starts before the request: time-to-first-token is exactly as
-    // much of a stall risk as a gap mid-stream.
-    resetIdle();
+    // The clock starts before the request: time-to-first-token is exactly as much of
+    // a stall risk as a gap mid-stream, and prompt processing happens in here too.
+    arm("first_output", this.firstOutputTimeoutMs);
     try {
       const response = await this.client.send(command, { abortSignal: controller.signal });
       if (!response.body) throw new Error("bedrock: response carried no event stream");
@@ -180,14 +213,25 @@ export class BedrockProvider implements ModelProvider {
         // that stays chatty would then run to the 15-minute backstop and report
         // itself as too large, which is the opposite diagnosis. Every other event
         // (message_start, content_block_start, the deltas) is real protocol
-        // progress, and message_start is what keeps a slow first token alive.
-        if (parsed.type !== "ping") resetIdle();
+        // progress and keeps the call alive.
         if (parsed.type === "content_block_delta" && parsed.delta?.type === "text_delta") {
           text += parsed.delta.text ?? "";
         }
         // stop_reason arrives once, on the message_delta that closes the message.
         if (parsed.delta?.stop_reason) stopReason = parsed.delta.stop_reason;
-        if (parsed.type === "message_stop") sawStop = true;
+        // Re-armed after accumulating, so `text` reflects this event when choosing
+        // the window.
+        if (parsed.type !== "ping") progressed();
+        // The message is over, so stop reading rather than waiting for the upstream
+        // to close the body. Nothing today holds it open past message_stop, but if
+        // anything did, the idle clock would fire on a response that is already
+        // whole and the completeness check below would discard a finished document
+        // as a stall. It also stops every successful call from carrying a live
+        // 60-second timer through the tail of the read.
+        if (parsed.type === "message_stop") {
+          sawStop = true;
+          break;
+        }
       }
     } catch (e) {
       // An abort surfaces from the SDK as an opaque AbortError. If one of our own
@@ -195,7 +239,7 @@ export class BedrockProvider implements ModelProvider {
       if (expired) throw stalled(expired);
       throw e;
     } finally {
-      clearTimeout(idleTimer);
+      clearTimeout(stallTimer);
       clearTimeout(totalTimer);
     }
 

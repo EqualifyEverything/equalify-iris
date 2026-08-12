@@ -297,6 +297,52 @@ test("waiting for the first token is a different failure from stalling halfway",
   );
 });
 
+test("an opening role delta does not spend the first-output window", async () => {
+  // The OpenAI convention, which OpenRouter forwards: the stream opens with a
+  // role-only delta as soon as the request is accepted, carrying no output. Treating
+  // an event as "generation began" would swap the generous start-up window for the
+  // tight idle one before a token existed — quietly halving the advertised budget on
+  // exactly the slow-to-start call this work exists to keep alive.
+  await withStream(
+    () => ({
+      body: (signal) =>
+        (async function* () {
+          const enc = new TextEncoder();
+          yield enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { role: "assistant", content: "" } }] })}\n\n`);
+          await sleepUnlessAborted(200, signal); // past idle, inside first-output
+          yield enc.encode([sseDelta("finally"), sseFinish("stop"), SSE_DONE].join("\n\n") + "\n\n");
+        })(),
+    }),
+    async () => {
+      const res = await provider(undefined, {
+        firstOutputTimeoutMs: 60_000,
+        idleTimeoutMs: 80,
+      }).complete(req);
+      assert.equal(res.text, "finally");
+    },
+  );
+});
+
+test("[DONE] ends the read, so a body held open cannot fail a whole document", async () => {
+  // Same rule as Bedrock's message_stop: the message ending and the connection
+  // ending are different events, and waiting for the second would let the idle clock
+  // fire on a response that is already complete.
+  await withStream(
+    () => ({
+      body: (signal) =>
+        (async function* () {
+          const enc = new TextEncoder();
+          yield enc.encode([sseDelta("<p>complete</p>"), sseFinish("stop"), SSE_DONE].join("\n\n") + "\n\n");
+          await sleepUnlessAborted(60_000, signal); // upstream never closes
+        })(),
+    }),
+    async () => {
+      const res = await provider(undefined, { idleTimeoutMs: 100 }).complete(req);
+      assert.equal(res.text, "<p>complete</p>");
+    },
+  );
+});
+
 test("a stream that ends early is not accepted as a finished document", async () => {
   await withStream(() => ({ lines: [sseDelta("<p>half")] }), async () => {
     await assert.rejects(
@@ -488,10 +534,14 @@ test("a stream that goes quiet fails with a message that explains itself", async
   );
 });
 
-test("time-to-first-token counts as idle time, not a grace period", async () => {
-  // A call that never sends anything at all must still be caught; the idle clock
-  // therefore has to start before the request, not at the first chunk.
-  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 100 });
+test("a call that never produces anything is caught, and named as such", async () => {
+  // The clock has to start before the request, not at the first chunk: a call that
+  // sends nothing at all would otherwise run to the 15-minute backstop and report
+  // itself as work that did not converge — the opposite diagnosis.
+  const bedrock = new BedrockProvider(
+    { default_model: "m" },
+    { firstOutputTimeoutMs: 100, maxTotalMs: 60_000 },
+  );
   stubStream(bedrock, async function* (signal) {
     await sleepUnlessAborted(60_000, signal);
     yield textDelta("never");
@@ -500,10 +550,38 @@ test("time-to-first-token counts as idle time, not a grace period", async () => 
     () => bedrock.complete(bedrockReq),
     (e: Error) => {
       assert.ok(e instanceof StalledStreamError);
-      assert.match(e.message, /nothing had streamed/);
+      assert.equal((e as StalledStreamError).kind, "first_output");
+      // "never started", not "stopped sending": a call that produced nothing must
+      // not be reported as one that died halfway.
+      assert.match(e.message, /before it produced anything/);
+      assert.match(e.message, /never started/);
+      assert.doesNotMatch(e.message, /Request aborted/);
       return true;
     },
   );
+});
+
+test("prompt processing gets the generous window, not the idle one", async () => {
+  // Before the first token there is nothing to distinguish a slow start from a dead
+  // socket, and that phase is where a whole document plus eight page images gets
+  // processed — the request that prompted this work. If a protocol event handed over
+  // to the shorter idle window here, this call would fail after 60s: sooner than the
+  // total cap streaming replaced, on the very request it was meant to rescue.
+  const bedrock = new BedrockProvider(
+    { default_model: "m" },
+    { firstOutputTimeoutMs: 400, idleTimeoutMs: 60, maxTotalMs: 60_000 },
+  );
+  stubStream(bedrock, async function* (signal) {
+    await sleepUnlessAborted(120, signal);
+    yield { chunk: { bytes: encode({ type: "message_start" }) } };
+    await sleepUnlessAborted(120, signal); // longer than idle, shorter than first-output
+    yield { chunk: { bytes: encode({ type: "content_block_start" }) } };
+    await sleepUnlessAborted(120, signal);
+    yield textDelta("finally");
+    yield messageDelta("end_turn");
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.equal(res.text, "finally");
 });
 
 test("a stream that trickles forever is stopped by the absolute ceiling", async () => {
@@ -570,22 +648,43 @@ test("keepalive pings do not pass for progress", async () => {
   );
 });
 
-test("a message_start keeps a slow first token alive", async () => {
-  // The other half of the ping rule: real protocol events must still count, or a
-  // model that takes its time before the first token is killed for being slow —
-  // reintroducing the bug this work fixes, at a lower threshold.
-  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 200 });
+test("protocol events between blocks still count as progress", async () => {
+  // The other half of the ping rule, in the phase where the tight window applies:
+  // once text has arrived a content_block_stop or a block boundary is real progress
+  // and must re-arm the idle clock, or a model that pauses between blocks is killed
+  // for being slow — the bug this work fixes, at a lower threshold.
+  const bedrock = new BedrockProvider(
+    { default_model: "m" },
+    { firstOutputTimeoutMs: 60_000, idleTimeoutMs: 150 },
+  );
   stubStream(bedrock, async function* (signal) {
-    await sleepUnlessAborted(120, signal);
-    yield { chunk: { bytes: encode({ type: "message_start" }) } };
-    await sleepUnlessAborted(120, signal);
+    yield textDelta("first block");
+    await sleepUnlessAborted(100, signal);
+    yield { chunk: { bytes: encode({ type: "content_block_stop" }) } };
+    await sleepUnlessAborted(100, signal);
     yield { chunk: { bytes: encode({ type: "content_block_start" }) } };
-    await sleepUnlessAborted(120, signal);
-    yield textDelta("finally");
+    await sleepUnlessAborted(100, signal); // 300ms total, past the 150ms idle limit
+    yield textDelta(" second block");
     yield messageDelta("end_turn");
   });
   const res = await bedrock.complete(bedrockReq);
-  assert.equal(res.text, "finally");
+  assert.equal(res.text, "first block second block");
+});
+
+test("message_stop ends the read, so a body held open cannot fail a whole document", async () => {
+  // The message being over and the connection being over are different events. If
+  // the loop waited for the body to close, anything holding it open would let the
+  // idle clock fire on a response that is already complete — discarding a finished
+  // document as a stall, and leaving a live timer on every successful call.
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 100 });
+  stubStream(bedrock, async function* (signal) {
+    yield textDelta("<p>complete</p>");
+    yield messageDelta("end_turn");
+    yield { chunk: { bytes: encode({ type: "message_stop" }) } };
+    await sleepUnlessAborted(60_000, signal); // upstream never closes
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.equal(res.text, "<p>complete</p>");
 });
 
 test("a stream that ends early is not accepted as a finished document", async () => {

@@ -180,12 +180,18 @@ export class OpenRouterProvider implements ModelProvider {
         if (parsed.error) {
           throw new Error(`openrouter: stream error: ${parsed.error.message ?? JSON.stringify(parsed.error)}`);
         }
-        // Any real event means generation is under way, so the idle window takes
-        // over from the first-output one from here on.
-        arm("idle", this.idleTimeoutMs);
         const choice = parsed.choices?.[0];
         if (choice?.delta?.content) text += choice.delta.content;
         if (choice?.finish_reason) finishReason = choice.finish_reason;
+        // Which window this re-arms turns on whether output has actually arrived,
+        // not on an event having arrived. The OpenAI convention — which OpenRouter
+        // forwards — opens with a role-only delta as soon as the request is
+        // accepted; treating that as "generation began" would swap the deliberately
+        // generous first-output window for the shorter idle one before a single
+        // token existed, and then report a call that never started as one that
+        // stopped halfway.
+        if (text) arm("idle", this.idleTimeoutMs);
+        else arm("first_output", this.firstOutputTimeoutMs);
       };
 
       arm("first_output", this.firstOutputTimeoutMs);
@@ -218,16 +224,24 @@ export class OpenRouterProvider implements ModelProvider {
         // straddling two reads is not mangled into a replacement char.
         const decoder = new TextDecoder();
         let buffer = "";
-        for await (const bytes of res.body as unknown as AsyncIterable<Uint8Array>) {
+        // Labelled so [DONE] can stop the read itself. Without that, iteration
+        // continues until the upstream closes the body, and anything holding it open
+        // would let the idle clock — last armed by the finish_reason chunk — fire on
+        // a response that is already whole, so the check below would discard a
+        // finished document as a stall.
+        read: for await (const bytes of res.body as unknown as AsyncIterable<Uint8Array>) {
           buffer += decoder.decode(bytes, { stream: true });
           let nl: number;
           while ((nl = buffer.indexOf("\n")) !== -1) {
             const line = buffer.slice(0, nl).trim();
             buffer = buffer.slice(nl + 1);
             handleLine(line);
+            if (sawDone) break read;
           }
         }
-        handleLine(buffer.trim()); // a final event with no trailing newline
+        // A final event with no trailing newline. Skipped after [DONE], since
+        // anything past the terminator is not part of the message.
+        if (!sawDone) handleLine(buffer.trim());
 
         // The stream ending is not the response ending. Without this, an abort that
         // closes the stream quietly, or a connection dropped between events, returns
