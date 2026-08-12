@@ -1,0 +1,11 @@
+# Every pull request automatically requests a review from the maintainer who
+# merges it, so nothing lands on `main` unseen.
+#
+# This file is ROUTING, not a gate. `main`'s protection requires a pull request
+# and restricts merging to @bbertucc, but it deliberately does NOT require
+# code-owner approval: GitHub does not let anyone approve their own PR, so that
+# setting would block the maintainer's own changes and leave the branch
+# mergeable only by someone the workflow says should not be merging it.
+#
+# Contributors need nothing from this file — a review is requested for you.
+* @bbertucc
