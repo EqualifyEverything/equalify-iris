@@ -122,7 +122,9 @@
             <button id="copy-code" type="button" class="secondary">Copy</button>
             <span id="copy-status" role="status" aria-live="polite"></span>
           </li>
-          <li><a id="verify-link" href="#" target="_blank" rel="noopener">Open GitHub</a>, enter the code, Authorize.</li>
+          <!-- The new-tab warning is part of the link text, so a screen reader reads it
+               as part of the link and sighted users see it too (issue #8). -->
+          <li><a id="verify-link" href="#" target="_blank" rel="noopener">Open GitHub (opens in a new tab)</a>, enter the code, Authorize.</li>
           <li>Come back here — you’ll be signed in automatically.</li>
         </ol>
         <p class="status">
@@ -165,11 +167,16 @@
       <h2 id="step4-h" tabindex="-1">Your accessible HTML</h2>
       <p>Your document was converted to accessible HTML.</p>
       <div class="row">
-        <button id="view-btn" type="button">View converted document</button>
+        <!-- The warning belongs in this button's own label, not in a hint under the
+             row (issue #8). A paragraph after three buttons reads as describing all
+             three — and the other two do not open a tab: Download saves a file and
+             "Convert another document" stays on this page. Nothing associated it with
+             this button either, so a screen reader announced "View converted
+             document, button" and no more, which is the case the issue is about. -->
+        <button id="view-btn" type="button">View converted document (opens in a new tab)</button>
         <button id="download-btn" type="button" class="secondary">Download HTML</button>
         <button id="restart-btn" type="button" class="secondary">Convert another document</button>
       </div>
-      <p class="hint">Opens in a new browser tab.</p>
 
       <form id="feedback-form">
         <label for="feedback-text">Not quite right? Tell Iris what to fix</label>
