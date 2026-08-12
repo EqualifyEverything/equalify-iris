@@ -5,8 +5,9 @@ import { mapWithConcurrency } from "../util/concurrency.ts";
 import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
-import { verifyAgentOutput } from "./feedback.ts";
+import { verifyAgentOutput, type VerifyVerdict } from "./feedback.ts";
 import { examplesForPrompt } from "./memory.ts";
+import { missingLinkProblem, missingLinks, pageLinkContext, unexpectedHrefs } from "./links.ts";
 import { STANDARD as STANDARD_AGENTS, isStandardType, logicalType } from "./contribute.ts";
 import type { Fragment } from "./fragment.ts";
 
@@ -138,9 +139,14 @@ async function renderPage(
       `Apply the user feedback above to this page. Keep everything the feedback does NOT ` +
       `concern exactly as it was, and re-check the affected content against the source image.\n`
     : "";
+  // The page's own link targets, which the image cannot show (pipeline/links.ts).
+  const links = pageLinkContext(img.links);
+  if (links.shown.length) {
+    ctx.log.event("page_links", { image: img.name, links: links.shown.length, dropped: links.dropped });
+  }
   const user =
     `Convert this document page image (filename: ${img.name}, page ${img.order} of ${ctx.images.length}) ` +
-    `to accessible HTML.\n\n${ACCESSIBILITY_REQUIREMENTS}${feedbackPreamble(ctx)}${lessons}${priorSection}`;
+    `to accessible HTML.\n\n${ACCESSIBILITY_REQUIREMENTS}${links.section}${feedbackPreamble(ctx)}${lessons}${priorSection}`;
   const res = await ctx.router.complete(
     PAGE_AGENT,
     "vision",
@@ -169,12 +175,15 @@ async function correctPage(
   previous: string,
   problems: string[],
 ): Promise<string | null> {
+  // The link list is repeated here, not just in the first pass: a dropped link is one
+  // of the problems this pass exists to fix, and it cannot re-attach a URL it can no
+  // longer see. The image still does not show them.
   const user =
     `Your previous accessible-HTML output for this page had fidelity/accessibility problems:\n` +
     `${problems.map((p) => `- ${p}`).join("\n")}\n\n` +
     `## Your previous output\n\`\`\`html\n${previous}\n\`\`\`\n\n` +
     `Look at the source image again and return a corrected version that resolves every problem.\n\n` +
-    `${ACCESSIBILITY_REQUIREMENTS}`;
+    `${ACCESSIBILITY_REQUIREMENTS}${pageLinkContext(img.links).section}`;
   const res = await ctx.router.complete(
     PAGE_AGENT,
     "vision",
@@ -399,6 +408,16 @@ interface PageOutcome {
   suggestion?: { name: string; reason: string; image: string };
 }
 
+// Did the fidelity check actually find something? `verifyAgentOutput` is deliberately
+// non-blocking: it answers ok=false with an empty problem list when the check could
+// not be made at all (no Feedback Agent configured, an unusable reply). That has
+// always counted as "nothing to correct", and both uses below depend on it meaning the
+// same thing — one to decide whether to correct, the other to decide whether a
+// correction may replace a fragment that had passed.
+function failedCheck(verdict: VerifyVerdict): boolean {
+  return !verdict.ok && verdict.problems.length > 0;
+}
+
 // Everything one page needs: render -> optional specialist merge -> verify ->
 // optional self-correction. Pages share no mutable state, so this is safe to run
 // concurrently for several pages at once (see runExtraction).
@@ -427,17 +446,80 @@ async function extractPage(
   }
 
   const verdict = await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml }]);
-  if (!verdict.ok && verdict.problems.length) {
+
+  // Whether the page's links arrived is checked here rather than left to the
+  // Feedback Agent: it verifies the output against the IMAGE, which is the one place
+  // a link target does not appear, so a dropped link is invisible to it and a
+  // fabricated one unfalsifiable. The comparison against the file's own annotations
+  // is exact, so it is made in code and handed to the same self-correction pass as
+  // any other fidelity problem.
+  const missing = missingLinks(img.links, innerHtml);
+  if (missing.length) {
+    ctx.log.event("page_links_missing", { image: img.name, links: missing.map((l) => l.href) });
+  }
+
+  // page_verify_ok / page_verify_failed report the Feedback Agent's verdict and
+  // nothing else, exactly as they did before links existed — a missing link is not
+  // part of that verdict, and folding it in would make the two events mean different
+  // things in old logs and new ones. `page_links_missing` above is the signal for a
+  // correction driven by a link.
+  const verifyFailed = failedCheck(verdict);
+  if (verifyFailed) {
     ctx.log.event("page_verify_failed", { image: img.name, problems: verdict.problems });
-    const corrected = await correctPage(ctx, pageAgent, img, innerHtml, verdict.problems);
-    if (corrected && corrected !== innerHtml.trim()) {
-      innerHtml = corrected;
-      logNote = logNote
-        ? `${logNote}; self-corrected after fidelity check`
-        : "self-corrected after fidelity check";
-    }
   } else {
     ctx.log.event("page_verify_ok", { image: img.name });
+  }
+
+  const problems = [
+    ...(verifyFailed ? verdict.problems : []),
+    ...missing.map(missingLinkProblem),
+  ];
+  if (problems.length) {
+    const corrected = await correctPage(ctx, pageAgent, img, innerHtml, problems);
+    if (corrected && corrected !== innerHtml.trim()) {
+      // A page that PASSED its fidelity check is being re-rendered here only to
+      // recover a link, so the rewrite has to earn the standing the original already
+      // had: it is verified in turn, and a rewrite that lost something is discarded
+      // in favour of the fragment that was known to be good. A link is additive, and
+      // paying for it with the structure of a page that already checked out — a
+      // heading level, a `<th scope>` — would make the document worse than it was
+      // before this feature. When the check had already failed, the original has no
+      // standing to protect and the correction is accepted as it always was.
+      let keep = true;
+      if (!verifyFailed) {
+        const recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }]);
+        keep = !failedCheck(recheck);
+        if (!keep) {
+          ctx.log.event("page_links_correction_rejected", {
+            image: img.name,
+            links: missing.map((l) => l.href),
+            problems: recheck.problems,
+          });
+        }
+      }
+      if (keep) {
+        innerHtml = corrected;
+        logNote = logNote
+          ? `${logNote}; self-corrected after fidelity check`
+          : "self-corrected after fidelity check";
+        // Whether the correction actually re-attached them is worth recording: the pass
+        // is single-shot, so a link still missing here is missing from the delivered
+        // document, and that is the whole failure this feature has to be able to see.
+        const stillMissing = missingLinks(img.links, innerHtml);
+        if (stillMissing.length) {
+          ctx.log.event("page_links_unrecovered", { image: img.name, links: stillMissing.map((l) => l.href) });
+        }
+      }
+    }
+  }
+
+  // Checked last, on the fragment that is actually delivered: a correction pass
+  // re-writes the anchors, so an href invented there is the one worth seeing.
+  // Logged, not corrected — a visible URL linked to itself is legitimate. See
+  // `unexpectedHrefs` for why the list is worth having anyway.
+  const unexpected = unexpectedHrefs(img.links, innerHtml);
+  if (unexpected.length) {
+    ctx.log.event("page_links_unexpected", { image: img.name, hrefs: unexpected });
   }
 
   return {

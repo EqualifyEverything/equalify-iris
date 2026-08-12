@@ -12,7 +12,7 @@ import { runPipeline } from "../pipeline/orchestrator.ts";
 import type { AuthedRequest } from "../auth/middleware.ts";
 import { sendError } from "./errors.ts";
 import { summarizeRun } from "../diagnostics.ts";
-import { rasterizePdf, PdfTooLargeError, MAX_PDF_PAGES } from "../util/pdf.ts";
+import { rasterizePdf, PdfTooLargeError, MAX_PDF_PAGES, type PageImage, type PdfLink } from "../util/pdf.ts";
 import { outputBasenameFromUploads, convertedHtmlFilename } from "../util/outputNames.ts";
 import { captureFixtures } from "../pipeline/regression.ts";
 import type { Fragment } from "../pipeline/fragment.ts";
@@ -186,14 +186,16 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     // still sending one keeps working, at the deployment's cap.
     const maxIter = req.user!.max_review_iterations;
 
-    // Expand uploads into ordered page images (PDF -> one PNG per page).
-    const pages: { name: string; buffer: Buffer }[] = [];
+    // Expand uploads into ordered page images (PDF -> one PNG per page), each
+    // carrying the link annotations on that page — the one part of a PDF that
+    // rasterizing destroys, so it travels alongside the image (see pipeline/links.ts).
+    const pages: PageImage[] = [];
     try {
       for (const f of files) {
         if (PDF_EXT.test(f.originalname)) {
           pages.push(...(await rasterizePdf(f.buffer, f.originalname)));
         } else {
-          pages.push({ name: f.originalname, buffer: f.buffer });
+          pages.push({ name: f.originalname, buffer: f.buffer, links: [] });
         }
       }
     } catch (e) {
@@ -224,6 +226,15 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       const order = String(i + 1).padStart(4, "0");
       writeFileSync(join(paths.sessionInput(sessionId), `${order}__${p.name}`), p.buffer);
     });
+    // …and the link annotations beside them, keyed by that same order. Only when
+    // there are some, so a session of plain images gains no empty file.
+    const linksByOrder: Record<string, PdfLink[]> = {};
+    pages.forEach((p, i) => {
+      if (p.links.length) linksByOrder[String(i + 1)] = p.links;
+    });
+    if (Object.keys(linksByOrder).length) {
+      writeFileSync(paths.sessionLinks(sessionId), JSON.stringify(linksByOrder, null, 2));
+    }
 
     const record = store.createSession({
       session_id: sessionId,
