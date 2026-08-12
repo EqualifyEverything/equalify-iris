@@ -227,12 +227,13 @@ session history.
 
 ## API
 
-All endpoints are under `/v1` and (except auth and health) require
+All endpoints are under `/v1` and (except auth, health and stats) require
 `Authorization: Bearer <github_token>`.
 
 | Method & path | Purpose |
 | --- | --- |
 | `GET  /v1/health` | Liveness probe |
+| `GET  /v1/stats` | Public tally of pages converted (no token; aggregate only) |
 | `GET  /v1/auth/github/start` | Begin OAuth (web clients) |
 | `GET  /v1/auth/github/callback` | OAuth callback → returns access token |
 | `POST /v1/auth/github/device` | Begin device flow (CLI clients) |
@@ -659,7 +660,8 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
 Intentionally **not** built in v1 (the PRD frames each as optional / alternative / out of scope):
 PostgreSQL and S3 backends (§10.2 — "supported alternative," SQLite + local FS is the v1
 reference), the per-user config endpoint (§9.1 — "not specified in v1"), and webhooks (§9.4 —
-out of scope). The only endpoint beyond the PRD is `GET /v1/health`, a standard liveness probe.
+out of scope). The endpoints beyond the PRD are `GET /v1/health`, a standard liveness probe, and
+`GET /v1/stats`, the public page tally described above.
 
 ## Automated code review
 

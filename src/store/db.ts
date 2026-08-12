@@ -37,7 +37,22 @@ export interface SessionRecord {
   error: string | null;
   created_at: string;
   updated_at: string;
+  // When this session FIRST reached ready_for_review, or null if it never has.
+  // Written once, by the store, and never cleared (see writeSet) — which is the
+  // whole point: it is what `publicStats` counts, and a public "pages processed"
+  // tally that can go DOWN is worse than no tally. `status` cannot answer the
+  // question, because a feedback re-run moves a finished session back to
+  // `queued` and then possibly to `failed`; counting on status alone would make
+  // the public number dip every time someone asked Iris to try again.
+  first_completed_at: string | null;
 }
+
+// What a caller may change about a session. `first_completed_at` is omitted
+// alongside the immutable identity/creation fields: it is derived from the
+// status transition itself, so no handler needs to (or gets to) set it by hand.
+export type SessionPatch = Partial<
+  Omit<SessionRecord, "session_id" | "github_user_id" | "created_at" | "first_completed_at">
+>;
 
 // The sort key `GET /v1/sessions` pages on. Both halves are required: session
 // rows are ordered by `created_at DESC`, and `created_at` is a millisecond
@@ -184,7 +199,9 @@ export class Store {
         image_count INTEGER NOT NULL DEFAULT 0,
         error TEXT,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        -- Nullable and write-once; see SessionRecord and addCompletionColumn.
+        first_completed_at TEXT
       );
       -- Matches the compound keyset order listSessions pages on, exactly. A new
       -- NAME rather than a redefinition of idx_sessions_user: CREATE INDEX IF NOT
@@ -200,6 +217,93 @@ export class Store {
       -- migration step for databases created before the compound cursor.
       DROP INDEX IF EXISTS idx_sessions_user;
     `);
+    // ...and the column the CREATE TABLE above cannot add to a database that
+    // already has a sessions table.
+    this.addCompletionColumn();
+  }
+
+  /**
+   * Add `sessions.first_completed_at` to an already-deployed database, and
+   * backfill it.
+   *
+   * `CREATE TABLE IF NOT EXISTS` is a no-op once the table exists, so editing the
+   * statement above adds the column to fresh databases only — an existing one
+   * needs the ALTER, or every write that stamps the column fails with "no such
+   * column" and every run ends `failed` at the moment it would have succeeded.
+   *
+   * The backfill is an approximation, deliberately and only here: sessions that
+   * finished before this column existed have no record of WHEN they finished, so
+   * `updated_at` stands in. That is exact for a session nothing has touched since
+   * (the completion was its last write) and late for one that was closed or
+   * re-run afterwards. It cannot be earlier than the real completion, which is
+   * the property that matters — `publicStats` reports `since` from the minimum,
+   * and the count itself is unaffected either way.
+   *
+   * `failed` is not backfilled even though a failed session may well have
+   * completed once before a feedback re-run broke: nothing distinguishes it from
+   * one that failed on its first run, and undercounting is the honest direction
+   * for a public tally. Going forward the stamp survives the re-run, so this only
+   * ever affects sessions that predate the column.
+   *
+   * One more session is missed, for the same reason and only at the upgrade
+   * moment: one that had completed and was **mid-feedback-re-run** (`queued` or
+   * `running`) when the new build booted. It is not in the backfill set, and
+   * `failStaleSessions` then marks it `failed` on that same boot — so it is
+   * excluded permanently rather than until its re-run finishes. Widening the
+   * filter to include in-flight sessions would be worse: it would count first
+   * runs that had never produced anything. Documented in docs/API.md §0b so the
+   * one-off gap is explicable rather than mysterious.
+   *
+   * Unlike everything else in the constructor, `ALTER TABLE` is not idempotent,
+   * so the check and the write are wrapped rather than trusted. Two processes
+   * booting against one database in the same window both see no column, both
+   * ALTER, and the loser would otherwise throw `duplicate column name` straight
+   * out of `new Store()` — an uncaught boot crash, and not one `busy_timeout`
+   * covers, since it is not a lock error. Re-checking on failure is what tells
+   * "someone else already did this" (fine — the winner also runs the backfill)
+   * from a real DDL error, which is rethrown. Multi-process is not a supported
+   * topology, so this is defense in depth; it just costs three lines to put this
+   * statement on the same footing as the IF NOT EXISTS block above it.
+   */
+  private addCompletionColumn(): void {
+    const hasColumn = (): boolean =>
+      (this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).some(
+        (c) => c.name === "first_completed_at",
+      );
+    if (hasColumn()) return;
+    try {
+      this.db.exec(`
+        ALTER TABLE sessions ADD COLUMN first_completed_at TEXT;
+        UPDATE sessions SET first_completed_at = updated_at
+         WHERE status IN ('ready_for_review', 'closed');
+      `);
+    } catch (e) {
+      if (!hasColumn()) throw e;
+    }
+  }
+
+  /**
+   * Build the `SET` clause shared by every session write, including the two
+   * columns no caller passes: `updated_at`, and the write-once completion stamp.
+   *
+   * The stamp lives here rather than in the orchestrator so that "a session that
+   * has reached ready_for_review is stamped" is a property of the store instead
+   * of something each call site remembers. `COALESCE` is what makes it write
+   * ONCE: the second and third times a session goes ready_for_review — every
+   * feedback re-run does — the existing value wins, so the public tally counts
+   * each set of page images once no matter how many times Iris re-read them.
+   */
+  private writeSet(patch: SessionPatch, now: string): { sets: string; values: unknown[] } {
+    const keys = Object.keys(patch);
+    const sets = keys.map((k) => `${k} = ?`);
+    const values = keys.map((k) => (patch as Record<string, unknown>)[k]);
+    if (patch.status === "ready_for_review") {
+      sets.push(`first_completed_at = COALESCE(first_completed_at, ?)`);
+      values.push(now);
+    }
+    sets.push(`updated_at = ?`);
+    values.push(now);
+    return { sets: sets.join(", "), values };
   }
 
   /**
@@ -332,14 +436,10 @@ export class Store {
     return this.db.prepare(`SELECT * FROM sessions WHERE session_id = ?`).get(id) as SessionRecord | undefined;
   }
 
-  updateSession(id: string, patch: Partial<Omit<SessionRecord, "session_id" | "github_user_id" | "created_at">>): void {
-    const keys = Object.keys(patch);
-    if (keys.length === 0) return;
-    const sets = keys.map((k) => `${k} = ?`).join(", ");
-    const values = keys.map((k) => (patch as Record<string, unknown>)[k]);
-    this.db
-      .prepare(`UPDATE sessions SET ${sets}, updated_at = ? WHERE session_id = ?`)
-      .run(...(values as never[]), new Date().toISOString(), id);
+  updateSession(id: string, patch: SessionPatch): void {
+    if (Object.keys(patch).length === 0) return;
+    const { sets, values } = this.writeSet(patch, new Date().toISOString());
+    this.db.prepare(`UPDATE sessions SET ${sets} WHERE session_id = ?`).run(...(values as never[]), id);
   }
 
   // Apply `patch` only if the session is still in `expected`, and report whether
@@ -364,18 +464,12 @@ export class Store {
   // the race in-process, and a duplicated feedback run is invisible in the response
   // (both callers get a 202) while two pipelines write the same output.html and
   // fragments/final.json.
-  claimSession(
-    id: string,
-    expected: SessionStatus,
-    patch: Partial<Omit<SessionRecord, "session_id" | "github_user_id" | "created_at">>,
-  ): boolean {
-    const keys = Object.keys(patch);
-    if (keys.length === 0) return false;
-    const sets = keys.map((k) => `${k} = ?`).join(", ");
-    const values = keys.map((k) => (patch as Record<string, unknown>)[k]);
+  claimSession(id: string, expected: SessionStatus, patch: SessionPatch): boolean {
+    if (Object.keys(patch).length === 0) return false;
+    const { sets, values } = this.writeSet(patch, new Date().toISOString());
     const res = this.db
-      .prepare(`UPDATE sessions SET ${sets}, updated_at = ? WHERE session_id = ? AND status = ?`)
-      .run(...(values as never[]), new Date().toISOString(), id, expected);
+      .prepare(`UPDATE sessions SET ${sets} WHERE session_id = ? AND status = ?`)
+      .run(...(values as never[]), id, expected);
     return Number(res.changes) > 0;
   }
 
@@ -430,5 +524,56 @@ export class Store {
         `SELECT * FROM sessions WHERE ${where} ORDER BY created_at DESC, session_id DESC LIMIT ?`,
       )
       .all(...(params as never[])) as unknown as SessionRecord[];
+  }
+
+  // --- public stats ---
+
+  /**
+   * The deployment-wide totals behind `GET /v1/stats`: how many page images Iris
+   * has converted, across how many documents, and since when.
+   *
+   * Aggregate only, and that is a requirement rather than a simplification —
+   * this feeds an UNAUTHENTICATED endpoint. Every value here is a count over the
+   * whole table: no user id, no login, no session id, no filename, and no content.
+   *
+   * What that does NOT promise, since the endpoint is public and pollable: the
+   * DELTA between two reads is a per-upload figure. `documents_processed` +1
+   * alongside `pages_processed` +40 says a 40-page document finished in that
+   * window, and on a quiet deployment the aggregate IS the individual. The route's
+   * 60s cache coarsens when that shows up, not the page count. Nothing identifying
+   * is inferable from it — no who, no what — so the query is right as it stands;
+   * an operator who considers document sizes sensitive should not expose this
+   * endpoint publicly, and this paragraph is here so that stays a decision rather
+   * than a surprise.
+   *
+   * "Processed" means a session that reached ready_for_review at least once, so:
+   *
+   *   * A queued or in-flight run is not counted yet — the pages have been
+   *     uploaded, not converted.
+   *   * A run that has NEVER completed is not counted, since nothing was
+   *     delivered. Note the asymmetry with a `failed` status: a session that
+   *     completed once and then failed a feedback re-run stays counted, because
+   *     its pages really were made accessible and the user still has that output.
+   *   * A feedback re-run does not count its pages a second time. The tally is
+   *     of distinct page images Iris has made accessible, not of model calls, so
+   *     re-reading page 3 four times is still one page (see writeSet).
+   *
+   * There is no index for the `IS NOT NULL` filter: this is a full scan of a
+   * table with one row per upload, behind a 60s response cache at the route, so
+   * an extra b-tree to maintain on every session write would cost more than it
+   * saves. If sessions ever grow to the point where this matters, a partial index
+   * on (first_completed_at, image_count) covers this query exactly.
+   */
+  publicStats(): { pages: number; documents: number; since: string | null } {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS documents,
+                COALESCE(SUM(image_count), 0) AS pages,
+                MIN(first_completed_at) AS since
+           FROM sessions
+          WHERE first_completed_at IS NOT NULL`,
+      )
+      .get() as { documents: number; pages: number; since: string | null };
+    return { pages: Number(row.pages), documents: Number(row.documents), since: row.since ?? null };
   }
 }

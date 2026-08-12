@@ -77,6 +77,10 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
     footer { border-top: 1px solid var(--border); padding-top: 1.25rem; padding-bottom: 2rem; color: var(--muted); }
+    /* The public "pages made accessible" tally. Deliberately quiet: it sits under
+       the tagline, in body text, and is not a badge or a banner. */
+    .tally { margin: 0 0 1.5rem; color: var(--muted); }
+    .tally strong { color: var(--fg); }
     .visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
   </style>
 </head>
@@ -86,6 +90,11 @@
   <header>
     <h1>Equalify Iris</h1>
     <p class="tagline">Turn images of document pages into accessible HTML.</p>
+    <!-- Filled from GET /v1/stats after load, and left hidden if that fails or
+         nothing has been converted yet: an empty boast is worse than none. Not a
+         live region — it is page content that happens to arrive late, not a
+         status update anyone is waiting on. -->
+    <p id="tally" class="tally" hidden></p>
     <p id="account" class="hint" hidden>Signed in as <strong id="account-name"></strong> ·
       <button id="signout-btn" type="button" class="linkish">Sign out</button></p>
   </header>
@@ -503,6 +512,40 @@
         setError('Could not submit feedback: ' + e.message);
       }
     });
+
+    // ----- Public tally: pages Iris has made accessible -----
+    // GET /v1/stats needs no token, so this loads for visitors who never sign in.
+    // Silent on every failure by design: the point is to celebrate a number, and a
+    // zero, a NaN or an error message in its place is worse than no line at all.
+    async function loadTally() {
+      try {
+        const res = await fetch(API + '/stats');
+        if (!res.ok) return;
+        const s = await res.json();
+        const pages = Number(s.pages_processed);
+        const docs = Number(s.documents_processed);
+        if (!Number.isFinite(pages) || pages < 1) return;
+        // The only interpolations below are numbers formatted here and a month +
+        // year rendered from a Date, so none of it can carry markup.
+        let text = 'Iris has made <strong>' + pages.toLocaleString() + ' ' +
+          (pages === 1 ? 'page' : 'pages') + '</strong> accessible';
+        // "across N documents" only when it says something the page count does
+        // not: if every document was a single page the two numbers are equal and
+        // the clause is noise.
+        if (Number.isFinite(docs) && docs > 1 && docs < pages) {
+          text += ' across <strong>' + docs.toLocaleString() + ' documents</strong>';
+        }
+        const since = s.since ? new Date(s.since) : null;
+        if (since && !isNaN(since.getTime())) {
+          text += ' since ' + since.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
+        }
+        $('tally').innerHTML = text + '.';
+        show('tally');
+      } catch {
+        // offline, blocked, or the endpoint is unreachable — leave the line hidden
+      }
+    }
+    loadTally();
 
     // If a token is already stored, skip straight to upload.
     (async function init() {

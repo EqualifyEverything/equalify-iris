@@ -8,6 +8,7 @@ import { makeAuthMiddleware } from "./auth/middleware.ts";
 import { authRouter } from "./routes/auth.ts";
 import { meRouter } from "./routes/me.ts";
 import { sessionsRouter } from "./routes/sessions.ts";
+import { statsRouter } from "./routes/stats.ts";
 
 const cfg = loadConfig();
 
@@ -35,6 +36,12 @@ app.use(express.json({ limit: "2mb" }));
 
 // Liveness probe (unauthenticated) — confirms the service is up.
 app.get("/v1/health", (_req, res) => res.json({ status: "ok", service: "equalify-iris" }));
+
+// The public tally of pages converted (unauthenticated, aggregate-only). The
+// browser app reads it to report how many pages Iris has made accessible, so it
+// has to answer before anyone signs in — and it is mounted here, above the auth
+// middleware, for exactly that reason.
+app.use("/v1/stats", statsRouter(store));
 
 // The browser app is the front door, served at the root (unauthenticated; it
 // drives the /v1 API itself). no-store so a deploy never serves a stale page.
