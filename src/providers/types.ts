@@ -57,3 +57,48 @@ export class TruncatedResponseError extends Error {
     this.chars = chars;
   }
 }
+
+// A streamed call was abandoned: either it went quiet for longer than the idle
+// timeout ("idle"), or it kept trickling past the absolute ceiling ("total").
+//
+// This type exists because the alternative is unreadable. Aborting an AWS SDK call
+// makes the SDK throw a bare `Error("Request aborted")`, which the orchestrator
+// stores verbatim as the session's error and the UI shows to the user — a message
+// that names neither the cause, the phase, nor anything to do about it. A slow
+// document rewrite and a genuinely dead connection produced the identical string.
+export class StalledStreamError extends Error {
+  readonly provider: string;
+  readonly model: string;
+  readonly kind: "idle" | "total";
+  readonly limitMs: number;
+  readonly chars: number;
+
+  constructor(args: {
+    provider: string;
+    model: string;
+    kind: "idle" | "total";
+    limitMs: number;
+    chars: number;
+  }) {
+    const seconds = Math.round(args.limitMs / 1000);
+    const streamed = args.chars
+      ? `${args.chars} chars had streamed`
+      : "nothing had streamed";
+    super(
+      args.kind === "idle"
+        ? `${args.provider}: the model stopped sending output for ${seconds}s ` +
+            `(${streamed}) on ${args.model}, so the call was abandoned. The connection ` +
+            `stalled rather than the work being too slow — a healthy stream is never ` +
+            `silent this long.`
+        : `${args.provider}: the call was still streaming after ${seconds}s ` +
+            `(${streamed}) on ${args.model} and hit the absolute ceiling. The document ` +
+            `is probably too large to correct in one call.`,
+    );
+    this.name = "StalledStreamError";
+    this.provider = args.provider;
+    this.model = args.model;
+    this.kind = args.kind;
+    this.limitMs = args.limitMs;
+    this.chars = args.chars;
+  }
+}

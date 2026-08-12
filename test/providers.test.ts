@@ -1,16 +1,21 @@
-// Provider-adapter behaviour, focused on the failure mode that has no downstream
-// detector: a response cut off at the output-token ceiling.
+// Provider-adapter behaviour, focused on the failure modes that have no downstream
+// detector: a response cut off at the output-token ceiling, and a call abandoned
+// because it went quiet.
 //
 // Truncation arrives as a 200 with partial content. A page of accessible HTML that
 // stops mid-tag still parses well enough to be assembled into the deliverable,
 // where it reads as content the source never had — so if the provider layer does
 // not reject it, nothing else will. Both adapters must raise instead of returning
 // the fragment.
+//
+// The Bedrock stall tests pin the distinction the streaming adapter exists to draw:
+// slow-but-progressing work must survive, silence must not.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeMaxTokens, DEFAULT_MAX_TOKENS } from "../src/config.ts";
+import { BedrockProvider } from "../src/providers/bedrock.ts";
 import { OpenRouterProvider } from "../src/providers/openrouter.ts";
-import { TruncatedResponseError } from "../src/providers/types.ts";
+import { StalledStreamError, TruncatedResponseError } from "../src/providers/types.ts";
 
 // --- normalizeMaxTokens -----------------------------------------------------
 
@@ -156,6 +161,185 @@ test("truncation is not retried as if it were a network blip", async () => {
     async (calls) => {
       await assert.rejects(() => provider(50).complete(req), TruncatedResponseError);
       assert.equal(calls.length, 1, `expected 1 attempt, got ${calls.length}`);
+    },
+  );
+});
+
+// --- Bedrock streaming: slow work vs. a stalled stream ----------------------
+
+const encode = (o: unknown) => new TextEncoder().encode(JSON.stringify(o));
+const textDelta = (text: string) => ({
+  chunk: { bytes: encode({ type: "content_block_delta", delta: { type: "text_delta", text } }) },
+});
+const messageDelta = (stop_reason: string) => ({
+  chunk: { bytes: encode({ type: "message_delta", delta: { stop_reason } }) },
+});
+
+// Exactly what the AWS SDK throws when an abortSignal fires: a bare Error whose
+// message is "Request aborted" (@smithy/node-http-handler/build-abort-error). The
+// tests below assert this string never reaches the caller — it is the opaque
+// failure the streaming adapter was written to replace.
+const abortError = () => Object.assign(new Error("Request aborted"), { name: "AbortError" });
+
+function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(abortError());
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortError());
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+// Replace the adapter's SDK client with one returning a scripted event stream.
+function stubStream(
+  bedrock: BedrockProvider,
+  script: (signal: AbortSignal) => AsyncIterable<unknown>,
+): void {
+  (bedrock as unknown as { client: unknown }).client = {
+    send: async (_cmd: unknown, opts: { abortSignal: AbortSignal }) => ({
+      body: script(opts.abortSignal),
+    }),
+  };
+}
+
+const bedrockReq = {
+  capability: "vision" as const,
+  model: "us.anthropic.claude-sonnet-4-6",
+  messages: [{ role: "user" as const, content: "fix this document" }],
+};
+
+test("streamed text deltas are concatenated into the result", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m", region: "us-east-2" });
+  stubStream(bedrock, async function* () {
+    yield { chunk: { bytes: encode({ type: "message_start" }) } };
+    yield textDelta("<h1>Title</h1>");
+    yield textDelta("<p>Body</p>");
+    yield messageDelta("end_turn");
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.equal(res.text, "<h1>Title</h1><p>Body</p>");
+  assert.equal(res.provider, "bedrock");
+  assert.equal(res.model, "us.anthropic.claude-sonnet-4-6");
+});
+
+test("a slow but progressing stream outlives the idle timeout", async () => {
+  // The actual regression this work fixes. Total duration (~360ms) is well past the
+  // 200ms idle limit, but no single gap is — so the call must complete. Under the
+  // old total-duration timeout this is precisely the call that got killed.
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 200 });
+  stubStream(bedrock, async function* (signal) {
+    for (let i = 0; i < 6; i++) {
+      await sleepUnlessAborted(60, signal);
+      yield textDelta(`chunk${i} `);
+    }
+    yield messageDelta("end_turn");
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.equal(res.text, "chunk0 chunk1 chunk2 chunk3 chunk4 chunk5 ");
+});
+
+test("a stream that goes quiet fails with a message that explains itself", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 120 });
+  stubStream(bedrock, async function* (signal) {
+    yield textDelta("some output");
+    await sleepUnlessAborted(60_000, signal); // silence until the idle clock fires
+    yield textDelta("never arrives");
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.ok(e instanceof StalledStreamError, `expected StalledStreamError, got ${e.name}`);
+      assert.equal((e as StalledStreamError).kind, "idle");
+      // The opaque SDK string must not be what an operator or user ends up reading.
+      assert.doesNotMatch(e.message, /Request aborted/);
+      // It must name the model, and how much had streamed — the two facts that
+      // distinguish "stalled at the start" from "stalled three quarters through".
+      assert.match(e.message, /us\.anthropic\.claude-sonnet-4-6/);
+      assert.match(e.message, /11 chars had streamed/);
+      return true;
+    },
+  );
+});
+
+test("time-to-first-token counts as idle time, not a grace period", async () => {
+  // A call that never sends anything at all must still be caught; the idle clock
+  // therefore has to start before the request, not at the first chunk.
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 100 });
+  stubStream(bedrock, async function* (signal) {
+    await sleepUnlessAborted(60_000, signal);
+    yield textDelta("never");
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.ok(e instanceof StalledStreamError);
+      assert.match(e.message, /nothing had streamed/);
+      return true;
+    },
+  );
+});
+
+test("a stream that trickles forever is stopped by the absolute ceiling", async () => {
+  // Never idle, never done: satisfies the idle timeout indefinitely while holding a
+  // concurrency slot. The backstop must distinguish itself from a stall.
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 5_000, maxTotalMs: 150 });
+  stubStream(bedrock, async function* (signal) {
+    for (;;) {
+      await sleepUnlessAborted(20, signal);
+      yield textDelta("x");
+    }
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.ok(e instanceof StalledStreamError, `expected StalledStreamError, got ${e.name}`);
+      assert.equal((e as StalledStreamError).kind, "total");
+      assert.match(e.message, /absolute ceiling/);
+      assert.doesNotMatch(e.message, /Request aborted/);
+      return true;
+    },
+  );
+});
+
+test("truncation is still caught when the stop reason arrives mid-stream", async () => {
+  // stop_reason rides the closing message_delta rather than a top-level field now,
+  // so the guard has to read it off the stream or truncated HTML flows downstream.
+  const bedrock = new BedrockProvider({ default_model: "m", max_tokens: 32_000 });
+  stubStream(bedrock, async function* () {
+    yield textDelta("<table><tr><td>cut");
+    yield messageDelta("max_tokens");
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.ok(e instanceof TruncatedResponseError, `expected TruncatedResponseError, got ${e.name}`);
+      assert.match(e.message, /providers\.bedrock\.max_tokens/);
+      assert.equal((e as TruncatedResponseError).chars, 18);
+      return true;
+    },
+  );
+});
+
+test("a service failure delivered mid-stream is raised, not silently truncated", async () => {
+  // These ride an otherwise-successful 200, so ignoring them would return whatever
+  // partial text had arrived as if it were the finished document.
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  stubStream(bedrock, async function* () {
+    yield textDelta("<p>partial");
+    yield { throttlingException: { message: "Too many tokens, please wait" } };
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.match(e.message, /throttlingException/);
+      assert.match(e.message, /Too many tokens/);
+      return true;
     },
   );
 });

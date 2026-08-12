@@ -101,6 +101,14 @@ from the environment at startup; changes require a restart.
   response that stops at the ceiling is a **failed** call, not a short one: it arrives as a 200
   with HTML cut mid-tag, which would otherwise be assembled into the deliverable as if it were
   genuine content. Both adapters reject it and the error names the knob to raise.
+  The Bedrock adapter **streams** its responses, to tell a stalled call apart from a slow one.
+  A single non-streaming request cannot: "no answer yet" describes a dead socket and a large
+  document being correctly rewritten equally well, so a total-duration cap kills both — and the
+  review phase's document-level rewrite (whole body in, whole corrected body out) is the call
+  slow enough to be killed. It is therefore an **idle** timeout: 60s of *silence* fails a call,
+  while work that keeps arriving runs as long as it needs, bounded only by a deliberately
+  generous 15-minute backstop for a stream that trickles without ever finishing. The two are
+  distinct errors, and each says which limit it hit and how much had streamed.
 - **Concurrency** (§9.4): two independent knobs under `defaults`.
   `extraction_concurrency` is *within* a run (pages in parallel);
   `max_concurrent_runs` is *across* sessions. Peak in-flight model calls is the product of the
