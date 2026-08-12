@@ -717,10 +717,15 @@ Two gaps worth knowing:
   `gh workflow run code-review.yml -f pr_number=<n>` — which runs the fork's code in a job
   holding the Bedrock role, so read the diff first.
 
-The verdict is advisory: `main` is protected, but this check is deliberately not required. Three
-kinds of PR produce no review at all — a fork PR, one touching only `paths-ignore`d files, and one
-editing this workflow — so requiring it would leave all three permanently unmergeable. A human
-merges. What changes is what that human is reading, not whether they read it.
+The verdict is advisory: `main` is protected, but this check is deliberately not required, because
+requiring it would fail in both directions at once. A PR touching only `paths-ignore`d files never
+triggers the workflow, so the check would never report and the PR could never merge. A PR editing
+this workflow is the opposite failure: the job runs to completion and reports **success** while the
+steps that would post or verify a review are gated off, so a required check would put a green tick
+on a PR nothing reviewed (measured on #70). A fork PR, whose job is skipped outright, should
+satisfy a required check the same vacuous way — that one is GitHub's documented handling of a
+skipped job rather than something measured here. A human merges. What changes is what that human
+is reading, not whether they read it.
 
 ## Contributing
 

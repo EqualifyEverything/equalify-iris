@@ -67,11 +67,12 @@ Your PR gets a review from Claude in CI before a maintainer reads it
 - **`### Non-blocking notes` means "merge-ready".** A finding only blocks if something reaches it
   on input the code accepts today; real-but-unreachable findings are notes on an *approval*. You
   don't have to resolve them to merge, and you don't have to argue your way out of them.
-- **Its verdict is advisory, and its check is not a merge gate.** A human merges. Requiring the
-  check would make fork PRs unmergeable — they get no automatic review at all (below) — so it
-  is deliberately not required. If you think a blocking finding is wrong, reply on
-  the PR — the reviewer sees its earlier reviews on re-runs, but it is the maintainer you're
-  actually talking to.
+- **Its verdict is advisory, and its check is not a merge gate.** A human merges. The check is
+  deliberately not required on `main`, because it could not be a trustworthy gate: a PR touching
+  only ignored paths never triggers it at all, a PR editing the workflow makes it report success,
+  and a fork PR's skipped job counts as satisfied — the last two with nothing having reviewed the
+  code. If you think a blocking finding is wrong, reply on the PR — the reviewer sees its earlier
+  reviews on re-runs, but it is the maintainer you're actually talking to.
 - **Fork PRs aren't reviewed automatically** (a fork PR gets no CI secrets). A maintainer
   dispatches the review manually; nothing is needed from you.
 - **Editing `.github/workflows/code-review.yml` disables its own review.** Expect a warning
