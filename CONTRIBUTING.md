@@ -41,6 +41,14 @@ should report **0 violations**.
 ## Pull requests
 
 - Branch from `main`, keep PRs focused, and describe the change + how you tested it.
+- **`main` is protected: every change lands as a merged pull request.** Direct pushes are
+  refused for everyone — maintainers included — and force-pushes and branch deletion are
+  blocked. **@bbertucc** merges; a review from them is requested automatically
+  ([CODEOWNERS](.github/CODEOWNERS)).
+- **No formal approval is required to merge**, so don't wait for a green review checkmark that
+  never comes. The gate is a maintainer reading the PR, not a count of approvals — GitHub won't
+  let anyone approve their own work, and requiring approvals would block the maintainer's
+  changes rather than yours.
 - Match the surrounding code style (the codebase favors small, well-commented modules).
 - New runtime dependencies should be justified — Iris aims to stay portable and lightweight.
 - AGPL-3.0: contributions are licensed under the same terms.
@@ -59,7 +67,9 @@ Your PR gets a review from Claude in CI before a maintainer reads it
 - **`### Non-blocking notes` means "merge-ready".** A finding only blocks if something reaches it
   on input the code accepts today; real-but-unreachable findings are notes on an *approval*. You
   don't have to resolve them to merge, and you don't have to argue your way out of them.
-- **Its verdict is advisory.** A human merges. If you think a blocking finding is wrong, reply on
+- **Its verdict is advisory, and its check is not a merge gate.** A human merges. Requiring the
+  check would make fork PRs unmergeable — they get no automatic review at all (below) — so it
+  is deliberately not required. If you think a blocking finding is wrong, reply on
   the PR — the reviewer sees its earlier reviews on re-runs, but it is the maintainer you're
   actually talking to.
 - **Fork PRs aren't reviewed automatically** (a fork PR gets no CI secrets). A maintainer
