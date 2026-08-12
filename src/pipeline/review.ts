@@ -5,6 +5,7 @@ import { runAxe, type LintResult } from "./lint.ts";
 import { flatten } from "./flatten.ts";
 import { examplesForPrompt } from "./memory.ts";
 import { knownPages, pageIndex, type IndexedPage } from "./pageindex.ts";
+import { droppedHrefs } from "./links.ts";
 
 export interface ReviewIssue {
   issue: string;
@@ -71,6 +72,13 @@ representation), reorder blocks, fix heading hierarchy, correct labels and table
 Preserve all genuine content and transcribed text; do not invent content. Content on pages whose
 image is NOT attached must be carried over unchanged unless an issue names it. Output ONLY the
 corrected body (no <html>/<head>/<body> wrapper).
+
+A link's target is content, and it is the one kind you cannot recover: an href came from the
+source FILE, not from the page image, so a URL you drop or alter is gone and a URL you invent
+cannot be checked. Carry every href through exactly as written — including on content you
+restructure or move — and never add a link that is not already in the document. You may change
+the TEXT of a link when an issue calls for it (link text that does not describe its
+destination is a real 2.4.4 problem); keep its href.
 
 Respond with ONLY JSON: { "html": "<corrected body content>" }`;
 
@@ -234,9 +242,14 @@ export async function runReview(
     if (iterations === ctx.maxReviewIterations) break; // cap reached, issues remain
 
     iterations++;
+    const before = body;
     body = await runEditor(ctx, body, issues);
     lint = await runAxe(wrapDocument(body));
     ctx.log.event("editor", { iteration: iterations });
+    // A link the editor dropped is unrecoverable and invisible to every later check
+    // in the loop — see droppedHrefs for why this is checked here and in code.
+    const dropped = droppedHrefs(before, body);
+    if (dropped.length) ctx.log.event("editor_links_dropped", { iteration: iterations, hrefs: dropped });
   }
 
   // Cap reached with issues remaining (§7.11): record them as a comment, with the

@@ -4,11 +4,18 @@ import type { ProviderRouter, Image } from "../providers/index.ts";
 import type { Paths } from "../store/paths.ts";
 import type { RunLog } from "../store/runlog.ts";
 import type { IrisConfig } from "../config.ts";
+import type { PdfLink } from "../util/pdf.ts";
 
 export interface InputImage {
   name: string; // filename, e.g. page-001.png
   order: number; // 1-based processing order
   path: string;
+  // The link annotations on this page, when it came from a PDF that had any —
+  // targets the image itself cannot carry (see pipeline/links.ts). Optional because
+  // most pages have none, and because callers that synthesize an InputImage from
+  // something other than an upload (the regression gate's fixture images) have no
+  // links to give it.
+  links?: PdfLink[];
 }
 
 // Everything a pipeline phase needs. Created once per run.

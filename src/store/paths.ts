@@ -38,6 +38,19 @@ export class Paths {
   sessionLog(id: string): string {
     return join(this.sessionDir(id), "log.jsonl");
   }
+  // The link annotations found in the uploaded PDFs, keyed by the page's 1-based
+  // processing order: `{ "3": [{ text, href }] }`. A rasterized page cannot carry
+  // them (see pipeline/links.ts), and the pipeline runs later — off a queue, in a
+  // separate step that only reads this directory — so what the upload extracted has
+  // to be persisted here or it is gone by extraction time.
+  //
+  // A file of its own, rather than a sidecar per image inside input/, because
+  // `enumerateInputs` treats every `<order>__<name>` file in there as a page image;
+  // a sidecar named to sit beside its image would be enumerated as one. Written only
+  // when a document actually has links, so its absence and `{}` mean the same thing.
+  sessionLinks(id: string): string {
+    return join(this.sessionDir(id), "links.json");
+  }
   // `sessionNewAgents()` and `sessionPrs()` used to sit here with zero callers,
   // left over from the fork-and-PR flow of PRD §7.13. That flow has been dropped
   // (contributions are issues filed under the user's identity), so they are gone

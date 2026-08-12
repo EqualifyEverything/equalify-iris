@@ -159,6 +159,17 @@ Accepted file types: PNG, JPEG, TIFF, WebP, **and PDF**. A PDF is rasterized ser
 one image per page (in page order) and processed like any other page sequence. Total pages
 (across all parts) are capped per deployment.
 
+A PDF's **links survive**, which rasterizing alone would not manage: a link is an annotation
+over the page rather than something drawn on it, so the page image carries the link text and
+none of its target. The link targets are read out of the file separately and given to the page
+agent as ground truth, and the output's `<a href>`s are checked against them — the run log
+carries a `page_links` line per page that had any, and `page_links_missing` /
+`page_links_unrecovered` when one did not make it into the HTML. Two kinds are dropped on
+purpose: links to a destination inside the same document (the page they point at is in the
+delivered HTML already), and any URL whose scheme is not `http(s)`, `mailto`, `tel`, or `ftp` —
+a PDF can carry a `javascript:` action, and that is not something to re-emit into a document.
+A link over an image with no text under it has nothing to attach to and is lost.
+
 `status` is `queued` on creation and becomes `running` when the pipeline actually starts. Those are
 usually the same instant, but a deployment runs at most `defaults.max_concurrent_runs` pipelines at
 once (default 2): beyond that, the session **waits in `queued`** — in FIFO order, for as long as it

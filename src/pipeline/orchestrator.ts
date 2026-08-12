@@ -13,16 +13,36 @@ import { runAxe } from "./lint.ts";
 import { learnFromFeedback, proposeAgentUpdatesFromFeedback, scopeFeedback } from "./feedback.ts";
 import { runContribution } from "./contribute.ts";
 import type { Fragment } from "./fragment.ts";
+import type { PdfLink } from "../util/pdf.ts";
+
+// The link annotations the upload extracted from its PDFs, keyed by page order
+// (see Paths.sessionLinks). Absent for a session of plain images, for a PDF with no
+// links, and for any session created before links were extracted at all — all of
+// which mean the same thing here, so a missing or unreadable file is no links rather
+// than an error. Links are additive: without them a run produces the document it
+// always produced.
+function readLinks(paths: Paths, sessionId: string): Record<string, PdfLink[]> {
+  const path = paths.sessionLinks(sessionId);
+  if (!existsSync(path)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, PdfLink[]>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 // Input files are stored as "<0001>__<original-name>" so submitted order
 // (significant per PRD §9.2) survives, independent of filename.
 export function enumerateInputs(paths: Paths, sessionId: string): InputImage[] {
   const dir = paths.sessionInput(sessionId);
+  const links = readLinks(paths, sessionId);
   return readdirSync(dir)
     .filter((f) => f.includes("__"))
     .map((f) => {
       const [prefix, ...rest] = f.split("__");
-      return { order: parseInt(prefix, 10), name: rest.join("__"), path: join(dir, f) };
+      const order = parseInt(prefix, 10);
+      return { order, name: rest.join("__"), path: join(dir, f), links: links[String(order)] ?? [] };
     })
     .sort((a, b) => a.order - b.order);
 }
