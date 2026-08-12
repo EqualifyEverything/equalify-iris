@@ -174,6 +174,7 @@ const textDelta = (text: string) => ({
 const messageDelta = (stop_reason: string) => ({
   chunk: { bytes: encode({ type: "message_delta", delta: { stop_reason } }) },
 });
+const ping = () => ({ chunk: { bytes: encode({ type: "ping" }) } });
 
 // Exactly what the AWS SDK throws when an abortSignal fires: a bare Error whose
 // message is "Request aborted" (@smithy/node-http-handler/build-abort-error). The
@@ -324,6 +325,101 @@ test("truncation is still caught when the stop reason arrives mid-stream", async
       return true;
     },
   );
+});
+
+test("keepalive pings do not pass for progress", async () => {
+  // A ping is the transport saying it is alive, not the model producing anything.
+  // If it reset the idle clock, a generation that hangs on a chatty connection
+  // would defeat the timeout entirely and run to the 15-minute backstop — and then
+  // report itself as too large, the opposite diagnosis.
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 150, maxTotalMs: 60_000 });
+  stubStream(bedrock, async function* (signal) {
+    yield textDelta("real output");
+    for (;;) {
+      await sleepUnlessAborted(30, signal); // chatty, but nothing is being produced
+      yield ping();
+    }
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.ok(e instanceof StalledStreamError, `expected StalledStreamError, got ${e.name}`);
+      assert.equal((e as StalledStreamError).kind, "idle", "a ping stream must read as idle, not as work");
+      return true;
+    },
+  );
+});
+
+test("a message_start keeps a slow first token alive", async () => {
+  // The other half of the ping rule: real protocol events must still count, or a
+  // model that takes its time before the first token is killed for being slow —
+  // reintroducing the bug this work fixes, at a lower threshold.
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 200 });
+  stubStream(bedrock, async function* (signal) {
+    await sleepUnlessAborted(120, signal);
+    yield { chunk: { bytes: encode({ type: "message_start" }) } };
+    await sleepUnlessAborted(120, signal);
+    yield { chunk: { bytes: encode({ type: "content_block_start" }) } };
+    await sleepUnlessAborted(120, signal);
+    yield textDelta("finally");
+    yield messageDelta("end_turn");
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.equal(res.text, "finally");
+});
+
+test("a stream that ends early is not accepted as a finished document", async () => {
+  // The iterator finishing is not the response finishing. An event stream that
+  // stops without erroring would otherwise return HTML cut mid-tag as a success,
+  // which is what TruncatedResponseError exists to prevent — same delivered
+  // failure, different road.
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  stubStream(bedrock, async function* () {
+    yield { chunk: { bytes: encode({ type: "message_start" }) } };
+    yield textDelta("<table><tr><td>half a document");
+    // no message_delta, no message_stop: the stream just ends
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.match(e.message, /ended without completing/);
+      assert.match(e.message, /30 chars received/);
+      return true;
+    },
+  );
+});
+
+test("an abort whose stream ends quietly still fails as a stall", async () => {
+  // Not every abort surfaces as a throw — a stream can respond to the signal by
+  // simply returning. `expired` is therefore re-checked after the loop, or this
+  // path returns partial output as a success with no error anywhere.
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 100 });
+  stubStream(bedrock, async function* (signal) {
+    yield textDelta("partial");
+    // Wait for the idle clock, then end the stream cleanly instead of throwing.
+    await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+  });
+  await assert.rejects(
+    () => bedrock.complete(bedrockReq),
+    (e: Error) => {
+      assert.ok(e instanceof StalledStreamError, `expected StalledStreamError, got ${e.name}`);
+      assert.equal((e as StalledStreamError).kind, "idle");
+      assert.match(e.message, /7 chars had streamed/);
+      return true;
+    },
+  );
+});
+
+test("a normal stream ending in message_stop needs no stop_reason", async () => {
+  // Guards the completeness check against being too strict: message_stop alone is
+  // a legitimate end, and demanding both would fail every healthy call.
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  stubStream(bedrock, async function* () {
+    yield textDelta("<p>done</p>");
+    yield { chunk: { bytes: encode({ type: "message_stop" }) } };
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.equal(res.text, "<p>done</p>");
 });
 
 test("a service failure delivered mid-stream is raised, not silently truncated", async () => {

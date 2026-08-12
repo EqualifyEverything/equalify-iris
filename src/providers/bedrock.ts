@@ -146,6 +146,16 @@ export class BedrockProvider implements ModelProvider {
 
     let text = "";
     let stopReason: string | undefined;
+    let sawStop = false;
+    const stalled = (kind: "idle" | "total"): StalledStreamError =>
+      new StalledStreamError({
+        provider: this.name,
+        model: req.model,
+        kind,
+        limitMs: kind === "idle" ? this.idleTimeoutMs : this.maxTotalMs,
+        chars: text.length,
+      });
+
     // The idle clock starts before the request: time-to-first-token is exactly as
     // much of a stall risk as a gap mid-stream.
     resetIdle();
@@ -153,37 +163,55 @@ export class BedrockProvider implements ModelProvider {
       const response = await this.client.send(command, { abortSignal: controller.signal });
       if (!response.body) throw new Error("bedrock: response carried no event stream");
       for await (const event of response.body) {
-        resetIdle(); // any event is progress, including a keepalive ping
         const failure = streamException(event);
         if (failure) throw new Error(`bedrock: ${failure}`);
         const bytes = event.chunk?.bytes;
+        // Not a chunk and not a modeled failure: an event shape this adapter does
+        // not know. Deliberately not counted as progress — an unknown event
+        // repeating forever should trip the idle clock, not defeat it.
         if (!bytes) continue;
         const parsed = JSON.parse(new TextDecoder().decode(bytes)) as StreamEvent;
         if (parsed.type === "error") {
           throw new Error(`bedrock: stream error: ${parsed.error?.message ?? "no message"}`);
         }
+        // A keepalive is the transport saying it is alive; it is not the model
+        // producing anything. Letting it reset the clock would defeat the timeout
+        // in the one case it exists for — a generation that hangs on a connection
+        // that stays chatty would then run to the 15-minute backstop and report
+        // itself as too large, which is the opposite diagnosis. Every other event
+        // (message_start, content_block_start, the deltas) is real protocol
+        // progress, and message_start is what keeps a slow first token alive.
+        if (parsed.type !== "ping") resetIdle();
         if (parsed.type === "content_block_delta" && parsed.delta?.type === "text_delta") {
           text += parsed.delta.text ?? "";
         }
         // stop_reason arrives once, on the message_delta that closes the message.
         if (parsed.delta?.stop_reason) stopReason = parsed.delta.stop_reason;
+        if (parsed.type === "message_stop") sawStop = true;
       }
     } catch (e) {
       // An abort surfaces from the SDK as an opaque AbortError. If one of our own
       // clocks fired, that is the real cause and it can be described precisely.
-      if (expired) {
-        throw new StalledStreamError({
-          provider: this.name,
-          model: req.model,
-          kind: expired,
-          limitMs: expired === "idle" ? this.idleTimeoutMs : this.maxTotalMs,
-          chars: text.length,
-        });
-      }
+      if (expired) throw stalled(expired);
       throw e;
     } finally {
       clearTimeout(idleTimer);
       clearTimeout(totalTimer);
+    }
+
+    // Reaching here means the iterator finished, which is not the same as the
+    // response having finished. Two ways to arrive with a partial document and no
+    // error to show for it: an abort whose stream ends by returning rather than
+    // throwing, and an event stream that simply stops early. Both would otherwise
+    // return HTML cut mid-tag as a successful result — the exact failure
+    // TruncatedResponseError exists to prevent, arriving by a different road.
+    if (expired) throw stalled(expired);
+    if (!sawStop && !stopReason) {
+      throw new Error(
+        `bedrock: the response stream ended without completing (${text.length} chars received, ` +
+          `no message_stop and no stop_reason). Treating a partial document as a whole one would ` +
+          `deliver content the source never had.`,
+      );
     }
 
     // A response cut off at the ceiling is NOT a valid result. Its HTML ends

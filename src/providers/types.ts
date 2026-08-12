@@ -90,9 +90,10 @@ export class StalledStreamError extends Error {
             `(${streamed}) on ${args.model}, so the call was abandoned. The connection ` +
             `stalled rather than the work being too slow — a healthy stream is never ` +
             `silent this long.`
-        : `${args.provider}: the call was still streaming after ${seconds}s ` +
-            `(${streamed}) on ${args.model} and hit the absolute ceiling. The document ` +
-            `is probably too large to correct in one call.`,
+        : `${args.provider}: the call was still producing output after ${seconds}s ` +
+            `(${streamed}) on ${args.model} without ever finishing its message, and hit the ` +
+            `absolute ceiling. Nothing stalled — the work itself did not converge, which usually ` +
+            `means the document is too large to correct in one call.`,
     );
     this.name = "StalledStreamError";
     this.provider = args.provider;
