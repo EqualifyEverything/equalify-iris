@@ -244,15 +244,42 @@ export class Store {
    * one that failed on its first run, and undercounting is the honest direction
    * for a public tally. Going forward the stamp survives the re-run, so this only
    * ever affects sessions that predate the column.
+   *
+   * One more session is missed, for the same reason and only at the upgrade
+   * moment: one that had completed and was **mid-feedback-re-run** (`queued` or
+   * `running`) when the new build booted. It is not in the backfill set, and
+   * `failStaleSessions` then marks it `failed` on that same boot — so it is
+   * excluded permanently rather than until its re-run finishes. Widening the
+   * filter to include in-flight sessions would be worse: it would count first
+   * runs that had never produced anything. Documented in docs/API.md §0b so the
+   * one-off gap is explicable rather than mysterious.
+   *
+   * Unlike everything else in the constructor, `ALTER TABLE` is not idempotent,
+   * so the check and the write are wrapped rather than trusted. Two processes
+   * booting against one database in the same window both see no column, both
+   * ALTER, and the loser would otherwise throw `duplicate column name` straight
+   * out of `new Store()` — an uncaught boot crash, and not one `busy_timeout`
+   * covers, since it is not a lock error. Re-checking on failure is what tells
+   * "someone else already did this" (fine — the winner also runs the backfill)
+   * from a real DDL error, which is rethrown. Multi-process is not a supported
+   * topology, so this is defense in depth; it just costs three lines to put this
+   * statement on the same footing as the IF NOT EXISTS block above it.
    */
   private addCompletionColumn(): void {
-    const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[];
-    if (cols.some((c) => c.name === "first_completed_at")) return;
-    this.db.exec(`
-      ALTER TABLE sessions ADD COLUMN first_completed_at TEXT;
-      UPDATE sessions SET first_completed_at = updated_at
-       WHERE status IN ('ready_for_review', 'closed');
-    `);
+    const hasColumn = (): boolean =>
+      (this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).some(
+        (c) => c.name === "first_completed_at",
+      );
+    if (hasColumn()) return;
+    try {
+      this.db.exec(`
+        ALTER TABLE sessions ADD COLUMN first_completed_at TEXT;
+        UPDATE sessions SET first_completed_at = updated_at
+         WHERE status IN ('ready_for_review', 'closed');
+      `);
+    } catch (e) {
+      if (!hasColumn()) throw e;
+    }
   }
 
   /**
@@ -507,14 +534,26 @@ export class Store {
    *
    * Aggregate only, and that is a requirement rather than a simplification —
    * this feeds an UNAUTHENTICATED endpoint. Every value here is a count over the
-   * whole table: no user id, no login, no session id, no filename, and nothing
-   * whose size reveals an individual upload.
+   * whole table: no user id, no login, no session id, no filename, and no content.
+   *
+   * What that does NOT promise, since the endpoint is public and pollable: the
+   * DELTA between two reads is a per-upload figure. `documents_processed` +1
+   * alongside `pages_processed` +40 says a 40-page document finished in that
+   * window, and on a quiet deployment the aggregate IS the individual. The route's
+   * 60s cache coarsens when that shows up, not the page count. Nothing identifying
+   * is inferable from it — no who, no what — so the query is right as it stands;
+   * an operator who considers document sizes sensitive should not expose this
+   * endpoint publicly, and this paragraph is here so that stays a decision rather
+   * than a surprise.
    *
    * "Processed" means a session that reached ready_for_review at least once, so:
    *
    *   * A queued or in-flight run is not counted yet — the pages have been
    *     uploaded, not converted.
-   *   * A failed run is not counted, since nothing was delivered.
+   *   * A run that has NEVER completed is not counted, since nothing was
+   *     delivered. Note the asymmetry with a `failed` status: a session that
+   *     completed once and then failed a feedback re-run stays counted, because
+   *     its pages really were made accessible and the user still has that output.
    *   * A feedback re-run does not count its pages a second time. The tally is
    *     of distinct page images Iris has made accessible, not of model calls, so
    *     re-reading page 3 four times is still one page (see writeSet).

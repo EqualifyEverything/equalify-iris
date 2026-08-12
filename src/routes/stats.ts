@@ -5,7 +5,7 @@ import type { Store } from "../store/db.ts";
 // celebration, not a control surface: nobody is worse off seeing a count that is
 // up to a minute stale, and the cache is what keeps an unauthenticated endpoint
 // from turning a scripted refresh into a full table scan per request.
-const TTL_MS = 60_000;
+export const DEFAULT_TTL_MS = 60_000;
 
 /**
  * `GET /v1/stats` — the public tally of what Iris has converted.
@@ -22,14 +22,21 @@ const TTL_MS = 60_000;
  *
  * `since` is when the earliest counted document finished (null before anything
  * has), so a client can say "since May 2026" without inventing a launch date.
+ *
+ * `ttlMs` exists so the cache is testable in less than a minute. The cache is the
+ * stated defence for letting an unauthenticated caller trigger a full scan, so
+ * "does a second request inside the window reuse the first answer, and does one
+ * after it recompute" needs to be asserted rather than assumed — see
+ * test/stats-route.test.ts. Production uses the default.
  */
-export function statsRouter(store: Store): Router {
+export function statsRouter(store: Store, opts: { ttlMs?: number } = {}): Router {
   const r = Router();
+  const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
   let cached: { at: number; body: Record<string, unknown> } | null = null;
 
   r.get("/", (_req, res) => {
     const now = Date.now();
-    if (!cached || now - cached.at >= TTL_MS) {
+    if (!cached || now - cached.at >= ttlMs) {
       const s = store.publicStats();
       cached = {
         at: now,
@@ -38,7 +45,7 @@ export function statsRouter(store: Store): Router {
     }
     // Let shared caches help too, with the same lifetime the in-process cache
     // uses — a stale-by-a-minute tally is the whole contract here.
-    res.set("Cache-Control", `public, max-age=${Math.floor(TTL_MS / 1000)}`);
+    res.set("Cache-Control", `public, max-age=${Math.floor(ttlMs / 1000)}`);
     res.json(cached.body);
   });
 

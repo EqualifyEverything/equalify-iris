@@ -31,9 +31,11 @@ curl -s "$BASE/stats"
 ```
 
 * `pages_processed` — **distinct page images** Iris has converted to accessible HTML. A session
-  counts once it has reached `ready_for_review`, so an upload that is still queued, running, or
-  failed is not in the number, and a feedback re-run does **not** count its pages again: this is a
-  tally of pages made accessible, not of model calls.
+  counts once it has reached `ready_for_review`, so an upload that has **never** reached it — still
+  queued, still running, or failed on its first run — is not in the number, and a feedback re-run
+  does **not** count its pages again: this is a tally of pages made accessible, not of model calls.
+  Note the asymmetry with a `failed` status: a session that completed once and then failed a re-run
+  stays counted (see "the number only ever goes up" below).
 * `documents_processed` — sessions counted, on the same basis. A 40-page PDF is one document and
   forty pages.
 * `since` — when the earliest counted document finished, or `null` before anything has, so a
@@ -45,9 +47,20 @@ moves it back to `queued`, and possibly on to `failed` — cannot make the publi
 databases that predate that column, sessions already in `ready_for_review`/`closed` are backfilled
 from `updated_at`, so nothing already converted is dropped from the count.
 
-Everything here is a deployment-wide aggregate: no session ids, logins, user ids or filenames, and
-no per-upload figures. Responses are cached for 60 seconds (`Cache-Control: public, max-age=60`),
-so a page you just converted may take up to a minute to appear.
+*One session is missed by that backfill, once:* one that had completed and was **mid-re-run** at the
+moment the upgraded build booted. It is not `ready_for_review`/`closed` at that instant, and the
+startup sweep then marks it `failed`, so it is excluded for good rather than until the re-run ends.
+Counting in-flight sessions instead would be worse — it would credit first runs that had produced
+nothing — so the tally undercounts by that one document. Only the upgrade moment is affected.
+
+Everything here is a deployment-wide aggregate: no session ids, logins, user ids, filenames or
+content. It is not, however, free of per-upload information: the **delta** between two reads is one
+— `documents_processed` +1 with `pages_processed` +40 means a 40-page document finished in that
+window, and on a quiet deployment the aggregate is the individual. Nothing identifying follows from
+it (no who, no what), but an operator who treats document sizes as sensitive should keep this
+endpoint off the public internet. Responses are cached for 60 seconds
+(`Cache-Control: public, max-age=60`), which coarsens *when* a conversion shows up but not the page
+count — so a page you just converted may take up to a minute to appear.
 
 ## 1. Authenticate (get a token)
 
