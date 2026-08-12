@@ -210,8 +210,13 @@ export async function runPipeline(args: {
       // Primary: record a corroborated, generalized lesson to the agent's example
       // bank (injected into future runs). Secondary: a well-corroborated, higher-
       // impact lesson may also be proposed as a gated prompt change (issue).
-      await learnFromFeedback(ctx, learnArgs);
-      await proposeAgentUpdatesFromFeedback(ctx, learnArgs);
+      //
+      // The lesson is threaded from the first into the second because the issue the
+      // second files is titled and deduped by it. `agentFile` here is a constant, so
+      // without the lesson every proposal ever made computes one identical title, and
+      // the first open issue suppresses all of them (see memory.ts `lessonSlug`).
+      const lesson = await learnFromFeedback(ctx, learnArgs);
+      await proposeAgentUpdatesFromFeedback(ctx, { ...learnArgs, lesson });
     }
 
     store.updateSession(sessionId, {

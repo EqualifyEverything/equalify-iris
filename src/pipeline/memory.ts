@@ -37,6 +37,59 @@ function normKey(instruction: string): string {
   return instruction.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 
+// How many words / characters of a lesson go into its slug. Long enough that two
+// unrelated lessons rarely share one, short enough to sit in an issue title next to
+// the agent name.
+const SLUG_WORDS = 8;
+const SLUG_CHARS = 60;
+// Words that read as truncation damage when the cut lands after them ("…from the source
+// document including"). Trimmed off the tail only — inside the slug they carry meaning,
+// and dropping them there would make two different lessons more likely to collide.
+const TRAILING_FILLER = new Set([
+  "a", "an", "and", "as", "at", "but", "by", "for", "from", "in", "including", "into",
+  "of", "on", "or", "so", "than", "that", "the", "to", "when", "which", "with",
+]);
+
+/**
+ * A short, stable identifier for a lesson — the discriminator in the title of the
+ * issue that proposes it (`Agent update proposal: page — preserve all hyperlinks…`).
+ *
+ * It exists because that title is the only dedupe key those issues have, and without a
+ * discriminator the key had exactly one possible value. `agentFile` on the feedback
+ * path is hardcoded to `page.md` (pipeline/orchestrator.ts), so every proposal from
+ * every user computed the same title, `Agent update proposal: page` — and a dedupe that
+ * skips when an open issue with that title exists could then never do anything but
+ * skip. One open issue silently swallowed every later lesson from every user for as
+ * long as it stayed open. Seen on the UIC deployment: one issue blocked the path for a
+ * day, and the three filed before it only got through because GitHub's search index
+ * lagged behind the filing.
+ *
+ * Built on `normKey` deliberately, so the slug agrees with the bank's own notion of
+ * lesson identity: two instructions `recordExample` folds into ONE entry slug
+ * identically, and so dedupe to one issue. Derive it from a recorded lesson's
+ * `instruction` rather than from a model-written summary wherever possible — the
+ * instruction is what gets corroborated across sessions and is therefore stable, while
+ * a summary is re-worded on every run and would slip past the match every time.
+ *
+ * Two distinct lessons whose first several words coincide collide onto one issue. That
+ * is the accepted direction to fail in: an extra comment on a related issue is
+ * recoverable, and silence is what this whole function exists to stop.
+ */
+export function lessonSlug(instruction: string): string {
+  const kept: string[] = [];
+  let chars = 0;
+  for (const w of normKey(instruction).split(" ").filter(Boolean).slice(0, SLUG_WORDS)) {
+    const next = chars + w.length + (kept.length ? 1 : 0); // +1 for the joining space
+    // Never emit a partial word, and never emit nothing when the first word alone is
+    // over the cap — a one-word slug still discriminates, an empty one does not.
+    if (kept.length && next > SLUG_CHARS) break;
+    kept.push(w);
+    chars = next;
+  }
+  while (kept.length > 1 && TRAILING_FILLER.has(kept[kept.length - 1])) kept.pop();
+  return kept.join(" ");
+}
+
 function cap(s: string): string {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > SNIPPET_CAP ? `${t.slice(0, SNIPPET_CAP)}…` : t;

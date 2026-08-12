@@ -30,7 +30,7 @@ paragraphs, lists, tables with <caption>/<thead>/<th scope>, forms with
 text faithfully and do not invent content. If content is cut off at a page edge, note it in
 the "log" field.
 
-Three structures are easy to render as something that merely looks right, so be explicit:
+Four structures are easy to render as something that merely looks right, so be explicit:
 - FOOTNOTES: keep them structurally distinct from body text — never inline a footnote into the
   paragraph that references it. Emit the in-text marker as a link
   (<sup><a href="#fn-N" id="fnref-N">N</a></sup>) and the footnote body at the foot of its
@@ -45,6 +45,18 @@ Three structures are easy to render as something that merely looks right, so be 
 - ORDERED LISTS: when the numbering does not begin at 1, set start on the <ol> so the numbers
   match the source. Use <ul>/<ol>/<dl> for real lists, never dashes or manual numbering in
   paragraphs.
+- SIGNATURE AND FILL-IN BLOCKS: a block of fields the page provides for someone to complete — a
+  signature block, an application section, a run of fill-in lines — is a form even where it has
+  already been filled in. Render the whole block as a <form> with one <fieldset>/<legend> per
+  signing party or logical group, and every field in it (Signature, Printed Name, Title, Date)
+  as an <input> with its own <label>. Transcribe a field that is already filled in as
+  <input readonly value="..."> rather than as a <dd> or as plain text, so that every party in
+  one block has the same structure: one party as a <dl> and another as controls tells a
+  screen-reader user the two differ in kind, when the only difference is that one is filled in.
+  Associate a handwritten-signature image with its field using aria-describedby. Set
+  aria-required="true" only where the page itself marks a field as required, never merely
+  because it is blank. This is about fields, not about every label/value pair: printed metadata
+  nobody is meant to complete (a reference number, a "Prepared by" line) is still a <dl>.
 
 If — and only if — this page contains a content type that a DEDICATED specialist agent would
 handle clearly better than this general pass (something beyond the common types: paragraph,

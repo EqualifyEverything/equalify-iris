@@ -43,6 +43,42 @@ test("agents/page.md has the sections the loader and this test depend on", () =>
   assert.match(pageMd, /##\s*Required capability\s*\n[^#]*\bvision\b/i, "page.md must declare the vision capability");
 });
 
+// The signature-block rule (issue #67) came from user feedback on a part-signed
+// page: one party's fields had been rendered as a <dl> and the other's as form
+// controls, so a screen-reader user met the same block twice in two different
+// shapes. Asserted on the clauses that carry the rule rather than on its prose —
+// the wording may be reflowed, but drop one of these and the output is back to
+// what the issue reported, or to the over-correction it invites (every label/value
+// pair on the page turned into a control).
+//
+// Only `page.md` is checked: the test below holds the fallback copy to it word for
+// word, so a rule present here and missing there fails there.
+test("the page agent's signature-block rule keeps the clauses that make it a rule", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["one fieldset per signing party", /<fieldset>\/<legend> per signing party or logical group/],
+    ["a filled-in field is a readonly input, not static text", /<input readonly value="\.\.\."> rather than as a <dd>/],
+    ["required is read off the page, not inferred from a blank field", /aria-required="true" only where the page itself marks a field as required/],
+    ["printed metadata is still a <dl>", /not about every label\/value pair.*is still a <dl>/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// The list of explicit structures is introduced by its own count, so adding a
+// fifth bullet and leaving "Four" in place would have the prompt miscount itself.
+test("the explicit-structures list agrees with the count that introduces it", () => {
+  const prompt = section("System prompt")!;
+  const NUMBERS: Record<string, number> = { Two: 2, Three: 3, Four: 4, Five: 5, Six: 6, Seven: 7, Eight: 8 };
+  const intro = prompt.match(/(\w+) structures are easy to render/);
+  assert.ok(intro, "page.md no longer introduces the list of explicit structures");
+  const claimed = NUMBERS[intro![1]];
+  assert.ok(claimed, `"${intro![1]} structures" is not a number this test knows — add it above`);
+  // The bullets are the SHOUTED ones: "- FOOTNOTES:", "- SIGNATURE AND FILL-IN BLOCKS:".
+  const bullets = prompt.match(/^- [A-Z][A-Z -]+:/gm) ?? [];
+  assert.equal(bullets.length, claimed, `the intro says ${claimed} structures but ${bullets.length} are listed: ${bullets.join(" ")}`);
+});
+
 test("DEFAULT_PAGE_PROMPT matches agents/page.md's instructions", () => {
   const fromFile = normalize(`${section("System prompt")}\n\n${section("Output contract")}`);
   assert.equal(

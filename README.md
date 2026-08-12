@@ -382,13 +382,19 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
 - **Contributions are issues, not PRs (§7.13/§9.2).** Instead of fork+PR-on-close, when the
   extractor flags content a specialist would handle better, Iris drafts that agent and files a
   `New agent suggestion: <type>` GitHub issue with the agent code + context; feedback that
-  generalizes files an `Agent update proposal: <agent>` issue the same way. Simpler to triage, and
-  it needs no write access to a fork — so nothing forks and nothing pushes. Consequently the PRD's
-  `pending_prs` and `prs_opened` response fields, the `skip_prs` parameter and the `fork_repo`
-  field on `/v1/me` are **not** part of the API.
+  generalizes files an `Agent update proposal: <agent> — <lesson>` issue the same way. Simpler to
+  triage, and it needs no write access to a fork — so nothing forks and nothing pushes. Consequently
+  the PRD's `pending_prs` and `prs_opened` response fields, the `skip_prs` parameter and the
+  `fork_repo` field on `/v1/me` are **not** part of the API.
   Issues are filed with the logged-in user's token, which is
   [required, and the point](#github-is-the-only-sso-layer-and-tokens-are-required);
   `github.issue_token` overrides that with a service account, at the cost of the attribution.
+  The update title carries a slug of the **lesson**, not just the agent, because the agent on that
+  path is always `page.md`: with the agent alone, every proposal ever made computed one title, and
+  the title-based dedupe then skipped every one of them after the first — silently, for as long as
+  that first issue stayed open (observed on the UIC deployment, where one issue blocked the path for
+  a day). A repeat report of the same lesson now comments on its issue with the new session and
+  corroboration count instead of being dropped, so no lesson leaves without a trace.
 - **Review issues are attributed by page, not by `@source` region (§7.8/§7.9).** The PRD's issue
   format references `@source` region ids from the per-region fan-out, which extraction no longer
   produces and which are stripped from the deliverable anyway (§7.4 v1.1). Issues instead carry
