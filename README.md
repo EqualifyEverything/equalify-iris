@@ -917,16 +917,57 @@ user uploads — at the UIC deployment, student records. axe rule ids are a fixe
 unresolved-issue descriptions are model-written prose about one identifiable person's document, and
 dropped `href`s came from that person's PDF, so only their counts exist in the aggregate at all.
 
-Turning it on is deliberate and per-deployment:
+Turning it on is deliberate and per-deployment — three values, in one place each:
 
-1. On the deployment, set `server.quality_token` (`IRIS_QUALITY_TOKEN`) to a long random value —
-   `openssl rand -hex 32` — and restart. Until then the endpoint answers **404**, not 401: a
-   deployment that has not opted in does not acknowledge it at all.
-2. In this repo, set the `QUALITY_URL` **variable** to that deployment's base URL (a public
-   hostname, not a secret) and the `QUALITY_TOKEN` **secret** to the same value. `QUALITY_URL` must
-   be `https://` — it carries a bearer token — and the job fails if it is not.
+1. **On the deployment:** `server.quality_token` (`IRIS_QUALITY_TOKEN` in the environment) — one long
+   random value, then restart.
 
-Without both, the job says what to set and stops. Filing nothing is the normal weekly outcome, and
+   ```bash
+   openssl rand -hex 32     # keep this; step 3 needs the same value
+   ```
+
+   Until it is set the endpoint answers **404**, not 401: a deployment that has not opted in does not
+   acknowledge it at all, so scanning for it reveals nothing about whether an operator merely forgot.
+
+2. **`QUALITY_URL`, a repository *variable*** — the deployment's **origin only**, no path:
+
+   ```bash
+   gh variable set QUALITY_URL --body https://iris.equalify.uic.edu
+   ```
+
+   The job appends `/v1/quality` itself, so a value ending in `/v1` produces a 404 that looks exactly
+   like a deployment that never opted in. A trailing slash is tolerated. It must be `https://` — the
+   token is a bearer token, and the job fails the run rather than putting one on the wire in
+   cleartext. A variable rather than a secret because it is a public hostname, and because a run log
+   that cannot name the host it failed to reach is not much of a run log.
+
+3. **`QUALITY_TOKEN`, a repository *secret*** — byte-for-byte the value from step 1:
+
+   ```bash
+   gh secret set QUALITY_TOKEN
+   ```
+
+   A mismatch goes **red**: the endpoint answers 401 and the job says the two have diverged. It is
+   not the only red path — a non-https `QUALITY_URL`, a non-numeric `days` and a 200 that is not a
+   tally all fail the run too — so read what the run says rather than reaching for the token first.
+
+Then verify before waiting a week for the schedule:
+
+```bash
+gh workflow run quality-report.yml -f dry_run=true
+```
+
+That reads the tally and prints every issue body it *would* file, filing none. A green run reporting
+"below the minimum document count" is a success, not a failure — it proves the URL and the token work
+on a deployment that has not yet converted 20 documents in the window.
+
+Without the variable and the secret, the job posts a notice saying what to set and exits **green** —
+the deliberate "not configured" path, so a repo that never opted in does not accumulate red runs. The
+consequence worth knowing: an unconfigured quality loop looks exactly like a healthy one from the
+Actions tab. If you expect weekly issues and see none, check that both values exist before assuming
+there is nothing to report.
+
+Filing nothing is the normal weekly outcome, and
 four things produce it: fewer than **20 documents** in the window (a rate over four documents is
 noise wearing a percentage sign); an issue for that threshold **already open** — titles are stable
 and carry no numbers, so this week's rate cannot make a new title; an issue for it **closed within
