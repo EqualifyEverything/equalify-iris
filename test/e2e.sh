@@ -18,6 +18,10 @@ DATA=/tmp/iris-e2e
 CFG=/tmp/iris-e2e-config.yaml
 LOG=/tmp/iris-e2e.log
 BASE="http://localhost:$PORT/v1"
+# Shared secret for GET /v1/quality (step 11c). Not a GitHub token — that endpoint
+# is the one that does not use the per-user auth, because it returns an aggregate
+# belonging to no user and its real caller is a CI job.
+QUALITY_TOKEN=e2e-quality-token
 
 # Seconds to wait for Iris to answer /health. Generous because a cold CI runner
 # type-strips every .ts source with no warm cache; locally this takes ~1s.
@@ -52,6 +56,10 @@ cat > "$CFG" <<YAML
 server:
   port: $PORT
   base_url: http://localhost:$PORT
+  # The quality tally is off unless a token is set (it 404s otherwise), and step
+  # 11c needs it on. Written literally rather than via \${IRIS_QUALITY_TOKEN} so
+  # the test does not depend on the caller's environment.
+  quality_token: $QUALITY_TOKEN
 storage:
   data_dir: $DATA
   agents_dir: ./agents
@@ -625,6 +633,93 @@ done
 [ "$len_a" = "$len_b" ] \
   && pass "an overlong cursor's 400 echo is bounded ($len_a chars for both a 1000- and a 9000-char input)" \
   || fail "pagination" "the echoed cursor is not bounded: $len_a vs $len_b chars"
+
+echo "==> 11c. GET /v1/quality (the tally the weekly quality-report workflow reads)"
+# Placed here, after several documents have been through the real pipeline, because
+# that is the only thing this check can do that a unit test cannot: prove the run
+# signals are actually WRITTEN by a real run. test/quality.test.ts covers what the
+# numbers mean and test/quality-route.test.ts covers the guard, both against a store
+# seeded by hand — neither would notice if the orchestrator stopped calling
+# recordRunSignals, which is a silent failure that makes the tally read BETTER.
+QAUTH=(-H "Authorization: Bearer $QUALITY_TOKEN")
+
+# The guard first. This endpoint is not behind the auth middleware every other one
+# uses, so its shared secret is the only thing in front of it.
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/quality")
+[ "$code" = "401" ] && pass "no token => 401" || fail "quality" "unauthenticated request got $code, expected 401"
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer wrong-token" "$BASE/quality")
+[ "$code" = "401" ] && pass "wrong token => 401" || fail "quality" "wrong token got $code, expected 401"
+# A user's GitHub token must NOT work here. It is a valid bearer token for every
+# other endpoint, so accepting it would be an easy mistake to make and an invisible
+# one — the workflow would keep working either way.
+code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/quality")
+[ "$code" = "401" ] && pass "a valid GitHub token is not a quality token (401)" \
+  || fail "quality" "a GitHub token was accepted on /quality ($code)"
+
+q=$(curl -s "${QAUTH[@]}" "$BASE/quality")
+# `!= null` rather than truthiness: `documents` is 0 on a deployment that has
+# converted nothing, and 0 is falsy in jq, so `.documents and …` would report a
+# perfectly good empty tally as a malformed response.
+echo "$q" | jq -e '.documents != null and .window_days != null' >/dev/null \
+  && pass "tally returned: $(echo "$q" | jq -c '{documents, mean_rounds, unresolved_rate, rules: (.rules | length)}')" \
+  || fail "quality" "$q"
+
+# The denominator is the whole design: a clean run writes no violation rows, so
+# every document that reached ready_for_review must be counted here whether or not
+# anything was wrong with it. If this is 0 while the runs above succeeded, the
+# orchestrator is not recording signals at all.
+docs=$(echo "$q" | jq -r '.documents')
+[ "$docs" -ge 1 ] \
+  && pass "the completed runs are in the denominator ($docs document(s))" \
+  || fail "quality" "documents=$docs after successful runs — recordRunSignals is not being called"
+# A round is an EDITOR pass, not a reader pass: the loop returns as soon as the
+# Reader finds nothing, before incrementing, so a document that comes back clean on
+# the first look completes with 0 rounds and that is the good outcome. The mock model
+# here produces exactly that. What must hold is that 0 is a recorded 0 and not a
+# missing row — `null` means nothing was recorded at all — and that the mean cannot
+# exceed the cap this config set (1), which would mean rounds are being double-counted.
+echo "$q" | jq -e '.mean_rounds != null and .mean_rounds >= 0 and .mean_rounds <= 1' >/dev/null \
+  && pass "mean_rounds is $(echo "$q" | jq -r '.mean_rounds'), within 0..max_review_iterations" \
+  || fail "quality" "mean_rounds=$(echo "$q" | jq -r '.mean_rounds'), expected a number in 0..1"
+echo "$q" | jq -e '.since != null' >/dev/null && pass "since is set" \
+  || fail "quality" "since is null despite $docs document(s)"
+
+# Nothing per-session, per-user or per-document. This is the constraint that matters
+# most, because the consumer copies these values into a PUBLIC issue and the
+# documents are user uploads. Checked against the real session id and login the run
+# above actually used, not a placeholder.
+# (`if`, not `grep … && fail`: under `set -e` a grep that finds nothing would fail
+# the AND-list and kill the script, turning "no leak" into a broken run.)
+for secret in "$SID" "$TOKEN"; do
+  if echo "$q" | grep -qF "$secret"; then
+    fail "quality" "the tally leaked '$secret' — see the constraint in src/routes/quality.ts"
+  fi
+done
+# Then the whole key set, so a field ADDED later has to be justified here rather than
+# shipped to a public issue by whoever adds it. Set subtraction rather than `inside`:
+# `inside` compares strings with `contains`, i.e. substring containment, so
+# `["doc"] | inside(["documents"])` is true and any new leaf whose name happens to be a
+# substring of an allowed one would slip through the one check that enforces this.
+allowed='["window_days","documents","since","mean_rounds","unresolved_rate","links_dropped_rate","lint_error_rate","id","impact","share","nodes"]'
+extra=$(echo "$q" | jq -c --argjson allowed "$allowed" '([paths(scalars) | last] | unique) - $allowed')
+[ "$extra" = "[]" ] \
+  && pass "the payload's key set is exactly the documented one (no session id, login or document content)" \
+  || fail "quality" "unexpected field(s) in the tally: $extra"
+
+# The window is echoed back clamped, so a caller reads what it got rather than what
+# it asked for — the workflow prints this number in a public issue.
+echo "$q" | jq -e '.window_days == 30' >/dev/null && pass "default window is 30 days" \
+  || fail "quality" "default window_days=$(echo "$q" | jq -r '.window_days')"
+w=$(curl -s "${QAUTH[@]}" "$BASE/quality?days=9999" | jq -r '.window_days')
+[ "$w" = "365" ] && pass "an out-of-range window is clamped (9999 => 365)" \
+  || fail "quality" "days=9999 gave window_days=$w, expected 365"
+w=$(curl -s "${QAUTH[@]}" "$BASE/quality?days=nonsense" | jq -r '.window_days')
+[ "$w" = "30" ] && pass "a garbled window falls back to the default rather than 400ing a weekly job" \
+  || fail "quality" "days=nonsense gave window_days=$w, expected 30"
+# Gated by a secret, so it must never be shared-cached — unlike /v1/stats, which is
+# public and sets max-age=60.
+curl -si "${QAUTH[@]}" "$BASE/quality" | grep -qi '^cache-control: no-store' \
+  && pass "Cache-Control: no-store" || fail "quality" "the response is missing Cache-Control: no-store"
 
 echo "==> 12. POST /v1/sessions/{id}/close (finalize + clean tmp; no PRs)"
 close=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/close")

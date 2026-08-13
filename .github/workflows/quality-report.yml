@@ -1,0 +1,503 @@
+name: Quality Report
+
+# Weekly reading of a live deployment's own output quality, filed as issues.
+#
+# The app already measures itself on every run — how many reader/editor rounds a
+# document needed, which axe-core rules its HTML still violates, whether a link from
+# the source PDF went missing — and until now it wrote all of it to a per-session log
+# and nothing ever looked across sessions. This job looks. It reads `GET /v1/quality`
+# (PRD §7.16), compares a handful of rates against thresholds held *in this file*, and
+# opens one issue per crossed threshold. `issue-to-pr.yml` then ranks those issues
+# alongside every other open issue and may open a PR against one. That is the whole
+# loop: the app's measurements become work, without a person typing feedback first.
+#
+# **This job spends no model tokens.** It is curl, jq and arithmetic. Every judgement
+# call it could make — is this rule worth fixing, which prompt is wrong, what should
+# change — is deliberately left to the workflow that is already good at that. Keeping
+# it dumb is also what makes it safe to run weekly against a production deployment.
+#
+# **What it may read is constrained at the source.** The endpoint returns aggregates
+# only: counts, rates and axe-core rule ids. It cannot return document text, because
+# what this job copies into a PUBLIC issue is whatever the endpoint said, and the
+# documents behind those numbers are user uploads — at the reference deployment,
+# student records. See `src/routes/quality.ts` for the constraint stated where a
+# reviewer adding a field would meet it.
+#
+# Setup — both are required, and the job declines rather than fails without them:
+#   - variable QUALITY_URL   — base URL of the deployment to read, e.g.
+#     `https://iris.equalify.uic.edu`. A repository *variable*, not a secret: it is a
+#     public hostname. Must be https, checked below, because the token is a bearer
+#     token and http would put it on the wire in cleartext.
+#   - secret   QUALITY_TOKEN — must equal that deployment's `server.quality_token`
+#     (`IRIS_QUALITY_TOKEN` in its environment). Generate with `openssl rand -hex 32`.
+#
+# It needs no Bedrock role, no OIDC, and no Node.
+
+on:
+  schedule:
+    # 20:00 UTC Saturday = early/mid afternoon Central. Saturday specifically, and
+    # this is the only interesting thing about the schedule: `issue-to-pr.yml` runs
+    # Sun–Wed, so an issue filed Saturday afternoon is on the candidate list for the
+    # very next triage run. File it Sunday evening instead and it waits a week.
+    #
+    # Weekly, not daily, and the window is what forces that. The tally is a 30-day
+    # rate: reading it daily produces 30 nearly-identical numbers, and a fix landing
+    # on Monday cannot visibly move a 30-day rate by Tuesday. Daily polling would add
+    # noise, not resolution.
+    - cron: '0 20 * * 6'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Window in days to read (default 30, max 365)'
+        required: false
+      dry_run:
+        description: 'Read the tally and report it — file no issues'
+        type: boolean
+        default: false
+
+# One at a time. This job writes issues, and two concurrent runs reading the same
+# tally would both find the same threshold crossed and both file it — the dedupe below
+# reads the issue list once, at the start, so it cannot see a sibling run's issue.
+concurrency:
+  group: quality-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # No `contents: write`: this job does not touch the repository. It reads one
+      # endpoint and writes issues, and `issues: write` is the whole of its authority.
+      contents: read
+      issues: write
+
+    steps:
+      - name: Read the deployment's quality tally
+        id: fetch
+        env:
+          QUALITY_URL: ${{ vars.QUALITY_URL }}
+          QUALITY_TOKEN: ${{ secrets.QUALITY_TOKEN }}
+          DAYS: ${{ inputs.days }}
+        run: |
+          set -euo pipefail
+
+          echo "## Quality report" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "${QUALITY_URL:-}" ] || [ -z "${QUALITY_TOKEN:-}" ]; then
+            # Not configured is a legitimate state, not a failure: a fork, or this
+            # repo before anyone opted a deployment in. Say what to set and stop —
+            # a red run every Saturday for a feature nobody enabled is noise that
+            # trains the maintainer to ignore the workflow.
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            {
+              echo
+              echo 'Skipped: no deployment configured to read.'
+              echo
+              echo 'Set the `QUALITY_URL` repository variable and the `QUALITY_TOKEN` secret'
+              echo '(matching that deployment'"'"'s `server.quality_token`). See the header of'
+              echo '`.github/workflows/quality-report.yml`.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::QUALITY_URL/QUALITY_TOKEN not configured — nothing to read."
+            exit 0
+          fi
+
+          case "$QUALITY_URL" in
+            https://*) ;;
+            *)
+              # Hard failure, not a warning. The token is a bearer credential; over
+              # http it is readable by anything on the path, and a deployment-wide
+              # quality tally is the least of what a leaked shared secret costs.
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              echo "::error::QUALITY_URL must be an https:// URL (got a non-https value). The token is a bearer token and must not travel in cleartext."
+              exit 1
+              ;;
+          esac
+
+          WINDOW=30
+          if [ -n "${DAYS:-}" ]; then
+            if ! printf '%s' "$DAYS" | grep -qE '^[0-9]+$'; then
+              # Validated before it reaches a URL. Not a security boundary —
+              # workflow_dispatch needs write access — but `30d` would otherwise be
+              # sent as a query value, silently clamped to the default by the server,
+              # and reported in the summary as the window the caller asked for.
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              echo "::error::days must be digits only, got '$DAYS'."
+              exit 1
+            fi
+            WINDOW="$DAYS"
+          fi
+
+          # Trailing slash tolerated, so QUALITY_URL can be written either way.
+          BASE="${QUALITY_URL%/}"
+
+          # --retry with a short --max-time: a transient blip must not turn into a red
+          # run, but a deployment that is genuinely unreachable must. Which way this
+          # goes when it fails is the decision that matters, and it is made below.
+          HTTP=$(curl -sS -o /tmp/quality.json -w '%{http_code}' \
+                   --retry 3 --retry-delay 5 --retry-all-errors --max-time 30 \
+                   -H "Authorization: Bearer $QUALITY_TOKEN" \
+                   -H 'Accept: application/json' \
+                   "$BASE/v1/quality?days=$WINDOW") || HTTP=000
+
+          case "$HTTP" in
+            200) ;;
+            404)
+              # The endpoint exists in the code but is unconfigured on that
+              # deployment (`server.quality_token` blank), so it answers 404 by
+              # design. Nothing to read, nothing wrong.
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              {
+                echo
+                printf 'Skipped: `%s` does not have the quality tally enabled (404).\n' "$BASE"
+                echo
+                echo 'Set `server.quality_token` in that deployment'"'"'s config and restart it.'
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::notice::$BASE returned 404 — the quality tally is not enabled there."
+              exit 0
+              ;;
+            401)
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              echo "::error::$BASE rejected the token (401). The QUALITY_TOKEN secret and that deployment's server.quality_token have diverged."
+              exit 1
+              ;;
+            *)
+              # Deliberately a failure. A quality loop that stops reporting is
+              # indistinguishable from a deployment with no problems, which is the
+              # exact failure mode this whole feature is built to avoid — so when the
+              # measurement itself breaks, the run must go red where someone sees it.
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              echo "::error::Could not read $BASE/v1/quality (HTTP $HTTP after retries). Nothing was measured this week."
+              exit 1
+              ;;
+          esac
+
+          if ! jq -e '.documents? != null and .rules? != null' /tmp/quality.json >/dev/null 2>&1; then
+            # A 200 that is not the tally: a login page, a proxy error page, an older
+            # deployment. Treated like an unreachable endpoint rather than parsed
+            # optimistically, because every threshold below reads a missing field as
+            # `null`, and `null > 0.15` is false — a garbled response would file
+            # nothing and look exactly like a clean week.
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "::error::$BASE/v1/quality returned 200 but not a quality tally. Nothing was measured this week."
+            exit 1
+          fi
+
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
+          {
+            echo
+            printf 'Read `%s/v1/quality?days=%s`:\n\n' "$BASE" "$WINDOW"
+            echo '```json'
+            # The whole response, in the summary, every run. It is aggregate by
+            # construction so there is nothing here to redact, and the numbers are
+            # the point of the job even on a week when nothing crosses a threshold.
+            jq . /tmp/quality.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compare against thresholds
+        id: check
+        if: steps.fetch.outputs.should_run == 'true'
+        run: |
+          set -euo pipefail
+
+          # ---- The thresholds. This is the file to edit. ----------------------
+          # They live here, not in the server, so retuning "how bad is too bad" is a
+          # repo edit with a diff and a reviewer rather than a config change and a
+          # restart. Every one of them is a guess that should be revised once there
+          # is a month of real numbers to look at; treat the first few runs as
+          # calibration, and prefer moving a number here over muting the workflow.
+
+          # Fraction of documents that finished with issues the review loop could not
+          # resolve. Some floor is inherent — a source document can be genuinely
+          # ambiguous — so this is set where "one in seven" starts to look systemic.
+          UNRESOLVED_RATE_MAX=0.15
+          # Fraction of documents where a link present in the source was missing from
+          # the editor's output. Lower, because this is content loss rather than an
+          # imperfect fix: the user's document had a link and ours does not.
+          LINKS_DROPPED_RATE_MAX=0.02
+          # Zero, meaning ANY document whose lint pass errored. `runAxe` degrades to
+          # "no violations" when it cannot run at all, so a broken linter silently
+          # drives every rule rate to zero and reads as a deployment that got better.
+          # One occurrence is a bug in Iris, not a bad document.
+          LINT_ERROR_RATE_MAX=0
+          # Mean EDITOR passes per document, against a default cap of 3
+          # (`defaults.max_review_iterations`). A document the Reader passes on its
+          # first look costs 0, so low is good and 0 is best. Above 2.5 the loop is
+          # using nearly its whole budget on the average document, which means the
+          # first pass is producing work the second and third have to undo.
+          MEAN_ROUNDS_MAX=2.5
+          # Fraction of documents violating one specific axe-core rule. A rule failing
+          # on a quarter of documents is a defect in a prompt, not a property of the
+          # documents — that is the signal worth a PR.
+          RULE_SHARE_MAX=0.25
+
+          # Below this many documents in the window, report and file nothing. Rates
+          # over a handful of documents are noise wearing a percentage sign: at 4
+          # documents one bad one crosses every threshold above, and an issue filed on
+          # that basis sends someone to rewrite a prompt over a single odd PDF.
+          MIN_DOCUMENTS=20
+
+          # How many issues one run may file. Same reasoning as issue-to-pr.yml's cap
+          # on open auto-PRs: a queue that grows faster than one person reads it is a
+          # backlog with a robot attached. Anything over the cap is named in the run
+          # summary, so nothing is dropped silently — it is deferred, visibly, and the
+          # next run will still see it.
+          MAX_ISSUES_PER_RUN=2
+          # --------------------------------------------------------------------
+
+          DOCS=$(jq -r '.documents' /tmp/quality.json)
+          if [ "$DOCS" -lt "$MIN_DOCUMENTS" ]; then
+            echo "found=0" >> "$GITHUB_OUTPUT"
+            {
+              echo
+              printf 'No issues filed: only %s document(s) in the window (minimum %s).\n' \
+                "$DOCS" "$MIN_DOCUMENTS"
+              echo
+              echo 'A rate over a handful of documents is noise. Nothing was measured against a'
+              echo 'threshold this run.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::Only $DOCS document(s) in the window (minimum $MIN_DOCUMENTS) — no thresholds evaluated."
+            exit 0
+          fi
+
+          THRESHOLDS=$(jq -n \
+            --argjson unresolved "$UNRESOLVED_RATE_MAX" \
+            --argjson links "$LINKS_DROPPED_RATE_MAX" \
+            --argjson lint "$LINT_ERROR_RATE_MAX" \
+            --argjson rounds "$MEAN_ROUNDS_MAX" \
+            --argjson rule "$RULE_SHARE_MAX" \
+            '{unresolved: $unresolved, links: $links, lint: $lint, rounds: $rounds, rule: $rule}')
+
+          # Each finding gets a STABLE title and a title-derived key. Stable is the
+          # load-bearing word, and it rules out TWO kinds of number: this week's rate,
+          # and the threshold it crossed. The rate would make the title different every
+          # week, so the dedupe below would file a fresh issue each run for the same
+          # problem. The threshold would be worse — it is a number this file invites you
+          # to retune, and a title asserting "a quarter of documents" against a
+          # threshold since moved to 0.4 is a lie in every issue already filed, while
+          # correcting the wording changes the dedupe key and refiles a problem that is
+          # already being tracked. Hence "too many", "nearly its whole budget", "a large
+          # share": vague in the title, exact in the body, where it costs nothing. This
+          # repo has already been bitten by the mirror image of that (PRD §7.13: a
+          # dedupe that could not match, so every session refiled the same
+          # suggestion), and one issue per week is how a maintainer learns to mute a
+          # workflow.
+          #
+          # `sev` orders the findings when the cap bites, and the order is by what the
+          # number means rather than by how far past its threshold it is:
+          #   1 lint errors  — the measurement itself is broken, so every rule rate
+          #                    below it is understated. Fix this before believing them.
+          #   2 dropped links — content the user gave us is missing from what we
+          #                    returned. Data loss outranks imperfect output.
+          #   3 unresolved    — known barriers, shipped, listed in unresolved.md.
+          #   4 a rule        — a specific recurring barrier: the most actionable of
+          #                    these, but narrower than the three above it.
+          #   5 rounds        — a cost and quality proxy, and the weakest signal here.
+          jq -r --argjson t "$THRESHOLDS" '
+            . as $q
+            | ( if ($q.lint_error_rate // 0) > $t.lint then
+                  [ { key: "lint-error", sev: 1,
+                      title: "Quality regression: the accessibility linter is failing to run",
+                      metric: "lint_error_rate", value: $q.lint_error_rate, threshold: $t.lint } ]
+                else [] end )
+              + ( if ($q.links_dropped_rate // 0) > $t.links then
+                  [ { key: "links-dropped", sev: 2,
+                      title: "Quality regression: links from the source document are being dropped",
+                      metric: "links_dropped_rate", value: $q.links_dropped_rate, threshold: $t.links } ]
+                else [] end )
+              + ( if ($q.unresolved_rate // 0) > $t.unresolved then
+                  [ { key: "unresolved", sev: 3,
+                      title: "Quality regression: too many documents ship with unresolved issues",
+                      metric: "unresolved_rate", value: $q.unresolved_rate, threshold: $t.unresolved } ]
+                else [] end )
+              + ( [ $q.rules[]? | select(.share > $t.rule)
+                    | { key: ("rule-" + .id), sev: 4,
+                        title: ("Quality regression: axe rule `" + .id + "` fails on a large share of documents"),
+                        metric: ("rules[\"" + .id + "\"].share"), value: .share, threshold: $t.rule,
+                        rule: .id, impact: (.impact // "unknown"), rule_documents: .documents, nodes: .nodes } ] )
+              + ( if ($q.mean_rounds // 0) > $t.rounds then
+                  [ { key: "mean-rounds", sev: 5,
+                      title: "Quality regression: the review loop is using nearly its whole round budget",
+                      metric: "mean_rounds", value: $q.mean_rounds, threshold: $t.rounds } ]
+                else [] end )
+            | sort_by(.sev, (0 - .value))
+            | .[] | @json' /tmp/quality.json > /tmp/findings.jsonl
+
+          FOUND=$(wc -l < /tmp/findings.jsonl | tr -d ' ')
+          echo "found=$FOUND" >> "$GITHUB_OUTPUT"
+          echo "max_issues=$MAX_ISSUES_PER_RUN" >> "$GITHUB_OUTPUT"
+          echo "findings: $FOUND"
+
+          if [ "$FOUND" -eq 0 ]; then
+            # The expected outcome most weeks, and it must produce nothing at all —
+            # no issue, no comment. An automation that always finds something to file
+            # is one that invents work, and an invented issue costs the same attention
+            # as a real one (and, through issue-to-pr.yml, a whole review slot).
+            {
+              echo
+              printf 'No issues filed: every rate is within its threshold over %s document(s).\n' "$DOCS"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::All rates within threshold over $DOCS documents — nothing to file."
+            exit 0
+          fi
+
+          {
+            echo
+            printf '### %s threshold(s) crossed\n\n' "$FOUND"
+            echo '| Metric | Measured | Threshold |'
+            echo '| --- | --- | --- |'
+            jq -r '"| `\(.metric)` | \(.value) | \(.threshold) |"' /tmp/findings.jsonl
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: File an issue per crossed threshold
+        if: steps.fetch.outputs.should_run == 'true' && steps.check.outputs.found != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Required, and not redundant with GITHUB_REPOSITORY. This job deliberately
+          # has no `actions/checkout` — it needs no source, only an HTTP call and some
+          # arithmetic — and `gh` resolves the repository from `--repo`, `GH_REPO`, or
+          # the git remotes of the working directory. It does NOT read
+          # GITHUB_REPOSITORY. Without this, `gh issue list` below fails with "not a git
+          # repository" under `set -e`, and it fails only on the weeks a threshold is
+          # actually crossed: this whole step is skipped when there is nothing to file,
+          # so the workflow would read green until the moment it had something to say,
+          # then go red having said nothing.
+          GH_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          MAX_ISSUES: ${{ steps.check.outputs.max_issues }}
+          QUALITY_URL: ${{ vars.QUALITY_URL }}
+        run: |
+          set -euo pipefail
+
+          # How long after an issue with this exact title was CLOSED before the same
+          # claim may be made again. Set to the width of the window itself, and that
+          # is the reason for it: the rate is measured over 30 days, so on the day a
+          # fix merges the window still contains a month of pre-fix documents and the
+          # rate has barely moved. Refiling then would tell the maintainer their fix
+          # did not work, a week after they made it. One window has to roll over
+          # before the number means anything again.
+          #
+          # It also handles the other close reason — "read it, not doing it" — the
+          # same way issue-to-pr.yml handles a rejected attempt: don't come straight
+          # back with it.
+          COOLDOWN_DAYS=30
+
+          # Every issue this workflow has ever filed, open or closed, found by title
+          # prefix. Searched then compared exactly, mirroring src/github/issue.ts: the
+          # `in:title` search is a full-text phrase match rather than an equality
+          # test, so it returns a superset and the comparison below decides.
+          #
+          # A prefix rather than a label, for the reason PRD §7.13 gives: labels are
+          # silently dropped for a filer without push access, so a label-based dedupe
+          # is one that works in testing and fails for everyone else. The title is set
+          # by the same request that creates the issue and cannot be stripped.
+          gh issue list --state all --limit 200 \
+            --search '"Quality regression:" in:title' \
+            --json number,title,state,closedAt,url > /tmp/existing.json
+          echo "existing quality-regression issues: $(jq length /tmp/existing.json)"
+
+          NOW_EPOCH=$(date -u +%s)
+          FILED=0
+          SKIPPED=""
+          DEFERRED=""
+
+          while IFS= read -r finding; do
+            TITLE=$(jq -r '.title' <<<"$finding")
+
+            # --- dedupe, before the cap: an already-open finding must not consume
+            # one of this run's slots, or a single long-lived issue would starve
+            # every other finding behind it forever.
+            # An open issue wins over any closed one; among closed ones the most
+            # recently closed wins, because that is the one the cooldown is about.
+            # (`false` sorts below `true` in jq, so the open one lands last.)
+            PRIOR=$(jq -c --arg t "$TITLE" '[.[] | select(.title == $t)]
+                      | sort_by([(.state == "OPEN"), (.closedAt // "")])
+                      | last // empty' /tmp/existing.json)
+            if [ -n "$PRIOR" ]; then
+              PRIOR_STATE=$(jq -r '.state' <<<"$PRIOR")
+              PRIOR_NUM=$(jq -r '.number' <<<"$PRIOR")
+              if [ "$PRIOR_STATE" = "OPEN" ]; then
+                SKIPPED="$SKIPPED- \`$TITLE\` — already open as #$PRIOR_NUM"$'\n'
+                continue
+              fi
+              CLOSED_AT=$(jq -r '.closedAt // ""' <<<"$PRIOR")
+              if [ -n "$CLOSED_AT" ]; then
+                CLOSED_EPOCH=$(date -u -d "$CLOSED_AT" +%s)
+                AGE_DAYS=$(( (NOW_EPOCH - CLOSED_EPOCH) / 86400 ))
+                if [ "$AGE_DAYS" -lt "$COOLDOWN_DAYS" ]; then
+                  SKIPPED="$SKIPPED- \`$TITLE\` — #$PRIOR_NUM was closed ${AGE_DAYS}d ago (cooldown ${COOLDOWN_DAYS}d)"$'\n'
+                  continue
+                fi
+              fi
+            fi
+
+            if [ "$FILED" -ge "$MAX_ISSUES" ]; then
+              DEFERRED="$DEFERRED- \`$TITLE\`"$'\n'
+              continue
+            fi
+
+            # Body assembled in jq rather than by interpolating into the shell, so a
+            # rule id never reaches a `run:` expression. Rule ids come from axe-core's
+            # fixed vocabulary today, but the endpoint is the untrusted side of this
+            # boundary and the cost of assuming otherwise is command execution in a
+            # job holding `issues: write`.
+            jq -r --arg url "${QUALITY_URL%/}" --argjson cooldown "$COOLDOWN_DAYS" \
+                  --slurpfile tallyfile /tmp/quality.json '
+              ($tallyfile[0]) as $tally
+              # One decimal place, via round rather than by multiplying by 100. These
+              # are IEEE doubles: 0.15 * 100 is 15.000000000000002, and a threshold
+              # printed that way in an issue body reads as a mistake even though the
+              # comparison behind it was correct.
+              | def pct: (. * 1000 | round) / 10;
+              (if .rule then
+                  "Over the last \($tally.window_days) days, **\(.rule_documents) of \($tally.documents) documents** (\(.value | pct)%) came out of Iris still violating the axe-core rule `\(.rule)` — \(.nodes) offending element(s) in total. Impact: **\(.impact)**.\n\nThe threshold is \(.threshold | pct)% of documents.\n\nA rule that fails on this share of documents is a property of how Iris writes HTML, not of the documents people upload. The likely places to look:\n\n- `agents/page.md` and the specialist agents in `agents/` — these files *are* the prompts, so a rule Iris keeps breaking usually means the prompt never told it not to.\n- `agents/copy_editor.md` and `agents/reader.md` — the review loop is meant to catch exactly this and evidently is not; worth asking whether the reader reports it and the editor fails to fix it, or the reader never mentions it at all.\n- `src/pipeline/lint.ts` for what the rule actually checks.\n\nRule reference: <https://dequeuniversity.com/rules/axe/4.10/\(.rule)>"
+                else
+                  {
+                    "lint-error": "Over the last \($tally.window_days) days, **\(.value | pct)% of \($tally.documents) documents** had a lint pass that errored instead of running.\n\nThe threshold is \(.threshold | pct)% — that is, any occurrence at all.\n\nThis one invalidates the rest of the tally, which is why it sorts to the top. `runAxe` in `src/pipeline/lint.ts` degrades to `{ ok: true, violations: [] }` when axe cannot run in its jsdom environment at all, so a document whose lint errored contributes **zero** violations to every rule rate in this report. The accessibility numbers for this window are understated by an unknown amount — and a deployment where this rises looks, in every other number, like one that is getting better.\n\nStart with `src/pipeline/lint.ts` and the `iris:lint-error` signal recorded in `src/pipeline/orchestrator.ts`; the per-session run log for an affected session carries the underlying error.",
+                    "links-dropped": "Over the last \($tally.window_days) days, **\(.value | pct)% of \($tally.documents) documents** lost at least one hyperlink between the assembled HTML and what the copy editor returned.\n\nThe threshold is \(.threshold | pct)% of documents.\n\nThis is content loss rather than imperfect output: the link was in the user'"'"'s source document, Iris had it, and the delivered HTML does not. The editor is a text model rewriting a fragment, so dropping an `href` while otherwise improving the prose around it is a plausible failure — and one the loop currently records (`editor_links_dropped`) without preventing.\n\nWhere to look: `droppedHrefs` and its caller in `src/pipeline/review.ts` for how it is detected, and `agents/copy_editor.md` for the instruction that is not holding. Whether the fix is a stronger instruction or a mechanical restore of the missing `href`s is the interesting question; the PDF link-preservation work in the recent history is relevant prior art.",
+                    "unresolved": "Over the last \($tally.window_days) days, **\(.value | pct)% of \($tally.documents) documents** finished the review loop with issues the loop could not resolve.\n\nThe threshold is \(.threshold | pct)% of documents.\n\nThese are barriers the Reader Agent found, reported, and that the loop then shipped anyway — listed in each session'"'"'s `unresolved.md`. Some floor here is inherent, because a source document can be genuinely ambiguous, so what this issue actually asks is whether the current rate is that floor or a pattern.\n\nOnly the **count** is available here, deliberately: an unresolved-issue description is model-written prose about one person'"'"'s document, so it cannot leave the deployment (see `src/routes/quality.ts`). Reading the descriptions themselves means looking at recent sessions on the deployment. Worth checking whether `defaults.max_review_iterations` (3) is simply too low before treating this as a prompt defect.",
+                    "mean-rounds": "Over the last \($tally.window_days) days, documents needed **\(.value) editor passes on average** across \($tally.documents) documents.\n\nThe threshold is \(.threshold), against a default cap of 3 (`defaults.max_review_iterations`). A document the Reader passes on its first look costs 0 passes, so this number rising means more documents are coming out of assembly needing repair.\n\nThe average document using nearly the whole budget means extraction and assembly are producing work the review loop then has to undo. Every round is a full pass of two agents over the whole document, so this is a latency and cost number as much as a quality one. It is the weakest signal in this report and may simply mean the cap wants raising — the useful version of the question is *what the second and third rounds keep fixing*, which points at `agents/page.md` rather than at the loop."
+                  }[.key] // "No description available for finding key `\(.key)`."
+                end) as $detail
+              | "**Measured:** `\(.metric)` = \(.value) (threshold \(.threshold))\n\n"
+                + $detail
+                + "\n\n---\n\n### How this was filed\n\n"
+                + "Opened automatically by `.github/workflows/quality-report.yml` (PRD §7.16), which reads `GET /v1/quality` on \($url) once a week and compares a few rates against thresholds held in that workflow file. No model was involved in writing this issue — it is arithmetic on the numbers below.\n\n"
+                + "**The threshold may be the thing that is wrong.** It is a guess, it lives in the workflow, and moving it is a one-line PR with a reviewer. If this rate is the honest cost of doing the job well, say so here and change the number — that is a better outcome than muting the workflow.\n\n"
+                + "Everything above is aggregate by construction. The endpoint cannot return document text: the documents behind these numbers are user uploads, and this issue is public.\n\n"
+                + "Closing this issue starts a \($cooldown)-day cooldown before the same threshold can be filed again, because the rate is measured over a \($tally.window_days)-day window and will barely have moved on the day a fix lands.\n\n"
+                + "<details><summary>Full tally for this window</summary>\n\n```json\n"
+                + ($tally | tojson)
+                + "\n```\n\n</details>\n"
+              ' <<<"$finding" > /tmp/issue-body.md
+
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              {
+                echo
+                printf '#### Would file: %s\n\n' "$TITLE"
+                cat /tmp/issue-body.md
+              } >> "$GITHUB_STEP_SUMMARY"
+              FILED=$((FILED + 1))
+              continue
+            fi
+
+            # No labels, and no `--assignee`. Labels are silently dropped for a filer
+            # without push access (PRD §7.13) so nothing downstream may depend on
+            # them; issue-to-pr.yml ranks these by the title prefix instead.
+            URL=$(gh issue create --title "$TITLE" --body-file /tmp/issue-body.md)
+            FILED=$((FILED + 1))
+            echo "filed: $URL"
+            { echo; printf -- '- Filed [%s](%s)\n' "$TITLE" "$URL"; } >> "$GITHUB_STEP_SUMMARY"
+          done < /tmp/findings.jsonl
+
+          if [ -n "$SKIPPED" ]; then
+            { echo; echo 'Already tracked, not refiled:'; echo; printf '%s' "$SKIPPED"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -n "$DEFERRED" ]; then
+            # Said out loud rather than truncated quietly: a cap that hides what it
+            # dropped reads, in the summary, exactly like a week with fewer problems.
+            { echo; printf 'Over the %s-issue cap, deferred to the next run:\n\n' "$MAX_ISSUES"; printf '%s' "$DEFERRED"; } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::Deferred $(printf '%s' "$DEFERRED" | grep -c '^-') finding(s) over the per-run cap of $MAX_ISSUES."
+          fi
+          echo "::notice::Filed $FILED issue(s) this run."

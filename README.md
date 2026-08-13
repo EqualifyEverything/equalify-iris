@@ -253,12 +253,14 @@ session history.
 ## API
 
 All endpoints are under `/v1` and (except auth, health and stats) require
-`Authorization: Bearer <github_token>`.
+`Authorization: Bearer <github_token>`. `/v1/quality` is the one exception in the other
+direction: it takes a bearer token too, but its own shared secret rather than a GitHub one.
 
 | Method & path | Purpose |
 | --- | --- |
 | `GET  /v1/health` | Liveness probe |
 | `GET  /v1/stats` | Public tally of pages converted (no token; aggregate only) |
+| `GET  /v1/quality` | Deployment-wide tally of output *quality* (own shared secret, off by default; aggregate only) |
 | `GET  /v1/auth/github/start` | Begin OAuth (web clients) |
 | `GET  /v1/auth/github/callback` | OAuth callback → returns access token |
 | `POST /v1/auth/github/device` | Begin device flow (CLI clients) |
@@ -809,7 +811,8 @@ The same reasoning is why it refuses to run more often than it is useful:
 
 Ranking, highest first: accessibility of the output or the app; a red `main` (baseline `npm ci` /
 typecheck / unit results are measured on untouched `main` and handed over, so a pre-existing failure
-is never mistaken for the diff's); correctness and data-safety bugs; small user-visible fixes
+is never mistaken for the diff's); correctness and data-safety bugs; a
+[measured quality regression](#weekly-quality-report); small user-visible fixes
 reported against the demo; agent-library work; then docs that contradict the code. Ranking is
 filtered by *can this be finished well in one focused PR* — an open-ended issue like "Stress Test
 Iris" is not a PR, and the PR body has to name the higher-ranked issues that were passed over and
@@ -859,6 +862,69 @@ grants nothing here: the job runs with `permissions: {}`.
 Nothing about this is load-bearing. With the secret absent — a fork, or before it is added — the
 step prints why and exits 0; if the token is revoked or the API is unreachable it warns instead.
 A deployment nobody else runs must never be able to turn this project's `main` red.
+
+## Weekly quality report
+
+[`.github/workflows/quality-report.yml`](.github/workflows/quality-report.yml) runs **Saturdays at
+20:00 UTC** (PRD §7.16). It reads `GET /v1/quality` on a live deployment, compares a handful of
+rates against thresholds held in that workflow file, and opens one issue per crossed threshold.
+[Scheduled issue triage](#scheduled-issue-triage) then ranks those issues with everything else and
+may open a PR against one.
+
+Everything before this depended on somebody typing. An issue, or a session's feedback — the loop is
+good, but a person has to start it. Meanwhile Iris grades itself on every single run: how many
+reader/editor rounds a document needed, which axe-core rules its HTML still violates, whether a
+hyperlink present before the copy editor was missing after it. All of that went into a per-session
+log that nothing ever read back. The app could tell that one axe rule fails on a third of everything
+it produces, and had no way to say so.
+
+So the runs now write those measurements to a `run_signals` table, `GET /v1/quality` aggregates them
+over a window, and this workflow turns a crossed threshold into an issue. **It spends no model
+tokens** — it is curl, `jq` and arithmetic, and every judgement call it could make is left to the
+triage workflow that is already good at that. Its only permission is `issues: write`; it needs no
+Bedrock role, no OIDC and no Node.
+
+What gets measured is only what cannot be argued with: an axe violation, a round count, a missing
+`href`, a lint pass that errored. The Reader Agent's opinion about a document is deliberately *not*
+recorded even though it is the richest thing Iris produces — an automation that files issues from
+model opinions manufactures work at whatever rate the model will opine. Only the *count* of
+unresolved issues crosses the line.
+
+**The endpoint cannot return document text, and that is a constraint on the schema rather than a
+convention.** These values get copied into public GitHub issues, and the documents behind them are
+user uploads — at the UIC deployment, student records. axe rule ids are a fixed safe vocabulary;
+unresolved-issue descriptions are model-written prose about one identifiable person's document, and
+dropped `href`s came from that person's PDF, so only their counts exist in the aggregate at all.
+
+Turning it on is deliberate and per-deployment:
+
+1. On the deployment, set `server.quality_token` (`IRIS_QUALITY_TOKEN`) to a long random value —
+   `openssl rand -hex 32` — and restart. Until then the endpoint answers **404**, not 401: a
+   deployment that has not opted in does not acknowledge it at all.
+2. In this repo, set the `QUALITY_URL` **variable** to that deployment's base URL (a public
+   hostname, not a secret) and the `QUALITY_TOKEN` **secret** to the same value. `QUALITY_URL` must
+   be `https://` — it carries a bearer token — and the job fails if it is not.
+
+Without both, the job says what to set and stops. Filing nothing is the normal weekly outcome, and
+four things produce it: fewer than **20 documents** in the window (a rate over four documents is
+noise wearing a percentage sign); an issue for that threshold **already open** — titles are stable
+and carry no numbers, so this week's rate cannot make a new title; an issue for it **closed within
+30 days**, because on the day a fix merges the 30-day rate still contains a month of pre-fix
+documents; and a cap of **two issues per run**, with anything over it named in the run summary
+rather than dropped quietly.
+
+The thresholds live in the workflow rather than on the server, so retuning "how bad is too bad" is a
+one-line PR with a reviewer. That has a deliberate consequence: `.github/workflows/**` is on the
+triage workflow's forbidden-paths list, so **the automation cannot close one of these issues by
+moving the number that produced it.** If the threshold is what is wrong, say so on the issue and
+change it yourself — that is a better outcome than muting the workflow, and the issue body says so.
+
+When the measurement itself breaks — endpoint unreachable, token rejected, a 200 that is not a tally
+— the run goes **red**. A quality loop that quietly stops reporting is indistinguishable from a
+deployment with no problems, which is the whole failure this exists to prevent.
+
+Run it by hand with `gh workflow run quality-report.yml`, `-f days=90` for a wider window, or
+`-f dry_run=true` to print the tally and every issue body it would file without filing any.
 
 ## Contributing
 

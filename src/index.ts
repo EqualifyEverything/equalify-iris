@@ -9,6 +9,7 @@ import { authRouter } from "./routes/auth.ts";
 import { meRouter } from "./routes/me.ts";
 import { sessionsRouter } from "./routes/sessions.ts";
 import { statsRouter } from "./routes/stats.ts";
+import { qualityRouter } from "./routes/quality.ts";
 
 const cfg = loadConfig();
 
@@ -42,6 +43,13 @@ app.get("/v1/health", (_req, res) => res.json({ status: "ok", service: "equalify
 // has to answer before anyone signs in — and it is mounted here, above the auth
 // middleware, for exactly that reason.
 app.use("/v1/stats", statsRouter(store));
+
+// The deployment-wide quality tally (PRD §7.16), read by the weekly
+// quality-report workflow. Mounted above the GitHub auth middleware because it
+// carries its own guard — a shared secret, since the data belongs to no user and the
+// caller is a CI job with no GitHub identity. Answers 404 until
+// `server.quality_token` is set.
+app.use("/v1/quality", qualityRouter(store, cfg.server));
 
 // The browser app is the front door, served at the root (unauthenticated; it
 // drives the /v1 API itself). no-store so a deploy never serves a stale page.

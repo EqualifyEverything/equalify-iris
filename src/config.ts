@@ -17,7 +17,21 @@ export interface ProviderBlock {
 }
 
 export interface IrisConfig {
-  server: { port: number; base_url: string };
+  server: {
+    port: number;
+    base_url: string;
+    // Shared secret that gates `GET /v1/quality`, the deployment-wide quality tally
+    // the weekly workflow files issues from (PRD §7.16). Unset by default, and the
+    // endpoint answers 404 until it is set — an operator opts in rather than
+    // discovering they exposed it.
+    //
+    // Deliberately NOT the GitHub user auth every other endpoint uses. That answers
+    // "which user is this", and this data belongs to no user: it is an aggregate over
+    // every document the deployment has converted, so there is no user whose token
+    // should unlock it and no user who should be denied their own. It is also read by
+    // a CI job, which has no GitHub user to be.
+    quality_token?: string;
+  };
   storage: { data_dir: string; agents_dir: string; database: string };
   github: {
     client_id: string;
