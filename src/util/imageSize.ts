@@ -58,9 +58,11 @@ function fromWebp(buf: Buffer): ImageDimensions | null {
     if (buf.length < 30) return null;
     return { width: buf.readUIntLE(24, 3) + 1, height: buf.readUIntLE(27, 3) + 1 };
   }
-  // Lossless: 14 bits each, packed into one little-endian word, also minus one.
+  // Lossless: a 1-byte signature, then 14 bits each packed into one little-endian
+  // word, also stored minus one.
   if (chunk === "VP8L") {
     if (buf.length < 25) return null;
+    if (buf[20] !== 0x2f) return null; // not a VP8L bitstream after all
     const bits = buf.readUInt32LE(21);
     return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
   }

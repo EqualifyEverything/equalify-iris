@@ -336,14 +336,32 @@ function gifHeader(width: number, height: number): Buffer {
   return buf;
 }
 
-// The extended form, whose canvas size is 24-bit little-endian and stored minus one.
-function webpHeader(width: number, height: number): Buffer {
+// WebP is three encodings behind one container, each storing its size differently, and
+// the two a real file is most likely to be are not the simple one.
+function webpHeader(kind: "VP8X" | "VP8L" | "VP8 ", width: number, height: number): Buffer {
   const buf = Buffer.alloc(32);
   buf.write("RIFF", 0, "latin1");
   buf.write("WEBP", 8, "latin1");
-  buf.write("VP8X", 12, "latin1");
-  buf.writeUIntLE(width - 1, 24, 3);
-  buf.writeUIntLE(height - 1, 27, 3);
+  buf.write(kind, 12, "latin1");
+  if (kind === "VP8X") {
+    // Extended: a 24-bit little-endian canvas size, stored minus one.
+    buf.writeUIntLE(width - 1, 24, 3);
+    buf.writeUIntLE(height - 1, 27, 3);
+  } else if (kind === "VP8L") {
+    // Lossless: a signature byte, then 14 bits of width and 14 of height packed into
+    // one word — so the height straddles a byte boundary, which is the part a
+    // hand-rolled reader gets wrong.
+    buf.writeUInt8(0x2f, 20);
+    buf.writeUInt32LE((width - 1) | ((height - 1) << 14), 21);
+  } else {
+    // Lossy: a VP8 key-frame start code, then 14-bit dimensions whose top two bits are
+    // a scaling hint rather than size — set here, so reading them as size would fail.
+    buf.writeUInt8(0x9d, 23);
+    buf.writeUInt8(0x01, 24);
+    buf.writeUInt8(0x2a, 25);
+    buf.writeUInt16LE(width | 0xc000, 26);
+    buf.writeUInt16LE(height | 0xc000, 28);
+  }
   return buf;
 }
 
@@ -367,7 +385,11 @@ function jpegHeader(width: number, height: number): Buffer {
 test("pixel dimensions are read from the header of every format on the allowlist", () => {
   assert.deepEqual(imageDimensions(pngHeader(1275, 1650)), { width: 1275, height: 1650 });
   assert.deepEqual(imageDimensions(gifHeader(640, 480)), { width: 640, height: 480 });
-  assert.deepEqual(imageDimensions(webpHeader(9000, 300)), { width: 9000, height: 300 });
+  // All three WebP encodings, because the container tells them apart and only one of
+  // them stores the size the obvious way.
+  assert.deepEqual(imageDimensions(webpHeader("VP8X", 9000, 300)), { width: 9000, height: 300 });
+  assert.deepEqual(imageDimensions(webpHeader("VP8L", 1600, 2400)), { width: 1600, height: 2400 });
+  assert.deepEqual(imageDimensions(webpHeader("VP8 ", 1600, 2400)), { width: 1600, height: 2400 });
   // The one that is easy to get backwards, and would pass a square fixture.
   assert.deepEqual(imageDimensions(jpegHeader(800, 1200)), { width: 800, height: 1200 });
 });
@@ -383,6 +405,15 @@ test("an unreadable header returns null, so no format becomes refusable by accid
   // A JPEG whose segments run off the end rather than reaching a frame header.
   const truncated = jpegHeader(10, 10).subarray(0, 8);
   assert.equal(imageDimensions(truncated), null);
+  // A RIFF/WEBP container whose payload is not one of the three encodings, and a VP8L
+  // chunk without its signature byte: both are "cannot say", not a guess at the bits
+  // that happen to sit at those offsets.
+  const unknownChunk = webpHeader("VP8X", 100, 100);
+  unknownChunk.write("ALPH", 12, "latin1");
+  assert.equal(imageDimensions(unknownChunk), null);
+  const noSignature = webpHeader("VP8L", 100, 100);
+  noSignature.writeUInt8(0x00, 20);
+  assert.equal(imageDimensions(noSignature), null);
 });
 
 test("an image over the hard dimension ceiling is refused, cheap as it may be", () => {
@@ -450,6 +481,37 @@ test("a rasterized PDF page is measured too, and says so as a page rather than a
     limits,
   );
   assert.match(wide ?? "", /9000x4000 px, over the 8000 px/);
+});
+
+test("a heavy page that is NOT large-format is diagnosed as density, not page size", () => {
+  const limits = resolveImageLimits(
+    cfg({ default: "bedrock", bedrock: { region: "us-east-1", default_model: SONNET_46 } }),
+  );
+  // The ordinary case, and the one the first version of this message got wrong: a
+  // letter page of photographic or halftoned content, rendered as lossless 24-bit PNG,
+  // passes the cap at 1275x1650. Advice about splitting fold-outs describes a document
+  // the caller does not have and a fix they cannot apply — the message would be
+  // contradicting the dimensions it prints two clauses earlier.
+  const why = rasterizedPageRejection(
+    "magazine.pdf",
+    4,
+    { bytes: 4_100_000, width: 1275, height: 1650 },
+    limits,
+  );
+  assert.ok(why);
+  assert.match(why, /Page 4 of magazine\.pdf renders to 3\.9 MB \(1275x1650 px\)/);
+  assert.match(why, /density rather than page size/);
+  assert.match(why, /JPEG/);
+  assert.doesNotMatch(why, /fold-out/);
+  // And the large-format case keeps its own explanation.
+  const drawing = rasterizedPageRejection(
+    "drawing.pdf",
+    1,
+    { bytes: 4_100_000, width: 3600, height: 5400 },
+    limits,
+  );
+  assert.match(drawing ?? "", /fold-out/);
+  assert.doesNotMatch(drawing ?? "", /density/);
 });
 
 // ----- GET /v1/limits -----

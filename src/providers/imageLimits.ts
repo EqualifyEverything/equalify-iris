@@ -69,6 +69,17 @@ const MAX_DIMENSION_PX = 8000;
 // page at 1275x1650 — under the 2000 px the docs prescribe for staying under the
 // limit on all platforms. Recorded here rather than left implicit because it is the
 // constraint that makes that DPI load-bearing rather than merely economical.
+//
+// NEITHER NUMBER IS ENFORCED, and the pair of assumptions above is the whole control:
+// 150 DPI, on a page no larger than letter or A4. A 21-page TABLOID PDF breaks it —
+// 1650x2550 per page, over 2000 and under the 8000 that is enforced — and fails inside
+// the model with an `invalid_request_error` rather than here. Not enforced at upload
+// because it would be the wrong trade: the rule applies per REQUEST, only the review
+// phase's unattributed path attaches every page to one call, and most such documents
+// convert without ever making that call. Refusing them all at upload would reject
+// documents that work today to pre-empt a failure some of them would never reach. The
+// fix, when it is worth doing, is on the rasterizing side — render large pages down
+// rather than refuse them.
 export const MANY_IMAGE_THRESHOLD = 20;
 export const MANY_IMAGE_MAX_DIMENSION_PX = 2000;
 
@@ -324,12 +335,9 @@ export function imageRejection(image: CandidateImage, limits: ImageLimits): stri
 // caller uploaded.
 //
 // A separate message because the caller cannot act on the one above: they did not
-// choose these pixels, Iris did, at the DPI util/pdf.ts renders with. What they can
-// act on is the page SIZE, which is what put it over — rasterizing at a fixed DPI
-// means the pixel count scales with the physical page, so a letter page lands at
-// 1275x1650 and an ARCH-D drawing at 3600x5400. The exemption this replaces assumed
-// the DPI alone kept a page image modest, which is only true of the page sizes a
-// document normally comes in.
+// choose these pixels, Iris did, at the DPI util/pdf.ts renders with. The exemption
+// this replaces assumed the DPI alone kept a page image modest, which is only true of
+// the page sizes a document normally comes in.
 export function rasterizedPageRejection(
   pdfName: string,
   pageNumber: number,
@@ -338,21 +346,47 @@ export function rasterizedPageRejection(
 ): string | null {
   const where = `Page ${pageNumber} of ${pdfName}`;
   const rendered = page.width ? ` (${page.width}x${page.height} px)` : "";
-  const advice =
-    `Iris rasterizes every page at a fixed resolution, so a page much larger than letter or A4 — ` +
-    `a drawing, a poster, a fold-out — renders past what the vision model accepts. Export or ` +
-    `split those pages at a smaller page size, or upload them as images you have resized.`;
   if (page.bytes > limits.max_image_bytes) {
     return (
       `${where} renders to ${formatBytes(page.bytes)}${rendered}, over the ` +
-      `${formatBytes(limits.max_image_bytes)} limit for one page image. ${advice}`
+      `${formatBytes(limits.max_image_bytes)} limit for one page image. ${weightAdvice(page)}`
     );
   }
   if (overDimension(page)) {
     return (
       `${where} renders to ${page.width}x${page.height} px, over the ${limits.max_dimension_px} px ` +
-      `limit on a side. ${advice}`
+      `limit on a side. ${LARGE_FORMAT_ADVICE}`
     );
   }
   return null;
+}
+
+// The long edge, in pixels, past which a rasterized page is bigger than the paper a
+// document normally comes on. Letter at util/pdf.ts's 150 DPI is 1650 px and A4 is
+// 1755; tabloid is 2550, and a drawing or a fold-out is larger still. Used only to
+// decide which explanation to give, never to reject anything.
+const NORMAL_PAGE_MAX_PX = 2000;
+
+const LARGE_FORMAT_ADVICE =
+  `Iris rasterizes every page at a fixed resolution, so the page image scales with the physical ` +
+  `page: a page much larger than letter or A4 — a drawing, a poster, a fold-out — renders past ` +
+  `what the vision model accepts. Export or split those pages at a smaller page size, or upload ` +
+  `them as images you have resized.`;
+
+// Two different documents reach the byte limit, and the remedy differs, so the message
+// has to name the right one. A large-format page is over because of its SIZE. A
+// letter-size page is over because of its CONTENT: pages are rendered as lossless
+// 24-bit PNG, and a photographic or halftoned scan at 2.1 megapixels compresses badly
+// enough to pass 3.7 MB. Telling the owner of a scanned magazine to "split the
+// fold-outs" describes a document they do not have and a fix they cannot apply.
+function weightAdvice(page: { width?: number; height?: number }): string {
+  const largeFormat =
+    (page.width !== undefined && page.width > NORMAL_PAGE_MAX_PX) ||
+    (page.height !== undefined && page.height > NORMAL_PAGE_MAX_PX);
+  if (largeFormat) return LARGE_FORMAT_ADVICE;
+  return (
+    `The page is letter- or A4-sized, so this is density rather than page size: pages are ` +
+    `rendered losslessly, and a photographic or halftoned scan does not compress. Re-save those ` +
+    `pages as JPEG images and upload those instead of the PDF.`
+  );
 }

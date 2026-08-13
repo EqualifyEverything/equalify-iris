@@ -318,7 +318,9 @@ curl -s "$BASE/limits" | jq
 
 `max_bytes` is what `POST /v1/sessions` enforces per image part, and `hint` is the same sentence
 its `400` carries — quote it rather than composing your own, and the two cannot disagree.
-`max_bytes` and `max_dimension_px` are both enforced; `max_long_edge_px` is advice, not a limit —
+`max_bytes` and `max_dimension_px` are both enforced — the second only when the dimensions can be
+read from the file's header, since a header Iris cannot parse must not become a rejection;
+`max_long_edge_px` is advice, not a limit —
 nothing rejects an image for exceeding it, because the model downscales past it instead of
 failing. If a client can only surface one number, surface `max_bytes`: it is what nearly every
 rejected upload will have broken. The model and provider that produced these numbers are
