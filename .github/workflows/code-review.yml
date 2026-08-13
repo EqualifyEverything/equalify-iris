@@ -14,6 +14,18 @@ name: Code Review
 #
 # There is deliberately no `issue_comment` trigger here: @claude mentions are
 # handled by the hosted Claude GitHub App, and duplicating it would double-post.
+#
+# Two GitHub identities post reviews from this job, and which one you get is not a
+# style choice — it is the mechanism that lets this workflow review changes to itself.
+# `claude-code-action` normally exchanges its OIDC token for a Claude App token and
+# posts as claude[bot]. That exchange fails with `workflow_not_found_on_default_branch`
+# when the workflow file invoking it differs from the copy on the default branch, and
+# the action treats that as a reason to skip itself — which is why, before the explicit
+# token below, every PR editing this file merged unreviewed. Handing the action an
+# explicit `github_token` short-circuits that exchange (`setupGitHubToken` returns the
+# provided token before it ever requests an OIDC token), so the review runs; it just
+# posts as github-actions[bot]. This job therefore passes GITHUB_TOKEN *only* on a PR
+# that changes this file, and leaves every other PR on the claude[bot] path.
 
 on:
   pull_request:
@@ -95,19 +107,24 @@ jobs:
             BASE_REF="${{ github.event.pull_request.base.ref }}"
             BASE_SHA="${{ github.event.pull_request.base.sha }}"
           fi
-          # Does this PR modify the review workflow itself? If so the action will
-          # self-skip (it requires an identical copy on the default branch), and
-          # the verify step at the end must not treat that as a failure.
+          # Does this PR modify the review workflow itself? If so the Claude step
+          # is handed an explicit GITHUB_TOKEN, because the OIDC exchange for a
+          # Claude App token refuses (`workflow_not_found_on_default_branch`) while
+          # this file differs from the default-branch copy and the action then skips
+          # itself. See the header comment for the mechanism. The consequence the
+          # steps below care about is the identity: the review posts as
+          # github-actions[bot], not claude[bot].
           if gh pr diff "$PR_NUMBER" --name-only | grep -qx '.github/workflows/code-review.yml'; then
             echo "changed_workflow=code-review.yml" >> "$GITHUB_OUTPUT"
-            echo "This PR modifies code-review.yml — the action will self-skip until it is on the default branch."
-            # Say it on the PR itself, not just in a log nobody opens. Between PR #43 and
-            # PR #63 a second workflow (workflow-review.yml, on pull_request_target)
-            # covered this gap; it never once succeeded in 6 runs and was deleted, so a PR
-            # touching this file now genuinely gets NO automated review. That is an
-            # accepted tradeoff — it also removed the repo's only
-            # `pull_request_target` + `id-token: write` job — but it must not be silent,
-            # because every other signal on such a PR still goes green.
+            echo "This PR modifies code-review.yml — reviewing under GITHUB_TOKEN, so the review will post as github-actions[bot]."
+            # Say it on the PR itself, not just in a log nobody opens. This notice used
+            # to report that the PR would get NO review at all, which was true from PR
+            # #63 (when workflow-review.yml, the `pull_request_target` job that had
+            # covered the gap without once succeeding in 6 runs, was deleted) until the
+            # explicit token below closed it. The PR is reviewed now, so the notice says
+            # what is still different about it — a non-standard token path and a diff
+            # whose failure modes the general review prompt only partly covers — rather
+            # than going quiet, because every other signal on such a PR goes green.
             # Single-quoted, and that is load-bearing on the last line. Two layers of
             # escaping stack there, and each one bites in a different place:
             #   1. Actions substitutes `${{ '${{' }}` textually before any shell sees
@@ -123,25 +140,29 @@ jobs:
             # they make the backticks literal as a bonus. See the actionlint rationale
             # further down for why an expression error here is unrecoverable.
             # Written to a file, then copied to both the step summary and a PR
-            # comment (see `Say on the PR that it will not be reviewed` below).
+            # comment (see `Say on the PR how its own review was produced` below).
             # One source for this text, because the escaping on the last line is
             # too easy to get wrong twice.
             {
-              echo '### ⚠️ This PR changes `code-review.yml` — it will not be reviewed by Claude'
+              echo '### This PR changes `code-review.yml` — its review runs on the fallback token'
               echo
-              echo '`claude-code-action` refuses to run when its own workflow file differs from'
-              echo 'the copy on the default branch, so the review step self-skips. Every other'
-              echo "check (install, typecheck, unit, e2e, actionlint) still runs against this PR's"
-              echo 'head, and the job reports success — so nothing else on this PR goes red.'
+              echo 'The OIDC exchange for a Claude App token refuses while this file differs from'
+              echo 'the copy on the default branch, so the job hands the action `GITHUB_TOKEN`'
+              echo 'instead. The review still runs; it posts as **github-actions[bot]** rather than'
+              echo 'claude[bot]. Every other check (install, typecheck, unit, e2e, actionlint) runs'
+              echo "against this PR's head as usual."
               echo
-              echo '**This diff needs a human read before merge** — in particular whether it lets'
-              echo 'PR-authored code run with secrets, widens `permissions:`, or interpolates'
-              echo 'attacker-controlled `${{ '${{' }} github.event.* }}` into a `run:` block.'
+              echo '**Read the workflow diff yourself anyway.** The reviewer has a CI-security'
+              echo 'checklist for it, but it is reviewing the file that decides whether anything'
+              echo 'gets reviewed. Check in particular whether this diff lets PR-authored code run'
+              echo 'with secrets, widens `permissions:`, interpolates attacker-controlled'
+              echo '`${{ '${{' }} github.event.* }}` into a `run:` block, or weakens the step that'
+              echo 'fails the job when no review was posted.'
               echo
               echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            } > /tmp/workflow-skip-notice.md
-            cat /tmp/workflow-skip-notice.md >> "$GITHUB_STEP_SUMMARY"
-            echo "::warning::This PR changes code-review.yml, so the Claude review step self-skips and the PR gets NO automated review. Read the workflow diff by hand before merging."
+            } > /tmp/workflow-notice.md
+            cat /tmp/workflow-notice.md >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::This PR changes code-review.yml. It is reviewed under GITHUB_TOKEN (review posts as github-actions[bot]); read the workflow diff by hand as well."
           else
             echo "changed_workflow=none" >> "$GITHUB_OUTPUT"
           fi
@@ -157,32 +178,60 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
           HEAD_SHA: ${{ steps.ctx.outputs.head_sha }}
+          SELF_EDIT: ${{ contains(steps.ctx.outputs.changed_workflow, 'code-review.yml') }}
         run: |
           set -euo pipefail
-          # Per-commit idempotency: if claude[bot] already reviewed this exact
-          # sha, don't post again. A new push (new sha) is reviewed as normal.
+          # Per-commit idempotency: if a model-written review already exists for
+          # this exact sha, don't post again. A new push (new sha) is reviewed as
+          # normal.
           #
-          # The marker filter is retained after workflow-review.yml was deleted (PR #63).
-          # Reviews carrying that marker still exist on PRs #58, #61 and #62, so a re-run or
-          # workflow_dispatch against one of those shas would still see one. This guard
-          # gates EVERY step below it — including npm ci, typecheck, unit and e2e — so
-          # counting a foreign review here means the whole suite is skipped while the job
-          # reports success. Cheap to keep, and it is what makes the guard correct
-          # independently of which identity posted.
+          # github-actions[bot] counts only on a PR that changes this workflow, because
+          # that is the only PR where a model-written review arrives under that identity
+          # (it is reviewed under GITHUB_TOKEN — see `Resolve PR + head sha`). Scoped
+          # rather than global: this guard gates the whole suite below, so accepting
+          # that login everywhere would let any future `github-actions[bot]` review on a
+          # head sha — another workflow, a `gh` one-liner — skip the tests and the review
+          # while the job reports success. Two bodies are filtered back out, and both
+          # filters are load-bearing:
+          #
+          #   FALLBACK — the `Fallback review` step at the end of this job also posts as
+          #     github-actions[bot], and its body opens with that heading. `startswith`,
+          #     not `contains`: a review of this workflow may well quote the heading while
+          #     discussing the fallback path, and matching anywhere in the body would then
+          #     discard a real review. A fallback is a partial verdict, and the reason to
+          #     dispatch a re-run is to replace it with a real one; counting it would
+          #     make that dispatch a no-op. It is still enough for `Verify a review was
+          #     posted`, which asks a different question (does this sha carry any
+          #     verdict at all).
+          #   MARKER — workflow-review.yml, deleted in PR #63, posted CI-security reviews
+          #     that still exist on PRs #58, #61 and #62, so a re-run against one of
+          #     those shas would still see one.
+          #
+          # This guard gates EVERY step below it — including npm ci, typecheck, unit and
+          # e2e — so counting a review this job did not write means the whole suite is
+          # skipped while the job reports success.
           MARKER='Scope: CI/workflow security review'
+          FALLBACK='## Automated review did not complete'
+          if [ "${SELF_EDIT:-false}" = "true" ]; then
+            LOGINS='["claude[bot]","github-actions[bot]"]'
+          else
+            LOGINS='["claude[bot]"]'
+          fi
           COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
-            | jq --arg m "$MARKER" --arg sha "$HEAD_SHA" \
-                '[.[] | select(.user.login=="claude[bot]") | select(.commit_id==$sha)
-                      | select(((.body // "") | startswith($m)) | not)] | length' \
+            | jq --arg m "$MARKER" --arg f "$FALLBACK" --arg sha "$HEAD_SHA" --argjson logins "$LOGINS" \
+                '[.[] | select(.user.login | IN($logins[]))
+                      | select(.commit_id==$sha)
+                      | select(((.body // "") | startswith($m)) | not)
+                      | select(((.body // "") | startswith($f)) | not)] | length' \
             | awk '{s+=$1} END {print s+0}')
           if [ "${COUNT:-0}" -gt 0 ]; then
             echo "already_reviewed=true" >> "$GITHUB_OUTPUT"
-            echo "A claude[bot] review already exists for $HEAD_SHA — skipping."
+            echo "A model-written review already exists for $HEAD_SHA (logins: $LOGINS) — skipping."
           else
             echo "already_reviewed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Say on the PR that it will not be reviewed
+      - name: Say on the PR how its own review was produced
         # A step summary and a `::warning::` annotation are both one click off the
         # PR page, and PR #78 shipped with neither noticed: green checks, empty
         # timeline, and the author asking why no review arrived. Say it where the
@@ -210,11 +259,15 @@ jobs:
           # order these. The result is one duplicate comment, and the next push
           # edits the first one and stops adding more. Silence was the bug being
           # fixed here; a duplicate is not the same class of problem.
+          # Marker text unchanged from when this comment said "will not be reviewed":
+          # it is an identity, not a description. Renaming it would leave the old
+          # comment on any PR currently open against this file and add a second one
+          # beside it, which is the duplicate this step exists to avoid.
           MARKER='<!-- code-review: workflow-self-skip -->'
-          BODY=/tmp/workflow-skip-comment.md
+          BODY=/tmp/workflow-notice-comment.md
           {
             echo "$MARKER"
-            cat /tmp/workflow-skip-notice.md
+            cat /tmp/workflow-notice.md
           } > "$BODY"
 
           # --jq over the marker, not the visible text: the body is reworded
@@ -232,10 +285,10 @@ jobs:
           if [ -n "$ID" ]; then
             gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$ID" \
               -f body="$(cat "$BODY")" --silent
-            echo "updated existing self-skip comment $ID"
+            echo "updated existing workflow-notice comment $ID"
           else
             gh pr comment "$PR_NUMBER" --body-file "$BODY"
-            echo "posted self-skip comment"
+            echo "posted workflow-notice comment"
           fi
 
       - uses: actions/setup-node@v7
@@ -325,9 +378,16 @@ jobs:
           # `set -o pipefail` would abort this step before the review is posted (PR #39).
           PRIOR_LINES=/tmp/prior-reviews.jsonl
           PRIOR_RECENT=/tmp/prior-reviews-recent.jsonl
+          # Both logins: a review of a PR that edits this workflow is posted by
+          # `github-actions[bot]`, so matching claude[bot] alone would silently drop
+          # every earlier review of exactly the PRs that get iterated on most, and the
+          # re-review would start from zero. The fallback's own body is excluded — its
+          # partial findings are not a verdict to be held to.
           if gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
-               --jq ".[] | select(.user.login==\"claude[bot]\") | select(.commit_id!=\"$HEAD_SHA\")
+               --jq ".[] | select(.user.login==\"claude[bot]\" or .user.login==\"github-actions[bot]\")
+                        | select(.commit_id!=\"$HEAD_SHA\")
                         | select(((.body // \"\") | startswith(\"Scope: CI/workflow security review\")) | not)
+                        | select(((.body // \"\") | startswith(\"## Automated review did not complete\")) | not)
                         | {sha: .commit_id[0:7], state: .state, body: (.body // \"(empty)\")}
                         | @json" \
                > "$PRIOR_LINES" 2>/dev/null && [ -s "$PRIOR_LINES" ]; then
@@ -665,6 +725,14 @@ jobs:
         env:
           PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
         with:
+          # Empty on every normal PR, which is what keeps the claude[bot] identity:
+          # the action only short-circuits its OIDC exchange when this input is
+          # non-empty. Set only when the PR changes this file, where the exchange
+          # would refuse and the action would skip itself — see the header comment.
+          # `pull-requests: write` above is what lets the model's `gh pr review` post
+          # under this token, and `id-token: write` is still needed either way for the
+          # AWS role assumption two steps up.
+          github_token: ${{ contains(steps.ctx.outputs.changed_workflow, 'code-review.yml') && secrets.GITHUB_TOKEN || '' }}
           use_bedrock: "true"
           allowed_bots: "claude"
           # display_report intentionally left unset: it auto-posts an aggregated
@@ -829,12 +897,93 @@ jobs:
                unjustified new runtime dependencies (the dependency footprint is deliberately
                small) and any code copied in under an incompatible licence.
 
+            9. **CI and workflow security — conditional, and when it applies it comes FIRST.**
+               Skip this item entirely unless the diff touches `.github/workflows/**` or
+               `.github/actions/**`. When it does, do it before item 1: the workflows in this
+               repo are as much a part of Iris as `src/` is. `code-review.yml` is the review
+               capacity §7.14 of `prd.md` promises and `issue-to-pr.yml` opens pull requests
+               against this repo on a schedule; both hold `id-token: write` and the Bedrock
+               role, and every workflow here holds a secret, a token, or write access to
+               something. A defect in one is reachable by definition — CI runs it — so the
+               reachability bar does not soften anything here.
+
+               Read each changed workflow file **in full** (`Read`), not just the hunks, and
+               compare against the default-branch copy: `git show origin/main:<path>`. Then:
+
+               - **Anything that lets PR-authored code execute with secrets.** In a job holding
+                 secrets, `id-token: write`, or write permissions, flag: a `pull_request_target`,
+                 `workflow_run` or `issue_comment` job that checks out the PR head or merge ref
+                 (`ref: ...head.sha`, `refs/pull/N/merge`, `gh pr checkout`,
+                 `git fetch origin pull/N/head`); or `npm ci`/`npm install`/`npm test`/a repo
+                 script or binary run on PR-authored content. `code-review.yml` runs the PR's
+                 suite legitimately — it is `pull_request` and restricted to same-repo PRs. A
+                 change that weakens either property while keeping the test run is the bug.
+               - **Script injection via `${{ '${{' }} }}` in `run:` blocks.** Actions substitutes
+                 textually before the shell sees the line, so an attacker-controlled expression
+                 in a `run:` is arbitrary shell. `github.event.pull_request.title`, `.body`,
+                 `.head.ref`, `.user.login`, and issue/comment bodies are attacker-controlled;
+                 `github.repository`, `github.event_name` and sha-derived `steps.*.outputs.*`
+                 are not, so do not flag those. The safe form is `env:` plus a quoted `"$VAR"`.
+                 Issue and PR text reaching the model through a file is data, not injection.
+               - **Privilege widening.** New or broadened `permissions:` (especially
+                 `contents: write`, `id-token: write`, `actions: write`), a new trigger that
+                 runs with secrets, removal of the fork/draft/dependabot `if:` conditions, or a
+                 change to the OIDC role ARN or `aws-region` that the IAM trust policy would
+                 not match (trust is scoped to this repo's `pull_request` and `refs/heads/*`
+                 subjects; the role has Bedrock invoke on us-east-1/us-east-2/us-west-2 only).
+               - **Secret exposure.** A secret echoed, written into a file that gets posted to
+                 the PR, or passed to a third-party action — and any new third-party action, or
+                 an existing one moved to an unpinned or lower version. `actionlint` is
+                 downloaded against a recorded SHA-256 in `Build review context`; a change that
+                 drops that verification is a supply-chain path into a job holding
+                 `id-token: write`.
+               - **Loss of review coverage.** Every PR is supposed to carry a verdict. Flag a
+                 weakened or skippable `Verify a review was posted`, `if:` conditions broadened
+                 so more PRs are silently skipped, a removed fallback path, `paths-ignore`
+                 growing to exclude something behavioural (`agents/*.md` are executable prompts
+                 and `docs/**` is contract — neither may be ignored), or a `github_token` input
+                 that stops being conditional and so silently moves every review off the
+                 claude[bot] identity. `continue-on-error: true` on the model step is
+                 deliberate — it is what lets the fallback run — so do not flag it.
+               - **`issue-to-pr.yml`'s path allowlist.** Its verify step re-reads the pushed
+                 diff against `FORBIDDEN` and is unreachable from the model, which is the only
+                 real control on a workflow whose input is attacker-authored issue text. Flag
+                 anything that narrows it, moves the check after the mutations it guards, or
+                 lets a `set -e` failure jump past the annotation that reports it.
+               - **Shell bugs in `run:` blocks.** These have bitten this repo for real: a pipe
+                 into a short reader (`| head -N`) makes the producer die on SIGPIPE and
+                 `pipefail` aborts the step (PR #39 lost a review to exactly that); a `$VAR`
+                 used under `set -u` but absent from that step's own `env:` (steps share files
+                 and `$GITHUB_OUTPUT`, never shell state); and `${{ '${{' }} }}` escapes that
+                 survive Actions substitution only to become a bash parameter expansion —
+                 `bad substitution` — which is why the notice block in `Resolve PR + head sha`
+                 is single-quoted.
+               - **Timeout arithmetic.** Job cap 30 min; the model step is capped at 22 with
+                 `bun install` inside it (up to ~3 min), leaving the ~19 the prompt promises;
+                 the remaining ~8 job-minutes cover checkout, context build, OIDC, fallback and
+                 verify. `issue-to-pr.yml` is 60/45. If the diff changes any of those numbers
+                 or the prompt's stated budget, re-derive both halves. A step cap at or above
+                 the job cap is a bug: the job cap cancels every remaining step, so the
+                 fallback never runs.
+               - **Comments that no longer match the YAML.** These files are load-bearing
+                 documentation for a security control, and a stale rationale comment here is a
+                 defect, not a nit. Same for `README.md`'s "Automated code review" /
+                 "Scheduled issue triage" sections and `prd.md` §7.14–§7.15, which state the
+                 behaviour these files implement.
+
+               Do not flag YAML style, key order, or line length — `actionlint` ran in the
+               check summary and covers schema and expression errors; style is not reviewed.
+
             ## Should flag (non-blocking, mention briefly)
 
             - Agent markdown edits that loosen the output contract, drop the accessibility
               requirements, or change a pinned git SHA without explanation.
             - Docs (`README.md`, `docs/API.md`, `prd.md`) that now contradict the code, and
               `config.example.yaml` missing a newly-required config key.
+            - Changes to the review context builder's thresholds (`MIN_CHANGED_PCT`,
+              `ALWAYS_INCLUDE_UNDER_BYTES`, `ALWAYS_INCLUDE_PATHS`, `MAX_BYTES_PER_FILE`) that
+              could drop a high-risk file from a future review's context. Name the files that
+              would stop being included in full.
             - Error responses that leak internals, or run-log events that lose the information
               needed to debug a failed session.
 
@@ -875,12 +1024,17 @@ jobs:
         #      the PR even when the model never got that far.
         # Posted as a review (not a comment) so the Verify step below is satisfied
         # and the PR carries a verdict even when the model died. Not a merge gate:
-        # this check is deliberately not required on `main`, because a fork PR, a
-        # PR touching only `paths-ignore`d files, and a PR editing this workflow
-        # each produce no review at all — see CONTRIBUTING.md.
+        # this check is deliberately not required on `main`, because a fork PR and a
+        # PR touching only `paths-ignore`d files each produce no review at all — see
+        # CONTRIBUTING.md.
+        #
+        # This step used to be gated off on a PR changing this workflow, since the
+        # model step could not run there and a fallback would have been the only
+        # "review" such a PR ever got. It runs on those PRs now: the model step does
+        # run (under GITHUB_TOKEN), so a failure here means the same thing it means
+        # anywhere else — a real review was attempted and cut off.
         if: >-
           steps.guard.outputs.already_reviewed != 'true' &&
-          !contains(steps.ctx.outputs.changed_workflow, 'code-review.yml') &&
           steps.claude.outcome != 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -891,11 +1045,25 @@ jobs:
           set -euo pipefail
           # The model may have posted its review and then failed on a later turn.
           # Don't double-post: re-check the same per-commit condition as the guard.
+          #
+          # Both logins, for the same reason the guard counts both: on a PR that edits
+          # this workflow the real review is `github-actions[bot]`, so matching
+          # claude[bot] alone would find nothing and stack a `--request-changes`
+          # fallback on top of a review posted minutes earlier — possibly one that
+          # approved. Unlike the guard this does NOT exclude the fallback's own body:
+          # if a fallback already covers this sha, a second one adds nothing. It does
+          # exclude MARKER, for the same reason the guard and the verify step do:
+          # deleted workflow-review.yml's reviews on PRs #58, #61 and #62 are under
+          # this same login, and on a re-run against one of those shas they are not
+          # this job's own work to defer to.
           COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
-            --jq ".[] | select(.user.login==\"claude[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
+            --jq ".[] | select(.user.login==\"claude[bot]\" or .user.login==\"github-actions[bot]\")
+                      | select(.commit_id==\"$HEAD_SHA\")
+                      | select(((.body // \"\") | startswith(\"Scope: CI/workflow security review\")) | not)
+                      | .id" \
             | wc -l | tr -d ' ')
           if [ "${COUNT:-0}" -gt 0 ]; then
-            echo "Claude already posted a review for $HEAD_SHA despite outcome=$OUTCOME — nothing to do."
+            echo "A review already exists for $HEAD_SHA despite outcome=$OUTCOME — nothing to do."
             exit 0
           fi
 
@@ -939,13 +1107,12 @@ jobs:
           echo "::warning::Claude review was cut off (outcome=$OUTCOME); posted a partial/fallback review instead."
 
       - name: Verify a review was posted
-        # Not run on the PR that introduces this file: claude-code-action refuses
-        # to execute until an identical copy exists on the default branch, so it
-        # self-skips and there is no review to verify. Everything before this step
-        # still exercises the real path (OIDC, context build, model access).
-        if: >-
-          steps.guard.outputs.already_reviewed != 'true' &&
-          !contains(steps.ctx.outputs.changed_workflow, 'code-review.yml')
+        # Runs on every PR this job reviewed, including one that changes this file.
+        # It used to be gated off there — the model step could not run, so there was
+        # nothing to verify and the job reported success with no review behind it.
+        # That gate is what made the unreviewed case indistinguishable from a pass,
+        # so it goes away with the case it was covering.
+        if: steps.guard.outputs.already_reviewed != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
@@ -959,8 +1126,17 @@ jobs:
           # (the GITHUB_TOKEN identity), not claude[bot], and a fallback review is
           # still a verdict on the PR. Matching only claude[bot] here would fail
           # the job immediately after the fallback successfully posted.
+          #
+          # The MARKER exclusion is not optional now that this accepts that login:
+          # deleted workflow-review.yml left `Scope: CI/workflow security review`
+          # reviews under it on PRs #58, #61 and #62, so dispatching a re-run against
+          # one of those shas would otherwise let a review this job did not write
+          # satisfy the one step whose job is to prove that it did.
           COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
-            --jq ".[] | select(.user.login==\"claude[bot]\" or .user.login==\"github-actions[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
+            --jq ".[] | select(.user.login==\"claude[bot]\" or .user.login==\"github-actions[bot]\")
+                      | select(.commit_id==\"$HEAD_SHA\")
+                      | select(((.body // \"\") | startswith(\"Scope: CI/workflow security review\")) | not)
+                      | .id" \
             | wc -l | tr -d ' ')
           if [ "${COUNT:-0}" -eq 0 ]; then
             echo "::error::No review posted for $HEAD_SHA. Re-run with: gh workflow run code-review.yml -f pr_number=$PR_NUMBER"

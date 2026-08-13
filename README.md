@@ -735,29 +735,40 @@ them, so if it's cut off, a fallback step posts the partial findings plus the ch
 `--request-changes` — an incomplete review must not read as a pass. A final step fails the job if
 no review was posted at all, since the action can exit 0 without posting one.
 
-Two gaps worth knowing:
+**The workflows are reviewed like the rest of the app**, because they are part of it. This
+reviewer and the issue-triage one are what §7.14's review promise actually rests on, and they hold
+`id-token: write` and the Bedrock role; every workflow here holds a secret, a token or write
+access, and a defect in one is reachable by definition, since CI runs it. So a diff touching
+`.github/workflows/**` gets a CI-security checklist
+ahead of the accessibility one — PR-authored code reaching secrets, `${{ }}` interpolated into a
+`run:` block, widened `permissions:`, an unpinned third-party action, lost review coverage, the
+shell traps that have actually bitten here, and the timeout arithmetic — and the reviewer reads
+each changed workflow in full against its `main` copy rather than only the hunks.
 
-- **A PR that modifies `code-review.yml` gets no automated review.** `claude-code-action` refuses
-  to run when its own workflow file differs from the copy on `main`. Everything else on such a PR
-  still goes green, so the workflow says so loudly — a step-summary block and an Actions warning
-  naming what to check by hand (does it let PR-authored code run with secrets, widen
-  `permissions:`, or interpolate `github.event.*` into a `run:` block). A second workflow used to
-  cover this on `pull_request_target`; it never produced a review in six runs and was the repo's
-  only PR-triggered job holding `id-token: write`, so it was deleted and the gap accepted.
-- **Fork PRs are skipped.** `pull_request` from a fork gets no secrets, so the OIDC role
-  assumption would fail confusingly. Review one with
-  `gh workflow run code-review.yml -f pr_number=<n>` — which runs the fork's code in a job
-  holding the Bedrock role, so read the diff first.
+Reviewing changes to `code-review.yml` itself takes one extra step, and it is worth knowing why.
+`claude-code-action` normally trades its OIDC token for a Claude App token, and that exchange
+refuses while the invoking workflow file differs from the copy on `main` — the action then skips
+itself, which is why every PR editing this file used to merge unreviewed. Handing the action an
+explicit `github_token` short-circuits the exchange, so the job passes `GITHUB_TOKEN` on exactly
+those PRs. The review runs; it posts as **github-actions[bot]** instead of claude[bot], and the
+workflow says so on the PR. (A previous attempt covered this from a second workflow on
+`pull_request_target`. It produced no review in six runs and was the repo's only PR-triggered job
+holding `id-token: write`, so it was deleted; this approach needs no such job.)
 
-The verdict is advisory: `main` is protected, but this check is deliberately not required, because
-requiring it would fail in both directions at once. A PR touching only `paths-ignore`d files never
-triggers the workflow, so the check would never report and the PR could never merge. A PR editing
-this workflow is the opposite failure: the job runs to completion and reports **success** while the
-steps that would post or verify a review are gated off, so a required check would put a green tick
-on a PR nothing reviewed (measured on #70). A fork PR, whose job is skipped outright, should
-satisfy a required check the same vacuous way — that one is GitHub's documented handling of a
-skipped job rather than something measured here. A human merges. What changes is what that human
-is reading, not whether they read it.
+One gap remains: **fork PRs are skipped.** `pull_request` from a fork gets no secrets, so the OIDC
+role assumption would fail confusingly. Review one with
+`gh workflow run code-review.yml -f pr_number=<n>` — which runs the fork's code in a job holding
+the Bedrock role, so read the diff first.
+
+The verdict stays advisory: `main` is protected, but this check is deliberately not required. A PR
+touching only `paths-ignore`d files never triggers the workflow, so the check would never report
+and the PR could never merge. A fork PR's job is skipped by its own `if:`, which should satisfy a
+required check the same vacuous way — GitHub's documented handling of a skipped job. The third
+case used to be the worst of them: a PR editing this workflow ran to completion and reported
+**success** with the steps that post and verify a review both gated off, so a required check would
+have put a green tick on a PR nothing had read (measured on #70). That one is now a real review
+with a real verdict, and both gates are gone with it. A human still merges. What changes is what
+that human is reading, not whether they read it.
 
 ## Scheduled issue triage
 
@@ -827,14 +838,24 @@ the repo would go wrong:
   issue argues with, so it is not the control. The control is a verify step that re-reads the
   **pushed diff** against a path allowlist: a PR touching `.github/workflows/**`,
   `.github/CODEOWNERS`, `LICENSE`, `infra/**` or `.env*` is converted to a draft with a comment
-  saying why, and the job goes red. `.github/workflows/**` is the sharp one — `code-review.yml`
-  self-skips on any PR that edits it, so a workflow-editing PR from this job would arrive with no
-  automated review and every other signal green.
+  saying why, and the job goes red. `.github/workflows/**` is the sharp one, and it stays forbidden
+  even though `code-review.yml` now reviews workflow diffs: CI is where this job's own privilege is
+  defined — the Bedrock role, `contents: write`, and that allowlist — so a run talked into editing
+  it could widen what the next run may do. That is a privilege boundary, not a review gap.
 - **These PRs are not automatically reviewed.** GitHub does not start workflow runs for events
   raised by `GITHUB_TOKEN`, so `code-review.yml` never fires on them. The verify step says so on the
   PR itself, with the dispatch command, because the absence of a signal is not something a reader
   notices. Configuring an `AUTO_PR_TOKEN` secret (a PAT or App token, used only for `gh pr create`)
   closes the gap; until then, `gh workflow run code-review.yml -f pr_number=<n>`.
+
+**The reporter is credited on the work.** The PR names whoever opened the issue, and the commit
+carries a `Co-authored-by` trailer for them, so their account is on the merged commit rather than
+only a bot's. The report is the contribution here — the patch does not exist without it. GitHub
+only resolves that trailer in its numeric-ID `noreply` form, so the address is precomputed from the
+public profile (never a real email) and handed to the model ready to paste; the verify step checks
+the pushed commits for it and, if it is missing, puts the exact line in the PR body for whoever
+runs the squash merge. Issues Iris filed itself are skipped — crediting a bot as co-author of the
+fix to its own report says nothing.
 
 Run it by hand with `gh workflow run issue-to-pr.yml`, optionally with `-f issue_number=<n>` to
 name the issue yourself, or `-f dry_run=true` to get the ranking and the plan with no branch, no

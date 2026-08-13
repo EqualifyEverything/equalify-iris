@@ -4,6 +4,14 @@ name: Issue to PR
 # what most improves Iris, and opens ONE focused pull request for the top issue
 # it can finish well. @bbertucc is requested as reviewer.
 #
+# Whoever reported the issue is credited on the work: named in the PR body, and
+# carried into the merged history by a `Co-authored-by` trailer on the commit. The
+# report is the contribution here — the patch would not exist without it — and the
+# default outcome without this is a commit authored entirely by a bot. The trailer
+# is precomputed in `Build triage context` (GitHub only resolves the numeric-ID
+# `noreply` address form), required by the prompt, and checked in `Verify and
+# report`, which adds it to the PR body if the commits arrived without it.
+#
 # The schedule is built around a human, not around the runner. It fires
 # Sun–Wed so every PR lands the afternoon before a review day, giving a
 # Mon–Thu reading queue with Friday clear for whatever the week actually needed.
@@ -441,6 +449,47 @@ jobs:
             } >> "$OUT"
           fi
 
+          # --- Reporter credit ----------------------------------------------
+          # A merged PR from this workflow should carry the person who reported the
+          # issue, not only the bot that typed the patch. `Co-authored-by` is the
+          # only trailer GitHub resolves to an account: it puts them on the merged
+          # commit and counts it toward their contributions. Precomputed here rather
+          # than left to the prompt, because the address has to be the numeric-ID
+          # form `<id>+<login>@users.noreply.github.com` — a bare login does not
+          # resolve, and the `.author.id` already in the candidate JSON is GraphQL's
+          # node id, not that number. The public REST profile is the only place it is.
+          #
+          # `users.noreply`, deliberately. A reporter's real email address is not this
+          # workflow's to publish into a permanent commit, and it does not need it.
+          #
+          # Bots are skipped: Iris files its own `New agent suggestion:` and `Agent
+          # update proposal:` issues (`src/github/issue.ts`), and crediting a bot as
+          # co-author of the fix to its own report says nothing.
+          jq -r '[ .[] | select((.author.is_bot // false) | not)
+                       | (.author.login // "") | select(. != "") ] | unique | .[]' \
+            /tmp/candidates.json > /tmp/reporter-logins.txt
+          : > /tmp/reporter-credits.jsonl
+          while IFS= read -r LOGIN; do
+            [ -n "$LOGIN" ] || continue
+            # `|| true` because a deleted or renamed account 404s here, and one
+            # missing credit line must not take the run down. The prompt omits the
+            # trailer when there is no line, and the verify step says so on the PR.
+            ACCOUNT_ID=$(gh api "users/$LOGIN" --jq '.id' 2>/dev/null || true)
+            case "$ACCOUNT_ID" in
+              ''|*[!0-9]*)
+                echo "::warning::No numeric account id for @$LOGIN — a PR for their issue will carry no co-author trailer."
+                continue
+                ;;
+            esac
+            jq -cn --arg l "$LOGIN" --arg id "$ACCOUNT_ID" \
+              '{login: $l, trailer: "Co-authored-by: \($l) <\($id)+\($l)@users.noreply.github.com>"}' \
+              >> /tmp/reporter-credits.jsonl
+          done < /tmp/reporter-logins.txt
+          # `-s` over an empty file yields `[]`, so this is `{}` on a run where every
+          # candidate was filed by a bot. The emit below then adds no credit lines.
+          jq -s 'map({key: .login, value: .trailer}) | from_entries' \
+            /tmp/reporter-credits.jsonl > /tmp/reporter-credits.json
+
           # --- Untrusted input boundary -------------------------------------
           # Everything below this line is written by whoever opened the issue,
           # which on a public repo is anyone. It is DATA. The fence markers and
@@ -450,9 +499,11 @@ jobs:
           # was talked into. Note also that no issue text is ever interpolated
           # into a `run:` block — it arrives here through a file, so a title
           # containing shell metacharacters or an Actions expression is inert.
-          jq -r '.[] |
+          jq -r --slurpfile credits /tmp/reporter-credits.json '.[] |
             "### Issue #\(.number) — \(.title)\n\n"
             + "- opened: \(.createdAt) by \(.author.login // "unknown")\n"
+            + ( ((.author.login // "") as $l | $credits[0][$l] // "")
+                | if . != "" then "- credit line for the commit: \(.)\n" else "" end )
             + "- last activity: \(.updatedAt)\n"
             + "- labels: \([.labels[].name] | join(", ") | if . == "" then "none" else . end)\n"
             + "- comments: \(.comments | length)\n\n"
@@ -737,11 +788,25 @@ jobs:
                in the PR body whether you verified it and how. Do not tick a box you did not
                check.
             6. Commit with a conventional-commit subject (`fix:`, `feat:`, `docs:` — see
-               `git log`) and push: `git push -u origin iris-auto/issue-<n>`.
+               `git log`), then push: `git push -u origin iris-auto/issue-<n>`.
+
+               **Credit the reporter in the commit.** If the issue's header in your context
+               carries a `- credit line for the commit:` line, that `Co-authored-by:` trailer
+               must be the **last line of the commit message**, after a blank line, copied
+               character for character. Do not reformat the address, do not guess one for an
+               issue that has no such line, and do not add anyone the context did not name.
+               This is the whole of the reporter's credit on the merged history: the repo
+               squash-merges, so GitHub builds the merge message from the commits, and a
+               trailer that is not in one of them is one a maintainer has to retype. The
+               verify step checks for it after you push.
 
             7. Write the PR body to `/tmp/pr-body.md` **before** creating the PR — step 8
                reads that file. It must follow `.github/pull_request_template.md` and contain:
                - `Closes #<n>` so the issue closes on merge.
+               - **`Reported by @<login>`**, naming the issue's author, whenever the issue's
+                 header in your context shows a login other than `unknown` and it is not a bot.
+                 They are the reason the change exists, and the PR should say so where a reader
+                 sees it — the trailer in step 6 is for the merged commit, this is for the PR.
                - **Summary**: what changed and why, in the maintainer's terms.
                - **Testing**: the template's checkboxes, ticked only for what you actually
                  ran, plus the real output summary of typecheck / unit / e2e.
@@ -800,9 +865,12 @@ jobs:
           # Paths this workflow's PRs may never touch. Enforced here rather than
           # trusted to the prompt, because the prompt is the layer an injected
           # issue body argues with and this one is not reachable from the model
-          # at all. `.github/workflows/**` is the sharp one: code-review.yml
-          # self-skips on any PR that edits it, so a workflow-editing PR from
-          # this job would arrive with no automated review and a green tick.
+          # at all. `.github/workflows/**` is the sharp one, and it stays forbidden
+          # now that code-review.yml does review workflow diffs: CI is where this
+          # job's own privilege lives — the Bedrock role, `contents: write`, and
+          # this very allowlist — so a run talked into editing it could widen what
+          # the next run may do. That is a privilege boundary, not a review gap,
+          # and it is not the automated reviewer's job to hold it.
           FORBIDDEN='^(\.github/workflows/|\.github/CODEOWNERS|LICENSE|infra/|\.env)'
 
           RESULT=/tmp/iris-auto-result.json
@@ -920,14 +988,14 @@ jobs:
               printf '```\n%s\n```\n' "$OFFENDING"
             } >> "$GITHUB_STEP_SUMMARY"
             # Draft, not closed. The change might be right and a human should
-            # decide — but it must not sit in the queue looking review-ready,
-            # because for `.github/workflows/**` the automated review self-skips
-            # and every other signal on the PR goes green.
+            # decide — but it must not sit in the queue looking review-ready.
+            # Drafting also stops code-review.yml, which skips drafts, from
+            # spending a review on a diff that should not have been proposed.
             gh pr ready "$NEW_PR" --undo || echo "::warning::could not convert #$NEW_PR to draft"
             gh pr comment "$NEW_PR" --body "$(printf '%s\n\n%s\n\n%s\n' \
               '⚠️ **Converted to draft by the `issue-to-pr` verify step.**' \
               "This PR touches paths the scheduled workflow is not allowed to change: \`$OFFENDING\`" \
-              'CI, CODEOWNERS, the licence and infra are out of its remit — and a PR editing `.github/workflows/**` gets no automated review at all (`code-review.yml` self-skips on its own file), so nothing would have read this diff. Read it by hand before marking it ready.')" \
+              'CI, CODEOWNERS, the licence and infra are out of its remit. `.github/workflows/**` is where the privilege of this workflow is defined — the Bedrock role, `contents: write`, and the allowlist that produced this comment — so a run that edits it could widen what the next run may do. Read it by hand before marking it ready.')" \
               || echo "::warning::could not comment on #$NEW_PR"
             exit 1
           fi
@@ -951,6 +1019,93 @@ jobs:
             cat /tmp/pr-files.txt
             printf '```\n'
           } >> "$GITHUB_STEP_SUMMARY"
+
+          # --- Reporter credit, re-derived rather than trusted ----------------
+          # The prompt asks for a `Co-authored-by` trailer naming whoever reported
+          # the issue (see `Doing the work` step 6), and asking is not getting. This
+          # re-derives the reporter from the API and reads what was actually pushed.
+          #
+          # A missing trailer is NOT amended in here. Doing that means a force-push
+          # over the branch a review is about to start against, to fix an attribution
+          # problem — the cure is worse. The PR body gets the exact line instead,
+          # which is where the person running the squash merge is looking when
+          # GitHub prefills that message from the commits.
+          #
+          # Warn, never fail — and that means every API call in this block is handled,
+          # not just the write. This step runs under `set -euo pipefail` AFTER the PR
+          # exists, so a transient 5xx on a bare `$(gh ...)` would fail the job over an
+          # attribution courtesy and take the duplicate backstop below it down too.
+          # Reads whose value is only tested are `|| true`, and an empty value falls
+          # through to the warning paths already written for a missing issue or a
+          # missing id; the one read whose OUTPUT is reused is an `if !` instead, for
+          # the reason given there.
+          CREDIT_ISSUE=$(gh pr view "$NEW_PR" --json closingIssuesReferences \
+            --jq '.closingIssuesReferences[0].number // empty' || true)
+          if [ -z "$CREDIT_ISSUE" ]; then
+            # Worth saying on its own: without a closing keyword the issue also does
+            # not close on merge, which the prompt requires in step 7.
+            echo "::warning::PR #$NEW_PR links no issue with a closing keyword, so nobody could be credited and the issue will not close on merge."
+          else
+            REPORTER=$(gh issue view "$CREDIT_ISSUE" --json author \
+              --jq 'if (.author.is_bot // false) then "" else (.author.login // "") end' || true)
+            if [ -z "$REPORTER" ]; then
+              echo "::notice::Issue #$CREDIT_ISSUE was filed by a bot or a deleted account — no reporter to credit."
+            else
+              # Every commit on the PR, not just the tip. The trailer belongs on
+              # whichever commit carries the change, and a later fixup commit must
+              # not make a present credit read as absent. A login is
+              # `[A-Za-z0-9-]` only, so it carries no regex metacharacters.
+              : > /tmp/pr-commit-messages.txt
+              gh api "repos/${{ github.repository }}/pulls/$NEW_PR/commits" --paginate \
+                --jq '.[].commit.message' > /tmp/pr-commit-messages.txt || true
+              # Anchored on the address, not on the login as a substring: `bob` must not
+              # read as credited because the trailer names `bobby`. A login cannot
+              # contain `+` or `@`, so this matches the one form GitHub resolves.
+              if grep -qiE "^[[:space:]]*co-authored-by:.*<[0-9]+\+${REPORTER}@" /tmp/pr-commit-messages.txt; then
+                echo "::notice::Reporter @$REPORTER is credited on #$NEW_PR's commits."
+                { echo; printf 'Reporter @%s credited with a `Co-authored-by` trailer.\n' "$REPORTER"; } \
+                  >> "$GITHUB_STEP_SUMMARY"
+              else
+                ACCOUNT_ID=$(gh api "users/$REPORTER" --jq '.id' 2>/dev/null || true)
+                case "$ACCOUNT_ID" in
+                  ''|*[!0-9]*) ACCOUNT_ID="" ;;
+                esac
+                if [ -z "$ACCOUNT_ID" ]; then
+                  echo "::warning::PR #$NEW_PR credits nobody for issue #$CREDIT_ISSUE, and @$REPORTER has no readable numeric account id. Add the credit by hand at merge."
+                else
+                  TRAILER="Co-authored-by: $REPORTER <$ACCOUNT_ID+$REPORTER@users.noreply.github.com>"
+                  # Annotation first, as everywhere else in this step: a failing
+                  # `gh pr edit` under `set -e` must not take the notice with it.
+                  echo "::warning::PR #$NEW_PR has no co-author trailer for reporter @$REPORTER — adding the line to the PR body. Keep it in the squash message."
+                  { echo; printf 'Reporter credit was missing from the commits. Added to the PR body:\n\n```\n%s\n```\n' "$TRAILER"; } \
+                    >> "$GITHUB_STEP_SUMMARY"
+                  # Read-modify-write of the body. Nothing else edits it once the
+                  # model has created the PR, and the concurrency group rules out a
+                  # second run of this workflow, so there is no writer to race.
+                  #
+                  # `if !`, not `|| true`, and the difference matters: the redirect
+                  # truncates the file before `gh` writes to it, so a failed read
+                  # leaves an EMPTY body — and the `gh pr edit` below would then
+                  # replace the PR's whole description with nothing but this footer.
+                  # Losing the body to fix the credit is worse than the missing
+                  # credit. Skip the write entirely and say so; `set -e` stays
+                  # satisfied either way.
+                  if ! gh pr view "$NEW_PR" --json body --jq .body > /tmp/pr-body-now.md; then
+                    echo "::warning::could not read #$NEW_PR's body, so the credit line was not added. Add it at merge: $TRAILER"
+                  else
+                    {
+                      cat /tmp/pr-body-now.md
+                      printf '\n\n---\n\n'
+                      printf 'Reported by @%s. No commit on this PR carries a co-author trailer for them, so **add this line to the squash-merge message** when merging:\n\n' "$REPORTER"
+                      printf '```\n%s\n```\n' "$TRAILER"
+                    } > /tmp/pr-body-credited.md
+                    gh pr edit "$NEW_PR" --body-file /tmp/pr-body-credited.md \
+                      || echo "::warning::could not add the credit line to #$NEW_PR's body"
+                  fi
+                fi
+              fi
+            fi
+          fi
 
           # Duplicate backstop. The preflight already dropped every issue an open
           # PR linked or named in its branch, so this is not that check again — it
