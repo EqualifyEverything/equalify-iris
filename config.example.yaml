@@ -8,6 +8,16 @@ server:
   # Public base URL of this deployment. Used to build the GitHub OAuth
   # callback URL and surfaced in device-flow instructions.
   base_url: http://localhost:8080
+  # Shared secret gating GET /v1/quality, the deployment-wide tally of how good
+  # the output has been (PRD §7.16). Read by the weekly quality-report workflow,
+  # which files an issue when a rate crosses a threshold.
+  #
+  # Blank (default) means the endpoint answers 404 — opting in is deliberate.
+  # Not the per-user GitHub auth the rest of the API uses: this is an aggregate
+  # over every document the deployment has converted, so it belongs to no user,
+  # and the caller is a CI job with no GitHub identity. Aggregate-only by
+  # construction; no document content is exposed.
+  quality_token: ${IRIS_QUALITY_TOKEN}
 
 storage:
   # Root directory for sessions/, tmp/, and the agents/ git checkout.

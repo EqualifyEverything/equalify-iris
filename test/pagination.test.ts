@@ -345,9 +345,18 @@ test("a negative limit cannot make the query unbounded", () => {
 
 // --- schema ---
 
+// Indexes on the SESSIONS table specifically. Scoped by `tbl_name` rather than
+// listing every `idx_%` in the schema, because the two assertions below are exact
+// (`deepEqual`) and are about which sessions index survives the migration — an index
+// added for an unrelated table, e.g. run_signals' recorded_at, is not a change to
+// that and should not fail them.
 function indexes(store: Store): string[] {
   return (store as unknown as { db: { prepare(s: string): { all(): { name: string }[] } } }).db
-    .prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%' ORDER BY name`)
+    .prepare(
+      `SELECT name FROM sqlite_master
+        WHERE type = 'index' AND tbl_name = 'sessions' AND name LIKE 'idx_%'
+        ORDER BY name`,
+    )
     .all()
     .map((r) => r.name);
 }

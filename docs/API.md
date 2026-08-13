@@ -2,7 +2,8 @@
 
 Every endpoint is under `/v1`. All responses are JSON unless noted. Every endpoint except
 `/v1/health`, `/v1/stats` and `/v1/auth/*` requires `Authorization: Bearer <github_token>`
-(PRD §9.1).
+(PRD §9.1) — with one exception, `/v1/quality`, which takes a bearer token that is **not** a
+GitHub token (§0c).
 
 These commands are copy-pasteable. They are the same calls exercised by `test/e2e.sh`, which
 runs the whole lifecycle against mock GitHub + mock model services and asserts every response.
@@ -61,6 +62,74 @@ it (no who, no what), but an operator who treats document sizes as sensitive sho
 endpoint off the public internet. Responses are cached for 60 seconds
 (`Cache-Control: public, max-age=60`), which coarsens *when* a conversion shows up but not the page
 count — so a page you just converted may take up to a minute to appear.
+
+## 0c. Quality tally (shared secret, off by default)
+
+How *good* the output has been, as opposed to how much of it there was. Iris already measures
+itself on every run — how many reader/editor rounds a document needed, which axe-core rules its
+HTML still violates, whether a link from the source went missing — and this is the only place
+those measurements are readable across sessions (PRD §7.16).
+
+It exists for one caller: `.github/workflows/quality-report.yml`, which reads it weekly, compares
+the rates against thresholds held in that workflow, and files a GitHub issue when one is crossed.
+
+```bash
+curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
+```
+```json
+{
+  "window_days": 30,
+  "documents": 212,
+  "since": "2026-07-14T00:00:00.000Z",
+  "mean_rounds": 1.8,
+  "unresolved_rate": 0.07,
+  "links_dropped_rate": 0.02,
+  "lint_error_rate": 0,
+  "rules": [
+    { "id": "heading-order", "impact": "moderate", "documents": 81, "share": 0.382, "nodes": 240 }
+  ]
+}
+```
+
+* `documents` — delivered documents in the window, **including flawless ones**. This is the
+  denominator for every rate below, and it is the whole reason the tally is stored the way it is: a
+  clean run produces no violation rows, so counting "documents that had a problem" would divide by
+  the bad documents alone and report every rate near 100%.
+* `mean_rounds` — mean **editor** passes per document, against `defaults.max_review_iterations`. The
+  loop stops as soon as the Reader finds nothing, so a document that reads clean on the first look
+  contributes `0`: low is good, and `0.0` across the window means nothing needed fixing. `null`,
+  not `0`, when nothing has run — otherwise an empty deployment reports the best possible score.
+* `unresolved_rate` — share of documents that finished with issues the review loop could not
+  resolve. Only the **count** of those issues is used, never their text — see below.
+* `links_dropped_rate` — share of documents where an `href` present before the copy editor was
+  missing after it.
+* `lint_error_rate` — share of documents whose lint pass **errored** instead of running. Recorded
+  explicitly rather than inferred, because `runAxe` degrades to "no violations" when axe cannot run
+  at all, so a broken linter would otherwise read as a deployment that got better.
+* `rules[]` — axe-core rule ids, **per document**: `documents` is how many documents violated the
+  rule and `share` is that over `documents` above, with `nodes` (total offending elements) alongside
+  rather than folded in. One pathological scan with 400 bad headings is a worse `nodes` and the same
+  `documents` as any other single failure — "fails on 40% of documents" names a prompt defect,
+  while "is 90% of our violations" moves when an unrelated rule is fixed.
+* `window_days` — the window actually used, echoed back. `?days=N` is clamped to 1–365 and a
+  garbled value falls back to 30, so read this rather than assuming what you asked for. Windowed
+  rather than all-time on purpose: an all-time rate converges and stops responding to a fix.
+
+**Nothing here can carry document content, and that is a hard constraint rather than a
+convention.** The consumer copies these values into a *public* GitHub issue, and the documents
+behind them are user uploads — at the reference deployment, student records. Rule ids come from
+axe-core's fixed vocabulary and are safe to publish; the review loop's unresolved-issue
+descriptions are model-written prose about one person's document, which is why only their count
+appears, and dropped `href`s came from the user's own PDF, which is why only their count appears.
+A field added here that quoted a document would leak it through a path no reviewer of the workflow
+would think to check.
+
+**Off unless configured**, and unset means **404**, not 401: a deployment that has not opted in
+does not acknowledge the endpoint at all. Set `server.quality_token`
+(`IRIS_QUALITY_TOKEN`) to a long random value — `openssl rand -hex 32` — and restart. This is the
+one endpoint not behind the GitHub user auth: the data belongs to no user, and the caller is a CI
+job with no GitHub identity, so a per-user credential is the wrong shape for it. Responses carry
+`Cache-Control: no-store` and are cached in-process for five minutes.
 
 ## 1. Authenticate (get a token)
 

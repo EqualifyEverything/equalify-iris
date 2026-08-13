@@ -24,6 +24,17 @@ export interface ReviewResult {
   iterationsCompleted: number;
   unresolved: ReviewIssue[];
   lint: LintResult;
+  // How many absolute hrefs the Copy Editor destroyed, totalled over the rounds it
+  // ran (PRD §7.16). Summing across rounds does not double-count: each round
+  // compares only its own before/after, so a link dropped in round 1 is already
+  // absent from round 2's `before`.
+  //
+  // Returned rather than left in the run log because this is the loop's one
+  // unrecoverable failure — an href came from the source FILE, so nothing later can
+  // re-read it — and a per-session log line is invisible in aggregate. The COUNT is
+  // what leaves this function: the URLs themselves are content from a user's
+  // document and must not reach the quality tally (see Store.recordRunSignals).
+  droppedLinks: number;
 }
 
 // Exported so a test can assert the marker vocabulary it advertises is the one
@@ -227,6 +238,7 @@ export async function runReview(
   let lint = initial.lint;
   let iterations = 0;
   let lastIssues: ReviewIssue[] = [];
+  let droppedLinks = 0;
   // The page index is built from the fragments as they entered review. Pages are
   // deliberately NOT re-indexed as the editor rewrites the body: the index exists
   // to attribute content to a SOURCE page, and the source doesn't change.
@@ -237,7 +249,7 @@ export async function runReview(
     lastIssues = issues;
     ctx.log.event("reader", { iteration: iterations, issues: issues.length });
     if (issues.length === 0) {
-      return { html: wrapDocument(body), body, iterationsCompleted: iterations, unresolved: [], lint };
+      return { html: wrapDocument(body), body, iterationsCompleted: iterations, unresolved: [], lint, droppedLinks };
     }
     if (iterations === ctx.maxReviewIterations) break; // cap reached, issues remain
 
@@ -249,7 +261,10 @@ export async function runReview(
     // A link the editor dropped is unrecoverable and invisible to every later check
     // in the loop — see droppedHrefs for why this is checked here and in code.
     const dropped = droppedHrefs(before, body);
-    if (dropped.length) ctx.log.event("editor_links_dropped", { iteration: iterations, hrefs: dropped });
+    if (dropped.length) {
+      droppedLinks += dropped.length;
+      ctx.log.event("editor_links_dropped", { iteration: iterations, hrefs: dropped });
+    }
   }
 
   // Cap reached with issues remaining (§7.11): record them as a comment, with the
@@ -263,5 +278,6 @@ export async function runReview(
     iterationsCompleted: iterations,
     unresolved: lastIssues,
     lint,
+    droppedLinks,
   };
 }

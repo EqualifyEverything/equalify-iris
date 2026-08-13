@@ -153,6 +153,91 @@ export function pageSessions(
   };
 }
 
+// The signals Iris records about its own output, as opposed to the axe-core rule
+// ids that share the `run_signals.code` column (PRD §7.16). Prefixed so the two
+// namespaces cannot collide — axe adds rules between versions, and a new rule
+// named `rounds` would otherwise be counted as a measurement of ours.
+//
+// Constants rather than inline strings because the recorder, the aggregate query
+// and the tests must all spell them identically, and the failure mode of a typo is
+// silent: a rate that reads 0% forever, which is indistinguishable from the good
+// news it would be mistaken for.
+//
+// `iris:rounds` is recorded for EVERY delivered document, including a flawless one.
+// That is what makes it the denominator: a clean run produces no rule rows and no
+// unresolved row, so counting documents by "has any signal" would have divided by
+// the problem documents alone and reported every rate as ~100%.
+export const SIGNAL_ROUNDS = "iris:rounds";
+// How many issues the review loop still had open when it hit its iteration cap.
+// Recorded only when non-zero. Needed as its own signal because
+// `iterations_completed = iterations_max` is ambiguous — it is equally what a
+// document that came back clean on the very last permitted round looks like.
+export const SIGNAL_UNRESOLVED = "iris:unresolved";
+// How many hrefs the Copy Editor dropped while rewriting. Unrecoverable content
+// loss (the href came from the source FILE, not the page image), invisible to every
+// later check in the loop, and previously only a line in one session's log.
+export const SIGNAL_LINKS_DROPPED = "iris:links-dropped";
+// axe-core failed to run at all. Recorded because its absence is otherwise
+// indistinguishable from success: `runAxe` degrades to `{ ok: true, violations: [] }`
+// on an environment error, so a broken linter would quietly drive every
+// accessibility rate in this table to zero and read as a fixed deployment.
+export const SIGNAL_LINT_ERROR = "iris:lint-error";
+
+// One measurement about one delivered document. `count` is a magnitude (nodes for a
+// rule, issues for `iris:unresolved`, rounds for `iris:rounds`) and is never a
+// document-level tally — see the run_signals PRIMARY KEY for why those are separate.
+export interface RunSignal {
+  code: string;
+  impact?: string | null;
+  count: number;
+}
+
+// What `GET /v1/quality` serves and what the weekly workflow files issues from
+// (PRD §7.16).
+//
+// Every field is a count, a rate or an axe rule id. There is deliberately no field
+// that can carry text from a converted document: this feeds an endpoint whose
+// consumer copies values into a PUBLIC GitHub issue, and the documents are
+// uploaded by users — at the reference deployment, student records. A rule id comes
+// from axe's fixed vocabulary; an unresolved-issue description is model-written
+// prose about someone's document, which is why only its COUNT is here.
+export interface QualityStats {
+  window_days: number;
+  documents: number;
+  since: string | null;
+  // Mean EDITOR passes per document — the loop returns as soon as the Reader finds
+  // nothing, so a document that reads clean on the first look contributes 0, and 0 is
+  // the good value. `null` only when there is nothing to average.
+  mean_rounds: number | null;
+  // Share of documents (0–1) that hit the review cap with issues still open.
+  unresolved_rate: number;
+  // Share of documents where the Copy Editor dropped at least one link.
+  links_dropped_rate: number;
+  // Share of documents where axe-core could not run.
+  lint_error_rate: number;
+  rules: {
+    id: string;
+    impact: string | null;
+    documents: number;
+    // documents / total documents, i.e. "fails on this share of what we ship".
+    share: number;
+    // Total offending nodes across those documents. A rule can be rare but
+    // enormous, or ubiquitous and a single node each; the two ranks differently.
+    nodes: number;
+  }[];
+}
+
+// Window `GET /v1/quality` reports over when the caller does not say. Long enough
+// that a rate is not one bad afternoon, short enough that it MOVES after a fix —
+// an all-time rate is the failure mode to avoid here, since it converges to a
+// number that no longer describes the current prompts and cannot fall.
+export const DEFAULT_QUALITY_WINDOW_DAYS = 30;
+// Refuse to report over a window so short the denominator is a handful of
+// documents, or so long it is effectively all-time. Both produce a number that
+// looks like a measurement and is not one.
+export const MIN_QUALITY_WINDOW_DAYS = 1;
+export const MAX_QUALITY_WINDOW_DAYS = 365;
+
 export class Store {
   private db: DatabaseSync;
 
@@ -216,6 +301,37 @@ export class Store {
       -- write on every session insert. Unconditional and idempotent: this is the
       -- migration step for databases created before the compound cursor.
       DROP INDEX IF EXISTS idx_sessions_user;
+      -- What each delivered document cost us in quality terms, one row per signal
+      -- (PRD §7.16). See recordRunSignals for what a row means and qualityStats for
+      -- what is counted over them.
+      --
+      -- Needs no ALTER migration, unlike sessions.first_completed_at: this is a new
+      -- TABLE, and CREATE TABLE IF NOT EXISTS does create it on an already-deployed
+      -- database. An existing deployment simply has no history here, and
+      -- qualityStats reports over the window it does have.
+      --
+      -- The PRIMARY KEY is load-bearing rather than hygienic. It is what makes
+      -- "how many documents had this problem" answerable as COUNT(*) GROUP BY code:
+      -- at most one row per (document, signal) exists, so a rule firing on forty
+      -- nodes of one page cannot look like forty documents. The per-node figure is
+      -- kept separately, in the count column.
+      CREATE TABLE IF NOT EXISTS run_signals (
+        session_id TEXT NOT NULL,
+        -- An axe-core rule id ("heading-order"), or one of the SIGNAL_* codes
+        -- below, which are "iris:"-prefixed so our own measurements can never
+        -- collide with a rule id axe adds in a future version.
+        code TEXT NOT NULL,
+        impact TEXT,
+        count INTEGER NOT NULL,
+        recorded_at TEXT NOT NULL,
+        PRIMARY KEY (session_id, code)
+      ) WITHOUT ROWID;
+      -- Every read is windowed on recorded_at (see qualityStats), and this table
+      -- gets several rows per document where the sessions table gets one — so
+      -- unlike the deliberately unindexed scan behind publicStats, it earns a
+      -- b-tree.
+      -- The write cost is per completed run, not per request.
+      CREATE INDEX IF NOT EXISTS idx_run_signals_recorded ON run_signals(recorded_at);
     `);
     // ...and the column the CREATE TABLE above cannot add to a database that
     // already has a sessions table.
@@ -575,5 +691,159 @@ export class Store {
       )
       .get() as { documents: number; pages: number; since: string | null };
     return { pages: Number(row.pages), documents: Number(row.documents), since: row.since ?? null };
+  }
+
+  // --- run quality signals (PRD §7.16) ---
+
+  /**
+   * Record what one delivered document cost us, replacing anything previously
+   * recorded for that session.
+   *
+   * Called once per successful run, from the orchestrator, with the final axe
+   * violations plus the `iris:` measurements. Nothing is recorded for a run that
+   * failed: the point of the tally is the quality of what we DELIVERED, and a run
+   * that produced no document has no output to judge.
+   *
+   * **Replace, not append**, and this is the whole reason the write is not a plain
+   * insert. A feedback re-run is the same session converted again — every one of
+   * them would otherwise add a second set of rows, so the documents people asked
+   * Iris to retry (which correlate with the documents that came out badly) would
+   * each be counted two, three, four times. That skews the rate in the worse
+   * direction, on precisely the documents most likely to carry a signal, and it
+   * would have made every number here read high for a reason that has nothing to
+   * do with the prompts.
+   *
+   * The DELETE is what handles the other half: a rule that fired on the first run
+   * and does NOT fire on the re-run has to disappear, and an upsert alone would
+   * leave the stale row behind — so a problem the user's feedback actually fixed
+   * would keep being reported as present. `INSERT OR REPLACE` covers only the rows
+   * the new run supplies.
+   *
+   * Wrapped in a transaction so a crash between the two statements cannot leave the
+   * session with no signals at all, which would silently drop it out of the
+   * denominator and make every rate computed from it slightly wrong in a way nothing
+   * could detect afterwards.
+   */
+  recordRunSignals(sessionId: string, signals: RunSignal[]): void {
+    const now = new Date().toISOString();
+    // De-duplicated in memory first. `code` is half the primary key, so two rows
+    // sharing one inside a single call would abort the whole transaction — and axe
+    // reporting one rule twice is not this method's business to police. Later wins;
+    // the counts are summed, since two entries for one rule are two sets of nodes.
+    const merged = new Map<string, RunSignal>();
+    for (const s of signals) {
+      if (!s.code) continue;
+      const prior = merged.get(s.code);
+      merged.set(s.code, {
+        code: s.code,
+        impact: s.impact ?? prior?.impact ?? null,
+        count: (prior?.count ?? 0) + (Number.isFinite(s.count) ? Math.max(0, Math.floor(s.count)) : 0),
+      });
+    }
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(`DELETE FROM run_signals WHERE session_id = ?`).run(sessionId);
+      const insert = this.db.prepare(
+        `INSERT OR REPLACE INTO run_signals (session_id, code, impact, count, recorded_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      );
+      for (const s of merged.values()) {
+        insert.run(sessionId, s.code, s.impact ?? null, s.count, now);
+      }
+      this.db.exec("COMMIT");
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+
+  /**
+   * The deployment-wide quality tally behind `GET /v1/quality` (PRD §7.16).
+   *
+   * Windowed on purpose — see DEFAULT_QUALITY_WINDOW_DAYS. An all-time rate is the
+   * shape to avoid: it converges, stops responding to a fix, and so cannot answer
+   * the question the weekly workflow exists to ask ("is this still happening?").
+   *
+   * Rates are per DOCUMENT, not per occurrence, and the two are not
+   * interchangeable. "heading-order fails on 38% of documents" names a prompt
+   * defect and is directly actionable; "heading-order is 38% of our violations"
+   * moves when an unrelated rule is fixed and can be dominated by one pathological
+   * 400-page scan. The per-node total is reported alongside as `nodes` rather than
+   * folded into the rate.
+   *
+   * Aggregate only, and for a stronger reason than publicStats': that endpoint is
+   * public but harmless, whereas this one's values are copied into public GitHub
+   * issues by the workflow that reads it. No session id, no user, no filename, no
+   * document text — see QualityStats.
+   */
+  qualityStats(opts: { days?: number } = {}): QualityStats {
+    const days = Math.min(
+      MAX_QUALITY_WINDOW_DAYS,
+      Math.max(MIN_QUALITY_WINDOW_DAYS, Math.floor(Number(opts.days)) || DEFAULT_QUALITY_WINDOW_DAYS),
+    );
+    const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+
+    // The denominator, and the rounds figure, from the one signal every delivered
+    // document has.
+    const base = this.db
+      .prepare(
+        `SELECT COUNT(*) AS documents, COALESCE(SUM(count), 0) AS rounds, MIN(recorded_at) AS since
+           FROM run_signals
+          WHERE code = ? AND recorded_at >= ?`,
+      )
+      .get(SIGNAL_ROUNDS, cutoff) as { documents: number; rounds: number; since: string | null };
+    const documents = Number(base.documents);
+
+    // Our own measurements, keyed by code. COUNT(*) is a document count because of
+    // the (session_id, code) primary key.
+    const ours = new Map<string, number>();
+    for (const row of this.db
+      .prepare(
+        `SELECT code, COUNT(*) AS documents
+           FROM run_signals
+          WHERE recorded_at >= ? AND code LIKE 'iris:%'
+          GROUP BY code`,
+      )
+      .all(cutoff) as unknown as { code: string; documents: number }[]) {
+      ours.set(row.code, Number(row.documents));
+    }
+
+    // Everything that is not ours is an axe rule id.
+    const rules = (
+      this.db
+        .prepare(
+          `SELECT code,
+                  MAX(impact) AS impact,
+                  COUNT(*) AS documents,
+                  COALESCE(SUM(count), 0) AS nodes
+             FROM run_signals
+            WHERE recorded_at >= ? AND code NOT LIKE 'iris:%'
+            GROUP BY code
+            ORDER BY documents DESC, nodes DESC, code ASC`,
+        )
+        .all(cutoff) as unknown as { code: string; impact: string | null; documents: number; nodes: number }[]
+    ).map((r) => ({
+      id: r.code,
+      impact: r.impact ?? null,
+      documents: Number(r.documents),
+      share: documents ? Number(r.documents) / documents : 0,
+      nodes: Number(r.nodes),
+    }));
+
+    // Guarding the division rather than trusting it: an empty window is the normal
+    // state of a fresh deployment, and 0/0 is NaN, which serializes to `null` in
+    // JSON and would reach the workflow's threshold comparison as a silent false.
+    const rate = (code: string): number => (documents ? (ours.get(code) ?? 0) / documents : 0);
+
+    return {
+      window_days: days,
+      documents,
+      since: base.since ?? null,
+      mean_rounds: documents ? Number(base.rounds) / documents : null,
+      unresolved_rate: rate(SIGNAL_UNRESOLVED),
+      links_dropped_rate: rate(SIGNAL_LINKS_DROPPED),
+      lint_error_rate: rate(SIGNAL_LINT_ERROR),
+      rules,
+    };
   }
 }

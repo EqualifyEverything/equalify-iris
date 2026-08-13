@@ -2,7 +2,13 @@ import { readdirSync, readFileSync, writeFileSync, existsSync, copyFileSync, mkd
 import { join } from "node:path";
 import type { IrisConfig } from "../config.ts";
 import { ProviderRouter } from "../providers/index.ts";
-import type { Store } from "../store/db.ts";
+import {
+  SIGNAL_LINKS_DROPPED,
+  SIGNAL_LINT_ERROR,
+  SIGNAL_ROUNDS,
+  SIGNAL_UNRESOLVED,
+  type Store,
+} from "../store/db.ts";
 import { Paths } from "../store/paths.ts";
 import { RunLog } from "../store/runlog.ts";
 import type { InputImage, PipelineContext } from "./context.ts";
@@ -191,6 +197,39 @@ export async function runPipeline(args: {
             )
             .join("\n"),
       );
+    }
+
+    // Record what this document cost us, for the deployment-wide quality tally
+    // behind GET /v1/quality (PRD §7.16). Counts and axe rule ids only — never the
+    // unresolved issues' text or the dropped URLs, both of which are content from
+    // the user's own document and would end up in a public GitHub issue.
+    //
+    // Recorded HERE rather than in a `finally`, so only a run that actually
+    // delivered a document is counted: the tally measures the quality of output
+    // people received, and a run that threw produced none. A failure is already
+    // visible as `sessions.status = 'failed'`.
+    //
+    // Failing to record must not fail a document the user has already paid for, so
+    // this is soft — same reasoning as the contribution filing below. But it is
+    // logged loudly, because the silent version of this failure is a quality tally
+    // that reads BETTER over time as recording breaks: fewer signals recorded looks
+    // exactly like fewer problems found.
+    try {
+      store.recordRunSignals(sessionId, [
+        // Always, including for a flawless document: this is the denominator every
+        // rate divides by (see SIGNAL_ROUNDS).
+        { code: SIGNAL_ROUNDS, count: review.iterationsCompleted },
+        ...(review.unresolved.length ? [{ code: SIGNAL_UNRESOLVED, count: review.unresolved.length }] : []),
+        ...(review.droppedLinks ? [{ code: SIGNAL_LINKS_DROPPED, count: review.droppedLinks }] : []),
+        // A linter that could not run reports zero violations, which is why its
+        // failure is recorded as a signal rather than inferred from an empty list.
+        ...(review.lint.error ? [{ code: SIGNAL_LINT_ERROR, count: 1 }] : []),
+        // The final lint, i.e. what survived the whole review loop. `nodes` is the
+        // offending-element count, kept apart from the per-document tally.
+        ...review.lint.violations.map((v) => ({ code: v.id, impact: v.impact, count: v.nodes })),
+      ]);
+    } catch (e) {
+      log.event("run_signals_failed", { error: e instanceof Error ? e.message : String(e) });
     }
 
     // Persist the final state so the next feedback round can refine the reviewed

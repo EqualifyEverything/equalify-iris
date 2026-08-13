@@ -663,15 +663,37 @@ jobs:
             3. **Correctness and data-safety bugs.** Wrong output on real page content,
                sessions that wedge instead of failing cleanly, cross-session access, anything
                that could log or echo a token or a user's uploaded content.
-            4. **A working feature a real user asked for**, especially small UI fixes reported
+            4. **A measured quality regression** (`Quality regression:` issues, filed by
+               `quality-report.yml` from a live deployment's own numbers). These say something
+               like "axe rule `heading-order` fails on 38% of documents" or "0.9% of documents
+               had a lint pass that errored" — a rate over real user documents, not one
+               report. That denominator is the reason they rank here rather than lower: a
+               barrier on a third of documents is shipped to a third of users. Three things
+               to know before you pick one:
+               - **You cannot close it by moving the threshold.** The thresholds live in
+                 `.github/workflows/quality-report.yml`, which is on the forbidden-paths list
+                 above, so a PR that retunes the number is drafted and this job fails.
+                 If the honest answer is that the threshold is wrong, that is a legitimate
+                 finding — say so in the run summary, comment it on the issue if you can,
+                 and pick a different issue. Do not attempt the edit.
+               - **The fix is usually a prompt, not code.** `agents/*.md` files *are* the
+                 prompts (§7.4 of prd.md). A rule Iris keeps breaking most often means
+                 `page.md` never told it not to, or `reader.md` does not report it, or
+                 `copy_editor.md` reports it and fails to fix it. Work out which of those
+                 three it is before editing anything — they need different changes.
+               - **The issue body is the whole evidence.** It is aggregate by construction:
+                 no document text can reach it, because those documents are user uploads and
+                 the issue is public. So do not go looking for the failing document, and do
+                 not ask for it. Reason from the rate and from the code.
+            5. **A working feature a real user asked for**, especially small UI fixes reported
                against the demo — a disabled-until-valid button, a form's default submit
                action, a control wired to the thing it claims to control. These are cheap,
                they are user-visible, and they are exactly the shape that reviews well.
-            5. **Agent-library work** (`New agent suggestion:` / `Agent update proposal:`
+            6. **Agent-library work** (`New agent suggestion:` / `Agent update proposal:`
                issues, filed by Iris itself). Real product value, but rank below a
                human-reported barrier: the agent files these speculatively from content it
                met once, so check the suggestion is actually general before building it.
-            6. **Docs that contradict the code.** Worth doing, but only if nothing above it is
+            7. **Docs that contradict the code.** Worth doing, but only if nothing above it is
                available — do not spend a review slot on prose when a bug is open.
 
             Then apply this filter, which matters as much as the ranking: **can I finish this
