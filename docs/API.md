@@ -28,7 +28,8 @@ visitors before anyone signs in, and it is the number the project celebrates wit
 curl -s "$BASE/stats"
 ```
 ```json
-{ "pages_processed": 1284, "documents_processed": 212, "since": "2026-05-22T18:00:00.000Z" }
+{ "pages_processed": 1284, "documents_processed": 212, "since": "2026-05-22T18:00:00.000Z",
+  "quality": { "window_days": 30, "documents": 212, "clean_rate": 0.93, "mean_rounds": 1.8 } }
 ```
 
 * `pages_processed` — **distinct page images** Iris has converted to accessible HTML. A session
@@ -41,6 +42,34 @@ curl -s "$BASE/stats"
   forty pages.
 * `since` — when the earliest counted document finished, or `null` before anything has, so a
   client can say "since May 2026" without hardcoding a launch date.
+* `quality` — how *well* it went, or **`null`** when the deployment has too few recent documents to
+  say (below). Present either way, so a client can tell "nothing to report" from an older server
+  without the field. Four fields, and no more:
+  * `window_days` — the window the two rates cover, echoed so a client can write "over the last 30
+    days" without hardcoding it. Fixed at 30 and **not** caller-adjustable: this endpoint takes no
+    parameters, which is what keeps its single shared cache entry correct for everyone, and a public
+    `?days=` would let anyone narrow the window until the denominator was one document.
+  * `documents` — the denominator: documents delivered inside the window, flawless ones included.
+    Distinct from `documents_processed`, which is all-time.
+  * `clean_rate` — share (0–1) of those documents the review loop finished with nothing left
+    unresolved. The complement of §0c's `unresolved_rate`, stated the positive way round because
+    this one is read by someone deciding whether to trust Iris with a file.
+  * `mean_rounds` — mean reader/editor passes per document. **0 is the good value:** the loop stops
+    as soon as the Reader finds nothing, so a document that reads clean immediately contributes 0.
+
+`quality` is `null` until the window holds at least 20 documents (`PUBLIC_QUALITY_MIN_DOCUMENTS`),
+and that floor is a privacy control, not a presentation choice. A rate over three documents is not
+a measurement — one bad afternoon reads as "67% clean" on a front page — and, more to the point, on
+a quiet deployment the aggregate *is* the individual: "50% finished clean" next to a document count
+of four is a statement about identifiable people's uploads. The floor is enforced in
+`Store.publicQuality`, not in the route, so a future route edit that reads the fields it wants
+cannot walk around it. Below the floor the answer is `null` rather than zeros, because a route has
+no way to tell a real 0% from an absent one and "0% clean" is the worst claim the field can make.
+
+Volume is all-time while quality is windowed, which is deliberate rather than an inconsistency: an
+all-time rate converges and stops responding to a fix, while an all-time page count is the
+achievement being reported. No rule ids here, unlike §0c — a standing list of what Iris still fails
+at belongs in front of the people who would fix it, not on a public page.
 
 The number only ever goes up. It is derived from a write-once `first_completed_at` stamp rather
 than from current `status`, precisely so that asking Iris to re-run a finished document — which

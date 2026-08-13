@@ -238,6 +238,49 @@ export const DEFAULT_QUALITY_WINDOW_DAYS = 30;
 export const MIN_QUALITY_WINDOW_DAYS = 1;
 export const MAX_QUALITY_WINDOW_DAYS = 365;
 
+// What `GET /v1/stats` publishes about output quality — the public subset of
+// `QualityStats`, and deliberately much less of it.
+//
+// The difference in audience is the whole design: `/v1/quality` is read by one CI job
+// behind a shared secret and may say what is still failing, because its consumer is
+// the person who would fix it. This is read by anyone who loads the demo page, so it
+// carries two numbers a visitor can actually interpret and no rule ids — a standing
+// list of axe rules on a public front page is a to-do list, not a claim about the
+// service, and `share` on a small denominator is noise dressed as a measurement.
+export interface PublicQuality {
+  // Echoed so a client can say "over the last N days" without hardcoding it. Fixed,
+  // not caller-chosen: `/v1/stats` takes no parameters and has one shared cache entry.
+  window_days: number;
+  // Denominator: delivered documents in the window, flawless ones included.
+  documents: number;
+  // Share (0–1) of those documents the review loop finished with nothing left open.
+  // The complement of `QualityStats.unresolved_rate`, stated the positive way round
+  // because this one is read by someone deciding whether to trust Iris with a file.
+  clean_rate: number;
+  // Mean editor passes per document. 0 is the good value — the loop stops as soon as
+  // the Reader finds nothing, so a document that reads clean immediately contributes
+  // 0 — and unlike `QualityStats.mean_rounds` this is never null, because the floor
+  // below guarantees a non-zero denominator.
+  mean_rounds: number;
+}
+
+// Below this many documents in the window, `Store.publicQuality` returns null and the
+// public tally says nothing about quality at all.
+//
+// Two reasons, and the second is the one that makes this a privacy control rather than
+// a presentation choice. A rate over three documents is not a measurement: one bad
+// afternoon reads as "67% clean" on the front page, and one flawless week reads as
+// 100%, and neither describes the prompts. And on a quiet deployment the aggregate IS
+// the individual — with a handful of documents in the window, "50% finished clean"
+// combined with the same page's document count is a statement about identifiable
+// people's uploads, in the reference deployment's case student records. The tally is
+// already written to stay silent rather than boast an empty number; this extends that
+// to the case where the number exists and still should not be said.
+//
+// Enforced in the store, not in the route, so it cannot be lost to a future route edit
+// that reads the fields it wants — the same reason `qualityStats` never returns text.
+export const PUBLIC_QUALITY_MIN_DOCUMENTS = 20;
+
 // The window a request actually gets, from whatever it asked for. Exported because
 // `GET /v1/quality` caches by window and has to key on the SAME value the query ran
 // under: keying on the unclamped request would let `?days=1000` and `?days=1001` add
@@ -705,6 +748,70 @@ export class Store {
       )
       .get() as { documents: number; pages: number; since: string | null };
     return { pages: Number(row.pages), documents: Number(row.documents), since: row.since ?? null };
+  }
+
+  /**
+   * How well the output has been going, in the two numbers `GET /v1/stats` may say in
+   * public — or `null` when the window holds too few documents to say anything at all
+   * (see `PUBLIC_QUALITY_MIN_DOCUMENTS`, which is the interesting part of this method).
+   *
+   * Windowed at `DEFAULT_QUALITY_WINDOW_DAYS` and not caller-adjustable, unlike
+   * `qualityStats`. `/v1/stats` takes no parameters — a fixed window is what keeps its
+   * single shared cache entry correct for every caller, and a public `?days=` would
+   * additionally let anyone narrow the window until the denominator is one document,
+   * walking straight around the floor this method exists to enforce.
+   *
+   * `null` rather than zeros for the below-floor case. Zeros would be read as a
+   * measurement — "0% clean" is the worst possible claim — and the route has no way to
+   * tell a real zero from an absent one. The demo page's line is already written to
+   * disappear rather than say something hollow.
+   *
+   * Reads the same `run_signals` rows as `qualityStats` and computes nothing new, so
+   * the two can only disagree by window. Two small aggregate queries behind the
+   * route's 60s cache, on a table with at most one row per (session, code).
+   */
+  publicQuality(): PublicQuality | null {
+    const cutoff = new Date(Date.now() - DEFAULT_QUALITY_WINDOW_DAYS * 86_400_000).toISOString();
+    // `iris:rounds` is present for every delivered document, so COUNT(*) over it is
+    // the document count and SUM(count) is the total editor passes across them.
+    const base = this.db
+      .prepare(
+        `SELECT COUNT(*) AS documents, COALESCE(SUM(count), 0) AS rounds
+           FROM run_signals
+          WHERE code = ? AND recorded_at >= ?`,
+      )
+      .get(SIGNAL_ROUNDS, cutoff) as { documents: number; rounds: number };
+    const documents = Number(base.documents);
+    if (documents < PUBLIC_QUALITY_MIN_DOCUMENTS) return null;
+
+    // COUNT(*) is a document count here too: (session_id, code) is the primary key, so
+    // one document contributes at most one `iris:unresolved` row however many issues
+    // it left open. Documents WITH the row are the ones that finished unresolved, so
+    // the clean count is the rest — and a signal recorded only when non-zero is why
+    // this is a subtraction rather than a `count = 0` filter.
+    const unresolved = Number(
+      (
+        this.db
+          .prepare(
+            `SELECT COUNT(*) AS documents
+               FROM run_signals
+              WHERE code = ? AND recorded_at >= ?`,
+          )
+          .get(SIGNAL_UNRESOLVED, cutoff) as { documents: number }
+      ).documents,
+    );
+
+    return {
+      window_days: DEFAULT_QUALITY_WINDOW_DAYS,
+      documents,
+      // Both divisions are safe: the floor above guarantees documents >= 20. The clamp
+      // covers the one way the subtraction could go negative — an `iris:unresolved` row
+      // whose `iris:rounds` partner is missing, which the recorder never writes but a
+      // half-applied migration or a hand-edited database could leave behind. A negative
+      // percentage on the front page is a worse outcome than a slightly optimistic one.
+      clean_rate: Math.min(1, Math.max(0, (documents - unresolved) / documents)),
+      mean_rounds: Number(base.rounds) / documents,
+    };
   }
 
   // --- run quality signals (PRD §7.16) ---

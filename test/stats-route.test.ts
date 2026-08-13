@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import type { AddressInfo } from "node:net";
-import type { Store } from "../src/store/db.ts";
+import type { PublicQuality, Store } from "../src/store/db.ts";
 import { statsRouter, DEFAULT_TTL_MS } from "../src/routes/stats.ts";
 
 // The store side of `GET /v1/stats` is covered in test/stats.test.ts, and e2e step
@@ -17,14 +17,22 @@ import { statsRouter, DEFAULT_TTL_MS } from "../src/routes/stats.ts";
 // typecheck and the e2e would all still pass.
 
 // A store that records how many times it was actually consulted, and can change its
-// answer between reads. Only `publicStats` is reachable from this router, so nothing
-// else needs to exist.
-function fakeStore(initial: { pages: number; documents: number; since: string | null }) {
-  const state = { calls: 0, value: initial };
+// answer between reads. Only `publicStats` and `publicQuality` are reachable from this
+// router, so nothing else needs to exist. `calls` counts requests that reached the
+// store at all, which is the same for both methods — the route recomputes the whole
+// body or none of it.
+function fakeStore(
+  initial: { pages: number; documents: number; since: string | null },
+  quality: PublicQuality | null = null,
+) {
+  const state = { calls: 0, value: initial, quality };
   const store = {
     publicStats() {
       state.calls++;
       return state.value;
+    },
+    publicQuality() {
+      return state.quality;
     },
   } as unknown as Store;
   return { store, state };
@@ -43,9 +51,10 @@ async function serve(router: express.Router): Promise<{
 }
 
 const STATS = { pages: 40, documents: 3, since: "2026-01-01T00:00:00.000Z" };
+const QUALITY: PublicQuality = { window_days: 30, documents: 212, clean_rate: 0.93, mean_rounds: 1.8 };
 
 test("the tally is served from cache within the TTL, and recomputed after it", async () => {
-  const { store, state } = fakeStore(STATS);
+  const { store, state } = fakeStore(STATS, QUALITY);
   // 200ms rather than the production minute: the branch is the same, and a test
   // that has to wait 60s to assert expiry is a test nobody runs. Long enough that
   // two localhost round-trips inside the window are not a coin flip.
@@ -57,12 +66,14 @@ test("the tally is served from cache within the TTL, and recomputed after it", a
       pages_processed: 40,
       documents_processed: 3,
       since: "2026-01-01T00:00:00.000Z",
+      quality: { window_days: 30, documents: 212, clean_rate: 0.93, mean_rounds: 1.8 },
     });
     assert.equal(state.calls, 1, "the first request must actually query the store");
 
     // Change what the store would say, so a second query is detectable in the
     // body and not only in the counter.
     state.value = { pages: 999, documents: 99, since: "2026-01-01T00:00:00.000Z" };
+    state.quality = { ...QUALITY, clean_rate: 0.5 };
     const second = await srv.get();
     assert.equal(state.calls, 1, "a request inside the TTL re-queried the store");
     assert.equal((await second.json()).pages_processed, 40, "the cached body was not served");
@@ -70,7 +81,12 @@ test("the tally is served from cache within the TTL, and recomputed after it", a
     await new Promise((r) => setTimeout(r, 250));
     const third = await srv.get();
     assert.equal(state.calls, 2, "a request after the TTL did not recompute");
-    assert.equal((await third.json()).pages_processed, 999, "the recomputed body was not served");
+    const body = await third.json();
+    assert.equal(body.pages_processed, 999, "the recomputed body was not served");
+    // The quality half expires with the rest of the body. It comes from a second store
+    // query, so a cache that kept only the tally would leave a rate from an hour ago
+    // sitting next to a fresh page count and no test would notice.
+    assert.equal(body.quality.clean_rate, 0.5, "the quality half was not recomputed");
   } finally {
     srv.close();
   }
@@ -100,7 +116,42 @@ test("an empty deployment answers 200 with zeros rather than an error", async ()
   try {
     const res = await srv.get();
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { pages_processed: 0, documents_processed: 0, since: null });
+    assert.deepEqual(await res.json(), {
+      pages_processed: 0,
+      documents_processed: 0,
+      since: null,
+      // Explicitly null rather than absent: the page has to be able to tell "too few
+      // documents to say" from "an old deployment serving a body without the field",
+      // and null is the answer the store gives below its floor.
+      quality: null,
+    });
+  } finally {
+    srv.close();
+  }
+});
+
+test("the route publishes the quality fields it names, and nothing else the store adds", async () => {
+  // The floor that keeps a rate over a handful of identifiable people's uploads off
+  // the front page lives in `Store.publicQuality`, and this route must not be able to
+  // route around it — hence naming the four fields instead of spreading the return.
+  // A store that hands back extra fields stands in for a future `PublicQuality` that
+  // grows one; the endpoint is unauthenticated, so inheriting it silently is the
+  // failure being prevented.
+  const { store } = fakeStore(STATS, {
+    ...QUALITY,
+    worst_rule: "heading-order",
+    session_id: "ses_secret",
+  } as unknown as PublicQuality);
+  const srv = await serve(statsRouter(store));
+  try {
+    const body = await (await srv.get()).json();
+    assert.deepEqual(Object.keys(body.quality).sort(), [
+      "clean_rate",
+      "documents",
+      "mean_rounds",
+      "window_days",
+    ]);
+    assert.ok(!JSON.stringify(body).includes("ses_secret"), "a store field reached the response");
   } finally {
     srv.close();
   }

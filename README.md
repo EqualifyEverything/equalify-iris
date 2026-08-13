@@ -259,7 +259,7 @@ direction: it takes a bearer token too, but its own shared secret rather than a 
 | Method & path | Purpose |
 | --- | --- |
 | `GET  /v1/health` | Liveness probe |
-| `GET  /v1/stats` | Public tally of pages converted (no token; aggregate only) |
+| `GET  /v1/stats` | Public tally of pages converted, plus a two-number quality summary (no token; aggregate only) |
 | `GET  /v1/quality` | Deployment-wide tally of output *quality* (own shared secret, off by default; aggregate only) |
 | `GET  /v1/auth/github/start` | Begin OAuth (web clients) |
 | `GET  /v1/auth/github/callback` | OAuth callback → returns access token |
@@ -946,6 +946,28 @@ deployment with no problems, which is the whole failure this exists to prevent.
 
 Run it by hand with `gh workflow run quality-report.yml`, `-f days=90` for a wider window, or
 `-f dry_run=true` to print the tally and every issue body it would file without filing any.
+
+### Two of those numbers are public
+
+The demo page already says how *much* Iris has converted. Someone deciding whether to hand it a
+document wants to know how *well* that went, so `GET /v1/stats` — no token, the tally the page
+already loads — carries a `quality` object alongside the page count, and the page appends it to the
+sentence:
+
+> Iris has made 1,284 pages accessible across 212 documents since May 2026 — over the last 30 days,
+> **93% finished with nothing left unresolved**, averaging 1.8 editor passes.
+
+It is the same `run_signals` rows, read through `Store.publicQuality`, so the public claim and the
+weekly job's rates cannot drift apart by anything except their window (volume is all-time; quality
+is windowed, because an all-time rate converges and stops responding to a fix). Two numbers a
+visitor can interpret, and no rule ids: a standing list of what Iris still fails at belongs in front
+of the people who would fix it, not on a front page.
+
+**Below 20 documents in the window the object is `null` and the line simply is not there.** Same
+floor as the weekly job, for a stronger reason — on a quiet deployment the aggregate is the
+individual, and a rate over four documents shown next to a document count is a statement about
+identifiable people's uploads. The floor is enforced in the store rather than in the route, so a
+later route change cannot publish a number this refused to. See `docs/API.md` §0b for the fields.
 
 ## Contributing
 

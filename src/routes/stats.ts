@@ -17,11 +17,23 @@ export const DEFAULT_TTL_MS = 60_000;
  * the part of this endpoint that needs guarding as it changes.
  *
  * ```json
- * { "pages_processed": 1284, "documents_processed": 212, "since": "2026-05-22T18:00:00.000Z" }
+ * { "pages_processed": 1284, "documents_processed": 212, "since": "2026-05-22T18:00:00.000Z",
+ *   "quality": { "window_days": 30, "documents": 212, "clean_rate": 0.93, "mean_rounds": 1.8 } }
  * ```
  *
  * `since` is when the earliest counted document finished (null before anything
  * has), so a client can say "since May 2026" without inventing a launch date.
+ *
+ * `quality` is how *well* it has been going rather than how much of it there was —
+ * two numbers from the same signals `GET /v1/quality` aggregates (PRD §7.16), which
+ * is otherwise readable only with that endpoint's shared secret. It is **null** until
+ * the window holds `PUBLIC_QUALITY_MIN_DOCUMENTS` documents, and the floor lives in
+ * `Store.publicQuality` rather than here on purpose: on a quiet deployment a rate over
+ * a handful of documents is a statement about identifiable people's uploads, so this
+ * route must not be able to publish one by reading the fields it wants. Volume is
+ * all-time and quality is windowed, which is not an inconsistency — an all-time rate
+ * converges and stops responding to a fix, while an all-time page count is the
+ * achievement being reported.
  *
  * `ttlMs` exists so the cache is testable in less than a minute. The cache is the
  * stated defence for letting an unauthenticated caller trigger a full scan, so
@@ -38,9 +50,25 @@ export function statsRouter(store: Store, opts: { ttlMs?: number } = {}): Router
     const now = Date.now();
     if (!cached || now - cached.at >= ttlMs) {
       const s = store.publicStats();
+      // Named fields, not a spread of `publicQuality()`'s return: a field added to
+      // `PublicQuality` should have to be added here too, in front of whoever reviews
+      // this route, rather than appearing on a public endpoint by inheritance.
+      const q = store.publicQuality();
       cached = {
         at: now,
-        body: { pages_processed: s.pages, documents_processed: s.documents, since: s.since },
+        body: {
+          pages_processed: s.pages,
+          documents_processed: s.documents,
+          since: s.since,
+          quality: q
+            ? {
+                window_days: q.window_days,
+                documents: q.documents,
+                clean_rate: q.clean_rate,
+                mean_rounds: q.mean_rounds,
+              }
+            : null,
+        },
       };
     }
     // Let shared caches help too, with the same lifetime the in-process cache
