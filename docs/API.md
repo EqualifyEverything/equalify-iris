@@ -267,9 +267,56 @@ export SID=$(echo "$create" | jq -r .session_id)
 ```json
 { "session_id": "ses_01HXYZ...", "status": "queued", "image_count": 2, "created_at": "..." }
 ```
-Accepted file types: PNG, JPEG, TIFF, WebP, **and PDF**. A PDF is rasterized server-side into
+Accepted file types: PNG, JPEG, GIF, WebP, **and PDF**. A PDF is rasterized server-side into
 one image per page (in page order) and processed like any other page sequence. Total pages
 (across all parts) are capped per deployment.
+
+Each **image** part also has a size limit, and an upload over it is rejected here with a `400`
+rather than accepted and failed later. The limit is not Iris's own: an uploaded image is passed
+to the vision model byte for byte, so the model's per-image cap is the cap — currently **5 MB
+base64**, which is **3.75 MB on disk**, on Amazon Bedrock. Ask the deployment instead of
+assuming, since it moves with the configured model and provider:
+[`GET /v1/limits`](#31-upload-limits-unauthenticated). PDFs are exempt from the byte limit: Iris rasterizes
+their pages at its own resolution, so the size of the PDF is not what reaches the model — the
+page cap is what bounds them.
+
+Pixel dimensions are **not** a limit worth planning around, and this is the common
+misdiagnosis: a large-but-light image converts fine, while a small-but-heavy photo is what
+fails. The model downscales anything over its long-edge limit (1568 px on Sonnet 4.6, 2576 px
+on Claude 4.7 and later) before reading it, so extra pixels buy no fidelity — they only spend
+bytes against the cap. Re-saving a 12-megapixel scan at 1568 px on the long edge, or as a JPEG,
+loses nothing the conversion would have used. The hard ceiling is 8000 px on either edge, above
+which the model rejects the request outright.
+
+### 3.1 Upload limits (unauthenticated)
+
+`GET /v1/limits` — unauthenticated. What this deployment accepts, resolved from the model and
+provider it is configured to use, so a client never has to hardcode numbers that change when
+the model does. The demo page states its file limits from this endpoint.
+
+```bash
+curl -s "$BASE/limits" | jq
+```
+```json
+{
+  "max_pages": 25,
+  "image": {
+    "max_bytes": 3932160,
+    "max_long_edge_px": 1568,
+    "max_dimension_px": 8000,
+    "media_types": ["image/png", "image/jpeg", "image/gif", "image/webp"],
+    "extensions": [".png", ".jpg", ".jpeg", ".gif", ".webp"],
+    "hint": "Each image must be under 3.7 MB and in one of PNG, JPEG, GIF, WEBP format. …"
+  },
+  "pdf": { "max_pages": 25 }
+}
+```
+
+`max_bytes` is what `POST /v1/sessions` enforces per image part, and `hint` is the same sentence
+its `400` carries — quote it rather than composing your own, and the two cannot disagree.
+`max_long_edge_px` is advice, not a limit: nothing rejects an image for exceeding it. The model
+and provider that produced these numbers are deliberately not named here; that is deployment
+detail, and this endpoint answers a question about files.
 
 A PDF's **links survive**, which rasterizing alone would not manage: a link is an annotation
 over the page rather than something drawn on it, so the page image carries the link text and

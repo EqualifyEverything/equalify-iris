@@ -9,6 +9,7 @@ import { authRouter } from "./routes/auth.ts";
 import { meRouter } from "./routes/me.ts";
 import { sessionsRouter } from "./routes/sessions.ts";
 import { statsRouter } from "./routes/stats.ts";
+import { limitsRouter } from "./routes/limits.ts";
 import { qualityRouter } from "./routes/quality.ts";
 
 const cfg = loadConfig();
@@ -43,6 +44,13 @@ app.get("/v1/health", (_req, res) => res.json({ status: "ok", service: "equalify
 // has to answer before anyone signs in — and it is mounted here, above the auth
 // middleware, for exactly that reason.
 app.use("/v1/stats", statsRouter(store));
+
+// What this deployment accepts for an upload (unauthenticated, no user data). Above
+// the auth middleware for the same reason as the tally, plus one of its own: the
+// browser app states the file limits on the upload step, where the visitor has not
+// signed in yet — and someone deciding whether a scan is small enough should not have
+// to authenticate to find out.
+app.use("/v1/limits", limitsRouter(cfg));
 
 // The deployment-wide quality tally (PRD §7.16), read by the weekly
 // quality-report workflow. Mounted above the GitHub auth middleware because it
