@@ -24,6 +24,11 @@ touches an issue labelled `no-auto-pr`, never files a second PR for an issue it 
 and stops entirely when nothing is eligible. If you'd rather own the fix yourself, say so on the
 issue and add that label.
 
+**You get the credit for it.** A PR from that workflow names you in its body and carries a
+`Co-authored-by` trailer for your account on the commit, so the merged commit is attributed to you
+as well as to the bot that typed it — the report is the contribution. The trailer uses your
+GitHub `users.noreply` address, never your real email.
+
 **It also stays off any issue that already has an open PR — including yours.** Open a PR for an
 issue and the workflow leaves it alone; if every open issue has one, it opens nothing at all. Two
 things claim an issue: **`Closes #<n>` in your PR body** (which also closes the issue on merge, so
@@ -84,14 +89,17 @@ Your PR gets a review from Claude in CI before a maintainer reads it
   don't have to resolve them to merge, and you don't have to argue your way out of them.
 - **Its verdict is advisory, and its check is not a merge gate.** A human merges. The check is
   deliberately not required on `main`, because it could not be a trustworthy gate: a PR touching
-  only ignored paths never triggers it at all, a PR editing the workflow makes it report success,
-  and a fork PR's skipped job counts as satisfied — the last two with nothing having reviewed the
-  code. If you think a blocking finding is wrong, reply on the PR — the reviewer sees its earlier
-  reviews on re-runs, but it is the maintainer you're actually talking to.
+  only ignored paths never triggers it at all, and a fork PR's skipped job counts as satisfied
+  with nothing having reviewed the code. If you think a blocking finding is wrong, reply on the
+  PR — the reviewer sees its earlier reviews on re-runs, but it is the maintainer you're actually
+  talking to.
 - **Fork PRs aren't reviewed automatically** (a fork PR gets no CI secrets). A maintainer
   dispatches the review manually; nothing is needed from you.
-- **Editing `.github/workflows/code-review.yml` disables its own review.** Expect a warning
-  saying so and a slower human read.
+- **A PR touching `.github/workflows/**` gets a CI-security review first.** The workflows are part
+  of the app, so expect questions about `permissions:`, secrets reaching PR-authored code, and
+  `${{ }}` in `run:` blocks before anything about accessibility. Changing `code-review.yml` itself
+  also works now, with one visible difference: the review posts as **github-actions[bot]** rather
+  than claude[bot], and the PR gets a comment explaining why and asking for a human read as well.
 - **`iris-auto/*` PRs aren't reviewed automatically either.** Those come from the scheduled triage
   workflow, and GitHub doesn't start workflow runs for events raised by `GITHUB_TOKEN`. Each one
   carries a comment saying so with the dispatch command. Nothing is needed from contributors.
