@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { extname } from "node:path";
 import type { ProviderRouter, Image } from "../providers/index.ts";
+import { IMAGE_MEDIA_TYPES } from "../providers/imageLimits.ts";
 import type { Paths } from "../store/paths.ts";
 import type { RunLog } from "../store/runlog.ts";
 import type { IrisConfig } from "../config.ts";
@@ -36,17 +37,12 @@ export interface PipelineContext {
   githubToken?: string;
 }
 
-const MEDIA_TYPES: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".tif": "image/tiff",
-  ".tiff": "image/tiff",
-  ".webp": "image/webp",
-};
-
+// The extension -> media type map lives with the rest of the model's input limits
+// (providers/imageLimits.ts), so the formats the upload route accepts and the media
+// types sent to the model cannot disagree — this file used to claim image/tiff for a
+// format the model does not read.
 export function mediaTypeFor(filename: string): string {
-  return MEDIA_TYPES[extname(filename).toLowerCase()] ?? "image/png";
+  return IMAGE_MEDIA_TYPES[extname(filename).toLowerCase()] ?? "image/png";
 }
 
 export function loadImage(img: InputImage): Image {

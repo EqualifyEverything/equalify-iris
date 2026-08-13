@@ -14,6 +14,21 @@ export interface ProviderBlock {
   // HTML is the binding case: hit the ceiling and the model stops mid-tag.
   // Normalized by loadConfig, so providers can trust it.
   max_tokens?: number;
+  // OPTIONAL override for what one uploaded page image may be. Leave unset: the
+  // defaults come from providers/imageLimits.ts, which derives them from the model
+  // and provider this block configures, so they follow a model switch on their own.
+  // Set one only for something that table cannot know — a model released after it
+  // was written, or a platform with its own cap. Normalized where it is read, not
+  // here, because the fallback is a per-model lookup rather than a constant.
+  image_limits?: {
+    // Bytes on disk. Defaults to three quarters of max_base64_bytes (base64 is 4
+    // characters per 3 bytes).
+    max_image_bytes?: number;
+    // The provider's cap on base64-encoded image data in one request.
+    max_base64_bytes?: number;
+    // Long edge above which the model downscales. Published, never enforced.
+    max_long_edge_px?: number;
+  };
 }
 
 export interface IrisConfig {

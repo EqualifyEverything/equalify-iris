@@ -141,8 +141,17 @@
       <h2 id="step2-h" tabindex="-1">Upload your pages</h2>
       <form id="upload-form">
         <label for="images">Pages (images or PDF)</label>
-        <p class="hint" id="images-hint">A PDF, or images (PNG, JPEG, TIFF, WebP) in reading order. A PDF is split into one page per image, and the links in it are carried into the HTML.</p>
-        <input id="images" name="images" type="file" accept="image/png,image/jpeg,image/tiff,image/webp,application/pdf" multiple aria-describedby="images-hint" required>
+        <!-- The formats and the size limit are facts about the vision model this
+             deployment runs, so they are fetched from GET /v1/limits rather than
+             written here: the page used to advertise TIFF, which the model has never
+             read, and said nothing at all about size — so an oversized photo was
+             accepted and then failed minutes later inside a model call. #limits-hint
+             stays empty if that fetch fails; the server enforces the same limits with
+             the same wording either way. -->
+        <p class="hint" id="images-hint">A PDF, or images in reading order. A PDF is split into one page per image, and the links in it are carried into the HTML. <span id="limits-hint"></span></p>
+        <!-- A fallback list, replaced from /v1/limits once it answers. It only filters
+             the file picker's dialog; it is not a check. -->
+        <input id="images" name="images" type="file" accept="image/png,image/jpeg,image/gif,image/webp,application/pdf" multiple aria-describedby="images-hint" required>
 
         <div class="row">
           <button id="convert-btn" type="submit" disabled>Convert to accessible HTML</button>
@@ -211,6 +220,12 @@
     // Screen Wake Lock sentinel + whether a conversion is currently active (#16).
     let wakeLock = null;
     let converting = false;
+    // What this deployment accepts for an upload, from GET /v1/limits (see
+    // loadLimits). Null until it answers, and null forever if it never does — every
+    // reader treats that as "do not know", never as "no limit": the server is the one
+    // that enforces, and a page that guessed would either reject a fine file or
+    // promise one that fails.
+    let uploadLimits = null;
 
     const $ = (id) => document.getElementById(id);
     const show = (id) => { $(id).hidden = false; };
@@ -358,6 +373,21 @@
       setError('');
       const files = $('images').files;
       if (!files.length) { setError('Please choose at least one image.'); return; }
+      // Say no before the upload rather than after it. The server enforces the same
+      // limit (POST /v1/sessions), but an oversized page has to travel the whole way
+      // there first, and this is a file someone chose seconds ago on a connection
+      // that may be slow. Skipped entirely when /v1/limits did not answer: an unknown
+      // limit must not become a guessed one. PDFs are exempt because Iris rasterizes
+      // their pages itself, so the size of the PDF is not what reaches the model.
+      const tooBig = uploadLimits
+        ? Array.from(files).find((f) => !/\.pdf$/i.test(f.name) && f.size > uploadLimits.maxBytes)
+        : null;
+      if (tooBig) {
+        // The limit itself is quoted from the served hint, so this message and the
+        // server's cannot disagree about the number.
+        setError('“' + tooBig.name + '” is too large to convert. ' + uploadLimits.hint);
+        return;
+      }
       // Output download name mirrors the uploaded file.
       sourceBase = (files[0].name.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9._-]/g, '_')) || 'document';
       const fd = new FormData();
@@ -617,6 +647,35 @@
       }
     }
     loadTally();
+
+    // ----- Upload limits: what this deployment accepts -----
+    // GET /v1/limits needs no token either, and has to answer before sign-in: the
+    // limits belong on the upload step, which is where someone is choosing a file.
+    //
+    // Everything published here is derived server-side from the vision model in use
+    // (src/providers/imageLimits.ts). The page states nothing about formats or sizes
+    // on its own so that switching models cannot leave it confidently describing the
+    // old one — the previous version advertised TIFF, which no Claude model reads.
+    async function loadLimits() {
+      try {
+        const res = await fetch(API + '/limits');
+        if (!res.ok) return;
+        const l = await res.json();
+        const bytes = Number(l && l.image && l.image.max_bytes);
+        if (!Number.isFinite(bytes) || bytes < 1) return;
+        uploadLimits = { maxBytes: bytes, hint: String(l.image.hint || '') };
+        // textContent, not innerHTML: this string comes off the network, and it is a
+        // sentence rather than markup.
+        if (uploadLimits.hint) $('limits-hint').textContent = uploadLimits.hint;
+        // Narrow the file picker to what the model actually reads, replacing the
+        // fallback list in the markup.
+        const types = Array.isArray(l.image.media_types) ? l.image.media_types : [];
+        if (types.length) $('images').setAttribute('accept', types.concat('application/pdf').join(','));
+      } catch {
+        // offline or unreachable: leave the hint empty and let the server enforce
+      }
+    }
+    loadLimits();
 
     // If a token is already stored, skip straight to upload.
     (async function init() {

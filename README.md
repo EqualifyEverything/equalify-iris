@@ -252,7 +252,7 @@ session history.
 
 ## API
 
-All endpoints are under `/v1` and (except auth, health and stats) require
+All endpoints are under `/v1` and (except auth, health, stats and limits) require
 `Authorization: Bearer <github_token>`. `/v1/quality` is the one exception in the other
 direction: it takes a bearer token too, but its own shared secret rather than a GitHub one.
 
@@ -261,6 +261,7 @@ direction: it takes a bearer token too, but its own shared secret rather than a 
 | `GET  /v1/health` | Liveness probe |
 | `GET  /v1/stats` | Public tally of pages converted, plus a two-number quality summary (no token; aggregate only) |
 | `GET  /v1/quality` | Deployment-wide tally of output *quality* (own shared secret, off by default; aggregate only) |
+| `GET  /v1/limits` | What an upload may be — formats, per-image size, page cap (no token) |
 | `GET  /v1/auth/github/start` | Begin OAuth (web clients) |
 | `GET  /v1/auth/github/callback` | OAuth callback → returns access token |
 | `POST /v1/auth/github/device` | Begin device flow (CLI clients) |
@@ -621,6 +622,24 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   queue sees a session its images are already buffered in RAM (ceiling: multer's own
   `limits.fileSize` × part count) and any PDF is already rasterized to full-page 150-DPI PNGs.
   Both are consequences of the single-instance, single-process design the store declares.
+- **The model's input limits are Iris's input limits, and they live in one file.** An uploaded
+  image is handed to the vision model byte for byte — nothing resizes or re-encodes it — so what
+  the model accepts is what Iris can accept, and every such number is therefore a fact about a
+  configured model or provider rather than about Iris. `src/providers/imageLimits.ts` holds all
+  of them (the per-provider per-image byte cap, the hard 8000 px ceiling, the per-generation long
+  edge, the format allowlist, the one sentence of advice) and resolves them through the same
+  `resolveAgentModel` the router uses, taking the *strictest* value on each axis independently
+  across the four agents that are handed a page image. Everything downstream reads from there:
+  the upload check and its `400`, `GET /v1/limits`, the demo page's hint and `accept` list, and
+  the API docs. A PDF is measured *after* rasterizing rather than as uploaded — its pages are
+  what reach the model, and at a fixed DPI a page image's size follows the physical page size, so
+  a large-format page can break a limit its 20 MB parent file does not. This is not tidiness — the numbers had
+  been stated in five places and enforced in none, so the demo, the docs and the PRD all
+  advertised **TIFF**, which Claude has never read (accepted, then failed inside the first model
+  call) while rejecting **GIF**, which it does; and an oversized photo was accepted by multer's
+  50 MB ceiling and died two to four minutes later as "no output arrived within 120s". Switching
+  models now moves every one of those surfaces together. An operator can still override per
+  provider (`providers.<name>.image_limits`) for a model newer than the table.
 - **Starting work on a session is a claim, not a check (`store.claimSession`).** The two endpoints
   that begin non-idempotent work — `POST /:id/feedback` (enqueues a pipeline) and `POST /:id/close`
   (files regression fixtures into the shared agent library, deletes the tmp tree) — used to read the

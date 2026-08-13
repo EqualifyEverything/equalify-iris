@@ -125,6 +125,25 @@ providers:
     # FAILS such a call rather than passing the fragment downstream, so if you see
     # "hit the ... output ceiling", raise this. Omit for the default (32000).
     max_tokens: 32000
+    # What one uploaded image may be, on this provider. LEAVE THIS UNSET — the
+    # limits follow the model automatically (src/providers/imageLimits.ts knows the
+    # documented per-image cap for each provider and the long edge for each Claude
+    # generation), and they are what `POST /v1/sessions` rejects an oversized upload
+    # by and what `GET /v1/limits` publishes.
+    #
+    # Override only for something that table cannot know: a model released after it
+    # was written, or a platform with its own cap. Setting these too HIGH does not
+    # raise what the model accepts — it re-creates the failure the check exists to
+    # prevent, where an upload is accepted and then dies minutes later inside a model
+    # call.
+    # Each value is read from the block of the provider it belongs to and then the
+    # STRICTEST across the agents that see an upload is what gets published, so a
+    # tighter number set here still narrows the limit in a mixed deployment where
+    # this provider only serves some of them.
+    # image_limits:
+    #   max_base64_bytes: 5242880   # provider's per-image cap, in base64 characters
+    #   max_image_bytes: 3932160    # bytes on disk; defaults to 3/4 of the above
+    #   max_long_edge_px: 1568      # published as advice; nothing is rejected for it
     per_capability:
       vision: anthropic/claude-opus-4.7
       structured_output: anthropic/claude-opus-4.7
@@ -143,6 +162,8 @@ providers:
     # SDK's own `standard` strategy (3 attempts, exponential backoff, throttling +
     # 5xx + network errors), so there is no retry knob here.
     max_tokens: 32000
+    # See the note on openrouter.image_limits above; the same override exists here
+    # and is just as unnecessary in normal use.
     per_capability:
       vision: us.anthropic.claude-opus-4-7
       structured_output: us.anthropic.claude-opus-4-7
