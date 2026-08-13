@@ -734,7 +734,7 @@ them, so if it's cut off, a fallback step posts the partial findings plus the ch
 no review was posted at all, since the action can exit 0 without posting one.
 
 **The workflows are reviewed like the rest of the app**, because they are part of it. This
-reviewer and the issue-triage one are what §7.13's review promise actually rests on, and they hold
+reviewer and the issue-triage one are what §7.14's review promise actually rests on, and they hold
 `id-token: write` and the Bedrock role; every workflow here holds a secret, a token or write
 access, and a defect in one is reachable by definition, since CI runs it. So a diff touching
 `.github/workflows/**` gets a CI-security checklist

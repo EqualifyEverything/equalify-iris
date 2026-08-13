@@ -1009,17 +1009,21 @@ jobs:
           # which is where the person running the squash merge is looking when
           # GitHub prefills that message from the commits.
           #
-          # Warn, never fail. An uncredited reporter is a discourtesy this step can
-          # still repair by hand; it is not the safety problem the path allowlist is.
+          # Warn, never fail — and that means `|| true` on every API call here, not
+          # just on the write. This step runs under `set -euo pipefail` AFTER the PR
+          # exists, so a transient 5xx on a bare `$(gh ...)` assignment would fail the
+          # job over an attribution courtesy and take the duplicate backstop below it
+          # down too. An empty value falls through to the warning paths already written
+          # for a missing issue or a missing id.
           CREDIT_ISSUE=$(gh pr view "$NEW_PR" --json closingIssuesReferences \
-            --jq '.closingIssuesReferences[0].number // empty')
+            --jq '.closingIssuesReferences[0].number // empty' || true)
           if [ -z "$CREDIT_ISSUE" ]; then
             # Worth saying on its own: without a closing keyword the issue also does
             # not close on merge, which the prompt requires in step 7.
             echo "::warning::PR #$NEW_PR links no issue with a closing keyword, so nobody could be credited and the issue will not close on merge."
           else
             REPORTER=$(gh issue view "$CREDIT_ISSUE" --json author \
-              --jq 'if (.author.is_bot // false) then "" else (.author.login // "") end')
+              --jq 'if (.author.is_bot // false) then "" else (.author.login // "") end' || true)
             if [ -z "$REPORTER" ]; then
               echo "::notice::Issue #$CREDIT_ISSUE was filed by a bot or a deleted account — no reporter to credit."
             else
@@ -1027,9 +1031,13 @@ jobs:
               # whichever commit carries the change, and a later fixup commit must
               # not make a present credit read as absent. A login is
               # `[A-Za-z0-9-]` only, so it carries no regex metacharacters.
+              : > /tmp/pr-commit-messages.txt
               gh api "repos/${{ github.repository }}/pulls/$NEW_PR/commits" --paginate \
-                --jq '.[].commit.message' > /tmp/pr-commit-messages.txt
-              if grep -qiE "^[[:space:]]*co-authored-by:.*${REPORTER}" /tmp/pr-commit-messages.txt; then
+                --jq '.[].commit.message' > /tmp/pr-commit-messages.txt || true
+              # Anchored on the address, not on the login as a substring: `bob` must not
+              # read as credited because the trailer names `bobby`. A login cannot
+              # contain `+` or `@`, so this matches the one form GitHub resolves.
+              if grep -qiE "^[[:space:]]*co-authored-by:.*<[0-9]+\+${REPORTER}@" /tmp/pr-commit-messages.txt; then
                 echo "::notice::Reporter @$REPORTER is credited on #$NEW_PR's commits."
                 { echo; printf 'Reporter @%s credited with a `Co-authored-by` trailer.\n' "$REPORTER"; } \
                   >> "$GITHUB_STEP_SUMMARY"

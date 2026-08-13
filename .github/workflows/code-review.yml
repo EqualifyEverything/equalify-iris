@@ -178,16 +178,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
           HEAD_SHA: ${{ steps.ctx.outputs.head_sha }}
+          SELF_EDIT: ${{ contains(steps.ctx.outputs.changed_workflow, 'code-review.yml') }}
         run: |
           set -euo pipefail
           # Per-commit idempotency: if a model-written review already exists for
           # this exact sha, don't post again. A new push (new sha) is reviewed as
           # normal.
           #
-          # Both bot identities count, because both post model-written reviews here: a
-          # PR that changes this workflow is reviewed under GITHUB_TOKEN and posts as
-          # github-actions[bot] (see `Resolve PR + head sha`). Two bodies are filtered
-          # back out, and both filters are load-bearing:
+          # github-actions[bot] counts only on a PR that changes this workflow, because
+          # that is the only PR where a model-written review arrives under that identity
+          # (it is reviewed under GITHUB_TOKEN — see `Resolve PR + head sha`). Scoped
+          # rather than global: this guard gates the whole suite below, so accepting
+          # that login everywhere would let any future `github-actions[bot]` review on a
+          # head sha — another workflow, a `gh` one-liner — skip the tests and the review
+          # while the job reports success. Two bodies are filtered back out, and both
+          # filters are load-bearing:
           #
           #   FALLBACK — the `Fallback review` step at the end of this job also posts as
           #     github-actions[bot], and its body opens with that heading. `startswith`,
@@ -207,16 +212,21 @@ jobs:
           # skipped while the job reports success.
           MARKER='Scope: CI/workflow security review'
           FALLBACK='## Automated review did not complete'
+          if [ "${SELF_EDIT:-false}" = "true" ]; then
+            LOGINS='["claude[bot]","github-actions[bot]"]'
+          else
+            LOGINS='["claude[bot]"]'
+          fi
           COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
-            | jq --arg m "$MARKER" --arg f "$FALLBACK" --arg sha "$HEAD_SHA" \
-                '[.[] | select(.user.login=="claude[bot]" or .user.login=="github-actions[bot]")
+            | jq --arg m "$MARKER" --arg f "$FALLBACK" --arg sha "$HEAD_SHA" --argjson logins "$LOGINS" \
+                '[.[] | select(.user.login | IN($logins[]))
                       | select(.commit_id==$sha)
                       | select(((.body // "") | startswith($m)) | not)
                       | select(((.body // "") | startswith($f)) | not)] | length' \
             | awk '{s+=$1} END {print s+0}')
           if [ "${COUNT:-0}" -gt 0 ]; then
             echo "already_reviewed=true" >> "$GITHUB_OUTPUT"
-            echo "A claude[bot] review already exists for $HEAD_SHA — skipping."
+            echo "A model-written review already exists for $HEAD_SHA (logins: $LOGINS) — skipping."
           else
             echo "already_reviewed=false" >> "$GITHUB_OUTPUT"
           fi
@@ -368,9 +378,16 @@ jobs:
           # `set -o pipefail` would abort this step before the review is posted (PR #39).
           PRIOR_LINES=/tmp/prior-reviews.jsonl
           PRIOR_RECENT=/tmp/prior-reviews-recent.jsonl
+          # Both logins: a review of a PR that edits this workflow is posted by
+          # `github-actions[bot]`, so matching claude[bot] alone would silently drop
+          # every earlier review of exactly the PRs that get iterated on most, and the
+          # re-review would start from zero. The fallback's own body is excluded — its
+          # partial findings are not a verdict to be held to.
           if gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
-               --jq ".[] | select(.user.login==\"claude[bot]\") | select(.commit_id!=\"$HEAD_SHA\")
+               --jq ".[] | select(.user.login==\"claude[bot]\" or .user.login==\"github-actions[bot]\")
+                        | select(.commit_id!=\"$HEAD_SHA\")
                         | select(((.body // \"\") | startswith(\"Scope: CI/workflow security review\")) | not)
+                        | select(((.body // \"\") | startswith(\"## Automated review did not complete\")) | not)
                         | {sha: .commit_id[0:7], state: .state, body: (.body // \"(empty)\")}
                         | @json" \
                > "$PRIOR_LINES" 2>/dev/null && [ -s "$PRIOR_LINES" ]; then
@@ -884,7 +901,7 @@ jobs:
                Skip this item entirely unless the diff touches `.github/workflows/**` or
                `.github/actions/**`. When it does, do it before item 1: the workflows in this
                repo are as much a part of Iris as `src/` is. `code-review.yml` is the review
-               capacity §7.13 of `prd.md` promises and `issue-to-pr.yml` opens pull requests
+               capacity §7.14 of `prd.md` promises and `issue-to-pr.yml` opens pull requests
                against this repo on a schedule; both hold `id-token: write` and the Bedrock
                role, and every workflow here holds a secret, a token, or write access to
                something. A defect in one is reachable by definition — CI runs it — so the
@@ -1028,11 +1045,19 @@ jobs:
           set -euo pipefail
           # The model may have posted its review and then failed on a later turn.
           # Don't double-post: re-check the same per-commit condition as the guard.
+          #
+          # Both logins, for the same reason the guard counts both: on a PR that edits
+          # this workflow the real review is `github-actions[bot]`, so matching
+          # claude[bot] alone would find nothing and stack a `--request-changes`
+          # fallback on top of a review posted minutes earlier — possibly one that
+          # approved. Unlike the guard this does NOT exclude the fallback's own body:
+          # if a fallback already covers this sha, a second one adds nothing.
           COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
-            --jq ".[] | select(.user.login==\"claude[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
+            --jq ".[] | select(.user.login==\"claude[bot]\" or .user.login==\"github-actions[bot]\")
+                      | select(.commit_id==\"$HEAD_SHA\") | .id" \
             | wc -l | tr -d ' ')
           if [ "${COUNT:-0}" -gt 0 ]; then
-            echo "Claude already posted a review for $HEAD_SHA despite outcome=$OUTCOME — nothing to do."
+            echo "A review already exists for $HEAD_SHA despite outcome=$OUTCOME — nothing to do."
             exit 0
           fi
 
