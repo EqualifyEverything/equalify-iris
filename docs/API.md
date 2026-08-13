@@ -51,9 +51,13 @@ curl -s "$BASE/stats"
     `?days=` would let anyone narrow the window until the denominator was one document.
   * `documents` — the denominator: documents delivered inside the window, flawless ones included.
     Distinct from `documents_processed`, which is all-time.
-  * `clean_rate` — share (0–1) of those documents the review loop finished with nothing left
-    unresolved. The complement of §0c's `unresolved_rate`, stated the positive way round because
-    this one is read by someone deciding whether to trust Iris with a file.
+  * `clean_rate` — share (0–1) of those documents whose review loop ended with the **reviewer**
+    reporting nothing left open. The complement of §0c's `unresolved_rate`, stated the positive way
+    round because this one is read by someone deciding whether to trust Iris with a file. Note what
+    it is *not*: it is the Reader Agent's remaining-issue list, not the final axe result, so a
+    document carrying a violation the reviewer never raised still counts here. §0c can see that gap
+    (its `rules` come from the final lint of the same run); this field cannot, which is why the demo
+    page's sentence credits the reviewer rather than saying the document came out clean.
   * `mean_rounds` — mean reader/editor passes per document. **0 is the good value:** the loop stops
     as soon as the Reader finds nothing, so a document that reads clean immediately contributes 0.
 
@@ -65,6 +69,16 @@ of four is a statement about identifiable people's uploads. The floor is enforce
 `Store.publicQuality`, not in the route, so a future route edit that reads the fields it wants
 cannot walk around it. Below the floor the answer is `null` rather than zeros, because a route has
 no way to tell a real 0% from an absent one and "0% clean" is the worst claim the field can make.
+
+**The floor bounds a snapshot, not a series of them.** `documents` and `clean_rate` together give an
+exact integer count of unresolved documents, and `documents_processed` deltas were already
+inferrable before `quality` existed — so an observer polling this endpoint on a deployment near the
+floor can difference the readings over days and attribute unresolved status to a single document,
+which is the inference the floor exists to prevent. Nothing identifying is exposed (no login, no
+filename, no per-document timestamp), so out-of-band knowledge of who uploaded when is needed for it
+to mean anything, and it is inherent to publishing any windowed rate rather than specific to these
+fields. An operator for whom that matters should treat it the same way as the page-count delta above:
+keep the endpoint off the public internet.
 
 Volume is all-time while quality is windowed, which is deliberate rather than an inconsistency: an
 all-time rate converges and stops responding to a fix, while an all-time page count is the

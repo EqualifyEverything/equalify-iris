@@ -955,13 +955,20 @@ already loads — carries a `quality` object alongside the page count, and the p
 sentence:
 
 > Iris has made 1,284 pages accessible across 212 documents since May 2026 — over the last 30 days,
-> **93% finished with nothing left unresolved**, averaging 1.8 editor passes.
+> **93% of documents finished with the reviewer finding nothing left to fix**, averaging 1.8 editor
+> passes.
 
 It is the same `run_signals` rows, read through `Store.publicQuality`, so the public claim and the
 weekly job's rates cannot drift apart by anything except their window (volume is all-time; quality
 is windowed, because an all-time rate converges and stops responding to a fix). Two numbers a
 visitor can interpret, and no rule ids: a standing list of what Iris still fails at belongs in front
 of the people who would fix it, not on a front page.
+
+The sentence is deliberately no stronger than the measurement. That rate counts documents the Reader
+Agent left nothing open on — not documents whose final axe pass came back empty — so it credits the
+reviewer instead of saying the output was clean, which is what a visitor would otherwise take away.
+The percentage is floored rather than rounded, too: 99.6% is excellent, and publishing it as 100%
+would be a claim of perfection about work Iris did not do perfectly.
 
 **Below 20 documents in the window the object is `null` and the line simply is not there.** Same
 floor as the weekly job, for a stronger reason — on a quiet deployment the aggregate is the

@@ -531,7 +531,15 @@
     //
     // Returns '' on anything unexpected, for the same reason the tally hides itself
     // on a zero: a visitor deciding whether to hand Iris a document is better served
-    // by one fewer sentence than by 'NaN% finished with nothing left unresolved'.
+    // by one fewer sentence than by 'NaN% of documents' on the front page.
+    //
+    // The wording is as narrow as the measurement. `clean_rate` counts documents whose
+    // review loop ended with the reviewer reporting nothing left (src/pipeline/
+    // review.ts), which is not the same as the final axe pass coming back empty — a
+    // document can carry a violation the reviewer did not raise. So the sentence
+    // credits the reviewer rather than claiming the output was flawless; "came out
+    // clean" is what a visitor would hear from the shorter version, and it would be
+    // a stronger claim than the number supports.
     function qualityClause(q) {
       if (!q || typeof q !== 'object') return '';
       // A real JSON number, not merely something Number() can coerce. `Number(null)`
@@ -544,19 +552,38 @@
       const clean = num(q.clean_rate);
       const days = num(q.window_days);
       if (clean === null || clean < 0 || clean > 1 || days === null || days < 1) return '';
-      // Floor, never round: 99.6% must not be published as '100%'. The one claim
-      // here that could be wrong in our favour is the one worth truncating.
-      const pct = Math.floor(clean * 100);
+      // Floor, never round: 99.6% must not be published as '100%'. The one claim here
+      // that could be wrong in our favour is the one worth truncating.
+      //
+      // The epsilon is not a fudge, it is what makes this the floor of the RATE rather
+      // than of a binary artefact: `0.58 * 100` is 57.99999999999999, so a deployment
+      // with exactly 58% clean would publish 57%. Ratios of small integers are what
+      // this field carries — 29/50 is an ordinary window — and there are several such
+      // pairs under 200 documents. 1e-9 is far below any rate two document counts can
+      // differ by and far above the ~1e-14 error being corrected, so it cannot round a
+      // genuine 99.99% up to 100.
+      const pct = Math.floor(clean * 100 + 1e-9);
       let out = ' — over the last ' + Math.round(days) + ' days, <strong>' + pct +
-        '% finished with nothing left unresolved</strong>';
+        '% of documents finished with the reviewer finding nothing left to fix</strong>';
       const rounds = num(q.mean_rounds);
       if (rounds !== null && rounds >= 0) {
-        // 0 is the good value (the review loop returns as soon as the Reader finds
-        // nothing), and 'averaging 0.0 editor passes' reads like a broken number
-        // rather than the best possible one, so it gets words instead.
-        out += rounds < 0.05
+        // Three branches, because two of them are claims and only one is a number.
+        //
+        // A mean of exactly 0 is the only value for which "no editor passes at all" is
+        // true: the loop returns as soon as the reviewer finds nothing, so 0 across the
+        // whole window means every document read clean on the first look. Any mean above
+        // 0 — 0.04 is 25 documents of which one needed a pass — means a document DID
+        // need one, and saying otherwise is the flattering direction this function is
+        // written to refuse everywhere else.
+        //
+        // Small-but-nonzero gets hedged words rather than 'averaging 0.0 editor passes',
+        // which reads like a number that failed to load. Same reason the exact-zero case
+        // gets words: the point is a sentence a visitor can believe.
+        out += rounds === 0
           ? ', needing no editor passes at all'
-          : ', averaging ' + rounds.toFixed(1) + ' editor passes';
+          : rounds < 0.05
+            ? ', averaging under 0.1 editor passes'
+            : ', averaging ' + rounds.toFixed(1) + ' editor passes';
       }
       return out;
     }
