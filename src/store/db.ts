@@ -238,6 +238,20 @@ export const DEFAULT_QUALITY_WINDOW_DAYS = 30;
 export const MIN_QUALITY_WINDOW_DAYS = 1;
 export const MAX_QUALITY_WINDOW_DAYS = 365;
 
+// The window a request actually gets, from whatever it asked for. Exported because
+// `GET /v1/quality` caches by window and has to key on the SAME value the query ran
+// under: keying on the unclamped request would let `?days=1000` and `?days=1001` add
+// a permanent entry each for one identical 365-day answer, and a second copy of this
+// arithmetic in the route is a clamp that can drift from the one that matters.
+// A garbled or zero request falls back to the default rather than to the minimum —
+// see the route for why a typo must not narrow a weekly job's window to one day.
+export function clampQualityWindow(days: unknown): number {
+  return Math.min(
+    MAX_QUALITY_WINDOW_DAYS,
+    Math.max(MIN_QUALITY_WINDOW_DAYS, Math.floor(Number(days)) || DEFAULT_QUALITY_WINDOW_DAYS),
+  );
+}
+
 export class Store {
   private db: DatabaseSync;
 
@@ -777,10 +791,7 @@ export class Store {
    * document text — see QualityStats.
    */
   qualityStats(opts: { days?: number } = {}): QualityStats {
-    const days = Math.min(
-      MAX_QUALITY_WINDOW_DAYS,
-      Math.max(MIN_QUALITY_WINDOW_DAYS, Math.floor(Number(opts.days)) || DEFAULT_QUALITY_WINDOW_DAYS),
-    );
+    const days = clampQualityWindow(opts.days);
     const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
 
     // The denominator, and the rounds figure, from the one signal every delivered

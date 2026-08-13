@@ -270,9 +270,15 @@ jobs:
             '{unresolved: $unresolved, links: $links, lint: $lint, rounds: $rounds, rule: $rule}')
 
           # Each finding gets a STABLE title and a title-derived key. Stable is the
-          # load-bearing word: the rate is in the body, never in the title, because a
-          # title carrying this week's number is a different title every week and the
-          # dedupe below would file a fresh issue each run for the same problem. This
+          # load-bearing word, and it rules out TWO kinds of number: this week's rate,
+          # and the threshold it crossed. The rate would make the title different every
+          # week, so the dedupe below would file a fresh issue each run for the same
+          # problem. The threshold would be worse — it is a number this file invites you
+          # to retune, and a title asserting "a quarter of documents" against a
+          # threshold since moved to 0.4 is a lie in every issue already filed, while
+          # correcting the wording changes the dedupe key and refiles a problem that is
+          # already being tracked. Hence "too many", "nearly its whole budget", "a large
+          # share": vague in the title, exact in the body, where it costs nothing. This
           # repo has already been bitten by the mirror image of that (PRD §7.13: a
           # dedupe that could not match, so every session refiled the same
           # suggestion), and one issue per week is how a maintainer learns to mute a
@@ -307,7 +313,7 @@ jobs:
                 else [] end )
               + ( [ $q.rules[]? | select(.share > $t.rule)
                     | { key: ("rule-" + .id), sev: 4,
-                        title: ("Quality regression: axe rule `" + .id + "` fails on a quarter of documents or more"),
+                        title: ("Quality regression: axe rule `" + .id + "` fails on a large share of documents"),
                         metric: ("rules[\"" + .id + "\"].share"), value: .share, threshold: $t.rule,
                         rule: .id, impact: (.impact // "unknown"), rule_documents: .documents, nodes: .nodes } ] )
               + ( if ($q.mean_rounds // 0) > $t.rounds then
@@ -348,6 +354,16 @@ jobs:
         if: steps.fetch.outputs.should_run == 'true' && steps.check.outputs.found != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Required, and not redundant with GITHUB_REPOSITORY. This job deliberately
+          # has no `actions/checkout` — it needs no source, only an HTTP call and some
+          # arithmetic — and `gh` resolves the repository from `--repo`, `GH_REPO`, or
+          # the git remotes of the working directory. It does NOT read
+          # GITHUB_REPOSITORY. Without this, `gh issue list` below fails with "not a git
+          # repository" under `set -e`, and it fails only on the weeks a threshold is
+          # actually crossed: this whole step is skipped when there is nothing to file,
+          # so the workflow would read green until the moment it had something to say,
+          # then go red having said nothing.
+          GH_REPO: ${{ github.repository }}
           DRY_RUN: ${{ inputs.dry_run }}
           MAX_ISSUES: ${{ steps.check.outputs.max_issues }}
           QUALITY_URL: ${{ vars.QUALITY_URL }}

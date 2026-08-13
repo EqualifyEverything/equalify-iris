@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { timingSafeEqual } from "node:crypto";
-import { DEFAULT_QUALITY_WINDOW_DAYS, type QualityStats, type Store } from "../store/db.ts";
+import { clampQualityWindow, type QualityStats, type Store } from "../store/db.ts";
 
 // How long a computed tally is served before it is recomputed. Longer than
 // `/v1/stats`' minute: the intended caller is a weekly CI job, nothing here changes
@@ -78,6 +78,11 @@ export function qualityRouter(
   // different answers, and a single-slot cache would serve whichever arrived first to
   // both — so a `?days=90` request could be answered with 30-day numbers, which is
   // wrong in a way nothing in the response would reveal.
+  //
+  // The key is the CLAMPED window, which is what bounds this map to one entry per
+  // legal window rather than one per distinct query string: `?days=1000` and
+  // `?days=1001` are the same 365-day answer, and caching them under their requested
+  // values would let a caller grow the map without limit and never hit any of it.
   const cached = new Map<number, { at: number; body: QualityStats }>();
 
   r.get("/", (req, res) => {
@@ -96,22 +101,18 @@ export function qualityRouter(
       return;
     }
 
-    // Parsed leniently and clamped by the store: `days` is a convenience for asking
-    // "has this moved?" over two windows, and a garbled one falling back to the
-    // default is better than a 400 that stops a weekly job over a typo. The window
-    // actually used is echoed back as `window_days`, so a caller can see what it got
-    // rather than assume what it asked for.
-    const requested = Number(req.query.days);
-    const days = Number.isFinite(requested) ? Math.floor(requested) : DEFAULT_QUALITY_WINDOW_DAYS;
+    // Parsed leniently: `days` is a convenience for asking "has this moved?" over two
+    // windows, and a garbled one falling back to the default is better than a 400 that
+    // stops a weekly job over a typo. Clamped through the store's own helper rather
+    // than re-derived here, so the cache key cannot disagree with the window the query
+    // ran under. The window actually used is echoed back as `window_days`, so a caller
+    // can see what it got rather than assume what it asked for.
+    const days = clampQualityWindow(req.query.days);
 
     const now = Date.now();
     let hit = cached.get(days);
     if (!hit || now - hit.at >= ttlMs) {
       hit = { at: now, body: store.qualityStats({ days }) };
-      // Keyed on the CLAMPED window the store actually used, so `?days=0` and
-      // `?days=30` share one entry instead of recomputing the same numbers under two
-      // keys. The map is bounded by the store's clamp either way.
-      cached.set(hit.body.window_days, hit);
       cached.set(days, hit);
     }
     // No shared caching, unlike /v1/stats: this response is gated by a secret, and a

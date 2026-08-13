@@ -22,8 +22,10 @@ function fakeStore(): { store: Store; state: { calls: number; days: number[] } }
   const store = {
     qualityStats({ days }: { days?: number } = {}) {
       state.calls++;
-      // The clamp lives in the real store; mirror just enough of it that the cache's
-      // keying on the CLAMPED window is exercised.
+      // The route is expected to have clamped already, so this mirror of the clamp
+      // should be a no-op on everything it receives — which is exactly what makes
+      // `state.days` worth asserting: it records the window the query RAN under, and
+      // the cache is required to be keyed on that same value.
       const w = Math.min(365, Math.max(1, Math.floor(Number(days)) || 30));
       state.days.push(w);
       return {
@@ -157,6 +159,34 @@ test("windows that clamp to the same number share one cache entry", async () => 
     await srv.get("?days=30", auth);
     assert.equal(state.calls, 1);
     assert.deepEqual(state.days, [30]);
+  } finally {
+    srv.close();
+  }
+});
+
+test("the cache cannot be grown past one entry per legal window", async () => {
+  const { store, state } = fakeStore();
+  const srv = await serve(qualityRouter(store, { quality_token: TOKEN }, { ttlMs: 60_000 }));
+  try {
+    // Every one of these is the same 365-day answer. Keying the cache on what was
+    // ASKED for rather than what was served would add a permanent entry per distinct
+    // query string, none of which is ever hit again — a caller holding the token could
+    // grow the map without limit, and would recompute the tally every time while doing
+    // it. Nothing evicts, so "bounded by the clamp" has to be true rather than stated.
+    for (const q of ["?days=1000", "?days=1001", "?days=99999", "?days=365"]) {
+      const body = (await (await srv.get(q, auth)).json()) as QualityStats;
+      assert.equal(body.window_days, 365, `${q} should be answered with the maximum window`);
+    }
+    assert.equal(state.calls, 1, "one query for four requests that mean the same window");
+    assert.deepEqual(state.days, [365]);
+
+    // Same on the other end, including the garbled and negative cases the route is
+    // deliberately lenient about.
+    for (const q of ["?days=-5", "?days=nonsense", "?days=", "?days=0.4"]) {
+      const body = (await (await srv.get(q, auth)).json()) as QualityStats;
+      assert.ok(body.window_days === 1 || body.window_days === 30, `${q} gave ${body.window_days}`);
+    }
+    assert.ok(state.calls <= 3, `expected at most one entry per clamped window, got ${state.calls}`);
   } finally {
     srv.close();
   }

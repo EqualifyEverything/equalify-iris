@@ -695,9 +695,16 @@ for secret in "$SID" "$TOKEN"; do
     fail "quality" "the tally leaked '$secret' — see the constraint in src/routes/quality.ts"
   fi
 done
-echo "$q" | jq -e '[paths(scalars) | last] | inside(["window_days","documents","since","mean_rounds","unresolved_rate","links_dropped_rate","lint_error_rate","id","impact","documents","share","nodes"])' >/dev/null \
-  && pass "no session id, login or document content in the payload" \
-  || fail "quality" "an unexpected field appeared in the tally: $q"
+# Then the whole key set, so a field ADDED later has to be justified here rather than
+# shipped to a public issue by whoever adds it. Set subtraction rather than `inside`:
+# `inside` compares strings with `contains`, i.e. substring containment, so
+# `["doc"] | inside(["documents"])` is true and any new leaf whose name happens to be a
+# substring of an allowed one would slip through the one check that enforces this.
+allowed='["window_days","documents","since","mean_rounds","unresolved_rate","links_dropped_rate","lint_error_rate","id","impact","share","nodes"]'
+extra=$(echo "$q" | jq -c --argjson allowed "$allowed" '([paths(scalars) | last] | unique) - $allowed')
+[ "$extra" = "[]" ] \
+  && pass "the payload's key set is exactly the documented one (no session id, login or document content)" \
+  || fail "quality" "unexpected field(s) in the tally: $extra"
 
 # The window is echoed back clamped, so a caller reads what it got rather than what
 # it asked for — the workflow prints this number in a public issue.
