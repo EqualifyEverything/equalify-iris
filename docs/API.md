@@ -276,17 +276,21 @@ rather than accepted and failed later. The limit is not Iris's own: an uploaded 
 to the vision model byte for byte, so the model's per-image cap is the cap — currently **5 MB
 base64**, which is **3.75 MB on disk**, on Amazon Bedrock. Ask the deployment instead of
 assuming, since it moves with the configured model and provider:
-[`GET /v1/limits`](#31-upload-limits-unauthenticated). PDFs are exempt from the byte limit: Iris rasterizes
-their pages at its own resolution, so the size of the PDF is not what reaches the model — the
-page cap is what bounds them.
+[`GET /v1/limits`](#31-upload-limits-unauthenticated). A **PDF** is not measured against that
+limit — the file you send is not what reaches the model, since Iris rasterizes its pages at its
+own resolution — but each *rendered page* is, and a page over it fails with a `400` naming the
+page and the PDF. That happens with large-format pages: rasterizing at a fixed DPI means the
+page image scales with the physical page, so a letter page renders well inside the limit and an
+ARCH-D drawing does not.
 
-Pixel dimensions are **not** a limit worth planning around, and this is the common
+Pixel dimensions are mostly **not** a limit worth planning around, and this is the common
 misdiagnosis: a large-but-light image converts fine, while a small-but-heavy photo is what
 fails. The model downscales anything over its long-edge limit (1568 px on Sonnet 4.6, 2576 px
 on Claude 4.7 and later) before reading it, so extra pixels buy no fidelity — they only spend
 bytes against the cap. Re-saving a 12-megapixel scan at 1568 px on the long edge, or as a JPEG,
-loses nothing the conversion would have used. The hard ceiling is 8000 px on either edge, above
-which the model rejects the request outright.
+loses nothing the conversion would have used. There is one hard ceiling, `max_dimension_px`
+(8000 px on either edge): above it the model rejects the request outright rather than
+downscaling, so Iris rejects it here instead, reading the dimensions from the file's header.
 
 ### 3.1 Upload limits (unauthenticated)
 
@@ -314,9 +318,12 @@ curl -s "$BASE/limits" | jq
 
 `max_bytes` is what `POST /v1/sessions` enforces per image part, and `hint` is the same sentence
 its `400` carries — quote it rather than composing your own, and the two cannot disagree.
-`max_long_edge_px` is advice, not a limit: nothing rejects an image for exceeding it. The model
-and provider that produced these numbers are deliberately not named here; that is deployment
-detail, and this endpoint answers a question about files.
+`max_bytes` and `max_dimension_px` are both enforced; `max_long_edge_px` is advice, not a limit —
+nothing rejects an image for exceeding it, because the model downscales past it instead of
+failing. If a client can only surface one number, surface `max_bytes`: it is what nearly every
+rejected upload will have broken. The model and provider that produced these numbers are
+deliberately not named here; that is deployment detail, and this endpoint answers a question
+about files.
 
 A PDF's **links survive**, which rasterizing alone would not manage: a link is an annotation
 over the page rather than something drawn on it, so the page image carries the link text and

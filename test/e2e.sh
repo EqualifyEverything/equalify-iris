@@ -126,6 +126,28 @@ fi
 curl -sf "$BASE/health" | jq -e '.status=="ok"' >/dev/null \
   && pass "health ok (booted in ${boot_elapsed}s)" || fail "health" "no ok"
 
+echo "==> 1b. GET /v1/limits (what an upload may be, no token)"
+# Deliberately WITHOUT "${AUTH[@]}": the browser app states the file limits on its
+# upload step, where the visitor has not signed in yet, so this endpoint sits above
+# the auth middleware. Step 2 establishes that everything else 401s.
+#
+# Asserted as a shape, not as today's numbers — every value here is resolved from the
+# configured model and provider, and this run's config is not the deployment's. What
+# must hold is that the byte limit is a usable positive number, that the format list
+# is the one the upload validator uses (PNG is in it, TIFF is not — TIFF was
+# advertised for months and the model has never read it), and that `hint` is present,
+# since the demo renders it verbatim rather than composing its own sentence.
+limits=$(curl -s "$BASE/limits")
+echo "$limits" | jq -e '.image.max_bytes > 0 and (.image.hint|type=="string") and (.image.hint|length > 0)' >/dev/null \
+  && pass "upload limits published ($(echo "$limits" | jq -r '.image.max_bytes') bytes/image)" \
+  || fail "limits" "expected a positive max_bytes and a hint, got $limits"
+echo "$limits" | jq -e '(.image.media_types|index("image/png")) and (.image.media_types|index("image/tiff")|not)' >/dev/null \
+  && pass "format list matches what the model reads" || fail "limits formats" "$limits"
+# The page cap the same request must also answer, because a client deciding whether to
+# send a 40-page PDF needs both numbers and should not have to guess one.
+echo "$limits" | jq -e '.max_pages > 0 and .max_pages == .pdf.max_pages' >/dev/null \
+  && pass "page cap published ($(echo "$limits" | jq -r '.max_pages') pages)" || fail "limits pages" "$limits"
+
 echo "==> 2. auth gating (no token => 401)"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/me")
 [ "$code" = "401" ] && pass "unauthenticated request rejected" || fail "auth gating" "got $code"

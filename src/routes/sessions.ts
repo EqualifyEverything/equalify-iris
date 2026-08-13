@@ -18,7 +18,13 @@ import { captureFixtures } from "../pipeline/regression.ts";
 import type { Fragment } from "../pipeline/fragment.ts";
 import { RunQueue } from "../util/queue.ts";
 import { RunLog } from "../store/runlog.ts";
-import { IMAGE_MEDIA_TYPES, imageRejection, resolveImageLimits } from "../providers/imageLimits.ts";
+import {
+  IMAGE_MEDIA_TYPES,
+  imageRejection,
+  rasterizedPageRejection,
+  resolveImageLimits,
+} from "../providers/imageLimits.ts";
+import { imageDimensions } from "../util/imageSize.ts";
 
 // 50 MB is a memory bound, not the image limit. It stays well above what an image may
 // be (see imageLimits.ts) because a PDF legitimately is: 25 pages of scans is a large
@@ -46,6 +52,13 @@ const MAX_TOTAL_PAGES = MAX_PDF_PAGES; // overall cap across all uploaded files
 
 // How the allowed types read in an error message: ".png,.jpg" -> "PNG, JPG".
 const ALLOWED_TYPES = [...Object.keys(IMAGE_MEDIA_TYPES).map((e) => e.slice(1).toUpperCase()), "PDF"].join(", ");
+
+// A rasterized PDF page the vision model cannot accept. Thrown from the expansion
+// loop rather than returned, because the check sits inside an `await` over several
+// files and the alternative is threading a rejection out through both branches; it
+// lands in the same catch as the other PDF failures. It carries the finished message
+// so the handler decides the status code and nothing else re-words the diagnosis.
+class PageTooLargeError extends Error {}
 
 // One-line axe-core summary for the PR description (from sessions/<id>/lint.json).
 function sessionSummary(s: SessionRecord) {
@@ -192,12 +205,21 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       // user two to four minutes later as a message about a stream that produced no
       // output, naming neither the file nor anything to do about it.
       //
-      // PDFs are exempt: their pages never reach the model as uploaded. They are
-      // rasterized at a DPI Iris chooses (util/pdf.ts), which is what keeps a page
-      // image modest, and a 20 MB PDF of 25 light pages is a perfectly convertible
-      // document. The page cap below is what bounds those.
+      // A PDF is not measured here — the file the caller sent is not what reaches the
+      // model. A 20 MB PDF of 25 light pages is a perfectly convertible document, so
+      // the size that matters is the size of each page AFTER rasterizing, and that is
+      // checked where the pages exist (below).
       if (!PDF_EXT.test(f.originalname)) {
-        const why = imageRejection({ name: f.originalname, bytes: f.buffer.length }, imageLimits);
+        const size = imageDimensions(f.buffer);
+        const why = imageRejection(
+          {
+            name: f.originalname,
+            bytes: f.buffer.length,
+            width: size?.width,
+            height: size?.height,
+          },
+          imageLimits,
+        );
         if (why) {
           sendError(res, 400, "invalid_request", why);
           return;
@@ -225,13 +247,29 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     try {
       for (const f of files) {
         if (PDF_EXT.test(f.originalname)) {
-          pages.push(...(await rasterizePdf(f.buffer, f.originalname)));
+          const rendered = await rasterizePdf(f.buffer, f.originalname);
+          // The uploaded PDF was exempt from the per-image limits; its pages are not.
+          // Rasterizing at a fixed DPI means the page image's size follows the
+          // PHYSICAL page, so a large-format page (a drawing, a fold-out) renders past
+          // what the model accepts — and the run would then die inside the first
+          // vision call, minutes in, which is the failure this route exists to catch.
+          for (const [i, p] of rendered.entries()) {
+            const size = imageDimensions(p.buffer);
+            const why = rasterizedPageRejection(
+              f.originalname,
+              i + 1,
+              { bytes: p.buffer.length, width: size?.width, height: size?.height },
+              imageLimits,
+            );
+            if (why) throw new PageTooLargeError(why);
+          }
+          pages.push(...rendered);
         } else {
           pages.push({ name: f.originalname, buffer: f.buffer, links: [] });
         }
       }
     } catch (e) {
-      if (e instanceof PdfTooLargeError) {
+      if (e instanceof PageTooLargeError || e instanceof PdfTooLargeError) {
         sendError(res, 400, "invalid_request", e.message);
       } else {
         sendError(res, 422, "pdf_conversion_failed", `Could not process a PDF: ${(e as Error).message}`);

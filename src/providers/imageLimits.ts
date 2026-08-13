@@ -54,10 +54,11 @@ const DEFAULT_BASE64_CAP = 5 * 1024 * 1024;
 // High-resolution is Claude 4.7 and later; every earlier model is the standard tier.
 const HIGH_RES_LONG_EDGE_PX = 2576;
 const STANDARD_LONG_EDGE_PX = 1568;
-const HIGH_RES_FROM_GENERATION = 4.7;
+const HIGH_RES_FROM_GENERATION = { major: 4, minor: 7 };
 
 // Hard ceiling on either dimension, for every model. Above this the request is
-// rejected outright rather than downscaled.
+// rejected outright rather than downscaled — which is why, unlike the long edge
+// above, this one IS enforced at upload (see `imageRejection`).
 const MAX_DIMENSION_PX = 8000;
 
 // Above this many image (or, on Bedrock/Vertex, document) blocks in ONE request, a
@@ -129,26 +130,42 @@ export function rawBytesForBase64Cap(cap: number): number {
 //
 // Both spellings, because the two providers version the same models differently:
 // Bedrock hyphenates (`us.anthropic.claude-sonnet-4-6`) and OpenRouter uses dots
-// (`anthropic/claude-opus-4.7`). A bare major version is a whole number
-// (`claude-opus-5` -> 5).
+// (`anthropic/claude-opus-4.7`). A bare major version has an implied minor of 0
+// (`claude-opus-5` -> 5.0).
+//
+// A PAIR rather than a decimal, because minor versions are counters and not
+// fractions: `Number("4.10")` is 4.1, which sorts below 4.7, so a `claude-*-4-10`
+// would be read as older than the model before it and dropped to the standard tier.
+// Nothing named that exists yet, which is exactly why the comparison should be right
+// before one does.
 //
 // Returning null for anything unrecognized is the point of the signature: a mock
 // model in a test, a fine-tune, or a naming scheme this file has not seen must fall
 // to the standard tier — the SMALLER long edge — so the note stays true rather than
 // promising resolution the model will silently throw away.
-export function modelGeneration(model: string): number | null {
+export interface ModelGeneration {
+  major: number;
+  minor: number;
+}
+
+export function modelGeneration(model: string): ModelGeneration | null {
   const m = model.match(/claude-[a-z]+-(\d+)(?:[.-](\d+))?/i);
   if (!m) return null;
-  const generation = Number(`${m[1]}.${m[2] ?? 0}`);
-  return Number.isFinite(generation) ? generation : null;
+  const major = Number(m[1]);
+  const minor = m[2] === undefined ? 0 : Number(m[2]);
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return null;
+  return { major, minor };
 }
 
 // The long edge one model reads before downscaling.
 export function longEdgeFor(model: string): number {
-  const generation = modelGeneration(model);
-  return generation !== null && generation >= HIGH_RES_FROM_GENERATION
-    ? HIGH_RES_LONG_EDGE_PX
-    : STANDARD_LONG_EDGE_PX;
+  const g = modelGeneration(model);
+  if (g === null) return STANDARD_LONG_EDGE_PX;
+  const highRes =
+    g.major !== HIGH_RES_FROM_GENERATION.major
+      ? g.major > HIGH_RES_FROM_GENERATION.major
+      : g.minor >= HIGH_RES_FROM_GENERATION.minor;
+  return highRes ? HIGH_RES_LONG_EDGE_PX : STANDARD_LONG_EDGE_PX;
 }
 
 // Coerce a configured `image_limits` number: absent, unparseable or nonsensical
@@ -169,12 +186,22 @@ function normalizeOverride(value: unknown, fallback: number): number {
 // An operator can override either number per provider block
 // (`providers.<name>.image_limits`), which is the escape hatch for the case this
 // file cannot know about: a model released after it was written, or a partner
-// platform with its own cap. The override is read from the block of the provider that
-// serves the STRICTEST agent, for the same reason the limits are.
+// platform with its own cap.
+//
+// Each axis is resolved on each provider's OWN block before the strictest is taken,
+// rather than reading the overrides off whichever block won on size. Two reasons, and
+// both were live bugs when this took the shortcut. A deployment whose providers share
+// a cap — which the table's two do today — has a tie, so "the strictest block" was
+// always just the first agent's, and an override on the other provider was silently
+// dropped: the route kept publishing 3.75 MB while a call on the tighter provider
+// failed mid-run, which is the exact failure this module exists to prevent, walked
+// back in through its own escape hatch. And the axes can disagree about who is
+// strictest — a mixed deployment can have the tighter byte cap on one provider and
+// the smaller long edge on the other — so one winning block cannot carry both.
 export function resolveImageLimits(cfg: IrisConfig): ImageLimits {
   let base64Cap = Infinity;
+  let rawCap = Infinity;
   let longEdge = Infinity;
-  let strictestBlock: ProviderBlock | undefined;
 
   for (const agent of IMAGE_AGENTS) {
     // A per_agent entry naming a provider with no config block is a startup error
@@ -186,27 +213,31 @@ export function resolveImageLimits(cfg: IrisConfig): ImageLimits {
     } catch {
       continue;
     }
-    const block = cfg.providers[resolved.provider] as ProviderBlock | undefined;
-    const cap = BASE64_CAP_BY_PROVIDER[resolved.provider] ?? DEFAULT_BASE64_CAP;
-    const edge = longEdgeFor(resolved.model);
-    if (cap < base64Cap) {
-      base64Cap = cap;
-      strictestBlock = block;
-    }
+    const override = (cfg.providers[resolved.provider] as ProviderBlock | undefined)?.image_limits;
+    const cap = normalizeOverride(
+      override?.max_base64_bytes,
+      BASE64_CAP_BY_PROVIDER[resolved.provider] ?? DEFAULT_BASE64_CAP,
+    );
+    // Derived from THIS provider's cap, so an override of one number still moves the
+    // other: raising the base64 cap for a platform that allows 10 MB raises the file
+    // size that follows from it, without the operator restating the arithmetic.
+    const raw = normalizeOverride(override?.max_image_bytes, rawBytesForBase64Cap(cap));
+    const edge = normalizeOverride(override?.max_long_edge_px, longEdgeFor(resolved.model));
+    if (cap < base64Cap) base64Cap = cap;
+    if (raw < rawCap) rawCap = raw;
     if (edge < longEdge) longEdge = edge;
   }
 
   // Nothing resolved at all (a config with no reachable provider). Fall back to the
   // conservative defaults rather than publishing Infinity.
   if (!Number.isFinite(base64Cap)) base64Cap = DEFAULT_BASE64_CAP;
+  if (!Number.isFinite(rawCap)) rawCap = rawBytesForBase64Cap(base64Cap);
   if (!Number.isFinite(longEdge)) longEdge = STANDARD_LONG_EDGE_PX;
 
-  const override = strictestBlock?.image_limits;
-  const maxBase64 = normalizeOverride(override?.max_base64_bytes, base64Cap);
   return {
-    max_image_bytes: normalizeOverride(override?.max_image_bytes, rawBytesForBase64Cap(maxBase64)),
-    max_base64_bytes: maxBase64,
-    max_long_edge_px: normalizeOverride(override?.max_long_edge_px, longEdge),
+    max_image_bytes: rawCap,
+    max_base64_bytes: base64Cap,
+    max_long_edge_px: longEdge,
     max_dimension_px: MAX_DIMENSION_PX,
     media_types: [...new Set(Object.values(IMAGE_MEDIA_TYPES))],
     extensions: Object.keys(IMAGE_MEDIA_TYPES),
@@ -245,16 +276,83 @@ export function imageLimitsHint(limits: ImageLimits): string {
   );
 }
 
+// One image, as much of it as a check can know: its name for the message, its weight,
+// and its pixel size when that could be read from the header (util/imageSize.ts) —
+// absent for a format the reader does not recognize, which must never be the reason a
+// file is refused.
+export interface CandidateImage {
+  name: string;
+  bytes: number;
+  width?: number;
+  height?: number;
+}
+
+// Whether an image breaks the ONE dimension rule that is a rule: over this the model
+// returns an error instead of downscaling. Shared by both rejections below so the
+// uploaded and the rasterized case cannot enforce different ceilings.
+function overDimension(image: { width?: number; height?: number }): boolean {
+  return (
+    (image.width !== undefined && image.width > MAX_DIMENSION_PX) ||
+    (image.height !== undefined && image.height > MAX_DIMENSION_PX)
+  );
+}
+
 // Why one uploaded file cannot be converted, or null if it can. A single function so
 // the check and its explanation stay together: the route below it decides the status
 // code, not the wording.
-export function imageRejection(
-  file: { name: string; bytes: number },
+//
+// Size first, then dimensions, because weight is what nearly every rejected upload
+// will have failed on and a message should lead with the likely cause.
+export function imageRejection(image: CandidateImage, limits: ImageLimits): string | null {
+  if (image.bytes > limits.max_image_bytes) {
+    return (
+      `${image.name} is ${formatBytes(image.bytes)}, over the ${formatBytes(limits.max_image_bytes)} ` +
+      `limit for one image. ${imageLimitsHint(limits)}`
+    );
+  }
+  if (overDimension(image)) {
+    return (
+      `${image.name} is ${image.width}x${image.height} px, over the ` +
+      `${limits.max_dimension_px} px limit on a side — the vision model refuses an image that ` +
+      `large outright rather than shrinking it. ${imageLimitsHint(limits)}`
+    );
+  }
+  return null;
+}
+
+// The same two limits, for a page Iris rasterized out of a PDF rather than one the
+// caller uploaded.
+//
+// A separate message because the caller cannot act on the one above: they did not
+// choose these pixels, Iris did, at the DPI util/pdf.ts renders with. What they can
+// act on is the page SIZE, which is what put it over — rasterizing at a fixed DPI
+// means the pixel count scales with the physical page, so a letter page lands at
+// 1275x1650 and an ARCH-D drawing at 3600x5400. The exemption this replaces assumed
+// the DPI alone kept a page image modest, which is only true of the page sizes a
+// document normally comes in.
+export function rasterizedPageRejection(
+  pdfName: string,
+  pageNumber: number,
+  page: { bytes: number; width?: number; height?: number },
   limits: ImageLimits,
 ): string | null {
-  if (file.bytes <= limits.max_image_bytes) return null;
-  return (
-    `${file.name} is ${formatBytes(file.bytes)}, over the ${formatBytes(limits.max_image_bytes)} ` +
-    `limit for one image. ${imageLimitsHint(limits)}`
-  );
+  const where = `Page ${pageNumber} of ${pdfName}`;
+  const rendered = page.width ? ` (${page.width}x${page.height} px)` : "";
+  const advice =
+    `Iris rasterizes every page at a fixed resolution, so a page much larger than letter or A4 — ` +
+    `a drawing, a poster, a fold-out — renders past what the vision model accepts. Export or ` +
+    `split those pages at a smaller page size, or upload them as images you have resized.`;
+  if (page.bytes > limits.max_image_bytes) {
+    return (
+      `${where} renders to ${formatBytes(page.bytes)}${rendered}, over the ` +
+      `${formatBytes(limits.max_image_bytes)} limit for one page image. ${advice}`
+    );
+  }
+  if (overDimension(page)) {
+    return (
+      `${where} renders to ${page.width}x${page.height} px, over the ${limits.max_dimension_px} px ` +
+      `limit on a side. ${advice}`
+    );
+  }
+  return null;
 }

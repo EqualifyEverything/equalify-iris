@@ -136,6 +136,10 @@ providers:
     # raise what the model accepts — it re-creates the failure the check exists to
     # prevent, where an upload is accepted and then dies minutes later inside a model
     # call.
+    # Each value is read from the block of the provider it belongs to and then the
+    # STRICTEST across the agents that see an upload is what gets published, so a
+    # tighter number set here still narrows the limit in a mixed deployment where
+    # this provider only serves some of them.
     # image_limits:
     #   max_base64_bytes: 5242880   # provider's per-image cap, in base64 characters
     #   max_image_bytes: 3932160    # bytes on disk; defaults to 3/4 of the above

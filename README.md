@@ -626,11 +626,14 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   image is handed to the vision model byte for byte — nothing resizes or re-encodes it — so what
   the model accepts is what Iris can accept, and every such number is therefore a fact about a
   configured model or provider rather than about Iris. `src/providers/imageLimits.ts` holds all
-  of them (the per-provider per-image byte cap, the per-generation long edge, the format
-  allowlist, the one sentence of advice) and resolves them through the same `resolveAgentModel`
-  the router uses, taking the *strictest* value across the four agents that are handed a page
-  image. Everything downstream reads from there: the upload check and its `400`, `GET /v1/limits`,
-  the demo page's hint and `accept` list, and the API docs. This is not tidiness — the numbers had
+  of them (the per-provider per-image byte cap, the hard 8000 px ceiling, the per-generation long
+  edge, the format allowlist, the one sentence of advice) and resolves them through the same
+  `resolveAgentModel` the router uses, taking the *strictest* value on each axis independently
+  across the four agents that are handed a page image. Everything downstream reads from there:
+  the upload check and its `400`, `GET /v1/limits`, the demo page's hint and `accept` list, and
+  the API docs. A PDF is measured *after* rasterizing rather than as uploaded — its pages are
+  what reach the model, and at a fixed DPI a page image's size follows the physical page size, so
+  a large-format page can break a limit its 20 MB parent file does not. This is not tidiness — the numbers had
   been stated in five places and enforced in none, so the demo, the docs and the PRD all
   advertised **TIFF**, which Claude has never read (accepted, then failed inside the first model
   call) while rejecting **GIF**, which it does; and an oversized photo was accepted by multer's

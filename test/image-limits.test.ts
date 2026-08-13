@@ -16,9 +16,11 @@ import {
   imageRejection,
   longEdgeFor,
   modelGeneration,
+  rasterizedPageRejection,
   rawBytesForBase64Cap,
   resolveImageLimits,
 } from "../src/providers/imageLimits.ts";
+import { imageDimensions } from "../src/util/imageSize.ts";
 import { limitsRouter } from "../src/routes/limits.ts";
 import { mediaTypeFor } from "../src/pipeline/context.ts";
 
@@ -75,16 +77,30 @@ test("base64 caps convert to bytes on disk, floored to a whole encoding group", 
 
 test("the resolution tier is read from the model id, in both providers' spellings", () => {
   // Bedrock hyphenates, OpenRouter uses dots, and both name the same models.
-  assert.equal(modelGeneration(SONNET_46), 4.6);
-  assert.equal(modelGeneration("anthropic/claude-sonnet-4.6"), 4.6);
-  assert.equal(modelGeneration(OPUS_47), 4.7);
-  assert.equal(modelGeneration("anthropic/claude-opus-4.7"), 4.7);
-  // A bare major version is a whole number, not a parse failure.
-  assert.equal(modelGeneration("claude-opus-5"), 5);
-  assert.equal(modelGeneration("anthropic/claude-haiku-4-5-20251001-v1:0"), 4.5);
+  assert.deepEqual(modelGeneration(SONNET_46), { major: 4, minor: 6 });
+  assert.deepEqual(modelGeneration("anthropic/claude-sonnet-4.6"), { major: 4, minor: 6 });
+  assert.deepEqual(modelGeneration(OPUS_47), { major: 4, minor: 7 });
+  assert.deepEqual(modelGeneration("anthropic/claude-opus-4.7"), { major: 4, minor: 7 });
+  // A bare major version has an implied minor of 0, not a parse failure.
+  assert.deepEqual(modelGeneration("claude-opus-5"), { major: 5, minor: 0 });
+  assert.deepEqual(modelGeneration("anthropic/claude-haiku-4-5-20251001-v1:0"), {
+    major: 4,
+    minor: 5,
+  });
   // Anything this cannot read must say so rather than guess.
   assert.equal(modelGeneration("mock-model"), null);
   assert.equal(modelGeneration(""), null);
+});
+
+test("a two-digit minor version is a counter, not a decimal fraction", () => {
+  // Read as a number, "4.10" is 4.1 — below 4.7 — so a claude-*-4-10 would be treated
+  // as older than the model released before it and dropped to the standard tier.
+  // Nothing is named that yet, which is the only reason this was not a live bug.
+  assert.deepEqual(modelGeneration("claude-opus-4-10"), { major: 4, minor: 10 });
+  assert.equal(longEdgeFor("claude-opus-4-10"), 2576);
+  assert.equal(longEdgeFor("anthropic/claude-opus-4.10"), 2576);
+  // And the comparison still has to reject genuinely older models on the same axis.
+  assert.equal(longEdgeFor("claude-opus-3-10"), 1568);
 });
 
 test("an unreadable model id falls to the SMALLER long edge, not the larger", () => {
@@ -147,6 +163,53 @@ test("a per-provider override wins, for a model the table cannot know yet", () =
   // Not overridden directly, so it is still derived from the cap that WAS.
   assert.equal(limits.max_image_bytes, rawBytesForBase64Cap(10 * 1024 * 1024));
   assert.equal(limits.max_long_edge_px, 4000);
+});
+
+test("an override on a provider that only serves some agents still narrows the limit", () => {
+  // The override used to be read off whichever provider block won on byte cap, with a
+  // STRICT comparison — and both providers in the table are 5 MB, so the first agent's
+  // block always won the tie and an override anywhere else was silently dropped. The
+  // route then published 3.75 MB while the call on the tightened provider failed
+  // mid-run: the failure this module exists to prevent, reintroduced through its own
+  // escape hatch.
+  const limits = resolveImageLimits(
+    cfg({
+      default: "bedrock",
+      bedrock: { region: "us-east-1", default_model: SONNET_46 },
+      openrouter: {
+        api_key: "k",
+        default_model: "anthropic/claude-sonnet-4.6",
+        image_limits: { max_base64_bytes: 1024 * 1024 },
+      },
+      per_agent: { feedback: "openrouter" },
+    }),
+  );
+  assert.equal(limits.max_base64_bytes, 1024 * 1024);
+  assert.equal(limits.max_image_bytes, rawBytesForBase64Cap(1024 * 1024));
+});
+
+test("each limit is resolved on its own axis, so two overrides cannot cancel out", () => {
+  // A mixed deployment can have the tighter byte cap on one provider and the smaller
+  // long edge on the other. One "strictest block" carrying both would honour whichever
+  // axis it won on and drop the other.
+  const limits = resolveImageLimits(
+    cfg({
+      default: "bedrock",
+      bedrock: {
+        region: "us-east-1",
+        default_model: OPUS_47,
+        image_limits: { max_base64_bytes: 2 * 1024 * 1024 },
+      },
+      openrouter: {
+        api_key: "k",
+        default_model: "anthropic/claude-opus-4.7",
+        image_limits: { max_long_edge_px: 1000 },
+      },
+      per_agent: { feedback: "openrouter" },
+    }),
+  );
+  assert.equal(limits.max_base64_bytes, 2 * 1024 * 1024); // from bedrock's block
+  assert.equal(limits.max_long_edge_px, 1000); // from openrouter's, on the same call
 });
 
 test("an empty or nonsensical override falls back instead of rejecting everything", () => {
@@ -251,6 +314,144 @@ test("the hint leads with the rule an upload is actually rejected by", () => {
   assert.doesNotMatch(hint, /TIFF/i);
 });
 
+// ----- Pixel dimensions, the one dimension limit that IS a limit -----
+
+// Minimal valid headers, built by hand. A real encoder is not needed and would make
+// the test assert its behaviour rather than the parser's: what these check is that the
+// documented offsets are read, including the ones that are not simply "width, height".
+function pngHeader(width: number, height: number, bytes = 64): Buffer {
+  const buf = Buffer.alloc(Math.max(bytes, 24));
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buf, 0);
+  buf.write("IHDR", 12, "latin1");
+  buf.writeUInt32BE(width, 16);
+  buf.writeUInt32BE(height, 20);
+  return buf;
+}
+
+function gifHeader(width: number, height: number): Buffer {
+  const buf = Buffer.alloc(32);
+  buf.write("GIF89a", 0, "latin1");
+  buf.writeUInt16LE(width, 6);
+  buf.writeUInt16LE(height, 8);
+  return buf;
+}
+
+// The extended form, whose canvas size is 24-bit little-endian and stored minus one.
+function webpHeader(width: number, height: number): Buffer {
+  const buf = Buffer.alloc(32);
+  buf.write("RIFF", 0, "latin1");
+  buf.write("WEBP", 8, "latin1");
+  buf.write("VP8X", 12, "latin1");
+  buf.writeUIntLE(width - 1, 24, 3);
+  buf.writeUIntLE(height - 1, 27, 3);
+  return buf;
+}
+
+// A JPEG keeps its size in a frame header that sits behind a variable run of metadata
+// segments, so the parser has to walk them — here, one APP0 in the way.
+function jpegHeader(width: number, height: number): Buffer {
+  const buf = Buffer.alloc(64);
+  buf.writeUInt16BE(0xffd8, 0); // SOI
+  buf.writeUInt16BE(0xffe0, 2); // APP0
+  buf.writeUInt16BE(16, 4); // its length, counting these two bytes
+  buf.write("JFIF", 6, "latin1");
+  const sof = 2 + 2 + 16;
+  buf.writeUInt16BE(0xffc0, sof); // SOF0
+  buf.writeUInt16BE(17, sof + 2);
+  buf.writeUInt8(8, sof + 4); // sample precision
+  buf.writeUInt16BE(height, sof + 5); // height BEFORE width, unlike every other format
+  buf.writeUInt16BE(width, sof + 7);
+  return buf;
+}
+
+test("pixel dimensions are read from the header of every format on the allowlist", () => {
+  assert.deepEqual(imageDimensions(pngHeader(1275, 1650)), { width: 1275, height: 1650 });
+  assert.deepEqual(imageDimensions(gifHeader(640, 480)), { width: 640, height: 480 });
+  assert.deepEqual(imageDimensions(webpHeader(9000, 300)), { width: 9000, height: 300 });
+  // The one that is easy to get backwards, and would pass a square fixture.
+  assert.deepEqual(imageDimensions(jpegHeader(800, 1200)), { width: 800, height: 1200 });
+});
+
+test("an unreadable header returns null, so no format becomes refusable by accident", () => {
+  // The direction that matters: this reader gates a REJECTION. A format it cannot
+  // parse, a truncated upload, or a header whose numbers make no sense must all mean
+  // "cannot say", never "too big".
+  assert.equal(imageDimensions(Buffer.alloc(0)), null);
+  assert.equal(imageDimensions(Buffer.from("not an image at all")), null);
+  assert.equal(imageDimensions(pngHeader(100, 100).subarray(0, 20)), null);
+  assert.equal(imageDimensions(pngHeader(0, 0)), null);
+  // A JPEG whose segments run off the end rather than reaching a frame header.
+  const truncated = jpegHeader(10, 10).subarray(0, 8);
+  assert.equal(imageDimensions(truncated), null);
+});
+
+test("an image over the hard dimension ceiling is refused, cheap as it may be", () => {
+  const limits = resolveImageLimits(
+    cfg({ default: "bedrock", bedrock: { region: "us-east-1", default_model: SONNET_46 } }),
+  );
+  // 8000 px is not advice like the long edge is: past it the model returns an error
+  // instead of downscaling. And pixels are nearly free in bytes — a 2400x2400 line-art
+  // scan is 39 KB — so the byte cap does not stand in for this one.
+  const why = imageRejection({ name: "banner.png", bytes: 500_000, width: 9000, height: 3000 }, limits);
+  assert.ok(why, "an over-dimension image must be rejected");
+  assert.match(why, /banner\.png is 9000x3000 px/);
+  assert.match(why, /8000 px/);
+  // At the ceiling, not over it: published numbers have to be inclusive.
+  assert.equal(
+    imageRejection({ name: "ok.png", bytes: 500_000, width: 8000, height: 8000 }, limits),
+    null,
+  );
+  // Unknown dimensions cannot reject anything.
+  assert.equal(imageRejection({ name: "unknown.png", bytes: 500_000 }, limits), null);
+});
+
+test("size is reported before dimensions, because size is what nearly everything fails on", () => {
+  const limits = resolveImageLimits(
+    cfg({ default: "bedrock", bedrock: { region: "us-east-1", default_model: SONNET_46 } }),
+  );
+  const why = imageRejection({ name: "both.png", bytes: 6_300_000, width: 9000, height: 9000 }, limits);
+  assert.ok(why);
+  assert.match(why, /is 6 MB, over the 3\.7 MB limit/);
+});
+
+test("a rasterized PDF page is measured too, and says so as a page rather than a file", () => {
+  const limits = resolveImageLimits(
+    cfg({ default: "bedrock", bedrock: { region: "us-east-1", default_model: SONNET_46 } }),
+  );
+  // A letter page at the DPI Iris renders with. This is the case the old blanket PDF
+  // exemption was reasoning from, and it is fine.
+  assert.equal(
+    rasterizedPageRejection("report.pdf", 1, { bytes: 400_000, width: 1275, height: 1650 }, limits),
+    null,
+  );
+  // A large-format page at the same DPI is not: rasterizing at a fixed resolution means
+  // the page image scales with the physical page.
+  const why = rasterizedPageRejection(
+    "drawing.pdf",
+    7,
+    { bytes: 5_000_000, width: 3600, height: 5400 },
+    limits,
+  );
+  assert.ok(why, "an over-limit rendered page must be rejected");
+  // Which page of which file — the caller uploaded one PDF and needs to know where.
+  assert.match(why, /Page 7 of drawing\.pdf/);
+  assert.match(why, /3600x5400 px/);
+  assert.match(why, /3\.7 MB limit/);
+  // The advice is the one the caller can act on. Telling them to re-save the image
+  // would be wrong: they never chose these pixels, Iris did.
+  assert.match(why, /page size/);
+  assert.doesNotMatch(why, /1568 px/);
+  // The dimension ceiling applies to a rendered page as well, and at the same value —
+  // a 60-inch banner page rasterizes past it while staying light.
+  const wide = rasterizedPageRejection(
+    "banner.pdf",
+    1,
+    { bytes: 900_000, width: 9000, height: 4000 },
+    limits,
+  );
+  assert.match(wide ?? "", /9000x4000 px, over the 8000 px/);
+});
+
 // ----- GET /v1/limits -----
 
 async function serve(router: express.Router) {
@@ -340,9 +541,12 @@ async function serveUploads() {
   await new Promise((r) => server.once("listening", r));
   const port = (server.address() as AddressInfo).port;
   return {
-    post: async (name: string, bytes: number, type = "image/png") => {
+    // `file` is either a byte count (contents irrelevant) or the actual bytes, for a
+    // case that turns on what the header says rather than on how much there is.
+    post: async (name: string, file: number | Buffer, type = "image/png") => {
       const fd = new FormData();
-      fd.append("images", new Blob([new Uint8Array(bytes)], { type }), name);
+      const bytes = typeof file === "number" ? new Uint8Array(file) : new Uint8Array(file);
+      fd.append("images", new Blob([bytes], { type }), name);
       const res = await fetch(`http://127.0.0.1:${port}/v1/sessions`, { method: "POST", body: fd });
       const body = (await res.json()) as { error?: { code?: string; message?: string } };
       return { status: res.status, message: body.error?.message ?? "" };
@@ -363,6 +567,21 @@ test("an oversized image is refused at upload, not minutes later in a model call
     // against the file that produced the original report, a 6.3 MB photo.
     assert.match(message, /photo-man\.png is 6 MB, over the 3\.7 MB limit/);
     assert.match(message, /1568 px/);
+  } finally {
+    s.close();
+  }
+});
+
+test("an image the model would refuse for its dimensions is refused here instead", async () => {
+  // Light enough to sail past the byte cap — 9000x3000 of line art is a few hundred
+  // KB — and over the one ceiling the model errors on rather than downscaling. Without
+  // reading the header this upload is accepted and dies inside the first vision call.
+  const s = await serveUploads();
+  try {
+    const { status, message } = await s.post("wide.png", pngHeader(9000, 3000, 200_000));
+    assert.equal(status, 400);
+    assert.match(message, /wide\.png is 9000x3000 px/);
+    assert.match(message, /8000 px/);
   } finally {
     s.close();
   }
