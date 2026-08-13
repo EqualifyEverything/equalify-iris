@@ -248,6 +248,15 @@ echo "$stats" | jq -e '.pages_processed==3 and .documents_processed==1 and (.sin
 # widening the query behind it.
 echo "$stats" | jq -e 'has("session_id") or has("sessions") or has("github_login") or has("github_user_id") | not' >/dev/null \
   && pass "tally carries no per-user or per-session detail" || fail "stats shape" "$stats"
+# The quality half, end to end, on the case every new deployment is in: one document
+# is far below PUBLIC_QUALITY_MIN_DOCUMENTS, so the honest answer is to say nothing.
+# The field has to be PRESENT and null — the demo page distinguishes "too few
+# documents to say" from an older server that has no such field at all — and the
+# floor has to hold through the real store and the real route, not only in the unit
+# test that calls the store directly.
+echo "$stats" | jq -e 'has("quality") and .quality==null' >/dev/null \
+  && pass "quality stays silent below the document floor" \
+  || fail "stats quality" "expected quality:null on a one-document deployment, got $stats"
 
 echo "==> 8. GET /v1/sessions/{id}/logs (ndjson)"
 logs=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/logs")

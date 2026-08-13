@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   MAX_QUALITY_WINDOW_DAYS,
+  PUBLIC_QUALITY_MIN_DOCUMENTS,
   SIGNAL_LINKS_DROPPED,
   SIGNAL_LINT_ERROR,
   SIGNAL_ROUNDS,
@@ -262,6 +263,114 @@ test("nothing per-session, per-user or per-document is exposed", () => {
     assert.deepEqual(store.qualityStats().rules.map((r) => Object.keys(r).sort()), [
       ["documents", "id", "impact", "nodes", "share"],
     ]);
+  });
+});
+
+// --- the public subset, `Store.publicQuality` ---
+//
+// The same rows, read for a different audience: this one goes onto the demo page with
+// no authentication in front of it. The failure modes are therefore not "the workflow
+// files a wrong issue" but "the front page publishes a claim about identifiable
+// people's uploads", which is why the floor below is tested as hard as the arithmetic.
+
+// Enough delivered documents to clear the floor, so a test can be about the number
+// being reported rather than about whether anything is reported at all.
+function atFloor(store: Store, extra: (i: number) => RunSignal[] = () => [], rounds = 1): void {
+  for (let i = 0; i < PUBLIC_QUALITY_MIN_DOCUMENTS; i++) delivered(store, `pub_${i}`, extra(i), rounds);
+}
+
+test("a window below the floor says nothing rather than a percentage", () => {
+  withStore((store) => {
+    assert.equal(store.publicQuality(), null, "an empty deployment");
+    for (let i = 0; i < PUBLIC_QUALITY_MIN_DOCUMENTS - 1; i++) delivered(store, `pub_${i}`);
+    // One short. This is the assertion that keeps the floor from being quietly lowered
+    // to "we have some data": with 19 documents a single bad one is five percentage
+    // points, and the page's own document count makes the arithmetic invertible.
+    assert.equal(store.publicQuality(), null, `${PUBLIC_QUALITY_MIN_DOCUMENTS - 1} documents`);
+    delivered(store, "pub_last");
+    assert.ok(store.publicQuality(), "the floor itself must report");
+  });
+});
+
+test("the clean rate is the share of documents that finished with nothing open", () => {
+  withStore((store) => {
+    // Four of twenty left something unresolved. Stated the positive way round, so an
+    // inverted complement is visible as 20% rather than as a plausible-looking number.
+    atFloor(store, (i) => (i < 4 ? [{ code: SIGNAL_UNRESOLVED, count: 2 }] : []));
+    const q = store.publicQuality()!;
+    assert.equal(q.documents, PUBLIC_QUALITY_MIN_DOCUMENTS);
+    assert.equal(q.clean_rate, 16 / 20);
+    // Per document, not per open issue: the four documents left 8 issues between them,
+    // and a per-issue rate would report 12/20 for the same pipeline.
+    assert.equal(q.clean_rate + store.qualityStats().unresolved_rate, 1, "the two must agree");
+  });
+});
+
+test("a flawless window reports 1, and a wholly unresolved one reports 0", () => {
+  withStore((store) => {
+    atFloor(store);
+    assert.equal(store.publicQuality()!.clean_rate, 1, "no unresolved rows at all");
+    atFloor(store, () => [{ code: SIGNAL_UNRESOLVED, count: 1 }]);
+    // The bound worth pinning: `iris:unresolved` is written only when non-zero, so the
+    // clean count is a subtraction, and an off-by-one there shows up here as -0.05.
+    assert.equal(store.publicQuality()!.clean_rate, 0);
+  });
+});
+
+test("mean rounds is averaged over documents, and zero is a real answer", () => {
+  withStore((store) => {
+    // 10 documents at 2 passes and 10 at 0: the zeros are the good ones, and dropping
+    // them from the average — the natural mistake, since 0 looks like "nothing to
+    // record" — would report 2.0 for a pipeline that averages 1.0.
+    atFloor(store, () => [], 0);
+    for (let i = 0; i < 10; i++) delivered(store, `pub_${i}`, [], 2);
+    assert.equal(store.publicQuality()!.mean_rounds, 1);
+    // And a window where every document read clean on the first look is 0, not null:
+    // the floor guarantees a denominator, so unlike `qualityStats` there is no
+    // "nothing ran" case left for null to mean.
+    atFloor(store, () => [], 0);
+    assert.equal(store.publicQuality()!.mean_rounds, 0);
+  });
+});
+
+test("the public window is the default one, and older documents leave both halves", () => {
+  withStore((store) => {
+    // Enough documents to clear the floor, all of them unresolved and all of them old.
+    atFloor(store, () => [{ code: SIGNAL_UNRESOLVED, count: 1 }]);
+    assert.equal(store.publicQuality()!.clean_rate, 0, "precondition");
+    const db = (store as unknown as { db: { prepare(s: string): { run(...a: unknown[]): void } } }).db;
+    const hundredDaysAgo = new Date(Date.now() - 100 * 86_400_000).toISOString();
+    db.prepare(`UPDATE run_signals SET recorded_at = ?`).run(hundredDaysAgo);
+    // Aged out of the window, the deployment is back below the floor and says nothing —
+    // rather than reporting a clean rate over a numerator alone, which is how a window
+    // applied to one half of a fraction fails.
+    assert.equal(store.publicQuality(), null, "an aged-out window is not a measurement");
+
+    atFloor(store, () => []);
+    const q = store.publicQuality()!;
+    assert.equal(q.window_days, 30, "the window is echoed so the page need not hardcode it");
+    assert.equal(q.documents, PUBLIC_QUALITY_MIN_DOCUMENTS, "only the recent documents count");
+    assert.equal(q.clean_rate, 1, "and the old unresolved rows do not follow them");
+  });
+});
+
+test("the public subset carries nothing per document, and no rule ids", () => {
+  withStore((store) => {
+    // The narrower version of quality.test.ts' leak assertion, and the stricter one:
+    // this object reaches an unauthenticated endpoint. A rule id here would put a
+    // standing list of what Iris fails at on the front page — a to-do list rather than
+    // a claim about the service — and `share` over 20 documents is noise besides.
+    atFloor(store, (i) => (i === 0 ? [{ code: "heading-order", impact: "serious", count: 2 }] : []));
+    delivered(store, "ses_secret", [{ code: SIGNAL_LINKS_DROPPED, count: 1 }]);
+    const q = store.publicQuality()!;
+    assert.deepEqual(
+      Object.keys(q).sort(),
+      ["clean_rate", "documents", "mean_rounds", "window_days"],
+      "the shape is pinned, so a field added here is a deliberate public statement",
+    );
+    const serialized = JSON.stringify(q);
+    assert.ok(!serialized.includes("ses_secret"), "no session id");
+    assert.ok(!serialized.includes("heading-order"), "no rule id");
   });
 });
 
