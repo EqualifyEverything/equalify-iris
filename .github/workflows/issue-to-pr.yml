@@ -1009,12 +1009,14 @@ jobs:
           # which is where the person running the squash merge is looking when
           # GitHub prefills that message from the commits.
           #
-          # Warn, never fail — and that means `|| true` on every API call here, not
-          # just on the write. This step runs under `set -euo pipefail` AFTER the PR
-          # exists, so a transient 5xx on a bare `$(gh ...)` assignment would fail the
-          # job over an attribution courtesy and take the duplicate backstop below it
-          # down too. An empty value falls through to the warning paths already written
-          # for a missing issue or a missing id.
+          # Warn, never fail — and that means every API call in this block is handled,
+          # not just the write. This step runs under `set -euo pipefail` AFTER the PR
+          # exists, so a transient 5xx on a bare `$(gh ...)` would fail the job over an
+          # attribution courtesy and take the duplicate backstop below it down too.
+          # Reads whose value is only tested are `|| true`, and an empty value falls
+          # through to the warning paths already written for a missing issue or a
+          # missing id; the one read whose OUTPUT is reused is an `if !` instead, for
+          # the reason given there.
           CREDIT_ISSUE=$(gh pr view "$NEW_PR" --json closingIssuesReferences \
             --jq '.closingIssuesReferences[0].number // empty' || true)
           if [ -z "$CREDIT_ISSUE" ]; then
@@ -1058,15 +1060,26 @@ jobs:
                   # Read-modify-write of the body. Nothing else edits it once the
                   # model has created the PR, and the concurrency group rules out a
                   # second run of this workflow, so there is no writer to race.
-                  gh pr view "$NEW_PR" --json body --jq .body > /tmp/pr-body-now.md
-                  {
-                    cat /tmp/pr-body-now.md
-                    printf '\n\n---\n\n'
-                    printf 'Reported by @%s. No commit on this PR carries a co-author trailer for them, so **add this line to the squash-merge message** when merging:\n\n' "$REPORTER"
-                    printf '```\n%s\n```\n' "$TRAILER"
-                  } > /tmp/pr-body-credited.md
-                  gh pr edit "$NEW_PR" --body-file /tmp/pr-body-credited.md \
-                    || echo "::warning::could not add the credit line to #$NEW_PR's body"
+                  #
+                  # `if !`, not `|| true`, and the difference matters: the redirect
+                  # truncates the file before `gh` writes to it, so a failed read
+                  # leaves an EMPTY body — and the `gh pr edit` below would then
+                  # replace the PR's whole description with nothing but this footer.
+                  # Losing the body to fix the credit is worse than the missing
+                  # credit. Skip the write entirely and say so; `set -e` stays
+                  # satisfied either way.
+                  if ! gh pr view "$NEW_PR" --json body --jq .body > /tmp/pr-body-now.md; then
+                    echo "::warning::could not read #$NEW_PR's body, so the credit line was not added. Add it at merge: $TRAILER"
+                  else
+                    {
+                      cat /tmp/pr-body-now.md
+                      printf '\n\n---\n\n'
+                      printf 'Reported by @%s. No commit on this PR carries a co-author trailer for them, so **add this line to the squash-merge message** when merging:\n\n' "$REPORTER"
+                      printf '```\n%s\n```\n' "$TRAILER"
+                    } > /tmp/pr-body-credited.md
+                    gh pr edit "$NEW_PR" --body-file /tmp/pr-body-credited.md \
+                      || echo "::warning::could not add the credit line to #$NEW_PR's body"
+                  fi
                 fi
               fi
             fi

@@ -1051,10 +1051,16 @@ jobs:
           # claude[bot] alone would find nothing and stack a `--request-changes`
           # fallback on top of a review posted minutes earlier — possibly one that
           # approved. Unlike the guard this does NOT exclude the fallback's own body:
-          # if a fallback already covers this sha, a second one adds nothing.
+          # if a fallback already covers this sha, a second one adds nothing. It does
+          # exclude MARKER, for the same reason the guard and the verify step do:
+          # deleted workflow-review.yml's reviews on PRs #58, #61 and #62 are under
+          # this same login, and on a re-run against one of those shas they are not
+          # this job's own work to defer to.
           COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
             --jq ".[] | select(.user.login==\"claude[bot]\" or .user.login==\"github-actions[bot]\")
-                      | select(.commit_id==\"$HEAD_SHA\") | .id" \
+                      | select(.commit_id==\"$HEAD_SHA\")
+                      | select(((.body // \"\") | startswith(\"Scope: CI/workflow security review\")) | not)
+                      | .id" \
             | wc -l | tr -d ' ')
           if [ "${COUNT:-0}" -gt 0 ]; then
             echo "A review already exists for $HEAD_SHA despite outcome=$OUTCOME — nothing to do."
@@ -1120,8 +1126,17 @@ jobs:
           # (the GITHUB_TOKEN identity), not claude[bot], and a fallback review is
           # still a verdict on the PR. Matching only claude[bot] here would fail
           # the job immediately after the fallback successfully posted.
+          #
+          # The MARKER exclusion is not optional now that this accepts that login:
+          # deleted workflow-review.yml left `Scope: CI/workflow security review`
+          # reviews under it on PRs #58, #61 and #62, so dispatching a re-run against
+          # one of those shas would otherwise let a review this job did not write
+          # satisfy the one step whose job is to prove that it did.
           COUNT=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" --paginate \
-            --jq ".[] | select(.user.login==\"claude[bot]\" or .user.login==\"github-actions[bot]\") | select(.commit_id==\"$HEAD_SHA\") | .id" \
+            --jq ".[] | select(.user.login==\"claude[bot]\" or .user.login==\"github-actions[bot]\")
+                      | select(.commit_id==\"$HEAD_SHA\")
+                      | select(((.body // \"\") | startswith(\"Scope: CI/workflow security review\")) | not)
+                      | .id" \
             | wc -l | tr -d ' ')
           if [ "${COUNT:-0}" -eq 0 ]; then
             echo "::error::No review posted for $HEAD_SHA. Re-run with: gh workflow run code-review.yml -f pr_number=$PR_NUMBER"
