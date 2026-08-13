@@ -178,9 +178,8 @@ Two more values live in the repo that reads it — the `QUALITY_URL` **variable*
 **origin**, no `/v1`: the job appends the path, and a value carrying one produces a 404 that looks
 exactly like a deployment which never opted in) and the `QUALITY_TOKEN` **secret**, byte-for-byte the
 token above. Verify the pair with `gh workflow run quality-report.yml -f dry_run=true` rather than
-waiting for the weekly schedule; README's "Measured quality regressions" section has the full
-procedure, including why a green run that declines to file is the expected result on a young
-deployment.
+waiting for the weekly schedule; README's "Weekly quality report" section has the full procedure,
+including why a green run that declines to file is the expected result on a young deployment.
 
 ## 1. Authenticate (get a token)
 

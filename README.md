@@ -947,8 +947,9 @@ Turning it on is deliberate and per-deployment — three values, in one place ea
    gh secret set QUALITY_TOKEN
    ```
 
-   A mismatch is the one misconfiguration that goes **red** rather than quiet: the endpoint answers
-   401 and the job says the two have diverged.
+   A mismatch goes **red**: the endpoint answers 401 and the job says the two have diverged. It is
+   not the only red path — a non-https `QUALITY_URL`, a non-numeric `days` and a 200 that is not a
+   tally all fail the run too — so read what the run says rather than reaching for the token first.
 
 Then verify before waiting a week for the schedule:
 
