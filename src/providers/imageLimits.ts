@@ -380,9 +380,19 @@ const LARGE_FORMAT_ADVICE =
 // enough to pass 3.7 MB. Telling the owner of a scanned magazine to "split the
 // fold-outs" describes a document they do not have and a fix they cannot apply.
 function weightAdvice(page: { width?: number; height?: number }): string {
-  const largeFormat =
-    (page.width !== undefined && page.width > NORMAL_PAGE_MAX_PX) ||
-    (page.height !== undefined && page.height > NORMAL_PAGE_MAX_PX);
+  // Unmeasured, because the header would not parse. Neither branch below may be
+  // claimed then — the message already prints no dimensions for this page, and
+  // following that with "the page is letter- or A4-sized" would assert the very thing
+  // that could not be read.
+  if (page.width === undefined || page.height === undefined) {
+    return (
+      `A page renders past the limit when it is much larger than letter or A4, or when it is a ` +
+      `dense photographic or halftoned scan — pages are rendered losslessly, so that kind of ` +
+      `content does not compress. Split or re-export large pages at a smaller page size, or ` +
+      `re-save the pages as JPEG images and upload those instead of the PDF.`
+    );
+  }
+  const largeFormat = page.width > NORMAL_PAGE_MAX_PX || page.height > NORMAL_PAGE_MAX_PX;
   if (largeFormat) return LARGE_FORMAT_ADVICE;
   return (
     `The page is letter- or A4-sized, so this is density rather than page size: pages are ` +

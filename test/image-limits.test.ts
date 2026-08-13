@@ -512,6 +512,15 @@ test("a heavy page that is NOT large-format is diagnosed as density, not page si
   );
   assert.match(drawing ?? "", /fold-out/);
   assert.doesNotMatch(drawing ?? "", /density/);
+  // And a page whose header would not parse claims neither: the message prints no
+  // dimensions for it, so it must not go on to say what size the page is.
+  const unmeasured = rasterizedPageRejection("odd.pdf", 2, { bytes: 4_100_000 }, limits);
+  assert.ok(unmeasured);
+  assert.doesNotMatch(unmeasured, /px/);
+  assert.doesNotMatch(unmeasured, /The page is letter- or A4-sized/);
+  // It still has to say both things the caller might act on.
+  assert.match(unmeasured, /smaller page size/);
+  assert.match(unmeasured, /JPEG/);
 });
 
 // ----- GET /v1/limits -----
