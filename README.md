@@ -845,6 +845,21 @@ PR's own target issues against every other open PR, and comments on the PR askin
 compared. It warns rather than drafting one of them — which of the pair to keep is a judgement about
 two diffs, not something to decide by timestamp.
 
+## Telling a deployment that main moved
+
+`notify-uic-deploy.yml` posts a `repository_dispatch` on every push to `main`, so the UIC test
+deployment at `iris.equalify.uic.edu` can ship the exact SHA that just landed. That is all it
+does: it holds no infrastructure knowledge, and whether or how the commit is rolled out is the
+private deployment repo's business.
+
+It needs one secret, `UIC_DEPLOY_DISPATCH_TOKEN` — a fine-grained PAT with **`Contents: read
+and write` on the deployment repo only**, which is the least that `POST /dispatches` accepts. It
+grants nothing here: the job runs with `permissions: {}`.
+
+Nothing about this is load-bearing. With the secret absent — a fork, or before it is added — the
+step prints why and exits 0; if the token is revoked or the API is unreachable it warns instead.
+A deployment nobody else runs must never be able to turn this project's `main` red.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md). Found an

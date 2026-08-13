@@ -4,6 +4,8 @@ config.yaml
 .env
 *.log
 
-# Local-only: UIC test-deployment infra (Terraform code + state + secrets).
-# Not committed to the public upstream repo.
+# The UIC test deployment's Terraform used to live here as a gitignored directory.
+# It is now its own private repo (UIC-OSF/iris.equalify.uic.edu) with state in S3.
+# The rule stays so a stray local copy — which would hold real secrets — can never
+# be committed here by accident.
 /infra/
