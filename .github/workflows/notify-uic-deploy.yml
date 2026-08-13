@@ -18,6 +18,14 @@ on:
 # capability comes from the PAT below, which is scoped to the deployment repo.
 permissions: {}
 
+# Newest wins, explicitly. Two merges seconds apart would otherwise race with no
+# ordering guarantee, and if the older SHA's dispatch arrives last the far end
+# deploys the older commit until something else is pushed — the exact drift this
+# workflow exists to remove.
+concurrency:
+  group: notify-uic-deploy
+  cancel-in-progress: true
+
 jobs:
   notify:
     runs-on: ubuntu-latest
@@ -52,8 +60,14 @@ jobs:
           # all — DNS (6), refused (7), timeout (28), TLS (35). Without this, a
           # network blip skips every line below and fails the job, which is the exact
           # outcome the comments here promise not to cause.
+          #
+          # `--retry` because the fallback for a missed dispatch is a `::warning::` on
+          # a green job, which nobody reads — and until the next push to `main` the
+          # deployment quietly sits on an older commit. A still-failing curl lands in
+          # the same branch below, so retrying costs nothing this job promised.
           RC=0
-          CODE=$(curl -sS --max-time 30 -o /tmp/resp.txt -w '%{http_code}' \
+          CODE=$(curl -sS --max-time 30 --retry 3 --retry-connrefused \
+            -o /tmp/resp.txt -w '%{http_code}' \
             -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $TOKEN" \
