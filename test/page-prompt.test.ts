@@ -43,6 +43,44 @@ test("agents/page.md has the sections the loader and this test depend on", () =>
   assert.match(pageMd, /##\s*Required capability\s*\n[^#]*\bvision\b/i, "page.md must declare the vision capability");
 });
 
+// The heading-level rule (issue #82) came from user feedback on a page whose
+// subsection headings were set smaller than the section heading above them: the
+// extractor gave them the same <h2>, so a screen-reader user browsing by heading
+// met a flat list of siblings where the page had two levels.
+//
+// Nothing downstream can recover this. axe-core's `heading-order` only fires on a
+// level SKIPPED upward (<h2> then <h4>) — an <h2> that should have been an <h3> is
+// well-formed HTML and lints clean — and the Reader Agent never sees the source
+// image (see READER_SYSTEM in src/pipeline/review.ts), so it cannot know which
+// heading the page subordinated to which. The extraction prompt is the only place
+// the information exists, which is why this is asserted rather than left to the
+// review loop.
+//
+// Asserted on the clauses, like the signature-block test below, and including both
+// guards against over-correction: the rule has to demote a subordinate heading
+// without flattening genuine sibling sections into one level, and the prompt
+// carried "headings in correct nesting order" already while still producing what
+// the issue reported — so the clauses that distinguish this from that sentence are
+// the ones worth pinning.
+test("the page agent's heading-level rule keeps the clauses that make it a rule", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["level comes from the content's place in the hierarchy, not from type size",
+      /level comes from what its content belongs to, not from how large or bold the page sets it/],
+    ["the reported case: a smaller bold subsection heading is an <h3> under the <h2>",
+      /smaller bold line that introduces a subsection of the section above it is an <h3> under that <h2>/],
+    ["subordinate content steps one level down from the nearest preceding heading",
+      /step one level down from that heading/],
+    ["a genuine new top-level section is not demoted",
+      /Do not demote a heading that genuinely starts a new top-level section/],
+    ["a heading is not promoted for being set large",
+      /do not promote one merely because the page sets it in large type/],
+    ["levels are never skipped downward", /never skip a level on the way down/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
 // The signature-block rule (issue #67) came from user feedback on a part-signed
 // page: one party's fields had been rendered as a <dl> and the other's as form
 // controls, so a screen-reader user met the same block twice in two different
