@@ -18,6 +18,57 @@ server:
   # and the caller is a CI job with no GitHub identity. Aggregate-only by
   # construction; no document content is exposed.
   quality_token: ${IRIS_QUALITY_TOKEN}
+  # How many proxies sit in front of this deployment. Set it to 1 behind a single
+  # Caddy/nginx (2 behind a CDN in front of that, and so on), and leave it unset
+  # when Iris is exposed directly. Express's own vocabulary also works for a
+  # topology a count cannot describe — `loopback`, or a comma-separated list of
+  # proxy addresses and subnets; anything else warns and trusts nothing.
+  #
+  # It decides whose address the rate limits below count against. Unset, every
+  # request behind a proxy presents as the proxy's own address, so all of your
+  # users share one bucket — the log warns if it sees an X-Forwarded-For while
+  # this is unset. `true` is accepted but coerced to 1 with a warning: trusting
+  # the whole chain means believing the part of the header the CLIENT wrote, which
+  # would let any caller mint a fresh address per request.
+  trust_proxy: ${IRIS_TRUST_PROXY}
+  #
+  # What one caller may ask of this deployment per minute (PRD §9.4). v1 is a
+  # single process with a synchronous SQLite store, so a request flood is felt by
+  # everyone using it — including the runs already in flight — and the run cap
+  # below cannot help, since the cheap endpoints never reach the queue.
+  #
+  # Defaults are sized an order of magnitude above a working client (the demo
+  # polls a running session every 2.5s; a device-flow login polls every 5s) and
+  # are counted per GitHub token where one has been validated, per address
+  # otherwise — so one user's polling loop cannot spend everyone else's budget
+  # behind a shared NAT. Omit any key for its default; a valueless or
+  # non-positive key is treated as unset rather than as "allow nothing".
+  #
+  # `GET /v1/limits` publishes whatever is in effect, and a refused request gets
+  # 429 with `Retry-After`, so a client can pace itself instead of guessing.
+  rate_limits:
+    # Everything under /v1 except the liveness probe.
+    general_per_minute: 240
+    # /v1/auth only, per address — there is no credential yet to count against.
+    # Each device-flow poll costs an OUTBOUND call to GitHub, which is what this
+    # protects; it is not a brute-force limit (there is no password here, and the
+    # code is entered at github.com). Keep it well above 12/minute or logins
+    # behind a shared address become unreliable.
+    auth_per_minute: 60
+    # POST /v1/sessions, per user. A conversion takes minutes and runs are queued,
+    # so uploads past this only wait on each other.
+    upload_per_minute: 12
+    # Megabytes of upload body being RECEIVED at once, across all callers — the
+    # one number here that bounds memory rather than request count, and so the
+    # first to lower on a small machine. Each request is charged what its
+    # Content-Length declares (a request that declares nothing is charged the
+    # 128 MB per-request ceiling), so ordinary uploads never wait on each other
+    # and only genuinely large concurrent ones are refused.
+    max_upload_memory_mb: 256
+    # Set false to turn all of the above off — e.g. where a proxy in front of Iris
+    # already limits requests AND is the only way in. Off means no counting at
+    # all, and `GET /v1/limits` then reports `rate_limits: null`.
+    enabled: true
 
 storage:
   # Root directory for sessions/, tmp/, and the agents/ git checkout.

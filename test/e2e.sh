@@ -60,6 +60,17 @@ server:
   # 11c needs it on. Written literally rather than via \${IRIS_QUALITY_TOKEN} so
   # the test does not depend on the caller's environment.
   quality_token: $QUALITY_TOKEN
+  # A whole test run is one client from one address (issue #102): this script creates ~11
+  # sessions and polls twice a second throughout, which is nothing for a deployment but
+  # sits right on the DEFAULT upload budget of 12/minute when the mocks make runs finish
+  # in seconds. Raised rather than switched off, so what these steps exercise is still the
+  # real limiter — and \`auth_per_minute\` is deliberately left SMALL, because the device
+  # flow above is the last authentication this script performs, which makes /v1/auth the
+  # one budget it can exhaust on purpose to prove a refusal (step 3b).
+  rate_limits:
+    general_per_minute: 6000
+    upload_per_minute: 600
+    auth_per_minute: 10
 storage:
   data_dir: $DATA
   agents_dir: ./agents
@@ -147,6 +158,23 @@ echo "$limits" | jq -e '(.image.media_types|index("image/png")) and (.image.medi
 # send a 40-page PDF needs both numbers and should not have to guess one.
 echo "$limits" | jq -e '.max_pages > 0 and .max_pages == .pdf.max_pages' >/dev/null \
   && pass "page cap published ($(echo "$limits" | jq -r '.max_pages') pages)" || fail "limits pages" "$limits"
+# And how often a client may ask, plus what one request may carry (issue #102). Same
+# rationale as the file limits: a budget a client can read is one it can pace itself
+# against instead of discovering by being refused.
+echo "$limits" | jq -e '.rate_limits.general_per_minute > 0 and .rate_limits.window_seconds > 0
+  and .upload.max_request_bytes > 0 and .upload.max_files > 0' >/dev/null \
+  && pass "request budget published ($(echo "$limits" | jq -r '.rate_limits.general_per_minute')/min)" \
+  || fail "limits rate" "$limits"
+# The header on a real response, which is the only thing here that can see the limiter is
+# actually MOUNTED. Everything above reads config; a limiter left out of src/index.ts
+# would publish the same body and bound nothing.
+curl -si "$BASE/limits" | grep -qi '^ratelimit:' \
+  && pass "responses carry the remaining budget" || fail "ratelimit header" "no RateLimit header on /v1/limits"
+# …and the liveness probe deliberately does NOT, because a probe that can be refused
+# reports a healthy deployment as down.
+curl -si "$BASE/health" | grep -qi '^ratelimit:' \
+  && fail "health exempt" "the liveness probe is behind the rate limiter" \
+  || pass "liveness probe is not rate limited"
 
 echo "==> 2. auth gating (no token => 401)"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/me")
@@ -176,6 +204,27 @@ scope=$(curl -s "http://localhost:$GH_PORT/__last_device_scope")
 echo "$scope" | jq -e '.recorded==true and .present==false' >/dev/null \
   && pass "the device flow requested no scope (and a request was actually recorded)" \
   || fail "oauth scope" "expected a recorded device-flow body carrying no scope, got $scope"
+
+echo "==> 3b. the request budget is enforced, not just published (issue #102)"
+# Step 1b proved the limiter is mounted and publishes headers; this proves it REFUSES, in
+# the documented shape, through the real stack. /v1/auth is the endpoint to do it on: it
+# holds the strict budget (auth_per_minute: 10 in the config above), the login just above
+# is the last authentication this script performs, and every request there would otherwise
+# cost an outbound call to GitHub — which is the reason the limit exists.
+code=""
+for i in $(seq 1 12); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/auth/github/device")
+  [ "$code" = "429" ] && break
+done
+[ "$code" = "429" ] && pass "auth budget enforced after $i requests" \
+  || fail "auth limit" "expected a 429 within 12 requests to /v1/auth, got $code"
+# And the refusal is an Iris error with a retry hint rather than the library's default
+# plain-text body — a client that cannot parse a refusal cannot pace itself.
+refusal=$(curl -si -X POST "$BASE/auth/github/device")
+echo "$refusal" | grep -qi '^retry-after:' \
+  && echo "$refusal" | tail -1 | jq -e '.error.code=="rate_limited" and .error.details.retry_after_seconds > 0' >/dev/null \
+  && pass "429 carries Retry-After and an Iris error body" \
+  || fail "auth limit shape" "expected Retry-After and an Iris rate_limited body, got: $refusal"
 
 echo "==> 4. GET /v1/me"
 me=$(curl -s "${AUTH[@]}" "$BASE/me")

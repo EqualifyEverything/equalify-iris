@@ -2,7 +2,7 @@ import express from "express";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { bundledAppWarning, clientIdWarning, loadConfig } from "./config.ts";
+import { applyTrustProxy, bundledAppWarning, clientIdWarning, loadConfig } from "./config.ts";
 import { Store } from "./store/db.ts";
 import { makeAuthMiddleware } from "./auth/middleware.ts";
 import { authRouter } from "./routes/auth.ts";
@@ -11,6 +11,7 @@ import { sessionsRouter } from "./routes/sessions.ts";
 import { statsRouter } from "./routes/stats.ts";
 import { limitsRouter } from "./routes/limits.ts";
 import { qualityRouter } from "./routes/quality.ts";
+import { authRateLimit, generalRateLimit } from "./util/requestLimits.ts";
 
 const cfg = loadConfig();
 
@@ -34,10 +35,33 @@ const store = new Store(cfg.storage.database);
 const stale = store.failStaleSessions();
 if (stale > 0) console.log(`Marked ${stale} interrupted session(s) as failed on startup.`);
 const app = express();
+// Whose address `req.ip` is. Off unless a deployment says how many proxies are in front
+// of it, because the rate limits below are only per-caller if this is right: unset behind
+// Caddy every caller looks like the proxy, and set too permissively every caller can
+// claim to be someone new (see normalizeTrustProxy).
+//
+// The third startup warning comes from here, for either way this key can be wrong: `true`
+// is accepted by Express and defeats every per-address limit, because the address then
+// comes from a header the client can write (coerced to one hop), and a value Express cannot
+// compile would otherwise be a crash naming no config key (trusted as nothing instead).
+const proxyWarning = applyTrustProxy(app, cfg.server.trust_proxy);
+if (proxyWarning) console.warn(`WARNING: ${proxyWarning}`);
 app.use(express.json({ limit: "2mb" }));
 
 // Liveness probe (unauthenticated) — confirms the service is up.
+//
+// Registered ABOVE the rate limiter on purpose, and it is the only /v1 route that is: a
+// probe that answers 429 reports the deployment as down, which is the opposite of what it
+// is for. It also polls from one address (a container healthcheck runs on the same host),
+// so it is precisely the caller a per-address budget would spend itself on.
 app.get("/v1/health", (_req, res) => res.json({ status: "ok", service: "equalify-iris" }));
+
+// How much anyone may ask of this deployment (util/requestLimits.ts). Mounted here —
+// above every route below, below the probe above — so a flood is refused before it
+// reaches a handler, the store, or multer. The run queue bounds pipeline compute, which
+// is a later and narrower question: nothing in it stops a polling loop from occupying
+// the event loop with synchronous SQLite reads.
+app.use("/v1", generalRateLimit(cfg));
 
 // The public tally of pages converted (unauthenticated, aggregate-only). The
 // browser app reads it to report how many pages Iris has made accessible, so it
@@ -69,8 +93,11 @@ app.get("/", (_req, res) => {
 // Keep the old /demo path working for any shared links.
 app.get("/demo", (_req, res) => res.redirect(302, "/"));
 
-// Auth endpoints are unauthenticated by definition (§9.1).
-app.use("/v1/auth", authRouter(cfg));
+// Auth endpoints are unauthenticated by definition (§9.1), which is also why they get a
+// tighter budget than the rest: there is no credential to count against yet, and every
+// device-flow poll spends an outbound call to GitHub. Counted in ADDITION to the general
+// limiter above — the stricter of the two is simply the one that bites first.
+app.use("/v1/auth", authRateLimit(cfg), authRouter(cfg));
 
 // Everything else requires a GitHub bearer token.
 const auth = makeAuthMiddleware(store, cfg);

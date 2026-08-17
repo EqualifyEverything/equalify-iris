@@ -15,6 +15,10 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       IRIS_UPSTREAM_REPO: ${IRIS_UPSTREAM_REPO}
+      # Number of reverse proxies in front of this container (1 behind a single
+      # Caddy/nginx). Blank trusts nothing, which makes every caller behind a proxy
+      # share one rate-limit bucket. See .env.example.
+      IRIS_TRUST_PROXY: ${IRIS_TRUST_PROXY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       # For Bedrock instead, supply the standard AWS credential env vars.
     volumes:

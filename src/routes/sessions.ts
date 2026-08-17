@@ -17,6 +17,13 @@ import { outputBasenameFromUploads, convertedHtmlFilename } from "../util/output
 import { captureFixtures } from "../pipeline/regression.ts";
 import type { Fragment } from "../pipeline/fragment.ts";
 import { RunQueue } from "../util/queue.ts";
+import {
+  MAX_UPLOAD_FILES,
+  meterUploadBody,
+  requestSizeGate,
+  uploadGate,
+  uploadRateLimit,
+} from "../util/requestLimits.ts";
 import { RunLog } from "../store/runlog.ts";
 import {
   IMAGE_MEDIA_TYPES,
@@ -30,13 +37,47 @@ import { imageDimensions } from "../util/imageSize.ts";
 // be (see imageLimits.ts) because a PDF legitimately is: 25 pages of scans is a large
 // file whose page images are small, and this ceiling has to admit it. Per-image size is
 // checked in the handler instead, where the file's type is known.
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+//
+// `files` bounds the OTHER half of that memory, which a per-file ceiling cannot: a
+// multipart body may carry any number of parts, so 50 MB each with no count meant one
+// request could buffer gigabytes before this handler ran. It cannot cost a real upload
+// anything — a session is capped at 25 pages however they arrive, so 25 files is already
+// more than an accepted request can use (see requestLimits.ts).
+//
+// Note what this pair is NOT: their product is 1.25 GB, so they are per-part backstops and
+// never the total. What one request may buffer in all is enforced in two places that share
+// one ceiling — `requestSizeGate`, which refuses a declared length before reading anything,
+// and `meterUploadBody`, which counts an undeclared one as it arrives (requestLimits.ts).
+// The numbers here only have to stay above any single legitimate part.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024, files: MAX_UPLOAD_FILES },
+});
 
 // Wrap multer so its errors (e.g. file too large) become clean 400s.
 function uploadImages(req: Request, res: Response, next: NextFunction): void {
+  // The total-bytes ceiling for a body that declared no length, which multer's per-part
+  // limits are not (see requestLimits.ts). Called here rather than mounted as its own
+  // middleware because it counts bytes off the request stream, and everything between it
+  // and multer's `req.pipe()` has to be synchronous — one statement is as close as that
+  // gets. It answers the request itself if the body overruns, and multer then never calls
+  // back at all.
+  meterUploadBody(req, res);
   upload.array("images")(req, res, (err: unknown) => {
     if (err) {
-      sendError(res, 400, "invalid_request", `Upload failed: ${(err as Error).message}`);
+      // meterUploadBody above can have already answered 413 and unpiped this body mid-parse.
+      // It does not expect multer to call back at all after that, but a second write to a
+      // sent response would throw from in here, where nothing is listening.
+      if (res.headersSent) return;
+      // Multer says "Too many files" for the part count, which does not say how many are
+      // too many. That cap is one Iris chose rather than a property of multipart, so the
+      // refusal owes the caller the number and what to do about it.
+      const message =
+        (err as { code?: string }).code === "LIMIT_FILE_COUNT"
+          ? `Upload failed: at most ${MAX_UPLOAD_FILES} file parts per request, since one session ` +
+            `carries at most ${MAX_TOTAL_PAGES} pages however they arrive. Split a larger batch across sessions.`
+          : `Upload failed: ${(err as Error).message}`;
+      sendError(res, 400, "invalid_request", message);
       return;
     }
     next();
@@ -91,6 +132,16 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   // across all sessions (see util/queue.ts for why global rather than per-user,
   // and why waiting rather than rejecting).
   const queue = new RunQueue(cfg.defaults.max_concurrent_runs);
+
+  // What the queue cannot bound, because it is spent before a handler runs: upload bytes
+  // held in memory at once, and uploads accepted from one user per minute. Built once per
+  // router, since both hold the counters they enforce (util/requestLimits.ts).
+  //
+  // The in-flight gate is checked before the per-minute budget so a request refused for
+  // congestion does not also spend a minute's allowance — it was told to retry in
+  // seconds, and that advice has to still be true when it does.
+  const inFlightUploads = uploadGate(cfg);
+  const uploadBudget = uploadRateLimit(cfg);
 
   // Submit a run to the queue instead of starting it immediately.
   //
@@ -188,7 +239,13 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
 
   // POST /v1/sessions — create a session. Accepts images and/or PDFs; PDFs are
   // rasterized to one image per page, expanded in submitted order (§9.2).
-  r.post("/", uploadImages, async (req: AuthedRequest, res) => {
+  //
+  // Three gates run BEFORE `uploadImages`, and the order is the point: multer buffers the
+  // whole body into memory as it parses, so anything that runs after it has already paid
+  // for the request it was going to refuse. So the size the caller declares is checked
+  // first (free), then how many bytes of upload are already arriving, then the caller's
+  // upload budget for the minute — and only then is a byte of this body read.
+  r.post("/", requestSizeGate(), inFlightUploads, uploadBudget, uploadImages, async (req: AuthedRequest, res) => {
     const files = (req.files as Express.Multer.File[] | undefined) ?? [];
     if (files.length === 0) {
       sendError(res, 400, "invalid_request", "At least one file part named 'images' is required (image or PDF)");
