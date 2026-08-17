@@ -571,8 +571,16 @@ means parallelism isn't happening. `slowest_calls` and `phase_durations_ms` show
 are often different agents. Deliberately no dollar figure: the rate depends on the provider,
 region and model, all of which are deployment config, so the token counts are reported and
 whoever holds the price sheet does the multiplication. The four counts bill at four different
-rates and are never summed here; note that `input` **excludes** cached tokens, so the whole
-prompt is `input + cache_read + cache_write`.
+rates and are never summed here; note that `input` **excludes** tokens read from the cache, so the
+whole prompt is `input + cache_read + cache_write`.
+
+One caveat on that sum, for whoever is doing the multiplication. It is exact on a provider that
+reports the four counts as disjoint sets, which is what the Anthropic-shaped APIs do. On an
+OpenAI-shaped one, cache reads are reported *inside* the prompt total and are subtracted back out
+here, but whether cache **writes** are also inside it is undocumented — so where they are, they
+are counted once as `input` and again as `cache_write`, and the sum is high by that amount.
+Over-counting is the deliberate choice: the alternative subtracts a number that may never have
+been in the total, which understates the prompt and reports a cache as cheaper than it was.
 
 `calls_reported` is how many of `model_calls.count` reported any usage at all. When it is lower
 than `count`, these sums cover only part of the run — a cost derived from them is a floor, not

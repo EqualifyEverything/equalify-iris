@@ -37,6 +37,36 @@ const IDLE_TIMEOUT_MS = 60_000;
 // here to bound the pathological case, not to bound normal slow work.
 const MAX_TOTAL_MS = 15 * 60_000;
 
+// What the upstream actually sends in a usage block, which is a superset of what
+// `Usage` declares: today `service_tier` and a nested `cache_creation` breakdown ride
+// along beside the four counts, and a model release can add more without notice.
+type RawUsage = Record<string, unknown>;
+
+// The four counts, and nothing else. The router spreads usage FLAT onto the
+// `model_call` log event so diagnostics can sum it straight off the line, so an
+// unknown field here is not inert: it lands in the run log, and a nested object lands
+// there too, contradicting the one-level-deep shape that spread depends on. Picking is
+// also what the OpenRouter adapter already does (`normalizeUsage`), so both adapters
+// hand the router the same four keys whatever their upstream volunteers.
+//
+// A non-number is dropped rather than coerced: `Number(undefined)` is NaN and
+// `Number(null)` is 0, and a 0 the upstream never sent would read as a free call
+// instead of an unreported one — the distinction `tokens.calls_reported` exists for.
+function pickUsage(raw?: RawUsage): Usage | undefined {
+  if (!raw) return undefined;
+  const usage: Usage = {};
+  for (const key of [
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+  ] as const) {
+    const v = raw[key];
+    if (typeof v === "number" && Number.isFinite(v)) usage[key] = v;
+  }
+  return Object.keys(usage).length ? usage : undefined;
+}
+
 // Anthropic's streaming event shapes, narrowed to the fields this adapter reads.
 // Deltas other than text (e.g. input_json_delta) are ignored: structured output
 // here is prompt-driven, not tool-driven, so text is the only content that arrives.
@@ -49,8 +79,13 @@ interface StreamEvent {
   // and the message_delta that closes the message carries the output total. Both
   // are read, because cost needs both and the input half is the one a stalled call
   // still knows.
-  message?: { usage?: Usage };
-  usage?: Usage;
+  //
+  // Typed as an open record rather than as `Usage`, because it is not one: the
+  // upstream sends more than the four fields Usage declares (`service_tier`, a
+  // nested `cache_creation` breakdown), and calling it `Usage` here would license
+  // passing the whole object on — see `pickUsage`.
+  message?: { usage?: RawUsage };
+  usage?: RawUsage;
 }
 
 // Bedrock delivers mid-stream service failures as events on an otherwise-200
@@ -178,7 +213,8 @@ export class BedrockProvider implements ModelProvider {
     // counts the moment the output's arrived. Reported as it accumulates so a call
     // that later stalls or truncates still accounts for what it spent.
     let usage: Usage | undefined;
-    const mergeUsage = (u?: Usage): void => {
+    const mergeUsage = (raw?: RawUsage): void => {
+      const u = pickUsage(raw);
       if (!u) return;
       usage = { ...usage, ...u };
       req.onUsage?.(usage);

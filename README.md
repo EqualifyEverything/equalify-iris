@@ -294,7 +294,7 @@ direction: it takes a bearer token too, but its own shared secret rather than a 
 | `POST /v1/sessions/{id}/feedback` | Submit feedback, trigger a re-run |
 | `POST /v1/sessions/{id}/close` | Finalize the session and clean tmp |
 | `GET  /v1/sessions/{id}/logs` | Fetch the run log (ndjson) |
-| `GET  /v1/sessions/{id}/diagnostics` | Timing/health summary (phase + per-call durations, in-flight/hung call) |
+| `GET  /v1/sessions/{id}/diagnostics` | Cost/timing/health summary (token counts per run and per agent, phase + per-call durations, in-flight/hung call) |
 
 Full copy-pasteable bash/curl walkthrough of every endpoint: **[docs/API.md](docs/API.md)**.
 To prove the endpoints work end-to-end (mock GitHub + mock model, no credentials needed):

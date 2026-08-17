@@ -80,6 +80,26 @@ export function normalizeUsage(u?: OpenAIUsage): Usage | undefined {
   return Object.keys(usage).length ? usage : undefined;
 }
 
+// Add two usage snapshots. Used across retry attempts, where the counts ADD rather
+// than replace: an attempt that reported tokens and was then abandoned was still
+// billed for them, so reporting only the surviving attempt understates the call — and
+// understates it invisibly, since `tokens.calls_reported` would still say the call was
+// fully accounted for.
+//
+// Absent stays absent when neither side reported: a 0 nobody sent reads as a free
+// half of the call rather than an unreported one.
+function addUsage(a?: Usage, b?: Usage): Usage | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  const sum: Usage = { ...a };
+  for (const key of Object.keys(b) as (keyof Usage)[]) {
+    const v = b[key];
+    if (v == null) continue;
+    sum[key] = (sum[key] ?? 0) + v;
+  }
+  return sum;
+}
+
 // OpenRouter adapter (PRD §10.3). Speaks the OpenAI-compatible chat
 // completions API that OpenRouter exposes, including image content parts.
 export class OpenRouterProvider implements ModelProvider {
@@ -146,6 +166,10 @@ export class OpenRouterProvider implements ModelProvider {
     const payload = JSON.stringify(body);
 
     let lastError: unknown;
+    // What the attempts before this one were billed for. Unlike `text`, which must
+    // start empty on a retry or the same passage ships twice, tokens an abandoned
+    // attempt reported were spent and stay spent — this call cost their sum.
+    let spent: Usage | undefined;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const controller = new AbortController();
       let expired: StallKind | null = null;
@@ -170,8 +194,9 @@ export class OpenRouterProvider implements ModelProvider {
       let text = "";
       let finishReason: string | undefined;
       let sawDone = false;
-      // Per-attempt for the same reason `text` is: a retry must not report the
-      // abandoned attempt's tokens on top of its own.
+      // Per-attempt, like `text`, because the chunks of one attempt merge field by
+      // field. What is reported outward is this attempt plus `spent`, since the bill
+      // covers every attempt (see `addUsage`).
       let usage: Usage | undefined;
       const stalled = (kind: StallKind): StalledStreamError =>
         new StalledStreamError({
@@ -225,7 +250,8 @@ export class OpenRouterProvider implements ModelProvider {
         const reported = normalizeUsage(parsed.usage);
         if (reported) {
           usage = { ...usage, ...reported };
-          req.onUsage?.(usage);
+          const total = addUsage(spent, usage);
+          if (total) req.onUsage?.(total);
         }
         const choice = parsed.choices?.[0];
         if (choice?.delta?.content) text += choice.delta.content;
@@ -310,8 +336,13 @@ export class OpenRouterProvider implements ModelProvider {
         if (finishReason === "length") {
           throw new TruncatedResponseError(this.name, req.model, this.maxTokens, text.length);
         }
-        return { text, model: req.model, provider: this.name, usage };
+        return { text, model: req.model, provider: this.name, usage: addUsage(spent, usage) };
       } catch (e) {
+        // This attempt is over however it ends, so whatever it reported joins the
+        // total before the loop either retries or rethrows — the router reads usage
+        // off the callback on the failing path, and off the result on the surviving
+        // one, and both have to agree that the earlier attempts were paid for.
+        spent = addUsage(spent, usage);
         // Our own clock firing is a diagnosis, not a blip: never retried, and never
         // reported as the opaque abort the runtime actually threw.
         if (expired) throw stalled(expired);
