@@ -333,6 +333,47 @@ test("an upload that will not say how big it is is charged the whole per-request
   }
 });
 
+test("every reader of the per-request ceiling follows it when it moves", async () => {
+  // Four things depend on this one number: the two 413 paths (tested below, each with its
+  // own lowered ceiling), the charge an undeclared upload is billed against the in-flight
+  // budget, and the number GET /v1/limits publishes. They read it through one accessor,
+  // and this is the test that says so — a reader that quietly went back to the constant
+  // would still be right in production and wrong everywhere the ceiling is not 128 MB,
+  // which is exactly the kind of drift no other test in this file would notice.
+  //
+  // 700 KB rather than a round megabyte: distinct from MAX_UPLOAD_BYTES *and* from the
+  // 1 MB budget, so neither a reader stuck on the constant nor one that confused the
+  // ceiling with the budget can pass.
+  __setUploadCeiling(700_000);
+
+  const app = express();
+  app.use("/v1/limits", limitsRouter(cfg()));
+  const limitsServer = app.listen(0);
+  await new Promise((r) => limitsServer.once("listening", r));
+  const srv = await uploadServer(uploadGate(cfg({ max_upload_memory_mb: 1 })));
+  try {
+    const published = (await fetch(`http://127.0.0.1:${(limitsServer.address() as AddressInfo).port}/v1/limits`).then(
+      (r) => r.json(),
+    )) as { upload: { max_request_bytes: number } };
+    assert.equal(published.upload.max_request_bytes, 700_000);
+
+    // Same number as the charge: one undeclared upload fits in the 1 MB budget, a second
+    // does not, and what it says it was refused for is the lowered ceiling.
+    const first = rawPost(srv.url, {}, "small");
+    await srv.entered(1);
+    const second = await rawPost(srv.url, {}, "small");
+    assert.equal(second.status, 429);
+    const details = (JSON.parse(second.body) as { error: { details: Record<string, number> } }).error.details;
+    assert.equal(details.request_bytes, 700_000);
+    assert.equal(details.in_flight_bytes, 700_000);
+    srv.releaseAll();
+    assert.equal((await first).status, 200);
+  } finally {
+    srv.close();
+    limitsServer.close();
+  }
+});
+
 test("an upload charge comes back when the client hangs up mid-request", async () => {
   const held: Array<() => void> = [];
   let announceEntry: () => void = () => {};
