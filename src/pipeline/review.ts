@@ -49,12 +49,23 @@ text-only view (what a screen reader announces, in order). Cross-check them, and
 the axe-core lint results provided.
 
 In the flattened view, anything in square brackets is a structural annotation, not content:
-[Heading 1-6], [List item], [Link], [Image], [Image alt], [Table], [Header row], [Row],
-[Field input|textarea|select|button|summary], [Label], [Quote], [Caption], [Term],
-[Definition], plus [N rows, M columns], [empty], [no caption], [spans N columns],
-[spans N rows], [alt missing] and [decorative, alt empty]. A field's own announced name
-follows its marker, so [Field input text] with nothing after it is a control with no
-accessible name at all. Tables are expanded row by row with cells separated by " | ".
+[Heading 1-6], [List item], [List item N], [Link], [Image], [Image alt], [Table],
+[Header row], [Row], [Field input|textarea|select|button|summary], [Label], [Quote],
+[Caption], [Term], [Definition], plus [N rows, M columns], [empty], [no caption],
+[spans N columns], [spans N rows], [alt missing] and [decorative, alt empty]. A field's own
+announced name follows its marker, so [Field input text] with nothing after it is a control
+with no accessible name at all. Tables are expanded row by row with cells separated by " | ".
+
+An item of an ORDERED list carries the number it is announced with — [List item 5] — and an
+item of an unordered or definition list carries none, because there is no number there. Those
+numbers are not in the items' text: an <ol> counts 1, 2, 3 by itself whatever the items
+contain, so a source's own numbering survives only in start on the <ol> and value on an <li>.
+Read them the way you read table cells that hold numbers, and report a contradiction you can
+point at: a list numbered 1, 2, 3 sitting under a note that says items 3 and 4 are not listed,
+a numbering note beside a sequence that is in fact unbroken, or an announced number that
+disagrees with the same list in the source-page excerpt below. You do NOT see the source
+images, so a plain 1, 2, 3 with nothing to contradict it is not evidence of anything — do not
+report a list for being consecutive, and never suggest a number the document does not show.
 
 Treat a table that reports [0 rows], a [Field ...] with nothing announced after it, and an
 [Image] [alt missing] as evidence of a real problem. Do NOT report these, which are correct
