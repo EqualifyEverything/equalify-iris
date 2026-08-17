@@ -53,6 +53,26 @@ function evict(now: number): void {
   }
 }
 
+/**
+ * Whether this process has recently validated this exact token — i.e. whether the string
+ * in an `Authorization` header is a credential or just a string.
+ *
+ * Read by the rate limiter (util/requestLimits.ts), which counts a request against its
+ * credential rather than its source address wherever it can: one GitHub user is one
+ * client no matter how many of them share a NAT or a reverse proxy. It needs this
+ * predicate because it runs BEFORE this middleware — nothing has resolved `req.user`
+ * yet — and because keying on any token presented would let a caller mint a fresh budget
+ * per random string, on the path that costs a `GET /user` per miss.
+ *
+ * Deliberately no side effects: a cache HIT here must not extend the entry's life, or a
+ * busy caller could hold a revoked token alive past its TTL. See `evict` on why this
+ * cache is FIFO rather than LRU.
+ */
+export function isValidatedToken(token: string): boolean {
+  const entry = tokenCache.get(token);
+  return entry !== undefined && entry.expires > Date.now();
+}
+
 // Test-only: the cache is module-level state, so it survives between tests in one
 // process and would otherwise let one test's token satisfy another's assertion.
 export function __clearTokenCache(): void {

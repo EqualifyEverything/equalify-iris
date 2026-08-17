@@ -31,6 +31,28 @@ export interface ProviderBlock {
   };
 }
 
+// How much one caller may ask of this deployment per minute, and how many uploads it
+// will receive at once. Enforced in util/requestLimits.ts and published by
+// `GET /v1/limits`; see that module for why each default is the size it is.
+export interface RateLimitConfig {
+  // Off switch for a deployment that limits request volume somewhere in front of Iris
+  // and would rather not have two budgets to reason about. Not the way to widen a
+  // limit — raise the numbers for that; this removes the bound entirely.
+  enabled: boolean;
+  // Requests per minute across all of `/v1`, per credential (or per address, before a
+  // credential has been validated).
+  general_per_minute: number;
+  // Requests per minute to `/v1/auth`, per address. Necessarily per address: there is
+  // no credential yet on the endpoint that issues one.
+  auth_per_minute: number;
+  // Session creations per minute, per user.
+  upload_per_minute: number;
+  // Megabytes of upload body being received at once, across all callers. A rate limit
+  // counts requests over a window; this bounds the ones that OVERLAP, which is what
+  // upload memory is actually spent by — multer buffers every part in memory.
+  max_upload_memory_mb: number;
+}
+
 export interface IrisConfig {
   server: {
     port: number;
@@ -46,6 +68,26 @@ export interface IrisConfig {
     // should unlock it and no user who should be denied their own. It is also read by
     // a CI job, which has no GitHub user to be.
     quality_token?: string;
+    // How many reverse proxies sit in front of this deployment, as a hop count (1 for a
+    // single Caddy or nginx). Passed to Express's `trust proxy` setting, which is what
+    // decides whether `req.ip` is the caller's address or the proxy's.
+    //
+    // It is a rate-limiting knob before it is anything else: unset behind a proxy, every
+    // caller presents as the same address and the per-address limits treat the whole
+    // deployment as one client. Left off by default because the opposite mistake is
+    // worse — trusting a hop that does not exist means believing an `X-Forwarded-For`
+    // the client wrote, which turns a per-address limit into no limit at all. A hop
+    // count is the safe form: with 1, only the address the proxy appended is read, and
+    // whatever the client claimed before it is ignored.
+    //
+    // Also accepts an Express-recognized string (`loopback`, a subnet) for a deployment
+    // whose topology a count cannot describe. Boolean `true` is coerced to 1 with a
+    // warning; see trustProxyWarning.
+    trust_proxy?: number | boolean | string;
+    // Optional overrides for the request-volume budget. Normalized by loadConfig, and
+    // resolved through resolveRateLimits at every read, so a config that omits the block
+    // (or a hand-built one in a test) still gets a complete, usable set.
+    rate_limits?: Partial<RateLimitConfig>;
   };
   storage: { data_dir: string; agents_dir: string; database: string };
   github: {
@@ -118,6 +160,95 @@ export const DEFAULT_MAX_CONCURRENT_RUNS = 2;
 // genuinely needs more concurrency than this wants multiple instances and a
 // shared Postgres store (§10.2), which v1 does not implement.
 export const MAX_CONCURRENT_RUNS_CEILING = 32;
+
+// The request-volume budget when the deployment doesn't say. Each is per minute; see
+// util/requestLimits.ts for the traffic each one was sized against, which is the thing
+// to re-check before changing one. In short: the demo polls a running session every
+// 2.5s (24/min) and a device-flow login polls every 5s (12/min) for as long as the user
+// takes to approve it, so these sit an order of magnitude above a working client and
+// still bound a loop that has come off its leash.
+export const DEFAULT_GENERAL_PER_MINUTE = 240;
+export const DEFAULT_AUTH_PER_MINUTE = 60;
+export const DEFAULT_UPLOAD_PER_MINUTE = 12;
+// Upload body being received at once, in megabytes — the only one of these that bounds
+// MEMORY rather than request count, and so the first to reduce on a small machine. 256 MB
+// is two uploads at the 128 MB per-request ceiling (util/requestLimits.ts), or any number
+// of ordinary ones: a full 25-page session of images is ~92 MB and a typical one a few MB,
+// so this refuses concurrent uploads only when they are genuinely large.
+export const DEFAULT_MAX_UPLOAD_MEMORY_MB = 256;
+
+// Coerce one configured limit into a usable positive integer. Same "absent means the
+// default, not zero" trap as the concurrency normalizers, and here the consequence of
+// letting a 0 through is the most severe of the set: express-rate-limit reads a limit of
+// 0 as "allow nothing", so a valueless `general_per_minute:` in YAML (null, and
+// Number(null) is 0) would answer 429 to every request the deployment ever receives. A
+// non-positive value is therefore treated as unset rather than obeyed; `enabled: false`
+// is how a deployment turns limiting off, which says so in one place instead of being
+// inferred from a number.
+function normalizePositiveInt(value: unknown, fallback: number): number {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "string" && value.trim() === "") return fallback;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return n < 1 ? fallback : Math.floor(n);
+}
+
+/**
+ * The complete request-volume budget for a config that may specify none, some, or all of
+ * it. Idempotent, and deliberately called at every read (util/requestLimits.ts,
+ * routes/limits.ts) as well as once by loadConfig: `server.rate_limits` is optional, so
+ * the alternative is every consumer carrying its own fallback and one of them eventually
+ * disagreeing about what the default is.
+ *
+ * Only an explicit `false` disables limiting. Anything else — including a config that
+ * says nothing at all — is on, because the failure mode of a typo'd key silently
+ * removing the bound is exactly the state this feature exists to prevent.
+ */
+export function resolveRateLimits(raw: Partial<RateLimitConfig> | undefined): RateLimitConfig {
+  const enabled = !(raw?.enabled === false || String(raw?.enabled) === "false");
+  return {
+    enabled,
+    general_per_minute: normalizePositiveInt(raw?.general_per_minute, DEFAULT_GENERAL_PER_MINUTE),
+    auth_per_minute: normalizePositiveInt(raw?.auth_per_minute, DEFAULT_AUTH_PER_MINUTE),
+    upload_per_minute: normalizePositiveInt(raw?.upload_per_minute, DEFAULT_UPLOAD_PER_MINUTE),
+    max_upload_memory_mb: normalizePositiveInt(raw?.max_upload_memory_mb, DEFAULT_MAX_UPLOAD_MEMORY_MB),
+  };
+}
+
+/**
+ * Coerce a configured `trust_proxy` into a value Express's `trust proxy` setting accepts.
+ *
+ * Absent, empty, `false`, `"false"`, `0` -> false (trust nothing, the safe default).
+ * A number or numeric string -> that many hops. Any other string is passed through for
+ * Express to interpret (`loopback`, a subnet list). `true` becomes 1, because trusting
+ * every hop means believing an `X-Forwarded-For` the client wrote — see
+ * trustProxyWarning, which says so out loud rather than silently obeying or silently
+ * correcting.
+ */
+export function normalizeTrustProxy(value: unknown): number | boolean | string {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "boolean") return value ? 1 : false;
+  if (typeof value === "number") return Number.isFinite(value) && value > 0 ? Math.floor(value) : false;
+  const text = String(value).trim();
+  if (text === "" || text.toLowerCase() === "false") return false;
+  if (text.toLowerCase() === "true") return 1;
+  const n = Number(text);
+  if (Number.isFinite(n)) return n > 0 ? Math.floor(n) : false;
+  return text;
+}
+
+// A boot-time warning for the one `trust_proxy` value that is accepted and unsafe.
+// Returned rather than logged, like the two GitHub warnings above, so it is testable and
+// the caller decides where it goes.
+export function trustProxyWarning(value: unknown): string | undefined {
+  if (value !== true && String(value).trim().toLowerCase() !== "true") return undefined;
+  return (
+    `server.trust_proxy is "true", which tells Express to trust the whole X-Forwarded-For chain — ` +
+    `including the part a client wrote, so any caller could present a fresh address per request and ` +
+    `the per-address rate limits would bound nothing. Using 1 hop instead. Set it to the number of ` +
+    `proxies actually in front of this deployment.`
+  );
+}
 
 // Reader/editor rounds a document gets when the deployment doesn't say. Since the
 // per-request override was removed (§9.2 "Amended"), this config value is the ONLY
@@ -392,6 +523,13 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   parsed.storage.data_dir = resolve(parsed.storage.data_dir);
   parsed.storage.agents_dir = resolve(parsed.storage.agents_dir);
   parsed.storage.database = resolve(parsed.storage.database);
+  // Normalize the request-volume budget here too, so the numbers `GET /v1/limits`
+  // publishes are the same object the limiters were built from. `trust_proxy` is
+  // deliberately NOT normalized here: index.ts needs the value as written to decide
+  // whether to warn about it (a `true` coerced to 1 in this function is a `true` nobody
+  // can warn about afterwards).
+  parsed.server = parsed.server ?? ({} as IrisConfig["server"]);
+  parsed.server.rate_limits = resolveRateLimits(parsed.server.rate_limits);
   // GitHub host defaults (overridable for GitHub Enterprise / testing).
   parsed.github.api_base_url = parsed.github.api_base_url || "https://api.github.com";
   parsed.github.oauth_base_url = parsed.github.oauth_base_url || "https://github.com";

@@ -8,6 +8,9 @@ GitHub token (§0c).
 These commands are copy-pasteable. They are the same calls exercised by `test/e2e.sh`, which
 runs the whole lifecycle against mock GitHub + mock model services and asserts every response.
 
+Requests are rate limited per client, and every response says how much of the budget is left:
+§3.2 has the numbers, the headers, and what a `429` looks like.
+
 ```bash
 export BASE=http://localhost:8080/v1
 ```
@@ -319,7 +322,15 @@ curl -s "$BASE/limits" | jq
     "extensions": [".png", ".jpg", ".jpeg", ".gif", ".webp"],
     "hint": "Each image must be under 3.7 MB and in one of PNG, JPEG, GIF, WEBP format. …"
   },
-  "pdf": { "max_pages": 25 }
+  "pdf": { "max_pages": 25 },
+  "upload": { "max_files": 25, "max_request_bytes": 134217728 },
+  "rate_limits": {
+    "general_per_minute": 240,
+    "auth_per_minute": 60,
+    "upload_per_minute": 12,
+    "max_upload_memory_mb": 256,
+    "window_seconds": 60
+  }
 }
 ```
 
@@ -333,6 +344,11 @@ failing. If a client can only surface one number, surface `max_bytes`: it is wha
 rejected upload will have broken. The model and provider that produced these numbers are
 deliberately not named here; that is deployment detail, and this endpoint answers a question
 about files.
+
+`upload` is what one **request** may be, as opposed to what one image may be: `max_files` parts
+and `max_request_bytes` across all of them, both enforced before the body is read. `rate_limits`
+is how often you may ask (§3.2), and is `null` on a deployment that does not limit requests in the
+app — which means "not limiting", not "unknown".
 
 A PDF's **links survive**, which rasterizing alone would not manage: a link is an annotation
 over the page rather than something drawn on it, so the page image carries the link text and
@@ -359,6 +375,52 @@ once (default 2): beyond that, the session **waits in `queued`** — in FIFO ord
 takes — rather than being rejected. Nothing is lost; the upload is already stored. If a session sits
 in `queued`, check its run log for `run_queued` / `run_dequeued` to see the wait rather than
 assuming a hang.
+
+### 3.2 Rate limits (how often you may ask)
+
+A deployment limits requests at the HTTP layer, because it is a single process whose reads hit
+SQLite synchronously — one client's runaway loop is felt by everyone, including the runs already
+in flight. Three budgets, each per minute, all published by `GET /v1/limits`:
+
+| Budget | Applies to | Default | Counted per |
+| --- | --- | --- | --- |
+| `general_per_minute` | everything under `/v1` except `/v1/health` | 240 | token if validated, else address |
+| `auth_per_minute` | `/v1/auth/*` | 60 | address (there is no token yet) |
+| `upload_per_minute` | `POST /v1/sessions` | 12 | user |
+
+Every response carries the budget it was counted against, so a client can pace itself without
+being refused first:
+
+```bash
+curl -si "${AUTH[@]}" "$BASE/sessions" | grep -i '^ratelimit'
+# ratelimit: limit=240, remaining=238, reset=41
+# ratelimit-policy: 240;w=60
+```
+
+Over budget is a `429` with `Retry-After` (seconds) and the standard error body:
+
+```json
+{ "error": { "code": "rate_limited",
+             "message": "Too many requests: this deployment allows 240 per minute per client. Retry in 41s.",
+             "details": { "limit": 240, "window_seconds": 60, "retry_after_seconds": 41 } } }
+```
+
+**Wait `Retry-After` seconds; do not retry immediately.** A tight retry loop spends the next
+window before it opens. If you are polling a session, poll every 2–5 seconds — a conversion takes
+minutes, and nothing changes faster than that.
+
+Two more refusals concern uploads specifically, and both answer **before** the body is read, so a
+rejected upload costs you nothing but the round trip:
+
+- `413 upload_too_large` — the request declares more than `upload.max_request_bytes`. Retrying it
+  unchanged will fail again; split the batch across sessions.
+- `429 rate_limited` with `max_upload_memory_bytes` in `details` — too much upload is arriving at
+  once across all callers (`max_upload_memory_mb`). This is about *bytes in flight*, not your
+  request count, so small uploads are essentially never refused for it. Retry in a few seconds.
+
+A token identifies you no matter which address you arrive from, so signing in is what gets you
+your own budget: unauthenticated requests, and any bearer token this deployment has not validated,
+count against your **address** — which you may be sharing with an entire campus.
 
 ## 4. Poll status
 
@@ -611,7 +673,8 @@ All errors share one shape:
 { "error": { "code": "invalid_state", "message": "Human-readable description", "details": {} } }
 ```
 Common codes: `unauthorized` (401), `session_not_found` (404), `invalid_state` (409),
-`invalid_request` (400).
+`invalid_request` (400), `rate_limited` (429, carries `Retry-After` — see §3.2),
+`upload_too_large` (413).
 
 A run that fails reports why in the `error` field of `GET /v1/sessions/{id}`. One worth
 recognizing:

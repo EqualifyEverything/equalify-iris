@@ -135,6 +135,24 @@ from the environment at startup; changes require a restart.
   is rejected — the upload is already received and on disk, so a 429 would discard work the user
   has already paid for. The cap is global rather than per user because the resources it protects
   (memory, jsdom, the provider's rate limit) are global.
+- **Request limits** (§9.4): the run cap bounds work the deployment has *accepted*;
+  `server.rate_limits` bounds what can be **asked** of it, which is a different problem — the cheap
+  endpoints never reach the queue, and every one of them queries SQLite *synchronously* on the one
+  event loop. Per minute: `general_per_minute` across `/v1` (240, liveness probe exempt),
+  `auth_per_minute` on `/v1/auth` (60 — each device-flow poll costs an outbound call to GitHub, so
+  this protects your GitHub rate limit rather than a password), `upload_per_minute` on session
+  creation (12), plus `max_upload_memory_mb` (256), which meters the **bytes** of upload body
+  arriving at once so that concurrent *small* uploads never wait on each other. These gates
+  **refuse** (429 with `Retry-After` and the standard error body) rather than wait, since nothing
+  has been received yet — the opposite of the run cap, for the same reason. A request counts
+  against its GitHub token once validated and against its address otherwise, so one user's polling
+  cannot spend everyone's budget from behind a shared NAT. `GET /v1/limits` publishes whatever is in
+  effect. Set `enabled: false` to turn it off where a proxy already does the job.
+- **Behind a reverse proxy**: set `server.trust_proxy` to the number of proxies in front of Iris
+  (1 for a single Caddy/nginx). Without it every caller presents as the proxy's address and shares
+  one rate-limit bucket — the log warns when it sees an `X-Forwarded-For` while this is unset.
+  `true` is coerced to 1 with a warning: trusting the whole chain means trusting the part of the
+  header a client wrote, which would make the per-address limits bound nothing.
 - **GitHub** (§9.1): GitHub is the auth mechanism — a user *is* their GitHub account, and a token
   is **required** on every call. By default the
   service uses a **bundled GitHub App via the device flow** — no per-operator app setup, no
