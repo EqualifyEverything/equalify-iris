@@ -45,9 +45,10 @@ import { imageDimensions } from "../util/imageSize.ts";
 // more than an accepted request can use (see requestLimits.ts).
 //
 // Note what this pair is NOT: their product is 1.25 GB, so they are per-part backstops and
-// never the total. What one request may buffer in all is `requestSizeGate` below, which
-// checks a declared length before reading anything and meters an undeclared one as it
-// arrives — the numbers here only have to stay above any single legitimate part.
+// never the total. What one request may buffer in all is enforced in two places that share
+// one ceiling — `requestSizeGate`, which refuses a declared length before reading anything,
+// and `meterUploadBody`, which counts an undeclared one as it arrives (requestLimits.ts).
+// The numbers here only have to stay above any single legitimate part.
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024, files: MAX_UPLOAD_FILES },
@@ -64,9 +65,9 @@ function uploadImages(req: Request, res: Response, next: NextFunction): void {
   meterUploadBody(req, res);
   upload.array("images")(req, res, (err: unknown) => {
     if (err) {
-      // requestSizeGate can have already answered 413 and unpiped this body mid-parse. It
-      // does not expect multer to call back at all after that, but a second write to a sent
-      // response would throw from in here, where nothing is listening.
+      // meterUploadBody above can have already answered 413 and unpiped this body mid-parse.
+      // It does not expect multer to call back at all after that, but a second write to a
+      // sent response would throw from in here, where nothing is listening.
       if (res.headersSent) return;
       // Multer says "Too many files" for the part count, which does not say how many are
       // too many. That cap is one Iris chose rather than a property of multipart, so the

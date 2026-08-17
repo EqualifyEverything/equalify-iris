@@ -2,13 +2,7 @@ import express from "express";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  bundledAppWarning,
-  clientIdWarning,
-  loadConfig,
-  normalizeTrustProxy,
-  trustProxyWarning,
-} from "./config.ts";
+import { applyTrustProxy, bundledAppWarning, clientIdWarning, loadConfig } from "./config.ts";
 import { Store } from "./store/db.ts";
 import { makeAuthMiddleware } from "./auth/middleware.ts";
 import { authRouter } from "./routes/auth.ts";
@@ -32,13 +26,6 @@ if (cidWarning) console.warn(`WARNING: ${cidWarning}`);
 const appWarning = bundledAppWarning(cfg.github.client_id, cfg.github.upstream_repo);
 if (appWarning) console.warn(`WARNING: ${appWarning}`);
 
-// And the third, for either way `trust_proxy` can be wrong: `true` is accepted by Express
-// and defeats every per-address rate limit, because the address then comes from a header
-// the client can write (coerced to one hop), and a string Express cannot compile would
-// otherwise be a startup crash naming no config key (trusted as nothing instead).
-const proxyWarning = trustProxyWarning(cfg.server.trust_proxy);
-if (proxyWarning) console.warn(`WARNING: ${proxyWarning}`);
-
 // Ensure the on-disk layout exists (PRD §8.1).
 mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
 mkdirSync(join(cfg.storage.data_dir, "tmp"), { recursive: true });
@@ -52,7 +39,13 @@ const app = express();
 // of it, because the rate limits below are only per-caller if this is right: unset behind
 // Caddy every caller looks like the proxy, and set too permissively every caller can
 // claim to be someone new (see normalizeTrustProxy).
-app.set("trust proxy", normalizeTrustProxy(cfg.server.trust_proxy));
+//
+// The third startup warning comes from here, for either way this key can be wrong: `true`
+// is accepted by Express and defeats every per-address limit, because the address then
+// comes from a header the client can write (coerced to one hop), and a value Express cannot
+// compile would otherwise be a crash naming no config key (trusted as nothing instead).
+const proxyWarning = applyTrustProxy(app, cfg.server.trust_proxy);
+if (proxyWarning) console.warn(`WARNING: ${proxyWarning}`);
 app.use(express.json({ limit: "2mb" }));
 
 // Liveness probe (unauthenticated) — confirms the service is up.

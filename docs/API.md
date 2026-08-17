@@ -412,8 +412,9 @@ Over budget is a `429` with `Retry-After` (seconds) and the standard error body:
 window before it opens. If you are polling a session, poll every 2–5 seconds — a conversion takes
 minutes, and nothing changes faster than that.
 
-Two more refusals concern uploads specifically, and both answer **before** the body is read, so a
-rejected upload costs you nothing but the round trip:
+Two more refusals concern uploads specifically. Both normally answer **before** the body is read,
+so a rejected upload costs you nothing but the round trip — the one exception is a request that
+declares no length, which can only be refused while it is arriving:
 
 - `413 upload_too_large` — the request is bigger than `upload.max_request_bytes`. Retrying it
   unchanged will fail again; split the batch across sessions. Normally answered from the declared

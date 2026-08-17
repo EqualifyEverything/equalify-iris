@@ -55,6 +55,18 @@ import { formatBytes } from "../providers/imageLimits.ts";
 export const MAX_UPLOAD_FILES = 25;
 export const MAX_UPLOAD_BYTES = 128 * 1024 * 1024;
 
+// The per-request ceiling as the two halves that enforce it read it — the constant above,
+// except while a test replaces it. Read from one place so a declared body and an undeclared
+// one cannot end up being refused at different sizes.
+let uploadCeiling = MAX_UPLOAD_BYTES;
+
+// Test-only. The refusal that matters most is the one at the END of the upload stack, in
+// front of multer and past the async rate limiter, and sending 128 MB into a test process
+// to reach it is not a test that gets run — so the ceiling moves instead of the body.
+export function __setUploadCeiling(bytes: number): void {
+  uploadCeiling = bytes;
+}
+
 // How long the gate suggests waiting when uploads are at their in-flight cap. Unlike
 // the rate limiters there is no window to expire here — the wait is however long
 // somebody else's upload takes to arrive — so this is advice, not arithmetic.
@@ -384,13 +396,11 @@ function refuseTooLarge(
  * A body that DID declare a length is left alone: `requestSizeGate` has already refused it
  * if it declared too much, and Node reads no more of a declared body than it declared, so
  * there is nothing left for counting to discover.
- *
- * `maxBytes` is a parameter so the metering can be tested against a ceiling a test can
- * afford to exceed; the caller uses the default.
  */
-export function meterUploadBody(req: Request, res: Response, maxBytes: number = MAX_UPLOAD_BYTES): void {
+export function meterUploadBody(req: Request, res: Response): void {
   const declared = Number(req.header("content-length"));
   if (Number.isFinite(declared) && declared > 0) return;
+  const maxBytes = uploadCeiling;
   let received = 0;
   const onData = (chunk: Buffer | string): void => {
     received += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length;
@@ -438,8 +448,8 @@ export function meterUploadBody(req: Request, res: Response, maxBytes: number = 
 export function requestSizeGate(): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     const declared = Number(req.header("content-length"));
-    if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES) {
-      refuseTooLarge(res, MAX_UPLOAD_BYTES, `declares ${formatBytes(declared)}`, { declared_bytes: declared });
+    if (Number.isFinite(declared) && declared > uploadCeiling) {
+      refuseTooLarge(res, uploadCeiling, `declares ${formatBytes(declared)}`, { declared_bytes: declared });
       return;
     }
     next();

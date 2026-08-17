@@ -9,6 +9,7 @@ import {
   DEFAULT_GENERAL_PER_MINUTE,
   DEFAULT_MAX_UPLOAD_MEMORY_MB,
   DEFAULT_UPLOAD_PER_MINUTE,
+  applyTrustProxy,
   normalizeTrustProxy,
   resolveRateLimits,
   trustProxyWarning,
@@ -18,6 +19,7 @@ import {
   MAX_UPLOAD_FILES,
   __resetProxyWarning,
   authRateLimit,
+  __setUploadCeiling,
   generalRateLimit,
   meterUploadBody,
   publishedRateLimits,
@@ -111,6 +113,9 @@ function validated(token: string, id = 1): void {
 afterEach(() => {
   __clearTokenCache();
   __resetProxyWarning();
+  // The per-request ceiling is module state, so a test that lowers it owes every test after
+  // it the real number back.
+  __setUploadCeiling(MAX_UPLOAD_BYTES);
 });
 
 test("a caller over the general budget gets an Iris-shaped 429 with a retry hint", async () => {
@@ -395,13 +400,14 @@ test("a request that declares more than one upload may carry is refused unread",
 });
 
 test("a body that will not declare its size is metered as it arrives, and cut off", async () => {
-  // A ceiling a test can afford to exceed — which is the only reason meterUploadBody takes
-  // one. What is under test is the counting, not the 128 MB.
+  // A ceiling a test can afford to exceed — which is the only reason it can be moved. What
+  // is under test is the counting, not the 128 MB.
+  __setUploadCeiling(2048);
   const app = express();
   app.post("/v1/sessions", (req, res) => {
     // Called and then consumed in one statement-run, which is the arrangement it requires
     // and the one routes/sessions.ts uses in front of multer.
-    meterUploadBody(req, res, 2048);
+    meterUploadBody(req, res);
     // The property that matters for an ALLOWED body is that all of it arrives: metering
     // puts the request stream in flowing mode, and a chunk delivered before the consumer
     // was listening would be a chunk silently missing from an upload nobody refused.
@@ -505,6 +511,18 @@ test("the upload route refuses an over-limit request in front of multer, not aft
       (JSON.parse(chunked.body) as { error: { message: string } }).error.message,
       new RegExp(`at most ${MAX_UPLOAD_FILES} file parts`),
     );
+
+    // And the same undeclared body against a ceiling it exceeds: refused mid-parse, from
+    // inside the multer wrapper, with multer holding parts it has already buffered. What
+    // this pins is that ONE answer comes back — the byte refusal, not a multer parse error
+    // behind it and not a second write to a response already sent.
+    __setUploadCeiling(512);
+    const overrun = await rawPost(srv.url, { "content-type": `multipart/form-data; boundary=${boundary}` }, parts);
+    assert.equal(overrun.status, 413);
+    const refusal = JSON.parse(overrun.body) as { error: { code: string; details: Record<string, number> } };
+    assert.equal(refusal.error.code, "upload_too_large");
+    assert.equal(refusal.error.details.max_bytes, 512);
+    assert.ok(refusal.error.details.received_bytes > 512);
   } finally {
     srv.close();
   }
@@ -569,29 +587,37 @@ test("trust_proxy accepts a hop count and refuses to blindly trust the chain", (
   assert.match(trustProxyWarning("true") ?? "", /Using 1 hop instead/);
   assert.equal(trustProxyWarning(1), undefined);
   assert.equal(trustProxyWarning(undefined), undefined);
+});
 
-  // A list Express can interpret survives; one it cannot does not. The difference matters
-  // because Express compiles this value EAGERLY, so a typo used to be a startup crash with
-  // a proxy-addr stack trace that named neither this key nor the file it came from.
-  assert.equal(normalizeTrustProxy("10.0.0.0/8, 127.0.0.1"), "10.0.0.0/8, 127.0.0.1");
-  assert.equal(trustProxyWarning("10.0.0.0/8, 127.0.0.1"), undefined);
-  assert.equal(normalizeTrustProxy("yes"), false);
-  assert.match(trustProxyWarning("yes") ?? "", /cannot interpret/);
-  assert.match(trustProxyWarning("yes") ?? "", /Trusting nothing instead/);
-  assert.equal(normalizeTrustProxy("10.0.0.0/8, not-an-address"), false);
-
-  // Checked against Express itself rather than against our reading of it: whatever comes
-  // out of the normalizer, `app.set` must accept — including the values it rejected above.
-  const inputs = [undefined, "", "false", 0, 1, "2", true, "loopback", "uniquelocal", "10.0.0.0/8, 127.0.0.1",
-    "10.0.0.0/255.0.0.0", "yes", "nginx", "10.0.0.0/8,", "::1"];
-  for (const value of inputs) {
-    assert.doesNotThrow(
-      () => express().set("trust proxy", normalizeTrustProxy(value)),
-      `trust_proxy: ${String(value)}`,
-    );
-  }
-  // The crash this prevents, for the record: unnormalized, that same value takes Express down.
+test("a trust_proxy Express cannot interpret warns instead of taking the process down", () => {
+  // The crash this exists to prevent: Express compiles `trust proxy` EAGERLY, so an
+  // unusable value is a startup TypeError from proxy-addr naming neither the config key nor
+  // the file it came from.
   assert.throws(() => express().set("trust proxy", "yes"), /invalid IP address/);
+
+  // Every one of these is plausible to write and invalid to proxy-addr, which is why the
+  // check is "hand it to Express and see" rather than a copy of proxy-addr's grammar: the
+  // three names are case-sensitive, `/0` is not a range, and an IPv4 mask must be contiguous.
+  for (const bad of ["yes", "nginx", "Loopback", "10.0.0.0/0", "10.0.0.0/255.0.0.1", "::1/ffff::", "10.0.0.0/8,"]) {
+    const app = express();
+    const warning = applyTrustProxy(app, bad);
+    assert.equal(app.get("trust proxy"), false, `trust_proxy: ${bad} should trust nothing`);
+    assert.match(warning ?? "", /cannot interpret/, `trust_proxy: ${bad} should say so`);
+    assert.match(warning ?? "", /Trusting nothing instead/);
+  }
+
+  // And what a real topology configures is applied, not warned about.
+  for (const good of [1, "2", "loopback", "uniquelocal", "10.0.0.0/8, 127.0.0.1", "10.0.0.0/255.0.0.0", "::1"]) {
+    const app = express();
+    assert.equal(applyTrustProxy(app, good), undefined, `trust_proxy: ${String(good)}`);
+    assert.deepEqual(app.get("trust proxy"), normalizeTrustProxy(good), `trust_proxy: ${String(good)}`);
+  }
+
+  // `true` is applied as one hop and warned about — a different failure from the ones above,
+  // and the only one where the value works and is still wrong.
+  const trusting = express();
+  assert.match(applyTrustProxy(trusting, true) ?? "", /Using 1 hop instead/);
+  assert.equal(trusting.get("trust proxy"), 1);
 });
 
 test("GET /v1/limits publishes the request budget, and says so when there is none", async () => {
