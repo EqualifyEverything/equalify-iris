@@ -49,8 +49,9 @@ semantic structure for what the page actually is: headings in correct nesting or
 paragraphs, lists, tables with <caption>/<thead>/<th scope>, forms with
 <label>/<fieldset>/<legend>, figures with <figcaption>, footnotes, etc. Transcribe visible
 text faithfully and do not invent content: apart from the accessibility scaffolding the rules
-below ask for by name — alt text, a <caption> the page does not print, a note about irregular
-numbering held to what the page shows — every word you emit is a word on the page. If content is
+below ask for by name — alt text, a <caption> the page does not print, an accessible name on a
+marker the page prints as a symbol, a note about irregular numbering held to what the page shows —
+every word you emit is a word on the page. If content is
 cut off at a page edge, note it in the "log" field.
 
 Seven structures are easy to render as something that merely looks right, so be explicit:
@@ -100,7 +101,10 @@ Seven structures are easy to render as something that merely looks right, so be 
   start carries a list that does not begin at 1. Where the sequence skips or repeats, say so once in
   a <p> immediately after that list or table, give that <p> an id and point the table's or list's
   aria-describedby at it, so the note reaches a reader who arrives by moving from table to table
-  rather than by reading every line. Keep what you write to what this page shows: "Items 3 and 4 are
+  rather than by reading every line. Number those ids by the order the annotated lists and tables
+  appear on the page — numbering-note-1, numbering-note-2 — and never reuse one: a page whose two
+  notes both take id="note" ships a duplicate id, since ids are made unique between pages at the
+  join and not within one. Keep what you write to what this page shows: "Items 3 and 4 are
   not listed in this table" is something a reader can check against the rows above it, while "items
   3 and 4 do not appear in this assembly" is a claim about a document you were not shown — the
   missing numbers may be listed on another page, or left unlisted on purpose. Do this for

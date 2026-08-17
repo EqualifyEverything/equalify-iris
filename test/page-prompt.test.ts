@@ -119,6 +119,11 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     // rule below and the sentence above it can be read as contradicting each other.
     ["the text these rules add is named where fidelity is demanded",
       /do not invent content: apart from the accessibility scaffolding the rules below ask for by name/],
+    // The exception list is an enumeration, so it reads as closed: anything the rules below ask
+    // for and it omits is text the Feedback Agent can call invented. aria-label="Footnote 1" is
+    // words that are not on the page, so it has to be named here too.
+    ["the accessible name on a symbol marker is one of the named exceptions",
+      /an accessible name on a marker the page prints as a symbol/],
     ["a shown sequence is transcribed, not tidied", /Transcribe the sequence exactly and never tidy it/],
     ["a repeated number is kept as it appears", /do not drop or alter a number that appears twice/],
     // Without this, "never renumber" is unachievable on the very structure the rule
@@ -134,6 +139,12 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     // the reader the rule is written for.
     ["the note is associated with its table, not merely placed after it",
       /give that <p> an id and point the table's or list's aria-describedby at it/],
+    // The rule above asks for one note per irregular list or table, so a multi-table parts
+    // manual gets several — and two <p>s that both pick id="note" are an intra-page duplicate,
+    // the same collision the symbol-marker clause closes and the same one assembly does not:
+    // namespaceAnchors renames ids more than one PAGE claims (src/pipeline/anchors.ts:611-615).
+    ["the note ids are ordered and never reused, since one page may need several",
+      /Number those ids by the order the annotated lists and tables appear on the page.*never reuse one/],
     ["the note claims only what this page shows, not what the document contains",
       /not listed in this table" is something a reader can check.*is a claim about a document you were not shown/],
     ["a note the page itself prints is transcribed rather than duplicated",
