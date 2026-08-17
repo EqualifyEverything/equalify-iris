@@ -33,11 +33,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // The HTTP-layer request budget (issue #102). What is worth pinning here is not that a
-// counter counts — express-rate-limit does that — but the four decisions made around it,
-// each of which is invisible in normal operation and expensive when wrong:
+// counter counts — express-rate-limit does that — but the decisions made around it, each of
+// which is invisible in normal operation and expensive when wrong:
 //
 //   * A 429 is an Iris error (PRD §9.3 shape) carrying `Retry-After`, not the library's
 //     default plain-text body. A client that cannot parse the refusal cannot pace itself.
+//   * An address is only an address if the deployment can trust the header it came from:
+//     unset, `X-Forwarded-For` is a claim, and a limiter that believed it would bound
+//     nothing while still answering 200 to everything.
 //   * A request counts against its CREDENTIAL where one has been validated, and against
 //     its address otherwise. Both halves are load-bearing: per-address alone punishes
 //     everyone behind a NAT for one user's polling, and per-credential-as-presented would
@@ -176,6 +179,38 @@ test("the auth budget is per address even for a validated caller", async () => {
     assert.match(((await over.json()) as { error: { message: string } }).error.message, /per address/);
   } finally {
     srv.close();
+  }
+});
+
+test("a forged X-Forwarded-For cannot buy a fresh bucket, and a trusted one is believed", async () => {
+  // Exposed directly (the default): the header is a claim from an untrusted client, so
+  // both requests are the same caller. This is what makes per-address limiting worth
+  // anything at all — if a header could reset the count nothing here bounds a thing, and
+  // the failure would be invisible, since every response is still a 200.
+  const direct = await serve(generalRateLimit(cfg({ general_per_minute: 1 })));
+  try {
+    assert.equal(await direct.get({ headers: { "x-forwarded-for": "10.0.0.1" } }).then((r) => r.status), 200);
+    assert.equal(await direct.get({ headers: { "x-forwarded-for": "10.0.0.2" } }).then((r) => r.status), 429);
+  } finally {
+    direct.close();
+  }
+
+  // Behind one trusted proxy the same two headers ARE two callers, which is the other half
+  // of the setting: users arriving through a reverse proxy must not share one budget.
+  __resetProxyWarning();
+  const app = express();
+  app.set("trust proxy", normalizeTrustProxy(1));
+  app.use("/v1/thing", generalRateLimit(cfg({ general_per_minute: 1 })), (_req, res) => res.json({ ok: true }));
+  const server = app.listen(0);
+  await new Promise((r) => server.once("listening", r));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/thing`;
+  try {
+    const as = (ip: string) => fetch(url, { headers: { "x-forwarded-for": ip } }).then((r) => r.status);
+    assert.equal(await as("10.0.0.1"), 200);
+    assert.equal(await as("10.0.0.2"), 200);
+    assert.equal(await as("10.0.0.1"), 429);
+  } finally {
+    server.close();
   }
 });
 
