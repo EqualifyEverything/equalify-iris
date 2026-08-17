@@ -121,6 +121,41 @@ test("token totals are summed per run and attributed per agent", () => {
   assert.equal(d.by_agent.copy_editor.output_tokens, 6400);
 });
 
+test("per-agent attribution carries all four counts, not just input and output", () => {
+  // `input_tokens` excludes what came from the cache, so a two-field per-agent split
+  // understates an agent's prompt by exactly its cached share — worst for the agent
+  // that caches BEST, which inverts the answer "which agent is expensive". Here the
+  // page agent's prompt is 30_000 tokens of which 24_000 were cache reads: on input
+  // alone it looks like the cheaper of the two, and it is not.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(4), type: "model_call", agent: "page", model: "m", capability: "vision", provider: "p",
+      duration_ms: 4000, ok: true, input_tokens: 6000, output_tokens: 900,
+      cache_read_input_tokens: 24_000, cache_creation_input_tokens: 30_000 },
+    { ts: T(8), type: "model_call", agent: "copy_editor", model: "m", capability: "text", provider: "p",
+      duration_ms: 4000, ok: true, input_tokens: 9000, output_tokens: 5000 },
+    { ts: T(8), type: "run_complete" },
+  );
+  const d = summarizeRun(text, { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.parse(T(8)) });
+  assert.deepEqual(d.by_agent.page, {
+    count: 1,
+    total_ms: 4000,
+    max_ms: 4000,
+    input_tokens: 6000,
+    output_tokens: 900,
+    cache_read_input_tokens: 24_000,
+    cache_creation_input_tokens: 30_000,
+  });
+  // An agent whose calls reported no cache counts gets zeros, not missing keys: the
+  // shape is the same for every agent so a consumer can add them up without checking.
+  assert.equal(d.by_agent.copy_editor.cache_read_input_tokens, 0);
+  assert.equal(d.by_agent.copy_editor.cache_creation_input_tokens, 0);
+  // And the per-agent counts still add up to the run's.
+  const agents = Object.values(d.by_agent);
+  assert.equal(agents.reduce((n, a) => n + a.cache_read_input_tokens, 0), d.tokens.cache_read);
+  assert.equal(agents.reduce((n, a) => n + a.cache_creation_input_tokens, 0), d.tokens.cache_write);
+});
+
 test("calls_reported shows when a token sum covers only part of a run", () => {
   // A provider that reports nothing, or an older log written before usage was
   // recorded, produces sums that look authoritative and are not. calls_reported

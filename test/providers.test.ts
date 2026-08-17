@@ -989,6 +989,10 @@ test("the field names the adapter emits are the ones diagnostics reads", async (
   });
   assert.equal(d.by_agent.page.input_tokens, 4000);
   assert.equal(d.by_agent.page.output_tokens, 900);
+  // The cache counts cross the same seam, and a cache read is the one an agent-level
+  // reader most needs: it is the difference between "this agent is cheap" and "this
+  // agent is cheap because it is hitting the cache".
+  assert.equal(d.by_agent.page.cache_read_input_tokens, 1000);
 });
 
 test("normalizeUsage subtracts cache reads and leaves cache writes alone", () => {

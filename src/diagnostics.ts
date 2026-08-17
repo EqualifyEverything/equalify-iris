@@ -73,9 +73,24 @@ export interface Diagnostics {
   };
   // Per-agent totals are the attribution that matters for both halves of the bill:
   // which agent is slow, and which one is expensive. They are not the same agent.
+  //
+  // All four token counts, not just input and output: `input_tokens` excludes what was
+  // read from the cache, so on a deployment that caches, a two-field split understates
+  // an agent's prompt by exactly its cached share — and understates it worst for the
+  // agent that caches best, which inverts the answer the split exists to give. Keyed as
+  // the log line keys them, so the names that cross the adapter/diagnostics seam are the
+  // same ones in both places.
   by_agent: Record<
     string,
-    { count: number; total_ms: number; max_ms: number; input_tokens: number; output_tokens: number }
+    {
+      count: number;
+      total_ms: number;
+      max_ms: number;
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_input_tokens: number;
+      cache_creation_input_tokens: number;
+    }
   >;
   slowest_calls: { agent: string; model: string; capability: string; duration_ms: number; ok: boolean }[];
   errors: { ts: string | null; type: string; message: string }[];
@@ -162,12 +177,24 @@ export function summarizeRun(
   const byAgent: Diagnostics["by_agent"] = {};
   for (const c of calls) {
     const k = c.agent ?? "?";
-    const cur = byAgent[k] ?? { count: 0, total_ms: 0, max_ms: 0, input_tokens: 0, output_tokens: 0 };
+    const cur =
+      byAgent[k] ??
+      {
+        count: 0,
+        total_ms: 0,
+        max_ms: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      };
     cur.count += 1;
     cur.total_ms += c.duration_ms ?? 0;
     cur.max_ms = Math.max(cur.max_ms, c.duration_ms ?? 0);
     cur.input_tokens += c.input_tokens ?? 0;
     cur.output_tokens += c.output_tokens ?? 0;
+    cur.cache_read_input_tokens += c.cache_read_input_tokens ?? 0;
+    cur.cache_creation_input_tokens += c.cache_creation_input_tokens ?? 0;
     byAgent[k] = cur;
 
     const reported =

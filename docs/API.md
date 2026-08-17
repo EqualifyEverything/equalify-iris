@@ -551,7 +551,8 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
   "model_calls": { "count": 7, "failed": 0, "total_ms": 51000, "avg_ms": 7285, "max_ms": 14300 },
   "tokens": { "input": 48200, "output": 19400, "cache_read": 0, "cache_write": 0, "calls_reported": 7 },
   "by_agent": { "page": { "count": 2, "total_ms": 28200, "max_ms": 15100,
-    "input_tokens": 21400, "output_tokens": 9100 } },
+    "input_tokens": 21400, "output_tokens": 9100,
+    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0 } },
   "slowest_calls": [ { "agent": "table", "model": "...", "capability": "vision", "duration_ms": 14300, "ok": true } ],
   "errors": []
 }
@@ -566,9 +567,10 @@ is total model-call time ÷ wall-clock elapsed: ~1 means calls ran serially, and
 means parallelism isn't happening. `slowest_calls` and `phase_durations_ms` show where time goes;
 `errors` lists failed calls.
 
-`tokens` is what the run **consumed**, and `by_agent` carries the same counts per agent — so
-"which agent is slow" and "which agent is expensive" can be answered separately, because they
-are often different agents. Deliberately no dollar figure: the rate depends on the provider,
+`tokens` is what the run **consumed**, and `by_agent` carries the same four counts per agent
+(under the names the run log uses: `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
+`cache_creation_input_tokens`) — so "which agent is slow" and "which agent is expensive" can be
+answered separately, because they are often different agents. Deliberately no dollar figure: the rate depends on the provider,
 region and model, all of which are deployment config, so the token counts are reported and
 whoever holds the price sheet does the multiplication. The four counts bill at four different
 rates and are never summed here; note that `input` **excludes** tokens read from the cache, so the
