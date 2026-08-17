@@ -90,6 +90,53 @@ test("the page agent's heading-level rule keeps the clauses that make it a rule"
   }
 });
 
+// The numbering and abbreviation rules (issues #98, #100, #101) came from one
+// session's feedback on a parts manual: item numbers that skipped were annotated
+// under the last table and nowhere else, a repeat went unremarked, the "NS" key
+// under each table was ALSO restated as a paragraph above it, and the symbols the
+// page used as footnote markers reached a screen reader as bare punctuation.
+//
+// The three issues contradict each other as filed — two ask for prose notes the
+// third asks to stop emitting — so what is pinned here is the resolution: a meaning
+// the page states goes into the markup where the page already puts it (`<abbr
+// title>`, an accessible name on a symbol marker) and is not restated as a
+// paragraph, while an observation about the numbering is allowed as prose but bounded
+// to what this page shows. That bound is the load-bearing half: the agent sees one
+// page, so "items 3 and 4 are not listed in this table" is checkable against the
+// rows above it and "items 3 and 4 do not appear in this assembly" is a claim about
+// a document it was never given.
+//
+// The consistency half is the reported bug rather than a refinement of it. An
+// irregularity annotated on the last table and not the first tells a reader the
+// others were checked and found sound, which is worse than annotating none.
+test("the page agent's numbering and abbreviation rules keep the clauses that make them rules", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["a shown sequence is transcribed, not tidied", /Transcribe the sequence exactly and never tidy it/],
+    ["a repeated number is kept as it appears", /do not drop or alter a number that appears twice/],
+    ["an irregularity is annotated in the document, immediately after the element",
+      /say so once in a <p> immediately after that list or table/],
+    ["the note claims only what this page shows, not what the document contains",
+      /not listed in this table" is something a reader can check.*is a claim about a document you were not shown/],
+    ["a note the page itself prints is transcribed rather than duplicated",
+      /where the page prints its own note about the numbering, transcribe that rather than adding a second one/],
+    ["no note is written for a sequence that is not actually irregular",
+      /Never write such a note for a sequence that is in fact unbroken/],
+    ["every irregular list and table is annotated, not just the most prominent one",
+      /Do this for EVERY irregular list and table on the page, and record each one in the "log" field as well/],
+    ["an abbreviation is expanded only in the page's own words",
+      /<abbr title="not shown">NS<\/abbr>.*Never supply an expansion the page does not state/],
+    ["the meaning is encoded once, where the page keeps it",
+      /do NOT also put a paragraph above the table restating what the legend below it already says/],
+    ["every cell carrying an abbreviation is marked, because a row is read on its own",
+      /mark every cell that carries the abbreviation and not only the first/],
+    ["a symbolic footnote marker keeps its glyph and gains an accessible name",
+      /keeps that symbol as its visible text.*aria-label="Footnote 1">\*<\/a>/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
 // The signature-block rule (issue #67) came from user feedback on a part-signed
 // page: one party's fields had been rendered as a <dl> and the other's as form
 // controls, so a screen-reader user met the same block twice in two different
