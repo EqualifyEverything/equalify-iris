@@ -29,8 +29,8 @@ paragraphs, lists, tables with <caption>/<thead>/<th scope>, forms with
 <label>/<fieldset>/<legend>, figures with <figcaption>, footnotes, etc. Transcribe visible
 text faithfully and do not invent content: apart from the accessibility scaffolding the rules
 below ask for by name — alt text, a <caption> the page does not print, an accessible name on a
-marker the page prints as a symbol, a note about irregular numbering held to what the page shows —
-every word you emit is a word on the page. If content is
+marker the page prints as a symbol, the ↩ that returns from a footnote, a note about irregular
+numbering held to what the page shows — every word you emit is a word on the page. If content is
 cut off at a page edge, note it in the "log" field.
 
 Seven structures are easy to render as something that merely looks right, so be explicit:

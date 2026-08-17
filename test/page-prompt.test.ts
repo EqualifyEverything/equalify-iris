@@ -120,10 +120,13 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     ["the text these rules add is named where fidelity is demanded",
       /do not invent content: apart from the accessibility scaffolding the rules below ask for by name/],
     // The exception list is an enumeration, so it reads as closed: anything the rules below ask
-    // for and it omits is text the Feedback Agent can call invented. aria-label="Footnote 1" is
-    // words that are not on the page, so it has to be named here too.
+    // for and it omits is text the Feedback Agent can call invented. Both of these are text no
+    // page prints — aria-label="Footnote 1" and the ↩ of a footnote's back-reference — and both
+    // are asked for by name a few lines below, so both have to be named here.
     ["the accessible name on a symbol marker is one of the named exceptions",
       /an accessible name on a marker the page prints as a symbol/],
+    ["the footnote back-reference is one of the named exceptions",
+      /the ↩ that returns from a footnote/],
     ["a shown sequence is transcribed, not tidied", /Transcribe the sequence exactly and never tidy it/],
     ["a repeated number is kept as it appears", /do not drop or alter a number that appears twice/],
     // Without this, "never renumber" is unachievable on the very structure the rule
