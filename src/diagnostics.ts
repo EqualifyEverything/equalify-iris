@@ -13,6 +13,10 @@ interface LogEvent {
   duration_ms?: number;
   ok?: boolean;
   error?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
   [k: string]: unknown;
 }
 
@@ -50,7 +54,29 @@ export interface Diagnostics {
     max_ms: number;
     concurrency_factor: number;
   };
-  by_agent: Record<string, { count: number; total_ms: number; max_ms: number }>;
+  // What the run consumed, in tokens. Deliberately not in dollars: the rate depends
+  // on the provider, the region and the model, all of which are deployment config and
+  // any of which can change without this file knowing — the same reason the limits
+  // endpoint publishes sizes without naming the model behind them. Tokens are the
+  // durable fact; whoever knows the price sheet does the multiplication.
+  //
+  // The four counts bill at four different rates, so they are reported separately
+  // rather than as a total. `calls_reported` is how many of `model_calls.count`
+  // carried any usage at all: when it is lower, these sums cover only part of the run
+  // and a cost derived from them is a floor, not an estimate.
+  tokens: {
+    input: number;
+    output: number;
+    cache_read: number;
+    cache_write: number;
+    calls_reported: number;
+  };
+  // Per-agent totals are the attribution that matters for both halves of the bill:
+  // which agent is slow, and which one is expensive. They are not the same agent.
+  by_agent: Record<
+    string,
+    { count: number; total_ms: number; max_ms: number; input_tokens: number; output_tokens: number }
+  >;
   slowest_calls: { agent: string; model: string; capability: string; duration_ms: number; ok: boolean }[];
   errors: { ts: string | null; type: string; message: string }[];
 }
@@ -127,14 +153,33 @@ export function summarizeRun(
   const failed = calls.filter((c) => c.ok === false).length;
   const total = durations.reduce((a, b) => a + b, 0);
 
+  // Token totals, and how many calls contributed any. Counted over the same `calls`
+  // as the timings, which includes the failed ones: a truncated call paid for a full
+  // ceiling of output and a stalled one paid for its prompt, so excluding them would
+  // under-report the bill on exactly the documents that cost the most.
+  const tokens = { input: 0, output: 0, cache_read: 0, cache_write: 0, calls_reported: 0 };
+
   const byAgent: Diagnostics["by_agent"] = {};
   for (const c of calls) {
     const k = c.agent ?? "?";
-    const cur = byAgent[k] ?? { count: 0, total_ms: 0, max_ms: 0 };
+    const cur = byAgent[k] ?? { count: 0, total_ms: 0, max_ms: 0, input_tokens: 0, output_tokens: 0 };
     cur.count += 1;
     cur.total_ms += c.duration_ms ?? 0;
     cur.max_ms = Math.max(cur.max_ms, c.duration_ms ?? 0);
+    cur.input_tokens += c.input_tokens ?? 0;
+    cur.output_tokens += c.output_tokens ?? 0;
     byAgent[k] = cur;
+
+    const reported =
+      c.input_tokens != null ||
+      c.output_tokens != null ||
+      c.cache_read_input_tokens != null ||
+      c.cache_creation_input_tokens != null;
+    if (reported) tokens.calls_reported += 1;
+    tokens.input += c.input_tokens ?? 0;
+    tokens.output += c.output_tokens ?? 0;
+    tokens.cache_read += c.cache_read_input_tokens ?? 0;
+    tokens.cache_write += c.cache_creation_input_tokens ?? 0;
   }
 
   const slowest = [...calls]
@@ -181,6 +226,7 @@ export function summarizeRun(
       max_ms: durations.length ? Math.max(...durations) : 0,
       concurrency_factor: elapsed > 0 ? Math.round((total / elapsed) * 100) / 100 : 0,
     },
+    tokens,
     by_agent: byAgent,
     slowest_calls: slowest,
     errors,

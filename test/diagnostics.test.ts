@@ -89,6 +89,77 @@ test("in_flight is null once the run is no longer running", () => {
   assert.equal(d.in_flight_count, 0);
 });
 
+test("token totals are summed per run and attributed per agent", () => {
+  // The two attributions answer different questions and pick different culprits:
+  // by_agent.total_ms says which agent is slow, by_agent.input_tokens says which is
+  // expensive. A vision agent sending page images can be cheap in time and dominant
+  // in cost.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    start(T(0), "page"),
+    {
+      ts: T(4), type: "model_call", agent: "page", model: "m", capability: "vision", provider: "p",
+      duration_ms: 4000, ok: true, input_tokens: 4200, output_tokens: 800, cache_read_input_tokens: 1024,
+      cache_creation_input_tokens: 0,
+    },
+    start(T(4), "copy_editor"),
+    {
+      ts: T(9), type: "model_call", agent: "copy_editor", model: "m", capability: "text", provider: "p",
+      duration_ms: 5000, ok: true, input_tokens: 11_000, output_tokens: 6400,
+    },
+    { ts: T(9), type: "run_complete" },
+  );
+  const d = summarizeRun(text, { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.parse(T(9)) });
+  assert.deepEqual(d.tokens, {
+    input: 15_200,
+    output: 7200,
+    cache_read: 1024,
+    cache_write: 0,
+    calls_reported: 2,
+  });
+  assert.equal(d.by_agent.page.input_tokens, 4200);
+  assert.equal(d.by_agent.copy_editor.output_tokens, 6400);
+});
+
+test("calls_reported shows when a token sum covers only part of a run", () => {
+  // A provider that reports nothing, or an older log written before usage was
+  // recorded, produces sums that look authoritative and are not. calls_reported
+  // against model_calls.count is the only thing that distinguishes a complete
+  // accounting from a floor.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    end(T(2), "page", 2000),
+    { ts: T(4), type: "model_call", agent: "page", model: "m", capability: "vision", provider: "p",
+      duration_ms: 2000, ok: true, input_tokens: 500, output_tokens: 100 },
+    { ts: T(4), type: "run_complete" },
+  );
+  const d = summarizeRun(text, { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.parse(T(4)) });
+  assert.equal(d.model_calls.count, 2);
+  assert.equal(d.tokens.calls_reported, 1, "one of the two calls reported nothing");
+  // The call that reported nothing contributes nothing rather than breaking the sum.
+  assert.equal(d.tokens.input, 500);
+  // And it is not silently credited with zero cost in its agent's totals either.
+  assert.equal(d.by_agent.page.count, 2);
+  assert.equal(d.by_agent.page.input_tokens, 500);
+});
+
+test("a failed call's tokens are counted, not discarded", () => {
+  // A truncation paid for a full ceiling of output and a stall paid for its prompt.
+  // Dropping them would under-report the bill on exactly the documents that cost the
+  // most — the ones that go wrong.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(3), type: "model_call", agent: "copy_editor", model: "m", capability: "text", provider: "p",
+      duration_ms: 3000, ok: false, error: "response hit the 32000-token output ceiling",
+      input_tokens: 9100, output_tokens: 32_000 },
+    { ts: T(3), type: "run_failed", error: "truncated" },
+  );
+  const d = summarizeRun(text, { sessionId: "s", status: "failed", phase: "review", now: Date.parse(T(3)) });
+  assert.equal(d.model_calls.failed, 1);
+  assert.equal(d.tokens.output, 32_000);
+  assert.equal(d.tokens.calls_reported, 1);
+});
+
 test("concurrency_factor shows overlap: ~1 serial, ~N parallel", () => {
   // Serial: two 2s calls over 4s wall-clock -> ~1.
   const serial = log(

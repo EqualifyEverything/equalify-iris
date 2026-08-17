@@ -1,9 +1,9 @@
 import type { Capability, IrisConfig, ProviderBlock } from "../config.ts";
 import { BedrockProvider } from "./bedrock.ts";
 import { OpenRouterProvider } from "./openrouter.ts";
-import type { CompletionResult, Image, Message, ModelProvider } from "./types.ts";
+import type { CompletionResult, Image, Message, ModelProvider, Usage } from "./types.ts";
 
-export type { Image, Message, CompletionResult } from "./types.ts";
+export type { Image, Message, CompletionResult, Usage } from "./types.ts";
 
 // The router maps (agent, capability) -> concrete provider + model using the
 // deployment config (PRD §10.3). Providers are constructed lazily so a
@@ -86,12 +86,40 @@ export class ProviderRouter {
     const meta = { agent: agentName, capability, model, provider: providerName };
     this.onEvent?.("model_call_start", meta);
     const startedAt = Date.now();
+    // Collected through the callback rather than read off the result, so a call that
+    // throws still reports what it spent. The expensive failures are precisely the
+    // ones worth accounting for: a truncation has already paid for a full ceiling of
+    // output, and a stall has already paid for a prompt carrying page images.
+    let usage: Usage | undefined;
+    const onUsage = (u: Usage): void => {
+      usage = u;
+    };
+    // Spread flat onto the event, alongside duration_ms, so the run log stays one
+    // level deep and `tokens` in diagnostics can be summed straight off it.
     try {
-      const result = await provider.complete({ capability, messages, model, images: opts.images, schema: opts.schema });
-      this.onEvent?.("model_call", { ...meta, duration_ms: Date.now() - startedAt, ok: true });
+      const result = await provider.complete({
+        capability,
+        messages,
+        model,
+        images: opts.images,
+        schema: opts.schema,
+        onUsage,
+      });
+      this.onEvent?.("model_call", {
+        ...meta,
+        duration_ms: Date.now() - startedAt,
+        ok: true,
+        ...(result.usage ?? usage ?? {}),
+      });
       return result;
     } catch (e) {
-      this.onEvent?.("model_call", { ...meta, duration_ms: Date.now() - startedAt, ok: false, error: (e as Error).message });
+      this.onEvent?.("model_call", {
+        ...meta,
+        duration_ms: Date.now() - startedAt,
+        ok: false,
+        error: (e as Error).message,
+        ...(usage ?? {}),
+      });
       throw e;
     }
   }

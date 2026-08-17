@@ -5,7 +5,7 @@ import {
 } from "@aws-sdk/client-bedrock-runtime";
 import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
 import { StalledStreamError, TruncatedResponseError, type StallKind } from "./types.ts";
-import type { CompletionRequest, CompletionResult, ModelProvider } from "./types.ts";
+import type { CompletionRequest, CompletionResult, ModelProvider, Usage } from "./types.ts";
 
 // How long a call may send NOTHING before we give up on it.
 //
@@ -44,6 +44,13 @@ interface StreamEvent {
   type?: string;
   delta?: { type?: string; text?: string; stop_reason?: string };
   error?: { type?: string; message?: string };
+  // Token counts arrive in two places and never in one: message_start carries the
+  // prompt's totals (input plus whatever was read from or written to the cache),
+  // and the message_delta that closes the message carries the output total. Both
+  // are read, because cost needs both and the input half is the one a stalled call
+  // still knows.
+  message?: { usage?: Usage };
+  usage?: Usage;
 }
 
 // Bedrock delivers mid-stream service failures as events on an otherwise-200
@@ -166,6 +173,16 @@ export class BedrockProvider implements ModelProvider {
     let text = "";
     let stopReason: string | undefined;
     let sawStop = false;
+    // Merged field-by-field rather than replaced: the two events that carry usage
+    // each carry only their own half, so overwriting would discard the prompt's
+    // counts the moment the output's arrived. Reported as it accumulates so a call
+    // that later stalls or truncates still accounts for what it spent.
+    let usage: Usage | undefined;
+    const mergeUsage = (u?: Usage): void => {
+      if (!u) return;
+      usage = { ...usage, ...u };
+      req.onUsage?.(usage);
+    };
     // Which window an event re-arms is decided by whether any text has arrived, not
     // by the event's own type. Protocol events (message_start, content_block_start)
     // are real progress and must keep the call alive, but they are not output, and
@@ -219,6 +236,11 @@ export class BedrockProvider implements ModelProvider {
         }
         // stop_reason arrives once, on the message_delta that closes the message.
         if (parsed.delta?.stop_reason) stopReason = parsed.delta.stop_reason;
+        // message_start nests usage under `message`; message_delta puts it at the
+        // top level. Both are checked rather than switching on `type`, so a future
+        // event carrying usage anywhere is picked up rather than dropped.
+        mergeUsage(parsed.message?.usage);
+        mergeUsage(parsed.usage);
         // Re-armed after accumulating, so `text` reflects this event when choosing
         // the window.
         if (parsed.type !== "ping") progressed();
@@ -266,6 +288,6 @@ export class BedrockProvider implements ModelProvider {
     if (stopReason === "max_tokens") {
       throw new TruncatedResponseError(this.name, req.model, this.maxTokens, text.length);
     }
-    return { text, model: req.model, provider: this.name };
+    return { text, model: req.model, provider: this.name, usage };
   }
 }
