@@ -5,7 +5,9 @@ export const ACCESSIBILITY_REQUIREMENTS = `
 ## Accessibility requirements (WCAG 2.2 AA — non-negotiable)
 - Use semantic HTML elements only; no <div> where <section>, <nav>, <article>,
   <aside>, <header>, or <footer> apply.
-- Use headings in correct nesting order (do not skip levels upward).
+- Use headings in correct nesting order: never skip a level on the way down (an
+  <h2> is never followed by an <h4>), and give a heading the level its content's
+  place in the hierarchy calls for, not the level its type size suggests.
 - Tables must have <caption>, <thead>, <th scope>, and association attributes where required.
 - Form fields must have programmatically associated labels; mark required fields
   accessibly; include error-messaging hooks.
