@@ -1,6 +1,6 @@
 import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
 import { StalledStreamError, TruncatedResponseError, type StallKind } from "./types.ts";
-import type { CompletionRequest, CompletionResult, ModelProvider } from "./types.ts";
+import type { CompletionRequest, CompletionResult, ModelProvider, Usage } from "./types.ts";
 
 // This adapter streams for the same reason the Bedrock one does: a single
 // non-streaming request cannot tell a stalled call from a slow one, so capping total
@@ -44,6 +44,60 @@ function isTransientNetworkError(e: unknown): boolean {
   if (code && transient.has(code)) return true;
   const msg = String(err?.message ?? "");
   return /fetch failed|terminated|socket hang up|network|ECONNRESET/i.test(msg);
+}
+
+// The OpenAI-shaped usage block OpenRouter sends. Since usage accounting became
+// unconditional there is nothing to opt into — `usage: {include: true}` and
+// `stream_options: {include_usage: true}` are both deprecated no-ops — so nothing is
+// added to the request for this, and an OpenAI-compatible upstream that reports
+// nothing simply leaves the counts absent.
+interface OpenAIUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+}
+
+// Normalize onto the Anthropic meaning of `input_tokens`, which is the one the Usage
+// type documents: tokens that were neither read from nor written to the cache. The
+// OpenAI convention counts cached tokens INSIDE prompt_tokens, so a cache hit reported
+// verbatim would be billed twice over — once at the full input rate and once at the
+// cache-read rate.
+//
+// Only `cached_tokens` is subtracted. It is specified as a subset of prompt_tokens;
+// whether `cache_write_tokens` is also included there is not documented, and
+// subtracting a number that was never in the total would understate the input. Erring
+// toward over-counting input is the safer direction for a cost estimate.
+export function normalizeUsage(u?: OpenAIUsage): Usage | undefined {
+  if (!u) return undefined;
+  const cacheRead = u.prompt_tokens_details?.cached_tokens;
+  const cacheWrite = u.prompt_tokens_details?.cache_write_tokens;
+  const prompt = u.prompt_tokens;
+  const usage: Usage = {};
+  if (prompt != null) usage.input_tokens = Math.max(0, prompt - (cacheRead ?? 0));
+  if (u.completion_tokens != null) usage.output_tokens = u.completion_tokens;
+  if (cacheRead != null) usage.cache_read_input_tokens = cacheRead;
+  if (cacheWrite != null) usage.cache_creation_input_tokens = cacheWrite;
+  return Object.keys(usage).length ? usage : undefined;
+}
+
+// Add two usage snapshots. Used across retry attempts, where the counts ADD rather
+// than replace: an attempt that reported tokens and was then abandoned was still
+// billed for them, so reporting only the surviving attempt understates the call — and
+// understates it invisibly, since `tokens.calls_reported` would still say the call was
+// fully accounted for.
+//
+// Absent stays absent when neither side reported: a 0 nobody sent reads as a free
+// half of the call rather than an unreported one.
+function addUsage(a?: Usage, b?: Usage): Usage | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  const sum: Usage = { ...a };
+  for (const key of Object.keys(b) as (keyof Usage)[]) {
+    const v = b[key];
+    if (v == null) continue;
+    sum[key] = (sum[key] ?? 0) + v;
+  }
+  return sum;
 }
 
 // OpenRouter adapter (PRD §10.3). Speaks the OpenAI-compatible chat
@@ -112,6 +166,10 @@ export class OpenRouterProvider implements ModelProvider {
     const payload = JSON.stringify(body);
 
     let lastError: unknown;
+    // What the attempts before this one were billed for. Unlike `text`, which must
+    // start empty on a retry or the same passage ships twice, tokens an abandoned
+    // attempt reported were spent and stay spent — this call cost their sum.
+    let spent: Usage | undefined;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const controller = new AbortController();
       let expired: StallKind | null = null;
@@ -136,6 +194,10 @@ export class OpenRouterProvider implements ModelProvider {
       let text = "";
       let finishReason: string | undefined;
       let sawDone = false;
+      // Per-attempt, like `text`, because the chunks of one attempt merge field by
+      // field. What is reported outward is this attempt plus `spent`, since the bill
+      // covers every attempt (see `addUsage`).
+      let usage: Usage | undefined;
       const stalled = (kind: StallKind): StalledStreamError =>
         new StalledStreamError({
           provider: this.name,
@@ -167,6 +229,7 @@ export class OpenRouterProvider implements ModelProvider {
         let parsed: {
           choices?: { delta?: { content?: string }; finish_reason?: string | null }[];
           error?: { message?: string; code?: string | number };
+          usage?: OpenAIUsage;
         };
         try {
           parsed = JSON.parse(data);
@@ -179,6 +242,16 @@ export class OpenRouterProvider implements ModelProvider {
         // response, so this is the only place such a failure is visible.
         if (parsed.error) {
           throw new Error(`openrouter: stream error: ${parsed.error.message ?? JSON.stringify(parsed.error)}`);
+        }
+        // Usage rides a late chunk of its own, which carries no choices — so this is
+        // read before the choice handling below rather than as part of it. Reported
+        // as soon as it arrives, so a truncation raised further down still accounts
+        // for the tokens it spent reaching the ceiling.
+        const reported = normalizeUsage(parsed.usage);
+        if (reported) {
+          usage = { ...usage, ...reported };
+          const total = addUsage(spent, usage);
+          if (total) req.onUsage?.(total);
         }
         const choice = parsed.choices?.[0];
         if (choice?.delta?.content) text += choice.delta.content;
@@ -263,8 +336,13 @@ export class OpenRouterProvider implements ModelProvider {
         if (finishReason === "length") {
           throw new TruncatedResponseError(this.name, req.model, this.maxTokens, text.length);
         }
-        return { text, model: req.model, provider: this.name };
+        return { text, model: req.model, provider: this.name, usage: addUsage(spent, usage) };
       } catch (e) {
+        // This attempt is over however it ends, so whatever it reported joins the
+        // total before the loop either retries or rethrows — the router reads usage
+        // off the callback on the failing path, and off the result on the surviving
+        // one, and both have to agree that the earlier attempts were paid for.
+        spent = addUsage(spent, usage);
         // Our own clock firing is a diagnosis, not a blip: never retried, and never
         // reported as the opaque abort the runtime actually threw.
         if (expired) throw stalled(expired);

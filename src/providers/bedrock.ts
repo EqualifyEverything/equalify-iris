@@ -5,7 +5,7 @@ import {
 } from "@aws-sdk/client-bedrock-runtime";
 import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
 import { StalledStreamError, TruncatedResponseError, type StallKind } from "./types.ts";
-import type { CompletionRequest, CompletionResult, ModelProvider } from "./types.ts";
+import type { CompletionRequest, CompletionResult, ModelProvider, Usage } from "./types.ts";
 
 // How long a call may send NOTHING before we give up on it.
 //
@@ -37,6 +37,36 @@ const IDLE_TIMEOUT_MS = 60_000;
 // here to bound the pathological case, not to bound normal slow work.
 const MAX_TOTAL_MS = 15 * 60_000;
 
+// What the upstream actually sends in a usage block, which is a superset of what
+// `Usage` declares: today `service_tier` and a nested `cache_creation` breakdown ride
+// along beside the four counts, and a model release can add more without notice.
+type RawUsage = Record<string, unknown>;
+
+// The four counts, and nothing else. The router spreads usage FLAT onto the
+// `model_call` log event so diagnostics can sum it straight off the line, so an
+// unknown field here is not inert: it lands in the run log, and a nested object lands
+// there too, contradicting the one-level-deep shape that spread depends on. Picking is
+// also what the OpenRouter adapter already does (`normalizeUsage`), so both adapters
+// hand the router the same four keys whatever their upstream volunteers.
+//
+// A non-number is dropped rather than coerced: `Number(undefined)` is NaN and
+// `Number(null)` is 0, and a 0 the upstream never sent would read as a free call
+// instead of an unreported one — the distinction `tokens.calls_reported` exists for.
+function pickUsage(raw?: RawUsage): Usage | undefined {
+  if (!raw) return undefined;
+  const usage: Usage = {};
+  for (const key of [
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+  ] as const) {
+    const v = raw[key];
+    if (typeof v === "number" && Number.isFinite(v)) usage[key] = v;
+  }
+  return Object.keys(usage).length ? usage : undefined;
+}
+
 // Anthropic's streaming event shapes, narrowed to the fields this adapter reads.
 // Deltas other than text (e.g. input_json_delta) are ignored: structured output
 // here is prompt-driven, not tool-driven, so text is the only content that arrives.
@@ -44,6 +74,18 @@ interface StreamEvent {
   type?: string;
   delta?: { type?: string; text?: string; stop_reason?: string };
   error?: { type?: string; message?: string };
+  // Token counts arrive in two places and never in one: message_start carries the
+  // prompt's totals (input plus whatever was read from or written to the cache),
+  // and the message_delta that closes the message carries the output total. Both
+  // are read, because cost needs both and the input half is the one a stalled call
+  // still knows.
+  //
+  // Typed as an open record rather than as `Usage`, because it is not one: the
+  // upstream sends more than the four fields Usage declares (`service_tier`, a
+  // nested `cache_creation` breakdown), and calling it `Usage` here would license
+  // passing the whole object on — see `pickUsage`.
+  message?: { usage?: RawUsage };
+  usage?: RawUsage;
 }
 
 // Bedrock delivers mid-stream service failures as events on an otherwise-200
@@ -166,6 +208,17 @@ export class BedrockProvider implements ModelProvider {
     let text = "";
     let stopReason: string | undefined;
     let sawStop = false;
+    // Merged field-by-field rather than replaced: the two events that carry usage
+    // each carry only their own half, so overwriting would discard the prompt's
+    // counts the moment the output's arrived. Reported as it accumulates so a call
+    // that later stalls or truncates still accounts for what it spent.
+    let usage: Usage | undefined;
+    const mergeUsage = (raw?: RawUsage): void => {
+      const u = pickUsage(raw);
+      if (!u) return;
+      usage = { ...usage, ...u };
+      req.onUsage?.(usage);
+    };
     // Which window an event re-arms is decided by whether any text has arrived, not
     // by the event's own type. Protocol events (message_start, content_block_start)
     // are real progress and must keep the call alive, but they are not output, and
@@ -219,6 +272,11 @@ export class BedrockProvider implements ModelProvider {
         }
         // stop_reason arrives once, on the message_delta that closes the message.
         if (parsed.delta?.stop_reason) stopReason = parsed.delta.stop_reason;
+        // message_start nests usage under `message`; message_delta puts it at the
+        // top level. Both are checked rather than switching on `type`, so a future
+        // event carrying usage anywhere is picked up rather than dropped.
+        mergeUsage(parsed.message?.usage);
+        mergeUsage(parsed.usage);
         // Re-armed after accumulating, so `text` reflects this event when choosing
         // the window.
         if (parsed.type !== "ping") progressed();
@@ -266,6 +324,6 @@ export class BedrockProvider implements ModelProvider {
     if (stopReason === "max_tokens") {
       throw new TruncatedResponseError(this.name, req.model, this.maxTokens, text.length);
     }
-    return { text, model: req.model, provider: this.name };
+    return { text, model: req.model, provider: this.name, usage };
   }
 }

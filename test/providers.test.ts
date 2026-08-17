@@ -12,10 +12,12 @@
 // slow-but-progressing work must survive, silence must not.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeMaxTokens, DEFAULT_MAX_TOKENS } from "../src/config.ts";
+import { normalizeMaxTokens, DEFAULT_MAX_TOKENS, type IrisConfig } from "../src/config.ts";
 import { BedrockProvider } from "../src/providers/bedrock.ts";
-import { OpenRouterProvider } from "../src/providers/openrouter.ts";
-import { StalledStreamError, TruncatedResponseError } from "../src/providers/types.ts";
+import { OpenRouterProvider, normalizeUsage } from "../src/providers/openrouter.ts";
+import { ProviderRouter } from "../src/providers/index.ts";
+import { StalledStreamError, TruncatedResponseError, type Usage } from "../src/providers/types.ts";
+import { summarizeRun } from "../src/diagnostics.ts";
 
 // --- normalizeMaxTokens -----------------------------------------------------
 
@@ -739,6 +741,283 @@ test("a normal stream ending in message_stop needs no stop_reason", async () => 
   });
   const res = await bedrock.complete(bedrockReq);
   assert.equal(res.text, "<p>done</p>");
+});
+
+// --- Token accounting -------------------------------------------------------
+//
+// Tokens are what a run costs, and the two halves of the count arrive at opposite
+// ends of a stream: the prompt's size with the first event, the output's with the
+// last. So the tests below pin three things — that both halves survive into one
+// result, that a call which never reaches the end still reports the half it knows
+// (the expensive failures are exactly these), and that a cache hit is not counted
+// twice when it arrives in OpenAI's vocabulary rather than Anthropic's.
+
+const messageStartUsage = (usage: Usage) => ({
+  chunk: { bytes: encode({ type: "message_start", message: { usage } }) },
+});
+const messageDeltaUsage = (stop_reason: string, usage: Usage) => ({
+  chunk: { bytes: encode({ type: "message_delta", delta: { stop_reason }, usage }) },
+});
+
+test("the prompt's tokens and the output's are merged, not overwritten", async () => {
+  // message_start carries one half and the closing message_delta the other. Replacing
+  // rather than merging would silently drop the input counts — which on a vision call
+  // carrying page images are the larger number.
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  stubStream(bedrock, async function* () {
+    yield messageStartUsage({
+      input_tokens: 4200,
+      cache_read_input_tokens: 1024,
+      cache_creation_input_tokens: 0,
+      output_tokens: 1,
+    });
+    yield textDelta("<p>done</p>");
+    yield messageDeltaUsage("end_turn", { output_tokens: 830 });
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.deepEqual(res.usage, {
+    input_tokens: 4200,
+    cache_read_input_tokens: 1024,
+    cache_creation_input_tokens: 0,
+    output_tokens: 830,
+  });
+});
+
+test("a call that reports nothing leaves usage absent rather than zero", async () => {
+  // Absent and zero are different claims: one is "not reported", the other "free".
+  // A cost summed over the second would look complete while covering nothing.
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  stubStream(bedrock, async function* () {
+    yield textDelta("<p>done</p>");
+    yield messageDelta("end_turn");
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.equal(res.usage, undefined);
+});
+
+test("a truncated call still accounts for what it spent", async () => {
+  // It has already paid for a full ceiling of output, so this is the last call whose
+  // cost should go unrecorded. Nothing rides the return path here — complete() throws
+  // — which is why usage is reported through a callback as it accumulates.
+  const bedrock = new BedrockProvider({ default_model: "m", max_tokens: 32_000 });
+  stubStream(bedrock, async function* () {
+    yield messageStartUsage({ input_tokens: 9100 });
+    yield textDelta("<table><tr><td>cut");
+    yield messageDeltaUsage("max_tokens", { output_tokens: 32_000 });
+  });
+  let seen: Usage | undefined;
+  await assert.rejects(
+    () => bedrock.complete({ ...bedrockReq, onUsage: (u) => void (seen = u) }),
+    TruncatedResponseError,
+  );
+  assert.deepEqual(seen, { input_tokens: 9100, output_tokens: 32_000 });
+});
+
+test("a stalled call reports the prompt it already paid for", async () => {
+  // The prompt was processed before the silence began — on a vision call that is a
+  // document's worth of page images, billed whether or not anything came back.
+  const bedrock = new BedrockProvider({ default_model: "m" }, { idleTimeoutMs: 100 });
+  stubStream(bedrock, async function* (signal) {
+    yield messageStartUsage({ input_tokens: 15_400, cache_read_input_tokens: 2048 });
+    yield textDelta("half a doc");
+    await sleepUnlessAborted(60_000, signal);
+  });
+  let seen: Usage | undefined;
+  await assert.rejects(
+    () => bedrock.complete({ ...bedrockReq, onUsage: (u) => void (seen = u) }),
+    StalledStreamError,
+  );
+  // No output_tokens key at all, rather than a zero: nothing finished, so no output
+  // count exists to report. deepEqual is strict about the difference.
+  assert.deepEqual(seen, { input_tokens: 15_400, cache_read_input_tokens: 2048 });
+});
+
+test("OpenRouter's usage chunk is read off a chunk that carries no choices", async () => {
+  // It arrives late and on its own, after finish_reason and before [DONE] — so a
+  // reader that only looked inside `choices[0]` would never see it.
+  const sseUsage = (usage: Record<string, unknown>) =>
+    `data: ${JSON.stringify({ choices: [], usage })}`;
+  await withStream(
+    () => ({
+      lines: [
+        sseDelta("<p>ok</p>"),
+        sseFinish("stop"),
+        sseUsage({
+          prompt_tokens: 4300,
+          completion_tokens: 820,
+          prompt_tokens_details: { cached_tokens: 1024 },
+        }),
+        SSE_DONE,
+      ],
+    }),
+    async () => {
+      const res = await provider().complete(req);
+      // 4300 - 1024: the cached tokens are inside prompt_tokens in this vocabulary,
+      // and billing them at the full input rate as well as the cache rate would
+      // overstate the cost of the one thing that makes it cheaper.
+      assert.deepEqual(res.usage, {
+        input_tokens: 3276,
+        output_tokens: 820,
+        cache_read_input_tokens: 1024,
+      });
+    },
+  );
+});
+
+test("only the four token counts leave the adapter, not whatever else the upstream sent", async () => {
+  // `message_start.message.usage` carries more than the four fields `Usage` declares —
+  // `service_tier` and a nested `cache_creation` breakdown today, more after any model
+  // release. It matters because the router spreads usage FLAT onto the `model_call` log
+  // line: passed through, an unknown scalar becomes a log field nobody declared and a
+  // nested object breaks the one-level-deep shape that spread depends on.
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  stubStream(bedrock, async function* () {
+    yield {
+      chunk: {
+        bytes: encode({
+          type: "message_start",
+          message: {
+            usage: {
+              input_tokens: 4200,
+              cache_read_input_tokens: 1024,
+              service_tier: "standard",
+              cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 },
+            },
+          },
+        }),
+      },
+    };
+    yield textDelta("<p>done</p>");
+    yield messageDeltaUsage("end_turn", { output_tokens: 830 });
+  });
+  const res = await bedrock.complete(bedrockReq);
+  assert.deepEqual(res.usage, {
+    input_tokens: 4200,
+    cache_read_input_tokens: 1024,
+    output_tokens: 830,
+  });
+});
+
+test("a retried call is billed for both attempts, not only the one that survived", async () => {
+  // Retries fire only while nothing has been generated, so usually little or nothing
+  // has been reported yet — but where an attempt did report before dying, its tokens
+  // were spent. Counting only the survivor understates the call INVISIBLY: the run
+  // still reads as fully accounted for, because the call reported something and
+  // `tokens.calls_reported` counts calls, not attempts.
+  const usageChunk = (prompt: number, completion: number) =>
+    `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: prompt, completion_tokens: completion } })}`;
+  let attempt = 0;
+  await withStream(
+    () => {
+      attempt++;
+      return attempt === 1
+        ? {
+            body: () =>
+              (async function* () {
+                yield new TextEncoder().encode(usageChunk(3000, 0) + "\n\n");
+                throw Object.assign(new Error("fetch failed"), { cause: { code: "ECONNRESET" } });
+              })(),
+          }
+        : { lines: [sseDelta("clean run"), sseFinish("stop"), usageChunk(3000, 400), SSE_DONE] };
+    },
+    async (calls) => {
+      const seen: Usage[] = [];
+      const res = await provider().complete({ ...req, onUsage: (u) => void seen.push(u) });
+      assert.equal(calls.length, 2, `expected 1 retry, got ${calls.length} attempts`);
+      // The text comes from the surviving attempt alone; the prompt was paid for twice.
+      assert.equal(res.text, "clean run");
+      assert.deepEqual(res.usage, { input_tokens: 6000, output_tokens: 400 });
+      // And the callback never reported less than the total spent so far, since it is
+      // what the router logs when the call ends by throwing.
+      assert.deepEqual(seen[0], { input_tokens: 3000, output_tokens: 0 });
+      assert.deepEqual(seen[seen.length - 1], { input_tokens: 6000, output_tokens: 400 });
+    },
+  );
+});
+
+test("the field names the adapter emits are the ones diagnostics reads", async () => {
+  // The seam this pins is two string literals in two files: `Usage`'s keys in
+  // providers/types.ts, spread onto the `model_call` event by the router, read back by
+  // name in diagnostics.ts. Nothing else exercises the join — the adapter tests stop at
+  // complete(), the diagnostics tests start from hand-written log lines — so dropping
+  // the spread, or renaming a key on one side, would turn every published count to 0
+  // with the rest of the suite green. That is the failure this feature exists to fix:
+  // `grep -rn usage src/` finding nothing while the bill kept arriving.
+  const cfg = {
+    providers: {
+      default: "openrouter",
+      openrouter: { api_key: "k", base_url: "http://localhost:1/v1", default_model: "m" },
+    },
+  } as unknown as IrisConfig;
+  const lines: string[] = [];
+  const router = new ProviderRouter(cfg, (type, data) =>
+    // Exactly how RunLog writes it: one flat line per event, ts first.
+    lines.push(JSON.stringify({ ts: new Date(0).toISOString(), type, ...data })),
+  );
+  await withStream(
+    () => ({
+      lines: [
+        sseDelta("<p>ok</p>"),
+        sseFinish("stop"),
+        `data: ${JSON.stringify({
+          choices: [],
+          usage: {
+            prompt_tokens: 5000,
+            completion_tokens: 900,
+            prompt_tokens_details: { cached_tokens: 1000 },
+          },
+        })}`,
+        SSE_DONE,
+      ],
+    }),
+    async () => {
+      await router.complete("page", "vision", [{ role: "user", content: "hi" }]);
+    },
+  );
+  const d = summarizeRun(lines.join("\n") + "\n", {
+    sessionId: "s",
+    status: "ready_for_review",
+    phase: "done",
+    now: 1000,
+  });
+  assert.deepEqual(d.tokens, {
+    input: 4000, // 5000 prompt tokens less the 1000 that came from the cache
+    output: 900,
+    cache_read: 1000,
+    cache_write: 0,
+    calls_reported: 1,
+  });
+  assert.equal(d.by_agent.page.input_tokens, 4000);
+  assert.equal(d.by_agent.page.output_tokens, 900);
+  // The cache counts cross the same seam, and a cache read is the one an agent-level
+  // reader most needs: it is the difference between "this agent is cheap" and "this
+  // agent is cheap because it is hitting the cache".
+  assert.equal(d.by_agent.page.cache_read_input_tokens, 1000);
+});
+
+test("normalizeUsage subtracts cache reads and leaves cache writes alone", () => {
+  // cached_tokens is specified as a subset of prompt_tokens, so it must come out.
+  // Whether cache_write_tokens is also inside it is not documented — subtracting a
+  // number that was never in the total would understate the input, and over-counting
+  // input is the safer error for a cost estimate.
+  assert.deepEqual(
+    normalizeUsage({
+      prompt_tokens: 1000,
+      completion_tokens: 100,
+      prompt_tokens_details: { cached_tokens: 400, cache_write_tokens: 200 },
+    }),
+    {
+      input_tokens: 600,
+      output_tokens: 100,
+      cache_read_input_tokens: 400,
+      cache_creation_input_tokens: 200,
+    },
+  );
+  // Nothing reported stays nothing: an empty object would read as a free call.
+  assert.equal(normalizeUsage(undefined), undefined);
+  assert.equal(normalizeUsage({}), undefined);
+  // Never negative, however the upstream's arithmetic disagrees with itself.
+  assert.equal(normalizeUsage({ prompt_tokens: 10, prompt_tokens_details: { cached_tokens: 99 } })?.input_tokens, 0);
 });
 
 test("a service failure delivered mid-stream is raised, not silently truncated", async () => {

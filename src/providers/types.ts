@@ -11,18 +11,47 @@ export interface Image {
   media_type: string;
 }
 
+// What a call actually consumed. Named after Anthropic's fields because that is the
+// vocabulary the models themselves report in; other adapters normalize onto it.
+//
+// Two things to know before adding these up. First, `input_tokens` EXCLUDES cached
+// tokens — the whole prompt is input + cache_read + cache_creation, so summing only
+// `input_tokens` on a cache-hitting deployment understates the prompt. Second, the
+// four numbers bill at four different rates, so they are deliberately kept apart
+// rather than folded into one total.
+//
+// Every field is optional because reporting is not guaranteed: an upstream may omit
+// usage entirely, and a call that fails partway through knows its prompt size but
+// never learns its output size. Absent means "not reported", not zero — see
+// `tokens.calls_reported` in diagnostics, which exists so a partial sum cannot be
+// mistaken for a complete one.
+export interface Usage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
 export interface CompletionRequest {
   capability: Capability;
   messages: Message[];
   images?: Image[];
   schema?: Record<string, unknown>; // JSON Schema for structured_output
   model: string; // resolved by the router from deployment config
+  // Called by the adapter whenever the running token totals change, with the full
+  // snapshot known so far (the latest call wins). A return value cannot serve here:
+  // the prompt's size is known at the start of a stream and the output's only at the
+  // end, so a call that stalls or truncates — exactly the expensive kind — would
+  // report nothing at all if usage only rode the successful return path.
+  onUsage?: (usage: Usage) => void;
 }
 
 export interface CompletionResult {
   text: string;
   model: string;
   provider: string;
+  // Absent when the upstream reported nothing.
+  usage?: Usage;
 }
 
 // PRD §10.3 provider interface. An agent declares a capability; the

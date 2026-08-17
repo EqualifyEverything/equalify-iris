@@ -549,7 +549,10 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
   "concurrency_factor": 3.8,
   "phase_durations_ms": { "extraction": 60100, "review": 24000 },
   "model_calls": { "count": 7, "failed": 0, "total_ms": 51000, "avg_ms": 7285, "max_ms": 14300 },
-  "by_agent": { "page": { "count": 2, "total_ms": 28200, "max_ms": 15100 } },
+  "tokens": { "input": 48200, "output": 19400, "cache_read": 0, "cache_write": 0, "calls_reported": 7 },
+  "by_agent": { "page": { "count": 2, "total_ms": 28200, "max_ms": 15100,
+    "input_tokens": 21400, "output_tokens": 9100,
+    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0 } },
   "slowest_calls": [ { "agent": "table", "model": "...", "capability": "vision", "duration_ms": 14300, "ok": true } ],
   "errors": []
 }
@@ -563,6 +566,29 @@ is total model-call time ÷ wall-clock elapsed: ~1 means calls ran serially, and
 `extraction_concurrency` during a parallel extraction phase — a value near 1 on a multi-page run
 means parallelism isn't happening. `slowest_calls` and `phase_durations_ms` show where time goes;
 `errors` lists failed calls.
+
+`tokens` is what the run **consumed**, and `by_agent` carries the same four counts per agent
+(under the names the run log uses: `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
+`cache_creation_input_tokens`) — so "which agent is slow" and "which agent is expensive" can be
+answered separately, because they are often different agents. Deliberately no dollar figure: the rate depends on the provider,
+region and model, all of which are deployment config, so the token counts are reported and
+whoever holds the price sheet does the multiplication. The four counts bill at four different
+rates and are never summed here; note that `input` **excludes** tokens read from the cache, so the
+whole prompt is `input + cache_read + cache_write`.
+
+One caveat on that sum, for whoever is doing the multiplication. It is exact on a provider that
+reports the four counts as disjoint sets, which is what the Anthropic-shaped APIs do. On an
+OpenAI-shaped one, cache reads are reported *inside* the prompt total and are subtracted back out
+here, but whether cache **writes** are also inside it is undocumented — so where they are, they
+are counted once as `input` and again as `cache_write`, and the sum is high by that amount.
+Over-counting is the deliberate choice: the alternative subtracts a number that may never have
+been in the total, which understates the prompt and reports a cache as cheaper than it was.
+
+`calls_reported` is how many of `model_calls.count` reported any usage at all. When it is lower
+than `count`, these sums cover only part of the run — a cost derived from them is a floor, not
+an estimate. Some upstreams report nothing; a call that stalls knows its prompt size but never
+learns its output size. Failed calls **are** counted, because a truncation has already paid for
+a full ceiling of output and a stall for its prompt.
 
 ## 8. List sessions
 
