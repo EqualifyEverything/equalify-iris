@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { isIP } from "node:net";
 import { resolve } from "node:path";
 import { parse } from "yaml";
 
@@ -215,15 +216,45 @@ export function resolveRateLimits(raw: Partial<RateLimitConfig> | undefined): Ra
   };
 }
 
+// The non-numeric vocabulary Express's `trust proxy` accepts, as proxy-addr compiles it:
+// these three names, or a list of addresses and subnets.
+const TRUST_PROXY_NAMES = new Set(["loopback", "linklocal", "uniquelocal"]);
+
+/**
+ * Whether Express can actually interpret this string as a trust list.
+ *
+ * Checked here rather than left to Express because Express compiles the value EAGERLY and
+ * throws on anything else: `IRIS_TRUST_PROXY=yes` would take the process down at startup
+ * with a proxy-addr `TypeError: invalid IP address: yes` that names neither this key nor
+ * the file it came from. An operator typo in one config value deserves the same treatment
+ * as every other one here — warn, fall back, keep serving.
+ */
+function isTrustProxyList(text: string): boolean {
+  const tokens = text.split(",").map((t) => t.trim());
+  if (tokens.some((t) => t === "")) return false;
+  return tokens.every((token) => {
+    if (TRUST_PROXY_NAMES.has(token.toLowerCase())) return true;
+    const [addr, prefix, ...rest] = token.split("/");
+    if (rest.length > 0) return false;
+    const family = isIP(addr);
+    if (family === 0) return false;
+    if (prefix === undefined) return true;
+    // A subnet may be written as a bit count or as a mask of the same family.
+    if (/^\d+$/.test(prefix)) return Number(prefix) <= (family === 4 ? 32 : 128);
+    return isIP(prefix) === family;
+  });
+}
+
 /**
  * Coerce a configured `trust_proxy` into a value Express's `trust proxy` setting accepts.
  *
  * Absent, empty, `false`, `"false"`, `0` -> false (trust nothing, the safe default).
- * A number or numeric string -> that many hops. Any other string is passed through for
- * Express to interpret (`loopback`, a subnet list). `true` becomes 1, because trusting
- * every hop means believing an `X-Forwarded-For` the client wrote — see
- * trustProxyWarning, which says so out loud rather than silently obeying or silently
- * correcting.
+ * A number or numeric string -> that many hops. A string Express can interpret — one of
+ * `loopback`/`linklocal`/`uniquelocal`, or a list of addresses and subnets — passes
+ * through, and anything else falls back to false with a warning rather than crashing
+ * Express at boot (see isTrustProxyList). `true` becomes 1, because trusting every hop
+ * means believing an `X-Forwarded-For` the client wrote — see trustProxyWarning, which
+ * says so out loud rather than silently obeying or silently correcting.
  */
 export function normalizeTrustProxy(value: unknown): number | boolean | string {
   if (value === null || value === undefined) return false;
@@ -234,19 +265,31 @@ export function normalizeTrustProxy(value: unknown): number | boolean | string {
   if (text.toLowerCase() === "true") return 1;
   const n = Number(text);
   if (Number.isFinite(n)) return n > 0 ? Math.floor(n) : false;
-  return text;
+  return isTrustProxyList(text) ? text : false;
 }
 
-// A boot-time warning for the one `trust_proxy` value that is accepted and unsafe.
-// Returned rather than logged, like the two GitHub warnings above, so it is testable and
-// the caller decides where it goes.
+// A boot-time warning for the two `trust_proxy` values that are not what they look like:
+// `true`, which is accepted and unsafe, and a string Express cannot compile, which would
+// otherwise be a startup crash. Returned rather than logged, like the two GitHub warnings
+// above, so it is testable and the caller decides where it goes.
 export function trustProxyWarning(value: unknown): string | undefined {
-  if (value !== true && String(value).trim().toLowerCase() !== "true") return undefined;
+  const text = String(value ?? "").trim();
+  if (value === true || text.toLowerCase() === "true") {
+    return (
+      `server.trust_proxy is "true", which tells Express to trust the whole X-Forwarded-For chain — ` +
+      `including the part a client wrote, so any caller could present a fresh address per request and ` +
+      `the per-address rate limits would bound nothing. Using 1 hop instead. Set it to the number of ` +
+      `proxies actually in front of this deployment.`
+    );
+  }
+  if (typeof value === "boolean" || typeof value === "number") return undefined;
+  if (text === "" || text.toLowerCase() === "false" || Number.isFinite(Number(text))) return undefined;
+  if (isTrustProxyList(text)) return undefined;
   return (
-    `server.trust_proxy is "true", which tells Express to trust the whole X-Forwarded-For chain — ` +
-    `including the part a client wrote, so any caller could present a fresh address per request and ` +
-    `the per-address rate limits would bound nothing. Using 1 hop instead. Set it to the number of ` +
-    `proxies actually in front of this deployment.`
+    `server.trust_proxy is ${JSON.stringify(text)}, which Express cannot interpret. It takes a number of ` +
+    `proxies in front of this deployment (1 behind a single Caddy/nginx), one of "loopback", ` +
+    `"linklocal" or "uniquelocal", or a comma-separated list of proxy addresses and subnets. Trusting ` +
+    `nothing instead, which means every caller behind a proxy shares one rate-limit bucket.`
   );
 }
 

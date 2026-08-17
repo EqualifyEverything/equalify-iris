@@ -20,7 +20,9 @@ server:
   quality_token: ${IRIS_QUALITY_TOKEN}
   # How many proxies sit in front of this deployment. Set it to 1 behind a single
   # Caddy/nginx (2 behind a CDN in front of that, and so on), and leave it unset
-  # when Iris is exposed directly.
+  # when Iris is exposed directly. Express's own vocabulary also works for a
+  # topology a count cannot describe — `loopback`, or a comma-separated list of
+  # proxy addresses and subnets; anything else warns and trusts nothing.
   #
   # It decides whose address the rate limits below count against. Unset, every
   # request behind a proxy presents as the proxy's own address, so all of your

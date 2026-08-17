@@ -141,12 +141,18 @@ export function __resetProxyWarning(): void {
   warnedAboutProxy = false;
 }
 
-// Seconds until the caller's window resets, read back off the header
-// express-rate-limit has already set. Read rather than recomputed so the number in the
-// message and the number in `Retry-After` cannot disagree.
+// Seconds until the caller's window resets: taken from the header express-rate-limit has
+// already set, and written back, so the number in the message, the number in `details`,
+// and the number in `Retry-After` are one number rather than three that agree by
+// coincidence. Writing it back is what closes the last gap — express-rate-limit derives
+// the header from `Math.max(0, delta)`, so a refusal landing exactly on a window boundary
+// sends `Retry-After: 0`, where the honest advice is "a second" and not the whole window
+// the fallback below would have claimed.
 function retryAfterSeconds(res: Response): number {
   const header = Number(res.getHeader("Retry-After"));
-  return Number.isFinite(header) && header > 0 ? Math.ceil(header) : Math.ceil(WINDOW_MS / 1000);
+  const seconds = Number.isFinite(header) ? Math.max(1, Math.ceil(header)) : Math.ceil(WINDOW_MS / 1000);
+  res.set("Retry-After", String(seconds));
+  return seconds;
 }
 
 // One rate limiter, built the same way three times over. The pieces that must not
@@ -265,11 +271,12 @@ export function uploadRateLimit(cfg: IrisConfig): RequestHandler {
  * is conservative in the safe direction — at most two undeclared uploads at the default —
  * and rare: browsers and curl both send `Content-Length` for a multipart body.
  *
- * What this can and cannot promise: Node reads at most `Content-Length` bytes of body for
- * a declared request, so a caller cannot under-declare and then send more — the charge is
- * an upper bound, not a courtesy. A chunked request can exceed its charge, and there
- * multer's per-file `fileSize` and per-count `files` limits (routes/sessions.ts) are the
- * enforcement.
+ * Every charge is an upper bound on what its request can actually spend, which is what
+ * makes the total mean anything. A declared request cannot exceed its declaration — Node
+ * reads at most `Content-Length` bytes of body, so the charge is a bound and not a
+ * courtesy — and an undeclared one is metered as it arrives and cut off at the same ceiling
+ * by `meterUploadBody` below. The total here is therefore the peak, not an estimate a
+ * chunked sender can walk past.
  *
  * Refusal rather than waiting — the opposite of what RunQueue does one step later, and
  * for the reason RunQueue gives for waiting: by the time the queue is consulted the
@@ -331,16 +338,99 @@ export function uploadGate(cfg: IrisConfig): RequestHandler {
   };
 }
 
+// The one refusal, worded once. Both halves of the gate below are the same answer — this
+// request is bigger than one upload may be — and they differ only in how that was found
+// out, so only that clause is theirs to fill in.
+function refuseTooLarge(
+  res: Response,
+  maxBytes: number,
+  cause: string,
+  details: Record<string, number>,
+): void {
+  sendError(
+    res,
+    413,
+    "upload_too_large",
+    `Upload too large: this request ${cause} and one request may carry at most ` +
+      `${formatBytes(maxBytes)} across all of its parts. A document of up to ${MAX_UPLOAD_FILES} pages ` +
+      `fits inside that; split a larger batch across sessions.`,
+    { max_bytes: maxBytes, ...details },
+  );
+}
+
 /**
- * Refuse a request whose declared size is past what one upload may be, before multer
- * reads any of it.
+ * Count a body that would not say how big it is, and cut it off at the ceiling.
  *
- * `Content-Length` is what a client says it is about to send, so this is a cheap
- * pre-check and not the enforcement: a chunked request declares nothing, and a lying
- * header would still be cut off by multer's own per-file and per-count limits (see
- * MAX_UPLOAD_FILES above and multer's `limits` in routes/sessions.ts). It is worth
- * having anyway because it is the only one of the three that costs nothing — the
- * alternative is buffering 500 MB in order to discover it was 500 MB.
+ * Counted here rather than left to multer because multer has no total: its limits are per
+ * part (`fileSize`) and per count (`files`), and their PRODUCT — 25 x 50 MB — is an order
+ * of magnitude above the per-request ceiling `GET /v1/limits` publishes. Lowering
+ * `fileSize` to a twenty-fifth of that ceiling would make the product come out right and
+ * refuse the large scanned PDF this endpoint exists for, so the total has to be counted
+ * where the total is known: off the request stream.
+ *
+ * WHERE THIS IS CALLED FROM IS PART OF IT. Attaching a `data` listener puts the stream in
+ * flowing mode, so anything delivered before multer pipes it into busboy is a chunk missing
+ * from a body nobody refused — which surfaces as a mangled multipart parse, i.e. a valid
+ * upload rejected as malformed. So this is called from inside the multer wrapper
+ * (routes/sessions.ts), two statements from `upload.array(...)`, and not from a middleware
+ * of its own: express-rate-limit awaits its store, so "the middleware in front of multer
+ * looks synchronous" is not something this can rest on.
+ *
+ * On refusal the response is written from here, mid-parse, while it is still ours to write:
+ * multer has not answered and never will, because unpiping means busboy sees no more of the
+ * body and never reaches its `close`. That is deliberate — the point is to stop parsing, not
+ * to let multer finish and then complain.
+ *
+ * A body that DID declare a length is left alone: `requestSizeGate` has already refused it
+ * if it declared too much, and Node reads no more of a declared body than it declared, so
+ * there is nothing left for counting to discover.
+ *
+ * `maxBytes` is a parameter so the metering can be tested against a ceiling a test can
+ * afford to exceed; the caller uses the default.
+ */
+export function meterUploadBody(req: Request, res: Response, maxBytes: number = MAX_UPLOAD_BYTES): void {
+  const declared = Number(req.header("content-length"));
+  if (Number.isFinite(declared) && declared > 0) return;
+  let received = 0;
+  const onData = (chunk: Buffer | string): void => {
+    received += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length;
+    if (received <= maxBytes) return;
+    req.off("data", onData);
+    req.unpipe();
+    if (!res.headersSent) {
+      // `Connection: close` rather than destroying the socket here: this connection has a
+      // body on it that nothing will finish reading, so it cannot be reused anyway, and
+      // Node's own close-after-response path flushes the refusal before the socket goes —
+      // where hanging up by hand races the response and can leave the caller holding a
+      // reset instead of a 413. It also ends the transfer, so an oversized sender does not
+      // get to spend the rest of its gigabytes on a request already refused.
+      res.set("Connection", "close");
+      refuseTooLarge(res, maxBytes, `sent ${formatBytes(received)} without declaring a length`, {
+        received_bytes: received,
+      });
+    }
+    // Discard whatever else arrives before that close, rather than leaving it in the
+    // socket's buffer. Draining costs bandwidth and no memory, which is the trade this
+    // whole gate is about.
+    req.resume();
+  };
+  req.on("data", onData);
+}
+
+/**
+ * Refuse a request whose declared size is past what one upload may be, before multer reads
+ * any of it.
+ *
+ * This is the cheap half of the per-request ceiling, and an exact one for the requests it
+ * covers: Node reads at most `Content-Length` bytes of body, so a caller cannot declare 1 MB
+ * and then send 500. It is worth having in front because it costs nothing — the alternative
+ * is buffering 500 MB in order to discover it was 500 MB.
+ *
+ * The other half is `meterUploadBody` above, for a body that declares nothing. Without it
+ * this ceiling would bind only the callers who mentioned their size, and the number
+ * `GET /v1/limits` publishes would be one an operator on a small machine could not rely on.
+ * The two are separate because they have to run in different places: this one as early in
+ * the stack as possible, that one as late as possible.
  *
  * 413 rather than 429: the request is not over a rate budget, it is too big, and the
  * caller who retries it unchanged should be told that rather than told to wait.
@@ -349,15 +439,7 @@ export function requestSizeGate(): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     const declared = Number(req.header("content-length"));
     if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES) {
-      sendError(
-        res,
-        413,
-        "upload_too_large",
-        `Upload too large: this request declares ${formatBytes(declared)} and one request may carry at ` +
-          `most ${formatBytes(MAX_UPLOAD_BYTES)} across all of its parts. A document of up to ` +
-          `${MAX_UPLOAD_FILES} pages fits inside that; split a larger batch across sessions.`,
-        { max_bytes: MAX_UPLOAD_BYTES, declared_bytes: declared },
-      );
+      refuseTooLarge(res, MAX_UPLOAD_BYTES, `declares ${formatBytes(declared)}`, { declared_bytes: declared });
       return;
     }
     next();

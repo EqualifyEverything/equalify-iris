@@ -32,9 +32,10 @@ if (cidWarning) console.warn(`WARNING: ${cidWarning}`);
 const appWarning = bundledAppWarning(cfg.github.client_id, cfg.github.upstream_repo);
 if (appWarning) console.warn(`WARNING: ${appWarning}`);
 
-// And the third: `trust_proxy: true` is accepted by Express and defeats every
-// per-address rate limit, because the address then comes from a header the client can
-// write. Coerced to one hop; the warning says so.
+// And the third, for either way `trust_proxy` can be wrong: `true` is accepted by Express
+// and defeats every per-address rate limit, because the address then comes from a header
+// the client can write (coerced to one hop), and a string Express cannot compile would
+// otherwise be a startup crash naming no config key (trusted as nothing instead).
 const proxyWarning = trustProxyWarning(cfg.server.trust_proxy);
 if (proxyWarning) console.warn(`WARNING: ${proxyWarning}`);
 

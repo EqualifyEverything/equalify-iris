@@ -152,7 +152,9 @@ from the environment at startup; changes require a restart.
   (1 for a single Caddy/nginx). Without it every caller presents as the proxy's address and shares
   one rate-limit bucket — the log warns when it sees an `X-Forwarded-For` while this is unset.
   `true` is coerced to 1 with a warning: trusting the whole chain means trusting the part of the
-  header a client wrote, which would make the per-address limits bound nothing.
+  header a client wrote, which would make the per-address limits bound nothing. Express's own
+  vocabulary (`loopback`, or a list of proxy addresses and subnets) works too; anything it cannot
+  interpret warns and trusts nothing, rather than taking the process down at startup.
 - **GitHub** (§9.1): GitHub is the auth mechanism — a user *is* their GitHub account, and a token
   is **required** on every call. By default the
   service uses a **bundled GitHub App via the device flow** — no per-operator app setup, no

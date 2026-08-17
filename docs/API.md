@@ -345,8 +345,11 @@ rejected upload will have broken. The model and provider that produced these num
 deliberately not named here; that is deployment detail, and this endpoint answers a question
 about files.
 
-`upload` is what one **request** may be, as opposed to what one image may be: `max_files` parts
-and `max_request_bytes` across all of them, both enforced before the body is read. `rate_limits`
+`upload` is what one **request** may be, as opposed to what one image may be: `max_files` parts and
+`max_request_bytes` across all of them. They are refused at different moments, which matters if you
+are streaming: the byte total is checked before the body is read (or counted as it arrives, when the
+request declares no length), while the part count is refused during parsing, once a part past
+`max_files` appears. `rate_limits`
 is how often you may ask (§3.2), and is `null` on a deployment that does not limit requests in the
 app — which means "not limiting", not "unknown".
 
@@ -412,8 +415,11 @@ minutes, and nothing changes faster than that.
 Two more refusals concern uploads specifically, and both answer **before** the body is read, so a
 rejected upload costs you nothing but the round trip:
 
-- `413 upload_too_large` — the request declares more than `upload.max_request_bytes`. Retrying it
-  unchanged will fail again; split the batch across sessions.
+- `413 upload_too_large` — the request is bigger than `upload.max_request_bytes`. Retrying it
+  unchanged will fail again; split the batch across sessions. Normally answered from the declared
+  `Content-Length` before a byte of body is read; a request that declares no length (chunked) is
+  counted as it arrives and cut off at the same ceiling, mid-upload, with `received_bytes` in
+  `details` instead of `declared_bytes`.
 - `429 rate_limited` with `max_upload_memory_bytes` in `details` — too much upload is arriving at
   once across all callers (`max_upload_memory_mb`). This is about *bytes in flight*, not your
   request count, so small uploads are essentially never refused for it. Retry in a few seconds.

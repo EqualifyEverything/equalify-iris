@@ -19,6 +19,7 @@ import type { Fragment } from "../pipeline/fragment.ts";
 import { RunQueue } from "../util/queue.ts";
 import {
   MAX_UPLOAD_FILES,
+  meterUploadBody,
   requestSizeGate,
   uploadGate,
   uploadRateLimit,
@@ -41,8 +42,12 @@ import { imageDimensions } from "../util/imageSize.ts";
 // multipart body may carry any number of parts, so 50 MB each with no count meant one
 // request could buffer gigabytes before this handler ran. It cannot cost a real upload
 // anything — a session is capped at 25 pages however they arrive, so 25 files is already
-// more than an accepted request can use (see requestLimits.ts, and requestSizeGate for
-// the total-bytes half of the same bound).
+// more than an accepted request can use (see requestLimits.ts).
+//
+// Note what this pair is NOT: their product is 1.25 GB, so they are per-part backstops and
+// never the total. What one request may buffer in all is `requestSizeGate` below, which
+// checks a declared length before reading anything and meters an undeclared one as it
+// arrives — the numbers here only have to stay above any single legitimate part.
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024, files: MAX_UPLOAD_FILES },
@@ -50,8 +55,19 @@ const upload = multer({
 
 // Wrap multer so its errors (e.g. file too large) become clean 400s.
 function uploadImages(req: Request, res: Response, next: NextFunction): void {
+  // The total-bytes ceiling for a body that declared no length, which multer's per-part
+  // limits are not (see requestLimits.ts). Called here rather than mounted as its own
+  // middleware because it counts bytes off the request stream, and everything between it
+  // and multer's `req.pipe()` has to be synchronous — one statement is as close as that
+  // gets. It answers the request itself if the body overruns, and multer then never calls
+  // back at all.
+  meterUploadBody(req, res);
   upload.array("images")(req, res, (err: unknown) => {
     if (err) {
+      // requestSizeGate can have already answered 413 and unpiped this body mid-parse. It
+      // does not expect multer to call back at all after that, but a second write to a sent
+      // response would throw from in here, where nothing is listening.
+      if (res.headersSent) return;
       // Multer says "Too many files" for the part count, which does not say how many are
       // too many. That cap is one Iris chose rather than a property of multipart, so the
       // refusal owes the caller the number and what to do about it.

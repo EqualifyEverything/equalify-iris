@@ -19,6 +19,7 @@ import {
   __resetProxyWarning,
   authRateLimit,
   generalRateLimit,
+  meterUploadBody,
   publishedRateLimits,
   requestSizeGate,
   uploadGate,
@@ -382,14 +383,59 @@ test("a request that declares more than one upload may carry is refused unread",
     assert.equal(body.error.details.max_bytes, MAX_UPLOAD_BYTES);
     assert.match(body.error.message, /128 MB/);
 
-    // A request that declares no length at all (Node frames this one as chunked) is a
-    // request the gate cannot judge, and it must not invent a reason to refuse it —
-    // multer's per-file and per-count limits are what bound that case (MAX_UPLOAD_FILES).
+    // A request that declares no length at all (Node frames this one as chunked) cannot be
+    // judged in advance, and the gate must not invent a reason to refuse it: this one is
+    // metered as it arrives and passes, because it is small.
     const undeclared = await rawPost(srv.url, {}, "small");
     assert.equal(undeclared.status, 200);
     assert.equal(await srv.post({ body: "small", headers: { "content-type": "text/plain" } }).then((r) => r.status), 200);
   } finally {
     srv.close();
+  }
+});
+
+test("a body that will not declare its size is metered as it arrives, and cut off", async () => {
+  // A ceiling a test can afford to exceed — which is the only reason meterUploadBody takes
+  // one. What is under test is the counting, not the 128 MB.
+  const app = express();
+  app.post("/v1/sessions", (req, res) => {
+    // Called and then consumed in one statement-run, which is the arrangement it requires
+    // and the one routes/sessions.ts uses in front of multer.
+    meterUploadBody(req, res, 2048);
+    // The property that matters for an ALLOWED body is that all of it arrives: metering
+    // puts the request stream in flowing mode, and a chunk delivered before the consumer
+    // was listening would be a chunk silently missing from an upload nobody refused.
+    let received = 0;
+    req.on("data", (chunk: Buffer) => (received += chunk.length));
+    // Guarded like the real one in routes/sessions.ts: on a refusal this end of the stack
+    // has already been answered for, and writing twice throws from inside an event handler.
+    req.on("end", () => {
+      if (!res.headersSent) res.json({ received });
+    });
+  });
+  const server = app.listen(0);
+  await new Promise((r) => server.once("listening", r));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/sessions`;
+  try {
+    // No `Content-Length` (Node frames this as chunked) and more than the ceiling. Nothing
+    // declared it, so counting it is the only way it can be caught — and multer's own
+    // limits are not that count: 25 parts x 50 MB each is 1.25 GB, ten times the ceiling
+    // this refusal names.
+    const over = await rawPost(url, {}, "x".repeat(4096));
+    assert.equal(over.status, 413);
+    const body = JSON.parse(over.body) as { error: { code: string; message: string; details: Record<string, number> } };
+    assert.equal(body.error.code, "upload_too_large");
+    assert.equal(body.error.details.max_bytes, 2048);
+    assert.ok(body.error.details.received_bytes > 2048, "the refusal should say what it counted");
+    assert.match(body.error.message, /without declaring a length/);
+
+    // And the case this must not break: an undeclared body under the ceiling reaches the
+    // handler with every byte of it.
+    const under = await rawPost(url, {}, "y".repeat(1000));
+    assert.equal(under.status, 200);
+    assert.deepEqual(JSON.parse(under.body), { received: 1000 });
+  } finally {
+    server.close();
   }
 });
 
@@ -439,6 +485,26 @@ test("the upload route refuses an over-limit request in front of multer, not aft
     const body = (await many.json()) as { error: { code: string; message: string } };
     assert.equal(body.error.code, "invalid_request");
     assert.match(body.error.message, new RegExp(`at most ${MAX_UPLOAD_FILES} file parts`));
+
+    // The same limit reached through a body that declared no length, which is the case the
+    // byte meter sits in front of. `fetch` sends a FormData with a Content-Length, so this
+    // one is built by hand: what it proves is that multer still receives an undeclared body
+    // INTACT — a chunk lost to the meter resuming the stream early would surface here as a
+    // mangled multipart parse rather than as the count refusal below.
+    const boundary = "----irisChunkedBoundary";
+    const parts =
+      Array.from(
+        { length: MAX_UPLOAD_FILES + 1 },
+        (_, i) =>
+          `--${boundary}\r\nContent-Disposition: form-data; name="images"; filename="page-${i}.png"\r\n` +
+          `Content-Type: image/png\r\n\r\n\x89PNG\r\n`,
+      ).join("") + `--${boundary}--\r\n`;
+    const chunked = await rawPost(srv.url, { "content-type": `multipart/form-data; boundary=${boundary}` }, parts);
+    assert.equal(chunked.status, 400);
+    assert.match(
+      (JSON.parse(chunked.body) as { error: { message: string } }).error.message,
+      new RegExp(`at most ${MAX_UPLOAD_FILES} file parts`),
+    );
   } finally {
     srv.close();
   }
@@ -503,6 +569,29 @@ test("trust_proxy accepts a hop count and refuses to blindly trust the chain", (
   assert.match(trustProxyWarning("true") ?? "", /Using 1 hop instead/);
   assert.equal(trustProxyWarning(1), undefined);
   assert.equal(trustProxyWarning(undefined), undefined);
+
+  // A list Express can interpret survives; one it cannot does not. The difference matters
+  // because Express compiles this value EAGERLY, so a typo used to be a startup crash with
+  // a proxy-addr stack trace that named neither this key nor the file it came from.
+  assert.equal(normalizeTrustProxy("10.0.0.0/8, 127.0.0.1"), "10.0.0.0/8, 127.0.0.1");
+  assert.equal(trustProxyWarning("10.0.0.0/8, 127.0.0.1"), undefined);
+  assert.equal(normalizeTrustProxy("yes"), false);
+  assert.match(trustProxyWarning("yes") ?? "", /cannot interpret/);
+  assert.match(trustProxyWarning("yes") ?? "", /Trusting nothing instead/);
+  assert.equal(normalizeTrustProxy("10.0.0.0/8, not-an-address"), false);
+
+  // Checked against Express itself rather than against our reading of it: whatever comes
+  // out of the normalizer, `app.set` must accept — including the values it rejected above.
+  const inputs = [undefined, "", "false", 0, 1, "2", true, "loopback", "uniquelocal", "10.0.0.0/8, 127.0.0.1",
+    "10.0.0.0/255.0.0.0", "yes", "nginx", "10.0.0.0/8,", "::1"];
+  for (const value of inputs) {
+    assert.doesNotThrow(
+      () => express().set("trust proxy", normalizeTrustProxy(value)),
+      `trust_proxy: ${String(value)}`,
+    );
+  }
+  // The crash this prevents, for the record: unnormalized, that same value takes Express down.
+  assert.throws(() => express().set("trust proxy", "yes"), /invalid IP address/);
 });
 
 test("GET /v1/limits publishes the request budget, and says so when there is none", async () => {
