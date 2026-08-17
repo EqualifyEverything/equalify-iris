@@ -112,10 +112,28 @@ test("the page agent's heading-level rule keeps the clauses that make it a rule"
 test("the page agent's numbering and abbreviation rules keep the clauses that make them rules", () => {
   const prompt = normalize(section("System prompt")!);
   for (const [what, re] of [
+    // "Do not invent content" governs the whole prompt and is read by two audiences:
+    // the page agent, and the Feedback Agent that judges its output for fidelity
+    // (agents/feedback.md) and sends a page back to correctPage when it decides
+    // something was invented. Both need the numbering note named as sanctioned, or the
+    // rule below and the sentence above it can be read as contradicting each other.
+    ["the text these rules add is named where fidelity is demanded",
+      /do not invent content: apart from the accessibility scaffolding the rules below ask for by name/],
     ["a shown sequence is transcribed, not tidied", /Transcribe the sequence exactly and never tidy it/],
     ["a repeated number is kept as it appears", /do not drop or alter a number that appears twice/],
+    // Without this, "never renumber" is unachievable on the very structure the rule
+    // names: an <ol> counts 1..n whatever the <li>s contain, so a gapped list closes
+    // its own gap and the only markup that shows the page's numbers is value.
+    ["a list keeps the page's numbers with value, since an <ol> counts for itself",
+      /an <ol> counts 1, 2, 3 by itself whatever you put in it — so set value on any <li> whose number differs from the count/],
     ["an irregularity is annotated in the document, immediately after the element",
       /say so once in a <p> immediately after that list or table/],
+    // Adjacency is linear-reading-order only. A reader moving between tables lands on
+    // the table, not on the paragraph after it, so the note is associated as well as
+    // placed — which is also what makes "checkable against the rows above it" true for
+    // the reader the rule is written for.
+    ["the note is associated with its table, not merely placed after it",
+      /give that <p> an id and point the table's or list's aria-describedby at it/],
     ["the note claims only what this page shows, not what the document contains",
       /not listed in this table" is something a reader can check.*is a claim about a document you were not shown/],
     ["a note the page itself prints is transcribed rather than duplicated",
@@ -132,6 +150,12 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
       /mark every cell that carries the abbreviation and not only the first/],
     ["a symbolic footnote marker keeps its glyph and gains an accessible name",
       /keeps that symbol as its visible text.*aria-label="Footnote 1">\*<\/a>/],
+    // The example hands a * the id fn-1 while the rule above derives ids from "the
+    // number the page shows". A page with both footnote 1 and a * footnote, followed
+    // literally, emits two id="fn-1" — and assembly namespaces ids between pages, not
+    // within one, so that collision is not the kind assembly resolves.
+    ["a symbol marker cannot reuse an id a numbered footnote on the page already has",
+      /never hand one an id that a numbered footnote on this page already uses/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
