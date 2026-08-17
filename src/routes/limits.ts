@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { IrisConfig } from "../config.ts";
 import { imageLimitsHint, resolveImageLimits } from "../providers/imageLimits.ts";
 import { MAX_PDF_PAGES } from "../util/pdf.ts";
-import { MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES, publishedRateLimits } from "../util/requestLimits.ts";
+import { MAX_UPLOAD_FILES, publishedRateLimits, uploadCeilingBytes } from "../util/requestLimits.ts";
 
 /**
  * `GET /v1/limits` — what this deployment accepts for an upload.
@@ -56,7 +56,7 @@ export function limitsRouter(cfg: IrisConfig): Router {
     // bounds rather than facts about documents (util/requestLimits.ts), and both are
     // enforced in front of multer rather than inside the handler, so a client that
     // batches uploads can see the shape of the request it should send.
-    upload: { max_files: MAX_UPLOAD_FILES, max_request_bytes: MAX_UPLOAD_BYTES },
+    upload: { max_files: MAX_UPLOAD_FILES, max_request_bytes: uploadCeilingBytes() },
     // How often it may be asked, or null when this deployment does not limit request
     // volume in the app. Same rationale as the upload limits: a budget a client can read
     // is one it can pace itself against, instead of discovering it by being refused.

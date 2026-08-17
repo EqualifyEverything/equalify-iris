@@ -55,9 +55,10 @@ import { formatBytes } from "../providers/imageLimits.ts";
 export const MAX_UPLOAD_FILES = 25;
 export const MAX_UPLOAD_BYTES = 128 * 1024 * 1024;
 
-// The per-request ceiling as the two halves that enforce it read it — the constant above,
-// except while a test replaces it. Read from one place so a declared body and an undeclared
-// one cannot end up being refused at different sizes.
+// The per-request ceiling as everything that depends on it reads it — the constant above,
+// except while a test replaces it. Read through `uploadCeilingBytes()` below rather than
+// off the constant, so a declared body and an undeclared one cannot end up being refused
+// at different sizes.
 let uploadCeiling = MAX_UPLOAD_BYTES;
 
 // Test-only. The refusal that matters most is the one at the END of the upload stack, in
@@ -65,6 +66,15 @@ let uploadCeiling = MAX_UPLOAD_BYTES;
 // to reach it is not a test that gets run — so the ceiling moves instead of the body.
 export function __setUploadCeiling(bytes: number): void {
   uploadCeiling = bytes;
+}
+
+// What one request may be, for everything that has to agree about it: the two gates that
+// refuse a request for exceeding it, the in-flight charge an undeclared request is billed,
+// and the number GET /v1/limits publishes. Everything reads it here so that lowering it
+// lowers all four — the alternative is a deployment that refuses at one number, bills at
+// another, and advertises a third.
+export function uploadCeilingBytes(): number {
+  return uploadCeiling;
 }
 
 // How long the gate suggests waiting when uploads are at their in-flight cap. Unlike
@@ -307,8 +317,8 @@ export function uploadGate(cfg: IrisConfig): RequestHandler {
   let inFlight = 0;
   return (req: Request, res: Response, next: NextFunction) => {
     const declared = Number(req.header("content-length"));
-    const charge =
-      Number.isFinite(declared) && declared > 0 ? Math.min(declared, MAX_UPLOAD_BYTES) : MAX_UPLOAD_BYTES;
+    const ceiling = uploadCeilingBytes();
+    const charge = Number.isFinite(declared) && declared > 0 ? Math.min(declared, ceiling) : ceiling;
     // `inFlight > 0` guards the case where one request alone is bigger than the whole
     // budget: an operator who sets max_upload_memory_mb below the per-request ceiling
     // should get a deployment that accepts uploads one at a time, not one that refuses
