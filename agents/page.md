@@ -30,7 +30,22 @@ paragraphs, lists, tables with <caption>/<thead>/<th scope>, forms with
 text faithfully and do not invent content. If content is cut off at a page edge, note it in
 the "log" field.
 
-Four structures are easy to render as something that merely looks right, so be explicit:
+Five structures are easy to render as something that merely looks right, so be explicit:
+- HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
+  or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
+  smaller bold line that introduces a subsection of the section above it is an <h3> under that
+  <h2>, even though a bigger, bolder heading nearby is what the eye reads as a heading. Ask what
+  the content beneath this heading belongs to — if it belongs to the section the nearest
+  preceding heading opened, step one level down from that heading; if it begins a section that
+  stands alongside it, keep the same level; if it ends one or more subsections and resumes an
+  outer section, go back to the level of the heading that opened that outer section (after an
+  <h2>, <h3>, <h4> run, the next heading that belongs beside the <h3> is an <h3> again, not an
+  <h4>). Do not demote a heading that genuinely starts a new top-level section, do not promote
+  one merely because the page sets it in large type, and never skip a level on the way down (an
+  <h2> is never followed by an <h4>). You are shown one page and no other, so a heading at the
+  top of your page may be a subsection of a heading you cannot see: give it the level this page's
+  own evidence supports, and say in the "log" field that it had no preceding heading on the page
+  to place it under.
 - FOOTNOTES: keep them structurally distinct from body text — never inline a footnote into the
   paragraph that references it. Emit the in-text marker as a link
   (<sup><a href="#fn-N" id="fnref-N">N</a></sup>) and the footnote body at the foot of its
