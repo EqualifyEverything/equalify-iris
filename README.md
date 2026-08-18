@@ -439,6 +439,20 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
 - **Color-contrast lint.** Output is content-only with no styling (§4), so axe-core's
   `color-contrast` rule is disabled — it cannot be assessed without rendering and is out of
   scope.
+- **Skipped heading levels are linted for, though they are not a conformance failure.**
+  axe tags `heading-order` `best-practice`, so the WCAG-only tag filter drops it, and it is
+  enabled by name on the same argument as the duplicate-id rules below: headings are how a
+  screen-reader user navigates a long document, the levels here are decided one page at a time
+  by a model looking at type size, and nothing after extraction could see the result. The page
+  prompt has forbidden skipping a level since #96 and #114 reported one shipped anyway. The rule
+  fires only where a level goes *down* by more than one, so it stays quiet on the shapes the page
+  prompt asks for — a body that opens at `<h2>` or `<h3>`, because a page may be a subsection of
+  a heading the extractor was never shown, and a heading that returns to an outer level after a
+  run of subsections. It cannot see the other half of the bug (an `<h2>` that should have been an
+  `<h3>` is a level the page decided, not a gap), so it narrows the prompt's job rather than
+  replacing it. Two consequences worth knowing: a document that used to pass may now spend review
+  iterations on heading levels, and `heading-order` can now appear in the quality tally, where it
+  has been the worked example in `docs/API.md` §0c all along without once being reportable.
 - **Duplicate ids are linted for three separate ways (§7.7 v1.2).** Obsolete as a *conformance
   criterion* is not the same as harmless here: this document is assembled from independently
   extracted pages, so a duplicate id is the specific defect concatenation produces, and it breaks
