@@ -77,6 +77,39 @@ export async function runAxe(html: string): Promise<LintResult> {
         // The third rule needs no enabling — `duplicate-id-aria` is current (`wcag2a`)
         // and arrives via the tag filter — but it is `reviewOnFail`, so axe puts its
         // findings in `incomplete` rather than `violations`. Handled below.
+        //
+        // Enabled BY NAME on the same argument as the two above, one criterion over:
+        // axe tags `heading-order` `best-practice`, so the tag filter drops it, and a
+        // level this document skips on the way down is indeed not a conformance
+        // failure. It is still the defect this pipeline is most exposed to. Headings
+        // are how a screen-reader user navigates a long document, the levels are
+        // decided one page at a time by a model looking at type size, and nothing
+        // downstream could see the result: the Reader Agent never gets the source
+        // images (READER_SYSTEM in review.ts), so it cannot know which heading the
+        // page subordinated to which, and until now this gate passed an <h2> followed
+        // by an <h4> with zero violations. `agents/page.md` has told the page agent
+        // not to skip a level since #96, and #114 reported one shipped anyway — which
+        // is the case for checking the output rather than only asking for it.
+        //
+        // The rule earns the exception by being decidable from the document alone. It
+        // fires only where a level goes DOWN by more than one — verified in this
+        // environment and pinned by test/lint-heading-order.test.ts, because which
+        // shapes axe's `after` function reports is an internal a version bump can
+        // move. In particular it stays quiet on the three shapes this pipeline
+        // produces on purpose: a body that opens at <h2> or <h3>, because a page may
+        // be a subsection of a heading on a page the extractor was never shown; a
+        // heading that returns to an outer level after a run of subsections; and a
+        // document with one heading or none. What it cannot see is the other half of
+        // the same bug — an <h2> that should have been an <h3> is a level the page
+        // decided, not a gap in the sequence — so this narrows the prompt's job
+        // rather than replacing it.
+        //
+        // Iris's own quality reporting has used this rule as its worked example since
+        // the tally shipped (`Store.qualityStats` in store/db.ts, docs/API.md §0c) and
+        // could not once have reported it: every rule id in `run_signals` comes from
+        // this call, so a rule the tag filter drops is one the weekly report can never
+        // raise, however often the output breaks it.
+        "heading-order": { enabled: true },
       },
     });
     // `duplicate-id-aria` is the one duplicate-id rule that is still a live WCAG
