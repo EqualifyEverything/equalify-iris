@@ -833,6 +833,12 @@ it cannot decide. A close needs the first to say `duplicate` at high confidence 
 fail to refute it. Disagreement is not a tie to be broken — it is the answer, and the answer is
 "leave it open and tell a human".
 
+The pair the second session reads is fetched fresh from the API, not taken from the corpus the first
+one was given. Both sessions can write files, so a corpus-derived pair would let the first session
+choose the second one's evidence — restate issue A's body as a copy of B's and the refutation opens
+a file in which the two really are identical. Independence has to cover the input, not just the
+argument.
+
 **Neither session can close anything.** They get `Read`, `Write`, `Glob` and `Grep` — enough to read
 the context file, grep `agents/` to check whether a proposed rule is already in the prompt, and
 write a verdict file. Neither has `Bash`, so neither can reach `gh`. Every close, label and comment

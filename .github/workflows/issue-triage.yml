@@ -654,21 +654,39 @@ jobs:
             echo "::notice::Canonical #$CANONICAL is newer than #$TARGET — reported, not closed. Skipping refutation."
             exit 0
           fi
-          # Existence and state are re-derived from the API rather than trusted to
-          # the context file, because the corpus was read minutes ago and the
-          # canonical could have been closed since. Read into a file and checked
-          # for the field, rather than captured from `$(...)`: `gh` prints an API
-          # error body to stdout, so a failed read would otherwise set CANON_STATE
-          # to a blob of JSON instead of leaving it empty.
-          CANON_STATE=unreadable
-          if gh issue view "$CANONICAL" --json state > /tmp/triage/canon.json 2>/dev/null \
-             && jq -e 'has("state")' /tmp/triage/canon.json >/dev/null 2>&1; then
-            CANON_STATE=$(jq -r '.state' /tmp/triage/canon.json)
-          fi
-          if [ "$CANON_STATE" != "OPEN" ]; then
-            echo "::warning::Proposed canonical #$CANONICAL is '$CANON_STATE', not an open issue. Nothing will be closed."
-            exit 0
-          fi
+          # Both issues re-read from the API, and the text is re-read for the same
+          # reason the state is. The state, because the corpus was built minutes
+          # ago and either issue could have been closed since. The text, because
+          # `/tmp/triage/open-issues.json` was written *before* the find session
+          # ran and that session holds `Write` — so building the pair from it
+          # would let session one choose session two's evidence. Rewrite issue A's
+          # body in that file as a copy of B's and the refutation session opens a
+          # file in which the two issues really are identical, and has nothing
+          # left to argue with. Removing `refute.json` closed the path where
+          # session one forges session two's verdict; this closes the one where it
+          # doctors session two's input, which is the same trick a step earlier.
+          # Nothing the model can write sits between these reads and the API.
+          #
+          # Read into files and checked for the field rather than captured from
+          # `$(...)`, because `gh` prints an API error body to stdout: a failed
+          # read would otherwise put a blob of JSON where a state should be. And
+          # `>` truncates, so a file pre-planted at this path by the find session
+          # is overwritten whether the read succeeds or fails — an unreadable pair
+          # cannot leave stale text behind, it just ends the step. A pair that
+          # cannot be re-read means no refutation, which means no close.
+          for N in "$CANONICAL" "$TARGET"; do
+            if ! gh issue view "$N" --json number,title,body,state,author,createdAt \
+                   > "/tmp/triage/pair-$N.json" 2>/dev/null \
+               || ! jq -e 'has("state")' "/tmp/triage/pair-$N.json" >/dev/null 2>&1; then
+              echo "::warning::Issue #$N could not be re-read for the refutation. Nothing will be closed."
+              exit 0
+            fi
+            PAIR_STATE=$(jq -r '.state' "/tmp/triage/pair-$N.json")
+            if [ "$PAIR_STATE" != "OPEN" ]; then
+              echo "::warning::Issue #$N is '$PAIR_STATE', not an open issue. Nothing will be closed."
+              exit 0
+            fi
+          done
 
           # The pair, and only the pair. This file is the entire world of the
           # second session: it does not get the corpus, and it does not get the
@@ -681,23 +699,21 @@ jobs:
             echo "## Issue A — the older issue, #$CANONICAL"
             echo
           } > /tmp/triage/pair.md
-          jq -r --argjson n "$CANONICAL" '
+          jq -r '
             def clip($n): (. // "") | split("## Proposed full")[0] | .[:$n];
-            .[] | select(.number == $n) |
             "**#\(.number) — \(.title)**\n\n- opened \(.createdAt) by \(.author.login // "unknown")\n\n"
             + "<<<UNTRUSTED ISSUE BODY #\(.number)>>>\n\(.body | clip(9000))\n<<<END ISSUE BODY #\(.number)>>>\n"
-            ' /tmp/triage/open-issues.json >> /tmp/triage/pair.md
+            ' "/tmp/triage/pair-$CANONICAL.json" >> /tmp/triage/pair.md
           {
             echo
             echo "## Issue B — the newer issue, #$TARGET"
             echo
           } >> /tmp/triage/pair.md
-          jq -r --argjson n "$TARGET" '
+          jq -r '
             def clip($n): (. // "") | split("## Proposed full")[0] | .[:$n];
-            .[] | select(.number == $n) |
             "**#\(.number) — \(.title)**\n\n- opened \(.createdAt) by \(.author.login // "unknown")\n\n"
             + "<<<UNTRUSTED ISSUE BODY #\(.number)>>>\n\(.body | clip(9000))\n<<<END ISSUE BODY #\(.number)>>>\n"
-            ' /tmp/triage/open-issues.json >> /tmp/triage/pair.md
+            ' "/tmp/triage/pair-$TARGET.json" >> /tmp/triage/pair.md
 
           echo "refute=true" >> "$GITHUB_OUTPUT"
           echo "pair context: $(wc -c < /tmp/triage/pair.md | tr -d ' ') bytes"
