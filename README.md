@@ -809,6 +809,73 @@ have put a green tick on a PR nothing had read (measured on #70). That one is no
 with a real verdict, and both gates are gone with it. A human still merges. What changes is what
 that human is reading, not whether they read it.
 
+## Closing duplicate issues
+
+[`.github/workflows/issue-triage.yml`](.github/workflows/issue-triage.yml) runs **when an issue is
+opened or reopened**. It reads the new issue, finds the open issue it most resembles, and — only
+when a second, independent session fails to refute the claim — closes the new one as a duplicate
+with a comment naming the survivor. Anything short of that is commented and reported, never closed.
+
+It exists because the dedupe already in the app cannot do this, and was never trying to.
+`src/github/issue.ts` refuses to file an `Agent update proposal:` whose title exactly matches an
+open one, which is the right check to have there: cheap, deterministic, no model. What it cannot see
+is that "procedure steps must be marked up at heading" and "when steps are nested inside a named
+section" are one rule described twice. Iris files these speculatively from content it met once
+(§7.13), so semantic overlap between them is the normal case rather than the exception, and it
+accumulates faster than anyone reads it.
+
+**Two sessions, and the second one is not shown the first one's argument.** The whole risk of
+automatic closing is a plausible-but-wrong duplicate call, and a session asked to check its own
+work draws the second opinion from the context that produced the first. So the *find* session reads
+the new issue against every other open issue and proposes the nearest one; the *refute* session is
+handed only that pair, told to argue against closing, and told to default to "not a duplicate" when
+it cannot decide. A close needs the first to say `duplicate` at high confidence and the second to
+fail to refute it. Disagreement is not a tie to be broken — it is the answer, and the answer is
+"leave it open and tell a human".
+
+**Neither session can close anything.** They get `Read`, `Write`, `Glob` and `Grep` — enough to read
+the context file, grep `agents/` to check whether a proposed rule is already in the prompt, and
+write a verdict file. Neither has `Bash`, so neither can reach `gh`. Every close, label and comment
+happens in a shell step that reads the two verdict files and the GitHub API, the same division as
+[Scheduled issue triage](#scheduled-issue-triage): the prompt is the layer an injected issue body
+argues with, so the rules live somewhere it cannot reach.
+
+**Four rules hold regardless of what either session says**, because that step re-derives them:
+
+- **Only the newer issue of a pair can close.** The survivor must have the lower number. This is
+  what makes the outcome independent of which issue happened to be triaged first — without it, two
+  issues opened a minute apart could each close the other and the tracker would lose both. A
+  verdict naming a *newer* issue is still reported; it just cannot close anything.
+- **An issue an open PR claims never closes** — anyone's PR, by a closing-issue link or an
+  `issue-<n>` branch fragment, the same two precise signals used for ranking.
+- **An issue with human discussion never closes.** A comment from anyone who is not the filer and
+  not a bot means a person engaged with it.
+- **`no-auto-close` is an unconditional veto**, and the only guard a manual `force` dispatch does
+  not override. The label does not exist in the repo yet; an absent label matches nothing.
+
+Every one of those is checked twice — once in the preflight, so an ineligible issue costs no model
+call at all, and once after both sessions, because a PR or a comment can land inside the minutes
+they take and that is exactly when closing does the most damage. A read that *fails* counts as a
+blocker rather than as a clean bill of health: `gh` prints API error bodies to stdout, so a check
+that treated an unreadable answer as an empty one would be reading `{"message":"Not Found"}` as
+"nobody has commented".
+
+A close also applies the `duplicate` label, which is what takes the issue out of
+[Scheduled issue triage](#scheduled-issue-triage)'s candidate list — that workflow reads labels,
+not close reasons. GitHub offers no `duplicate` close reason, so the state closes as `not planned`
+and the comment carries the actual reason, along with an invitation to reopen and say what the
+survivor misses. A reopened issue is not triaged again.
+
+There is no schedule, and the backlog that predates the workflow is triaged one dispatch at a time
+so a human sees each verdict as it lands:
+
+```
+gh workflow run issue-triage.yml -f issue_number=<n> -f dry_run=true
+```
+
+`dry_run` does the full triage, both sessions, and reports exactly what it would have done without
+touching the issue. Add `-f force=true` to re-triage an issue that has already been triaged.
+
 ## Scheduled issue triage
 
 [`.github/workflows/issue-to-pr.yml`](.github/workflows/issue-to-pr.yml) runs **Sun–Wed at 22:00
