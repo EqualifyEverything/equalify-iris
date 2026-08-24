@@ -90,6 +90,75 @@ test("the page agent's heading-level rule keeps the clauses that make it a rule"
   }
 });
 
+// Six more sessions landed on the same outline (issues #108, #111, #116, #119, #120,
+// #128), and between them they say a heading's level is not the only thing a page can
+// get wrong about a heading: whether a line is a heading at all, what a heading's parts
+// belong under, and what two headings with one label mean. Each is pinned here because
+// each was reported as output that shipped.
+//
+// Two of these are cross-page defects that a per-page extractor cannot see on its own —
+// a title reprinted on every page it continues on (#111), and adjacent same-level
+// headings that only sit adjacent once the pages are joined (#119). The prompt carries
+// the half a single page shows; READER_SYSTEM and EDITOR_SYSTEM in
+// src/pipeline/review.ts carry the document-wide half, pinned in
+// test/review-headings.test.ts. Neither half is sufficient alone, which is why both
+// exist.
+//
+// The over-correction guards matter as much as the rules. "A line with nothing under it
+// is not a heading" would delete a heading at the foot of a page whose section continues
+// overleaf, and "two headings with one label are one section" would merge two sections
+// the page really does label alike — so the clauses that separate those cases are pinned
+// alongside.
+test("the page agent's heading rules keep the clauses that place a section's parts", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    // #116, #120: "Step 6" and its siblings came out as <h2>s inside the <h2> section
+    // whose procedure they are steps of. Reported twice by the same user, on two runs.
+    ["a step of a procedure is one level below the procedure's own heading",
+      /a step label — Step 4, B\., Second, however the page names it and however large it sets it — is one level below that heading and never a peer of the section that contains it/],
+    // #108: the labels that group a table of contents into runs of entries were emitted as
+    // paragraphs, so the one structure a reader navigates a manual with was unnavigable.
+    ["a table of contents' group labels are headings under the contents heading",
+      /the labels that divide a table of contents into runs of entries \(Preparations, Operation, Reference\) are headings for the same reason, one level under the contents heading/],
+    // #128: SAVE THESE INSTRUCTIONS and FOR COMMERCIAL USE ONLY were promoted to <h2>
+    // for being set in bold, putting two entries in the outline that head nothing.
+    ["a line that says something rather than naming a section is not a heading",
+      /a line that SAYS something rather than naming something — SAVE THESE INSTRUCTIONS, FOR COMMERCIAL USE ONLY.*is a <p> \(or a <strong> inside one\) however prominently it is printed/],
+    // The guard on that rule. This agent is shown one page, so "nothing under it" is also
+    // what a real heading looks like when its section continues on the next page — and
+    // dropping it there loses the only place that section is named.
+    ["a heading at the foot of the page is kept, because its section continues overleaf",
+      /A heading at the foot of the page with nothing after it is not that case and is kept/],
+    // #111: a section title reprinted on the page its section continued onto became a
+    // second <h2> of the same name, when the previous run had produced one <h2> with the
+    // page's own subsection headings under it.
+    ["a section title reprinted above continuing content does not open a second section",
+      /two headings of the same level under the same words, they are one section and not two: a section title reprinted above content that continues it does not open a new section/],
+    // #119: three <h2>Operation</h2> headings in one document. The guard against merging
+    // them is the other half — where the page really does label two sections alike, the
+    // label stays and each gains the words that page prints for that section, which keeps
+    // this inside the fidelity rule instead of inviting a subtitle of the agent's own.
+    ["two sections the page labels alike keep the label and gain the page's own words",
+      /keep the label and extend each with the words that page prints for that section — "Operation: Grinding", not a phrase of your own/],
+    ["an extended heading is recorded, since the words came from elsewhere on the page",
+      /say in the "log" field which headings you extended/],
+    // #128's second half: a <section aria-label="Page 6"> wrapper around each page's
+    // content. Nothing in the pipeline emits that — the shared accessibility requirements
+    // ask for semantic elements over <div>s (src/pipeline/accessibility.ts) and the agent
+    // reached for the one boundary it can always see — so the prompt is where it is closed.
+    ["a page is not a landmark, and the page's own boundary is not wrapped in one",
+      /never wrap what you emit in a <section> or other region that stands for the page itself/],
+    ["the reported wrapper is named, so the rule cannot be read as being about something else",
+      /<section aria-label="Page 6"> announces a boundary that exists only because the paper ran out/],
+    // And the positive half, so the rule does not read as "no landmarks": the page's own
+    // self-contained parts are still regions, named from the words the page gives them.
+    ["a part the page really does set apart is still a region, named from the page",
+      /a table of contents is a <nav>, a sidebar or a pull-out note an <aside> — and name it from the words the page gives that part/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
 // The numbering and abbreviation rules (issues #98, #100, #101) came from one
 // session's feedback on a parts manual: item numbers that skipped were annotated
 // under the last table and nowhere else, a repeat went unremarked, the "NS" key
