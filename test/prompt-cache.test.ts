@@ -43,7 +43,8 @@ const SHORT = "x".repeat(400);
 
 test("both providers' spellings of a model name resolve to the same family", () => {
   // Bedrock hyphenates and puts the version last; OpenRouter uses dots; older Bedrock
-  // ids put the version in the middle. All three name a model whose minimum is 1024.
+  // ids put the version in the middle. All three name a model whose minimum is 1024 —
+  // which is a separate question from whether that model can cache at all (below).
   assert.equal(claudeFamily("us.anthropic.claude-sonnet-4-6"), "sonnet");
   assert.equal(claudeFamily("anthropic/claude-opus-4.7"), "opus");
   assert.equal(claudeFamily("anthropic.claude-3-5-sonnet-20240620-v1:0"), "sonnet");
@@ -59,6 +60,19 @@ test("a model this cannot read gets no breakpoint at all", () => {
   assert.equal(claudeFamily("openai/gpt-5"), null);
   assert.equal(cacheableSystemPrompt("mock-model", LONG), false);
   assert.equal(cacheableSystemPrompt("openai/gpt-5", LONG), false);
+});
+
+test("a generation too old to cache is declined, family or no family", () => {
+  // Recognizing the family is not the same as knowing the model can do this. Bedrock's
+  // caching support starts at 3.7, and an upstream that has never heard of
+  // `cache_control` rejects the whole request — so an id whose family reads fine but
+  // whose generation predates caching has to get the same answer as an unreadable one.
+  assert.equal(claudeFamily("anthropic.claude-3-5-sonnet-20240620-v1:0"), "sonnet");
+  assert.equal(cacheableSystemPrompt("anthropic.claude-3-5-sonnet-20240620-v1:0", LONG), false);
+  assert.equal(cacheableSystemPrompt("anthropic.claude-3-sonnet-20240229-v1:0", LONG), false);
+  // And the first generation that can: both id spellings of it.
+  assert.equal(cacheableSystemPrompt("anthropic.claude-3-7-sonnet-20250219-v1:0", LONG), true);
+  assert.equal(cacheableSystemPrompt("anthropic/claude-3.7-sonnet", LONG), true);
 });
 
 test("a prompt too short to be cacheable is not asked about", () => {

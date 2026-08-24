@@ -203,6 +203,12 @@ providers:
     # and nothing about the output changes. Iris decides per call whether the prefix is
     # long enough to be worth it (src/providers/promptCache.ts).
     #
+    # It is not free in every case, which is why the numbers are worth reading rather
+    # than assuming: a WRITE bills at 1.25x, so an agent called only once in a run pays
+    # a 25% surcharge on its prompt and gets no read back for it. That is a few hundred
+    # tokens against the tens of thousands the multi-call agents save, and the write is
+    # re-read by the next run within the cache's ~5 minute window on a busy deployment.
+    #
     # Set false only if this provider's upstream REJECTS `cache_control` — an
     # Anthropic field, so the risk is real only behind a broker that picks the upstream
     # for you, and the symptom is unmistakable: every call fails with a 400 naming the

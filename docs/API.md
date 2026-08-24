@@ -588,10 +588,17 @@ Expect roughly one `cache_write` per agent per run and a `cache_read` on every c
 on a long document the same prefix is paid for once at 1.25× instead of 25 times at 1×, and a read
 bills at 0.1×. A run that shows `cache_read: 0` with several calls to the same agent is a run that
 is paying full price for the same instructions repeatedly — the cases where that is expected are a
-model whose id Iris cannot recognize as a Claude model, an agent prompt too short to be cacheable
-(the platform minimum is ~1k tokens), and a deployment that set `prompt_cache: false` on the
-provider block. Nothing about the document changes either way; this is a cost field, not a quality
-one.
+model whose id Iris cannot recognize as a Claude model, a model generation older than caching
+support (Iris asks from 3.7 on), an agent prompt too short to be cacheable (the platform minimum is
+~1k tokens), and a deployment that set `prompt_cache: false` on the provider block.
+
+`cache_write` is the weaker signal of the two, and a zero there means less than a zero read. It is
+reported by the provider, and on an OpenAI-shaped upstream the field it would come from is
+undocumented, so a deployment can see reads climbing with writes sitting at 0 forever. That is a
+cache working and a counter staying quiet, not a cache half-broken; `cache_read` is what tells you
+whether the asking is paying off. Whichever way these two land, the caching changes nothing about
+the converted document — it is the same prompt either way, so these are cost fields and not quality
+ones.
 
 One caveat on that sum, for whoever is doing the multiplication. It is exact on a provider that
 reports the four counts as disjoint sets, which is what the Anthropic-shaped APIs do. On an

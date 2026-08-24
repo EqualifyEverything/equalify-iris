@@ -1,4 +1,5 @@
 import type { ProviderBlock } from "../config.ts";
+import { generationAtLeast } from "./imageLimits.ts";
 
 // What the model will cache, and when it is worth asking it to.
 //
@@ -29,6 +30,17 @@ import type { ProviderBlock } from "../config.ts";
 // ignored and the request is served exactly as it would have been without one. That
 // asymmetry is why the check below only has to be roughly right.
 const MIN_CACHEABLE_TOKENS = { opus: 1024, sonnet: 1024, haiku: 2048 } as const;
+
+// The generation from which asking is safe on every platform Iris speaks to.
+//
+// This is a floor, not the full picture, and deliberately so. The Claude API has
+// supported caching since 3.0 on some models; Bedrock's support starts at 3.7 (with
+// 3.5 Haiku as its one earlier exception) and it is Bedrock that Iris is deployed on.
+// The intersection is what a single number can honestly promise, and being under it in
+// one direction costs a legacy deployment its saving, while being over it in the other
+// costs that deployment EVERY CALL — an upstream that does not know the field rejects
+// the request, not just the caching.
+const CACHING_FROM_GENERATION = { major: 3, minor: 7 };
 
 // A LOWER BOUND on characters per token — not an average. It is used only to decide
 // when a prompt is too short to be worth a breakpoint, and the two directions of being
@@ -101,13 +113,16 @@ export function promptCacheEnabled(cfg: Pick<ProviderBlock, "prompt_cache">): bo
 // each write expires unread, which pays 0.25x of one agent prompt per run: ~600 tokens
 // for `agents/page.md`, against the six figures a busy one saves.
 //
-// An unrecognized model id gets no breakpoint. That is the safe direction and the
-// reason this returns false rather than guessing a minimum: an id this cannot read may
-// not be a Claude model at all — an OpenAI model reached through OpenRouter caches
-// automatically and takes no such field, and a test's mock model has no cache to ask
-// for.
+// An id this cannot read gets no breakpoint, and neither does one whose generation
+// predates caching. Both are the same safe direction, and the reason neither guesses:
+// an unreadable id may not be a Claude model at all — an OpenAI model reached through
+// OpenRouter caches automatically and takes no such field, and a test's mock model has
+// no cache to ask for — while a recognizable but old one is a model whose platform may
+// reject the field outright. Recognizing the FAMILY is not enough on its own; a name
+// only says which Claude, not which generation of it.
 export function cacheableSystemPrompt(model: string, system: string): boolean {
   const family = claudeFamily(model);
   if (!family) return false;
+  if (!generationAtLeast(model, CACHING_FROM_GENERATION)) return false;
   return system.length >= MIN_CACHEABLE_TOKENS[family] * MIN_CHARS_PER_TOKEN;
 }
