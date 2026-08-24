@@ -353,6 +353,17 @@ jobs:
         # was halved this way in the review of PR #147, for a file the CI-security
         # item tells the reviewer to read in full.
         #
+        # The line count comes from `awk 'END{print NR}'` and not `wc -l` because wc
+        # counts newlines, so a file whose last line is unterminated reports one
+        # short — and at exactly the cap that hid the cut completely. It is fed on
+        # stdin and not as an argument because awk reads any argument matching
+        # `name=value` as a variable assignment and then falls back to stdin, which
+        # inside the `while read -r f` loop is the rest of the changed-file list: one
+        # root-level path with an `=` in it would end the loop and drop every
+        # remaining file's source, silently, which is the harm the marker exists to
+        # prevent one layer up. `< "$1"` is immune, and matches the `wc -c < "$f"`
+        # idiom the loop already uses.
+        #
         # The rationale lives here rather than in the block because a `run:` block
         # is one expression capped at 21000 and this is the block near that ceiling —
         # within about a kilobyte of the ~20,500 usable figure that
@@ -706,13 +717,11 @@ jobs:
             echo "are always included in full, however small the change."
           } >> "$OUT"
 
-          # Say where a file was cut. See this step's YAML comment for why.
-          # `awk END{print NR}` and not `wc -l`: wc counts newlines, so a file whose
-          # last line is unterminated reports one short, and at exactly the cap that
-          # hides the cut completely.
+          # Say where a file was cut. See this step's YAML comment for why, and for
+          # why both the `awk` and the `<` are deliberate.
           emit_source() {
             head -n "$MAX_LINES_PER_FILE" "$1" >> "$OUT"
-            N=$(awk 'END{print NR}' "$1")
+            N=$(awk 'END{print NR}' < "$1")
             [ "${N:-0}" -le "$MAX_LINES_PER_FILE" ] || printf \
               '\n... TRUNCATED at %s of %s lines. Read the file for the rest.\n' \
               "$MAX_LINES_PER_FILE" "$N" >> "$OUT"
