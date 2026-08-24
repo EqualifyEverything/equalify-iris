@@ -711,6 +711,15 @@ jobs:
           # too — the two `echo`s below quote both strings back. Same reasoning as
           # there: these are enums, so an unrecognised value is discarded rather
           # than repeated, and an empty one cannot pass the gates that follow.
+          # Case and space are normalised away first for the reason given there,
+          # and it has to happen the same way in both steps — a `Duplicate` that
+          # this step accepted and `Decide and act` discarded would prepare a
+          # refutation for a verdict that then failed the run.
+          enum_value() {
+            printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'
+          }
+          VERDICT=$(enum_value "$VERDICT")
+          CONFIDENCE=$(enum_value "$CONFIDENCE")
           case "$VERDICT" in duplicate|related|distinct) ;; *) VERDICT="" ;; esac
           case "$CONFIDENCE" in high|medium|low) ;; *) CONFIDENCE="" ;; esac
 
@@ -984,10 +993,13 @@ jobs:
           # inherits and `set -e` turns into a dead step. That would kill the one
           # step built to report no matter what — including on the paths where an
           # issue has already been closed and the comment explaining it has not
-          # been posted yet. `${s:0:600}` has no pipe and no reader to die on, and
-          # it counts characters rather than bytes, so the cut cannot land inside
-          # a UTF-8 sequence and "600 characters" is what it says on the
-          # em-dash-heavy prose this repo tends to produce.
+          # been posted yet. `${s:0:600}` has no pipe and no reader to die on.
+          # Under a UTF-8 locale it also counts characters rather than bytes, so
+          # "600 characters" is what it says on em-dash-heavy prose and the cut
+          # cannot land inside a sequence; if the runner leaves `LANG` unset bash
+          # falls back to `C` and indexes bytes, which is the old behaviour and at
+          # worst a replacement character in a comment. Not worth pinning a locale
+          # for — the cap is a bound on length, not a correctness guarantee.
           #
           # Redacted against the live credential values, which is the layer that
           # is actually reliable. The session that wrote these strings had the
@@ -1030,6 +1042,21 @@ jobs:
           # `verdict` that is the branch immediately below, which reports no
           # readable verdict and fails the run, and for `confidence` it reads as
           # `unstated` and cannot satisfy the `high` gate.
+          #
+          # Case and surrounding space are normalised away first, because the two
+          # outcomes either side of this check are very far apart and the most
+          # likely way a model misses the shape is a cosmetic one. `Duplicate` or
+          # ` duplicate` would otherwise be discarded, which means a failed run
+          # and nothing on the issue — indistinguishable from a timeout, for a
+          # verdict whose meaning was never in doubt. Normalising keeps the
+          # reporting path for those and widens nothing: `duplicate` is still the
+          # only spelling any gate below accepts, and the refutation and the four
+          # re-derived rules stand between it and a close either way.
+          enum_value() {
+            printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'
+          }
+          VERDICT=$(enum_value "$VERDICT")
+          CONFIDENCE=$(enum_value "$CONFIDENCE")
           case "$VERDICT" in
             duplicate|related|distinct) ;;
             *)

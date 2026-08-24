@@ -873,7 +873,9 @@ last layer catches verbatim copying and not a re-encoded value — which is why 
 rather than the publishing merely filtered. `verdict` and `confidence` are not sanitized but held to
 their allowed values, which is stronger where it applies: a string outside the enum is not a
 malformed verdict, it is not a verdict, so it is discarded rather than repeated back — and a
-discarded verdict fails the run.
+discarded verdict fails the run. Case and space are normalised away first, so a `Duplicate` still
+gets the comment explaining which rule stopped it rather than a red run with nothing on the issue;
+`duplicate` remains the only spelling any gate accepts.
 
 **Four rules hold regardless of what either session says**, because that step re-derives them:
 
