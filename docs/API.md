@@ -146,7 +146,12 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   contributes `0`: low is good, and `0.0` across the window means nothing needed fixing. `null`,
   not `0`, when nothing has run — otherwise an empty deployment reports the best possible score.
 * `unresolved_rate` — share of documents that finished with issues the review loop could not
-  resolve. Only the **count** of those issues is used, never their text — see below.
+  resolve. Only the **count** of those issues is used, never their text — see below. One class of
+  issue is deliberately never resolved and so always lands here: two headings the document labels
+  alike where nothing the copy editor was given says whether they are one section or two. It is
+  reported and left standing rather than guessed at, because merging two real sections cannot be
+  undone — so a document with one spends the full `max_review_iterations` and raises this rate and
+  `mean_rounds` together, which is the honest reading: it shipped with an ambiguity a reader meets.
 * `links_dropped_rate` — share of documents where an `href` present before the copy editor was
   missing after it.
 * `lint_error_rate` — share of documents whose lint pass **errored** instead of running. Recorded

@@ -140,6 +140,13 @@ test("every answer the Reader can give is one the editor has an instruction for"
 const runs = (body: string) =>
   sameWordedHeadingRuns(body).map((r) => `h${r.level}:${r.text}:${r.count}`);
 
+// Same, plus where the run starts in the outline — the field that keeps two runs of the
+// same words at the same level from rendering as one line.
+const placed = (body: string) =>
+  sameWordedHeadingRuns(body).map(
+    (r) => `h${r.level}:${r.text}:${r.count} after ${r.after ? `h${r.after.level}:${r.after.text}` : "-"}`,
+  );
+
 test("two same-level headings with the same words and only their own content between them", () => {
   // #119 as reported, in miniature: the second [Heading 2] Operation tells a reader
   // navigating by heading that the same subject follows.
@@ -212,14 +219,23 @@ test("a body with no headings, and one with no repeats, produce no list at all",
 
 test("the list quotes the heading and says how many, and says when it is truncated", () => {
   const note = sameWordedHeadingNote([
-    { level: 2, text: "Operation", count: 3 },
-    { level: 3, text: "Cleaning", count: 2 },
+    { level: 2, text: "Operation", count: 3, after: null },
+    { level: 3, text: "Cleaning", count: 2, after: { level: 2, text: "Care" } },
   ])!;
-  assert.match(note, /\[Heading 2\] "Operation" \(3 of them\)/);
-  assert.match(note, /\[Heading 3\] "Cleaning"$/m, "a plain pair needs no count");
+  assert.match(note, /\[Heading 2\] "Operation" \(3 of them\), at the start of the document/);
+  assert.match(
+    note,
+    /\[Heading 3\] "Cleaning", the first of them after \[Heading 2\] "Care"$/m,
+    "a plain pair needs no count, but still needs placing",
+  );
 
   // A silent cap reads as "these are all of them" to whoever acts on the list.
-  const many = Array.from({ length: 20 }, (_, i) => ({ level: 2, text: `Section ${i}`, count: 2 }));
+  const many = Array.from({ length: 20 }, (_, i) => ({
+    level: 2,
+    text: `Section ${i}`,
+    count: 2,
+    after: null,
+  }));
   const capped = sameWordedHeadingNote(many)!;
   assert.match(capped, /and 8 more, not listed here/);
 });
@@ -306,4 +322,29 @@ test("an empty heading between the pair ends the run, as any other section would
   // longer the pair with nothing but their own content between them. Stated because the
   // opposite reading is tempting: an empty heading announces nothing to a reader.
   assert.deepEqual(runs("<h2>Op</h2><p>a</p><h2></h2><h2>Op</h2><p>b</p>"), []);
+});
+
+test("two runs of the same words at the same level are two distinguishable entries", () => {
+  // The list the Reader is told never contains a false positive must not contain two
+  // lines it cannot tell apart either: read as a restatement, the second pair goes
+  // unreported. Each entry is placed by the heading it follows.
+  const body =
+    "<h2>Op</h2><p>a</p><h2>Op</h2><p>b</p>" +
+    "<h2>Other</h2><p>c</p>" +
+    "<h2>Op</h2><p>d</p><h2>Op</h2><p>e</p>";
+  assert.deepEqual(placed(body), [
+    "h2:Op:2 after -",
+    "h2:Op:2 after h2:Other",
+  ]);
+  const note = sameWordedHeadingNote(sameWordedHeadingRuns(body))!;
+  assert.equal(new Set(note.split("\n")).size, 2, "the two lines must differ, not just the runs behind them");
+});
+
+test("a run is placed by the heading before it whatever that heading's level", () => {
+  // The preceding heading is the run's position in the outline, not its parent: after a
+  // deeper subsection, that heading is the one the reader last passed.
+  assert.deepEqual(
+    placed("<h1>Manual</h1><h2>Care</h2><h3>Deep</h3><p>a</p><h2>Op</h2><p>b</p><h2>Op</h2><p>c</p>"),
+    ["h2:Op:2 after h3:Deep"],
+  );
 });

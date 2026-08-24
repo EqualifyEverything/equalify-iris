@@ -25,6 +25,16 @@ export interface HeadingRun {
   // How many headings are in the run. Three <h2>Operation</h2> in a row is one run of
   // three, not two overlapping pairs — the Reader should report it once.
   count: number;
+  // Where in the outline this run starts: the heading immediately before its first
+  // member, at whatever level, or null at the top of the document.
+  //
+  // A document can hold two runs of the SAME words at the SAME level with another
+  // section between them — "Op Op … Other … Op Op" — and level + text + count alone
+  // renders those as two identical lines. The Reader is told every entry is a real pair,
+  // so a line indistinguishable from the one above it reads as a restatement of it and
+  // one of the two pairs goes unreported. This is what tells them apart, and it is also
+  // what the Reader needs anyway: it locates the run in the HTML it was given.
+  after: { level: number; text: string } | null;
 }
 
 const HEADINGS = "h1, h2, h3, h4, h5, h6";
@@ -99,7 +109,13 @@ export function sameWordedHeadingRuns(body: string): HeadingRun[] {
       members.push(next);
     }
     if (members.length > 1) {
-      runs.push({ level: first.level, text: first.text, count: members.length });
+      const prev = i > 0 ? headings[i - 1] : null;
+      runs.push({
+        level: first.level,
+        text: first.text,
+        count: members.length,
+        after: prev ? { level: prev.level, text: prev.text } : null,
+      });
       for (const m of members) counted.add(m);
     }
   }
@@ -113,10 +129,13 @@ export function sameWordedHeadingRuns(body: string): HeadingRun[] {
 export function sameWordedHeadingNote(runs: HeadingRun[]): string | null {
   if (!runs.length) return null;
   const shown = runs.slice(0, MAX_RUNS);
+  const quote = (t: string) => (t.length > MAX_QUOTED ? `${t.slice(0, MAX_QUOTED)}…` : t);
   const lines = shown.map((r) => {
-    const quoted = r.text.length > MAX_QUOTED ? `${r.text.slice(0, MAX_QUOTED)}…` : r.text;
     const many = r.count > 2 ? ` (${r.count} of them)` : "";
-    return `- [Heading ${r.level}] "${quoted}"${many}`;
+    const where = r.after
+      ? `, the first of them after [Heading ${r.after.level}] "${quote(r.after.text)}"`
+      : ", at the start of the document";
+    return `- [Heading ${r.level}] "${quote(r.text)}"${many}${where}`;
   });
   if (runs.length > shown.length) {
     lines.push(`- …and ${runs.length - shown.length} more, not listed here`);
