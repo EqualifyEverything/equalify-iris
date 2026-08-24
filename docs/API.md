@@ -522,8 +522,9 @@ Useful events to grep for:
 | `run_queued` / `run_dequeued` | The run's wait for a concurrency slot: how busy the queue was when it was admitted (`running` of `limit`, plus `waiting`), and `waited_ms` when it actually started. A large `waited_ms` means the deployment is saturated, not that this run is slow. |
 | `feedback_scoped` | How a feedback re-run was routed (`document` vs `extraction`, and which pages) |
 | `reextract_start` / `reextract_complete` | Which pages went back to the page agent. `reextract_complete.pages` is what was actually re-extracted; a `failed` list is pages whose re-extraction threw and which therefore kept their **prior** content unchanged. |
-| `page_extraction_failed` | One page's own extraction threw (`page`, `image`, `error`). The rest of the document still ran — see §7c. `kept: "prior"` marks the feedback-re-extraction case, where the page keeps the content it already had. |
+| `page_extraction_failed` | One page's own extraction threw (`page`, `image`, `error`). The rest of the document still ran — see §7c. `kept: "prior"` marks the feedback-re-extraction case, where the page keeps the content it already had and the document stays whole. |
 | `extraction_complete` | How many page fragments came out (`pages`) and which page numbers failed (`failed`, always present, `[]` on a whole run). |
+| `extraction_failed` | **Every** page failed, so the run is ending rather than delivering a document with no content in it. The `run_failed` line that follows carries the first page's provider error. |
 | `editor_images` | How many source images the Copy Editor received this round (`attached` of `of`, plus `pages`). A `dropped` count means the selection did not fit in one request and was trimmed to the pages issues actually named. `attached == of` on a multi-page document means at least one issue in that round carried no page attribution, so the round asked for everything. |
 | `editor_images_refused` | The provider refused the round's payload as too large, so the same prompt was re-sent **without** images. The correction still had the whole body and every issue; only a fidelity problem that must be checked against the source can go unfixed. |
 | `reader` / `editor` | Per-iteration review-loop progress (issue counts) |
@@ -594,7 +595,8 @@ an estimate. Some upstreams report nothing; a call that stalls knows its prompt 
 learns its output size. Failed calls **are** counted, because a truncation has already paid for
 a full ceiling of output and a stall for its prompt.
 
-`pages_failed` is the set of source pages whose own extraction threw (§7c). It has its own field
+`pages_failed` is the set of source pages the delivered document has no content for, because their
+own extraction threw (§7c). It has its own field
 because a run that reaches `ready_for_review` without one of its pages is otherwise
 indistinguishable here from one that delivered the whole document: the failed model call
 underneath shows up in `errors` exactly as a retried-and-recovered one does, and `status` says the
@@ -606,25 +608,43 @@ A page's extraction can fail on its own (a model call that hits the output ceili
 stream). That page fails; the run does not. Every other page is still rendered, verified,
 assembled and reviewed, and the document is delivered.
 
-The failed page is **not** silently dropped. It appears in the body as a comment naming the page
-and the error:
+**Unless every page failed.** Then the run ends `failed`, with the page's own provider error as
+`error` — a document containing none of the source's words is not a partial success, and the error
+naming the ceiling and the knob to raise is more use than an empty file. `GET .../output` answers
+`409`, as it does for any failed run.
+
+The failed page is **not** silently dropped. Two comments say so, in different places and for
+different reasons:
 
 ```html
+<main>
 <!-- @page-failed 7: bedrock: response hit the 32000-token output ceiling and was truncated (87851 chars returned). ... -->
+</main>
+<!-- @page-failed 7
+  This document is incomplete: the source pages above could not be extracted and
+  none of their content is here. See the run log (page_extraction_failed) or the
+  session's diagnostics (pages_failed) for why.
+-->
 ```
 
-A comment rather than visible prose, for the same reason as `@unresolved`: everything visible in a
-delivered document is meant to be text that was on the page. It is invisible to a reader, inert to
-axe and to the screen-reader flattening, and findable by tooling.
+The one **inside** `<main>` sits where the page's content would have been, so it says *where* the
+hole is — but it is part of the body handed to the Copy Editor each review round, and a round that
+rewrites the document may drop it. The one **after** `</main>` is injected once the review loop is
+finished, out of the editor's reach, so the document cannot end up claiming to be whole. Comments
+rather than visible prose, for the same reason as `@unresolved`: everything visible in a delivered
+document is meant to be text that was on the page. Both are invisible to a reader, inert to axe and
+to the screen-reader flattening, and findable by tooling.
 
-Three places report it, in increasing order of convenience: `page_extraction_failed` in the run
-log per page, `failed_pages` on the `run_complete` line (present only when there were any), and
+Three places report it, in increasing order of convenience: `page_extraction_failed` in the run log
+per page, `failed_pages` on the `run_complete` line (present only when there were any), and
 `pages_failed` in diagnostics (§7b). A client that cares whether it received a whole document
 should check the last of those, not `status`.
 
 On a feedback re-extraction the same failure is non-destructive instead: the page keeps the content
-it already had (`page_extraction_failed` with `kept: "prior"`), because a page Iris could not
-improve is not a page it lost.
+it already had, because a page Iris could not improve is not a page it lost. That case is
+`page_extraction_failed` with `kept: "prior"`, and it is deliberately **not** counted in
+`pages_failed` or `failed_pages` — the document is whole, it is just not improved. Look for it in
+`reextract_complete.failed`.
 
 ## 8. List sessions
 

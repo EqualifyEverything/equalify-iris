@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runExtraction, reExtractPages } from "../src/pipeline/extraction.ts";
-import { assembleBody } from "../src/pipeline/assembly.ts";
+import { assembleBody, wrapDocument } from "../src/pipeline/assembly.ts";
 import { summarizeRun } from "../src/diagnostics.ts";
 import { TruncatedResponseError } from "../src/providers/types.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
@@ -127,7 +127,9 @@ test("the failure note cannot end the comment it lives in", async () => {
   await withTemp(async (dir) => {
     // A `--` inside an HTML comment closes it early, which would spill the note into
     // the document as visible text — the same reason wrapDocument sanitizes @unresolved.
-    const { ctx } = makeCtx(dir, 1, [1], () => new Error("bad -- input --> here"));
+    // Two pages, one failing: a document where every page fails is a failed run, so a
+    // surviving page is what keeps the marker reachable at all.
+    const { ctx } = makeCtx(dir, 2, [1], () => new Error("bad -- input --> here"));
     const { fragments } = await runExtraction(ctx);
     const inner = fragments[0].innerHtml;
     assert.match(inner, /^<!-- @page-failed 1: /);
@@ -135,17 +137,57 @@ test("the failure note cannot end the comment it lives in", async () => {
   });
 });
 
-test("every page failing is still a document, not a thrown run", async () => {
+test("every page failing is a failed run, not an empty document", async () => {
   await withTemp(async (dir) => {
-    // The degenerate end of containment. It delivers nothing usable — but it delivers
-    // it with all three pages named, where the old behavior surfaced one error and left
-    // the other two pages' fate unrecorded.
+    // Containment trades a thrown run for the pages that DID work. With none of them
+    // there is nothing to trade: assembly and review would run happily on a body of
+    // failure markers and the session would end `ready_for_review`, serving a document
+    // containing none of the source's words — worse than the failure it replaced, which
+    // named the ceiling and the knob to raise (test/e2e.sh §9d).
     const { ctx, rec } = makeCtx(dir, 3, [1, 2, 3], truncated);
-    const { fragments, failedPages } = await runExtraction(ctx);
-    assert.deepEqual(failedPages, [1, 2, 3]);
-    assert.equal(fragments.length, 3);
+    await assert.rejects(runExtraction(ctx), (e: Error) => {
+      // The page's own error, unwrapped: it is the diagnosis, and a message written at
+      // the document level would drop the provider's account of why.
+      assert.match(e.message, /output ceiling/);
+      assert.match(e.message, /max_tokens/);
+      return true;
+    });
     assert.deepEqual(ev(rec, "extraction_complete")[0].data, { pages: 3, failed: [1, 2, 3] });
+    assert.equal(ev(rec, "extraction_failed").length, 1, "the log says why the run ended, not just that a page did");
   });
+});
+
+test("a single-page document that fails fails the run", async () => {
+  await withTemp(async (dir) => {
+    // The one-page case is the same rule, and the one that matters most: "1 of 1 failed"
+    // is 100% of the document, so there is no partial success to deliver.
+    const { ctx } = makeCtx(dir, 1, [1], truncated);
+    await assert.rejects(runExtraction(ctx), /output ceiling/);
+  });
+});
+
+test("the document itself admits the hole, out of the editor's reach", async () => {
+  await withTemp(async (dir) => {
+    // The in-fragment marker is part of the body handed to the Copy Editor with "return
+    // the complete corrected body", so a round that rewrites the document may drop it.
+    // wrapDocument re-states it after the loop, where no editor round can reach it —
+    // the same guarantee @unresolved already had.
+    const { ctx } = makeCtx(dir, 3, [2], truncated);
+    const { fragments, failedPages } = await runExtraction(ctx);
+    // The editor deleted the marker, which it is free to do.
+    const rewritten = assembleBody(fragments).replace(/<!-- @page-failed[\s\S]*?-->/g, "");
+    assert.doesNotMatch(rewritten, /@page-failed/, "the body no longer says anything about page 2");
+    const html = wrapDocument(rewritten, { failedPages });
+    assert.match(html, /@page-failed 2/);
+    assert.match(html, /This document is incomplete/);
+  });
+});
+
+test("a whole document says nothing about failed pages", () => {
+  // No empty marker on an ordinary document: a comment about failure in a document with
+  // none reads as a defect to whoever finds it.
+  assert.doesNotMatch(wrapDocument("<p>fine</p>", { failedPages: [] }), /@page-failed/);
+  assert.doesNotMatch(wrapDocument("<p>fine</p>"), /@page-failed/);
 });
 
 test("a whole run logs an empty failed list rather than no list", async () => {
@@ -175,7 +217,9 @@ test("a failed re-extraction keeps the page it could not improve", async () => {
   await withTemp(async (dir) => {
     const { ctx, rec } = makeCtx(dir, 3, [2], truncated);
     const { fragments, failedPages } = await reExtractPages(ctx, [prior(1), prior(2), prior(3)], [2, 3]);
-    assert.deepEqual(failedPages, [2]);
+    // NOT reported as a failed page: that means the document has no content for it, and
+    // this document has page 2's prior content. It is whole, just not improved.
+    assert.deepEqual(failedPages, []);
     assert.equal(
       fragments.find((f) => f.order === 2)!.innerHtml,
       "<p>prior 2</p>",
@@ -220,6 +264,27 @@ test("diagnostics reports which pages are missing from the document", async () =
     now: Date.parse("2026-08-24T00:00:30.000Z"),
   });
   assert.deepEqual(d.pages_failed, [2, 3], "sorted and deduped");
+});
+
+test("a page that kept its prior content is not reported as missing", () => {
+  // The feedback path logs the same event with `kept: "prior"`, and it means the
+  // opposite: the re-extraction threw, so the page kept the content it already had and
+  // the document is whole. Naming it here sends a client looking for a hole that is not
+  // there — docs/API.md §7c tells it to check this field for exactly that.
+  const log = [
+    { ts: "2026-08-24T00:00:00.000Z", type: "run_start", images: 3 },
+    { ts: "2026-08-24T00:00:10.000Z", type: "page_extraction_failed", image: "page-002.png", page: 2, error: "x", kept: "prior" },
+    { ts: "2026-08-24T00:00:20.000Z", type: "run_complete" },
+  ]
+    .map((e) => JSON.stringify(e))
+    .join("\n");
+  const d = summarizeRun(log, {
+    sessionId: "ses_test",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse("2026-08-24T00:00:30.000Z"),
+  });
+  assert.deepEqual(d.pages_failed, []);
 });
 
 test("a whole run reports no failed pages", () => {

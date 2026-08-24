@@ -123,10 +123,16 @@ export async function runPipeline(args: {
     // Specialist-agent suggestions come from a pass that actually looks at the
     // source images: a full extraction, or a targeted feedback re-extraction.
     let suggestions: { name: string; reason: string; image: string }[] = [];
-    // Pages the model did not deliver this run (extraction.ts `failedPage`). A run can
-    // now finish with some, which is the point — but it has finished with a document
-    // that is not what was asked for, so it is reported on the run's own completion
-    // line rather than only in the per-page events above it.
+    // Pages the delivered document has no content for (extraction.ts `failedPage`). A run
+    // can now finish with some, which is the point — but it has finished with a document
+    // that is not what was asked for, so it is reported on the run's own completion line
+    // rather than only in the per-page events above it, and re-stated in the document
+    // itself once the review loop can no longer edit it (assembly.ts wrapDocument).
+    //
+    // A run where EVERY page failed does not reach here at all: runExtraction re-raises
+    // instead, because a document containing none of the source's words is not a partial
+    // success. Nor does the review-only feedback path assign this — a page that failed in
+    // some earlier run is that run's fact, and its marker already travels in the fragment.
     let failedPages: number[] = [];
     let mode: string;
 
@@ -160,7 +166,12 @@ export async function runPipeline(args: {
         const assembled = await runAssembly(ctx, fragments);
 
         setPhase("review");
-        review = await runReview(ctx, { body: assembled.body, lint: assembled.lint, pages: fragments });
+        review = await runReview(ctx, {
+          body: assembled.body,
+          lint: assembled.lint,
+          pages: fragments,
+          failedPages,
+        });
       } else {
         mode = "feedback_iterative";
         log.event("run_start", { images: images.length, feedback: args.feedback ?? null, mode });
@@ -186,7 +197,12 @@ export async function runPipeline(args: {
       const assembled = await runAssembly(ctx, fragments);
 
       setPhase("review");
-      review = await runReview(ctx, { body: assembled.body, lint: assembled.lint, pages: fragments });
+      review = await runReview(ctx, {
+        body: assembled.body,
+        lint: assembled.lint,
+        pages: fragments,
+        failedPages,
+      });
     }
 
     writeFileSync(paths.sessionOutput(sessionId), review.html);

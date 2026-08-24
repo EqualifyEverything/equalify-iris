@@ -150,11 +150,17 @@ Respond with ONLY this JSON:
 export interface ExtractionResult {
   fragments: Fragment[];
   suggestions: { name: string; reason: string; image: string }[];
-  // Source pages (1-based order) whose own extraction threw and that are therefore
-  // in the document as a failure marker rather than as content — see `failedPage`.
-  // Empty on an ordinary run. Returned rather than only logged because a document
-  // delivered with a page missing is a different deliverable, and the caller records
-  // it alongside the run's other outcome counts.
+  // Source pages (1-based order) the delivered document has NO content for: their own
+  // extraction threw and they are in the document as a failure marker — see
+  // `failedPage`. Empty on an ordinary run. Returned rather than only logged because a
+  // document delivered with a page missing is a different deliverable, and the caller
+  // records it alongside the run's other outcome counts.
+  //
+  // Always empty from `reExtractPages`, and that is a fact about that path rather than
+  // an omission: it only runs for pages that already have a fragment, so a page whose
+  // re-extraction throws keeps the content it had and the document stays whole. Those
+  // pages are reported as `reextract_complete.failed` instead. Folding them in here
+  // would tell a client its document is missing a page that is in it.
   failedPages: number[];
 }
 
@@ -475,6 +481,11 @@ interface PageOutcome {
   // from the fragment, because a caller must not have to pattern-match HTML to find
   // out whether the document it was handed is whole.
   failed?: true;
+  // The error that page threw, kept so it can be re-raised if it turns out EVERY page
+  // failed (see runExtraction). Containment replaces one message with a document; when
+  // there is no document, the message is all there is, and a fresh one written here
+  // would be a worse diagnosis than the provider's own.
+  error?: unknown;
 }
 
 // What one page leaves behind when its own extraction throws.
@@ -513,6 +524,7 @@ function failedPage(ctx: PipelineContext, pageAgent: AgentSpec, img: InputImage,
       log: `extraction failed: ${message}`,
     },
     failed: true,
+    error: e,
   };
 }
 
@@ -686,6 +698,25 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
   // per-page containment" are not the same observation in a log.
   ctx.log.event("extraction_complete", { pages: fragments.length, failed: failedPages });
 
+  // Nothing was extracted. Containment trades a thrown run for the pages that DID
+  // work, and with none of them there is nothing to trade: assembly and the review
+  // loop would run happily on a body of failure markers (the Reader and Editor are
+  // text calls, so whatever killed the page images need not touch them), and the
+  // session would end `ready_for_review` serving a document containing none of the
+  // source's words. That is worse than the failure it replaced, which at least named
+  // the ceiling and the knob to raise (test/e2e.sh §9d).
+  //
+  // The FIRST page's error, unwrapped, because it is the diagnosis: a message written
+  // here would say "every page failed" and drop the provider's account of why. The
+  // remaining pages' errors are already in the log, one event each.
+  if (outcomes.length > 0 && failedPages.length === outcomes.length) {
+    ctx.log.event("extraction_failed", { pages: failedPages.length, reason: "no page produced content" });
+    // The `??` is unreachable — `failed` is only ever set alongside `error` — but a
+    // thrown `undefined` would reach the operator as the string "undefined", which is
+    // the one outcome this branch exists to prevent.
+    throw outcomes[0].error ?? new Error("extraction failed for every page");
+  }
+
   writeFileSync(
     join(ctx.paths.sessionFragments(ctx.sessionId), "fragments.json"),
     JSON.stringify(fragments, null, 2),
@@ -755,11 +786,12 @@ export async function reExtractPages(
   const suggestions = outcomes
     .map((o) => o.suggestion)
     .filter((s): s is NonNullable<typeof s> => s !== undefined);
-  // Pages left as they were because their re-extraction threw. Not the same as
-  // runExtraction's `failedPages`, where the page has no content at all — reported
-  // under the same name because both answer "which pages did the model not deliver
-  // this run", and `reextract_complete` below says which ones it did.
-  const failedPages = outcomes.filter((o) => o.failed).map((o) => o.fragment.order);
+  // Pages left as they were because their re-extraction threw. NOT reported as
+  // `failedPages`: that field means the document has no content for the page, and these
+  // pages have their prior content — the document is whole, it is just not improved.
+  // Conflating the two tells a client following docs/API.md §7c that it received a
+  // partial document when it did not.
+  const keptPrior = outcomes.filter((o) => o.failed).map((o) => o.fragment.order);
 
   writeFileSync(
     join(ctx.paths.sessionFragments(ctx.sessionId), "fragments.json"),
@@ -770,7 +802,7 @@ export async function reExtractPages(
   // opposite of a page this run produced.
   ctx.log.event("reextract_complete", {
     pages: outcomes.filter((o) => !o.failed).map((o) => o.fragment.order).sort((a, b) => a - b),
-    ...(failedPages.length ? { failed: failedPages } : {}),
+    ...(keptPrior.length ? { failed: keptPrior } : {}),
   });
-  return { fragments, suggestions, failedPages };
+  return { fragments, suggestions, failedPages: [] };
 }

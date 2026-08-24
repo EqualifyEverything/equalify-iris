@@ -244,10 +244,15 @@ export function summarizeRun(
   // Sorted and deduped: a feedback re-run can log a page twice over the life of one
   // session's log, and the field answers "which pages are not in the document", which
   // is a set.
+  //
+  // `kept: "prior"` is excluded, because that event reports the opposite outcome under
+  // the same name: a re-extraction that threw left the page's earlier content in place,
+  // so the document is whole and naming the page here would send a client looking for a
+  // hole that isn't there (pipeline/extraction.ts reExtractPages).
   const pagesFailed = [
     ...new Set(
       events
-        .filter((e) => e.type === "page_extraction_failed" && typeof e.page === "number")
+        .filter((e) => e.type === "page_extraction_failed" && typeof e.page === "number" && e.kept !== "prior")
         .map((e) => e.page as number),
     ),
   ].sort((a, b) => a - b);

@@ -1,6 +1,6 @@
 import { extractJson } from "../util/json.ts";
 import { MAX_EDITOR_IMAGES } from "../providers/imageLimits.ts";
-import { isInputTooLongError } from "../providers/types.ts";
+import { isRequestTooLargeError } from "../providers/types.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
 import { runAxe, type LintResult } from "./lint.ts";
@@ -260,7 +260,7 @@ async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue
     // Only for a size refusal, and only when there were images to drop. Anything else
     // (a stall, a stream error, a bad key) is not made better by asking again, and
     // retrying it would double the cost of every real failure.
-    if (!selected.length || !isInputTooLongError(e)) throw e;
+    if (!selected.length || !isRequestTooLargeError(e)) throw e;
     ctx.log.event("editor_images_refused", {
       attached: selected.length,
       of: ctx.images.length,
@@ -318,7 +318,7 @@ async function editorCall(
 // actually re-confirmed it, so reported issues are verified-fixed, not assumed.
 export async function runReview(
   ctx: PipelineContext,
-  initial: { body: string; lint: LintResult; pages?: IndexedPage[] },
+  initial: { body: string; lint: LintResult; pages?: IndexedPage[]; failedPages?: number[] },
 ): Promise<ReviewResult> {
   let body = initial.body;
   let lint = initial.lint;
@@ -329,13 +329,25 @@ export async function runReview(
   // deliberately NOT re-indexed as the editor rewrites the body: the index exists
   // to attribute content to a SOURCE page, and the source doesn't change.
   const pages = initial.pages ?? [];
+  // Carried through the loop only to be re-stated in the wrapper at the end. The review
+  // loop cannot fix a page that was never extracted, and must not be asked to: the
+  // Reader would raise "this page is missing" every round against a body no editor can
+  // repair, spending the whole iteration budget on it. See wrapDocument.
+  const failedPages = initial.failedPages ?? [];
 
   while (iterations <= ctx.maxReviewIterations) {
     const issues = await runReader(ctx, body, lint, pages);
     lastIssues = issues;
     ctx.log.event("reader", { iteration: iterations, issues: issues.length });
     if (issues.length === 0) {
-      return { html: wrapDocument(body), body, iterationsCompleted: iterations, unresolved: [], lint, droppedLinks };
+      return {
+        html: wrapDocument(body, { failedPages }),
+        body,
+        iterationsCompleted: iterations,
+        unresolved: [],
+        lint,
+        droppedLinks,
+      };
     }
     if (iterations === ctx.maxReviewIterations) break; // cap reached, issues remain
 
@@ -359,7 +371,7 @@ export async function runReview(
     (i) => `${i.issue} (severity: ${i.severity}${i.pages?.length ? `, page ${i.pages.join(", ")}` : ""})`,
   );
   return {
-    html: wrapDocument(body, { unresolved: unresolvedLines }),
+    html: wrapDocument(body, { unresolved: unresolvedLines, failedPages }),
     body,
     iterationsCompleted: iterations,
     unresolved: lastIssues,

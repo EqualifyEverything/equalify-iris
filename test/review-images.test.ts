@@ -403,6 +403,49 @@ test("a refused payload is retried without the images rather than failing the ru
   });
 });
 
+test("a byte-size refusal is retried too, not only a context-window one", async () => {
+  await withTemp(async (dir) => {
+    // MAX_EDITOR_IMAGES bounds what a page costs in TOKENS; the request ceiling these
+    // APIs enforce is in bytes. A dozen screenshots at the published per-image ceiling is
+    // tens of megabytes base64-encoded, and is refused for size without ever being
+    // weighed in tokens — the same fact about the same request, so the same remedy.
+    const { ctx, rec } = ctxWith(
+      dir,
+      3,
+      [{ issue: "table headers", severity: "high", suggested_action: "add th", pages: [2] }],
+      { imageCallFailsWith: "Request failed with status code 413" },
+    );
+    await runReview(ctx, { body: "<h1>Report</h1>", lint: { ok: true, violations: [] }, pages: PAGES });
+    const editorCalls = rec.calls.filter((c) => c.agent === "copy_editor");
+    assert.equal(editorCalls.length, 2);
+    assert.equal(editorCalls[1].imageCount, 0);
+    assert.ok(rec.events.some((e) => e.type === "editor_images_refused"));
+  });
+});
+
+test("a truncated editor response is not mistaken for a payload that was too big", async () => {
+  await withTemp(async (dir) => {
+    // A TruncatedResponseError's message carries a character count and the model's
+    // max_tokens, either of which can contain "413". Retrying it with fewer images fixes
+    // nothing and hides the one diagnosis that names the knob to raise.
+    const { ctx, rec } = ctxWith(
+      dir,
+      3,
+      [{ issue: "table headers", severity: "high", suggested_action: "add th", pages: [2] }],
+      {
+        imageCallFailsWith:
+          "bedrock: response hit the 32000-token output ceiling and was truncated (413 chars returned). " +
+          "Raise providers.bedrock.max_tokens.",
+      },
+    );
+    await assert.rejects(
+      runReview(ctx, { body: "<h1>Report</h1>", lint: { ok: true, violations: [] }, pages: PAGES }),
+      /output ceiling/,
+    );
+    assert.equal(rec.calls.filter((c) => c.agent === "copy_editor").length, 1);
+  });
+});
+
 test("a failure that is not about size is not retried", async () => {
   await withTemp(async (dir) => {
     // Retrying a stall or a stream error would double the cost of every real failure
