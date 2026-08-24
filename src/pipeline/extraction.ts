@@ -61,7 +61,7 @@ the page does not print, an accessible name on a marker the page prints as a sym
 returns from a footnote, a note about irregular numbering held to what the page shows — every word
 you emit is a word on the page. If content is cut off at a page edge, note it in the "log" field.
 
-Eight structures are easy to render as something that merely looks right, so be explicit:
+Nine structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
   smaller bold line that introduces a subsection of the section above it is an <h3> under that
@@ -178,6 +178,21 @@ Eight structures are easy to render as something that merely looks right, so be 
   aria-required="true" only where the page itself marks a field as required, never merely
   because it is blank. This is about fields, not about every label/value pair: printed metadata
   nobody is meant to complete (a reference number, a "Prepared by" line) is still a <dl>.
+- PAGE-BREAK MARKERS: where you mark the boundary of the page you were given, the marker carries
+  the page number the page prints as its text content, and carries no aria-label and no
+  aria-labelledby: <p role="doc-pagebreak" id="page-5">5</p>. The id is what a reference to this
+  page needs and the text is what names the marker, so there is nothing left for a label to do —
+  and role="doc-pagebreak" is named by its own contents, which makes a name supplied as an
+  attribute prohibited on it rather than merely redundant. That distinction is the whole of this
+  rule: the same marker written <p role="doc-pagebreak" aria-label="Page 5" id="page-5"></p> is a
+  SERIOUS violation, because the prohibition only bites when the element is empty — put the number
+  inside and the name comes from content and the attribute goes unremarked, so a document can carry
+  that label on six markers that kept their number and fail the gate on the seventh that lost it.
+  Never emit an empty marker in any form: a role with nothing in it announces a boundary to a
+  screen-reader user and then says nothing about which boundary it is. Where the page prints no
+  number you can read, leave the marker out and note the boundary in the "log" field instead. The
+  same holds wherever you reach for a name: aria-label belongs on an element whose role takes one —
+  a link, a button, a table, a region — never on a <p>, <span> or <div> that is only holding text.
 
 If — and only if — this page contains a content type that a DEDICATED specialist agent would
 handle clearly better than this general pass (something beyond the common types: paragraph,

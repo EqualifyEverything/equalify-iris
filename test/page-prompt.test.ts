@@ -282,11 +282,50 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
   }
 });
 
+// The page-break rule (issue #145) came from a delivered document that shipped a SERIOUS
+// axe violation from one empty element: six of its seven `role="doc-pagebreak"` markers
+// carried their page number as text and the seventh was `<p role="doc-pagebreak"
+// aria-label="Page 5" id="page-5"></p>`, which is `aria-prohibited-attr`.
+//
+// The gate does catch this one — unlike the heading and image rules above, the shape is
+// decidable from the document, and test/lint-pagebreak.test.ts pins that it fires. What it
+// cannot do is stop it shipping: the marker is the page agent's own invention (nothing in
+// src/ emits one), the re-lint that would have raised it is the last thing a deployment
+// running `iterations_max: 1` does, and the document was delivered with it. So the rule is
+// asserted here as well, on the two clauses that make it a rule rather than a preference —
+// the number goes in as text, and the attribute stays off even when text is present. The
+// second is the load-bearing one: an `aria-label` beside text lints clean, which is exactly
+// how the same pattern passed six times in one document and failed once.
+test("the page agent's page-break rule keeps the clauses that make it a rule", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["the marker carries its page number as text and no name attribute",
+      /the marker carries the page number the page prints as its text content, and carries no aria-label and no aria-labelledby: <p role="doc-pagebreak" id="page-5">5<\/p>/],
+    ["the attribute is prohibited on the role rather than merely redundant",
+      /role="doc-pagebreak" is named by its own contents, which makes a name supplied as an attribute prohibited on it rather than merely redundant/],
+    // Without this the rule reads as "put the number in", which the failing document's six
+    // healthy markers already did while still carrying the prohibited attribute — one lost
+    // its text and the attribute became a violation.
+    ["the reported shape is named as the serious violation it is",
+      /<p role="doc-pagebreak" aria-label="Page 5" id="page-5"><\/p> is a SERIOUS violation, because the prohibition only bites when the element is empty/],
+    ["an empty marker is not emitted in any form", /Never emit an empty marker in any form/],
+    ["a boundary with no legible number is logged instead of marked",
+      /Where the page prints no number you can read, leave the marker out and note the boundary in the "log" field/],
+    // The generalisation has to stay compatible with the footnote rule a few bullets up,
+    // which puts aria-label on an <a> (a link takes a name) — so it is written as where the
+    // attribute belongs, not as a blanket ban.
+    ["a name attribute belongs only on an element whose role takes one",
+      /aria-label belongs on an element whose role takes one — a link, a button, a table, a region — never on a <p>, <span> or <div> that is only holding text/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
 // The list of explicit structures is introduced by its own count, so adding a
 // fifth bullet and leaving "Four" in place would have the prompt miscount itself.
 test("the explicit-structures list agrees with the count that introduces it", () => {
   const prompt = section("System prompt")!;
-  const NUMBERS: Record<string, number> = { Two: 2, Three: 3, Four: 4, Five: 5, Six: 6, Seven: 7, Eight: 8 };
+  const NUMBERS: Record<string, number> = { Two: 2, Three: 3, Four: 4, Five: 5, Six: 6, Seven: 7, Eight: 8, Nine: 9, Ten: 10 };
   const intro = prompt.match(/(\w+) structures are easy to render/);
   assert.ok(intro, "page.md no longer introduces the list of explicit structures");
   const claimed = NUMBERS[intro![1]];
