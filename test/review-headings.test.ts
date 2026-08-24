@@ -496,6 +496,34 @@ test("a tooltip on a container is not words the section opens with", () => {
   assert.equal(field[0].opening, "Serial number");
 });
 
+test("a control announces its name and its subtree, and one name at that", () => {
+  // A `title` is what a reader hears when there is no `aria-label`, and is not heard at all
+  // when there is one, so reading both would put a word in the opening that the page never
+  // says. flatten's `??` chain is the one being matched here, empty aria-label included.
+  const both = sameWordedHeadingRuns(
+    '<h2>Op</h2><p><input type="text" aria-label="Serial" title="Enter the serial"></p><h2>Op</h2><p>t</p>',
+  );
+  assert.equal(both[0].opening, "Serial");
+  const emptied = sameWordedHeadingRuns(
+    '<h2>Op</h2><p><input type="text" aria-label="" title="Tip"></p><h2>Op</h2><p>t</p>',
+  );
+  assert.equal(emptied[0].opening, "");
+
+  // And a control is the one element whose attributes are read even though its subtree spoke:
+  // a named <select> announces the name AND the options, which is how flatten reads it too.
+  const select = sameWordedHeadingRuns(
+    '<h2>Op</h2><p><select aria-label="Size"><option>Low</option><option>High</option></select></p>' +
+      "<h2>Op</h2><p>t</p>",
+  );
+  assert.equal(select[0].opening, "Size Low High");
+  for (const word of ["Size", "Low", "High"]) {
+    assert.ok(
+      flatten('<p><select aria-label="Size"><option>Low</option><option>High</option></select></p>').includes(word),
+      `flatten announces ${word} too`,
+    );
+  }
+});
+
 test("a field labelled only by its placeholder or value is not reported as nothing", () => {
   // A placeholder used as a label is itself a defect the Reader is told to report, so a
   // section holding one is the last to assert is empty. flatten reads the same attributes

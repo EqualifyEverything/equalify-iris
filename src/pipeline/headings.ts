@@ -103,7 +103,8 @@ const textOf = (el: Element): string => (el.textContent ?? "").replace(/\s+/g, "
 // content flatters whatever is being measured. A `title` is the quiet case: on an image or a
 // field it is the name a reader hears, on a bare <div> it is a mouse tooltip and nothing
 // hears it, so only the elements that take their name from an attribute are asked for one.
-// And only where their subtree said nothing, so a titled link still reads as its own words.
+// And, apart from a control, only where their subtree said nothing, so a titled link still
+// reads as its own words.
 
 // Which elements those are. Narrower than "anything with the attribute" for the reason
 // above, and it deliberately does not include the containers a page wraps things in.
@@ -112,11 +113,13 @@ const NAMED_BY_ATTRIBUTE = new Set([
   "object", "embed", "audio", "video",
 ]);
 
-// A control can be labelled by more than an `aria-label`, and a page that labels a field
-// with its placeholder alone is a defect the Reader is told to report — so that is the last
-// section to assert is empty. flatten reads the same list for the same reason
-// (`fieldText`), so these are the words the entry and the page view will agree on.
-const FIELD_NAME_ATTRIBUTES = ["aria-label", "title", "placeholder", "value"];
+// A control is the one case where the attributes are read whatever the subtree says, and
+// where more than one of them is read: a page that labels a field with its placeholder alone
+// is a defect the Reader is told to report, so that is the last section to assert is empty,
+// and a <select> announces its name AND its options. flatten reads exactly this — the name,
+// then the placeholder, then the value, then the subtree (`fieldText`) — so the words in the
+// entry and the words in the page view are the same words. Its `[Field …]` marker is its own
+// annotation about role and stays there, as `[Image alt]` does.
 const FIELD = new Set(["input", "textarea", "select", "button"]);
 
 // An image with no `alt` at all is not the same as `alt=""`: the first is a defect the
@@ -126,8 +129,17 @@ const FIELD = new Set(["input", "textarea", "select", "button"]);
 // Reader sees both views and they should not describe the same image two ways.
 const IMAGE_UNNAMED = "[Image] [alt missing]";
 
+// `title` is a fallback for `aria-label` being absent, not an addition to it — a control
+// carrying both announces the first only, so reading both would put a word in the opening
+// that no reader hears. Same `??` as flatten's `ariaName`, down to `aria-label=""` stopping
+// the chain rather than falling through.
 const attributeName = (e: Element): string =>
   e.getAttribute("aria-label") ?? e.getAttribute("title") ?? "";
+
+const fieldName = (e: Element): string =>
+  [attributeName(e), e.getAttribute("placeholder") ?? "", e.getAttribute("value") ?? ""]
+    .filter(Boolean)
+    .join(" ");
 
 // The words an element announces on its own account, when its subtree announced none.
 function announced(e: Element, tag: string): string {
@@ -136,9 +148,6 @@ function announced(e: Element, tag: string): string {
     // `alt=""` is decorative, so it stays empty rather than falling through to a tooltip.
     if (alt !== null) return alt.trim();
     return attributeName(e) || IMAGE_UNNAMED;
-  }
-  if (FIELD.has(tag)) {
-    return FIELD_NAME_ATTRIBUTES.map((a) => e.getAttribute(a) ?? "").filter(Boolean).join(" ");
   }
   return NAMED_BY_ATTRIBUTE.has(tag) ? attributeName(e) : "";
 }
@@ -150,6 +159,9 @@ function segment(e: Element, out: string[]): boolean {
   if (SILENT.has(tag)) return false;
   out.push(" ");
   const at = out.length;
+  // A control's name and its subtree are both announced, in that order, so its attributes
+  // are read here and not in the silence fallback below.
+  if (FIELD.has(tag)) out.push(fieldName(e), " ");
   const stop = textUpToHeading(e, out);
   if (!stop && !out.slice(at).join("").trim()) out.push(announced(e, tag));
   out.push(" ");
