@@ -129,7 +129,11 @@ repeat and put what followed it under the first, at the level its content calls 
 sections the document really does label alike keep the label and each gain the words that
 distinguish them. Those words come from that section's own content, which is the one text you may
 add here; never write a subtitle of your own, and never merge two sections that are merely named
-alike.
+alike. And where nothing you were given decides it — the reviewer says it could not tell, or the
+pages those headings are on were not attached — leave both headings exactly as they are and resolve
+the other issues. An outline that says the same thing twice is a smaller harm to a reader than a
+section merged into another one or a heading dropped, and an issue left alone comes back next round
+or is reported as unresolved, while content you removed on a guess is gone from the document.
 
 A link's target is content, and it is the one kind you cannot recover: an href came from the
 source FILE, not from the page image, so a URL you drop or alter is gone and a URL you invent

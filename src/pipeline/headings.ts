@@ -72,29 +72,35 @@ export function sameWordedHeadingRuns(body: string): HeadingRun[] {
   }
 
   const runs: HeadingRun[] = [];
-  // The chain a run is built along: the next heading at or above this level. An empty
-  // heading is skipped rather than matched — two headings with no words are a
-  // different defect (and one axe reports), not an ambiguous pair.
+  // Which headings a run already accounts for. Members only, NOT the headings between
+  // them: a run of two <h2>Op</h2> spans everything under the first one, and a page that
+  // reprints its running title AND a continued subsection header — #111's own shape —
+  // puts an <h3> pair inside that span. Advancing the cursor to the run's last heading
+  // instead would jump the interval and drop the inner pair from the list.
+  const counted = new Set<number>();
+  // An empty heading never begins a run: two headings with no words are a different
+  // defect, and one axe reports as `empty-heading`. It is not skipped as a LINK in a
+  // chain, though — it opens a section of its own, however little it names it, so it
+  // ends the run the way any other intervening same-level heading does.
   for (let i = 0; i < headings.length; i++) {
     const first = headings[i];
-    if (!key(first.text)) continue;
-    let count = 1;
-    let at = i;
+    if (counted.has(i) || !key(first.text)) continue;
+    const members = [i];
     for (;;) {
-      // The heading that closes the section opened at `at`: the first one after it at
-      // or above its level. Anything deeper than that belongs to it.
+      // The heading that closes the section opened by the run's last member: the first
+      // one after it at or above its level. Anything deeper than that belongs to it.
+      const from = members[members.length - 1];
       let next = -1;
-      for (let j = at + 1; j < headings.length; j++) {
+      for (let j = from + 1; j < headings.length; j++) {
         if (headings[j].level <= first.level) { next = j; break; }
       }
       if (next === -1 || headings[next].level !== first.level) break;
       if (key(headings[next].text) !== key(first.text)) break;
-      count++;
-      at = next;
+      members.push(next);
     }
-    if (count > 1) {
-      runs.push({ level: first.level, text: first.text, count });
-      i = at; // the run is reported once, from its first heading
+    if (members.length > 1) {
+      runs.push({ level: first.level, text: first.text, count: members.length });
+      for (const m of members) counted.add(m);
     }
   }
   return runs;

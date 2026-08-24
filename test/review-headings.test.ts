@@ -101,6 +101,15 @@ test("the Copy Editor is told how to resolve each case the Reader reports", () =
     ["a subtitle of the editor's own is forbidden", /never write a subtitle of your own/],
     ["sections that are merely named alike are not merged",
       /never merge two sections that are merely named alike/],
+    // The Reader has a third answer — it is told to say so where the excerpts do not tell
+    // it which case a pair is, and with a 200-char page excerpt that happens for any pair
+    // away from a page's top. Without an instruction for it the editor still has "resolve
+    // every issue you can", and the resolution it can always reach is the destructive one.
+    // This is also the state of the size-refusal retry, which carries no images at all.
+    ["an undecidable pair is left alone rather than resolved on a guess",
+      /where nothing you were given decides it — the reviewer says it could not tell, or the pages those headings are on were not attached — leave both headings exactly as they are/],
+    ["the asymmetry is stated: a repeated label is recoverable, a merged section is not",
+      /an issue left alone comes back next round or is reported as unresolved, while content you removed on a guess is gone from the document/],
   ] as [string, RegExp][]) {
     assert.match(editor, re, `EDITOR_SYSTEM no longer says: ${what}`);
   }
@@ -112,11 +121,14 @@ test("the Copy Editor is told how to resolve each case the Reader reports", () =
 // editor cannot act on does not produce a wrong document — it produces one where the issue
 // comes back as `unresolved` round after round, spending review iterations on a finding
 // that could never be fixed.
-test("the Reader's two cases are both cases the editor can act on", () => {
+test("every answer the Reader can give is one the editor has an instruction for", () => {
   for (const [what, inReader, inEditor] of [
     ["the reprinted-title case: one section", /one section whose title repeats/, /is ONE heading/],
     ["the labelled-alike case: two sections", /two sections the document labels alike/, /really does label alike/],
     ["the words added come from the section's own content", /that section's own content/, /that section's own content/],
+    ["the case where the Reader cannot tell which of the two it is",
+      /where the excerpts do not tell you, say that instead of choosing/,
+      /the reviewer says it could not tell.*leave both headings exactly as they are/],
   ] as [string, RegExp, RegExp][]) {
     assert.match(reader, inReader, `READER_SYSTEM stopped reporting ${what}`);
     assert.match(editor, inEditor, `EDITOR_SYSTEM stopped resolving ${what} — the Reader still reports it`);
@@ -270,4 +282,28 @@ test("a clean document is not sent a section saying there is nothing", async () 
   const prompts = await readerPrompts("<h1>Report</h1><h2>One</h2><p>a</p><h2>Two</h2><p>b</p>");
   assert.equal(prompts.length, 1);
   assert.doesNotMatch(prompts[0], /Headings with the same words/);
+});
+
+test("a pair nested inside an outer pair is in the list too", () => {
+  // #111's own shape: the page reprints the running title AND the header of the
+  // subsection that continues under it, so the <h3> pair sits inside the <h2> run.
+  // Reporting the run by advancing the cursor to its last heading would jump the whole
+  // interval between the two <h2>s and lose the inner pair.
+  assert.deepEqual(
+    runs("<h2>Op</h2><h3>X</h3><p>a</p><h3>X</h3><p>b</p><h2>Op</h2><h3>Y</h3><p>c</p><h3>Y</h3><p>d</p>"),
+    ["h2:Op:2", "h3:X:2", "h3:Y:2"],
+  );
+});
+
+test("a heading is a member of one run only", () => {
+  // The dedupe the cursor jump was there for: three consecutive <h2>Op</h2> are one run
+  // of three, not a run of three plus a run of two starting at the second.
+  assert.deepEqual(runs("<h2>Op</h2><p>a</p><h2>Op</h2><p>b</p><h2>Op</h2><p>c</p>"), ["h2:Op:3"]);
+});
+
+test("an empty heading between the pair ends the run, as any other section would", () => {
+  // It names nothing, but it opens a section — so the two headings around it are no
+  // longer the pair with nothing but their own content between them. Stated because the
+  // opposite reading is tempting: an empty heading announces nothing to a reader.
+  assert.deepEqual(runs("<h2>Op</h2><p>a</p><h2></h2><h2>Op</h2><p>b</p>"), []);
 });
