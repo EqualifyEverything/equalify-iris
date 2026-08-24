@@ -6,6 +6,13 @@ import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { verifyAgentOutput, type VerifyVerdict } from "./feedback.ts";
+import {
+  changedAnything,
+  claimRecheck,
+  correctionEffect,
+  recheckSampler,
+  type RecheckSampler,
+} from "./correction.ts";
 import { examplesForPrompt } from "./memory.ts";
 import { missingLinkProblem, missingLinks, pageLinkContext, unexpectedHrefs } from "./links.ts";
 import { STANDARD as STANDARD_AGENTS, isStandardType, logicalType } from "./contribute.ts";
@@ -579,6 +586,7 @@ async function extractPage(
   pageAgent: AgentSpec,
   img: InputImage,
   lessons: string,
+  sampler: RecheckSampler,
   previous?: string,
 ): Promise<PageOutcome> {
   const { html, log, suggestion } = await renderPage(ctx, pageAgent, img, lessons, previous);
@@ -628,8 +636,41 @@ async function extractPage(
     ...missing.map(missingLinkProblem),
   ];
   if (problems.length) {
+    // What the correction was asked to fix, for the event below. Both triggers can fire
+    // on one page, and they cost the same call but mean different things: a link the
+    // model dropped is an exact, code-checked miss, while a fidelity problem is the
+    // Feedback Agent's judgement.
+    const trigger = verifyFailed ? (missing.length ? "both" : "verify") : "links";
+    const before = innerHtml.trim();
     const corrected = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons);
-    if (corrected && corrected !== innerHtml.trim()) {
+    // What the pass changed, measured but NOT used to decide what ships. Whether the
+    // fragment is adopted stays on string identity, exactly as it was before any of this:
+    // `correctionEffect` observes the text, the descriptions, the attributes and the tag
+    // sequence, and a delivery decision must not turn on a signal being complete — a
+    // correction whose only change is one this cannot see would be silently reverted, and
+    // the page would keep the defect the pass had already fixed. The effect decides the
+    // LABEL, which is all the note it answers asked for: a model that re-indents its own
+    // page, or writes `&` where it wrote `&amp;`, returns a different string and the same
+    // page, and counting that under `results.kept` beside a restored table row is what makes
+    // the number unreadable — `text` and `structure` overlap, so the fold cannot subtract it
+    // out afterwards.
+    const effect = corrected ? correctionEffect(before, corrected) : null;
+    const moved = effect !== null && changedAnything(effect);
+    // A correction that produced nothing usable, or produced the page it was given back, is
+    // a page call paid for and nothing delivered. Recorded because it was previously
+    // invisible: the log said a page failed its check and said nothing about what the
+    // pass bought, so the loop's value could only be guessed at from call counts (issue
+    // #137). See `correctionEffect` for why the kept case reports what it changed.
+    if (!corrected || corrected === before) {
+      ctx.log.event("page_corrected", {
+        image: img.name,
+        page: img.order,
+        trigger,
+        problems: problems.length,
+        result: corrected ? "identical" : "empty",
+      });
+    }
+    if (corrected && corrected !== before) {
       // A page that PASSED its fidelity check is being re-rendered here only to
       // recover a link, so the rewrite has to earn the standing the original already
       // had: it is verified in turn, and a rewrite that lost something is discarded
@@ -639,8 +680,9 @@ async function extractPage(
       // before this feature. When the check had already failed, the original has no
       // standing to protect and the correction is accepted as it always was.
       let keep = true;
+      let recheck: VerifyVerdict | null = null;
       if (!verifyFailed) {
-        const recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }]);
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }]);
         keep = !failedCheck(recheck);
         if (!keep) {
           ctx.log.event("page_links_correction_rejected", {
@@ -649,7 +691,70 @@ async function extractPage(
             problems: recheck.problems,
           });
         }
+      } else if (moved && claimRecheck(sampler)) {
+        // Measurement only, on at most one page per batch: does a corrected page pass
+        // the check it just failed? A page the pass did not actually change is not worth
+        // the batch's one slot — there is nothing to check, and the answer would be the
+        // verdict already on record. Nothing here decides anything — a verify-driven
+        // correction is accepted exactly as it always was, whatever this says — because
+        // whether to keep re-rendering until a page passes is a policy question, and the
+        // answer to it needs the rate this event exists to produce (issue #137). See
+        // `RECHECKS_PER_BATCH` for why it is one page and not all of them.
+        //
+        // And nothing here can cost a page either. `verifyAgentOutput` is non-blocking
+        // for an absent Feedback Agent and an unparseable reply, but a PROVIDER error is
+        // rethrown (providers/index.ts logs `model_call ok:false` and throws), so an
+        // uncaught throttle on this one extra call would propagate out of extractPage
+        // into `failedPage` and ship a `@page-failed` marker for a page that had already
+        // rendered, verified and corrected — the corrected fragment sitting in a local
+        // variable and thrown away. A measurement that decides nothing must not be able
+        // to delete a page of accessible content, so a failed sample is a sample not
+        // taken: it is logged, the slot stays spent (a refund would let a throttled
+        // provider be retried once per corrected page, which is the cost this bounds),
+        // and the page ships exactly as it would have with no measurement at all.
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }]).catch(
+          (e: unknown) => {
+            ctx.log.event("page_correction_recheck_failed", {
+              image: img.name,
+              page: img.order,
+              error: (e as Error).message,
+            });
+            return null;
+          },
+        );
       }
+      if (recheck) {
+        // `ok` is "the verifier named no problem", which is also what an unavailable
+        // Feedback Agent looks like (see `failedCheck`). On this branch the sampled
+        // recheck can only follow a verdict it gave, so the ambiguity is confined to the
+        // links path, where it was already the standing behaviour.
+        ctx.log.event("page_correction_recheck", {
+          image: img.name,
+          page: img.order,
+          ok: !failedCheck(recheck),
+          problems: recheck.problems,
+          // Whether this verdict was allowed to change what is delivered. False for the
+          // sample, so a consumer cannot read it as the loop having gained a gate.
+          binding: !verifyFailed,
+        });
+      }
+      // What the pass actually changed about the page, and whether that change is what
+      // the document carries. `correctionEffect` reads both fragments rather than the
+      // verdict, so "the alt text was refined" and "a table came back" are separable in
+      // a log where both were `page_verify_failed` — which is the measurement issue #137
+      // asks for and the one the verdict cannot give about itself.
+      //
+      // `kept` is reserved for a correction that changed something, so a fragment adopted
+      // because it differs as a string while being the same page is `identical` here: the
+      // page call was paid for and bought nothing, whichever of the two strings ships.
+      ctx.log.event("page_corrected", {
+        image: img.name,
+        page: img.order,
+        trigger,
+        problems: problems.length,
+        result: keep ? (moved ? "kept" : "identical") : "rejected",
+        ...effect,
+      });
       if (keep) {
         innerHtml = corrected;
         logNote = logNote
@@ -717,8 +822,12 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
   // Contained per page: mapWithConcurrency rejects with the first error any item
   // throws (matching a serial loop), so without this one page takes the document with
   // it. See `failedPage`.
+  // One measurement-only re-verify for the whole batch, claimed by whichever corrected
+  // page gets there first (correction.ts). Created here rather than inside extractPage so
+  // it cannot become one per page, which is the cost it exists to bound.
+  const sampler = recheckSampler();
   const outcomes = await mapWithConcurrency(ctx.images, limit, (img) =>
-    extractPage(ctx, pageAgent, img, lessons).catch((e) => failedPage(ctx, pageAgent, img, e)),
+    extractPage(ctx, pageAgent, img, lessons, sampler).catch((e) => failedPage(ctx, pageAgent, img, e)),
   );
 
   // Results come back in input order, so fragments are already in page order.
@@ -811,8 +920,12 @@ export async function reExtractPages(
   // than to a failure marker: this path only runs for pages that already have one, and
   // a re-extraction that throws is a page Iris could not improve, not a page it lost.
   // Replacing good prior content with a marker would make a feedback round destructive.
+  // A feedback round gets its own sample, for the same reason the first pass does: these
+  // pages are corrected too, and a round that re-extracts three pages is as much a place
+  // for the rate to come from as a full run.
+  const sampler = recheckSampler();
   const outcomes = await mapWithConcurrency(toRun, ctx.extractionConcurrency, (img) =>
-    extractPage(ctx, pageAgent, img, lessons, previousFor(img.order)).catch(
+    extractPage(ctx, pageAgent, img, lessons, sampler, previousFor(img.order)).catch(
       (e): PageOutcome => {
         const message = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim();
         ctx.log.event("page_extraction_failed", {

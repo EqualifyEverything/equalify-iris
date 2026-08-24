@@ -224,3 +224,110 @@ test("concurrency_factor shows overlap: ~1 serial, ~N parallel", () => {
   const p = summarizeRun(par, { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.parse(T(2)) });
   assert.equal(p.model_calls.concurrency_factor, 4);
 });
+
+// --- the verify/correct tally (issue #137) ----------------------------------
+//
+// A run's page-call count is `pages + corrections`, and on three real runs the verify
+// failure rate was 77% — so the optional correction pass is in practice mandatory, and
+// none of what it bought was visible. These fields are that measurement, folded out of
+// the same log everything else here comes from.
+
+const done = (now: number) => ({ sessionId: "s", status: "ready_for_review", phase: "done", now });
+
+test("the verification tally counts what was checked, corrected and re-checked", () => {
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_verify_failed", image: "page-001.png", problems: ["the alt text is thin"] },
+    { ts: T(1), type: "page_verify_ok", image: "page-002.png" },
+    { ts: T(2), type: "page_verify_failed", image: "page-003.png", problems: ["a table row is missing"] },
+    // An alt-only refinement: a page call spent on an image description.
+    { ts: T(3), type: "page_corrected", image: "page-001.png", page: 1, trigger: "verify", problems: 1,
+      result: "kept", chars_before: 900, chars_after: 940,
+      text_changed: false, alt_changed: true, attrs_changed: false, structure_changed: false },
+    // Content coming back: text and structure both, and both counted.
+    { ts: T(3), type: "page_corrected", image: "page-003.png", page: 3, trigger: "verify", problems: 1,
+      result: "kept", chars_before: 1200, chars_after: 1600,
+      text_changed: true, alt_changed: false, attrs_changed: false, structure_changed: true },
+    // And the cheap real fix: a page that passed its check, lost a link, and came back with
+    // the URL re-typed. No word on it moves, and it is not a correction that bought nothing.
+    { ts: T(3), type: "page_corrected", image: "page-002.png", page: 2, trigger: "links", problems: 1,
+      result: "kept", chars_before: 700, chars_after: 702,
+      text_changed: false, alt_changed: false, attrs_changed: true, structure_changed: false },
+    { ts: T(4), type: "page_correction_recheck", image: "page-001.png", page: 1, ok: true, problems: [], binding: false },
+    { ts: T(5), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(5))));
+  assert.equal(d.verification.pages_verified, 3);
+  assert.equal(d.verification.verify_failed, 2);
+  assert.equal(d.verification.corrections, 3);
+  assert.deepEqual(d.verification.results, { kept: 3, rejected: 0, identical: 0, empty: 0 });
+  // `text` and `structure` are not exclusive — one re-render is both — while `alt_only`
+  // is the count of corrections that moved nothing but a description.
+  assert.deepEqual(d.verification.effects, { alt_only: 1, text: 1, attrs: 1, structure: 1 });
+  assert.deepEqual(d.verification.triggers, { verify: 2, links: 1, both: 0 });
+  assert.deepEqual(d.verification.rechecks, { sampled: 1, sampled_ok: 1, binding: 0, binding_ok: 0 });
+});
+
+test("a correction that bought nothing is counted apart from one that was kept", () => {
+  // The cost signal: `identical` and `empty` are page calls that were paid for and
+  // produced no change, and `rejected` is one whose change was discarded.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_corrected", image: "a.png", page: 1, trigger: "verify", problems: 2, result: "identical" },
+    { ts: T(1), type: "page_corrected", image: "b.png", page: 2, trigger: "verify", problems: 1, result: "empty" },
+    { ts: T(2), type: "page_corrected", image: "c.png", page: 3, trigger: "links", problems: 1, result: "rejected",
+      chars_before: 500, chars_after: 480, text_changed: true, alt_changed: false,
+      attrs_changed: false, structure_changed: true },
+    // A rewrite that refined a description AND re-typed an attribute is not `alt_only`:
+    // that bucket exists to name the run that pays a page call per page for image
+    // descriptions and nothing else, so anything else disqualifies it.
+    { ts: T(2), type: "page_corrected", image: "d.png", page: 4, trigger: "both", problems: 2, result: "kept",
+      chars_before: 500, chars_after: 530, text_changed: false, alt_changed: true,
+      attrs_changed: true, structure_changed: false },
+    { ts: T(3), type: "page_correction_recheck", image: "c.png", page: 3, ok: false,
+      problems: ["a heading level was lost"], binding: true },
+    { ts: T(4), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(4))));
+  assert.equal(d.verification.corrections, 4);
+  assert.deepEqual(d.verification.results, { kept: 1, rejected: 1, identical: 1, empty: 1 });
+  // A rejected correction's effect is still what it changed — it says what the rewrite
+  // would have done to a page that had passed.
+  assert.deepEqual(d.verification.effects, { alt_only: 0, text: 1, attrs: 1, structure: 1 });
+  assert.deepEqual(d.verification.triggers, { verify: 2, links: 1, both: 1 });
+  // The links path's re-verification is `binding`, and stays out of the sample it would
+  // otherwise outnumber: this page had PASSED its check and was rewritten for a link, so
+  // its failure says nothing about whether correcting a FAILED page converges.
+  assert.deepEqual(d.verification.rechecks, { sampled: 0, sampled_ok: 0, binding: 1, binding_ok: 0 });
+});
+
+test("a log from before these events reports zeros, not absences", () => {
+  // Every field is present on every run, so "this deployment corrected nothing" and
+  // "this log predates the measurement" are both readable rather than one being an
+  // undefined a consumer has to guess at. A `page_corrected` line with a result this
+  // version does not know still counts as a correction and lands in no bucket.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_corrected", image: "a.png", page: 1, result: "deferred", trigger: "policy" },
+    // And a result that names something on Object.prototype, which a membership test
+    // would answer "yes" to and then add 1 to a function.
+    { ts: T(1), type: "page_corrected", image: "b.png", page: 2, result: "constructor", trigger: "toString" },
+    // A recheck that does not say which population it belongs to lands in neither, rather
+    // than being guessed into the one whose rate it would distort.
+    { ts: T(1), type: "page_correction_recheck", image: "b.png", page: 2, ok: true },
+    { ts: T(2), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(2))));
+  assert.equal(d.verification.pages_verified, 0);
+  assert.equal(d.verification.corrections, 2);
+  for (const [k, v] of Object.entries({ ...d.verification.results, ...d.verification.triggers })) {
+    assert.equal(typeof v, "number", `${k} is not a number`);
+  }
+  assert.deepEqual(d.verification.results, { kept: 0, rejected: 0, identical: 0, empty: 0 });
+  assert.deepEqual(d.verification.triggers, { verify: 0, links: 0, both: 0 });
+  assert.deepEqual(d.verification.effects, { alt_only: 0, text: 0, attrs: 0, structure: 0 });
+  assert.deepEqual(d.verification.rechecks, { sampled: 0, sampled_ok: 0, binding: 0, binding_ok: 0 });
+  assert.deepEqual(summarizeRun("", done(Date.parse(T(0)))).verification.rechecks, {
+    sampled: 0, sampled_ok: 0, binding: 0, binding_ok: 0,
+  });
+});

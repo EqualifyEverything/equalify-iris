@@ -526,6 +526,10 @@ Useful events to grep for:
 | `extraction_complete` | How many page fragments came out (`pages`) and which page numbers failed (`failed`, always present, `[]` on a whole run). |
 | `page_recovered` | A feedback re-extraction succeeded on a page an earlier run had lost, so the document is whole again for those `pages`. Logged late in the run, once that document has been persisted: a round that re-extracts the page and then throws in review leaves the earlier document — hole and all — as the one the session holds. |
 | `extraction_failed` | **Every** page failed, so the run is ending rather than delivering a document with no content in it. The `run_failed` line that follows carries the first page's provider error. |
+| `page_verify_ok` / `page_verify_failed` | The Feedback Agent's fidelity verdict on one page, checked against its source image. A failure names its `problems` and buys that page one self-correction pass. A page that passes can still be re-rendered (a dropped link), so a run's `page` call count is `pages + corrections`, not `pages + failures`. |
+| `page_corrected` | What a self-correction pass did (`trigger`: `verify`, `links` or `both`; `problems`: how many it was given). `result` is `kept` (it changed the delivered document), `rejected` (discarded to keep a page that had already passed — links path only), `identical` (it changed nothing about the page) or `empty` (nothing usable came back); the last two are calls paid for that bought nothing. `identical` is decided on the **effect**, not on string identity, so a model that returns its own page re-indented or with `&` for `&amp;` is counted here rather than as `kept`. Note that such a fragment is still **adopted** — what ships is decided on string identity, deliberately, so that a change no signal here observes cannot be silently reverted; `identical` means the page call bought nothing, not that its output was discarded (that is `rejected`). Two shapes of `identical` are worth telling apart, and field presence is what tells them apart: with `chars_before` / `chars_after` and all four flags `false`, the model re-typed the page to no effect; with no sizes and no flags at all, it handed back the exact string it was given. Same bill, different behaviour. When it changed something, `text_changed` / `alt_changed` / `attrs_changed` / `structure_changed` and `chars_before` / `chars_after` say **what** changed — observed on the two fragments, not claimed by the verdict, so an alt-text refinement, a re-typed `href` and a restored table row are distinguishable. |
+| `page_correction_recheck` | A second verdict on a corrected page (`ok`, `problems`). `binding: true` is the links path re-verifying a rewrite it may discard; `binding: false` is a measurement-only sample, one page per batch, which changes nothing about what is delivered. The two are counted apart in `verification.rechecks`; `sampled_ok / sampled` across many runs is whether correction converges. |
+| `page_correction_recheck_failed` | The measurement-only sample could not be taken — the extra Feedback Agent call hit a provider error (`error`). Logged rather than raised: the page ships as it would have with no measurement at all, and the batch's one sample slot stays spent, so a throttled provider is not retried once per corrected page. A `binding` recheck has no such line, because there the verdict decides whether the rewrite is kept. |
 | `editor_images` | How many source images the Copy Editor received this round (`attached` of `of`, plus `pages`). A `dropped` count means the selection did not fit in one request and was trimmed to the pages issues actually named. `attached == of` on a multi-page document means at least one issue in that round carried no page attribution, so the round asked for everything. |
 | `editor_images_refused` | The provider refused the round's payload as too large, so the same prompt was re-sent **without** images. The correction still had the whole body and every issue; only a fidelity problem that must be checked against the source can go unfixed. |
 | `reader` / `editor` | Per-iteration review-loop progress (issue counts) |
@@ -560,6 +564,13 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
     "cache_read_input_tokens": 2500, "cache_creation_input_tokens": 2500 } },
   "slowest_calls": [ { "agent": "table", "model": "...", "capability": "vision", "duration_ms": 14300, "ok": true } ],
   "errors": [],
+  "verification": {
+    "pages_verified": 25, "verify_failed": 13, "corrections": 14,
+    "results": { "kept": 12, "rejected": 0, "identical": 2, "empty": 0 },
+    "triggers": { "verify": 13, "links": 1, "both": 0 },
+    "effects": { "alt_only": 4, "text": 8, "attrs": 3, "structure": 6 },
+    "rechecks": { "sampled": 1, "sampled_ok": 1, "binding": 1, "binding_ok": 1 }
+  },
   "pages_failed": []
 }
 ```
@@ -613,6 +624,40 @@ than `count`, these sums cover only part of the run — a cost derived from them
 an estimate. Some upstreams report nothing; a call that stalls knows its prompt size but never
 learns its output size. Failed calls **are** counted, because a truncation has already paid for
 a full ceiling of output and a stall for its prompt.
+
+`verification` is what the verify-then-correct loop did. Every page is checked against its source
+image and a page that fails is re-rendered once, so a run's `page` call count is
+`pages + corrections` — on three real 25-page runs the Feedback Agent rejected 58 of 75 pages,
+which makes the "correct if needed" pass mandatory in practice and put verification alone at 24% of
+one document's bill. `corrections` and **not** `verify_failed`: a page that passed its check is
+re-rendered too when the code finds a link the model dropped, and that costs the same page call, so
+`triggers` is the split — `verify` is a page the Feedback Agent rejected, `links` a page that passed
+and lost a link, `both` one that did each. `verify_failed / pages_verified` is the rejection rate; the
+raw counts are reported rather than the percentage, because a rate over three pages is not a
+measurement.
+
+The fields answer different questions about the same loop. `results` is what the corrections
+**cost**: `identical` and `empty` are page calls paid for that produced no change at all. `effects`
+is what they **did**, read off the two fragments rather than taken from the verdict, which is what
+separates a refined alt text from a restored table row — both are one `page_verify_failed` line.
+`text` and `structure` are not exclusive (a re-render is usually both); `alt_only` is the count that
+stands alone, and a run where it dominates is spending a page call per page on image descriptions.
+`attrs` is every attribute but `alt`, which is where the cheapest real fixes live — an `href` the
+model re-typed, a missing `<th scope>`, an `aria-describedby` — a correction that moves no word and
+still matters.
+`rechecks` is whether correction **converges**: `sampled_ok / sampled` is a corrected page that had
+FAILED its check, verified a second time to see whether the re-render fixed it. One sample per batch
+is deliberate — re-verifying every corrected page would roughly double the share of the bill the
+question is about — so it is a fleet number that accrues over runs, not a verdict on any single
+document. `binding` is counted apart from it and not added to it: those are the links path's own
+re-verifications of pages that had already **passed**, kept or discarded on the verdict, so their
+ok-rate answers "did a rewrite of a good page stay good" — a different question, and on a link-heavy
+PDF there is one per page, enough to swamp the sample if the two were summed.
+
+Nothing in here gates anything. A verify-driven correction is accepted exactly as it was before
+these fields existed; whether to re-render until a page passes, or to run a cheaper verifier, is a
+policy question that needs the rate first. Like `model_calls`, the counts sum over every run a
+session has had, so a feedback round that re-extracts three pages adds three more verifications.
 
 `pages_failed` is the set of source pages the delivered document has no content for, because their
 own extraction threw (§7c). It has its own field
