@@ -26,7 +26,9 @@ The pipeline as **implemented today** runs in three phases:
    screen-reader view) and flags reading-order / semantic / accessibility issues, attributing
    each to the source page(s) it appears on; the Copy Editor proposes fixes against **just those
    pages'** source images; fixes are applied and the document re-linted. Loops up to
-   `max_review_iterations` (default 3).
+   `max_review_iterations` (default 3). A document that spans several chunks is read
+   **in parallel** — the chunks are independent calls over one unchanging body — up to the same
+   `defaults.extraction_concurrency` at a time, and the issues they raise stay in chunk order.
 
 When Iris meets content a specialist agent would handle better than the general pass, it drafts
 that agent and **automatically files a GitHub issue titled `New agent suggestion: <type>`** (with
@@ -127,8 +129,9 @@ from the environment at startup; changes require a restart.
   different road. Conversely the terminal event ends the read then and there, so a connection
   held open after the message is finished cannot let the silence clock discard a whole document.
 - **Concurrency** (§9.4): two independent knobs under `defaults`.
-  `extraction_concurrency` is *within* a run (pages in parallel);
-  `max_concurrent_runs` is *across* sessions. Peak in-flight model calls is the product of the
+  `extraction_concurrency` is *within* a run — pages in parallel during extraction, and the
+  Reader's chunk reads in parallel during review, both under that one cap, so a run's in-flight
+  calls never exceed it in either phase; `max_concurrent_runs` is *across* sessions. Peak in-flight model calls is the product of the
   two, so the second is the one that bounds what the machine is doing — each run also holds a
   jsdom+axe instance. Uploads beyond the cap **wait**, in FIFO order, in `status: "queued"`; the
   wait appears in the session's run log as `run_queued` / `run_dequeued` (`waited_ms`). Nothing

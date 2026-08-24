@@ -1,4 +1,5 @@
 import { extractJson } from "../util/json.ts";
+import { mapWithConcurrency } from "../util/concurrency.ts";
 import { MAX_EDITOR_IMAGES } from "../providers/imageLimits.ts";
 import { isRequestTooLargeError } from "../providers/types.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
@@ -175,7 +176,6 @@ async function runReader(
   lint: LintResult,
   pages: IndexedPage[],
 ): Promise<ReviewIssue[]> {
-  const issues: ReviewIssue[] = [];
   const index = pages.length ? pageIndex(pages, READER_INDEX_EXCERPT_CHARS) : "";
   // Computed over the whole body, once, and given to the FIRST chunk only. Both halves
   // of that matter. Whole-body, because a chunk is a character window and the pair this
@@ -184,35 +184,57 @@ async function runReader(
   // same defect would arrive two or three times and be carried to @unresolved that many
   // times if no editor round cleared it.
   const duplicateHeadings = sameWordedHeadingNote(sameWordedHeadingRuns(body));
-  let first = true;
-  for (const c of chunk(body)) {
+  // The two per-run tails of the prompt, read once instead of once per chunk:
+  // `examplesForPrompt` reads and parses the agent's example bank off disk, and it
+  // cannot change while a round is in flight.
+  const tail = feedbackPreamble(ctx) + examplesForPrompt(ctx.paths, "page.md", ["a11y_policy"]);
+  const chunks = chunk(body);
+  // Chunks are independent calls over disjoint windows of a body nothing mutates while
+  // they run, so they are sent CONCURRENTLY rather than one after another. On a long
+  // document this is the review loop's dominant latency term and it was strictly serial:
+  // a 25-page body is several CHUNK_BUDGET windows, each a full text call, and the whole
+  // ladder is re-climbed on every round of the loop (up to max_review_iterations + 1
+  // times) because the Reader has to re-read what the editor changed.
+  //
+  // Nothing about what is SENT changes — same prompts, same chunk order — so this costs
+  // no extra tokens and cannot change a verdict. Only the waiting is removed.
+  //
+  // Bounded by the same knob as page extraction: it is the deployment's answer to how
+  // many model calls one run may have in flight (`defaults.extraction_concurrency`), and
+  // a Reader chunk is that same kind of call. So a run's peak stays where the operator
+  // set it, in this phase as in the other, and an operator who lowered it for a
+  // rate-limited provider gets the review bounded too. Defensive `|| 1` for a
+  // directly-constructed context (tests, embedders) that never set it: serial is what
+  // this function did before, so an unset knob degrades to exactly the old behaviour.
+  const limit = Math.max(1, Math.floor(ctx.extractionConcurrency) || 1);
+  const perChunk = await mapWithConcurrency(chunks, limit, async (c, i) => {
     const user =
       `## HTML\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint)}` +
-      (first && duplicateHeadings
+      (i === 0 && duplicateHeadings
         ? `\n\n## Headings with the same words at the same level, nothing but their own content between them (whole document)\n${duplicateHeadings}`
         : "") +
       (index ? `\n\n## Source pages in this document (extracted HTML, truncated)\n${index}` : "") +
-      feedbackPreamble(ctx) +
-      examplesForPrompt(ctx.paths, "page.md", ["a11y_policy"]);
+      tail;
     const res = await ctx.router.complete("reader", "text", [
       { role: "system", content: READER_SYSTEM },
       { role: "user", content: user },
     ]);
-    first = false;
     ctx.log.agentCall({
       agent: { name: "reader", file: "reader.md", content: READER_SYSTEM, capabilities: ["text"], sha: null, sessionBuilt: false },
       phase: "review",
       output: res.text,
     });
     const parsed = extractJson<{ issues?: (ReviewIssue & { pages?: unknown })[] }>(res.text);
-    for (const i of parsed?.issues ?? []) {
-      // Drop hallucinated page numbers here rather than downstream, so a bad
-      // attribution degrades to "no attribution" (all images) instead of
-      // silently sending the editor the wrong page.
-      issues.push({ ...i, pages: knownPages(i.pages, pages) });
-    }
-  }
-  return issues;
+    // Drop hallucinated page numbers here rather than downstream, so a bad
+    // attribution degrades to "no attribution" (all images) instead of
+    // silently sending the editor the wrong page.
+    return (parsed?.issues ?? []).map((issue) => ({ ...issue, pages: knownPages(issue.pages, pages) }));
+  });
+  // mapWithConcurrency returns results in INPUT order, so the issue list is the one a
+  // serial loop produced — which matters downstream: `imagesForIssues` unions the pages
+  // and `unresolved` is written in this order, so a document's unresolved list must not
+  // depend on which chunk's call happened to finish first.
+  return perChunk.flat();
 }
 
 // Which source images the Copy Editor needs this round: the union of the pages the
