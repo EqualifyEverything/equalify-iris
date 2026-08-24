@@ -35,14 +35,26 @@ name: Issue Triage
 #
 # ## Why the model cannot close anything
 #
-# Neither session is given `Bash`. They get `Read`, `Write`, `Glob`, `Grep` — enough
-# to read the context file, grep `agents/` to check whether a proposed rule is
-# already in the prompt, and write a verdict file. They cannot reach `gh`, so they
-# cannot close, label or comment, whatever an issue body talks them into. Every
-# mutation in this workflow happens in `Decide and act`, in shell, from the two
-# verdict files plus the GitHub API — the same division as `issue-to-pr.yml`, where
-# the path allowlist lives in the verify step precisely because that is the layer
-# an injected issue body cannot argue with.
+# Neither session is given `Bash`, so neither can reach `gh`: they cannot close,
+# label or comment, whatever an issue body talks them into. Every mutation in this
+# workflow happens in `Decide and act`, in shell, from the two verdict files plus
+# the GitHub API — the same division as `issue-to-pr.yml`, where the path allowlist
+# lives in the verify step precisely because that is the layer an injected issue
+# body cannot argue with.
+#
+# `Write` is scoped to `/tmp/triage` on both sessions, which is the only place a
+# verdict file belongs. The checkout is not inert: `.git/config` and
+# `.git/info/attributes` define filters that any later git command executes,
+# `agents/*.md` is evidence a later step might read, and a `CLAUDE.md` at the root
+# is project instructions for whatever runs next. Unscoped `Write` reaches all
+# three, and none of them is something a verdict needs.
+#
+# The two sessions also get different tools, because they are asked different
+# questions. Find gets `Glob` and `Grep` on a checkout nothing has touched yet —
+# useful for seeing whether a proposed rule is already in the prompt, which it
+# reports in `notes`. Refute gets neither: it ran second, in the same workspace, so
+# anything on disk is evidence the first session could have chosen. Its world is
+# the pair, and the pair comes from the API.
 #
 # ## The four rules that hold regardless of what the model says
 #
@@ -498,8 +510,21 @@ jobs:
           # it was built for. Nothing is trusted as a consequence — the bot's text
           # is fenced as untrusted like everyone else's.
           allowed_bots: "*"
+          # `Write` is scoped to the one directory this session has any business
+          # writing to. Unscoped, it could write anywhere in the checkout, and the
+          # checkout is not inert: `.git/config` and `.git/info/attributes` define
+          # filters that later git commands execute, `agents/*.md` is evidence a
+          # later step might read, and a planted `CLAUDE.md` at the repo root is
+          # project instructions for whatever runs next. None of those are things a
+          # verdict file needs, so none of them are reachable. This is the same
+          # move as giving neither session `Bash`: take the capability away rather
+          # than ask the prompt not to use it.
+          #
+          # If the action ever stops honouring the pattern, the fallback is a
+          # denied `Write`, an empty verdict file and a run that closes nothing and
+          # says so — not a widened one.
           claude_args: >-
-            --allowedTools Read,Write,Glob,Grep
+            --allowedTools "Read,Glob,Grep,Write(/tmp/triage/**)"
             --model ${{ vars.BEDROCK_TRIAGE_MODEL || vars.BEDROCK_REVIEW_MODEL || 'us.anthropic.claude-opus-5' }}
           prompt: |
             You are triaging issue #${{ steps.ctx.outputs.target }} in ${{ github.repository }}
@@ -669,27 +694,20 @@ jobs:
             echo "::notice::Canonical #$CANONICAL is newer than #$TARGET — reported, not closed. Skipping refutation."
             exit 0
           fi
-          # The checkout, back to the commit. There is one `actions/checkout` for
-          # the whole job and the find session has unrestricted `Write` inside it,
-          # so anything that session edited is still on disk when the refute
-          # session reads the tree — and the refute prompt sends it there
-          # deliberately, to read `agents/*.md` and see whether a proposed rule is
-          # already in the prompt. That is the very question the refutation turns
-          # on, so an edit to `agents/page.md` making B's rule look already-present
-          # is the doctored-evidence trick again, wearing the repository instead of
-          # the corpus. Restoring here means the pair comes from the API and
-          # everything else session two reads comes from the commit.
+          # There is deliberately no `git` here, and no repair of the checkout at
+          # all. An earlier version of this step ran `git checkout -- .` to undo
+          # anything the find session had written, which was worse than the problem
+          # it addressed: `.git/config` and `.git/info/attributes` are plain files
+          # inside the workspace, `git checkout` applies smudge filters, and so a
+          # filter defined in those two files executes as part of the restore — in
+          # a step holding GITHUB_TOKEN and the Bedrock credentials. A `.git` that
+          # is not trusted cannot be repaired with git, because every git command
+          # reads its config first.
           #
-          # `-fd` and not `-fdx`: `-x` would take ignored paths too, and
-          # `node_modules/` is ignored. /tmp/triage is outside the workspace, so
-          # the verdict files are not in scope either way. A failure here is a
-          # warning rather than an exit because the refute step is
-          # `continue-on-error` and its absence already blocks the close — there is
-          # no outcome where failing to restore the tree lets a close through.
-          git -C "$GITHUB_WORKSPACE" checkout -- . \
-            || echo "::warning::could not restore tracked files before the refutation session"
-          git -C "$GITHUB_WORKSPACE" clean -fd \
-            || echo "::warning::could not remove untracked files before the refutation session"
+          # The tree is handled where it should be, by neither session being able
+          # to write to it: `Write` is scoped to `/tmp/triage` on both, and the
+          # refute session is not given `Glob` or `Grep` at all. Nothing after the
+          # find session reads the checkout, so there is nothing here to undo.
 
           # Both issues re-read from the API, and the text is re-read for the same
           # reason the state is. The state, because the corpus was built minutes
@@ -765,8 +783,24 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           use_bedrock: "true"
           allowed_bots: "*"
+          # No `Glob` and no `Grep`, and `Write` scoped to `/tmp/triage` as above.
+          # This session's world is `pair.md`, which comes from the API, and the
+          # narrower tool set is what makes that true rather than merely intended.
+          # It used to be told to grep `agents/*.md` to see whether a proposed rule
+          # was already in the prompt, which reads well until you notice the find
+          # session ran first in the same checkout: it could edit `agents/page.md`
+          # so that B's proposed rule appears already present, and that is the exact
+          # question the refutation turns on. Session one choosing session two's
+          # evidence is the thing this pair of sessions exists to prevent.
+          #
+          # The capability is a real loss and worth stating: the refutation now
+          # compares two issue texts and nothing else. It costs accuracy in the
+          # conservative direction — a session with less to go on refutes more
+          # readily, and refusing to close is this workflow's safe answer. Whether
+          # a rule is already in the prompt is the find session's business anyway;
+          # it has a clean checkout and reports that in `notes`.
           claude_args: >-
-            --allowedTools Read,Write,Glob,Grep
+            --allowedTools "Read,Write(/tmp/triage/**)"
             --model ${{ vars.BEDROCK_TRIAGE_MODEL || vars.BEDROCK_REVIEW_MODEL || 'us.anthropic.claude-opus-5' }}
           prompt: |
             Read `/tmp/triage/pair.md`. It contains two issues from ${{ github.repository }}
@@ -787,9 +821,11 @@ jobs:
             - Would a maintainer reading only A miss something a reader of B would need?
             - Do they touch the same prompt rule but pull it in different directions?
 
-            You may `Grep` and `Read` the checkout — `agents/*.md` are the prompt files these
-            proposals edit, and reading the current text is often what settles whether two
-            proposed rules are the same rule.
+            The two issues are all you get. There is no repository checkout in reach and no
+            corpus — deliberately, because the session that made the claim you are checking ran
+            before you and in the same workspace, so anything on disk is evidence it could have
+            chosen. If deciding would need the current text of a prompt file you cannot read,
+            that is not a decidable duplicate: refute it and say so.
 
             **Default to refuting.** If after reading both you cannot decide, that is a refusal,
             not a duplicate: set `refuted` to `true` and say you were unsure. The cost of a

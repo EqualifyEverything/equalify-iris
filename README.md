@@ -834,19 +834,27 @@ fail to refute it. Disagreement is not a tie to be broken — it is the answer, 
 "leave it open and tell a human".
 
 The pair the second session reads is fetched fresh from the API, not taken from the corpus the first
-one was given, and the checkout is restored to the commit in between. Both sessions can write files,
-so anything derived from what the first one leaves on disk would let it choose the second one's
-evidence — restate issue A's body as a copy of B's and the refutation opens a file in which the two
-really are identical; edit `agents/page.md` and the rule B proposes looks like it is already in the
-prompt, which is the question the refutation turns on. Independence has to cover the input, not just
-the argument.
+one was given, and the second session gets no `Glob` or `Grep` — no repository, no corpus, just the
+two issues. Independence has to cover the input, not only the argument: the first session runs first
+and in the same workspace, so anything it could leave on disk is evidence it could choose. Restate
+issue A's body as a copy of B's and the refutation opens a file in which the two really are
+identical; edit `agents/page.md` and the rule B proposes looks like it is already in the prompt,
+which is the question the refutation turns on. It costs the refutation some accuracy, in the
+direction of refusing to close.
 
-**Neither session can close anything.** They get `Read`, `Write`, `Glob` and `Grep` — enough to read
-the context file, grep `agents/` to check whether a proposed rule is already in the prompt, and
-write a verdict file. Neither has `Bash`, so neither can reach `gh`. Every close, label and comment
-happens in a shell step that reads the two verdict files and the GitHub API, the same division as
-[Scheduled issue triage](#scheduled-issue-triage): the prompt is the layer an injected issue body
-argues with, so the rules live somewhere it cannot reach.
+**Neither session can close anything.** Neither has `Bash`, so neither can reach `gh`. Every close,
+label and comment happens in a shell step that reads the two verdict files and the GitHub API, the
+same division as [Scheduled issue triage](#scheduled-issue-triage): the prompt is the layer an
+injected issue body argues with, so the rules live somewhere it cannot reach.
+
+`Write` is scoped to `/tmp/triage` on both, which is the only place a verdict file belongs. A
+checkout is not inert — `.git/config` defines filters that any later `git` command executes,
+`agents/*.md` is evidence a later step might read, and a `CLAUDE.md` at the root is project
+instructions for whatever runs next. An earlier version of this workflow ran `git checkout -- .`
+between the sessions to undo writes, which was worse than the problem: `git checkout` applies smudge
+filters, so a filter written into `.git/config` would execute during the repair, in a step holding
+the token. A `.git` you do not trust cannot be repaired with `git`, because every `git` command reads
+its config first. Not being able to write there in the first place is the version that works.
 
 **Four rules hold regardless of what either session says**, because that step re-derives them:
 
