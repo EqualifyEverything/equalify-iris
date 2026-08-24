@@ -37,11 +37,21 @@ function tagShape(html: string): string {
 // dropped, entities decoded so `&amp;` and `&` are one text, whitespace collapsed so a
 // re-indented fragment is not a changed one. Attribute values do not survive, which is
 // what keeps this independent of `altText` below.
+//
+// The tag pattern steps over quoted attribute values rather than stopping at the first
+// `>`, because model output does not always escape one: `<img alt="revenue > 2019">` cut
+// at the first `>` leaves ` 2019">` behind as "visible text", and then rewriting only
+// that alt reports `text_changed` and leaves `alt_only` — the one bucket this module
+// exists to isolate. So: `<`, a tag-ish first character, then runs of unquoted
+// characters and whole quoted strings, to the `>` that actually closes it (or the end of
+// a fragment that was cut off mid-tag).
+const TAG = /<[a-z!/?][^>"']*(?:(?:"[^"]*"|'[^']*')[^>"']*)*>?/gi;
+
 function visibleText(html: string): string {
   return decodeEntities(
     html
       .replace(/<!--[\s\S]*?-->/g, " ")
-      .replace(/<[^>]*>/g, " "),
+      .replace(TAG, " "),
   )
     .replace(/\s+/g, " ")
     .trim();
@@ -51,9 +61,16 @@ function visibleText(html: string): string {
 // value cannot itself contain. A space would let a rewrite that moves one word from one
 // image's description into the next one's compare equal to the original: both descriptions
 // changed, and only the boundary between them says so.
+//
+// `\b` would open on the `alt` in `data-alt=` and in any other attribute ending in those
+// three letters, so the name has to start on something that is not part of a longer one.
+// What remains is prose that writes `alt="…"` as text about markup; both sides are scanned
+// the same way, so such a fragment is compared consistently and a rewrite of it is reported
+// as an alt change, which is the wrong bucket but not a wrong answer about whether the page
+// moved.
 function altText(html: string): string {
   const values: string[] = [];
-  for (const m of html.matchAll(/\balt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+  for (const m of html.matchAll(/(?<![-\w])alt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
     values.push(decodeEntities(m[1] ?? m[2] ?? m[3] ?? "").replace(/\s+/g, " ").trim());
   }
   return values.join("\u0000");

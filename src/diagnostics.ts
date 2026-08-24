@@ -97,9 +97,12 @@ export interface Diagnostics {
   // What the verify-then-correct loop did, and what it bought.
   //
   // Every page is checked against its source image and a page that fails is re-rendered
-  // once, so a run's page-call count is `pages + failures` and a high failure rate turns
+  // once, so a run's page-call count is `pages + corrections` and a high failure rate turns
   // an optional pass into a mandatory one — 58 of 75 pages across three real runs, with
-  // verification alone at 24% of one document's bill (issue #137). None of that was
+  // verification alone at 24% of one document's bill (issue #137). `corrections` and not
+  // `verify_failed`, because a page that PASSED its check is re-rendered too when the code
+  // finds a link the model dropped, and that costs the same page call: see `triggers`.
+  // None of that was
   // visible here: the log recorded the verdicts and said nothing about the corrections,
   // so the loop's cost was inferable from arithmetic and its value not at all.
   //
@@ -117,6 +120,12 @@ export interface Diagnostics {
     // `identical` returned the page it was given, `empty` returned nothing usable. The
     // last two are calls that bought nothing.
     results: { kept: number; rejected: number; identical: number; empty: number };
+    // Why each correction ran: `verify` is a page the Feedback Agent rejected, `links` is a
+    // page that passed and lost a link the code found in the PDF, `both` is one that did
+    // each. These are the split that makes `corrections` readable as a bill — a `links`
+    // correction is a page call with no verify failure behind it, so a consumer reading
+    // `verify_failed` as the number of extra page calls undercounts by `links`.
+    triggers: { verify: number; links: number; both: number };
     // What the corrections that DID change something changed, as observed on the two
     // fragments rather than claimed by the verdict (pipeline/correction.ts). Not a
     // partition: a re-render that rebuilds a table counts under both `text` and
@@ -124,13 +133,22 @@ export interface Diagnostics {
     // — a run whose corrections only ever refine alt text is paying a page call per page
     // for image descriptions.
     effects: { alt_only: number; text: number; structure: number };
-    // Second verdicts on a corrected page: the links path's own re-verification, plus one
-    // measurement-only sample per batch of pages. `ok` counts those the verifier found
-    // nothing in — so `rechecks_ok / rechecks` is whether correction converges, which is
-    // the number that says if the loop is worth its 24%. It accumulates one or two
-    // samples per run, so it is a fleet measurement and not a per-document one.
-    rechecks: number;
-    rechecks_ok: number;
+    // Second verdicts on a corrected page, kept apart by whether the verdict was allowed to
+    // decide anything, because the two answer different questions and a single ok-rate over
+    // both answers neither.
+    //
+    // `sampled` is the measurement-only sample — at most one page per batch (correction.ts
+    // `RECHECKS_PER_BATCH`) — taken on a page that FAILED its check and was re-rendered, so
+    // `sampled_ok / sampled` is whether correction converges: the number that says whether
+    // the loop is worth its 24%. It accumulates one or two per run, so it is a fleet
+    // measurement and not a per-document one.
+    //
+    // `binding` is the links path's own re-verification, which keeps or discards the
+    // rewrite. Those pages had already PASSED verification and were re-rendered only to
+    // recover a link, so their ok-rate is "did a rewrite of a good page stay good" — a
+    // different question, and on a link-heavy PDF there is one per page, which would swamp
+    // the sample if the two were summed.
+    rechecks: { sampled: number; sampled_ok: number; binding: number; binding_ok: number };
   };
   // Source pages whose own extraction threw, so the delivered document carries a
   // failure marker instead of that page's content (pipeline/extraction.ts
@@ -159,6 +177,9 @@ function parse(logText: string): LogEvent[] {
 // list, so a `result` this version does not know counts as a correction and is
 // attributed to nothing rather than inventing a bucket for it.
 const CORRECTION_RESULTS = ["kept", "rejected", "identical", "empty"] as const;
+
+// And why it ran. A closed list for the same reason, and read off the same event.
+const CORRECTION_TRIGGERS = ["verify", "links", "both"] as const;
 
 const ms = (a?: string, b?: string): number =>
   a && b ? Math.max(0, new Date(b).getTime() - new Date(a).getTime()) : 0;
@@ -305,9 +326,9 @@ export function summarizeRun(
     verify_failed: 0,
     corrections: 0,
     results: { kept: 0, rejected: 0, identical: 0, empty: 0 },
+    triggers: { verify: 0, links: 0, both: 0 },
     effects: { alt_only: 0, text: 0, structure: 0 },
-    rechecks: 0,
-    rechecks_ok: 0,
+    rechecks: { sampled: 0, sampled_ok: 0, binding: 0, binding_ok: 0 },
   };
   for (const e of events) {
     if (e.type === "page_verify_ok") {
@@ -323,14 +344,25 @@ export function summarizeRun(
       // util/html.ts uses a null prototype for.
       const result = CORRECTION_RESULTS.find((r) => r === e.result);
       if (result) verification.results[result] += 1;
+      const trigger = CORRECTION_TRIGGERS.find((t) => t === e.trigger);
+      if (trigger) verification.triggers[trigger] += 1;
       if (e.text_changed === true) verification.effects.text += 1;
       if (e.structure_changed === true) verification.effects.structure += 1;
       if (e.alt_changed === true && e.text_changed !== true && e.structure_changed !== true) {
         verification.effects.alt_only += 1;
       }
     } else if (e.type === "page_correction_recheck") {
-      verification.rechecks += 1;
-      if (e.ok === true) verification.rechecks_ok += 1;
+      // Split on the flag the event already carries. A line whose `binding` is neither
+      // boolean lands in neither bucket, for the same reason an unknown `result` does:
+      // guessing which population a verdict belongs to is worse than a total that is
+      // visibly short of the lines in the log.
+      if (e.binding === true) {
+        verification.rechecks.binding += 1;
+        if (e.ok === true) verification.rechecks.binding_ok += 1;
+      } else if (e.binding === false) {
+        verification.rechecks.sampled += 1;
+        if (e.ok === true) verification.rechecks.sampled_ok += 1;
+      }
     }
   }
 

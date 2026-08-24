@@ -74,6 +74,26 @@ test("moving a word from one image's description to the next is a change", () =>
   assert.equal(correctionEffect(before, after).alt_changed, true);
 });
 
+test("an unescaped > inside a description does not make an alt rewrite a text change", () => {
+  // Model output does not always escape `>` in an attribute. A tag-strip that stops at the
+  // first one leaves ` 2019">` behind as "visible text", and then this correction reports
+  // text_changed and leaves `alt_only` — the bucket the module exists to isolate.
+  const before = `<p>Revenue</p><img src="c.png" alt="a bar chart, 2020 > 2019">`;
+  const after = `<p>Revenue</p><img src="c.png" alt="a bar chart, 2020 taller than 2019">`;
+  const e = correctionEffect(before, after);
+  assert.equal(e.alt_changed, true);
+  assert.equal(e.text_changed, false);
+  assert.equal(e.structure_changed, false);
+});
+
+test("an attribute that merely ends in alt is not an alt", () => {
+  // `\b` opens on the `alt` of `data-alt`, so a rewrite of a data attribute would be
+  // reported as a change to a description no reader ever hears.
+  const e = correctionEffect(`<img src="a.png" alt="a kayak" data-alt="one">`, `<img src="a.png" alt="a kayak" data-alt="two">`);
+  assert.equal(e.alt_changed, false);
+  assert.equal(e.text_changed, false);
+});
+
 test("a page rewritten to nothing reports what it lost", () => {
   const e = correctionEffect(`<p>The whole page</p>`, ``);
   assert.equal(e.text_changed, true);
@@ -97,6 +117,8 @@ interface Behaviour {
   corrected: (order: number) => string;
   // The re-verification's verdict, for pages that get one.
   recheck?: (order: number) => string[];
+  // A provider error on the re-verification, the way ProviderRouter.complete raises one.
+  recheckThrows?: boolean;
   links?: PdfLink[];
 }
 
@@ -137,6 +159,7 @@ function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 2): Pipelin
         if (user.includes("TASK: verify")) {
           const n = (verifies.get(order) ?? 0) + 1;
           verifies.set(order, n);
+          if (n > 1 && b.recheckThrows) throw new Error("ThrottlingException: Too many requests");
           const problems = n === 1 ? b.problems(order) : (b.recheck ?? (() => []))(order);
           return {
             text: JSON.stringify({
@@ -325,6 +348,38 @@ test("a link-driven correction's own re-verification is logged as the binding on
     assert.equal(rechecks.length, 2);
     assert.deepEqual(rechecks.map((r) => r.binding), [true, true]);
     assert.match(result.fragments[0].innerHtml, /href="https:\/\/example\.org\/report"/);
+  });
+});
+
+test("a provider error on the sample costs the measurement, not the page", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The sampled recheck is one more Feedback Agent call, and `verifyAgentOutput` is
+    // non-blocking only for an absent agent and an unparseable reply — a provider error is
+    // rethrown. Uncaught, it would leave extractPage through the per-page catch and ship a
+    // `@page-failed` marker for a page that had rendered, verified AND corrected: a whole
+    // page of accessible content lost to a measurement that decides nothing.
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<p>first pass</p>`,
+        problems: () => ["a figure is missing its caption"],
+        corrected: (o) => `<p>first pass</p><figcaption>Figure ${o}</figcaption>`,
+        recheckThrows: true,
+      }),
+    );
+    // Both pages are delivered, corrected, and neither carries a failure marker.
+    assert.equal(result.failedPages.length, 0);
+    for (const f of result.fragments) assert.match(f.innerHtml, /<figcaption>/);
+    assert.doesNotMatch(result.fragments.map((f) => f.innerHtml).join(""), /@page-failed/);
+    // The sample is recorded as not taken, rather than silently absent, and there is no
+    // verdict for it.
+    const missed = of(events, "page_correction_recheck_failed");
+    assert.equal(missed.length, 1);
+    assert.match(String(missed[0].error), /ThrottlingException/);
+    assert.equal(of(events, "page_correction_recheck").length, 0);
+    // And the slot stays spent: a throttled provider is not asked again for every
+    // corrected page in the batch.
+    assert.equal(of(events, "page_corrected").length, 2);
   });
 });
 

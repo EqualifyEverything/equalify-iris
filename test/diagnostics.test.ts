@@ -259,8 +259,8 @@ test("the verification tally counts what was checked, corrected and re-checked",
   // `text` and `structure` are not exclusive — one re-render is both — while `alt_only`
   // is the count of corrections that moved nothing but a description.
   assert.deepEqual(d.verification.effects, { alt_only: 1, text: 1, structure: 1 });
-  assert.equal(d.verification.rechecks, 1);
-  assert.equal(d.verification.rechecks_ok, 1);
+  assert.deepEqual(d.verification.triggers, { verify: 2, links: 0, both: 0 });
+  assert.deepEqual(d.verification.rechecks, { sampled: 1, sampled_ok: 1, binding: 0, binding_ok: 0 });
 });
 
 test("a correction that bought nothing is counted apart from one that was kept", () => {
@@ -282,8 +282,11 @@ test("a correction that bought nothing is counted apart from one that was kept",
   // A rejected correction's effect is still what it changed — it says what the rewrite
   // would have done to a page that had passed.
   assert.deepEqual(d.verification.effects, { alt_only: 0, text: 1, structure: 1 });
-  assert.equal(d.verification.rechecks, 1);
-  assert.equal(d.verification.rechecks_ok, 0);
+  assert.deepEqual(d.verification.triggers, { verify: 2, links: 1, both: 0 });
+  // The links path's re-verification is `binding`, and stays out of the sample it would
+  // otherwise outnumber: this page had PASSED its check and was rewritten for a link, so
+  // its failure says nothing about whether correcting a FAILED page converges.
+  assert.deepEqual(d.verification.rechecks, { sampled: 0, sampled_ok: 0, binding: 1, binding_ok: 0 });
 });
 
 test("a log from before these events reports zeros, not absences", () => {
@@ -293,19 +296,26 @@ test("a log from before these events reports zeros, not absences", () => {
   // version does not know still counts as a correction and lands in no bucket.
   const text = log(
     { ts: T(0), type: "run_start" },
-    { ts: T(1), type: "page_corrected", image: "a.png", page: 1, result: "deferred" },
+    { ts: T(1), type: "page_corrected", image: "a.png", page: 1, result: "deferred", trigger: "policy" },
     // And a result that names something on Object.prototype, which a membership test
     // would answer "yes" to and then add 1 to a function.
-    { ts: T(1), type: "page_corrected", image: "b.png", page: 2, result: "constructor" },
+    { ts: T(1), type: "page_corrected", image: "b.png", page: 2, result: "constructor", trigger: "toString" },
+    // A recheck that does not say which population it belongs to lands in neither, rather
+    // than being guessed into the one whose rate it would distort.
+    { ts: T(1), type: "page_correction_recheck", image: "b.png", page: 2, ok: true },
     { ts: T(2), type: "run_complete" },
   );
   const d = summarizeRun(text, done(Date.parse(T(2))));
   assert.equal(d.verification.pages_verified, 0);
   assert.equal(d.verification.corrections, 2);
-  for (const [k, v] of Object.entries(d.verification.results)) {
-    assert.equal(typeof v, "number", `results.${k} is not a number`);
+  for (const [k, v] of Object.entries({ ...d.verification.results, ...d.verification.triggers })) {
+    assert.equal(typeof v, "number", `${k} is not a number`);
   }
   assert.deepEqual(d.verification.results, { kept: 0, rejected: 0, identical: 0, empty: 0 });
+  assert.deepEqual(d.verification.triggers, { verify: 0, links: 0, both: 0 });
   assert.deepEqual(d.verification.effects, { alt_only: 0, text: 0, structure: 0 });
-  assert.equal(summarizeRun("", done(Date.parse(T(0)))).verification.rechecks, 0);
+  assert.deepEqual(d.verification.rechecks, { sampled: 0, sampled_ok: 0, binding: 0, binding_ok: 0 });
+  assert.deepEqual(summarizeRun("", done(Date.parse(T(0)))).verification.rechecks, {
+    sampled: 0, sampled_ok: 0, binding: 0, binding_ok: 0,
+  });
 });

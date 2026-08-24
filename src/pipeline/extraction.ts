@@ -684,7 +684,28 @@ async function extractPage(
         // whether to keep re-rendering until a page passes is a policy question, and the
         // answer to it needs the rate this event exists to produce (issue #137). See
         // `RECHECKS_PER_BATCH` for why it is one page and not all of them.
-        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }]);
+        //
+        // And nothing here can cost a page either. `verifyAgentOutput` is non-blocking
+        // for an absent Feedback Agent and an unparseable reply, but a PROVIDER error is
+        // rethrown (providers/index.ts logs `model_call ok:false` and throws), so an
+        // uncaught throttle on this one extra call would propagate out of extractPage
+        // into `failedPage` and ship a `@page-failed` marker for a page that had already
+        // rendered, verified and corrected — the corrected fragment sitting in a local
+        // variable and thrown away. A measurement that decides nothing must not be able
+        // to delete a page of accessible content, so a failed sample is a sample not
+        // taken: it is logged, the slot stays spent (a refund would let a throttled
+        // provider be retried once per corrected page, which is the cost this bounds),
+        // and the page ships exactly as it would have with no measurement at all.
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }]).catch(
+          (e: unknown) => {
+            ctx.log.event("page_correction_recheck_failed", {
+              image: img.name,
+              page: img.order,
+              error: (e as Error).message,
+            });
+            return null;
+          },
+        );
       }
       if (recheck) {
         // `ok` is "the verifier named no problem", which is also what an unavailable
