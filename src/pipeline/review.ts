@@ -175,6 +175,9 @@ async function runReader(
   body: string,
   lint: LintResult,
   pages: IndexedPage[],
+  // Only so the line this logs can say which round it belongs to, the way `reader` and
+  // `editor` already do. Nothing here reads it.
+  iteration: number,
 ): Promise<ReviewIssue[]> {
   const index = pages.length ? pageIndex(pages, READER_INDEX_EXCERPT_CHARS) : "";
   // Computed over the whole body, once, and given to the FIRST chunk only. Both halves
@@ -196,8 +199,18 @@ async function runReader(
   // ladder is re-climbed on every round of the loop (up to max_review_iterations + 1
   // times) because the Reader has to re-read what the editor changed.
   //
-  // Nothing about what is SENT changes — same prompts, same chunk order — so this costs
-  // no extra tokens and cannot change a verdict. Only the waiting is removed.
+  // Nothing about what is SENT changes — same prompts, same chunk order — so no verdict
+  // can move and no extra token goes over the wire.
+  //
+  // What a COLD round is billed does change, on one term. READER_SYSTEM clears
+  // `cacheableSystemPrompt`, so it carries a cache breakpoint: serially, chunk 0 paid the
+  // 1.25x write and the rest read it at 0.1x, while chunks sent together all miss an entry
+  // that does not exist yet and each pay a write. That is ~1.15x of one system prompt per
+  // extra chunk (~1.4k tokens), once, and only on a round whose cache entry has expired —
+  // the prompt is static across sessions and every read refreshes the five-minute TTL, so
+  // a deployment doing any work at all is warm and pays none of it. Priming the entry with
+  // a serial first chunk would buy that back by putting a whole call's latency into every
+  // round, warm ones included, to save a fraction of one prompt on the rare cold one.
   //
   // Bounded by the same knob as page extraction: it is the deployment's answer to how
   // many model calls one run may have in flight (`defaults.extraction_concurrency`), and
@@ -207,7 +220,17 @@ async function runReader(
   // directly-constructed context (tests, embedders) that never set it: serial is what
   // this function did before, so an unset knob degrades to exactly the old behaviour.
   const limit = Math.max(1, Math.floor(ctx.extractionConcurrency) || 1);
+  ctx.log.event("reader_start", { iteration, chunks: chunks.length, concurrency: limit });
+  // The first error any chunk threw. `mapWithConcurrency` rejects with it — matching the
+  // serial loop, and the round is discarded either way — but its workers go on pulling
+  // items until the list is exhausted, so a chunk that fails early would otherwise be
+  // followed by a full-price call for every chunk still queued behind it. Whoever fails
+  // first records it here and the rest decline to send. This is the first caller that can
+  // reject at all: extraction contains each page in a `.catch`, so nothing before it ever
+  // reached this path.
+  let failure: unknown = null;
   const perChunk = await mapWithConcurrency(chunks, limit, async (c, i) => {
+    if (failure !== null) throw failure;
     const user =
       `## HTML\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint)}` +
       (i === 0 && duplicateHeadings
@@ -215,10 +238,18 @@ async function runReader(
         : "") +
       (index ? `\n\n## Source pages in this document (extracted HTML, truncated)\n${index}` : "") +
       tail;
-    const res = await ctx.router.complete("reader", "text", [
-      { role: "system", content: READER_SYSTEM },
-      { role: "user", content: user },
-    ]);
+    let res;
+    try {
+      res = await ctx.router.complete("reader", "text", [
+        { role: "system", content: READER_SYSTEM },
+        { role: "user", content: user },
+      ]);
+    } catch (e) {
+      // The first one wins, so the error the round rejects with is the one that
+      // actually happened rather than whichever chunk noticed the flag.
+      failure ??= e;
+      throw e;
+    }
     ctx.log.agentCall({
       agent: { name: "reader", file: "reader.md", content: READER_SYSTEM, capabilities: ["text"], sha: null, sessionBuilt: false },
       phase: "review",
@@ -419,7 +450,7 @@ export async function runReview(
   const failedPages = initial.failedPages ?? [];
 
   while (iterations <= ctx.maxReviewIterations) {
-    const issues = await runReader(ctx, body, lint, pages);
+    const issues = await runReader(ctx, body, lint, pages, iterations);
     lastIssues = issues;
     ctx.log.event("reader", { iteration: iterations, issues: issues.length });
     if (issues.length === 0) {

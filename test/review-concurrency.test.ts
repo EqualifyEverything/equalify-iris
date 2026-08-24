@@ -51,7 +51,12 @@ interface ReaderRun {
 // naming that chunk, after a delay chosen so completion order is the REVERSE of chunk
 // order. `maxReviewIterations: 0` stops the loop after the first read, so the issues it
 // returns as `unresolved` are exactly what runReader produced.
-async function readerRound(chunks: number, concurrency: number, delayFor: (chunk: number) => number): Promise<ReaderRun> {
+async function readerRound(
+  chunks: number,
+  concurrency: number,
+  delayFor: (chunk: number) => number,
+  onEvent: (type: string, data: Record<string, unknown>) => void = () => {},
+): Promise<ReaderRun> {
   const dir = mkdtempSync(join(tmpdir(), "iris-review-conc-"));
   try {
     let inFlight = 0;
@@ -83,7 +88,7 @@ async function readerRound(chunks: number, concurrency: number, delayFor: (chunk
           };
         },
       },
-      log: { event: () => {}, agentCall: () => {} },
+      log: { event: onEvent, agentCall: () => {} },
     } as unknown as PipelineContext;
 
     const result = await runReview(ctx, { body: markedBody(chunks), lint: { ok: true, violations: [] } });
@@ -126,4 +131,59 @@ test("a short document is one call, as it was", async () => {
   const run = await readerRound(1, 4, () => 1);
   assert.equal(run.calls, 1);
   assert.equal(run.maxInFlight, 1);
+});
+
+test("the round says how it was read, so a slow one can be diagnosed", async () => {
+  // A review round that times out on a rate-limited provider is the case this line
+  // exists for: without it a run log cannot say whether the chunks went out together or
+  // how many were allowed to, which is the first thing to check.
+  const events: { type: string; data: Record<string, unknown> }[] = [];
+  await readerRound(3, 2, () => 1, (type, data) => events.push({ type, data }));
+  const starts = events.filter((e) => e.type === "reader_start");
+  assert.equal(starts.length, 1, "one line per round");
+  assert.deepEqual(starts[0].data, { iteration: 0, chunks: 3, concurrency: 2 });
+});
+
+test("a chunk that fails stops the round paying for the chunks behind it", async () => {
+  // mapWithConcurrency rejects with the first error, matching the serial loop — but its
+  // workers keep pulling items, so without the guard a chunk-0 failure on a 5-chunk body
+  // at a limit of 2 still buys three more full-price reader calls for a round whose
+  // result is already discarded.
+  const dir = mkdtempSync(join(tmpdir(), "iris-review-fail-"));
+  try {
+    let calls = 0;
+    const boom = new Error("provider said no");
+    const ctx = {
+      sessionId: "ses_test",
+      images: [],
+      maxReviewIterations: 0,
+      extractionConcurrency: 2,
+      paths: {
+        agentsDir: join(dir, "agents"),
+        tmpAgentsDir: () => join(dir, "tmp-agents"),
+        agentMemory: () => join(dir, "memory", "page.json"),
+      } as unknown as Paths,
+      router: {
+        complete: async (agent: string, _cap: string, messages: { content: string }[]) => {
+          if (agent !== "reader") return { text: JSON.stringify({ html: "" }) };
+          calls++;
+          const which = chunkOf(messages.map((m) => m.content).join("\n"));
+          await sleep(which === 0 ? 1 : 30);
+          if (which === 0) throw boom;
+          return { text: JSON.stringify({ issues: [] }) };
+        },
+      },
+      log: { event: () => {}, agentCall: () => {} },
+    } as unknown as PipelineContext;
+
+    await assert.rejects(
+      runReview(ctx, { body: markedBody(5), lint: { ok: true, violations: [] } }),
+      // The error the round rejects with is the one that actually happened, not a
+      // stand-in raised by a chunk that read the flag.
+      (e: unknown) => e === boom,
+    );
+    assert.ok(calls <= 2, `only the calls already in flight should have been paid for, got ${calls}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
