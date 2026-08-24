@@ -638,8 +638,23 @@ jobs:
           # removes the vector outright rather than escaping around it, and the
           # only output this step still sets is the one below, from a literal.
           VERDICT=$(jq -r '.verdict // ""' "$FIND")
-          CANONICAL=$(jq -r 'if (.canonical | type) == "number" then .canonical else "" end' "$FIND")
+          CANONICAL=$(jq -r 'if (.canonical | type) == "number" then (.canonical | tostring) else "" end' "$FIND")
           CONFIDENCE=$(jq -r '.confidence // ""' "$FIND")
+
+          # `type == "number"` admits `1.5` and `1e30`, and a non-integer there
+          # would reach `[ "$CANONICAL" -gt "$TARGET" ]` below, where `test` exits
+          # 2 with `integer expression expected`. That is falsy inside an `if`, so
+          # the step would carry on to `gh issue view 1.5`, fail the read and stop
+          # — the right outcome reached by accident, which is not the same as
+          # checked. Same digits-only test the target gets, so an unusable number
+          # is an empty one from here on and every `-z "$CANONICAL"` branch already
+          # handles it.
+          if ! printf '%s' "$CANONICAL" | grep -qE '^[0-9]+$'; then
+            if [ -n "$CANONICAL" ]; then
+              echo "::warning::Verdict named '$CANONICAL' as the canonical issue, which is not an issue number — ignoring it."
+            fi
+            CANONICAL=""
+          fi
 
           [ "$VERDICT" = "duplicate" ] || { echo "verdict is '$VERDICT' — no refutation needed."; exit 0; }
           [ "$CONFIDENCE" = "high" ] || { echo "confidence is '$CONFIDENCE' — cannot close on it, no refutation needed."; exit 0; }
@@ -654,6 +669,28 @@ jobs:
             echo "::notice::Canonical #$CANONICAL is newer than #$TARGET — reported, not closed. Skipping refutation."
             exit 0
           fi
+          # The checkout, back to the commit. There is one `actions/checkout` for
+          # the whole job and the find session has unrestricted `Write` inside it,
+          # so anything that session edited is still on disk when the refute
+          # session reads the tree — and the refute prompt sends it there
+          # deliberately, to read `agents/*.md` and see whether a proposed rule is
+          # already in the prompt. That is the very question the refutation turns
+          # on, so an edit to `agents/page.md` making B's rule look already-present
+          # is the doctored-evidence trick again, wearing the repository instead of
+          # the corpus. Restoring here means the pair comes from the API and
+          # everything else session two reads comes from the commit.
+          #
+          # `-fd` and not `-fdx`: `-x` would take ignored paths too, and
+          # `node_modules/` is ignored. /tmp/triage is outside the workspace, so
+          # the verdict files are not in scope either way. A failure here is a
+          # warning rather than an exit because the refute step is
+          # `continue-on-error` and its absence already blocks the close — there is
+          # no outcome where failing to restore the tree lets a close through.
+          git -C "$GITHUB_WORKSPACE" checkout -- . \
+            || echo "::warning::could not restore tracked files before the refutation session"
+          git -C "$GITHUB_WORKSPACE" clean -fd \
+            || echo "::warning::could not remove untracked files before the refutation session"
+
           # Both issues re-read from the API, and the text is re-read for the same
           # reason the state is. The state, because the corpus was built minutes
           # ago and either issue could have been closed since. The text, because
@@ -814,11 +851,19 @@ jobs:
           VERDICT=""; CANONICAL=""; CONFIDENCE=""; REASON=""; LOST=""; NOTES=""
           if [ -s "$FIND" ] && jq -e . "$FIND" >/dev/null 2>&1; then
             VERDICT=$(jq -r '.verdict // ""' "$FIND")
-            CANONICAL=$(jq -r 'if (.canonical | type) == "number" then .canonical else "" end' "$FIND")
+            CANONICAL=$(jq -r 'if (.canonical | type) == "number" then (.canonical | tostring) else "" end' "$FIND")
             CONFIDENCE=$(jq -r '.confidence // ""' "$FIND")
             REASON=$(jq -r '.reason // ""' "$FIND")
             LOST=$(jq -r '.lost_if_closed // ""' "$FIND")
             NOTES=$(jq -r '.notes // ""' "$FIND")
+            # Digits only, for the reason given in `Prepare the refutation`: a
+            # `1.5` would make every `-gt` and `-eq` below exit 2 rather than
+            # answer, and a chain of accidentally-falsy tests is not a rule. An
+            # unusable number becomes no number, which the `-z` branch reports as
+            # "no canonical issue was named".
+            if ! printf '%s' "$CANONICAL" | grep -qE '^[0-9]+$'; then
+              CANONICAL=""
+            fi
           fi
 
           REFUTED=""; REFUTE_REASON=""
