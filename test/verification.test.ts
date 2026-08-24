@@ -251,6 +251,38 @@ test("a correction that returned the page it was given is recorded as buying not
   });
 });
 
+test("a page re-typed to no effect is counted with the calls that bought nothing", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The model returns its own page re-indented, with `&` where it wrote `&amp;`. That is a
+    // different string and the same page, so bucketing on string identity would file it as
+    // `kept` — a page call that bought nothing counted beside one that restored a table, and
+    // not recoverable from the fold afterwards, since `text` and `structure` overlap and
+    // cannot be subtracted from `kept`.
+    const rendered = `<ul><li>Costs &amp; savings</li></ul>`;
+    const retyped = `<ul>\n  <li>Costs & savings</li>\n</ul>`;
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => rendered,
+        problems: (o) => (o === 1 ? ["a list item was dropped"] : []),
+        corrected: () => retyped,
+      }),
+    );
+    const corrected = of(events, "page_corrected");
+    assert.equal(corrected.length, 1);
+    assert.equal(corrected[0].result, "identical");
+    // The sizes still say which kind of nothing this was: a model that re-typed the page
+    // and one that handed back the exact string it was given cost the same and are not the
+    // same event.
+    assert.equal(corrected[0].chars_before, rendered.length);
+    assert.equal(corrected[0].chars_after, retyped.length);
+    assert.equal("text_changed" in corrected[0], false);
+    // And it buys no re-verification either: there is no change to check.
+    assert.equal(of(events, "page_correction_recheck").length, 0);
+    assert.match(result.fragments[0].innerHtml, /Costs/);
+  });
+});
+
 test("a correction that came back empty is recorded, and the page keeps its content", async () => {
   await withTemp(async (dir) => {
     const events: Event[] = [];

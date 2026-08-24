@@ -115,10 +115,12 @@ export interface Diagnostics {
     pages_verified: number;
     verify_failed: number;
     corrections: number;
-    // How each correction pass ended: `kept` is in the delivered document, `rejected` was
+    // How each correction pass ended: `kept` CHANGED the delivered document, `rejected` was
     // discarded in favour of the fragment it was meant to improve (links path only),
-    // `identical` returned the page it was given, `empty` returned nothing usable. The
-    // last two are calls that bought nothing.
+    // `identical` changed nothing about the page, `empty` returned nothing usable. The last
+    // two are calls that bought nothing — `identical` on the effect and not on string
+    // identity, so a model that re-typed its own page to no purpose is counted here rather
+    // than inflating `kept`, which is the number these fields exist to make honest.
     results: { kept: number; rejected: number; identical: number; empty: number };
     // Why each correction ran: `verify` is a page the Feedback Agent rejected, `links` is a
     // page that passed and lost a link the code found in the PDF, `both` is one that did

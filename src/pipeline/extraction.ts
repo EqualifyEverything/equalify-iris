@@ -642,21 +642,43 @@ async function extractPage(
     const trigger = verifyFailed ? (missing.length ? "both" : "verify") : "links";
     const before = innerHtml.trim();
     const corrected = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons);
-    // A correction that produced nothing usable, or produced the page it was given, is
+    // What the pass actually changed, decided before anything is decided on it.
+    // `corrected === before` catches only the model handing back the exact string it was
+    // given; a re-emission that reflows the whitespace, re-indents, or writes `&` where it
+    // wrote `&amp;` is a different string and the same page — which is what
+    // `correctionEffect` is for (correction.ts). Bucketing on the effect rather than on
+    // string identity is what keeps `results.kept` meaning "this correction changed the
+    // document": the fold cannot recover it afterwards, because `text` and `structure`
+    // overlap and so cannot be subtracted from `kept`.
+    const effect = corrected ? correctionEffect(before, corrected) : null;
+    const moved = effect !== null && (effect.text_changed || effect.alt_changed || effect.structure_changed);
+    // A correction that produced nothing usable, or produced the page it was given back, is
     // a page call paid for and nothing delivered. Recorded because it was previously
     // invisible: the log said a page failed its check and said nothing about what the
     // pass bought, so the loop's value could only be guessed at from call counts (issue
     // #137). See `correctionEffect` for why the kept case reports what it changed.
-    if (!corrected || corrected === before) {
+    if (!corrected || !moved) {
       ctx.log.event("page_corrected", {
         image: img.name,
         page: img.order,
         trigger,
         problems: problems.length,
         result: corrected ? "identical" : "empty",
+        // The three flags are all false by definition on this branch and are left off for
+        // that reason. The sizes are not: equal to `before` means the model returned exactly
+        // what it was given, and different means it re-typed the page to no effect — the
+        // same bill, and worth telling apart.
+        ...(corrected && corrected !== before
+          ? { chars_before: before.length, chars_after: corrected.length }
+          : {}),
       });
     }
-    if (corrected && corrected !== before) {
+    // Nothing below runs for a page the pass did not change, which also means it costs no
+    // re-verification: neither the sample (there is no change to check) nor the links path's
+    // own (a rewrite that moved nothing cannot have re-attached a link, so the fragment that
+    // was already there is the one to keep, and the `identical` event above is what says the
+    // link went unrecovered).
+    if (corrected && moved) {
       // A page that PASSED its fidelity check is being re-rendered here only to
       // recover a link, so the rewrite has to earn the standing the original already
       // had: it is verified in turn, and a rewrite that lost something is discarded
@@ -733,7 +755,7 @@ async function extractPage(
         trigger,
         problems: problems.length,
         result: keep ? "kept" : "rejected",
-        ...correctionEffect(before, corrected),
+        ...effect,
       });
       if (keep) {
         innerHtml = corrected;
