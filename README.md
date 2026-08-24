@@ -852,9 +852,22 @@ checkout is not inert — `.git/config` defines filters that any later `git` com
 `agents/*.md` is evidence a later step might read, and a `CLAUDE.md` at the root is project
 instructions for whatever runs next. An earlier version of this workflow ran `git checkout -- .`
 between the sessions to undo writes, which was worse than the problem: `git checkout` applies smudge
-filters, so a filter written into `.git/config` would execute during the repair, in a step holding
-the token. A `.git` you do not trust cannot be repaired with `git`, because every `git` command reads
-its config first. Not being able to write there in the first place is the version that works.
+filters, so a filter written into `.git/config` executes during the repair, and the "restored" file
+comes back with whatever the filter returned. A `.git` you do not trust cannot be repaired with
+`git`, because every `git` command reads its config first. Not being able to write there in the first
+place is the version that works.
+
+Reading is scoped for the same reason, from the other end. These sessions run in a step holding the
+Bedrock credentials and a token, and the verdict's prose is posted to a public issue comment — so
+whatever a session can read, it can publish. The refutation gets `Read` on `/tmp/triage` and nothing
+else; the find session needs the checkout, so it keeps a broad `Read` with `/proc`, the runner's temp
+directory and `~/.aws` denied, and `Grep` and `Glob` denied the same paths, since a tool that returns
+matching lines is also a way to read a file. `persist-credentials: false` on the checkout keeps the
+token off disk entirely, which costs nothing because no step here runs `git`. Then `Decide and act`
+flattens each model-authored field to one line, caps it at 600 characters and redacts it against the
+live credential values before it can reach a comment. That last layer catches verbatim copying and
+not a re-encoded value — which is why the reading is scoped rather than the publishing merely
+filtered.
 
 **Four rules hold regardless of what either session says**, because that step re-derives them:
 

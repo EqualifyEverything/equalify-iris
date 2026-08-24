@@ -173,6 +173,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Nothing in this job runs `git`, so the token has no reason to be on
+          # disk. Left at the default, checkout writes it to a credential file
+          # under the runner's temp directory and pulls that in from
+          # `.git/config` via `includeIf` — two plain files, in a job whose next
+          # steps hand a model session a `Read` tool. The token is passed to the
+          # sessions as an action input for an unrelated reason (see the find
+          # step), which is a different thing from leaving it in the filesystem
+          # for anything in the job to pick up.
+          persist-credentials: false
 
       - name: Resolve target and check the guards
         id: ctx
@@ -520,11 +530,31 @@ jobs:
           # move as giving neither session `Bash`: take the capability away rather
           # than ask the prompt not to use it.
           #
-          # If the action ever stops honouring the pattern, the fallback is a
-          # denied `Write`, an empty verdict file and a run that closes nothing and
-          # says so — not a widened one.
+          # Both `//tmp/...` and `/tmp/...` are listed, and the doubled slash is
+          # the one that matters: these patterns are gitignore-style, where a
+          # single leading slash anchors to the project directory and `//` means
+          # the filesystem root. `Write(/tmp/triage/**)` alone would resolve to
+          # `$GITHUB_WORKSPACE/tmp/triage/**`, permit no write to the real path,
+          # and leave every run producing no verdict — a green job that quietly
+          # triages nothing, which is a worse failure than a loud one. The extra
+          # rule costs nothing and does not widen anything: both name the same
+          # directory under either reading.
+          #
+          # `Read` is not left open. This session does need the checkout, so the
+          # allowance stays broad and the credential-bearing paths are denied
+          # instead — deny beats allow. That is a blocklist and worth naming as
+          # one: `/proc/self/environ` is this process's own environment, which
+          # holds the Bedrock session credentials that `Configure AWS credentials`
+          # exported, and the runner's `_temp` holds the file-command files those
+          # were written through. `Grep` and `Glob` are denied the same paths,
+          # because a tool that returns matching lines is also a way to read a
+          # file. The exfiltration route this closes is real and specific: the
+          # verdict's `notes` and `reason` are posted to a public issue comment,
+          # so anything a session can read, it can publish. `Decide and act`
+          # redacts those strings against the live values as the second layer.
           claude_args: >-
-            --allowedTools "Read,Glob,Grep,Write(/tmp/triage/**)"
+            --allowedTools "Read,Glob,Grep,Write(//tmp/triage/**),Write(/tmp/triage/**)"
+            --disallowedTools "Read(//proc/**),Read(//sys/**),Read(//home/runner/work/_temp/**),Read(//home/runner/.aws/**),Read(**/.git/**),Grep(//proc/**),Grep(//sys/**),Grep(//home/runner/work/_temp/**),Grep(//home/runner/.aws/**),Glob(//proc/**),Glob(//home/runner/work/_temp/**)"
             --model ${{ vars.BEDROCK_TRIAGE_MODEL || vars.BEDROCK_REVIEW_MODEL || 'us.anthropic.claude-opus-5' }}
           prompt: |
             You are triaging issue #${{ steps.ctx.outputs.target }} in ${{ github.repository }}
@@ -799,8 +829,13 @@ jobs:
           # readily, and refusing to close is this workflow's safe answer. Whether
           # a rule is already in the prompt is the find session's business anyway;
           # it has a clean checkout and reports that in `notes`.
+          # This session reads exactly one file and writes exactly one, so both
+          # tools are allow-listed to `/tmp/triage` rather than denied out of a
+          # wider grant. Nothing else is in reach: not the checkout, not
+          # `/proc/self/environ`, not the runner's temp directory. Same doubled
+          # slash as the find step, and for the same reason.
           claude_args: >-
-            --allowedTools "Read,Write(/tmp/triage/**)"
+            --allowedTools "Read(//tmp/triage/**),Read(/tmp/triage/**),Write(//tmp/triage/**),Write(/tmp/triage/**)"
             --model ${{ vars.BEDROCK_TRIAGE_MODEL || vars.BEDROCK_REVIEW_MODEL || 'us.anthropic.claude-opus-5' }}
           prompt: |
             Read `/tmp/triage/pair.md`. It contains two issues from ${{ github.repository }}
@@ -908,17 +943,74 @@ jobs:
             REFUTE_REASON=$(jq -r '.reason // ""' "$REFUTE")
           fi
 
+          # --- The model's prose, on its way to a public comment --------------
+          # `reason`, `lost_if_closed`, `notes` and the refutation's `reason` are
+          # free text a model wrote after reading an issue body anyone can open.
+          # They are the only part of this step that is not re-derived, and they
+          # get posted to a public issue comment, so whatever a session can read,
+          # it can publish. Three things happen to them first.
+          #
+          # Flattened to one line, so a field cannot forge structure. Markdown
+          # headings, list items and a `---` rule all read as workflow output
+          # rather than as quoted input, and the comment puts the workflow's own
+          # sentences next to these.
+          #
+          # Capped. 600 characters is more than an explanation of two issues
+          # needs, and it stops a runaway field from burying the part of the
+          # comment this file wrote. Not a security control by itself — an AWS
+          # access key id is 20 characters — but a bound is a bound.
+          #
+          # Redacted against the live credential values, which is the layer that
+          # is actually reliable. The session that wrote these strings had the
+          # Bedrock credentials and the token in its process environment; this
+          # step has the real values and can compare. It catches verbatim
+          # copying, and it does not catch a value re-encoded on the way out —
+          # nothing here could. The control for that is upstream, in what the
+          # session is allowed to read, which is why `Read` is scoped as well.
+          clean_field() {
+            printf '%s' "$1" | tr -d '\000' | tr '\n\r\t' '   ' | head -c 600
+          }
+          redact_field() {
+            local s
+            s=$(clean_field "$1")
+            for v in "${GH_TOKEN:-}" "${AWS_ACCESS_KEY_ID:-}" \
+                     "${AWS_SECRET_ACCESS_KEY:-}" "${AWS_SESSION_TOKEN:-}"; do
+              # 8 is short enough to catch a real value and long enough that an
+              # empty or placeholder variable cannot turn every field into
+              # `[redacted]`.
+              if [ -n "$v" ] && [ "${#v}" -ge 8 ]; then
+                s="${s//"$v"/[redacted]}"
+              fi
+            done
+            printf '%s' "$s"
+          }
+          REASON=$(redact_field "$REASON")
+          LOST=$(redact_field "$LOST")
+          NOTES=$(redact_field "$NOTES")
+          REFUTE_REASON=$(redact_field "$REFUTE_REASON")
+
           # --- Did anything actually run? -----------------------------------
+          # This fails the run rather than warning on a green one, and the
+          # difference matters more than it looks. Every guard above exits 0 with
+          # a reason, because "not eligible" is a correct outcome. Reaching this
+          # point is not: the run got past every guard, spent a model call and
+          # produced nothing readable. The failure mode that motivated the change
+          # is a permissions or path mistake that denies the session its `Write`,
+          # where every run would end here — and a workflow that triages nothing
+          # while reporting success is one nobody discovers is broken. Red is how
+          # anyone finds out. A model timeout lands here too, and calling that a
+          # failed run is also correct.
           if [ -z "$VERDICT" ]; then
             {
               echo
               echo '### No verdict'
               echo
-              printf 'The find step ended with outcome `%s` and left no readable verdict, so issue #%s was not triaged. Nothing was changed on it.\n' \
+              printf 'The find step ended with outcome `%s` and left no readable verdict, so issue #%s was not triaged. Nothing was changed on it.\n\n' \
                 "$FIND_OUTCOME" "$TARGET"
+              printf 'If this repeats on every run, suspect the tool permissions on the model steps rather than the model: a denied `Write` to `/tmp/triage` looks exactly like this.\n'
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::warning::No verdict for #$TARGET (find outcome=$FIND_OUTCOME) — the issue was not triaged."
-            exit 0
+            echo "::error::No verdict for #$TARGET (find outcome=$FIND_OUTCOME) — the issue was not triaged."
+            exit 1
           fi
 
           # --- Re-derive every gate, in the order they can veto --------------
