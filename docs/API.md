@@ -152,9 +152,11 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   reported and left standing rather than guessed at, because merging two real sections cannot be
   undone — so a document with one spends the full `max_review_iterations` and raises this rate and
   `mean_rounds` together, which is the honest reading: it shipped with an ambiguity a reader meets.
-  A `[not legible]` marker can end the same way: the copy editor is given that page's image and may
-  well read what the extractor could not, but where the marks do not resolve for it either the
-  marker stays and the issue is reported unresolved every round. That is the source page being
+  A `[not legible]` marker can end the same way: the copy editor is usually given that page's image
+  and may well read what the extractor could not — usually, because the per-round image budget
+  (`capEditorImages`) and a provider that refuses a request for size both leave it with fewer images
+  than the issues named, or none. Where the image is absent, or the marks do not resolve for it
+  either, the marker stays and the issue is reported unresolved every round. That is the source page being
   unreadable, not the pipeline failing to try, and the alternative — a plausible word, or a quiet
   deletion — is the one outcome a reader cannot detect.
 * `links_dropped_rate` — share of documents where an `href` present before the copy editor was

@@ -1,6 +1,7 @@
 // A `[not legible]` marker is the page agent's honest record that the marks on its page did
-// not resolve into characters (issues #112, #117, and the legibility half of #116; the page
-// half is pinned in test/page-prompt.test.ts). Once it is in the document, two later passes
+// not resolve into characters, and a `[page not fully transcribed]` marker its record that it
+// could not return all of a page (issues #112, #117, #133, and the legibility half of #116; the
+// page half of both is pinned in test/page-prompt.test.ts). Once one is in the document, two passes
 // can meet it, and both of the obvious things they might do with it are worse than leaving
 // it alone: replacing it with a plausible word puts something a reader will act on into the
 // document with nothing behind it, and deleting it tells every later reader that the page
@@ -23,16 +24,22 @@ const editor = normalize(EDITOR_SYSTEM);
 
 test("the Reader reports an unreadable region without trying to read it", () => {
   for (const [what, re] of [
-    ["it says what the marker is, so it is not read as a defect in the markup",
-      /A \[not legible\] marker is what the extractor wrote where the marks on its page did not resolve into characters/],
+    ["it says what each marker is, so neither is read as a defect in the markup",
+      /A \[not legible\] marker is what the extractor wrote where the marks on its page did not resolve into characters, and a \[page not fully transcribed\] marker is what it wrote where it could not return the whole page/],
+    // The flattened view's vocabulary sentence tells the Reader that anything in square brackets
+    // is an annotation and not content. These two are content, so the exception belongs there and
+    // not only in the paragraph 40 lines below it: a marker read as an annotation is one the
+    // Reader does not attribute to a page, and attribution is what fetches the image.
+    ["the bracket vocabulary excepts them, where the Reader meets brackets first",
+      /Two bracketed tokens are the exception, because the extractor wrote them into the document rather than the flattener adding them: \[not legible\] and \[page not fully transcribed\] are content/],
     // Attribution is the point: the editor is handed the images for the pages the issues name,
     // so an unattributed marker is one the only pass that could resolve it cannot look at.
     ["every marker is reported with its page, because that is what fetches the image",
       /Report every one of them with the page it is on/],
     ["the Reader does not guess the words, having never seen the page",
-      /You do not see the source images, so never suggest what the marker stood for/],
-    ["and does not ask for the marker to be dropped",
-      /never ask for it to be deleted — a document that once said it could not read a word and now says nothing tells every reader that the page was fully transcribed/],
+      /You do not see the source images, so never suggest what a marker stood for/],
+    ["and does not ask for a marker to be dropped",
+      /never ask for one to be deleted — a document that once said a word could not be read, or a page not finished, and now says nothing tells every reader that the page arrived whole/],
   ] as [string, RegExp][]) {
     assert.match(reader, re, `READER_SYSTEM no longer says: ${what}`);
   }
@@ -40,19 +47,19 @@ test("the Reader reports an unreadable region without trying to read it", () => 
 
 test("the editor may read the page again, and may do nothing else with the marker", () => {
   for (const [what, re] of [
-    ["the marker is not content and not a markup defect",
-      /A \[not legible\] marker is not content and not a defect in the markup/],
+    ["the marker is not a markup defect, and the second marker is the same case",
+      /A \[not legible\] marker is not a defect in the markup.*A \[page not fully transcribed\] marker says the same about the rest of a page it could not return/],
     // The resolution that is actually available: the editor has the image the extractor had.
-    ["with the page attached, the region is looked at again",
-      /Where that page's image IS attached, look at the region again/],
+    ["with the page attached, it is looked at again",
+      /Where that page's image IS attached, look again/],
     // And it stays inside the fidelity bound the rest of this prompt keeps: the words come
     // from the page. The heading rule names its own added text the same way.
     ["the words it may add are the page's own",
-      /replace the marker with the words the page shows, which is the other text you may add here because it comes from the page and not from you/],
+      /put the words the page shows in the marker's place, which is the other text you may add here because it comes from the page and not from you/],
     ["without the page, or without a reading, the marker stands",
       /If they do not resolve, or that page was not attached, leave the marker exactly where it stands/],
     ["neither a guess nor a deletion, and why each is worse than the marker",
-      /Never replace it with a plausible word, and never simply delete it: a guess reaches a reader as something the page says, and a deletion tells every later reader that the page was read in full/],
+      /Never replace one with a plausible word, and never simply delete one: a guess reaches a reader as something the page says, and a deletion tells every later reader that the page was read in full/],
     // The bound that matters on a manual: context can support a word and cannot support a
     // torque figure, and the figure is what someone will act on.
     ["a number or a code is the case to be strictest about",
@@ -69,9 +76,9 @@ test("every answer the Reader can give about a marker is one the editor can act 
   for (const [state, reported, instructed] of [
     ["the page image is attached and the marks resolve",
       /Report every one of them with the page it is on/,
-      /if the marks resolve now, replace the marker with the words the page shows/],
+      /if the marks resolve now, or the content the second marker stands for is there to be read, put the words the page shows in the marker's place/],
     ["the page image is attached and they still do not resolve",
-      /never suggest what the marker stood for/,
+      /never suggest what a marker stood for/,
       /If they do not resolve, or that page was not attached, leave the marker exactly where it stands/],
     ["the page image was not attached at all",
       /the Copy Editor is given that page's image and can look again/,

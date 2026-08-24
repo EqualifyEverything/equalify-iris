@@ -55,9 +55,12 @@ In the flattened view, anything in square brackets is a structural annotation, n
 [Heading 1-6], [List item], [List item N], [Link], [Image], [Image alt], [Table],
 [Header row], [Row], [Field input|textarea|select|button|summary], [Label], [Quote],
 [Caption], [Term], [Definition], plus [N rows, M columns], [empty], [no caption],
-[spans N columns], [spans N rows], [alt missing] and [decorative, alt empty]. A field's own
-announced name follows its marker, so [Field input text] with nothing after it is a control
-with no accessible name at all. Tables are expanded row by row with cells separated by " | ".
+[spans N columns], [spans N rows], [alt missing] and [decorative, alt empty]. Two bracketed
+tokens are the exception, because the extractor wrote them into the document rather than the
+flattener adding them: [not legible] and [page not fully transcribed] are content — what a page
+said where the source could not be read, or could not be returned in full — and are dealt with
+below. A field's own announced name follows its marker, so [Field input text] with nothing after
+it is a control with no accessible name at all. Tables are expanded row by row with cells separated by " | ".
 
 An item of an ORDERED list carries the number it is announced with — [List item 5] — and an
 item of an unordered or definition list carries none, because there is no number there. Those
@@ -91,11 +94,12 @@ choosing. The list decides only that a pair EXISTS: no entry is a false positive
 with, and finding a pair the list missed is still worth reporting.
 
 A [not legible] marker is what the extractor wrote where the marks on its page did not resolve
-into characters. Report every one of them with the page it is on, and nothing more: the Copy Editor
-is given that page's image and can look again, which is the only thing that settles it. You do not
-see the source images, so never suggest what the marker stood for, and never ask for it to be
-deleted — a document that once said it could not read a word and now says nothing tells every
-reader that the page was fully transcribed.
+into characters, and a [page not fully transcribed] marker is what it wrote where it could not
+return the whole page. Report every one of them with the page it is on, and nothing more: the Copy
+Editor is given that page's image and can look again, which is the only thing that settles either.
+You do not see the source images, so never suggest what a marker stood for, and never ask for one to
+be deleted — a document that once said a word could not be read, or a page not finished, and now
+says nothing tells every reader that the page arrived whole.
 
 Treat a table that reports [0 rows], a [Field ...] with nothing announced after it, and an
 [Image] [alt missing] as evidence of a real problem. Do NOT report these, which are correct
@@ -142,15 +146,16 @@ the other issues. An outline that says the same thing twice is a smaller harm to
 section merged into another one or a heading dropped, and an issue left alone comes back next round
 or is reported as unresolved, while content you removed on a guess is gone from the document.
 
-A [not legible] marker is not content and not a defect in the markup: it is the extractor saying
-the marks on that page did not resolve into characters. Where that page's image IS attached, look at
-the region again — if the marks resolve now, replace the marker with the words the page shows, which
-is the other text you may add here because it comes from the page and not from you. If they do not
-resolve, or that page was not attached, leave the marker exactly where it stands. Never replace it
-with a plausible word, and never simply delete it: a guess reaches a reader as something the page
-says, and a deletion tells every later reader that the page was read in full. A number, a part code
-or a measurement is the case to be strictest about — nothing in the surrounding sentence can confirm
-one, and it is the string a reader will act on.
+A [not legible] marker is not a defect in the markup: it is the extractor saying the marks on that
+page did not resolve into characters. A [page not fully transcribed] marker says the same about the
+rest of a page it could not return. Where that page's image IS attached, look again — if the marks
+resolve now, or the content the second marker stands for is there to be read, put the words the page
+shows in the marker's place, which is the other text you may add here because it comes from the page
+and not from you. If they do not resolve, or that page was not attached, leave the marker exactly
+where it stands. Never replace one with a plausible word, and never simply delete one: a guess
+reaches a reader as something the page says, and a deletion tells every later reader that the page
+was read in full. A number, a part code or a measurement is the case to be strictest about — nothing
+in the surrounding sentence can confirm one, and it is the string a reader will act on.
 
 A link's target is content, and it is the one kind you cannot recover: an href came from the
 source FILE, not from the page image, so a URL you drop or alter is gone and a URL you invent

@@ -189,8 +189,13 @@ test("the page agent says what to do with what it cannot read, and emits the who
       /none of it is summarised, abbreviated, or handed back in part because the rest is more of the same/],
     ["the reason it matters: no later pass can tell a dropped row was ever there",
       /the document is assembled from what you return, so a row, an item or a section you leave out is simply not in the document any reader gets/],
-    ["length is not a reason to stop, and stopping is said out loud",
-      /Length is not a reason to stop.*say in the "log" field where you stopped/],
+    // A page that stops early is recorded only in `fragment.log` otherwise, and "log" is not
+    // delivered: `wrapDocument`'s @page-failed block covers pages whose extraction THREW, so a
+    // self-limited page would ship as a silently short document — the very shape #133 reported.
+    ["length is not a reason to stop, and stopping is marked in the document",
+      /Length is not a reason to stop.*make \[page not fully transcribed\] the last thing you emit/],
+    ["the marker is the part that matters, because the log is not delivered",
+      /"log" is not delivered as the document, so a page that stops without one reads as complete to every reader/],
     // #117: "[not legible]" over text the user could read in Preview. The rule is an order of
     // operations — read first, mark second — and it names the regions that get skimmed.
     ["the page is read before any of it is called unreadable",
@@ -224,8 +229,8 @@ test("the page agent says what to do with what it cannot read, and emits the who
     // The fidelity sentence is a closed enumeration of what may be emitted that the page does
     // not print, and the Feedback Agent judges against it (agents/feedback.md), so a
     // placeholder that is not named there can be sent back as invented content.
-    ["the placeholder is named where fidelity is demanded",
-      /a \[not legible\] marker where the marks on the page do not resolve into characters/],
+    ["the placeholders are named where fidelity is demanded",
+      /a \[not legible\] marker where the marks on the page do not resolve into characters, a \[page not fully transcribed\] marker where you could not return all of it/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }

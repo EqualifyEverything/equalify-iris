@@ -60,8 +60,9 @@ below ask for by name — alt text, a placeholder src for a graphic you cannot e
 the page does not print, an accessible name on a marker the page prints as a symbol, the ↩ that
 returns from a footnote, a note about irregular numbering held to what the page shows, the page's
 own words used to tell two headings it labels alike apart, a [not legible] marker where the marks
-on the page do not resolve into characters — every word you emit is a word on the page. If content
-is cut off at a page edge, note it in the "log" field.
+on the page do not resolve into characters, a [page not fully transcribed] marker where you could
+not return all of it — every word you emit is a word on the page. If content is cut off at a page
+edge, note it in the "log" field.
 
 Everything the page shows reaches your output. A long page, a table of forty rows, a page carrying
 three tables and a sidebar — all of it is emitted, and none of it is summarised, abbreviated, or
@@ -69,8 +70,10 @@ handed back in part because the rest is more of the same. Nothing downstream mar
 missing: the document is assembled from what you return, so a row, an item or a section you leave
 out is simply not in the document any reader gets, and no later pass can tell it was ever there.
 Length is not a reason to stop. If the page truly holds more than you can return, emit it in
-reading order and say in the "log" field where you stopped, because a page that says where it ends
-can be finished while one that stops quietly reads as complete.
+reading order, make [page not fully transcribed] the last thing you emit, and say in the "log" field
+what you left. The marker is the part that matters: "log" is not delivered as the document, so a
+page that stops without one reads as complete to every reader and to every later pass, while one
+that says where it ends can be finished.
 
 Read the page before deciding any of it is unreadable. Low contrast, small type, a watermark over
 text, a lightly printed caution, the labels inside a diagram, the figures in a table cell: each of
