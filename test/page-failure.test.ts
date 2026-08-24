@@ -237,19 +237,24 @@ test("re-extracting a page that was missing fills the hole", async () => {
     // is the only thing that shrinks it: a failed page's fragment is a marker, but it IS
     // a fragment, so the page is re-extractable and a clean round fills it in.
     const { ctx, rec } = makeCtx(dir, 3, [], truncated);
-    const { fragments, failedPages } = await reExtractPages(ctx, [prior(1), prior(2), prior(3)], [2], [2]);
+    const { fragments, failedPages, recovered } = await reExtractPages(ctx, [prior(1), prior(2), prior(3)], [2], [2]);
     assert.deepEqual(failedPages, [], "page 2 has content now");
     assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "<p>page</p>");
-    assert.deepEqual(ev(rec, "page_recovered")[0].data, { pages: [2] });
+    assert.deepEqual(recovered, [2]);
+    // Reported, not yet announced: diagnostics folds `page_recovered` straight into
+    // `pages_failed`, and this round can still throw in review — which would leave the
+    // client holding the document that has the hole and a diagnostics answer saying it
+    // does not. The caller logs it once the new state is written (orchestrator.ts).
+    assert.equal(ev(rec, "page_recovered").length, 0, "the recovery is not logged before it is durable");
   });
 });
 
 test("a page that was missing and failed again is still missing", async () => {
   await withTemp(async (dir) => {
-    const { ctx, rec } = makeCtx(dir, 3, [2], truncated);
-    const { failedPages } = await reExtractPages(ctx, [prior(1), prior(2), prior(3)], [2], [2]);
+    const { ctx } = makeCtx(dir, 3, [2], truncated);
+    const { failedPages, recovered } = await reExtractPages(ctx, [prior(1), prior(2), prior(3)], [2], [2]);
     assert.deepEqual(failedPages, [2], "it kept its marker, so the document still has no page 2");
-    assert.equal(ev(rec, "page_recovered").length, 0);
+    assert.deepEqual(recovered, []);
   });
 });
 
@@ -363,9 +368,24 @@ test("a page a later round recovered is no longer reported as missing", () => {
   assert.deepEqual(d.pages_failed, [3]);
 });
 
-test("a page that was recovered and then failed again is missing again", () => {
-  // Which is why this is a fold in event order and not a set difference: the last thing
-  // the log says about a page is what is true of the document.
+test("a recovered page stays recovered when a later round fails on it", () => {
+  // The sequence a session really produces: once the hole is filled the page HAS content,
+  // so a later re-extraction that throws keeps it — `kept: "prior"`, which this excludes.
+  // Reporting the page as missing again would be the same lie in the other direction.
+  const d = diag([
+    { type: "page_extraction_failed", image: "page-002.png", page: 2, error: "x" },
+    { type: "page_recovered", pages: [2] },
+    { type: "page_extraction_failed", image: "page-002.png", page: 2, error: "x", kept: "prior" },
+    { type: "run_complete" },
+  ]);
+  assert.deepEqual(d.pages_failed, []);
+});
+
+test("a page reported missing again after a recovery is missing again", () => {
+  // Nothing emits this today: only the from-scratch extraction logs the event without
+  // `kept: "prior"`, and a session extracts from scratch once. It pins the SHAPE of the
+  // computation — the last word wins — so that a second from-scratch pass (a re-run whose
+  // saved state is gone) cannot report a whole document, which a set difference would.
   const d = diag([
     { type: "page_extraction_failed", image: "page-002.png", page: 2, error: "x" },
     { type: "page_recovered", pages: [2] },

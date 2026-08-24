@@ -140,6 +140,12 @@ export async function runPipeline(args: {
     // instead, because a document containing none of the source's words is not a partial
     // success.
     let failedPages: number[] = [];
+    // Pages this run filled in that the document had no content for. Logged only once the
+    // new state is on disk (below), because that is when it becomes true: diagnostics
+    // folds `page_recovered` straight into `pages_failed`, so a line written when the
+    // re-extraction returned would answer "the document is whole" for a round that then
+    // threw in review — leaving the client with the document that still has the hole.
+    let recovered: number[] = [];
     let mode: string;
 
     if (iterative) {
@@ -174,6 +180,7 @@ export async function runPipeline(args: {
         fragments = extraction.fragments;
         suggestions = extraction.suggestions;
         failedPages = extraction.failedPages;
+        recovered = extraction.recovered ?? [];
 
         setPhase("assembly");
         const assembled = await runAssembly(ctx, fragments);
@@ -275,6 +282,8 @@ export async function runPipeline(args: {
       finalFragmentsPath,
       JSON.stringify({ fragments, body: review.body, failedPages }, null, 2),
     );
+    // Now that the document that HAS these pages is the persisted one (see `recovered`).
+    if (recovered.length) log.event("page_recovered", { pages: recovered });
 
     // Feedback -> agent training (PRD §7.12/§7.13): turn the document-level
     // correction this feedback run produced into a proposed improvement to the

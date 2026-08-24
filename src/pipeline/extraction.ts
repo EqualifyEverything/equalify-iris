@@ -163,6 +163,14 @@ export interface ExtractionResult {
   // `reextract_complete.failed` instead — folding them in would tell a client its
   // document is missing a page that is in it.
   failedPages: number[];
+  // Pages that WERE in `failedPages` and are not any more, because this re-extraction
+  // produced content for them. Returned rather than logged here: "the document has this
+  // page now" only becomes true once the round's document is persisted, and a round that
+  // throws after re-extracting (in the Reader, the editor, the lint) leaves the client
+  // holding the document that still has the hole. Logged by the caller, after the write
+  // (pipeline/orchestrator.ts) — diagnostics folds the event straight into
+  // `pages_failed`, so a premature line there claims a document is whole when it is not.
+  recovered?: number[];
 }
 
 function stripFences(t: string): string {
@@ -811,9 +819,7 @@ export async function reExtractPages(
   // missing and threw again keeps its marker, so it stays in the set.
   const filled = new Set(outcomes.filter((o) => !o.failed).map((o) => o.fragment.order));
   const failedPages = priorFailedPages.filter((p) => !filled.has(p));
-  if (priorFailedPages.length !== failedPages.length) {
-    ctx.log.event("page_recovered", { pages: priorFailedPages.filter((p) => filled.has(p)) });
-  }
+  const recovered = priorFailedPages.filter((p) => filled.has(p));
 
   writeFileSync(
     join(ctx.paths.sessionFragments(ctx.sessionId), "fragments.json"),
@@ -826,5 +832,5 @@ export async function reExtractPages(
     pages: outcomes.filter((o) => !o.failed).map((o) => o.fragment.order).sort((a, b) => a - b),
     ...(keptPrior.length ? { failed: keptPrior } : {}),
   });
-  return { fragments, suggestions, failedPages };
+  return { fragments, suggestions, failedPages, recovered };
 }

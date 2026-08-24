@@ -244,13 +244,15 @@ export function summarizeRun(
   // Which pages the document has no content for — a set, and a set that changes over
   // the life of one session's log, because a feedback round can re-extract a page that
   // failed earlier and fill the hole. So this is a fold over the events in order rather
-  // than a filter: `page_extraction_failed` adds, `page_recovered` removes, and a page
-  // that fails again after being recovered is added back.
+  // than a filter: `page_extraction_failed` adds, `page_recovered` removes, and what the
+  // log says LAST about a page is what is true of the document.
   //
   // `kept: "prior"` is excluded, because that event reports the opposite outcome under
   // the same name: a re-extraction that threw left the page's earlier content in place,
   // so the document is whole and naming the page here would send a client looking for a
-  // hole that isn't there (pipeline/extraction.ts reExtractPages).
+  // hole that isn't there (pipeline/extraction.ts reExtractPages). Which is also why a
+  // recovered page stays recovered: after the hole is filled, the page HAS content, so
+  // every later failure on it is one of these.
   const failedSet = new Set<number>();
   for (const e of events) {
     if (e.type === "page_extraction_failed" && typeof e.page === "number" && e.kept !== "prior") {
