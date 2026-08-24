@@ -684,8 +684,8 @@ jobs:
 
             ## Hard limits
 
-            - **Never touch these paths.** `.github/workflows/**`, `.github/CODEOWNERS`,
-              `LICENSE`, `infra/**`, `.env*`. A PR touching them is rejected by a check that
+            - **Never touch these paths.** `.github/workflows/**`, `.github/scripts/**`,
+              `.github/CODEOWNERS`, `LICENSE`, `infra/**`, `.env*`. A PR touching them is rejected by a check that
               does not consult you, so writing there wastes the run. If an issue genuinely
               needs a CI or infra change, say so in the run summary and pick a different issue.
             - **Never push to `main`.** It is protected; work on `iris-auto/issue-<n>`.
@@ -871,7 +871,14 @@ jobs:
           # this very allowlist — so a run talked into editing it could widen what
           # the next run may do. That is a privilege boundary, not a review gap,
           # and it is not the automated reviewer's job to hold it.
-          FORBIDDEN='^(\.github/workflows/|\.github/CODEOWNERS|LICENSE|infra/|\.env)'
+          #
+          # `.github/scripts/` is here for the same reason and was added the day a
+          # workflow first needed it: `issue-triage.yml` outgrew what a `run:` block
+          # may hold and moved its enforcement step — the code that decides whether
+          # an issue closes — into `.github/scripts/triage-decide.sh`. A privilege
+          # boundary drawn at a directory name follows the privilege, not the name,
+          # so anywhere a workflow's own logic lives belongs in this pattern.
+          FORBIDDEN='^(\.github/workflows/|\.github/scripts/|\.github/CODEOWNERS|LICENSE|infra/|\.env)'
 
           RESULT=/tmp/iris-auto-result.json
           CLAIMED_PR=""
@@ -995,7 +1002,7 @@ jobs:
             gh pr comment "$NEW_PR" --body "$(printf '%s\n\n%s\n\n%s\n' \
               '⚠️ **Converted to draft by the `issue-to-pr` verify step.**' \
               "This PR touches paths the scheduled workflow is not allowed to change: \`$OFFENDING\`" \
-              'CI, CODEOWNERS, the licence and infra are out of its remit. `.github/workflows/**` is where the privilege of this workflow is defined — the Bedrock role, `contents: write`, and the allowlist that produced this comment — so a run that edits it could widen what the next run may do. Read it by hand before marking it ready.')" \
+              'CI, CODEOWNERS, the licence and infra are out of its remit. `.github/workflows/**` and `.github/scripts/**` are where the privilege of this workflow is defined — the Bedrock role, `contents: write`, and the allowlist that produced this comment — so a run that edits it could widen what the next run may do. Read it by hand before marking it ready.')" \
               || echo "::warning::could not comment on #$NEW_PR"
             exit 1
           fi

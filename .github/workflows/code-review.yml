@@ -299,14 +299,88 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      - name: Lint the workflow scripts
+        id: scriptlint
+        if: steps.guard.outputs.already_reviewed != 'true'
+        # `.github/scripts/*.sh` holds a workflow's own logic, kept out of the YAML
+        # only because GitHub refuses a `run:` block past 21000 bytes — and
+        # `triage-decide.sh` is the file that decides whether an issue closes.
+        # Nothing looked at it until this step existed: `actionlint` reads
+        # `.github/workflows/*.yml` and nothing else, and it runs with
+        # `-shellcheck=` off anyway.
+        #
+        # A separate shellcheck pass rather than re-enabling actionlint's: the
+        # false-positive argument for turning it off is about heavily-templated
+        # `run:` blocks, and these files are plain bash with no Actions expressions
+        # in them at all. `shellcheck` is preinstalled on ubuntu-latest, so there is
+        # nothing to download and no pin to verify — the reason actionlint needs six
+        # lines of checksum above. `-S warning` is quiet on correct code, which is
+        # what keeps a style opinion from reading as a failed check.
+        #
+        # Its own step, and its report is a file the context builder cats, because
+        # that builder's `run:` block is within a kilobyte of the 21000-byte ceiling
+        # and this repo has already lost a run to crossing it.
+        run: |
+          set -euo pipefail
+          OUT=/tmp/script-lint.md
+          {
+            echo
+            echo "## Workflow scripts — \`shellcheck\`"
+            echo '```'
+          } > "$OUT"
+          if ! ls .github/scripts/*.sh >/dev/null 2>&1; then
+            echo "(no .github/scripts/*.sh in this checkout)" >> "$OUT"
+            RESULT=skip
+          elif ! command -v shellcheck >/dev/null 2>&1; then
+            echo "(shellcheck not installed on this runner)" >> "$OUT"
+            RESULT=skip
+          elif shellcheck -s bash -S warning .github/scripts/*.sh 2>&1 | tail -40 >> "$OUT"; then
+            RESULT=pass
+          else
+            RESULT=fail
+          fi
+          { echo '```'; echo; echo "Result: **$RESULT**"; } >> "$OUT"
+          echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+          echo "shellcheck over .github/scripts: $RESULT"
+
       - name: Build review context
         if: steps.guard.outputs.already_reviewed != 'true'
+        # `emit_source` below marks where `head -n $MAX_LINES_PER_FILE` cut a file.
+        # An unmarked cut is worse than a smaller budget: the fence closes mid-line
+        # and nothing says the rest exists, so the reviewer reads a partial file as
+        # a whole one and can conclude something is missing when it is 200 lines
+        # further down. This is not hypothetical — `issue-triage.yml` (1017 lines)
+        # was halved this way in the review of PR #147, for a file the CI-security
+        # item tells the reviewer to read in full.
+        #
+        # The line count comes from `awk 'END{print NR}'` and not `wc -l` because wc
+        # counts newlines, so a file whose last line is unterminated reports one
+        # short — and at exactly the cap that hid the cut completely. It is fed on
+        # stdin and not as an argument because awk reads any argument matching
+        # `name=value` as a variable assignment and then falls back to stdin, which
+        # inside the `while read -r f` loop is the rest of the changed-file list: one
+        # root-level path with an `=` in it would end the loop and drop every
+        # remaining file's source, silently, which is the harm the marker exists to
+        # prevent one layer up. `< "$1"` is immune, and matches the `wc -c < "$f"`
+        # idiom the loop already uses.
+        #
+        # The rationale lives here rather than in the block because a `run:` block
+        # is one expression capped at 21000 and this is the block near that ceiling —
+        # within about a kilobyte of the ~20,500 usable figure that
+        # `.github/scripts/triage-decide.sh` derives. YAML comments outside the
+        # scalar cost nothing against it, which is the only reason there is room to
+        # explain any of this; at this block's average line, roughly a dozen more
+        # lines of *code* is what would spend the rest, and the next thing that needs
+        # real length belongs in `.github/scripts/` like the triage decision did. To
+        # re-measure, count the block's bytes plus one per line, or dispatch the
+        # workflow and read the 422 body.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
           HEAD_SHA: ${{ steps.ctx.outputs.head_sha }}
           BASE_REF: ${{ steps.ctx.outputs.base_ref }}
           BASE_SHA: ${{ steps.ctx.outputs.base_sha }}
+          SCRIPT_LINT: ${{ steps.scriptlint.outputs.result }}
         run: |
           set -euo pipefail
           OUT=/tmp/review-context.md
@@ -338,8 +412,14 @@ jobs:
           #   config.ts          — model routing + provider resolution, Must flag #4
           #   pipeline/*.ts      — phase error handling and the axe-clean guarantee,
           #                        Must flag #1 and #5
+          #   .github/scripts/   — a workflow's own logic, kept out of the YAML only
+          #                        because GitHub refuses a `run:` block past 21000
+          #                        characters. `triage-decide.sh` is 22KB and decides
+          #                        whether an issue closes; item 9 asks the reviewer
+          #                        to read changed CI code in full, so it has to be
+          #                        here or that instruction has nothing to read.
           # Matched as path prefixes against the changed-file list below.
-          ALWAYS_INCLUDE_PATHS="src/auth/ src/github/ src/providers/ src/store/paths.ts src/pipeline/ src/routes/sessions.ts src/config.ts"
+          ALWAYS_INCLUDE_PATHS="src/auth/ src/github/ src/providers/ src/store/paths.ts src/pipeline/ src/routes/sessions.ts src/config.ts .github/scripts/"
 
           {
             echo "# Review context"
@@ -544,6 +624,10 @@ jobs:
           fi
           { echo '```'; echo; echo "Result: **$WFLINT**"; } >> "$OUT"
 
+          # The script lint ran in its own step, above, so this block stays clear of
+          # the 21000-byte ceiling on a `run:` block. Its report is a file.
+          cat /tmp/script-lint.md >> "$OUT"
+
           # Summary goes to four places: the context file (for the reviewer), the
           # job log and the run summary (for humans), and its own small file for
           # the fallback step to cat. Without the middle two, a check failing in CI
@@ -557,15 +641,15 @@ jobs:
           # (workflow-review.yml, which grepped them out of this job's log, was deleted in
           # PR #63), so the format is now free to change — but the fallback step below and
           # the run summary both render it, so keep it readable.
-          SUMMARY=$(printf '## Check summary\n- npm ci: %s\n- typecheck: %s\n- unit (`npm test`): %s\n- e2e (`./test/e2e.sh`): %s\n- workflow lint (`actionlint`): %s\n' \
-            "$INSTALL" "$TYPECHECK" "$UNIT" "$E2E" "$WFLINT")
+          SUMMARY=$(printf '## Check summary\n- npm ci: %s\n- typecheck: %s\n- unit (`npm test`): %s\n- e2e (`./test/e2e.sh`): %s\n- workflow lint (`actionlint`): %s\n- workflow scripts (`shellcheck`): %s\n' \
+            "$INSTALL" "$TYPECHECK" "$UNIT" "$E2E" "$WFLINT" "$SCRIPT_LINT")
           { echo; echo "$SUMMARY"; } >> "$OUT"
           echo "$SUMMARY"
           echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
           echo "$SUMMARY" > /tmp/check-summary.md
           # `skip` for the lint (install failed) is not a check failure — it says
           # nothing about the PR. Only an actual `fail` counts.
-          if [ "$INSTALL$TYPECHECK$UNIT$E2E" != "passpasspasspass" ] || [ "$WFLINT" = fail ]; then
+          if [ "$INSTALL$TYPECHECK$UNIT$E2E" != "passpasspasspass" ] || [ "$WFLINT" = fail ] || [ "$SCRIPT_LINT" = fail ]; then
             echo "::warning::One or more checks failed — see the run summary. The review continues so Claude reports it on the PR."
           fi
 
@@ -633,6 +717,16 @@ jobs:
             echo "are always included in full, however small the change."
           } >> "$OUT"
 
+          # Say where a file was cut. See this step's YAML comment for why, and for
+          # why both the `awk` and the `<` are deliberate.
+          emit_source() {
+            head -n "$MAX_LINES_PER_FILE" "$1" >> "$OUT"
+            N=$(awk 'END{print NR}' < "$1")
+            [ "${N:-0}" -le "$MAX_LINES_PER_FILE" ] || printf \
+              '\n... TRUNCATED at %s of %s lines. Read the file for the rest.\n' \
+              "$MAX_LINES_PER_FILE" "$N" >> "$OUT"
+          }
+
           # Whole-file source is included only where the diff alone is hard to
           # judge: new files, and files substantially rewritten. Dumping every
           # touched file made review context 235KB on PR #38 vs 132KB on the PR
@@ -660,7 +754,7 @@ jobs:
             done
             if [ "$FORCED" = yes ]; then
               printf '\n### %s\n\n_(high-risk path — included in full regardless of change size)_\n\n```\n' "$f" >> "$OUT"
-              head -n "$MAX_LINES_PER_FILE" "$f" >> "$OUT"
+              emit_source "$f"
               printf '\n```\n' >> "$OUT"
               continue
             fi
@@ -681,7 +775,7 @@ jobs:
               continue
             fi
             printf '\n### %s\n\n```\n' "$f" >> "$OUT"
-            head -n "$MAX_LINES_PER_FILE" "$f" >> "$OUT"
+            emit_source "$f"
             printf '\n```\n' >> "$OUT"
           done
 
@@ -878,7 +972,9 @@ jobs:
                `src/store/paths.ts` that could escape the data dir.
 
             6. **Failing checks.** If the "Check summary" shows install, typecheck, unit tests,
-               e2e, or the workflow lint failing, that is blocking. Say which one and quote the
+               e2e, the workflow lint or the workflow scripts' `shellcheck` failing, that is
+               blocking — every line of that summary, so a check added later is covered by this
+               item on the day it is added. Say which one and quote the
                relevant output. An `actionlint` failure on a `.github/workflows/*.yml` change is
                especially serious: an Actions-expression error does not degrade the workflow, it
                disables it — every run fails immediately with no jobs and no logs, which reads as
@@ -898,8 +994,12 @@ jobs:
                small) and any code copied in under an incompatible licence.
 
             9. **CI and workflow security — conditional, and when it applies it comes FIRST.**
-               Skip this item entirely unless the diff touches `.github/workflows/**` or
-               `.github/actions/**`. When it does, do it before item 1: the workflows in this
+               Skip this item entirely unless the diff touches `.github/workflows/**`,
+               `.github/scripts/**` or `.github/actions/**`. `.github/scripts/` counts
+               because a workflow may keep part of itself there — GitHub refuses a `run:`
+               block past 21000 characters, so `issue-triage.yml` holds its enforcement
+               step in `.github/scripts/triage-decide.sh`, and that file decides whether an
+               issue closes. When it does, do it before item 1: the workflows in this
                repo are as much a part of Iris as `src/` is. `code-review.yml` is the review
                capacity §7.14 of `prd.md` promises and `issue-to-pr.yml` opens pull requests
                against this repo on a schedule; both hold `id-token: write` and the Bedrock

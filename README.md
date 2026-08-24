@@ -759,12 +759,14 @@ and every future session.
 
 What it does, in order:
 
-1. Runs `npm ci`, `tsc --noEmit`, the unit suite, `./test/e2e.sh`, and `actionlint`, and hands
-   the model their **actual output**. The reviewer is told not to re-run them, so a claim that a
+1. Runs `npm ci`, `tsc --noEmit`, the unit suite, `./test/e2e.sh`, `actionlint` over the workflow
+   files and `shellcheck` over `.github/scripts/*.sh`, and hands the model their **actual output**. The reviewer is told not to re-run them, so a claim that a
    check failed is quoted rather than predicted.
 2. Builds a context file: the diff, plus full source for files that are new or substantially
    rewritten, plus up to the 3 most recent prior reviews on **earlier commits of the same PR** —
-   so a re-review knows what it already said instead of repeating it.
+   so a re-review knows what it already said instead of repeating it. Source is capped at 800
+   lines per file and says so where it cuts — an unmarked cut reads as a whole file, and the
+   reviewer then reports as missing what is merely further down.
 3. Reviews against a ranked list: accessibility of the output, upstream side effects and filing
    identity, auth/tokens/secrets, provider routing and cost, correctness, failing checks, missing
    tests, and the PR template's own contract.
@@ -792,7 +794,7 @@ no review was posted at all, since the action can exit 0 without posting one.
 reviewer and the issue-triage one are what §7.14's review promise actually rests on, and they hold
 `id-token: write` and the Bedrock role; every workflow here holds a secret, a token or write
 access, and a defect in one is reachable by definition, since CI runs it. So a diff touching
-`.github/workflows/**` gets a CI-security checklist
+`.github/workflows/**` or `.github/scripts/**` gets a CI-security checklist
 ahead of the accessibility one — PR-authored code reaching secrets, `${{ }}` interpolated into a
 `run:` block, widened `permissions:`, an unpinned third-party action, lost review coverage, the
 shell traps that have actually bitten here, and the timeout arithmetic — and the reviewer reads
@@ -848,51 +850,91 @@ fail to refute it. Disagreement is not a tie to be broken — it is the answer, 
 "leave it open and tell a human".
 
 The pair the second session reads is fetched fresh from the API, not taken from the corpus the first
-one was given, and the second session gets no `Glob` or `Grep` — no repository, no corpus, just the
-two issues. Independence has to cover the input, not only the argument: the first session runs first
-and in the same workspace, so anything it could leave on disk is evidence it could choose. Restate
+one was given, and the second session gets no repository and no corpus — just the two issues. Losing
+`Glob` and `Grep` is not what makes that true, and it is worth being exact, because the earlier
+version of this paragraph said it was: `Read` alone still reaches `agents/page.md` and `src/**` by
+path, and a session that can open the prompt can answer the question its instructions tell it is
+unanswerable, then confirm a close on the answer. So the checkout and `/tmp/triage` are denied to
+its `Read` by path, in both the project-relative and absolute spellings, and the pair file was moved
+to a directory of its own so that denying the corpus wholesale does not deny the one file the
+session is meant to read. Independence has to cover the input, not only the argument: the first session runs first
+and in the same workspace, so anything it could leave behind is evidence it could choose. Restate
 issue A's body as a copy of B's and the refutation opens a file in which the two really are
 identical; edit `agents/page.md` and the rule B proposes looks like it is already in the prompt,
-which is the question the refutation turns on. It costs the refutation some accuracy, in the
-direction of refusing to close.
+which is the question the refutation turns on. Neither is reachable now that no session has `Write`,
+but the fresh read stays: it is cheap, and it does not depend on a claim about what the other session
+could touch. Withholding the repository does cost the refutation some accuracy, in the direction of
+refusing to close.
 
 **Neither session can close anything.** Neither has `Bash`, so neither can reach `gh`. Every close,
-label and comment happens in a shell step that reads the two verdict files and the GitHub API, the
-same division as [Scheduled issue triage](#scheduled-issue-triage): the prompt is the layer an
-injected issue body argues with, so the rules live somewhere it cannot reach.
+label and comment happens in a shell step that reads the two verdicts and the GitHub API, the same
+division as [Scheduled issue triage](#scheduled-issue-triage): the prompt is the layer an injected
+issue body argues with, so the rules live somewhere it cannot reach.
 
-`Write` is scoped to `/tmp/triage` on both, which is the only place a verdict file belongs. A
-checkout is not inert — `.git/config` defines filters that any later `git` command executes,
+That step's body is [`.github/scripts/triage-decide.sh`](.github/scripts/triage-decide.sh) rather
+than an inline block, for a mechanical reason worth knowing before writing a long step: GitHub parses
+a `run:` block as one expression and refuses the whole workflow file when one exceeds 21000. The
+enforcement step's reasoning is longer than that, and an unparseable workflow file fails *every* run
+with no jobs and no annotation — the loudest possible failure for the quietest possible reason, and
+the Actions UI will only say the file has an issue. `gh api
+repos/OWNER/REPO/actions/workflows/FILE/dispatches` is what names the line and the limit.
+
+Do not budget against 21000 directly. The block that broke this workflow held 20,893 bytes over 408
+lines and was rejected anyway — 21,301 with CRLF line endings, which is what the limit appears to
+count. Roughly 20,500 bytes of content is the usable ceiling, and `code-review.yml`'s context builder
+is the other block in this repo close enough to it to matter.
+
+**Neither session has `Write`, either.** A verdict is the session's structured output — `--json-schema`
+has the runtime validate it and the action publishes it as a step output — so nothing needs to create
+a file and neither session is given the means to. That is worth more than scoping `Write` could be. A
+checkout is not inert: `.git/config` defines filters that any later `git` command executes,
 `agents/*.md` is evidence a later step might read, and a `CLAUDE.md` at the root is project
-instructions for whatever runs next. An earlier version of this workflow ran `git checkout -- .`
-between the sessions to undo writes, which was worse than the problem: `git checkout` applies smudge
-filters, so a filter written into `.git/config` executes during the repair, and the "restored" file
-comes back with whatever the filter returned. A `.git` you do not trust cannot be repaired with
-`git`, because every `git` command reads its config first. Not being able to write there in the first
-place is the version that works.
+instructions for whatever runs next in the same job, which is the refutation. An earlier version of
+this workflow ran `git checkout -- .` between the sessions to undo writes, which was worse than the
+problem: `git checkout` applies smudge filters, so a filter written into `.git/config` executes during
+the repair and the "restored" file comes back with whatever the filter returned. A `.git` you do not
+trust cannot be repaired with `git`, because every `git` command reads its config first. Having no
+`Write` is the version that works — and it retires the two `rm -f`s that used to guard against a
+verdict file left on the runner by an earlier run being read as this one's.
 
-Reading is scoped for the same reason, from the other end. These sessions run in a step holding the
-Bedrock credentials and a token, and the verdict's prose is posted to a public issue comment — so
-whatever a session can read, it can publish. The refutation gets `Read` on `/tmp/triage` and nothing
-else; the find session needs the checkout, so it keeps a broad `Read` with `/proc`, the runner's temp
-directory and `~/.aws` denied, and `Grep` and `Glob` denied the same paths, since a tool that returns
-matching lines is also a way to read a file. `persist-credentials: false` on the checkout keeps the
-token off disk entirely, which costs nothing because no step here runs `git`. Every deny is written
-in both `/x` and `//x` form, because a deny that resolves the wrong way fails *open* and silently,
-where a wrong allow just refuses a write and turns the run red.
+That design replaced one where both sessions wrote verdict files into `/tmp/triage`, and the reason is
+worth recording, because the scoping looked right and was not. **A path-scoped `Write(...)` *allow*
+rule grants nothing** — probed directly: every spelling denied the write, absolute or relative, target
+existing or not, while a bare `Write` succeeded. So the first live run ended with a permission denial
+and no verdict, which `Decide and act` correctly turned into a red run. Deny rules *do* work, probed
+the same way, which is why the reading side below is a broad allow plus denies.
+
+Reading is scoped from the other end. These sessions run in a step holding the Bedrock credentials
+and a token, and the verdict's prose is posted to a public issue comment — so whatever a session can
+read, it can publish. Both get `Read` with `/proc`, `/sys`, the runner's temp directory and `~/.aws`
+denied; the find session also gets `Grep` and `Glob`, denied the same paths, since a tool that returns
+matching lines is also a way to read a file and one that returns only names still says which secrets
+exist and where. The temp-directory deny carries more weight than it looks: that is where the action
+writes its execution log, so it is what keeps "the refutation cannot see the first session's argument"
+a fact about the sandbox rather than a claim about the prompt. `persist-credentials: false` on the
+checkout keeps the token off disk entirely, which costs nothing because no step here runs `git`. Every
+deny is written in both `/x` and `//x` form, because a deny that resolves the wrong way fails *open*
+and silently.
 
 Then `Decide and act` flattens each model-authored prose field to one line, caps it at 600
 characters and redacts it against the live credential values before it can reach a comment. That
 last layer catches verbatim copying and not a re-encoded value — which is why the reading is scoped
 rather than the publishing merely filtered. `verdict` and `confidence` are not sanitized but held to
-their allowed values, which is stronger where it applies: a string outside the enum is not a
-malformed verdict, it is not a verdict, so it is discarded rather than repeated back — and a
-discarded verdict fails the run. Case and space are normalised away first, so a `Duplicate` is not
-thrown out — a cosmetic slip should not change what a verdict means, and being discarded now costs
-the issue its comment as well. Precisely: the gates accept one *normalised* value, so a mis-cased
-`duplicate` can close, and the normalisation is blunt enough that `dup licate` would too. What that
-does not touch is anything standing between a verdict and a close — the refutation and the four
-rules below are unchanged.
+their allowed values — twice, once by the schema in the runtime and again in the shell, because a
+control that only holds while the action keeps behaving is not a control. That is stronger than
+sanitizing where it applies: a string outside the enum is not a malformed verdict, it is not a
+verdict, so it is discarded rather than repeated back — and a discarded verdict fails the run.
+
+The shell also normalises case and space before checking, and that buys less than it was written to.
+It went in so a `Duplicate` would not be thrown out for a cosmetic slip, since being discarded costs
+the issue its comment too. But the schema pins the same three words in the runtime and sits in front
+of the shell, so a `Duplicate` never gets this far: validation rejects it, the verdict arrives empty,
+and the run goes red having posted nothing. The normalisation is therefore not a nicety with an
+effect today — it is the layer that still means something if the action stops validating, which is
+the same reason the type checks run at all. Where it is reached, the gates accept one *normalised*
+value, so a mis-cased `duplicate` can close, and it is blunt enough that `dup licate` would too.
+Either way nothing standing between a verdict and a close moves: the refutation and the four rules
+below are unchanged.
 
 **Four rules hold regardless of what either session says**, because that step re-derives them:
 
@@ -998,8 +1040,10 @@ the repo would go wrong:
   shell metacharacters or an Actions expression is inert. But the prompt is the layer an injected
   issue argues with, so it is not the control. The control is a verify step that re-reads the
   **pushed diff** against a path allowlist: a PR touching `.github/workflows/**`,
-  `.github/CODEOWNERS`, `LICENSE`, `infra/**` or `.env*` is converted to a draft with a comment
-  saying why, and the job goes red. `.github/workflows/**` is the sharp one, and it stays forbidden
+  `.github/scripts/**`, `.github/CODEOWNERS`, `LICENSE`, `infra/**` or `.env*` is converted to a
+  draft with a comment saying why, and the job goes red. `.github/scripts/` is on the list because
+  a workflow may keep part of itself there: GitHub refuses a `run:` block past 21000 characters, so
+  `issue-triage.yml`'s enforcement step is `.github/scripts/triage-decide.sh`. CI is the sharp case, and it stays forbidden
   even though `code-review.yml` now reviews workflow diffs: CI is where this job's own privilege is
   defined — the Bedrock role, `contents: write`, and that allowlist — so a run talked into editing
   it could widen what the next run may do. That is a privilege boundary, not a review gap.
