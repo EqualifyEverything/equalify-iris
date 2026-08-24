@@ -345,6 +345,17 @@ jobs:
 
       - name: Build review context
         if: steps.guard.outputs.already_reviewed != 'true'
+        # `emit_source` below marks where `head -n $MAX_LINES_PER_FILE` cut a file.
+        # An unmarked cut is worse than a smaller budget: the fence closes mid-line
+        # and nothing says the rest exists, so the reviewer reads a partial file as
+        # a whole one and can conclude something is missing when it is 200 lines
+        # further down. This is not hypothetical — `issue-triage.yml` (1017 lines)
+        # was halved this way in the review of PR #147, for a file the CI-security
+        # item tells the reviewer to read in full.
+        #
+        # The rationale lives here rather than in the block because a `run:` block
+        # is one expression capped at 21000 and this is the block near that ceiling;
+        # YAML comments outside the scalar cost nothing against it.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
@@ -688,6 +699,15 @@ jobs:
             echo "are always included in full, however small the change."
           } >> "$OUT"
 
+          # Say where a file was cut. See this step's YAML comment for why.
+          emit_source() {
+            head -n "$MAX_LINES_PER_FILE" "$1" >> "$OUT"
+            N=$(wc -l < "$1" | tr -d ' ')
+            [ "${N:-0}" -le "$MAX_LINES_PER_FILE" ] || printf \
+              '\n... TRUNCATED at %s of %s lines. Read the file for the rest.\n' \
+              "$MAX_LINES_PER_FILE" "$N" >> "$OUT"
+          }
+
           # Whole-file source is included only where the diff alone is hard to
           # judge: new files, and files substantially rewritten. Dumping every
           # touched file made review context 235KB on PR #38 vs 132KB on the PR
@@ -715,7 +735,7 @@ jobs:
             done
             if [ "$FORCED" = yes ]; then
               printf '\n### %s\n\n_(high-risk path — included in full regardless of change size)_\n\n```\n' "$f" >> "$OUT"
-              head -n "$MAX_LINES_PER_FILE" "$f" >> "$OUT"
+              emit_source "$f"
               printf '\n```\n' >> "$OUT"
               continue
             fi
@@ -736,7 +756,7 @@ jobs:
               continue
             fi
             printf '\n### %s\n\n```\n' "$f" >> "$OUT"
-            head -n "$MAX_LINES_PER_FILE" "$f" >> "$OUT"
+            emit_source "$f"
             printf '\n```\n' >> "$OUT"
           done
 
@@ -933,7 +953,9 @@ jobs:
                `src/store/paths.ts` that could escape the data dir.
 
             6. **Failing checks.** If the "Check summary" shows install, typecheck, unit tests,
-               e2e, or the workflow lint failing, that is blocking. Say which one and quote the
+               e2e, the workflow lint or the workflow scripts' `shellcheck` failing, that is
+               blocking — every line of that summary, so a check added later is covered by this
+               item on the day it is added. Say which one and quote the
                relevant output. An `actionlint` failure on a `.github/workflows/*.yml` change is
                especially serious: an Actions-expression error does not degrade the workflow, it
                disables it — every run fails immediately with no jobs and no logs, which reads as

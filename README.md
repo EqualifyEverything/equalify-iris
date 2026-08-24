@@ -764,7 +764,9 @@ What it does, in order:
    check failed is quoted rather than predicted.
 2. Builds a context file: the diff, plus full source for files that are new or substantially
    rewritten, plus up to the 3 most recent prior reviews on **earlier commits of the same PR** —
-   so a re-review knows what it already said instead of repeating it.
+   so a re-review knows what it already said instead of repeating it. Source is capped at 800
+   lines per file and says so where it cuts — an unmarked cut reads as a whole file, and the
+   reviewer then reports as missing what is merely further down.
 3. Reviews against a ranked list: accessibility of the output, upstream side effects and filing
    identity, auth/tokens/secrets, provider routing and cost, correctness, failing checks, missing
    tests, and the PR template's own contract.
