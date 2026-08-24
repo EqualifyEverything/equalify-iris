@@ -99,7 +99,12 @@ const FIELD = new Set(["input", "textarea", "select", "button", "summary"]);
 // Never announced and never transcribed content. Their text was being emitted as
 // content, so injected CSS or JS became free hits in the coverage word sets — the
 // gate would read as *healthier* the more style markup an agent leaked.
-const SILENT = new Set(["style", "script", "template", "noscript"]);
+//
+// Exported because `pipeline/headings.ts` quotes a section's opening words for the
+// Reader and must not quote a leaked stylesheet either. This one IS the same question in
+// both places — is this text content at all — unlike the inline/block split, which each
+// file asks for its own purpose.
+export const SILENT = new Set(["style", "script", "template", "noscript"]);
 
 // An accessible name can come from an attribute rather than from the subtree. A
 // field labelled only by `aria-label` is correct, axe-clean markup, so dropping it

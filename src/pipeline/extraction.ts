@@ -58,8 +58,19 @@ paragraphs, lists, tables with <caption>/<thead>/<th scope>, forms with
 text faithfully and do not invent content: apart from the accessibility scaffolding the rules
 below ask for by name — alt text, a placeholder src for a graphic you cannot embed, a <caption>
 the page does not print, an accessible name on a marker the page prints as a symbol, the ↩ that
-returns from a footnote, a note about irregular numbering held to what the page shows — every word
-you emit is a word on the page. If content is cut off at a page edge, note it in the "log" field.
+returns from a footnote, a note about irregular numbering held to what the page shows, the page's
+own words used to tell two headings it labels alike apart — every word you emit is a word on the
+page. If content is cut off at a page edge, note it in the "log" field.
+
+A landmark names a part of the document, and a page is not one. You are shown one page at a time,
+but a page is a unit of printing rather than a unit of meaning: never wrap what you emit in a
+<section> or other region that stands for the page itself — <section aria-label="Page 6"> announces
+a boundary that exists only because the paper ran out, and it tells a reader moving between regions
+that something begins here which does not. Reach for <section>, <nav> or <aside> where the page
+sets a self-contained part of the document apart — a table of contents is a <nav>, a sidebar or a
+pull-out note an <aside> — and name it from the words the page gives that part, with
+aria-labelledby pointing at its own heading where it has one. Content that is simply the section
+above it continuing needs no wrapper at all.
 
 Eight structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
@@ -77,6 +88,29 @@ Eight structures are easy to render as something that merely looks right, so be 
   top of your page may be a subsection of a heading you cannot see: give it the level this page's
   own evidence supports, and say in the "log" field that it had no preceding heading on the page
   to place it under.
+  Two questions settle most of this before you count anything. What is under the heading: the steps
+  of a procedure belong to the section that procedure's own heading opened, so a step label — Step
+  4, B., Second, however the page names it and however large it sets it — is one level below that
+  heading and never a peer of the section that contains it; and the labels that divide a table of
+  contents into runs of entries (Preparations, Operation, Reference) are headings for the same
+  reason, one level under the contents heading, because each of them heads the entries beneath it.
+  And whether anything is under it at all: a heading names a section, so a line that SAYS something
+  rather than naming something — SAVE THESE INSTRUCTIONS, FOR COMMERCIAL USE ONLY, a stamp or a
+  notice the page sets in bold with nothing subordinate to it — is a <p> (or a <strong> inside one)
+  however prominently it is printed. A heading at the foot of the page with nothing after it is not
+  that case and is kept: its section continues on a page you were not shown, so emit it and say so
+  in the "log" field.
+  Where this page puts two headings of the same level under the same words, they are one section
+  and not two: a section title reprinted above content that continues it does not open a new
+  section, so emit that title once — the reprint is not a heading and is not emitted as one — give
+  what followed it the level its content calls for under the first, and say in the "log" field that
+  you dropped a reprinted title. A title whose FIRST printing is on a page you were not shown is
+  not this case, because you cannot see it: emit the heading your page prints, and say in the "log"
+  field that it opens the page. Where
+  the page really does open two distinct sections with one label, keep the label and extend each
+  with the words that page prints for that section — "Operation: Grinding", not a phrase of your
+  own — so that a reader moving from heading to heading is not told twice that the same subject
+  follows, and say in the "log" field which headings you extended.
 - IMAGES AND ALT TEXT: every <img> carries an alt attribute, and what belongs in it is decided
   by what the picture gives a reader that the words around it do not. An image is decorative —
   alt="" — only where a reader who cannot see it loses nothing: a rule, a border, a flourish, a
