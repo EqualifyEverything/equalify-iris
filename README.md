@@ -850,44 +850,59 @@ fail to refute it. Disagreement is not a tie to be broken — it is the answer, 
 The pair the second session reads is fetched fresh from the API, not taken from the corpus the first
 one was given, and the second session gets no `Glob` or `Grep` — no repository, no corpus, just the
 two issues. Independence has to cover the input, not only the argument: the first session runs first
-and in the same workspace, so anything it could leave on disk is evidence it could choose. Restate
+and in the same workspace, so anything it could leave behind is evidence it could choose. Restate
 issue A's body as a copy of B's and the refutation opens a file in which the two really are
 identical; edit `agents/page.md` and the rule B proposes looks like it is already in the prompt,
-which is the question the refutation turns on. It costs the refutation some accuracy, in the
-direction of refusing to close.
+which is the question the refutation turns on. Neither is reachable now that no session has `Write`,
+but the fresh read stays: it is cheap, and it does not depend on a claim about what the other session
+could touch. Withholding the repository does cost the refutation some accuracy, in the direction of
+refusing to close.
 
 **Neither session can close anything.** Neither has `Bash`, so neither can reach `gh`. Every close,
-label and comment happens in a shell step that reads the two verdict files and the GitHub API, the
-same division as [Scheduled issue triage](#scheduled-issue-triage): the prompt is the layer an
-injected issue body argues with, so the rules live somewhere it cannot reach.
+label and comment happens in a shell step that reads the two verdicts and the GitHub API, the same
+division as [Scheduled issue triage](#scheduled-issue-triage): the prompt is the layer an injected
+issue body argues with, so the rules live somewhere it cannot reach.
 
-`Write` is scoped to `/tmp/triage` on both, which is the only place a verdict file belongs. A
-checkout is not inert — `.git/config` defines filters that any later `git` command executes,
+**Neither session has `Write`, either.** A verdict is the session's structured output — `--json-schema`
+has the runtime validate it and the action publishes it as a step output — so nothing needs to create
+a file and neither session is given the means to. That is worth more than scoping `Write` could be. A
+checkout is not inert: `.git/config` defines filters that any later `git` command executes,
 `agents/*.md` is evidence a later step might read, and a `CLAUDE.md` at the root is project
-instructions for whatever runs next. An earlier version of this workflow ran `git checkout -- .`
-between the sessions to undo writes, which was worse than the problem: `git checkout` applies smudge
-filters, so a filter written into `.git/config` executes during the repair, and the "restored" file
-comes back with whatever the filter returned. A `.git` you do not trust cannot be repaired with
-`git`, because every `git` command reads its config first. Not being able to write there in the first
-place is the version that works.
+instructions for whatever runs next in the same job, which is the refutation. An earlier version of
+this workflow ran `git checkout -- .` between the sessions to undo writes, which was worse than the
+problem: `git checkout` applies smudge filters, so a filter written into `.git/config` executes during
+the repair and the "restored" file comes back with whatever the filter returned. A `.git` you do not
+trust cannot be repaired with `git`, because every `git` command reads its config first. Having no
+`Write` is the version that works — and it retires the two `rm -f`s that used to guard against a
+verdict file left on the runner by an earlier run being read as this one's.
 
-Reading is scoped for the same reason, from the other end. These sessions run in a step holding the
-Bedrock credentials and a token, and the verdict's prose is posted to a public issue comment — so
-whatever a session can read, it can publish. The refutation gets `Read` on `/tmp/triage` and nothing
-else; the find session needs the checkout, so it keeps a broad `Read` with `/proc`, the runner's temp
-directory and `~/.aws` denied, and `Grep` and `Glob` denied the same paths, since a tool that returns
-matching lines is also a way to read a file. `persist-credentials: false` on the checkout keeps the
-token off disk entirely, which costs nothing because no step here runs `git`. Every deny is written
-in both `/x` and `//x` form, because a deny that resolves the wrong way fails *open* and silently,
-where a wrong allow just refuses a write and turns the run red.
+That design replaced one where both sessions wrote verdict files into `/tmp/triage`, and the reason is
+worth recording, because the scoping looked right and was not. **A path-scoped `Write(...)` *allow*
+rule grants nothing** — probed directly: every spelling denied the write, absolute or relative, target
+existing or not, while a bare `Write` succeeded. So the first live run ended with a permission denial
+and no verdict, which `Decide and act` correctly turned into a red run. Deny rules *do* work, probed
+the same way, which is why the reading side below is a broad allow plus denies.
+
+Reading is scoped from the other end. These sessions run in a step holding the Bedrock credentials
+and a token, and the verdict's prose is posted to a public issue comment — so whatever a session can
+read, it can publish. Both get `Read` with `/proc`, `/sys`, the runner's temp directory and `~/.aws`
+denied; the find session also gets `Grep` and `Glob`, denied the same paths, since a tool that returns
+matching lines is also a way to read a file and one that returns only names still says which secrets
+exist and where. The temp-directory deny carries more weight than it looks: that is where the action
+writes its execution log, so it is what keeps "the refutation cannot see the first session's argument"
+a fact about the sandbox rather than a claim about the prompt. `persist-credentials: false` on the
+checkout keeps the token off disk entirely, which costs nothing because no step here runs `git`. Every
+deny is written in both `/x` and `//x` form, because a deny that resolves the wrong way fails *open*
+and silently.
 
 Then `Decide and act` flattens each model-authored prose field to one line, caps it at 600
 characters and redacts it against the live credential values before it can reach a comment. That
 last layer catches verbatim copying and not a re-encoded value — which is why the reading is scoped
 rather than the publishing merely filtered. `verdict` and `confidence` are not sanitized but held to
-their allowed values, which is stronger where it applies: a string outside the enum is not a
-malformed verdict, it is not a verdict, so it is discarded rather than repeated back — and a
-discarded verdict fails the run. Case and space are normalised away first, so a `Duplicate` is not
+their allowed values — twice, once by the schema in the runtime and again in the shell, because a
+control that only holds while the action keeps behaving is not a control. That is stronger than
+sanitizing where it applies: a string outside the enum is not a malformed verdict, it is not a
+verdict, so it is discarded rather than repeated back — and a discarded verdict fails the run. Case and space are normalised away first, so a `Duplicate` is not
 thrown out — a cosmetic slip should not change what a verdict means, and being discarded now costs
 the issue its comment as well. Precisely: the gates accept one *normalised* value, so a mis-cased
 `duplicate` can close, and the normalisation is blunt enough that `dup licate` would too. What that
