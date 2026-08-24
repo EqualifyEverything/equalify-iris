@@ -8,6 +8,7 @@ import { flatten } from "./flatten.ts";
 import { examplesForPrompt } from "./memory.ts";
 import { knownPages, pageIndex, type IndexedPage } from "./pageindex.ts";
 import { droppedHrefs } from "./links.ts";
+import { sameWordedHeadingNote, sameWordedHeadingRuns } from "./headings.ts";
 
 export interface ReviewIssue {
   issue: string;
@@ -81,6 +82,13 @@ heading keeps the label and gains the words that tell it apart — words already
 own content, never a phrase of your own. Do not report two same-level headings that merely share a
 level, or identical headings with other sections in between: what is ambiguous is the pair with
 nothing but its own subject's content between them.
+
+Those pairs are found for you. Where the document has any, a section below lists them, computed
+from the WHOLE document rather than from the HTML you were given — so a heading it names may sit
+outside your excerpt, and is to be reported anyway. Report every entry in that list as an issue,
+and say which of the two cases it is; where the excerpts do not tell you, say that instead of
+choosing. The list decides only that a pair EXISTS: no entry is a false positive to be argued
+with, and finding a pair the list missed is still worth reporting.
 
 Treat a table that reports [0 rows], a [Field ...] with nothing announced after it, and an
 [Image] [alt missing] as evidence of a real problem. Do NOT report these, which are correct
@@ -165,9 +173,20 @@ async function runReader(
 ): Promise<ReviewIssue[]> {
   const issues: ReviewIssue[] = [];
   const index = pages.length ? pageIndex(pages, READER_INDEX_EXCERPT_CHARS) : "";
+  // Computed over the whole body, once, and given to the FIRST chunk only. Both halves
+  // of that matter. Whole-body, because a chunk is a character window and the pair this
+  // finds is a page apart (see sameWordedHeadingRuns). First chunk only, because every
+  // call that receives the list reports it, and the chunks are independent calls — the
+  // same defect would arrive two or three times and be carried to @unresolved that many
+  // times if no editor round cleared it.
+  const duplicateHeadings = sameWordedHeadingNote(sameWordedHeadingRuns(body));
+  let first = true;
   for (const c of chunk(body)) {
     const user =
       `## HTML\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint)}` +
+      (first && duplicateHeadings
+        ? `\n\n## Headings with the same words at the same level, nothing but their own content between them (whole document)\n${duplicateHeadings}`
+        : "") +
       (index ? `\n\n## Source pages in this document (extracted HTML, truncated)\n${index}` : "") +
       feedbackPreamble(ctx) +
       examplesForPrompt(ctx.paths, "page.md", ["a11y_policy"]);
@@ -175,6 +194,7 @@ async function runReader(
       { role: "system", content: READER_SYSTEM },
       { role: "user", content: user },
     ]);
+    first = false;
     ctx.log.agentCall({
       agent: { name: "reader", file: "reader.md", content: READER_SYSTEM, capabilities: ["text"], sha: null, sessionBuilt: false },
       phase: "review",

@@ -74,7 +74,11 @@ Eight structures are easy to render as something that merely looks right, so be 
   in the "log" field.
   Where this page puts two headings of the same level under the same words, they are one section
   and not two: a section title reprinted above content that continues it does not open a new
-  section, so give what follows the second the level its content calls for under the first. Where
+  section, so emit that title once — the reprint is not a heading and is not emitted as one — give
+  what followed it the level its content calls for under the first, and say in the "log" field that
+  you dropped a reprinted title. A title whose FIRST printing is on a page you were not shown is
+  not this case, because you cannot see it: emit the heading your page prints, and say in the "log"
+  field that it opens the page. Where
   the page really does open two distinct sections with one label, keep the label and extend each
   with the words that page prints for that section — "Operation: Grinding", not a phrase of your
   own — so that a reader moving from heading to heading is not told twice that the same subject

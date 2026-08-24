@@ -2,7 +2,12 @@
 // agent cannot see. It is handed one page and no other, so a section title reprinted where
 // the section continues looks exactly like a new section starting, and three <h2>Operation</h2>
 // headings arrive one per call with nothing to compare them against. The defect only exists
-// in the assembled document — which is precisely what the Reader Agent is given.
+// in the assembled document — which the Reader Agent is given, but a chunk at a time:
+// `runReader` sends the body in CHUNK_BUDGET windows, and a reprinted title is a full page
+// of extracted HTML away from its twin, so at some offsets the pair straddles a cut and
+// neither call sees both headings. So finding the pairs is done in code over the whole body
+// (`sameWordedHeadingRuns`) and handed to the Reader, which is left with the part that needs
+// judgement: which of the two cases a pair is, and which pages it is on.
 //
 // Nothing else in the pipeline reaches it either. axe (src/pipeline/lint.ts) reports a
 // SKIPPED level and says nothing about two headings at the same level with the same words,
@@ -15,7 +20,13 @@
 // ships with the defect the user reported.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { READER_SYSTEM, EDITOR_SYSTEM } from "../src/pipeline/review.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { READER_SYSTEM, EDITOR_SYSTEM, runReview } from "../src/pipeline/review.ts";
+import { sameWordedHeadingNote, sameWordedHeadingRuns } from "../src/pipeline/headings.ts";
+import type { PipelineContext } from "../src/pipeline/context.ts";
+import type { Paths } from "../src/store/paths.ts";
 
 // The prompts wrap for reading, so the clauses are matched on words rather than bytes —
 // reflowing a paragraph must not fail a test whose subject is what the paragraph says.
@@ -56,6 +67,14 @@ test("the Reader is told to find the duplicate-heading pair and say which case i
       /Do not report two same-level headings that merely share a level/],
     ["identical headings with other sections between them are not reported",
       /identical headings with other sections in between/],
+    // The prompt has to describe the computed section the code sends, or the Reader treats
+    // a list of headings it cannot find in its own excerpt as noise.
+    ["the computed list is announced, and announced as covering the whole document",
+      /a section below lists them, computed from the WHOLE document rather than from the HTML you were given/],
+    ["a heading the list names but the excerpt does not contain is still reported",
+      /a heading it names may sit outside your excerpt, and is to be reported anyway/],
+    ["entries are not argued with, and a pair the list missed is still worth reporting",
+      /no entry is a false positive to be argued with, and finding a pair the list missed is still worth reporting/],
   ] as [string, RegExp][]) {
     assert.match(reader, re, `READER_SYSTEM no longer says: ${what}`);
   }
@@ -102,4 +121,153 @@ test("the Reader's two cases are both cases the editor can act on", () => {
     assert.match(reader, inReader, `READER_SYSTEM stopped reporting ${what}`);
     assert.match(editor, inEditor, `EDITOR_SYSTEM stopped resolving ${what} — the Reader still reports it`);
   }
+});
+
+// --- the finding half, in code -----------------------------------------------
+
+const runs = (body: string) =>
+  sameWordedHeadingRuns(body).map((r) => `h${r.level}:${r.text}:${r.count}`);
+
+test("two same-level headings with the same words and only their own content between them", () => {
+  // #119 as reported, in miniature: the second [Heading 2] Operation tells a reader
+  // navigating by heading that the same subject follows.
+  assert.deepEqual(
+    runs("<h2>Operation</h2><p>Fill the hopper.</p><h2>Operation</h2><p>Press start.</p>"),
+    ["h2:Operation:2"],
+  );
+});
+
+test("a subsection between them is their own content, not another section", () => {
+  // This is what a reprinted title looks like once the pages are joined (#111): the
+  // page's own subsections sit under the first heading, then the title comes again.
+  assert.deepEqual(
+    runs("<h2>Controls</h2><h3>Top</h3><p>a</p><h2>Controls</h2><h3>Rear</h3><p>b</p>"),
+    ["h2:Controls:2"],
+  );
+});
+
+test("a run of three is reported once, with its length", () => {
+  // The user's report was three <h2>Operation</h2> headings. Two overlapping pairs
+  // would have the Reader raise the same defect twice and the editor resolve it in two
+  // rounds, out of a budget of a few.
+  assert.deepEqual(runs("<h2>Op</h2><p>a</p><h2>Op</h2><p>b</p><h2>Op</h2><p>c</p>"), ["h2:Op:3"]);
+});
+
+test("another section in between is not the ambiguous case", () => {
+  // Deliberate bound, and the guard READER_SYSTEM states: the intervening section tells
+  // a reader the two headings are different places in the document. Widening this to
+  // every same-worded heading in a manual would send the editor merging or renaming
+  // sections that were never ambiguous.
+  assert.deepEqual(runs("<h2>Op</h2><p>a</p><h2>Care</h2><p>b</p><h2>Op</h2><p>c</p>"), []);
+});
+
+test("headings at different levels are not a pair, however alike their words", () => {
+  // <h1>Operation</h1> followed by <h2>Operation</h2> is a section and its first
+  // subsection sharing a name — read in order it is unambiguous, and it is also what
+  // the page prompt's own "step one level down" rule produces.
+  assert.deepEqual(runs("<h1>Operation</h1><h2>Operation</h2><p>a</p>"), []);
+});
+
+test("case and trailing punctuation do not make two headings different", () => {
+  // A page that sets a running title in capitals and reprints it in title case is
+  // reprinting it, and a colon is a typographic choice about the same words.
+  assert.deepEqual(
+    runs("<h2>OPERATION:</h2><p>a</p><h2>Operation</h2><p>b</p>"),
+    ["h2:OPERATION::2"],
+    "reported with the text as first printed, since that is what is matched against page excerpts",
+  );
+});
+
+test("markup inside a heading is read as the words it announces", () => {
+  assert.deepEqual(
+    runs("<h2>Care <em>and</em> cleaning</h2><p>a</p><h2>Care and cleaning</h2><p>b</p>"),
+    ["h2:Care and cleaning:2"],
+  );
+});
+
+test("two empty headings are a different defect and are not reported as a pair", () => {
+  // An <h2></h2> announces nothing; two of them are not two sections a reader confuses,
+  // they are markup axe already reports (empty-heading). Reporting them here would put
+  // an entry in the list the Reader is told is never a false positive.
+  assert.deepEqual(runs("<h2></h2><p>a</p><h2>  </h2><p>b</p>"), []);
+});
+
+test("a body with no headings, and one with no repeats, produce no list at all", () => {
+  assert.deepEqual(runs("<p>Just prose.</p>"), []);
+  assert.deepEqual(runs("<h2>One</h2><p>a</p><h2>Two</h2><p>b</p>"), []);
+  assert.equal(sameWordedHeadingNote([]), null, "the section is omitted rather than asserting an absence");
+});
+
+test("the list quotes the heading and says how many, and says when it is truncated", () => {
+  const note = sameWordedHeadingNote([
+    { level: 2, text: "Operation", count: 3 },
+    { level: 3, text: "Cleaning", count: 2 },
+  ])!;
+  assert.match(note, /\[Heading 2\] "Operation" \(3 of them\)/);
+  assert.match(note, /\[Heading 3\] "Cleaning"$/m, "a plain pair needs no count");
+
+  // A silent cap reads as "these are all of them" to whoever acts on the list.
+  const many = Array.from({ length: 20 }, (_, i) => ({ level: 2, text: `Section ${i}`, count: 2 }));
+  const capped = sameWordedHeadingNote(many)!;
+  assert.match(capped, /and 8 more, not listed here/);
+});
+
+test("a body that cannot be parsed costs the list, not the review", () => {
+  // The list is an aid to a rule the Reader has anyway. Returning [] here keeps a
+  // pathological body from ending a review that would otherwise have run.
+  assert.deepEqual(runs(""), []);
+});
+
+// --- the seam between the code and the prompt --------------------------------
+
+// The list is computed over the whole body but the Reader is called per chunk, so two
+// things have to be true at once and neither is visible from the prompt text: the section
+// has to reach the Reader, and it has to reach it ONCE. Chunk calls are independent, so a
+// list given to all of them yields the same finding two or three times — carried to
+// `unresolved` that many times if no editor round clears it.
+async function readerPrompts(body: string): Promise<string[]> {
+  const dir = mkdtempSync(join(tmpdir(), "iris-headings-"));
+  try {
+    const prompts: string[] = [];
+    const ctx = {
+      sessionId: "ses_test",
+      images: [],
+      maxReviewIterations: 0,
+      extractionConcurrency: 4,
+      paths: {
+        agentsDir: join(dir, "agents"),
+        tmpAgentsDir: () => join(dir, "tmp-agents"),
+        agentMemory: () => join(dir, "memory", "page.json"),
+      } as unknown as Paths,
+      router: {
+        complete: async (agent: string, _cap: string, messages: { content: string }[]) => {
+          if (agent === "reader") prompts.push(messages.map((m) => m.content).join("\n"));
+          return { text: JSON.stringify({ issues: [] }) };
+        },
+      },
+      log: { event: () => {}, agentCall: () => {} },
+    } as unknown as PipelineContext;
+    await runReview(ctx, { body, lint: { ok: true, violations: [] } });
+    return prompts;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("the Reader is handed the computed list, once, however many chunks the body takes", async () => {
+  // Two same-worded <h2>s a long way apart: 40k of filler between them puts them in
+  // different CHUNK_BUDGET (24000) windows, which is the case that was previously
+  // undetectable no matter what the prompt said.
+  const filler = "<p>Fill the hopper and press start.</p>".repeat(1100);
+  const prompts = await readerPrompts(`<h2>Operation</h2>${filler}<h2>Operation</h2><p>end</p>`);
+  assert.ok(prompts.length > 1, "the body must actually span more than one chunk for this to prove anything");
+  const withList = prompts.filter((p) => /Headings with the same words at the same level/.test(p));
+  assert.equal(withList.length, 1, "the list belongs to exactly one call, or the same finding arrives twice");
+  assert.match(withList[0], /\[Heading 2\] "Operation"/);
+});
+
+test("a clean document is not sent a section saying there is nothing", async () => {
+  const prompts = await readerPrompts("<h1>Report</h1><h2>One</h2><p>a</p><h2>Two</h2><p>b</p>");
+  assert.equal(prompts.length, 1);
+  assert.doesNotMatch(prompts[0], /Headings with the same words/);
 });
