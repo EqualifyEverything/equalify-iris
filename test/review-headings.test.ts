@@ -448,6 +448,40 @@ test("the opening quotes content and not a leaked stylesheet", () => {
   assert.equal(nested[0].opening, "Turn the dial.");
 });
 
+test("a section that opens with a symbol is not reported as having nothing under it", () => {
+  // "with nothing under it" is an affirmative claim, so it has to be true. A scanned warning
+  // page whose content is a pictogram and its alt text is an ordinary shape, and its words
+  // are in an attribute rather than a text node (issue #111's manuals are full of them).
+  const wrapped = sameWordedHeadingRuns(
+    '<h2>Warning</h2><p><img alt="Do not immerse in water"></p><h2>Warning</h2><p>t</p>',
+  );
+  assert.equal(wrapped[0].opening, "Do not immerse in water");
+
+  const bare = sameWordedHeadingRuns(
+    '<h2>Warning</h2><img alt="Do not immerse in water"><h2>Warning</h2><p>t</p>',
+  );
+  assert.equal(bare[0].opening, "Do not immerse in water");
+
+  // Decorative means unannounced, so an empty alt stays empty rather than falling through
+  // to some other attribute.
+  const decorative = sameWordedHeadingRuns('<h2>Op</h2><p><img alt=""></p><h2>Op</h2><p>t</p>');
+  assert.equal(decorative[0].opening, "");
+
+  // And an element whose subtree DID say something keeps its own words: a title attribute
+  // is a fallback for silence, not an addition to speech.
+  const titled = sameWordedHeadingRuns(
+    '<h2>Op</h2><p><a title="Manual" href="#">Read this</a></p><h2>Op</h2><p>t</p>',
+  );
+  assert.equal(titled[0].opening, "Read this");
+});
+
+test("words the extractor left unwrapped are still the section's opening words", () => {
+  // A paragraph that never got a <p> is a bare text node under the body, and walking only
+  // element siblings skipped it — reporting "nothing under it" about a section with content.
+  const runs = sameWordedHeadingRuns("<h2>Op</h2>Loose text under it.<h2>Op</h2><p>t</p>");
+  assert.equal(runs[0].opening, "Loose text under it.");
+});
+
 test("a twin wrapped in its own section does not lend its words to an empty one", () => {
   // The run finder flattens the tree, so these two headings are a pair; the second is not
   // a SIBLING of the first, so stopping only at sibling headings would quote the wrapped

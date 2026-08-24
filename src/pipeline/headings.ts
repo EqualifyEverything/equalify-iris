@@ -40,7 +40,8 @@ export interface HeadingRun {
   // repeat when the outline does. `after` alone still collides on the doubled version of
   // #111's shape (a reprinted running title AND a reprinted subsection header: both <h3>
   // runs follow an <h2> called the same thing), and the content under two different
-  // sections is what actually differs. Empty when the heading is followed by nothing.
+  // sections is what actually differs. Empty when nothing announced follows the heading —
+  // which the note states outright, so it must mean that and not "nothing this walk saw".
   opening: string;
 }
 
@@ -73,10 +74,10 @@ function key(text: string): string {
 
 const textOf = (el: Element): string => (el.textContent ?? "").replace(/\s+/g, " ").trim();
 
-// The words a heading's own section opens with: the text after it, in document order, up
+// The words a heading's own section opens with: what follows it, in document order, up
 // to the next heading, capped.
 //
-// Three things it must not do, all of which read as a distinct entry while being nothing of
+// Four things it must not do, all of which read as a distinct entry while being nothing of
 // the kind.
 //
 // It must not run separate segments together. `el.textContent` on a spec table gives
@@ -92,9 +93,32 @@ const textOf = (el: Element): string => (el.textContent ?? "").replace(/\s+/g, "
 // <section> is not a sibling, while the run finder flattens the tree and pairs them anyway,
 // so a heading with an empty section would otherwise be quoted its twin's content.
 //
+// It must not miss words that are not in a text node. A section can open with a symbol and
+// its alt text, or with a labelled control, and a scanned warning page often does; taking
+// only text nodes reported "with nothing under it" about a section that says "Do not immerse
+// in water". Which is worse than a collision, because it is an assertion. An element's own
+// `alt`/`aria-label`/`title` is used only where its subtree said nothing, so a titled link
+// still reads as its own words; `alt=""` stays empty, as decorative means unannounced.
+//
 // And it must not quote what is never announced. SILENT is flatten's, for the same reason
 // it exists there: leaked CSS is not content, and reading it as content flatters whatever
 // is being measured.
+const attributeName = (e: Element): string =>
+  e.getAttribute("alt") ?? e.getAttribute("aria-label") ?? e.getAttribute("title") ?? "";
+
+// True when this element is, or contains, the heading that ends the walk.
+function segment(e: Element, out: string[]): boolean {
+  const tag = e.tagName.toLowerCase();
+  if (/^h[1-6]$/.test(tag)) return true;
+  if (SILENT.has(tag)) return false;
+  out.push(" ");
+  const at = out.length;
+  const stop = textUpToHeading(e, out);
+  if (!stop && !out.slice(at).join("").trim()) out.push(attributeName(e));
+  out.push(" ");
+  return stop;
+}
+
 function textUpToHeading(el: Element, out: string[]): boolean {
   for (const child of el.childNodes) {
     if (child.nodeType === TEXT) {
@@ -102,13 +126,7 @@ function textUpToHeading(el: Element, out: string[]): boolean {
       continue;
     }
     if (child.nodeType !== ELEMENT) continue;
-    const e = child as Element;
-    const tag = e.tagName.toLowerCase();
-    if (/^h[1-6]$/.test(tag)) return true;
-    if (SILENT.has(tag)) continue;
-    out.push(" ");
-    if (textUpToHeading(e, out)) return true;
-    out.push(" ");
+    if (segment(child as Element, out)) return true;
   }
   return false;
 }
@@ -117,12 +135,15 @@ function openingAfter(el: Element): string {
   const out: string[] = [];
   const collapsed = () => out.join("").replace(/\s+/g, " ").trim();
   try {
-    for (let next = el.nextElementSibling; next; next = next.nextElementSibling) {
-      const tag = next.tagName.toLowerCase();
-      if (/^h[1-6]$/.test(tag)) break;
-      if (SILENT.has(tag)) continue;
-      out.push(" ");
-      if (textUpToHeading(next, out)) break;
+    // Sibling NODES, not sibling elements: a paragraph the extractor never wrapped is a bare
+    // text node under the body, and it is still the words that section opens with.
+    for (let next = el.nextSibling; next; next = next.nextSibling) {
+      if (next.nodeType === TEXT) {
+        out.push(next.nodeValue ?? "");
+        continue;
+      }
+      if (next.nodeType !== ELEMENT) continue;
+      if (segment(next as Element, out)) break;
       if (collapsed().length >= MAX_OPENING) break;
     }
   } catch {
