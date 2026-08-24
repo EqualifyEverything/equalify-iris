@@ -496,6 +496,21 @@ test("a tooltip on a container is not words the section opens with", () => {
   assert.equal(field[0].opening, "Serial number");
 });
 
+test("a field labelled only by its placeholder or value is not reported as nothing", () => {
+  // A placeholder used as a label is itself a defect the Reader is told to report, so a
+  // section holding one is the last to assert is empty. flatten reads the same attributes
+  // for the same reason, and the words — not its [Field] marker — are what must match.
+  for (const [markup, words] of [
+    ['<input type="text" placeholder="Serial number">', "Serial number"],
+    ['<input type="submit" value="Start grinding">', "Start grinding"],
+    ['<input type="text" placeholder="e.g. 12345" value="99">', "e.g. 12345 99"],
+  ] as [string, string][]) {
+    const runs = sameWordedHeadingRuns(`<h2>Op</h2><p>${markup}</p><h2>Op</h2><p>t</p>`);
+    assert.equal(runs[0].opening, words, markup);
+    assert.ok(flatten(`<p>${markup}</p>`).includes(words), `flatten agrees on the words: ${markup}`);
+  }
+});
+
 test("an image with no alt at all is not reported as nothing", () => {
   // "with nothing under it" would be an assertion of emptiness about precisely the section
   // the pipeline has a finding about. A missing alt is not the same as alt="": the second

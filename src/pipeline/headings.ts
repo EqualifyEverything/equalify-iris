@@ -112,6 +112,13 @@ const NAMED_BY_ATTRIBUTE = new Set([
   "object", "embed", "audio", "video",
 ]);
 
+// A control can be labelled by more than an `aria-label`, and a page that labels a field
+// with its placeholder alone is a defect the Reader is told to report — so that is the last
+// section to assert is empty. flatten reads the same list for the same reason
+// (`fieldText`), so these are the words the entry and the page view will agree on.
+const FIELD_NAME_ATTRIBUTES = ["aria-label", "title", "placeholder", "value"];
+const FIELD = new Set(["input", "textarea", "select", "button"]);
+
 // An image with no `alt` at all is not the same as `alt=""`: the first is a defect the
 // pipeline reports, the second is correct markup for a decoration. Both announce no words,
 // so both would render as ", with nothing under it" — an assertion of emptiness about
@@ -129,6 +136,9 @@ function announced(e: Element, tag: string): string {
     // `alt=""` is decorative, so it stays empty rather than falling through to a tooltip.
     if (alt !== null) return alt.trim();
     return attributeName(e) || IMAGE_UNNAMED;
+  }
+  if (FIELD.has(tag)) {
+    return FIELD_NAME_ATTRIBUTES.map((a) => e.getAttribute(a) ?? "").filter(Boolean).join(" ");
   }
   return NAMED_BY_ATTRIBUTE.has(tag) ? attributeName(e) : "";
 }
