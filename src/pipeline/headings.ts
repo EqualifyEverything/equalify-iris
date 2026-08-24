@@ -96,15 +96,42 @@ const textOf = (el: Element): string => (el.textContent ?? "").replace(/\s+/g, "
 // It must not miss words that are not in a text node. A section can open with a symbol and
 // its alt text, or with a labelled control, and a scanned warning page often does; taking
 // only text nodes reported "with nothing under it" about a section that says "Do not immerse
-// in water". Which is worse than a collision, because it is an assertion. An element's own
-// `alt`/`aria-label`/`title` is used only where its subtree said nothing, so a titled link
-// still reads as its own words; `alt=""` stays empty, as decorative means unannounced.
+// in water". Which is worse than a collision, because it is an assertion.
 //
-// And it must not quote what is never announced. SILENT is flatten's, for the same reason
-// it exists there: leaked CSS is not content, and reading it as content flatters whatever
-// is being measured.
+// And it must not quote what is never announced — of which a leaked stylesheet is only the
+// loudest case. SILENT is flatten's, for the same reason it exists there: reading CSS as
+// content flatters whatever is being measured. A `title` is the quiet case: on an image or a
+// field it is the name a reader hears, on a bare <div> it is a mouse tooltip and nothing
+// hears it, so only the elements that take their name from an attribute are asked for one.
+// And only where their subtree said nothing, so a titled link still reads as its own words.
+
+// Which elements those are. Narrower than "anything with the attribute" for the reason
+// above, and it deliberately does not include the containers a page wraps things in.
+const NAMED_BY_ATTRIBUTE = new Set([
+  "img", "area", "input", "textarea", "select", "button", "a", "iframe", "svg",
+  "object", "embed", "audio", "video",
+]);
+
+// An image with no `alt` at all is not the same as `alt=""`: the first is a defect the
+// pipeline reports, the second is correct markup for a decoration. Both announce no words,
+// so both would render as ", with nothing under it" — an assertion of emptiness about
+// precisely the section a finding is about. This is flatten's wording, deliberately: the
+// Reader sees both views and they should not describe the same image two ways.
+const IMAGE_UNNAMED = "[Image] [alt missing]";
+
 const attributeName = (e: Element): string =>
-  e.getAttribute("alt") ?? e.getAttribute("aria-label") ?? e.getAttribute("title") ?? "";
+  e.getAttribute("aria-label") ?? e.getAttribute("title") ?? "";
+
+// The words an element announces on its own account, when its subtree announced none.
+function announced(e: Element, tag: string): string {
+  if (tag === "img") {
+    const alt = e.getAttribute("alt");
+    // `alt=""` is decorative, so it stays empty rather than falling through to a tooltip.
+    if (alt !== null) return alt.trim();
+    return attributeName(e) || IMAGE_UNNAMED;
+  }
+  return NAMED_BY_ATTRIBUTE.has(tag) ? attributeName(e) : "";
+}
 
 // True when this element is, or contains, the heading that ends the walk.
 function segment(e: Element, out: string[]): boolean {
@@ -114,7 +141,7 @@ function segment(e: Element, out: string[]): boolean {
   out.push(" ");
   const at = out.length;
   const stop = textUpToHeading(e, out);
-  if (!stop && !out.slice(at).join("").trim()) out.push(attributeName(e));
+  if (!stop && !out.slice(at).join("").trim()) out.push(announced(e, tag));
   out.push(" ");
   return stop;
 }

@@ -25,6 +25,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { READER_SYSTEM, EDITOR_SYSTEM, runReview } from "../src/pipeline/review.ts";
 import { sameWordedHeadingNote, sameWordedHeadingRuns } from "../src/pipeline/headings.ts";
+import { flatten } from "../src/pipeline/flatten.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 
@@ -473,6 +474,46 @@ test("a section that opens with a symbol is not reported as having nothing under
     '<h2>Op</h2><p><a title="Manual" href="#">Read this</a></p><h2>Op</h2><p>t</p>',
   );
   assert.equal(titled[0].opening, "Read this");
+});
+
+test("a tooltip on a container is not words the section opens with", () => {
+  // The fallback exists because an attribute can hold what a reader hears. On a bare <div>
+  // or <span> a `title` is a mouse tooltip and nothing hears it, so quoting it would put
+  // words in the opening that appear nowhere in the page the Reader is matching against.
+  const div = sameWordedHeadingRuns(
+    '<h2>Op</h2><div title="tooltip only"></div><p>Real words.</p><h2>Op</h2><p>t</p>',
+  );
+  assert.equal(div[0].opening, "Real words.");
+  const span = sameWordedHeadingRuns(
+    '<h2>Op</h2><span title="hint"></span><p>Words.</p><h2>Op</h2><p>t</p>',
+  );
+  assert.equal(span[0].opening, "Words.");
+
+  // A field, by contrast, takes its name from exactly there.
+  const field = sameWordedHeadingRuns(
+    '<h2>Op</h2><p><input aria-label="Serial number"></p><h2>Op</h2><p>t</p>',
+  );
+  assert.equal(field[0].opening, "Serial number");
+});
+
+test("an image with no alt at all is not reported as nothing", () => {
+  // "with nothing under it" would be an assertion of emptiness about precisely the section
+  // the pipeline has a finding about. A missing alt is not the same as alt="": the second
+  // announces nothing on purpose, so it stays empty.
+  const missing = sameWordedHeadingRuns('<h2>Op</h2><p><img src="x.png"></p><h2>Op</h2><p>t</p>');
+  assert.equal(missing[0].opening, "[Image] [alt missing]");
+  // And the wording is flatten's, so the Reader — which sees both views — is not given two
+  // descriptions of one image. This assertion is what keeps the two in step.
+  assert.match(flatten('<p><img src="x.png"></p>'), /\[Image\] \[alt missing\]/);
+
+  const decorative = sameWordedHeadingRuns('<h2>Op</h2><p><img alt=""></p><h2>Op</h2><p>t</p>');
+  assert.equal(decorative[0].opening, "");
+
+  // With no alt, the name a reader hears is the aria-label or title, as flatten reads it too.
+  const named = sameWordedHeadingRuns(
+    '<h2>Op</h2><p><img src="x.png" title="Diagram"></p><h2>Op</h2><p>t</p>',
+  );
+  assert.equal(named[0].opening, "Diagram");
 });
 
 test("words the extractor left unwrapped are still the section's opening words", () => {
