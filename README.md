@@ -850,15 +850,16 @@ argues with, so the rules live somewhere it cannot reach.
   `issue-<n>` branch fragment, the same two precise signals used for ranking.
 - **An issue with human discussion never closes.** A comment from anyone who is not the filer and
   not a bot means a person engaged with it.
-- **`no-auto-close` is an unconditional veto**, and the only guard a manual `force` dispatch does
-  not override. The label does not exist in the repo yet; an absent label matches nothing.
+- **`no-auto-close` is an unconditional veto.** No dispatch input overrides it — a manual `force`
+  bypasses only the record of an earlier triage, nothing about the issue itself. The label does not
+  exist in the repo yet; an absent label matches nothing.
 
-Every one of those is checked twice — once in the preflight, so an ineligible issue costs no model
-call at all, and once after both sessions, because a PR or a comment can land inside the minutes
-they take and that is exactly when closing does the most damage. A read that *fails* counts as a
-blocker rather than as a clean bill of health: `gh` prints API error bodies to stdout, so a check
-that treated an unreadable answer as an empty one would be reading `{"message":"Not Found"}` as
-"nobody has commented".
+The last three are checked twice — once in the preflight, so an ineligible issue costs no model call
+at all, and again after both sessions, because a PR, a reply or a label can land inside the minutes
+they take and that is exactly when closing does the most damage. The first rule needs a verdict to
+check, so it is only checked after. A read that *fails* counts as a blocker rather than as a clean
+bill of health: `gh` prints API error bodies to stdout, so a check that treated an unreadable answer
+as an empty one would be reading `{"message":"Not Found"}` as "nobody has commented".
 
 A close also applies the `duplicate` label, which is what takes the issue out of
 [Scheduled issue triage](#scheduled-issue-triage)'s candidate list — that workflow reads labels,

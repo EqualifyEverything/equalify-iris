@@ -57,9 +57,15 @@ name: Issue Triage
 #   3. **An issue with human discussion never closes.** A comment from anyone who
 #      is not the filer and not a bot means a person engaged with it. Auto-closing
 #      over that is how an automation gets muted.
-#   4. **`no-auto-close` is an unconditional veto.** The label does not exist in
-#      the repo yet; an absent label matches nothing, so it costs nothing until
-#      someone creates it.
+#   4. **`no-auto-close` is an unconditional veto.** No dispatch input overrides
+#      it; `force` bypasses only the already-triaged marker. The label does not
+#      exist in the repo yet, and an absent label matches nothing, so it costs
+#      nothing until someone creates it.
+#
+# Rules 2, 3 and 4 are checked twice: in the preflight, so an ineligible issue
+# costs no model call, and again in `Decide and act`, because a pull request, a
+# reply or a label can land inside the minutes the two sessions take — which is
+# precisely when closing the issue does the most damage.
 #
 # Closing is reversible and this workflow says so on the issue — "reopen it and
 # say why" is in the comment it posts. That is why closing is an acceptable
@@ -116,15 +122,25 @@ on:
         type: boolean
         default: false
 
-# One at a time, repo-wide — not per-issue. Two concurrent runs would each read a
-# corpus that does not yet contain the other's decision, which is the one way rule
-# 1 above can be defeated: both runs see an open counterpart and both act on it.
-# Serialising means the second run reads the first one's close.
+# Per issue, not repo-wide. A repo-wide group serialises the whole tracker
+# through one lane, and because Actions keeps at most one pending run per group,
+# a burst — which is the normal case here, since Iris files proposals in batches
+# — would silently drop every run but the last queued one. Issues would go
+# untriaged with nothing anywhere saying so, which is the failure mode this
+# workflow is least able to notice.
+#
+# Serialising repo-wide was for rule 1: two concurrent runs each read a corpus
+# without the other's decision, so both could close their counterpart and the
+# tracker would lose the pair. Per-issue groups keep that closed for a different
+# reason, and a sturdier one — only the newer issue of a pair may close, so of
+# any two concurrent runs at most one is even eligible, whatever order they read
+# in. The recheck in `Decide and act` covers the rest: an issue whose canonical
+# has been closed underneath it does not close.
 #
 # cancel-in-progress is false because a cancelled run can leave an issue closed
 # with no explanatory comment on it, which is worse than a slow queue.
 concurrency:
-  group: issue-triage
+  group: issue-triage-${{ github.event.issue.number || inputs.issue_number }}
   cancel-in-progress: false
 
 jobs:
@@ -236,11 +252,13 @@ jobs:
           fi
 
           # --- Guard: explicit opt-out --------------------------------------
-          # An unconditional veto, and the only guard `force` does not override:
-          # force means "you were wrong about the marker", not "ignore what a
-          # maintainer wrote on the issue". `duplicate` is here too — an issue
-          # already marked as one has been judged, by a person or by a previous
-          # run, and re-deciding it is not this workflow's business.
+          # An unconditional veto. `force` does not reach it — `force` overrides
+          # exactly one thing, the already-triaged marker check above, and nothing
+          # else in this file consults it. It means "you were wrong about the
+          # marker", not "ignore what a maintainer wrote on the issue", and there
+          # is deliberately no input that means the second. `duplicate` is here
+          # too: an issue already marked as one has been judged, by a person or by
+          # a previous run, and re-deciding it is not this workflow's business.
           VETO=$(jq -r '[.labels[].name] | map(select(. == "no-auto-close" or . == "duplicate")) | join(", ")' \
             /tmp/triage/target.json)
           if [ -n "$VETO" ]; then
@@ -284,7 +302,7 @@ jobs:
             $1 == "" || $1 == filer { next }
             $1 ~ /\[bot\]$/ { next }
             $1 == "Rogue-Git-Dev" { next }
-            { print $1 }' /tmp/triage/target-comments.tsv | sort -u | tr '\n' ' ')
+            { print $1 }' /tmp/triage/target-comments.tsv | sort -u | paste -sd' ' -)
           echo "human_commenters=$HUMAN_COMMENTERS" >> "$GITHUB_OUTPUT"
 
           if [ -n "$CLAIMED_BY" ] || [ -n "$HUMAN_COMMENTERS" ]; then
@@ -337,6 +355,15 @@ jobs:
         run: |
           set -euo pipefail
           OUT=/tmp/triage/context.md
+
+          # Both verdict files, gone before either session could write one. A
+          # runner is normally clean, but self-hosted runners and reruns are not
+          # guaranteed to be, and every gate in `Decide and act` reads these files
+          # rather than the sessions themselves — so a leftover `find.json` from an
+          # earlier run is a verdict about a different issue that this run would
+          # enforce as its own. The failure is silent and it fails toward closing,
+          # which is the only direction that matters here.
+          rm -f /tmp/triage/find.json /tmp/triage/refute.json
 
           {
             echo "# Duplicate-triage context"
@@ -572,6 +599,16 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Cleared again, immediately before the session that writes it. The
+          # corpus step already did this, but that step runs only when
+          # `should_run` is true and this one is `always()`, and the file this
+          # removes is the one thing standing between "the refutation session did
+          # not run" and a close. A `refute.json` left over from an earlier run
+          # would be read as this pair's refutation, and if it happened to say
+          # `refuted: false` the close would proceed on a verdict about two other
+          # issues. One line, and it removes the whole class.
+          rm -f /tmp/triage/refute.json
+
           # Only a `duplicate` claim is worth refuting. `related` and `distinct`
           # both end at "leave it open", which is what happens anyway if the
           # second session is skipped, so spending a session to confirm a
@@ -590,12 +627,19 @@ jobs:
             exit 0
           fi
 
+          # Read into shell variables and deliberately NOT published as step
+          # outputs. They were, and nothing ever consumed them — `Decide and act`
+          # re-reads find.json itself, which is the only read that should be
+          # trusted. Dead outputs would be harmless if the values were ours, but
+          # `verdict` and `confidence` are strings the model wrote: an embedded
+          # newline in `$GITHUB_OUTPUT` starts a new `key=value` line, so a body
+          # that talked the find session into a two-line `confidence` could append
+          # `refute=true` and claim a refutation that never ran. Writing nothing
+          # removes the vector outright rather than escaping around it, and the
+          # only output this step still sets is the one below, from a literal.
           VERDICT=$(jq -r '.verdict // ""' "$FIND")
           CANONICAL=$(jq -r 'if (.canonical | type) == "number" then .canonical else "" end' "$FIND")
           CONFIDENCE=$(jq -r '.confidence // ""' "$FIND")
-          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
-          echo "canonical=$CANONICAL" >> "$GITHUB_OUTPUT"
-          echo "confidence=$CONFIDENCE" >> "$GITHUB_OUTPUT"
 
           [ "$VERDICT" = "duplicate" ] || { echo "verdict is '$VERDICT' — no refutation needed."; exit 0; }
           [ "$CONFIDENCE" = "high" ] || { echo "confidence is '$CONFIDENCE' — cannot close on it, no refutation needed."; exit 0; }
@@ -823,7 +867,8 @@ jobs:
           # depends on the check, and one of them broke silently in the permissive
           # direction, so all of them now read the same way: a failed read is not a
           # clean bill of health, it is a blocker. An issue this step cannot
-          # confirm is open, unclaimed and unlabelled does not get closed.
+          # confirm is open, unclaimed, unlabelled and unanswered does not get
+          # closed.
           #
           # The reads are also two commands each rather than one, because
           # `gh --jq` takes no `--argjson`.
@@ -842,9 +887,11 @@ jobs:
             add_blocker "the open pull requests could not be re-read, so it is unknown whether one now claims this issue"
           fi
 
-          if gh issue view "$TARGET" --json state,labels > /tmp/triage/target-now.json 2>/dev/null \
+          RECHECK_FILER=""
+          if gh issue view "$TARGET" --json state,labels,author > /tmp/triage/target-now.json 2>/dev/null \
              && jq -e 'has("state")' /tmp/triage/target-now.json >/dev/null 2>&1; then
             RECHECK_STATE=$(jq -r '.state' /tmp/triage/target-now.json)
+            RECHECK_FILER=$(jq -r '.author.login // ""' /tmp/triage/target-now.json)
             RECHECK_LABELS=$(jq -r '[.labels[].name]
               | map(select(. == "no-auto-close" or . == "duplicate")) | join(", ")' \
               /tmp/triage/target-now.json)
@@ -852,6 +899,36 @@ jobs:
             [ -z "$RECHECK_LABELS" ] || add_blocker "the issue now carries \`$RECHECK_LABELS\`"
           else
             add_blocker "issue #$TARGET could not be re-read to confirm it is still open and unlabelled"
+          fi
+
+          # Rule 3, re-checked here and not only in the preflight — and this one
+          # matters more than the symmetry does, because it is the assertion the
+          # close comment makes on the issue itself. Checked only in the preflight,
+          # "nobody has replied to it" was a statement about a read taken *before*
+          # two model sessions ran, and the minutes those sessions take are exactly
+          # when somebody answers a freshly-filed issue. A reply landing in that
+          # window is a person engaging with the report, which is the case rule 3
+          # exists for; closing over it is how an automation gets muted.
+          #
+          # Same failure posture as the reads above: a comment list this step
+          # cannot read blocks the close rather than passing it. The filer comes
+          # from the re-read, so if that read failed `$RECHECK_FILER` is empty, no
+          # login is excluded, and the filer's own follow-up blocks too — the
+          # cautious direction, which is the one to fail in.
+          if gh api "repos/${{ github.repository }}/issues/$TARGET/comments" --paginate \
+               --jq '.[] | [(.user.login // ""), (.body // "")] | @tsv' \
+               > /tmp/triage/target-comments-now.tsv 2>/dev/null; then
+            RECHECK_COMMENTERS=$(awk -F'\t' -v filer="$RECHECK_FILER" '
+              $1 == "" { next }
+              filer != "" && $1 == filer { next }
+              $1 ~ /\[bot\]$/ { next }
+              $1 == "Rogue-Git-Dev" { next }
+              { print $1 }' /tmp/triage/target-comments-now.tsv | sort -u | paste -sd' ' -)
+            if [ -n "$RECHECK_COMMENTERS" ]; then
+              add_blocker "$RECHECK_COMMENTERS replied to this issue while it was being triaged"
+            fi
+          else
+            add_blocker "the comments on this issue could not be re-read, so it is unknown whether a person has replied to it"
           fi
 
           # The refutation. A missing or unparseable file blocks the close rather
@@ -884,7 +961,7 @@ jobs:
               printf 'A reopened issue is not triaged again, so it will stay open.\n\n'
               printf -- '---\n\n'
               printf 'Closed by the `issue-triage` workflow ([run](%s)). ' "$RUN_URL"
-              printf 'It closes an issue only when it is the newer of the pair, nothing links a pull request to it, and nobody has commented on it.\n'
+              printf 'It closes an issue only when it is the newer of the pair, nothing links a pull request to it, and nobody other than its author has replied to it — each of those re-checked against the API immediately before this comment was posted.\n'
             } >> "$BODY"
 
             if [ "${DRY_RUN:-false}" = "true" ]; then
