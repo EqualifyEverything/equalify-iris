@@ -354,8 +354,15 @@ jobs:
         # item tells the reviewer to read in full.
         #
         # The rationale lives here rather than in the block because a `run:` block
-        # is one expression capped at 21000 and this is the block near that ceiling;
-        # YAML comments outside the scalar cost nothing against it.
+        # is one expression capped at 21000 and this is the block near that ceiling —
+        # within about a kilobyte of the ~20,500 usable figure that
+        # `.github/scripts/triage-decide.sh` derives. YAML comments outside the
+        # scalar cost nothing against it, which is the only reason there is room to
+        # explain any of this; at this block's average line, roughly a dozen more
+        # lines of *code* is what would spend the rest, and the next thing that needs
+        # real length belongs in `.github/scripts/` like the triage decision did. To
+        # re-measure, count the block's bytes plus one per line, or dispatch the
+        # workflow and read the 422 body.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
@@ -700,9 +707,12 @@ jobs:
           } >> "$OUT"
 
           # Say where a file was cut. See this step's YAML comment for why.
+          # `awk END{print NR}` and not `wc -l`: wc counts newlines, so a file whose
+          # last line is unterminated reports one short, and at exactly the cap that
+          # hides the cut completely.
           emit_source() {
             head -n "$MAX_LINES_PER_FILE" "$1" >> "$OUT"
-            N=$(wc -l < "$1" | tr -d ' ')
+            N=$(awk 'END{print NR}' "$1")
             [ "${N:-0}" -le "$MAX_LINES_PER_FILE" ] || printf \
               '\n... TRUNCATED at %s of %s lines. Read the file for the rest.\n' \
               "$MAX_LINES_PER_FILE" "$N" >> "$OUT"
