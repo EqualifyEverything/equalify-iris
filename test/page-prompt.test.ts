@@ -48,15 +48,15 @@ test("agents/page.md has the sections the loader and this test depend on", () =>
 // extractor gave them the same <h2>, so a screen-reader user browsing by heading
 // met a flat list of siblings where the page had two levels.
 //
-// Nothing downstream can recover this. The lint gate does not see heading levels at
-// all: axe-core tags `heading-order` `best-practice`, and `src/pipeline/lint.ts`
-// restricts `runOnly` to the WCAG tags and re-enables only the two duplicate-id
-// rules by name — so even the blatant case (<h2> then <h4>) lints clean here, let
-// alone an <h2> that should have been an <h3>. The Reader Agent never sees the
-// source image either (see READER_SYSTEM in src/pipeline/review.ts), so it cannot
-// know which heading the page subordinated to which. The extraction prompt is the
-// only place the information exists, which is why this is asserted rather than left
-// to the review loop.
+// Almost nothing downstream can recover this. The lint gate catches the blatant half
+// and only that half: `src/pipeline/lint.ts` enables `heading-order` by name (issue
+// #114 — axe tags it `best-practice`, so the WCAG-only tag filter drops it), which
+// reports an <h2> followed by an <h4> but says nothing about an <h2> that should have
+// been an <h3>, since that is a level the page decided and not a gap in the sequence.
+// The Reader Agent never sees the source image either (see READER_SYSTEM in
+// src/pipeline/review.ts), so it cannot know which heading the page subordinated to
+// which. For the reported case the extraction prompt is the only place the information
+// exists, which is why this is asserted rather than left to the review loop.
 //
 // Asserted on the clauses, like the signature-block test below, and including both
 // guards against over-correction: the rule has to demote a subordinate heading
