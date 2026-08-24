@@ -129,6 +129,7 @@ test("no announced text is lost, across the structures a real page contains", ()
     ["colspan header", `<table><tr><th colspan="2">Fiscal year</th></tr><tr><td>A</td><td>B</td></tr></table>`],
     ["deeply nested inline", `<p>A <span>b <strong>c <em>d</em></strong></span> e</p>`],
     ["definition list", `<dl><dt>Term</dt><dd>Meaning</dd></dl>`],
+    ["renumbered ordered list", `<ol start="2"><li>Alpha</li><li value="9">Beta</li></ol>`],
   ] as [string, string][]) {
     assertNoTextLost(html, label);
   }
@@ -263,6 +264,9 @@ test("nothing flatten adds itself survives the bracket strip", () => {
     `<p>Plain paragraph</p>`,
     `<select><option>Platform</option></select>`,
     `<input type="email" placeholder="you@example.org" value="ada@example.org">`,
+    // A list ordinal is the newest annotation, and a number is the easiest kind to
+    // leak: `9` outside the brackets would be counted as a word the agent transcribed.
+    `<ol start="2"><li>Alpha</li><li value="9">Beta</li></ol>`,
   ];
   for (const html of cases) {
     const emitted = wordsOf(flatten(html).replace(/\[[^\]]*\]/g, " "));
@@ -508,6 +512,68 @@ test("a marker stays attached to its text when the text is in a block child", ()
   assert.ok(t.indexOf("[List item]") < t.indexOf("Cell"), `reading order lost:\n${t}`);
 });
 
+test("an ordered list's items are announced with their numbers", () => {
+  // The numbers are the whole point: an <ol> counts 1..n by itself whatever its items
+  // contain, so a list whose numbering was tidied — the gap closed, the repeat dropped
+  // — used to flatten identically to one that kept it. `[List item]` with no number is
+  // the one form of altered content the review loop could not see.
+  const plain = flatten(`<ol><li>Alpha</li><li>Beta</li></ol>`);
+  assert.match(plain, /\[List item 1\] Alpha/);
+  assert.match(plain, /\[List item 2\] Beta/);
+  // `start` carries a list that does not begin at 1, and `value` sets one item's number
+  // AND the count that follows it — 1, 5, 6, as the HTML ordinal algorithm has it.
+  assert.match(flatten(`<ol start="5"><li>Fifth</li><li>Sixth</li></ol>`), /\[List item 5\] Fifth\n\[List item 6\] Sixth/);
+  const skipped = flatten(`<ol><li>One</li><li value="5">Five</li><li>Six</li></ol>`);
+  assert.match(skipped, /\[List item 1\] One\n\[List item 5\] Five\n\[List item 6\] Six/);
+  // A reversed list counts down from its own length, because that is what is
+  // announced; a countdown read out as 1, 2, 3 would be a wrong number, which is
+  // worse than no number.
+  assert.match(flatten(`<ol reversed><li>Second</li><li>First</li></ol>`), /\[List item 2\] Second\n\[List item 1\] First/);
+  assert.match(flatten(`<ol reversed start="10"><li>Ten</li><li>Nine</li></ol>`), /\[List item 10\] Ten\n\[List item 9\] Nine/);
+  // An unordered or definition list has no number to lose, so nothing is invented for
+  // it — a number there would be one the document does not show.
+  const ul = flatten(`<ul><li>Alpha</li><li>Beta</li></ul>`);
+  assert.match(ul, /\[List item\] Alpha/);
+  assert.ok(!/\[List item \d/.test(ul), `an unordered list was numbered:\n${ul}`);
+});
+
+test("a list item's number reaches it however the item is announced", () => {
+  // The marker travels down to a block child (`<li><p>x</p></li>`) and combines with
+  // that child's own marker, so the number has to survive both paths — a `[List item]`
+  // that loses its number on the ordinary `<li><p>` shape would leave the gap open for
+  // most real markup.
+  assert.match(flatten(`<ol><li><p>First item</p></li><li><p>Second item</p></li></ol>`), /\[List item 1\] First item\n\[List item 2\] Second item/);
+  assert.match(flatten(`<ol start="3"><li><h3>Nested heading</h3></li></ol>`), /\[List item 3\] \[Heading 3\] Nested heading/);
+  const t = flatten(`<ol start="4"><li><table><tr><td>Cell</td></tr></table></li></ol>`);
+  assert.ok(t.indexOf("[List item 4]") < t.indexOf("Cell"), `reading order lost:\n${t}`);
+  // Each list counts its own items: a nested list restarts, and the outer one resumes
+  // where it left off rather than continuing from the child's count.
+  const nested = flatten(`<ol><li>Alpha<ol><li>Inner</li></ol></li><li>Beta</li></ol>`);
+  assert.match(nested, /\[List item 1\] Alpha\n\[List item 1\] Inner\n\[List item 2\] Beta/);
+  // Only `<li>` children advance the count, and only the ones this list owns.
+  assert.match(flatten(`<ol><p>Intro</p><li>Alpha</li></ol>`), /\[List item 1\] Alpha/);
+  // A number the browser would ignore leaves the count alone rather than emitting NaN.
+  assert.match(flatten(`<ol start="abc"><li value="x">Alpha</li><li>Beta</li></ol>`), /\[List item 1\] Alpha\n\[List item 2\] Beta/);
+});
+
+test("the number is inside the brackets, so it is visible to the Reader and not to coverage", () => {
+  // Both halves matter. The Reader has to see the number; `contentCoverage` must not,
+  // because an annotation outside the brackets is padding every candidate reproduces
+  // for free — the same defect that once moved a gutted table from 0.833 to 0.875 and
+  // past the gate.
+  const faithful = `<h2>Parts list</h2><ol><li>Bean hopper</li><li value="5">Burr carrier ring</li><li>Grind adjuster knob</li></ol>`;
+  const tidied = `<h2>Parts list</h2><ol><li>Bean hopper</li><li>Burr carrier ring</li><li>Grind adjuster knob</li></ol>`;
+  assert.notEqual(flatten(faithful), flatten(tidied), "a renumbered list must not flatten identically to a faithful one");
+  // The words are the same on both sides, so the gate is unmoved: the numbering
+  // regression is the Reader's to catch, and this must not become a coverage failure
+  // that flags every list whose numbering merely differs.
+  assert.equal(contentCoverage(faithful, tidied), 1);
+  assert.equal(contentCoverage(tidied, faithful), 1);
+  // And no digit escapes into the compared word set.
+  const stripped = flatten(`<ol start="42"><li>Alpha</li></ol>`).replace(/\[[^\]]*\]/g, " ");
+  assert.ok(!/\d/.test(stripped), `a list ordinal leaked into content: ${stripped}`);
+});
+
 test("every marker the Reader prompt advertises is one flatten emits", () => {
   // `[Option]` was documented and unreachable: options reach the inline path, where
   // `option` is neither inline nor a field, so it recursed to bare text. A marker the
@@ -516,6 +582,12 @@ test("every marker the Reader prompt advertises is one flatten emits", () => {
   const view = flatten(`<select><option>Platform</option><option>Design</option></select>`);
   assert.match(view, /\[Field select\] Platform, Design/);
   assert.ok(!READER_SYSTEM.includes("[Option]"), "the prompt advertises a marker flatten never emits");
+  // The mirror of that failure: a marker the code emits and the prompt never names. An
+  // ordered list's items are numbered now, so the prompt has to say so — otherwise the
+  // Reader is told everything in brackets is an annotation from a list that does not
+  // include this one.
+  assert.match(flatten(`<ol><li>Alpha</li></ol>`), /\[List item 1\]/);
+  assert.ok(READER_SYSTEM.includes("[List item N]"), "flatten emits a marker the prompt does not name");
   // Options are still content, and are separated so they cannot run together.
   assertNoTextLost(`<select><option>Platform</option><option>Design</option></select>`, "select options");
 });

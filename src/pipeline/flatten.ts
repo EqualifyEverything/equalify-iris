@@ -67,11 +67,18 @@ const norm = (s: string): string => s.replace(/\s+/g, " ").trim();
 // because parentheses appear in real extracted prose ("(see appendix)") and
 // stripping them there would discard genuine content from both sides — trading
 // this bug for a quieter version of the one this file exists to prevent.
-function blockMarker(tag: string): string | null {
+//
+// `ordinal` is the number an ordered list's item is announced with, and it goes
+// inside the brackets for exactly the reason above: it is an annotation, not a word
+// the agent transcribed, and outside the brackets every candidate that emits a list
+// at all would reproduce the digits for free. Inside them the Reader can see the
+// number while the coverage comparison is unchanged.
+function blockMarker(tag: string, ordinal?: number): string | null {
   const h = HEADING.exec(tag);
   if (h) return `[Heading ${h[1]}]`;
   switch (tag) {
-    case "li": return "[List item]";
+    // An unordered or definition list has no number to lose, so its items stay bare.
+    case "li": return ordinal === undefined ? "[List item]" : `[List item ${ordinal}]`;
     case "blockquote": return "[Quote]";
     case "label": return "[Label]";
     case "figcaption": case "caption": return "[Caption]";
@@ -131,6 +138,25 @@ const tagOf = (el: El): string => el.tagName.toLowerCase();
 function span(el: El, attr: "colspan" | "rowspan" = "colspan"): number {
   const n = parseInt(el.getAttribute(attr) ?? "", 10);
   return Number.isInteger(n) && n > 0 ? Math.min(n, 1000) : 1;
+}
+
+// The number the FIRST item of an `<ol>` is announced with. An `<ol>` counts 1..n by
+// itself whatever its items contain, so the numbers a screen reader reads out live in
+// `start` and in each `<li>`'s `value` — nowhere in the text. That is why they have to
+// be reconstructed here rather than transcribed: without them a list whose numbering
+// was tidied (a gap closed, a repeat dropped) flattens identically to one that kept it,
+// and neither the Reader nor `contentCoverage` can see the difference. page.md asks the
+// page agent to preserve those numbers, so this is the view that can now check it.
+//
+// `reversed` is honoured because ignoring it would be the same bug pointing the other
+// way: a countdown announced as 1, 2, 3 is a wrong number in the view, which is worse
+// than no number. A reversed list with no `start` counts down from its own length,
+// which is what the HTML ordinal algorithm does and therefore what is announced.
+function listStart(el: El): number {
+  const s = parseInt(el.getAttribute("start") ?? "", 10);
+  if (Number.isInteger(s)) return s;
+  if (el.getAttribute("reversed") === null) return 1;
+  return Array.from(el.children).filter((c) => tagOf(c) === "li").length;
 }
 
 export function flatten(html: string): string {
@@ -256,6 +282,22 @@ export function flatten(html: string): string {
   const block = (parent: El, marker: string | null): void => {
     let pending = marker;
     let run: string[] = [];
+    // Ordinal state for this element's own `<li>` children, held here because the
+    // number is a property of the LIST, and `blockMarker` sees only a tag. Non-`li`
+    // children of an `<ol>` do not advance it, and a `<ul>`/`<dl>` never starts it.
+    const ordered = tagOf(parent) === "ol";
+    const step = ordered && parent.getAttribute("reversed") !== null ? -1 : 1;
+    let counter = ordered ? listStart(parent) : 0;
+    // The number this item is announced with, consuming one step of the counter. A
+    // `value` on the item both sets its own number and moves the count for the rest,
+    // as the HTML ordinal algorithm has it — so 1, <li value="5">, 6.
+    const nextOrdinal = (el: El): number => {
+      const v = parseInt(el.getAttribute("value") ?? "", 10);
+      if (Number.isInteger(v)) counter = v;
+      const n = counter;
+      counter += step;
+      return n;
+    };
     const flush = (): void => {
       const text = norm(run.join(" "));
       run = [];
@@ -283,6 +325,9 @@ export function flatten(html: string): string {
         if (t) run.push(t);
         continue;
       }
+      // Computed before the two paths below diverge, so the counter advances exactly
+      // once per item however this child is announced.
+      const own = blockMarker(tag, ordered && tag === "li" ? nextOrdinal(el) : undefined);
       // A block child ends the current line. Flushing first is what keeps
       // reading order intact: "Fruit" is announced before the nested list.
       //
@@ -294,7 +339,6 @@ export function flatten(html: string): string {
       // prompt teaches it to treat empty structures as real problems.
       const inherit = pending !== null && !run.length && tag !== "table" && !FIELD.has(tag);
       if (inherit) {
-        const own = blockMarker(tag);
         const combined = own ? `${pending} ${own}` : (pending as string);
         pending = null;
         block(el, combined);
@@ -310,7 +354,7 @@ export function flatten(html: string): string {
         // see that the control has no accessible name.
         out.push(fieldText(el));
       } else {
-        block(el, blockMarker(tag));
+        block(el, own);
       }
     }
     flush();
@@ -330,9 +374,9 @@ export function flatten(html: string): string {
   //
   // The fallback keeps WORDS and ORDER and gives up on STRUCTURE, which is the trade
   // `inlineText` already makes for a block inside a table cell: role markers, table
-  // geometry and field roles are absent, and every text node plus every attribute that
-  // carries an accessible name is emitted in document order. That is what the invariant
-  // asks for — `contentCoverage` compares word sets with `[...]` markers stripped, so a
+  // geometry, list ordinals and field roles are absent, and every text node plus every
+  // attribute that carries an accessible name is emitted in document order. That is what
+  // the invariant asks for — `contentCoverage` compares word sets with `[...]` stripped, so a
   // marker-free view scores identically, while a missing word is exactly what it exists
   // to catch. `SILENT` is still honoured: CSS and script text are not content, and
   // counting them would make the gate read as healthier the more of it an agent leaks.
