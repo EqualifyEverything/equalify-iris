@@ -123,14 +123,41 @@ export async function runPipeline(args: {
     // Specialist-agent suggestions come from a pass that actually looks at the
     // source images: a full extraction, or a targeted feedback re-extraction.
     let suggestions: { name: string; reason: string; image: string }[] = [];
+    // Pages the delivered document has no content for (extraction.ts `failedPage`). A run
+    // can now finish with some, which is the point — but it has finished with a document
+    // that is not what was asked for, so it is reported on the run's own completion line
+    // rather than only in the per-page events above it, and re-stated in the document
+    // itself once the review loop can no longer edit it (assembly.ts wrapDocument).
+    //
+    // A property of the DOCUMENT, not of the run that lost the page, which is why it is
+    // persisted to final.json and read back on a feedback round. The in-fragment marker
+    // travels with the fragment on its own, but it is the one report a Copy Editor round
+    // can delete — so a second round on a session that lost page 7 would deliver a
+    // document free to claim it is whole, which is what the durable marker exists to
+    // prevent. Only re-extracting the page removes it from the set.
+    //
+    // A run where EVERY page failed does not reach here at all: runExtraction re-raises
+    // instead, because a document containing none of the source's words is not a partial
+    // success.
+    let failedPages: number[] = [];
+    // Pages this run filled in that the document had no content for. Logged only once the
+    // new state is on disk (below), because that is when it becomes true: diagnostics
+    // folds `page_recovered` straight into `pages_failed`, so a line written when the
+    // re-extraction returned would answer "the document is whole" for a round that then
+    // threw in review — leaving the client with the document that still has the hole.
+    let recovered: number[] = [];
     let mode: string;
 
     if (iterative) {
       const saved = JSON.parse(readFileSync(finalFragmentsPath, "utf8")) as {
         fragments?: Fragment[];
         body?: string;
+        failedPages?: number[];
       };
       const priorFragments = saved.fragments ?? [];
+      // Absent in state written before this was recorded, which reads as "no page is
+      // missing" — the same answer that state implied when it was written.
+      failedPages = saved.failedPages ?? [];
       beforeBody = (saved.body ?? assembleBody(priorFragments)).trim();
 
       // Route the feedback: content-level complaints ("you misread the table on
@@ -146,15 +173,25 @@ export async function runPipeline(args: {
         mode = "feedback_reextract";
         log.event("run_start", { images: images.length, feedback: args.feedback ?? null, mode });
 
-        const extraction = await reExtractPages(ctx, priorFragments, scope.pages);
+        // A page that failed earlier is exactly the kind of page feedback names, and
+        // re-extracting it successfully is the one thing that fills the hole — so the
+        // prior set goes in and the updated one comes out.
+        const extraction = await reExtractPages(ctx, priorFragments, scope.pages, failedPages);
         fragments = extraction.fragments;
         suggestions = extraction.suggestions;
+        failedPages = extraction.failedPages;
+        recovered = extraction.recovered ?? [];
 
         setPhase("assembly");
         const assembled = await runAssembly(ctx, fragments);
 
         setPhase("review");
-        review = await runReview(ctx, { body: assembled.body, lint: assembled.lint, pages: fragments });
+        review = await runReview(ctx, {
+          body: assembled.body,
+          lint: assembled.lint,
+          pages: fragments,
+          failedPages,
+        });
       } else {
         mode = "feedback_iterative";
         log.event("run_start", { images: images.length, feedback: args.feedback ?? null, mode });
@@ -164,7 +201,7 @@ export async function runPipeline(args: {
         // Re-lint the existing reviewed body (no model call), then let the
         // feedback-aware review loop refine it in place.
         const lint = await runAxe(wrapDocument(beforeBody));
-        review = await runReview(ctx, { body: beforeBody, lint, pages: fragments });
+        review = await runReview(ctx, { body: beforeBody, lint, pages: fragments, failedPages });
       }
     } else {
       mode = "full";
@@ -174,12 +211,18 @@ export async function runPipeline(args: {
       const extraction = await runExtraction(ctx);
       fragments = extraction.fragments;
       suggestions = extraction.suggestions;
+      failedPages = extraction.failedPages;
 
       setPhase("assembly");
       const assembled = await runAssembly(ctx, fragments);
 
       setPhase("review");
-      review = await runReview(ctx, { body: assembled.body, lint: assembled.lint, pages: fragments });
+      review = await runReview(ctx, {
+        body: assembled.body,
+        lint: assembled.lint,
+        pages: fragments,
+        failedPages,
+      });
     }
 
     writeFileSync(paths.sessionOutput(sessionId), review.html);
@@ -237,8 +280,10 @@ export async function runPipeline(args: {
     // output keyed to its source image) can be captured on accept (close handler).
     writeFileSync(
       finalFragmentsPath,
-      JSON.stringify({ fragments, body: review.body }, null, 2),
+      JSON.stringify({ fragments, body: review.body, failedPages }, null, 2),
     );
+    // Now that the document that HAS these pages is the persisted one (see `recovered`).
+    if (recovered.length) log.event("page_recovered", { pages: recovered });
 
     // Feedback -> agent training (PRD §7.12/§7.13): turn the document-level
     // correction this feedback run produced into a proposed improvement to the
@@ -267,6 +312,9 @@ export async function runPipeline(args: {
       iterations: review.iterationsCompleted,
       unresolved: review.unresolved.length,
       mode,
+      // Only when there were any: a `failed_pages` of [] on every successful run would
+      // read as a field about failure on lines that have none.
+      ...(failedPages.length ? { failed_pages: failedPages } : {}),
     });
 
     // After the user has their output, auto-file agent-suggestion issues

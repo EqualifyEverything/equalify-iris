@@ -87,6 +87,54 @@ export class TruncatedResponseError extends Error {
   }
 }
 
+// A call the upstream REFUSED for size, before processing any of it: too much input
+// for the model's context window, or too many bytes for the endpoint to accept at all.
+// Both are the same fact to a caller — this request is too big — and the same remedy.
+//
+// Worth telling apart from every other failure because it is the one a caller can
+// answer: the payload is Iris's own doing (page images, a whole document body), so
+// dropping part of it and asking again is a real recovery, and the refusal is cheap
+// — no prompt was read, so nothing was billed and it comes back in under a second.
+//
+// Matched on the message, because neither adapter is given anything better. Bedrock
+// raises a ValidationException whose message is "Input is too long for requested
+// model." with no code distinguishing it from any other validation failure, and
+// OpenRouter forwards a 400 body from whichever upstream served the request, worded
+// differently again ("maximum context length is N tokens"). Both reach a caller as a
+// plain Error carrying that text.
+//
+// The byte-size phrasings are not redundant with the token ones, and the count-based
+// bound upstream does not cover them: MAX_EDITOR_IMAGES is derived from what a
+// rasterized page costs in TOKENS, while the request ceiling these APIs enforce is in
+// bytes. Screenshots rather than rendered PDF pages are the shape that gets there —
+// at the per-image ceiling GET /v1/limits publishes, a dozen of them is tens of
+// megabytes once base64-encoded, which is refused for size without ever being weighed
+// in tokens.
+//
+// Deliberately a small set of phrasings rather than anything cleverer. The caller
+// (pipeline/review.ts) reacts by retrying with a smaller payload, so a false positive
+// costs one extra call that fails the same way, and a false negative is exactly the
+// behaviour that existed before this function.
+export function isRequestTooLargeError(e: unknown): boolean {
+  const message = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return (
+    // Over the context window.
+    message.includes("input is too long") ||
+    message.includes("prompt is too long") ||
+    message.includes("context length") ||
+    message.includes("context window") ||
+    message.includes("too many tokens") ||
+    // Over the transport's or endpoint's size limit.
+    message.includes("payload size") ||
+    message.includes("too large") ||
+    // A 413 with no reason phrase ("failed with status code 413"). The status word is
+    // required rather than matching a bare 413, because a TruncatedResponseError's
+    // message carries a character count and a model's max_tokens — either of which can
+    // be that number, and retrying a truncation with fewer images fixes nothing.
+    (/\b413\b/.test(message) && /status|http|code/.test(message))
+  );
+}
+
 // A streamed call was abandoned. Three ways, because they are three different
 // diagnoses and an operator reading one of these needs to know which: nothing ever
 // arrived ("first_output"), output started and then stopped ("idle"), or output kept

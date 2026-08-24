@@ -94,6 +94,14 @@ export interface Diagnostics {
   >;
   slowest_calls: { agent: string; model: string; capability: string; duration_ms: number; ok: boolean }[];
   errors: { ts: string | null; type: string; message: string }[];
+  // Source pages whose own extraction threw, so the delivered document carries a
+  // failure marker instead of that page's content (pipeline/extraction.ts
+  // `failedPage`). Its own field because a run that ends `ready_for_review` with a
+  // page missing is otherwise indistinguishable here from one that delivered the
+  // whole document: the failed model call underneath shows up in `errors` exactly as
+  // a retried-and-recovered one does, and `status` says the run succeeded — which it
+  // did, on 24 of 25 pages.
+  pages_failed: number[];
 }
 
 function parse(logText: string): LogEvent[] {
@@ -233,6 +241,28 @@ export function summarizeRun(
     .filter((e) => e.type === "run_failed" || e.ok === false)
     .map((e) => ({ ts: e.ts ?? null, type: e.type ?? "error", message: e.error ?? "unknown" }));
 
+  // Which pages the document has no content for — a set, and a set that changes over
+  // the life of one session's log, because a feedback round can re-extract a page that
+  // failed earlier and fill the hole. So this is a fold over the events in order rather
+  // than a filter: `page_extraction_failed` adds, `page_recovered` removes, and what the
+  // log says LAST about a page is what is true of the document.
+  //
+  // `kept: "prior"` is excluded, because that event reports the opposite outcome under
+  // the same name: a re-extraction that threw left the page's earlier content in place,
+  // so the document is whole and naming the page here would send a client looking for a
+  // hole that isn't there (pipeline/extraction.ts reExtractPages). Which is also why a
+  // recovered page stays recovered: after the hole is filled, the page HAS content, so
+  // every later failure on it is one of these.
+  const failedSet = new Set<number>();
+  for (const e of events) {
+    if (e.type === "page_extraction_failed" && typeof e.page === "number" && e.kept !== "prior") {
+      failedSet.add(e.page);
+    } else if (e.type === "page_recovered" && Array.isArray(e.pages)) {
+      for (const p of e.pages) if (typeof p === "number") failedSet.delete(p);
+    }
+  }
+  const pagesFailed = [...failedSet].sort((a, b) => a - b);
+
   const elapsed = ms(startedAt ?? undefined, endRef);
 
   return {
@@ -257,5 +287,6 @@ export function summarizeRun(
     by_agent: byAgent,
     slowest_calls: slowest,
     errors,
+    pages_failed: pagesFailed,
   };
 }

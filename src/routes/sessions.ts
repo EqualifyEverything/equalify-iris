@@ -539,8 +539,19 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     try {
       const finalPath = paths.sessionFinalFragments(s.session_id);
       if (existsSync(finalPath)) {
-        const saved = JSON.parse(readFileSync(finalPath, "utf8")) as { fragments?: Fragment[] };
-        captureFixtures(paths, s.session_id, saved.fragments ?? []);
+        const saved = JSON.parse(readFileSync(finalPath, "utf8")) as {
+          fragments?: Fragment[];
+          failedPages?: number[];
+        };
+        // A page whose extraction failed is excluded. Its fragment is a `@page-failed`
+        // comment, and a fixture is an assertion that this HTML is the RIGHT output for
+        // this image — capturing one would gate every future page-agent update on
+        // reproducing a failure, and the first page of a document is exactly the
+        // representative image the fixture is keyed to. Read from the recorded set
+        // rather than sniffed out of the HTML: the run already knows which pages those
+        // are (pipeline/orchestrator.ts).
+        const failed = new Set(saved.failedPages ?? []);
+        captureFixtures(paths, s.session_id, (saved.fragments ?? []).filter((f) => !failed.has(f.order)));
       }
     } catch {
       // ignore — fixture capture must not prevent accepting a session

@@ -142,6 +142,13 @@ function sse(res, content, finishReason) {
 // a truncation run — the mock boots once for the whole e2e.
 let truncateNext = false;
 
+// When set to a page number, ONLY that page's extraction returns a truncated response,
+// so a run can end with a document that is missing one page while the others are whole —
+// the case per-page containment exists for (issue #135). Set via POST /__fail-page with
+// `{"page":2}`, cleared with `{"page":null}`; while it is set a re-extraction of that
+// page fails too, and clearing it lets a later feedback round recover the page.
+let failPage = null;
+
 // When set, the page agent's response carries a `suggested_agent` with this name,
 // so the e2e can drive specialist dispatch. Set to a real library agent to make
 // dispatch succeed, or to a name no file matches to make it MISS — the case the
@@ -152,6 +159,12 @@ const or = createServer(async (req, res) => {
   if (req.method === "POST" && new URL(req.url, "http://x").pathname === "/__truncate") {
     truncateNext = !truncateNext;
     return json(res, 200, { truncate: truncateNext });
+  }
+  if (req.method === "POST" && new URL(req.url, "http://x").pathname === "/__fail-page") {
+    const raw = await readBody(req);
+    const p = JSON.parse(raw || "{}").page;
+    failPage = typeof p === "number" ? p : null;
+    return json(res, 200, { fail_page: failPage });
   }
   if (req.method === "POST" && new URL(req.url, "http://x").pathname === "/__suggest") {
     const raw = await readBody(req);
@@ -174,6 +187,9 @@ const or = createServer(async (req, res) => {
     if (Array.isArray(u)) imageParts = u.filter((p) => p.type === "image_url").length;
   } catch {}
   let content = "{}";
+  // Set when THIS call is the armed page's extraction (see failPage), so the truncation
+  // below applies to one page of the document rather than to every call in the run.
+  let truncateThisPage = false;
   // Feedback Agent, TASK: scope — route feedback to extraction or the review loop.
   // Keyed off the feedback text so the e2e can drive either path: a message naming
   // a page and a misread is source-level, anything else is document-level.
@@ -192,6 +208,7 @@ const or = createServer(async (req, res) => {
     const page = m ? Number(m[1]) : 1;
     const total = m ? Number(m[2]) : 1;
     await sleep(Math.max(0, (total - page + 1) * 120));
+    truncateThisPage = page === failPage;
     // A re-extraction prompt carries the page's previous output. Mark the result
     // so the e2e can prove that ONLY the targeted page was re-extracted.
     const revised = user.includes("## Your previous output for this page");
@@ -250,7 +267,7 @@ const or = createServer(async (req, res) => {
   // is deliberately plausible-looking JSON cut mid-tag, which is what makes this
   // dangerous: without the provider-level guard it would be assembled into the
   // deliverable as if it were genuine content.
-  if (truncateNext) {
+  if (truncateNext || truncateThisPage) {
     const cut = '{"html":"<table><tr><td>cut off mid';
     return wantsStream
       ? sse(res, cut, "length")

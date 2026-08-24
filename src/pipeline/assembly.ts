@@ -36,9 +36,24 @@ export function assembleBodyWithReport(fragments: Fragment[]): { body: string; a
 // Wrap body content in a minimal accessible document shell. If issues remain at
 // the review cap they are recorded as an HTML comment (invisible to users, but
 // in the document for tooling); the full list also persists in unresolved.md.
-export function wrapDocument(body: string, opts: { unresolved?: string[] } = {}): string {
+//
+// `failedPages` is recorded the same way, and for a reason worth spelling out: the
+// per-page marker `failedPage` writes lives INSIDE a fragment, so it is part of the body
+// handed to the Copy Editor with "return the complete corrected body" — a round that
+// rewrites the document may drop it, leaving a document missing a page with nothing in it
+// to say so, which is exactly what that marker exists to prevent. Injected here, after
+// the loop, it is out of the editor's reach for the same reason @unresolved is. The
+// in-body marker stays because it says WHERE the hole is; this one guarantees the
+// document admits there is one.
+export function wrapDocument(body: string, opts: { unresolved?: string[]; failedPages?: number[] } = {}): string {
   const unresolved = opts.unresolved?.length
     ? `\n<!-- @unresolved\n${opts.unresolved.map((u) => `  - ${u.replace(/--+/g, "—")}`).join("\n")}\n-->`
+    : "";
+  const failed = opts.failedPages?.length
+    ? `\n<!-- @page-failed ${opts.failedPages.join(", ")}\n` +
+      `  This document is incomplete: the source pages above could not be extracted and\n` +
+      `  none of their content is here. See the run log (page_extraction_failed) or the\n` +
+      `  session's diagnostics (pages_failed) for why.\n-->`
     : "";
   return `<!DOCTYPE html>
 <html lang="en">
@@ -49,7 +64,7 @@ export function wrapDocument(body: string, opts: { unresolved?: string[] } = {})
 <body>
 <main>
 ${body}
-</main>${unresolved}
+</main>${failed}${unresolved}
 </body>
 </html>
 `;
