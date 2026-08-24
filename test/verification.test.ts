@@ -157,6 +157,21 @@ test("an attribute that moved to the wrong element is a change", () => {
   assert.equal(changedAnything(e), true);
 });
 
+test("rewriting an HTML comment is not an attribute change", () => {
+  // A comment is not content anywhere in this module — `visibleText` strips them — and the
+  // attribute scan sees `<!-- … -->` as a tag whose body is a list of attribute names unless
+  // it strips them too. Uncaught, a re-worded comment lands in `effects.attrs`, the bucket
+  // documented as a re-typed `href`, and spends the batch's one measurement slot.
+  for (const [before, after] of [
+    [`<!-- continued from previous page --><p>Hi</p>`, `<!-- continues on next page --><p>Hi</p>`],
+    [`<!-- a note --><p>Hi</p>`, `<p>Hi</p>`],
+  ] as [string, string][]) {
+    const e = correctionEffect(before, after);
+    assert.equal(e.attrs_changed, false, `read as an attribute change: ${after}`);
+    assert.equal(changedAnything(e), false, `read as a change to the page: ${after}`);
+  }
+});
+
 test("a page rewritten to nothing reports what it lost", () => {
   const e = correctionEffect(`<p>The whole page</p>`, ``);
   assert.equal(e.text_changed, true);

@@ -96,9 +96,15 @@ function altText(html: string): string {
 // Tags are joined on a separator an attribute value cannot contain, for the reason `altText`
 // is: on a space, an attribute moved from one tag to the next would compare equal to the
 // original, and the tag boundary is the only thing that says otherwise.
+//
+// Comments are removed first, as `visibleText` removes them: `TAG` matches `<!-- … -->` too,
+// and the pair scanner below would then harvest every word in the comment body as an
+// attribute name — so a rewrite of `<!-- continued from previous page -->` would land in
+// `effects.attrs`, the bucket that is documented as a re-typed `href` or a missing
+// `<th scope>`. A comment is not content anywhere else in this module and is not one here.
 function attrText(html: string): string {
   const tags: string[] = [];
-  for (const tag of html.match(TAG) ?? []) {
+  for (const tag of html.replace(/<!--[\s\S]*?-->/g, " ").match(TAG) ?? []) {
     const inner = tag.replace(/^<\/?[a-z][a-z0-9]*/i, "").replace(/\/?>?$/, "");
     const pairs: string[] = [];
     for (const m of inner.matchAll(/([a-z_:][\w:.-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/gi)) {

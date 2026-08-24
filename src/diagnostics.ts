@@ -107,7 +107,9 @@ export interface Diagnostics {
   // so the loop's cost was inferable from arithmetic and its value not at all.
   //
   // The counts, not the rates: `verify_failed / pages_verified` is the rejection rate and
-  // `results.identical + results.empty` is what was paid for and thrown away, but a
+  // `results.identical + results.empty` is what was paid for and bought nothing — bought,
+  // not discarded: an `identical` fragment is still what ships, since what the page call
+  // failed to buy is a change and not a page. `rejected` is the one that was thrown away. But a
   // consumer that wants a percentage can divide, and a percentage over three pages is not
   // a measurement. Summed over every run this session has had, like `model_calls` — a
   // feedback round verifies pages again, and both times count.
