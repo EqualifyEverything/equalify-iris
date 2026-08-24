@@ -66,14 +66,19 @@ Eight structures are easy to render as something that merely looks right, so be 
   pictured is printed beside the image — in its caption, in the label that follows it, in the
   heading a group of figures sits under — the alt text does not repeat that name; it says what the
   name does not. This is a redundancy rule and not a brevity one: every detail that is in the
-  picture and not in the words around it stays, and a <figcaption> follows the same rule, carrying
-  what distinguishes ITS figure rather than the category its heading has already established.
+  picture and not in the words around it stays. And it governs the description, never the page: a
+  caption or label the page prints is transcribed as printed, however much of its heading's wording
+  it repeats, because those are words on the page and dropping them takes them from every reader.
+  What is forbidden is adding the repetition yourself — never extend a printed caption with the
+  product, section or category name its heading already gives.
   Where the same subject is pictured more than once with no visible difference between the
   occurrences, describe them the same way and in the same detail — a fuller description of one
   tells a reader that the other differs.
   A graphic whose content is words is still a graphic: emit a logo, a masthead or a wordmark as an
   <img> with alt text (alt="Acme Corp logo"), never as a heading, a paragraph, or a transcription
-  of its lettering — a logo set as an <h1> tells a reader the document is organised under it. You
+  of its lettering — a logo set as an <h1> tells a reader the document is organised under it. Name
+  the mark, even on a letterhead that prints the same name in type beside it: a mark whose content
+  IS a name is described by that name, and alt="logo" names nothing. You
   cannot embed the file, so give src a placeholder that names the page and the graphic
   (src="page-1-logo.png") and record it in the "log" field for whatever supplies the real asset.
   Never point src at the source image you were given, and never leave it empty: the image you were

@@ -242,8 +242,16 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     // instead of trimming the repetition.
     ["it is a redundancy rule and not a licence to describe less",
       /This is a redundancy rule and not a brevity one: every detail that is in the picture and not in the words around it stays/],
-    ["a figcaption carries what distinguishes its figure, not its heading's category",
-      /a <figcaption> follows the same rule, carrying what distinguishes ITS figure rather than the category its heading has already established/],
+    // And it is a rule about the description, not about the page. A `<figcaption>` here is
+    // transcribed page text — the fidelity sentence above sanctions "a <caption> the page does
+    // not print" and pointedly not a figcaption — so trimming the heading's words out of a
+    // printed caption would delete words from the delivered document for every reader, and
+    // would be sent back as unfaithful by the very next verify call. What #126 reported is
+    // the other thing: the category name appended to a caption that did not print it.
+    ["a caption the page prints is transcribed as printed, repetition and all",
+      /a caption or label the page prints is transcribed as printed, however much of its heading's wording it repeats/],
+    ["what is forbidden is appending the heading's words to a printed caption",
+      /never extend a printed caption with the product, section or category name its heading already gives/],
     // #122: the same position pictured twice, described fully once and vaguely the second
     // time — which tells a reader the two pictures differ when they do not.
     ["the same subject pictured twice is described the same way",
@@ -258,6 +266,11 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     // file this agent has a name for is the whole page it was given.
     ["src is neither the source page image nor empty",
       /Never point src at the source image you were given, and never leave it empty/],
+    // The redundancy rule above and this example pull against each other on a letterhead,
+    // where the company name is printed in type beside the mark: read together they would
+    // license alt="logo" on the one image whose entire content is that name.
+    ["a mark whose content is a name is described by that name, printed beside it or not",
+      /Name the mark, even on a letterhead that prints the same name in type beside it/],
     // The fidelity sentence enumerates what the agent may emit that the page does not print,
     // and the Feedback Agent judges against that list (agents/feedback.md). A placeholder src
     // is not a word on the page, so it has to be named there or the pass that adds one can be
