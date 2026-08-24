@@ -95,8 +95,10 @@ with, and finding a pair the list missed is still worth reporting.
 
 A [not legible] marker is what the extractor wrote where the marks on its page did not resolve
 into characters, and a [page not fully transcribed] marker is what it wrote where it could not
-return the whole page. Report every one of them with the page it is on, and nothing more: the Copy
-Editor is given that page's image and can look again, which is the only thing that settles either.
+return the whole page. Report every one of them with the page it is on, and nothing more. The page
+is what matters: the Copy Editor is given the images for the pages your issues name, and looking at
+that page again is the only thing that can settle the first marker — the second is settled by
+re-extracting that page, which is nobody's job in this loop, so it is reported and left standing.
 You do not see the source images, so never suggest what a marker stood for, and never ask for one to
 be deleted — a document that once said a word could not be read, or a page not finished, and now
 says nothing tells every reader that the page arrived whole.
@@ -138,8 +140,9 @@ its section continued looks like once the pages are joined. The source images sa
 goes: a title the pages reprint because the section runs across them is ONE heading — drop the
 repeat and put what followed it under the first, at the level its content calls for — while two
 sections the document really does label alike keep the label and each gain the words that
-distinguish them. Those words come from that section's own content, which is the one text you may
-add here; never write a subtitle of your own, and never merge two sections that are merely named
+distinguish them. Those words come from that section's own content, which is one of the two texts you
+may add here (the other is under the markers below, and there is no third); never write a subtitle
+of your own, and never merge two sections that are merely named
 alike. And where nothing you were given decides it — the reviewer says it could not tell, or the
 pages those headings are on were not attached — leave both headings exactly as they are and resolve
 the other issues. An outline that says the same thing twice is a smaller harm to a reader than a
@@ -147,15 +150,23 @@ section merged into another one or a heading dropped, and an issue left alone co
 or is reported as unresolved, while content you removed on a guess is gone from the document.
 
 A [not legible] marker is not a defect in the markup: it is the extractor saying the marks on that
-page did not resolve into characters. A [page not fully transcribed] marker says the same about the
-rest of a page it could not return. Where that page's image IS attached, look again — if the marks
-resolve now, or the content the second marker stands for is there to be read, put the words the page
-shows in the marker's place, which is the other text you may add here because it comes from the page
-and not from you. If they do not resolve, or that page was not attached, leave the marker exactly
-where it stands. Never replace one with a plausible word, and never simply delete one: a guess
-reaches a reader as something the page says, and a deletion tells every later reader that the page
-was read in full. A number, a part code or a measurement is the case to be strictest about — nothing
-in the surrounding sentence can confirm one, and it is the string a reader will act on.
+page did not resolve into characters. Where that page's image IS attached, look at that region again
+— if the marks resolve for you, put the words the page shows in the marker's place, which is the
+second and last text you may add here, because it comes from the page and not from you. If they do
+not resolve, or that page was not attached, leave the marker exactly where it stands. Never replace
+it with a plausible word, and never simply delete it: a guess reaches a reader as something the page
+says, and a deletion tells every later reader that the page was read in full. A number, a part code
+or a measurement is the case to be strictest about — nothing in the surrounding sentence can confirm
+one, and it is the string a reader will act on.
+
+A [page not fully transcribed] marker is not yours to resolve at all, even with that page's image in
+front of you. It stands where an extraction could not return the whole of one page, so filling it in
+means returning the rest of that page on top of the complete corrected body — the one request in this
+pipeline that can exceed what a response can hold, and hitting that ceiling does not degrade to a
+smaller retry: it ends the run, and the document nobody has been given yet is the document nobody
+gets. Re-extracting that page is what has a whole response to itself. So leave the marker exactly
+where it stands, resolve the other issues around it, and never delete it — an unfinished page that
+says so can be finished, and one that does not looks complete to everyone downstream.
 
 A link's target is content, and it is the one kind you cannot recover: an href came from the
 source FILE, not from the page image, so a URL you drop or alter is gone and a URL you invent
@@ -165,6 +176,29 @@ the TEXT of a link when an issue calls for it (link text that does not describe 
 destination is a real 2.4.4 problem); keep its href.
 
 Respond with ONLY JSON: { "html": "<corrected body content>" }`;
+
+// The two markers the page agent writes INTO the body: what it could not read, and what it
+// could not finish. Both sit inside a fragment, which is the position assembly.ts deliberately
+// keeps its own @page-failed marker out of — a round that returns "the complete corrected body"
+// can drop anything in there, and nothing else in the pipeline would notice. `droppedHrefs`
+// exists for the same reason one file over; `contentCoverage` strips [...] before comparing
+// words, so a marker the editor deleted costs the document nothing any gate can see, and what
+// ships is the one outcome this rule argues a reader cannot detect: a document that reads as
+// transcribed in full.
+//
+// Counted, not restored, and the asymmetry between the two is the reason. A [not legible] marker
+// SHOULD disappear when the editor reads that region off the attached page image — that is the
+// resolution EDITOR_SYSTEM asks for — so a fall in its count is a record and not a verdict.
+// [page not fully transcribed] is never the editor's to resolve, so every one of those that goes
+// missing is a loss. Re-inserting either has no honest position: the words that surrounded it
+// were rewritten by the same round that dropped it.
+export const BODY_MARKERS = ["[not legible]", "[page not fully transcribed]"] as const;
+
+export function markerCounts(body: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const m of BODY_MARKERS) out[m] = body.split(m).length - 1;
+  return out;
+}
 
 const CHUNK_BUDGET = 24000;
 const CHUNK_OVERLAP = 2000;
@@ -445,6 +479,13 @@ export async function runReview(
     if (dropped.length) {
       droppedLinks += dropped.length;
       ctx.log.event("editor_links_dropped", { iteration: iterations, hrefs: dropped });
+    }
+    // See BODY_MARKERS: the only place a marker's disappearance is recorded.
+    const was = markerCounts(before);
+    const now = markerCounts(body);
+    const fewer = BODY_MARKERS.filter((m) => now[m] < was[m]);
+    if (fewer.length) {
+      ctx.log.event("editor_markers_fewer", { iteration: iterations, markers: fewer, before: was, after: now });
     }
   }
 

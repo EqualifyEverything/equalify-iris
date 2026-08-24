@@ -158,7 +158,12 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   than the issues named, or none. Where the image is absent, or the marks do not resolve for it
   either, the marker stays and the issue is reported unresolved every round. That is the source page being
   unreadable, not the pipeline failing to try, and the alternative — a plausible word, or a quiet
-  deletion — is the one outcome a reader cannot detect.
+  deletion — is the one outcome a reader cannot detect. A `[page not fully transcribed]` marker
+  always ends this way, by design: no pass in the review loop can resolve it, because finishing a
+  page means returning the rest of it on top of the whole corrected body, and a response that hits
+  its ceiling ends the run with nothing delivered. So it is reported every round and left standing,
+  and it raises this rate for a document that is otherwise sound. Read it as what it is — one page
+  arrived short, and the document says where.
 * `links_dropped_rate` — share of documents where an `href` present before the copy editor was
   missing after it.
 * `lint_error_rate` — share of documents whose lint pass **errored** instead of running. Recorded
