@@ -475,6 +475,15 @@ run log instead (step 7). An `<!-- @unresolved -->` comment listing outstanding 
 appended if the review loop hit its iteration cap. Returns `409` while the session is still
 running.
 
+**Image references do not resolve, by design.** A graphic on the page — a logo, a diagram, a
+photograph — is emitted as an `<img>` with a description and a placeholder `src` naming the page
+and the graphic (`src="page-1-logo.png"`), because the extractor sees a rasterized page and has no
+asset to embed; the placeholder is also recorded in the run log. Iris serves no image endpoint, so
+those references 404 until a consumer supplies the files. What a screen-reader user receives is the
+`alt` text, which is the content the picture carries — but a client that renders this HTML in a
+browser will show broken images, and one that rewrites the `src`s has the log and the fragment to
+match them against.
+
 ## 6. Submit feedback (re-run)
 
 Triggers a new run within the same session, with the feedback injected as a top-level
