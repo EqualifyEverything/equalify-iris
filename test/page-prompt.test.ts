@@ -159,6 +159,78 @@ test("the page agent's heading rules keep the clauses that place a section's par
   }
 });
 
+// What the agent may say about what it could not read, and how much of the page has to
+// arrive at all (issues #112, #117, #133, and the legibility half of #116).
+//
+// Three reports, one shape: the output was quieter than the page. A user compared the
+// result against Preview on their own Mac and found far more readable than the run had
+// transcribed (#117); a run emitted "d :5[" where the sentence was about an inserted disc
+// (#112); a run dropped whole sections and tables (#133). Nothing downstream recovers any
+// of it. The Reader Agent never sees the source image by design (READER_SYSTEM in
+// src/pipeline/review.ts), the verify pass compares the output against the image but
+// judges it by this file, and the assembled document is exactly what the page calls
+// returned — so a row that never arrived is not missing anywhere, it simply is not there.
+//
+// Two of the four asks were declined and the reasons are pinned as clauses too, since a
+// later reading of the issues would otherwise re-add them: #116 asks for
+// `<span aria-label="text not legible">[not legible]</span>`, which hands a screen reader
+// the same words twice and overrides the visible text with a copy of itself, and asks for
+// "suggested_agent" on an illegible page, where that field means a content-type specialist
+// and the contract says so. The location of an unreadable region goes in "log", which is
+// not delivered as part of the document.
+test("the page agent says what to do with what it cannot read, and emits the whole page", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    // #133: entire sections and tables absent from the output. Length is the reason a model
+    // stops, so length is named as not being one.
+    ["everything on the page reaches the output",
+      /Everything the page shows reaches your output/],
+    ["nothing is summarised or handed back in part",
+      /none of it is summarised, abbreviated, or handed back in part because the rest is more of the same/],
+    ["the reason it matters: no later pass can tell a dropped row was ever there",
+      /the document is assembled from what you return, so a row, an item or a section you leave out is simply not in the document any reader gets/],
+    ["length is not a reason to stop, and stopping is said out loud",
+      /Length is not a reason to stop.*say in the "log" field where you stopped/],
+    // #117: "[not legible]" over text the user could read in Preview. The rule is an order of
+    // operations — read first, mark second — and it names the regions that get skimmed.
+    ["the page is read before any of it is called unreadable",
+      /Read the page before deciding any of it is unreadable/],
+    ["the regions that take a second look are named",
+      /Low contrast, small type, a watermark over text, a lightly printed caution, the labels inside a diagram, the figures in a table cell/],
+    ["text a reader could make out with effort is transcribed",
+      /text a reader could make out with effort is text you transcribe/],
+    // #116's legibility half: the placeholder keeps the structure around it, and the mark is
+    // scoped to the words that could not be read rather than to the block they sit in.
+    ["the placeholder stands where the words stand, inside the element they belong to",
+      /write \[not legible\] where that word or phrase stands, keep the element it belongs to around it — the <li>, the <td>, the <p> of the caution box/],
+    ["only what could not be read is marked",
+      /Mark only what you could not read: a placeholder standing for a paragraph you could mostly read costs a reader the part you had/],
+    // #117's other half. A paraphrase and an invented caution are the dangerous ones on a
+    // safety page; an editorial note is the one the user actually saw in the body.
+    ["nothing else may stand in that place, including an editorial note",
+      /not a paraphrase, not a caution of your own that suits the picture, not an editorial note \("manual transcription required", "insufficient contrast", "see the original manual"\)/],
+    ["notes about the transcription go where they are not delivered",
+      /notes about the transcription belong in the "log" field, which is not part of the document/],
+    // #112: "d :5[" for "disc". A reading has to be a reading of the marks, which is what
+    // keeps this from becoming licence to write the word the sentence wants.
+    ["an ambiguous run of marks is read as the word its shapes allow",
+      /what you emit is a reading OF those marks: "d :5\[" is not a word, and where the shapes allow "disc" and the sentence is about an inserted disc, disc is what the page says/],
+    ["a word that fits but is not on the page is still invented content",
+      /A word whose letters are not on the page is invented content however well it fits/],
+    // The bound that matters most on a manual: context can confirm a word and cannot confirm
+    // a torque figure or a part number, and those are the strings a reader acts on.
+    ["a number, a code or a measurement is marked rather than mended",
+      /a number, a part code, a measurement or a model name is never settled this way.*an uncertain one is marked, not mended/],
+    // The fidelity sentence is a closed enumeration of what may be emitted that the page does
+    // not print, and the Feedback Agent judges against it (agents/feedback.md), so a
+    // placeholder that is not named there can be sent back as invented content.
+    ["the placeholder is named where fidelity is demanded",
+      /a \[not legible\] marker where the marks on the page do not resolve into characters/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
 // The numbering and abbreviation rules (issues #98, #100, #101) came from one
 // session's feedback on a parts manual: item numbers that skipped were annotated
 // under the last table and nowhere else, a repeat went unremarked, the "NS" key
