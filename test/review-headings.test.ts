@@ -147,6 +147,10 @@ const placed = (body: string) =>
     (r) => `h${r.level}:${r.text}:${r.count} after ${r.after ? `h${r.after.level}:${r.after.text}` : "-"}`,
   );
 
+// The rendered lines, which is what the Reader actually acts on. Two runs it cannot tell
+// apart cost one of them a report, whatever the objects behind them look like.
+const lines = (body: string) => (sameWordedHeadingNote(sameWordedHeadingRuns(body)) ?? "").split("\n");
+
 test("two same-level headings with the same words and only their own content between them", () => {
   // #119 as reported, in miniature: the second [Heading 2] Operation tells a reader
   // navigating by heading that the same subject follows.
@@ -219,13 +223,16 @@ test("a body with no headings, and one with no repeats, produce no list at all",
 
 test("the list quotes the heading and says how many, and says when it is truncated", () => {
   const note = sameWordedHeadingNote([
-    { level: 2, text: "Operation", count: 3, after: null },
-    { level: 3, text: "Cleaning", count: 2, after: { level: 2, text: "Care" } },
+    { level: 2, text: "Operation", count: 3, after: null, opening: "Fill the hopper." },
+    { level: 3, text: "Cleaning", count: 2, after: { level: 2, text: "Care" }, opening: "" },
   ])!;
-  assert.match(note, /\[Heading 2\] "Operation" \(3 of them\), at the start of the document/);
   assert.match(
     note,
-    /\[Heading 3\] "Cleaning", the first of them after \[Heading 2\] "Care"$/m,
+    /1\. \[Heading 2\] "Operation" \(3 of them\), at the start of the document, opening "Fill the hopper\."/,
+  );
+  assert.match(
+    note,
+    /2\. \[Heading 3\] "Cleaning", the first of them after \[Heading 2\] "Care", with nothing under it$/m,
     "a plain pair needs no count, but still needs placing",
   );
 
@@ -235,6 +242,7 @@ test("the list quotes the heading and says how many, and says when it is truncat
     text: `Section ${i}`,
     count: 2,
     after: null,
+    opening: "",
   }));
   const capped = sameWordedHeadingNote(many)!;
   assert.match(capped, /and 8 more, not listed here/);
@@ -347,4 +355,45 @@ test("a run is placed by the heading before it whatever that heading's level", (
     placed("<h1>Manual</h1><h2>Care</h2><h3>Deep</h3><p>a</p><h2>Op</h2><p>b</p><h2>Op</h2><p>c</p>"),
     ["h2:Op:2 after h3:Deep"],
   );
+});
+
+test("two runs whose preceding headings are also alike are still two distinct lines", () => {
+  // #111's shape doubled: the page reprints its running title AND the header of the
+  // subsection continuing under it, twice over — so both <h3> runs follow an <h2> with the
+  // same words, and the heading before them cannot tell them apart. What differs is the
+  // content under them, and past that, the numbering.
+  const body =
+    "<h2>Op</h2><h3>X</h3><p>Fill the hopper.</p><h3>X</h3><p>Press start.</p>" +
+    "<h2>Op</h2><h3>X</h3><p>Empty the tray.</p><h3>X</h3><p>Wipe the plate.</p>";
+  const out = lines(body);
+  assert.equal(out.length, 3, `expected the outer pair and both inner pairs: ${out.join(" / ")}`);
+  assert.equal(new Set(out).size, 3, `every line must be distinct: ${out.join(" / ")}`);
+  assert.match(out[1], /opening "Fill the hopper\."/);
+  assert.match(out[2], /opening "Empty the tray\."/);
+});
+
+test("even an outline that repeats exactly leaves the entries numbered apart", () => {
+  // Two runs where the preceding heading AND the words underneath match — a page
+  // duplicated wholesale. Nothing observable distinguishes them, so the numbering is what
+  // is left, and it is enough for the Reader to report two pairs rather than one.
+  const body =
+    "<h2>Op</h2><h3>X</h3><p>Same words.</p><h3>X</h3><p>Same words.</p>" +
+    "<h2>Op</h2><h3>X</h3><p>Same words.</p><h3>X</h3><p>Same words.</p>";
+  const out = lines(body);
+  assert.equal(new Set(out).size, out.length, `every line must be distinct: ${out.join(" / ")}`);
+  assert.match(out[1], /^2\. /);
+  assert.match(out[2], /^3\. /);
+});
+
+test("the words quoted under a heading stop at the next heading and at its own section", () => {
+  // The opening exists to tell two entries apart, so it must be the run's OWN content: a
+  // heading with an empty section that borrowed the next section's words would read as
+  // distinct when it is not, and as describing content it does not have.
+  const empty = sameWordedHeadingRuns("<h2>Op</h2><h3>X</h3><h3>X</h3><p>Under the second.</p>");
+  assert.equal(empty.find((r) => r.level === 3)!.opening, "", "the first X has nothing under it");
+  const wrapped = sameWordedHeadingRuns(
+    "<section><h2>Op</h2><p>Inside.</p></section><section><h2>Op</h2><p>Also inside.</p></section>",
+  );
+  assert.equal(wrapped.length, 1, "a heading wrapped in its own <section> is still found");
+  assert.equal(wrapped[0].opening, "Inside.", "and its opening is its own section's words");
 });

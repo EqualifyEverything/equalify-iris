@@ -35,6 +35,12 @@ export interface HeadingRun {
   // one of the two pairs goes unreported. This is what tells them apart, and it is also
   // what the Reader needs anyway: it locates the run in the HTML it was given.
   after: { level: number; text: string } | null;
+  // The words the run's first section opens with, truncated — the one field that does not
+  // repeat when the outline does. `after` alone still collides on the doubled version of
+  // #111's shape (a reprinted running title AND a reprinted subsection header: both <h3>
+  // runs follow an <h2> called the same thing), and the content under two different
+  // sections is what actually differs. Empty when the heading is followed by nothing.
+  opening: string;
 }
 
 const HEADINGS = "h1, h2, h3, h4, h5, h6";
@@ -48,6 +54,11 @@ const MAX_RUNS = 12;
 // opening of a heading is enough to find it in a page excerpt.
 const MAX_QUOTED = 120;
 
+// And how much of the text under it is quoted. Long enough to match against a page
+// excerpt (READER_INDEX_EXCERPT_CHARS is 200) and to read as a sentence, short enough
+// that a dozen entries do not crowd out the rest of the Reader's input.
+const MAX_OPENING = 80;
+
 // What "the same words" means. Case is a typographic choice — a page that sets a
 // running title in capitals and reprints it in title case is reprinting it — and so is
 // the trailing colon or full stop a heading may or may not carry. Anything more
@@ -59,6 +70,21 @@ function key(text: string): string {
 
 const textOf = (el: Element): string => (el.textContent ?? "").replace(/\s+/g, " ").trim();
 
+// The words a heading's own section opens with: the text of the elements after it, up to
+// the next heading, capped. Siblings only — a heading wrapped in its own <section> has its
+// content beside it, and following the tree out of that wrapper would quote the NEXT
+// section's words for a heading whose own section is empty, which is the opposite of
+// telling two entries apart.
+function openingAfter(el: Element): string {
+  let out = "";
+  for (let next = el.nextElementSibling; next && out.length < MAX_OPENING; next = next.nextElementSibling) {
+    if (/^h[1-6]$/i.test(next.tagName)) break;
+    const t = textOf(next);
+    if (t) out = out ? `${out} ${t}` : t;
+  }
+  return out.length > MAX_OPENING ? `${out.slice(0, MAX_OPENING).trimEnd()}…` : out;
+}
+
 // The runs of same-worded, same-level headings in `body`, in document order.
 //
 // "Adjacent" is the load-bearing word and it is not a character distance: two headings
@@ -68,12 +94,13 @@ const textOf = (el: Element): string => (el.textContent ?? "").replace(/\s+/g, "
 // apart. Identical headings with another section in between are excluded on purpose —
 // there, the intervening section tells a reader the two are different places.
 export function sameWordedHeadingRuns(body: string): HeadingRun[] {
-  let headings: { level: number; text: string }[];
+  let headings: { level: number; text: string; opening: string }[];
   try {
     const doc = new JSDOM(`<body>${body}</body>`).window.document;
     headings = [...doc.querySelectorAll(HEADINGS)].map((el) => ({
       level: Number(el.tagName[1]),
       text: textOf(el),
+      opening: openingAfter(el),
     }));
   } catch {
     // The Reader's own rule about duplicate headings still applies to whatever it can
@@ -115,6 +142,7 @@ export function sameWordedHeadingRuns(body: string): HeadingRun[] {
         text: first.text,
         count: members.length,
         after: prev ? { level: prev.level, text: prev.text } : null,
+        opening: first.opening,
       });
       for (const m of members) counted.add(m);
     }
@@ -130,15 +158,19 @@ export function sameWordedHeadingNote(runs: HeadingRun[]): string | null {
   if (!runs.length) return null;
   const shown = runs.slice(0, MAX_RUNS);
   const quote = (t: string) => (t.length > MAX_QUOTED ? `${t.slice(0, MAX_QUOTED)}…` : t);
-  const lines = shown.map((r) => {
+  // Numbered, so that every line is distinct even where an outline repeats so exactly
+  // that both the preceding heading and the opening words match. The Reader is told each
+  // entry is a real pair; two lines it cannot tell apart cost one of them a report.
+  const lines = shown.map((r, n) => {
     const many = r.count > 2 ? ` (${r.count} of them)` : "";
     const where = r.after
       ? `, the first of them after [Heading ${r.after.level}] "${quote(r.after.text)}"`
       : ", at the start of the document";
-    return `- [Heading ${r.level}] "${quote(r.text)}"${many}${where}`;
+    const opens = r.opening ? `, opening "${r.opening}"` : ", with nothing under it";
+    return `${n + 1}. [Heading ${r.level}] "${quote(r.text)}"${many}${where}${opens}`;
   });
   if (runs.length > shown.length) {
-    lines.push(`- …and ${runs.length - shown.length} more, not listed here`);
+    lines.push(`…and ${runs.length - shown.length} more, not listed here`);
   }
   return lines.join("\n");
 }
