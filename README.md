@@ -863,6 +863,14 @@ label and comment happens in a shell step that reads the two verdicts and the Gi
 division as [Scheduled issue triage](#scheduled-issue-triage): the prompt is the layer an injected
 issue body argues with, so the rules live somewhere it cannot reach.
 
+That step's body is [`.github/scripts/triage-decide.sh`](.github/scripts/triage-decide.sh) rather
+than an inline block, for a mechanical reason worth knowing before writing a long step: GitHub parses
+a `run:` block as one expression and refuses the whole workflow file past 21000 characters. The
+enforcement step's reasoning is longer than that, and an unparseable workflow file fails *every* run
+with no jobs and no annotation — the loudest possible failure for the quietest possible reason, and
+the Actions UI will only say the file has an issue. `gh api
+repos/OWNER/REPO/actions/workflows/FILE/dispatches` is what names the line and the limit.
+
 **Neither session has `Write`, either.** A verdict is the session's structured output — `--json-schema`
 has the runtime validate it and the action publishes it as a step output — so nothing needs to create
 a file and neither session is given the means to. That is worth more than scoping `Write` could be. A
