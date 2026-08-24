@@ -823,6 +823,114 @@ have put a green tick on a PR nothing had read (measured on #70). That one is no
 with a real verdict, and both gates are gone with it. A human still merges. What changes is what
 that human is reading, not whether they read it.
 
+## Closing duplicate issues
+
+[`.github/workflows/issue-triage.yml`](.github/workflows/issue-triage.yml) runs **when an issue is
+opened or reopened**. It reads the new issue, finds the open issue it most resembles, and — only
+when a second, independent session fails to refute the claim — closes the new one as a duplicate
+with a comment naming the survivor. Anything short of that is commented and reported, never closed.
+
+It exists because the dedupe already in the app cannot do this, and was never trying to.
+`src/github/issue.ts` refuses to file an `Agent update proposal:` whose title exactly matches an
+open one, which is the right check to have there: cheap, deterministic, no model. What it cannot see
+is that "procedure steps must be marked up at heading" and "when steps are nested inside a named
+section" are one rule described twice. Iris files these speculatively from content it met once
+(§7.13), so semantic overlap between them is the normal case rather than the exception, and it
+accumulates faster than anyone reads it.
+
+**Two sessions, and the second one is not shown the first one's argument.** The whole risk of
+automatic closing is a plausible-but-wrong duplicate call, and a session asked to check its own
+work draws the second opinion from the context that produced the first. So the *find* session reads
+the new issue against every other open issue and proposes the nearest one; the *refute* session is
+handed only that pair, told to argue against closing, and told to default to "not a duplicate" when
+it cannot decide. A close needs the first to say `duplicate` at high confidence and the second to
+fail to refute it. Disagreement is not a tie to be broken — it is the answer, and the answer is
+"leave it open and tell a human".
+
+The pair the second session reads is fetched fresh from the API, not taken from the corpus the first
+one was given, and the second session gets no `Glob` or `Grep` — no repository, no corpus, just the
+two issues. Independence has to cover the input, not only the argument: the first session runs first
+and in the same workspace, so anything it could leave on disk is evidence it could choose. Restate
+issue A's body as a copy of B's and the refutation opens a file in which the two really are
+identical; edit `agents/page.md` and the rule B proposes looks like it is already in the prompt,
+which is the question the refutation turns on. It costs the refutation some accuracy, in the
+direction of refusing to close.
+
+**Neither session can close anything.** Neither has `Bash`, so neither can reach `gh`. Every close,
+label and comment happens in a shell step that reads the two verdict files and the GitHub API, the
+same division as [Scheduled issue triage](#scheduled-issue-triage): the prompt is the layer an
+injected issue body argues with, so the rules live somewhere it cannot reach.
+
+`Write` is scoped to `/tmp/triage` on both, which is the only place a verdict file belongs. A
+checkout is not inert — `.git/config` defines filters that any later `git` command executes,
+`agents/*.md` is evidence a later step might read, and a `CLAUDE.md` at the root is project
+instructions for whatever runs next. An earlier version of this workflow ran `git checkout -- .`
+between the sessions to undo writes, which was worse than the problem: `git checkout` applies smudge
+filters, so a filter written into `.git/config` executes during the repair, and the "restored" file
+comes back with whatever the filter returned. A `.git` you do not trust cannot be repaired with
+`git`, because every `git` command reads its config first. Not being able to write there in the first
+place is the version that works.
+
+Reading is scoped for the same reason, from the other end. These sessions run in a step holding the
+Bedrock credentials and a token, and the verdict's prose is posted to a public issue comment — so
+whatever a session can read, it can publish. The refutation gets `Read` on `/tmp/triage` and nothing
+else; the find session needs the checkout, so it keeps a broad `Read` with `/proc`, the runner's temp
+directory and `~/.aws` denied, and `Grep` and `Glob` denied the same paths, since a tool that returns
+matching lines is also a way to read a file. `persist-credentials: false` on the checkout keeps the
+token off disk entirely, which costs nothing because no step here runs `git`. Every deny is written
+in both `/x` and `//x` form, because a deny that resolves the wrong way fails *open* and silently,
+where a wrong allow just refuses a write and turns the run red.
+
+Then `Decide and act` flattens each model-authored prose field to one line, caps it at 600
+characters and redacts it against the live credential values before it can reach a comment. That
+last layer catches verbatim copying and not a re-encoded value — which is why the reading is scoped
+rather than the publishing merely filtered. `verdict` and `confidence` are not sanitized but held to
+their allowed values, which is stronger where it applies: a string outside the enum is not a
+malformed verdict, it is not a verdict, so it is discarded rather than repeated back — and a
+discarded verdict fails the run. Case and space are normalised away first, so a `Duplicate` is not
+thrown out — a cosmetic slip should not change what a verdict means, and being discarded now costs
+the issue its comment as well. Precisely: the gates accept one *normalised* value, so a mis-cased
+`duplicate` can close, and the normalisation is blunt enough that `dup licate` would too. What that
+does not touch is anything standing between a verdict and a close — the refutation and the four
+rules below are unchanged.
+
+**Four rules hold regardless of what either session says**, because that step re-derives them:
+
+- **Only the newer issue of a pair can close.** The survivor must have the lower number. This is
+  what makes the outcome independent of which issue happened to be triaged first — without it, two
+  issues opened a minute apart could each close the other and the tracker would lose both. A
+  verdict naming a *newer* issue is still reported; it just cannot close anything.
+- **An issue an open PR claims never closes** — anyone's PR, by a closing-issue link or an
+  `issue-<n>` branch fragment, the same two precise signals used for ranking.
+- **An issue with human discussion never closes.** A comment from anyone who is not the filer and
+  not a bot means a person engaged with it.
+- **`no-auto-close` is an unconditional veto.** No dispatch input overrides it — a manual `force`
+  bypasses only the record of an earlier triage, nothing about the issue itself. The label does not
+  exist in the repo yet; an absent label matches nothing.
+
+The last three are checked twice — once in the preflight, so an ineligible issue costs no model call
+at all, and again after both sessions, because a PR, a reply or a label can land inside the minutes
+they take and that is exactly when closing does the most damage. The first rule needs a verdict to
+check, so it is only checked after. A read that *fails* counts as a blocker rather than as a clean
+bill of health: `gh` prints API error bodies to stdout, so a check that treated an unreadable answer
+as an empty one would be reading `{"message":"Not Found"}` as "nobody has commented".
+
+A close also applies the `duplicate` label, which is what takes the issue out of
+[Scheduled issue triage](#scheduled-issue-triage)'s candidate list — that workflow reads labels,
+not close reasons. GitHub offers no `duplicate` close reason, so the state closes as `not planned`
+and the comment carries the actual reason, along with an invitation to reopen and say what the
+survivor misses. A reopened issue is not triaged again.
+
+There is no schedule, and the backlog that predates the workflow is triaged one dispatch at a time
+so a human sees each verdict as it lands:
+
+```
+gh workflow run issue-triage.yml -f issue_number=<n> -f dry_run=true
+```
+
+`dry_run` does the full triage, both sessions, and reports exactly what it would have done without
+touching the issue. Add `-f force=true` to re-triage an issue that has already been triaged.
+
 ## Scheduled issue triage
 
 [`.github/workflows/issue-to-pr.yml`](.github/workflows/issue-to-pr.yml) runs **Sun–Wed at 22:00
