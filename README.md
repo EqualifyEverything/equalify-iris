@@ -759,8 +759,8 @@ and every future session.
 
 What it does, in order:
 
-1. Runs `npm ci`, `tsc --noEmit`, the unit suite, `./test/e2e.sh`, and `actionlint`, and hands
-   the model their **actual output**. The reviewer is told not to re-run them, so a claim that a
+1. Runs `npm ci`, `tsc --noEmit`, the unit suite, `./test/e2e.sh`, `actionlint` over the workflow
+   files and `shellcheck` over `.github/scripts/*.sh`, and hands the model their **actual output**. The reviewer is told not to re-run them, so a claim that a
    check failed is quoted rather than predicted.
 2. Builds a context file: the diff, plus full source for files that are new or substantially
    rewritten, plus up to the 3 most recent prior reviews on **earlier commits of the same PR** —
@@ -792,7 +792,7 @@ no review was posted at all, since the action can exit 0 without posting one.
 reviewer and the issue-triage one are what §7.14's review promise actually rests on, and they hold
 `id-token: write` and the Bedrock role; every workflow here holds a secret, a token or write
 access, and a defect in one is reachable by definition, since CI runs it. So a diff touching
-`.github/workflows/**` gets a CI-security checklist
+`.github/workflows/**` or `.github/scripts/**` gets a CI-security checklist
 ahead of the accessibility one — PR-authored code reaching secrets, `${{ }}` interpolated into a
 `run:` block, widened `permissions:`, an unpinned third-party action, lost review coverage, the
 shell traps that have actually bitten here, and the timeout arithmetic — and the reviewer reads
@@ -871,11 +871,16 @@ issue body argues with, so the rules live somewhere it cannot reach.
 
 That step's body is [`.github/scripts/triage-decide.sh`](.github/scripts/triage-decide.sh) rather
 than an inline block, for a mechanical reason worth knowing before writing a long step: GitHub parses
-a `run:` block as one expression and refuses the whole workflow file past 21000 characters. The
+a `run:` block as one expression and refuses the whole workflow file when one exceeds 21000. The
 enforcement step's reasoning is longer than that, and an unparseable workflow file fails *every* run
 with no jobs and no annotation — the loudest possible failure for the quietest possible reason, and
 the Actions UI will only say the file has an issue. `gh api
 repos/OWNER/REPO/actions/workflows/FILE/dispatches` is what names the line and the limit.
+
+Do not budget against 21000 directly. The block that broke this workflow held 20,893 bytes over 408
+lines and was rejected anyway — 21,301 with CRLF line endings, which is what the limit appears to
+count. Roughly 20,500 bytes of content is the usable ceiling, and `code-review.yml`'s context builder
+is the other block in this repo close enough to it to matter.
 
 **Neither session has `Write`, either.** A verdict is the session's structured output — `--json-schema`
 has the runtime validate it and the action publishes it as a step output — so nothing needs to create
@@ -916,12 +921,18 @@ rather than the publishing merely filtered. `verdict` and `confidence` are not s
 their allowed values — twice, once by the schema in the runtime and again in the shell, because a
 control that only holds while the action keeps behaving is not a control. That is stronger than
 sanitizing where it applies: a string outside the enum is not a malformed verdict, it is not a
-verdict, so it is discarded rather than repeated back — and a discarded verdict fails the run. Case and space are normalised away first, so a `Duplicate` is not
-thrown out — a cosmetic slip should not change what a verdict means, and being discarded now costs
-the issue its comment as well. Precisely: the gates accept one *normalised* value, so a mis-cased
-`duplicate` can close, and the normalisation is blunt enough that `dup licate` would too. What that
-does not touch is anything standing between a verdict and a close — the refutation and the four
-rules below are unchanged.
+verdict, so it is discarded rather than repeated back — and a discarded verdict fails the run.
+
+The shell also normalises case and space before checking, and that buys less than it was written to.
+It went in so a `Duplicate` would not be thrown out for a cosmetic slip, since being discarded costs
+the issue its comment too. But the schema pins the same three words in the runtime and sits in front
+of the shell, so a `Duplicate` never gets this far: validation rejects it, the verdict arrives empty,
+and the run goes red having posted nothing. The normalisation is therefore not a nicety with an
+effect today — it is the layer that still means something if the action stops validating, which is
+the same reason the type checks run at all. Where it is reached, the gates accept one *normalised*
+value, so a mis-cased `duplicate` can close, and it is blunt enough that `dup licate` would too.
+Either way nothing standing between a verdict and a close moves: the refutation and the four rules
+below are unchanged.
 
 **Four rules hold regardless of what either session says**, because that step re-derives them:
 
@@ -1027,8 +1038,10 @@ the repo would go wrong:
   shell metacharacters or an Actions expression is inert. But the prompt is the layer an injected
   issue argues with, so it is not the control. The control is a verify step that re-reads the
   **pushed diff** against a path allowlist: a PR touching `.github/workflows/**`,
-  `.github/CODEOWNERS`, `LICENSE`, `infra/**` or `.env*` is converted to a draft with a comment
-  saying why, and the job goes red. `.github/workflows/**` is the sharp one, and it stays forbidden
+  `.github/scripts/**`, `.github/CODEOWNERS`, `LICENSE`, `infra/**` or `.env*` is converted to a
+  draft with a comment saying why, and the job goes red. `.github/scripts/` is on the list because
+  a workflow may keep part of itself there: GitHub refuses a `run:` block past 21000 characters, so
+  `issue-triage.yml`'s enforcement step is `.github/scripts/triage-decide.sh`. CI is the sharp case, and it stays forbidden
   even though `code-review.yml` now reviews workflow diffs: CI is where this job's own privilege is
   defined — the Bedrock role, `contents: write`, and that allowlist — so a run talked into editing
   it could widen what the next run may do. That is a privilege boundary, not a review gap.

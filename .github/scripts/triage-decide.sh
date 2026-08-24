@@ -3,12 +3,21 @@
 #
 # This is the body of that workflow's `Decide and act` step, and it lives in a
 # file for a mechanical reason: GitHub parses a `run:` block as a single
-# expression and refuses the whole workflow file past 21000 characters. This
+# expression and refuses the whole workflow file when one exceeds 21000. This
 # step's reasoning is longer than that, and an unparseable workflow file fails
 # every run with no jobs at all — the loudest possible failure for the quietest
-# possible reason. Read it as part of that workflow; it takes its whole input
-# from the environment that step sets, and nothing here is interpolated by
-# Actions.
+# possible reason.
+#
+# The units are worth knowing before budgeting against that number. The block
+# that broke this workflow held 20,893 bytes over 408 lines and was rejected,
+# which is 21,301 with CRLF line endings — so it is the block's own content,
+# counted with a carriage return per line, and the usable budget is nearer
+# 20,500 bytes than 21,000. GitHub reports the failure as a run named after the
+# file path with no jobs; the message naming the line and the limit comes only
+# from `gh api repos/OWNER/REPO/actions/workflows/FILE/dispatches`.
+#
+# Read this as part of that workflow; it takes its whole input from the
+# environment that step sets, and nothing here is interpolated by Actions.
 set -euo pipefail
 
 # The enforcement layer. Everything above produced claims; this step
@@ -130,21 +139,25 @@ REFUTE_REASON=$(redact_field "$REFUTE_REASON")
 # readable verdict and fails the run, and for `confidence` it reads as
 # `unstated` and cannot satisfy the `high` gate.
 #
-# Case and surrounding space are normalised away first, because the two
-# outcomes either side of this check are very far apart and the most
-# likely way a model misses the shape is a cosmetic one. `Duplicate` or
-# ` duplicate` would otherwise be discarded, which means a failed run
-# and nothing on the issue — indistinguishable from a timeout, for a
-# verdict whose meaning was never in doubt. Be exact about what this
-# does: the gates below accept one *normalised* value, so a `Duplicate`
-# does not merely get a report, it can close — that is the point, since
-# a cosmetic slip should not change what a verdict means. What does not
-# move is everything that stands between a verdict and a close: the
-# refutation and the four re-derived rules are the same either way. The
-# normalisation is also blunt — `tr -d '[:space:]'` drops interior space,
-# so `dup licate` normalises in too. Harmless, because a body aiming at
-# a close would just write `duplicate`, but not something to describe as
-# a single accepted spelling.
+# Case and surrounding space are normalised away first, and it is worth
+# being straight about what that buys today, because it is less than it
+# was written for. It went in to keep a cosmetic slip from costing an
+# issue its comment: `Duplicate` discarded here means a failed run and
+# nothing posted, indistinguishable from a timeout, for a verdict whose
+# meaning was never in doubt. But `--json-schema` pins `verdict` to the
+# same three words in the runtime, which sits in front of this: a
+# `Duplicate` fails validation there, `$FIND_JSON` arrives empty, and
+# the `No verdict` branch below is what runs. So the case the
+# normalisation was for cannot reach it while the schema holds, and the
+# normalisation earns its place as the layer that still means something
+# if the action stops validating — the same reason the type guards above
+# run at all. What it does when it is reached: the gates accept one
+# *normalised* value, so a `Duplicate` can close rather than merely be
+# reported. Nothing between a verdict and a close moves either way — the
+# refutation and the four re-derived rules are the same. And it is
+# blunt: `tr -d '[:space:]'` drops interior space, so `dup licate`
+# normalises in too. Harmless, since a body aiming at a close would just
+# write `duplicate`, but not a single accepted spelling.
 enum_value() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'
 }
