@@ -165,6 +165,11 @@ test("rewriting an HTML comment is not an attribute change", () => {
   for (const [before, after] of [
     [`<!-- continued from previous page --><p>Hi</p>`, `<!-- continues on next page --><p>Hi</p>`],
     [`<!-- a note --><p>Hi</p>`, `<p>Hi</p>`],
+    // And one the model never closed, which a parser reads as running to the end of the
+    // fragment. Both signals have to read it that way or they disagree about the same
+    // characters: the tag scan swallows `<!-- continued alpha <p>` whole, so the text signal
+    // drops those words while the attribute signal would file them as attribute names.
+    [`<p>Hi</p><!-- continued alpha <p>`, `<p>Hi</p><!-- continued beta <p>`],
   ] as [string, string][]) {
     const e = correctionEffect(before, after);
     assert.equal(e.attrs_changed, false, `read as an attribute change: ${after}`);
