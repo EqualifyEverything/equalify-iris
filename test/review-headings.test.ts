@@ -413,12 +413,39 @@ test("the opening keeps the word boundaries the markup put there", () => {
   );
   assert.equal(list[0].opening, "Fill the hopper Press start");
 
-  // And it must not gain a boundary inside a phrase: an emphasised word is announced
-  // within the sentence, so INLINE decides this and flatten's set is the one that decides it.
+  // A boundary inside a phrase costs nothing, because the spaces of a sentence are in its
+  // own text nodes: the separator lands where a space already is, and collapses into it.
   const inline = sameWordedHeadingRuns(
     "<h2>Op</h2><p>Press <strong>start</strong> now.</p><h2>Op</h2><p>t</p>",
   );
   assert.equal(inline[0].opening, "Press start now.");
+
+  // The cases a reader hears a break in and `textContent` does not: a line break, and two
+  // adjacent inline elements. Both are how a page prints an address block or a spec pair.
+  const broken = sameWordedHeadingRuns(
+    "<h2>Op</h2><p>Acme Ltd<br>12 Mill Road<br>Leeds</p><h2>Op</h2><p>t</p>",
+  );
+  assert.equal(broken[0].opening, "Acme Ltd 12 Mill Road Leeds");
+
+  const spans = sameWordedHeadingRuns(
+    "<h2>Op</h2><p><span>Low</span><span>2 min</span></p><h2>Op</h2><p>t</p>",
+  );
+  assert.equal(spans[0].opening, "Low 2 min");
+});
+
+test("the opening quotes content and not a leaked stylesheet", () => {
+  // SILENT is flatten's set and the question is the same one in both places — is this text
+  // content at all. A rule block read as the section's opening words matches no page
+  // excerpt and tells the Reader the section says something it never says.
+  const runs = sameWordedHeadingRuns(
+    "<h2>Op</h2><style>.x{color:red;font-size:12px}</style><p>Turn the dial.</p><h2>Op</h2><p>t</p>",
+  );
+  assert.equal(runs[0].opening, "Turn the dial.");
+
+  const nested = sameWordedHeadingRuns(
+    "<h2>Op</h2><div><script>var x = 1;</script>Turn the dial.</div><h2>Op</h2><p>t</p>",
+  );
+  assert.equal(nested[0].opening, "Turn the dial.");
 });
 
 test("a twin wrapped in its own section does not lend its words to an empty one", () => {
