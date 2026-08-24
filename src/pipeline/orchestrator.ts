@@ -123,6 +123,11 @@ export async function runPipeline(args: {
     // Specialist-agent suggestions come from a pass that actually looks at the
     // source images: a full extraction, or a targeted feedback re-extraction.
     let suggestions: { name: string; reason: string; image: string }[] = [];
+    // Pages the model did not deliver this run (extraction.ts `failedPage`). A run can
+    // now finish with some, which is the point — but it has finished with a document
+    // that is not what was asked for, so it is reported on the run's own completion
+    // line rather than only in the per-page events above it.
+    let failedPages: number[] = [];
     let mode: string;
 
     if (iterative) {
@@ -149,6 +154,7 @@ export async function runPipeline(args: {
         const extraction = await reExtractPages(ctx, priorFragments, scope.pages);
         fragments = extraction.fragments;
         suggestions = extraction.suggestions;
+        failedPages = extraction.failedPages;
 
         setPhase("assembly");
         const assembled = await runAssembly(ctx, fragments);
@@ -174,6 +180,7 @@ export async function runPipeline(args: {
       const extraction = await runExtraction(ctx);
       fragments = extraction.fragments;
       suggestions = extraction.suggestions;
+      failedPages = extraction.failedPages;
 
       setPhase("assembly");
       const assembled = await runAssembly(ctx, fragments);
@@ -267,6 +274,9 @@ export async function runPipeline(args: {
       iterations: review.iterationsCompleted,
       unresolved: review.unresolved.length,
       mode,
+      // Only when there were any: a `failed_pages` of [] on every successful run would
+      // read as a field about failure on lines that have none.
+      ...(failedPages.length ? { failed_pages: failedPages } : {}),
     });
 
     // After the user has their output, auto-file agent-suggestion issues

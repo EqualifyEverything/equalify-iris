@@ -94,6 +94,14 @@ export interface Diagnostics {
   >;
   slowest_calls: { agent: string; model: string; capability: string; duration_ms: number; ok: boolean }[];
   errors: { ts: string | null; type: string; message: string }[];
+  // Source pages whose own extraction threw, so the delivered document carries a
+  // failure marker instead of that page's content (pipeline/extraction.ts
+  // `failedPage`). Its own field because a run that ends `ready_for_review` with a
+  // page missing is otherwise indistinguishable here from one that delivered the
+  // whole document: the failed model call underneath shows up in `errors` exactly as
+  // a retried-and-recovered one does, and `status` says the run succeeded — which it
+  // did, on 24 of 25 pages.
+  pages_failed: number[];
 }
 
 function parse(logText: string): LogEvent[] {
@@ -233,6 +241,17 @@ export function summarizeRun(
     .filter((e) => e.type === "run_failed" || e.ok === false)
     .map((e) => ({ ts: e.ts ?? null, type: e.type ?? "error", message: e.error ?? "unknown" }));
 
+  // Sorted and deduped: a feedback re-run can log a page twice over the life of one
+  // session's log, and the field answers "which pages are not in the document", which
+  // is a set.
+  const pagesFailed = [
+    ...new Set(
+      events
+        .filter((e) => e.type === "page_extraction_failed" && typeof e.page === "number")
+        .map((e) => e.page as number),
+    ),
+  ].sort((a, b) => a - b);
+
   const elapsed = ms(startedAt ?? undefined, endRef);
 
   return {
@@ -257,5 +276,6 @@ export function summarizeRun(
     by_agent: byAgent,
     slowest_calls: slowest,
     errors,
+    pages_failed: pagesFailed,
   };
 }

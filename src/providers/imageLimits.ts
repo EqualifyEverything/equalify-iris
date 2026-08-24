@@ -63,25 +63,48 @@ const MAX_DIMENSION_PX = 8000;
 
 // Above this many image (or, on Bedrock/Vertex, document) blocks in ONE request, a
 // stricter per-image dimension limit kicks in and oversized images are rejected with
-// an `invalid_request_error` about "many-image requests". Iris crosses it: a 25-page
-// PDF (util/pdf.ts MAX_PDF_PAGES) is 25 image blocks in the review phase's call. It
-// stays safe only because those pages are rasterized at 150 DPI, which puts a letter
-// page at 1275x1650 — under the 2000 px the docs prescribe for staying under the
-// limit on all platforms. Recorded here rather than left implicit because it is the
-// constraint that makes that DPI load-bearing rather than merely economical.
+// an `invalid_request_error` about "many-image requests". Iris used to cross it: a
+// 25-page PDF (util/pdf.ts MAX_PDF_PAGES) was 25 image blocks in the review phase's
+// call, and stayed safe only because those pages are rasterized at 150 DPI, which
+// puts a letter page at 1275x1650 — under the 2000 px the docs prescribe for staying
+// under the limit on all platforms. A 21-page TABLOID PDF broke that assumption
+// (1650x2550 per page, over 2000 and under the 8000 that is enforced) and failed
+// inside the model rather than here.
 //
-// NEITHER NUMBER IS ENFORCED, and the pair of assumptions above is the whole control:
-// 150 DPI, on a page no larger than letter or A4. A 21-page TABLOID PDF breaks it —
-// 1650x2550 per page, over 2000 and under the 8000 that is enforced — and fails inside
-// the model with an `invalid_request_error` rather than here. Not enforced at upload
-// because it would be the wrong trade: the rule applies per REQUEST, only the review
-// phase's unattributed path attaches every page to one call, and most such documents
-// convert without ever making that call. Refusing them all at upload would reject
-// documents that work today to pre-empt a failure some of them would never reach. The
-// fix, when it is worth doing, is on the rasterizing side — render large pages down
-// rather than refuse them.
+// It no longer crosses it: `MAX_EDITOR_IMAGES` below is the only path that ever
+// attached every page to one request, and it is now the smaller number. Neither
+// number here is enforced at upload, and that stays deliberate — the rule applies per
+// REQUEST, so refusing large-format documents at upload would reject ones that
+// convert fine to pre-empt a call they no longer make. The remaining fix, if a request
+// ever needs more image blocks than this, is on the rasterizing side: render large
+// pages down rather than refuse them.
 export const MANY_IMAGE_THRESHOLD = 20;
 export const MANY_IMAGE_MAX_DIMENSION_PX = 2000;
+
+// The most source page images ONE Copy Editor call may carry (pipeline/review.ts).
+//
+// This is a bound on the whole request, not a preference. The editor's prompt already
+// holds the entire assembled body and every issue the Reader raised, and it has to be
+// able to emit a full `max_tokens` ceiling of corrected body on top — so the images
+// are the one term that can be capped, and until they were, they were unbounded: an
+// issue the Reader could not attribute to a page fell back to attaching EVERY page,
+// which on a 25-page document is a request the model refuses outright. That refusal
+// arrives after extraction and assembly have both been paid for, so an unbounded
+// fallback is not an expensive round — it is a lost run (issue #134).
+//
+// Derived, not picked. An image block costs roughly (width x height) / 750 tokens, so
+// at util/pdf.ts's 150 DPI a letter page is ~2.8k and a tabloid page — the largest
+// Iris rasterizes without refusing it — is ~5.6k. Twelve of the latter is ~67k, which
+// leaves well over half of the 200k context window that is the SMALLEST any Claude
+// vision model has for the body, the issue list and the output. It is also under
+// MANY_IMAGE_THRESHOLD, so the stricter per-image dimension rule above never applies
+// to this call either.
+//
+// Being wrong here is survivable in both directions, which is why one number is
+// enough: too low costs the editor a page image it might have used (recoverable — the
+// next round re-attributes, and the pages an issue actually named are attached first),
+// and too high is caught by the text-only retry in `runEditor`.
+export const MAX_EDITOR_IMAGES = 12;
 
 // Every image format Claude vision accepts, mapped to the media type sent with it.
 // This is the whole allowlist: an upload whose extension is not a key here cannot be

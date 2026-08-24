@@ -87,6 +87,36 @@ export class TruncatedResponseError extends Error {
   }
 }
 
+// A call the upstream REFUSED for size: the request carried more input than the
+// model's context window holds, so it was rejected before anything was processed.
+//
+// Worth telling apart from every other failure because it is the one a caller can
+// answer: the payload is Iris's own doing (page images, a whole document body), so
+// dropping part of it and asking again is a real recovery, and the refusal is cheap
+// — no prompt was read, so nothing was billed and it comes back in under a second.
+//
+// Matched on the message, because neither adapter is given anything better. Bedrock
+// raises a ValidationException whose message is "Input is too long for requested
+// model." with no code distinguishing it from any other validation failure, and
+// OpenRouter forwards a 400 body from whichever upstream served the request, worded
+// differently again ("maximum context length is N tokens"). Both reach a caller as a
+// plain Error carrying that text.
+//
+// Deliberately a small set of phrasings rather than anything cleverer. The caller
+// (pipeline/review.ts) reacts by retrying with a smaller payload, so a false positive
+// costs one extra call that fails the same way, and a false negative is exactly the
+// behaviour that existed before this function.
+export function isInputTooLongError(e: unknown): boolean {
+  const message = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return (
+    message.includes("input is too long") ||
+    message.includes("prompt is too long") ||
+    message.includes("context length") ||
+    message.includes("context window") ||
+    message.includes("too many tokens")
+  );
+}
+
 // A streamed call was abandoned. Three ways, because they are three different
 // diagnoses and an operator reading one of these needs to know which: nothing ever
 // arrived ("first_output"), output started and then stopped ("idle"), or output kept

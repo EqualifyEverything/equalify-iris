@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { imagesForIssues, runReview, type ReviewIssue } from "../src/pipeline/review.ts";
+import { capEditorImages, imagesForIssues, runReview, type ReviewIssue } from "../src/pipeline/review.ts";
+import { MAX_EDITOR_IMAGES } from "../src/providers/imageLimits.ts";
 import type { InputImage, PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 
@@ -31,6 +32,10 @@ function img(order: number): InputImage {
   return { name: `page-00${order}.png`, order, path: `/dev/null/page-00${order}.png` };
 }
 
+function pages(n: number): InputImage[] {
+  return Array.from({ length: n }, (_, i) => img(i + 1));
+}
+
 interface Call {
   agent: string;
   capability: string;
@@ -54,6 +59,10 @@ function ctxWith(
   // deliberately feed what a sloppy model returns (`["3", 3]`) to prove the
   // coercion works. Omit removes the declared type so the override applies.
   issues: (Omit<ReviewIssue, "pages"> & { pages?: unknown })[],
+  // Makes the editor call that CARRIES IMAGES fail with this message, the way a
+  // provider refuses a request larger than the model's context window. A retry with
+  // no images succeeds, which is the whole point of the fallback under test.
+  behavior: { imageCallFailsWith?: string } = {},
 ): { ctx: PipelineContext; rec: Recorded; images: InputImage[] } {
   const inputDir = join(dir, "input");
   mkdirSync(inputDir, { recursive: true });
@@ -94,6 +103,9 @@ function ctxWith(
           imageCount: opts.images?.length ?? 0,
         });
         if (agent === "reader") return { text: JSON.stringify({ issues }) };
+        if (behavior.imageCallFailsWith && (opts.images?.length ?? 0) > 0) {
+          throw new Error(behavior.imageCallFailsWith);
+        }
         return { text: JSON.stringify({ html: "<h1>Edited</h1>" }) };
       },
     },
@@ -187,6 +199,55 @@ test("attributions that match no available image fall back rather than sending n
 
 test("a document with no images selects nothing", () => {
   assert.deepEqual(imagesForIssues([], [{ issue: "a", severity: "low", suggested_action: "x" }]), []);
+});
+
+// --- capEditorImages: what fits in one request -------------------------------
+
+test("a selection within the cap is passed through untouched", () => {
+  const selected = pages(MAX_EDITOR_IMAGES);
+  const capped = capEditorImages(selected, []);
+  assert.deepEqual(capped, selected, "same images, same order, nothing dropped at exactly the cap");
+});
+
+test("an over-cap selection is trimmed to the cap", () => {
+  const capped = capEditorImages(pages(25), [
+    { issue: "reading order is wrong somewhere", severity: "high", suggested_action: "reorder" },
+  ]);
+  assert.equal(capped.length, MAX_EDITOR_IMAGES);
+  // Nothing is attributed, so there is no evidence to prefer by and document order wins.
+  assert.deepEqual(capped.map((i) => i.order), Array.from({ length: MAX_EDITOR_IMAGES }, (_, i) => i + 1));
+});
+
+test("a page an issue named survives the cap ahead of earlier pages", () => {
+  // The whole point of the preference: page 25 is the only page the editor cannot fix
+  // this issue without, and it is last in document order — a plain head-slice loses it.
+  const capped = capEditorImages(pages(25), [
+    { issue: "table headers missing", severity: "high", suggested_action: "add th", pages: [25] },
+    { issue: "duplicated content", severity: "medium", suggested_action: "dedupe" },
+  ]);
+  assert.equal(capped.length, MAX_EDITOR_IMAGES);
+  assert.ok(capped.some((i) => i.order === 25), "the attributed page was kept");
+  assert.deepEqual(
+    capped.map((i) => i.order),
+    [...Array.from({ length: MAX_EDITOR_IMAGES - 1 }, (_, i) => i + 1), 25],
+    "survivors are re-sorted into document order, because the prompt names them in that order",
+  );
+});
+
+test("more attributed pages than fit still yields exactly the cap", () => {
+  const attributed = Array.from({ length: 20 }, (_, i) => i + 6);
+  const capped = capEditorImages(pages(25), [
+    { issue: "a", severity: "high", suggested_action: "x", pages: attributed },
+  ]);
+  assert.equal(capped.length, MAX_EDITOR_IMAGES);
+  assert.ok(capped.every((i) => attributed.includes(i.order)), "only attributed pages took the slots");
+});
+
+test("a cap of zero still sends one image", () => {
+  // Defensive: zero images at capability "vision" is a request shape the editor prompt
+  // does not describe, so the floor is one page rather than none.
+  const capped = capEditorImages(pages(3), [], 0);
+  assert.deepEqual(capped.map((i) => i.order), [1]);
 });
 
 // --- runReview: the loop actually narrows the payload ------------------------
@@ -295,6 +356,69 @@ test("the images attached are logged for each editor round", async () => {
     await runReview(ctx, { body: "<h1>Report</h1>", lint: { ok: true, violations: [] }, pages: PAGES });
     const ev = rec.events.find((e) => e.type === "editor_images");
     assert.deepEqual(ev?.data, { attached: 1, of: 3, pages: [2] });
+  });
+});
+
+test("the all-images fallback on a long document is capped, and the drop is logged", async () => {
+  await withTemp(async (dir) => {
+    // The #134 shape: a 25-page upload (MAX_PDF_PAGES) plus one issue the Reader could
+    // not attribute. Before the cap this sent all 25 page images and the provider
+    // refused the request, ending a run that had already paid for extraction.
+    const { ctx, rec } = ctxWith(dir, 25, [
+      { issue: "reading order is wrong somewhere", severity: "high", suggested_action: "reorder" },
+    ]);
+    await runReview(ctx, { body: "<h1>Report</h1>", lint: { ok: true, violations: [] }, pages: PAGES });
+    assert.equal(editorCall(rec)?.imageCount, MAX_EDITOR_IMAGES);
+    const ev = rec.events.find((e) => e.type === "editor_images");
+    assert.equal(ev?.data.attached, MAX_EDITOR_IMAGES);
+    assert.equal(ev?.data.of, 25);
+    assert.equal(ev?.data.dropped, 25 - MAX_EDITOR_IMAGES, "no silent cap: the round says what it lost");
+  });
+});
+
+test("a refused payload is retried without the images rather than failing the run", async () => {
+  await withTemp(async (dir) => {
+    const { ctx, rec } = ctxWith(
+      dir,
+      3,
+      [{ issue: "table headers", severity: "high", suggested_action: "add th", pages: [2] }],
+      // Bedrock's wording for a request over the context window. The cap is derived from
+      // an estimate, so a body long enough to leave no room still gets here.
+      { imageCallFailsWith: "ValidationException: Input is too long for requested model." },
+    );
+    const result = await runReview(ctx, {
+      body: "<h1>Report</h1>",
+      lint: { ok: true, violations: [] },
+      pages: PAGES,
+    });
+    const editorCalls = rec.calls.filter((c) => c.agent === "copy_editor");
+    assert.equal(editorCalls.length, 2, "the same prompt was re-sent once");
+    assert.equal(editorCalls[1].imageCount, 0);
+    assert.equal(editorCalls[1].capability, "text", "no images means no vision model is needed");
+    assert.match(editorCalls[1].prompt, /No source images are available/, "the prompt stops promising attachments");
+    assert.match(editorCalls[1].prompt, /table headers/, "the issues and body survive the retry");
+    const ev = rec.events.find((e) => e.type === "editor_images_refused");
+    assert.equal(ev?.data.attached, 1);
+    assert.match(result.body, /Edited/, "the correction the text-only pass produced was kept");
+  });
+});
+
+test("a failure that is not about size is not retried", async () => {
+  await withTemp(async (dir) => {
+    // Retrying a stall or a stream error would double the cost of every real failure
+    // and change nothing about the outcome.
+    const { ctx, rec } = ctxWith(
+      dir,
+      3,
+      [{ issue: "table headers", severity: "high", suggested_action: "add th", pages: [2] }],
+      { imageCallFailsWith: "bedrock: stream error: boom" },
+    );
+    await assert.rejects(
+      runReview(ctx, { body: "<h1>Report</h1>", lint: { ok: true, violations: [] }, pages: PAGES }),
+      /stream error: boom/,
+    );
+    assert.equal(rec.calls.filter((c) => c.agent === "copy_editor").length, 1);
+    assert.equal(rec.events.find((e) => e.type === "editor_images_refused"), undefined);
   });
 });
 

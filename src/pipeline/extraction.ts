@@ -150,6 +150,12 @@ Respond with ONLY this JSON:
 export interface ExtractionResult {
   fragments: Fragment[];
   suggestions: { name: string; reason: string; image: string }[];
+  // Source pages (1-based order) whose own extraction threw and that are therefore
+  // in the document as a failure marker rather than as content — see `failedPage`.
+  // Empty on an ordinary run. Returned rather than only logged because a document
+  // delivered with a page missing is a different deliverable, and the caller records
+  // it alongside the run's other outcome counts.
+  failedPages: number[];
 }
 
 function stripFences(t: string): string {
@@ -464,6 +470,50 @@ interface PageOutcome {
   // A genuinely-new content type to file for contribution, if any. A suggestion
   // already covered by a dispatched library specialist is not reported.
   suggestion?: { name: string; reason: string; image: string };
+  // Set when this page's own extraction threw and the fragment is a stand-in rather
+  // than the page's content (`failedPage`). Carried explicitly rather than inferred
+  // from the fragment, because a caller must not have to pattern-match HTML to find
+  // out whether the document it was handed is whole.
+  failed?: true;
+}
+
+// What one page leaves behind when its own extraction throws.
+//
+// Everything else in this file already degrades a PAGE rather than a document: a
+// specialist that fails is logged and the page is kept as the general pass wrote it
+// (`dispatchSpecialist`), a fidelity check that cannot run counts as nothing to
+// correct (`failedCheck`), a correction that comes back empty is discarded. Only the
+// page's own render was fatal to the whole run — so a model call that hit the output
+// ceiling on page 26 of 50 threw away 24 pages that had already been rendered,
+// verified and corrected, and delivered nothing (issue #135). "This page's output is
+// unusable" and "this document is unrecoverable" are different claims, and the caller
+// is better placed than this function to decide whether 24 good pages are acceptable.
+//
+// The page is NOT silently dropped. An empty fragment is filtered out at assembly, so
+// the delivered document would simply be missing a page with nothing to say so — and
+// a page absent for a reason nobody recorded is the failure this function exists to
+// avoid re-creating one level down. The marker is a comment because the alternative is
+// worse: a visible note is prose Iris wrote into a document whose whole contract is
+// that every word in it is a word on the page. A comment is invisible to a reader,
+// inert to axe and to `flatten`, and findable by tooling — the same trade
+// `wrapDocument` makes for @unresolved, and it sanitizes runs of dashes for the same
+// reason (a `--` inside a comment ends it early).
+function failedPage(ctx: PipelineContext, pageAgent: AgentSpec, img: InputImage, e: unknown): PageOutcome {
+  const message = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim();
+  ctx.log.event("page_extraction_failed", { image: img.name, page: img.order, error: message });
+  const note = message.slice(0, 300).replace(/--+/g, "—");
+  return {
+    fragment: {
+      image: img.name,
+      order: img.order,
+      agent: pageAgent.file,
+      region: "page",
+      innerHtml: `<!-- @page-failed ${img.order}: ${note} -->`,
+      edges: [],
+      log: `extraction failed: ${message}`,
+    },
+    failed: true,
+  };
 }
 
 // Did the fidelity check actually find something? `verifyAgentOutput` is deliberately
@@ -619,8 +669,11 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
   const limit = ctx.extractionConcurrency;
   ctx.log.event("extraction_start", { pages: ctx.images.length, concurrency: limit });
 
+  // Contained per page: mapWithConcurrency rejects with the first error any item
+  // throws (matching a serial loop), so without this one page takes the document with
+  // it. See `failedPage`.
   const outcomes = await mapWithConcurrency(ctx.images, limit, (img) =>
-    extractPage(ctx, pageAgent, img, lessons),
+    extractPage(ctx, pageAgent, img, lessons).catch((e) => failedPage(ctx, pageAgent, img, e)),
   );
 
   // Results come back in input order, so fragments are already in page order.
@@ -628,12 +681,16 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
   const suggestions = outcomes
     .map((o) => o.suggestion)
     .filter((s): s is NonNullable<typeof s> => s !== undefined);
+  const failedPages = outcomes.filter((o) => o.failed).map((o) => o.fragment.order);
+  // Always logged, including the zero case, so "no page failed" and "this run predates
+  // per-page containment" are not the same observation in a log.
+  ctx.log.event("extraction_complete", { pages: fragments.length, failed: failedPages });
 
   writeFileSync(
     join(ctx.paths.sessionFragments(ctx.sessionId), "fragments.json"),
     JSON.stringify(fragments, null, 2),
   );
-  return { fragments, suggestions };
+  return { fragments, suggestions, failedPages };
 }
 
 // Re-extract only the pages a piece of feedback actually concerns (PRD §7.12),
@@ -672,8 +729,23 @@ export async function reExtractPages(
     concurrency: ctx.extractionConcurrency,
   });
 
+  // Contained per page as in runExtraction, but degrading to the PRIOR fragment rather
+  // than to a failure marker: this path only runs for pages that already have one, and
+  // a re-extraction that throws is a page Iris could not improve, not a page it lost.
+  // Replacing good prior content with a marker would make a feedback round destructive.
   const outcomes = await mapWithConcurrency(toRun, ctx.extractionConcurrency, (img) =>
-    extractPage(ctx, pageAgent, img, lessons, priorByOrder.get(img.order)?.innerHtml),
+    extractPage(ctx, pageAgent, img, lessons, priorByOrder.get(img.order)?.innerHtml).catch(
+      (e): PageOutcome => {
+        const message = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim();
+        ctx.log.event("page_extraction_failed", {
+          image: img.name,
+          page: img.order,
+          error: message,
+          kept: "prior",
+        });
+        return { fragment: priorByOrder.get(img.order)!, failed: true };
+      },
+    ),
   );
 
   const replaced = new Map(outcomes.map((o) => [o.fragment.order, o.fragment]));
@@ -683,11 +755,22 @@ export async function reExtractPages(
   const suggestions = outcomes
     .map((o) => o.suggestion)
     .filter((s): s is NonNullable<typeof s> => s !== undefined);
+  // Pages left as they were because their re-extraction threw. Not the same as
+  // runExtraction's `failedPages`, where the page has no content at all — reported
+  // under the same name because both answer "which pages did the model not deliver
+  // this run", and `reextract_complete` below says which ones it did.
+  const failedPages = outcomes.filter((o) => o.failed).map((o) => o.fragment.order);
 
   writeFileSync(
     join(ctx.paths.sessionFragments(ctx.sessionId), "fragments.json"),
     JSON.stringify(fragments, null, 2),
   );
-  ctx.log.event("reextract_complete", { pages: [...replaced.keys()].sort((a, b) => a - b) });
-  return { fragments, suggestions };
+  // `pages` is what was actually re-extracted, so a page that threw is not counted
+  // among them — its entry in `replaced` is its own prior fragment, which is the
+  // opposite of a page this run produced.
+  ctx.log.event("reextract_complete", {
+    pages: outcomes.filter((o) => !o.failed).map((o) => o.fragment.order).sort((a, b) => a - b),
+    ...(failedPages.length ? { failed: failedPages } : {}),
+  });
+  return { fragments, suggestions, failedPages };
 }

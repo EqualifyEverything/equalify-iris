@@ -1,4 +1,6 @@
 import { extractJson } from "../util/json.ts";
+import { MAX_EDITOR_IMAGES } from "../providers/imageLimits.ts";
+import { isInputTooLongError } from "../providers/types.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
 import { runAxe, type LintResult } from "./lint.ts";
@@ -171,15 +173,48 @@ async function runReader(
 // at the cap it never happens — the issue is written to @unresolved having never
 // been shown its own page.
 //
-// The cost of being generous is bounded: a chronically unattributable structural
-// issue pins the document to all-images, which is precisely the status quo. The
-// savings case — every issue attributed — is the common one and is preserved.
+// The cost of being generous is bounded by `capEditorImages` below, which is what
+// makes the paragraph above true. It did not used to be: the claim was that a
+// chronically unattributable issue pins the document to all-images, "which is
+// precisely the status quo" — and that reasoning holds only while all-images is
+// merely expensive. At MAX_PDF_PAGES it is over the context window, so on a 25-page
+// document the fallback was not a cost bound but a refused request, arriving after
+// extraction and assembly had both been paid for and ending the run with nothing
+// delivered (issue #134). The savings case — every issue attributed — is unchanged.
 export function imagesForIssues(images: InputImage[], issues: ReviewIssue[]): InputImage[] {
   if (issues.some((i) => !i.pages?.length)) return images;
   const wanted = new Set(issues.flatMap((i) => i.pages ?? []));
   if (wanted.size === 0) return images;
   const selected = images.filter((img) => wanted.has(img.order));
   return selected.length ? selected : images;
+}
+
+// Fit `imagesForIssues`'s selection inside one request (providers/imageLimits.ts
+// MAX_EDITOR_IMAGES for why that number).
+//
+// Kept separate from the selection rule on purpose: which pages the editor WANTS is a
+// question about the issues, and how many of them fit is a question about the model.
+// Folding the second into the first would make the answer to the first untestable, and
+// the two change for different reasons.
+//
+// Pages an issue actually NAMED come first, because those are the ones the editor
+// cannot fix without them — an unattributed issue is usually structural and fixable
+// from the HTML alone, which is the fallback's own justification for being safe to
+// broaden. Past the cap, attribution is the only evidence available about which image
+// is worth a slot. What survives is re-sorted into document order, since the prompt
+// tells the editor the images arrive in the order it names them.
+export function capEditorImages(
+  selected: InputImage[],
+  issues: ReviewIssue[],
+  max: number = MAX_EDITOR_IMAGES,
+): InputImage[] {
+  if (selected.length <= max) return selected;
+  const attributed = new Set(issues.flatMap((i) => i.pages ?? []));
+  const preferred = [
+    ...selected.filter((img) => attributed.has(img.order)),
+    ...selected.filter((img) => !attributed.has(img.order)),
+  ];
+  return preferred.slice(0, Math.max(1, max)).sort((a, b) => a.order - b.order);
 }
 
 // Document-level correction: the editor sees the whole body + all issues + the
@@ -190,11 +225,62 @@ export function imagesForIssues(images: InputImage[], issues: ReviewIssue[]): In
 // 25-page document that is the difference between re-uploading 25 base64 PNGs on
 // every one of up to max_review_iterations rounds and uploading the one or two
 // that are actually in question.
+//
+// Two things bound the request, in that order, because they answer different
+// questions: `capEditorImages` decides what fits BEFORE sending, and the retry below
+// handles a payload the model refuses anyway — a document body large enough to leave
+// no room, a page whose image is heavier than the estimate the cap is derived from.
+// Neither alone is sufficient: without the cap the refusal is the common case on a
+// long document, and without the retry the cap has to be right about a limit it can
+// only estimate.
 async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue[]): Promise<string> {
-  const selected = imagesForIssues(ctx.images, issues);
+  const wanted = imagesForIssues(ctx.images, issues);
+  const selected = capEditorImages(wanted, issues);
+  // Logged only when the cap actually dropped something, so an ordinary round's line
+  // is unchanged — but never silently: a page the editor asked for and did not get is
+  // the only reason it could fail to fix an issue it was shown.
+  const dropped = wanted.length - selected.length;
+  ctx.log.event("editor_images", {
+    attached: selected.length,
+    of: ctx.images.length,
+    pages: selected.map((i) => i.order),
+    ...(dropped > 0 ? { dropped } : {}),
+  });
+
+  try {
+    return await editorCall(ctx, body, issues, selected);
+  } catch (e) {
+    // The images are the only part of this request Iris can give up, and giving them
+    // up is far better than what refusing to do so costs: the run ends here, after
+    // extraction and assembly have been paid for in full, and the user gets nothing
+    // (issue #134). A text-only correction pass still has the whole body and every
+    // issue the Reader raised — which are already text — so it can fix everything
+    // except a fidelity problem that has to be checked against the source.
+    //
+    // Only for a size refusal, and only when there were images to drop. Anything else
+    // (a stall, a stream error, a bad key) is not made better by asking again, and
+    // retrying it would double the cost of every real failure.
+    if (!selected.length || !isInputTooLongError(e)) throw e;
+    ctx.log.event("editor_images_refused", {
+      attached: selected.length,
+      of: ctx.images.length,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return await editorCall(ctx, body, issues, []);
+  }
+}
+
+// One Copy Editor call, with whichever images it was given. Split out so the same
+// prompt can be re-sent without them; `selected` empty is a normal shape here, and the
+// prompt says so rather than promising attachments that are not there.
+async function editorCall(
+  ctx: PipelineContext,
+  body: string,
+  issues: ReviewIssue[],
+  selected: InputImage[],
+): Promise<string> {
   const images = selected.map(loadImage);
   const pageList = selected.map((i) => i.order).join(", ");
-  ctx.log.event("editor_images", { attached: selected.length, of: ctx.images.length, pages: selected.map((i) => i.order) });
   const user =
     `## Current document (body content)\n${body}\n\n` +
     `## Issues to fix\n${issues
