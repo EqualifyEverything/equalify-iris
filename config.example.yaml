@@ -195,6 +195,26 @@ providers:
     #   max_base64_bytes: 5242880   # provider's per-image cap, in base64 characters
     #   max_image_bytes: 3932160    # bytes on disk; defaults to 3/4 of the above
     #   max_long_edge_px: 1568      # published as advice; nothing is rejected for it
+    #
+    # Ask the model to cache the prompt prefix each call re-sends (the agent's own
+    # prompt, which is identical on every page of every document). ON by default and
+    # best left that way: a cache read bills at a tenth of the input rate, so on a
+    # 25-page document the page agent's prompt is paid for once instead of 25 times,
+    # and nothing about the output changes. Iris decides per call whether the prefix is
+    # long enough to be worth it (src/providers/promptCache.ts).
+    #
+    # It is not free in every case, which is why the numbers are worth reading rather
+    # than assuming: a WRITE bills at 1.25x, so an agent called only once in a run pays
+    # a 25% surcharge on its prompt and gets no read back for it. That is a few hundred
+    # tokens against the tens of thousands the multi-call agents save, and the write is
+    # re-read by the next run within the cache's ~5 minute window on a busy deployment.
+    #
+    # Set false only if this provider's upstream REJECTS `cache_control` — an
+    # Anthropic field, so the risk is real only behind a broker that picks the upstream
+    # for you, and the symptom is unmistakable: every call fails with a 400 naming the
+    # field. `GET /v1/sessions/:id/diagnostics` reports `tokens.cache_read` and
+    # `tokens.cache_write`, which is where you can see it working.
+    # prompt_cache: false
     per_capability:
       vision: anthropic/claude-opus-4.7
       structured_output: anthropic/claude-opus-4.7
@@ -213,8 +233,10 @@ providers:
     # SDK's own `standard` strategy (3 attempts, exponential backoff, throttling +
     # 5xx + network errors), so there is no retry knob here.
     max_tokens: 32000
-    # See the note on openrouter.image_limits above; the same override exists here
-    # and is just as unnecessary in normal use.
+    # See the notes on openrouter.image_limits and openrouter.prompt_cache above; the
+    # same overrides exist here and are just as unnecessary in normal use. Bedrock
+    # serves the Anthropic Messages API directly, so it is the one provider where
+    # `cache_control` cannot arrive at an upstream that has never heard of it.
     per_capability:
       vision: us.anthropic.claude-opus-4-7
       structured_output: us.anthropic.claude-opus-4-7

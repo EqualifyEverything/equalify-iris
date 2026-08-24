@@ -183,7 +183,13 @@ export interface ModelGeneration {
 }
 
 export function modelGeneration(model: string): ModelGeneration | null {
-  const m = model.match(/claude-[a-z]+-(\d+)(?:[.-](\d+))?/i);
+  // The family name is optional in the middle because the older ids put the version
+  // FIRST — `anthropic.claude-3-5-sonnet-20240620-v1:0` against
+  // `us.anthropic.claude-sonnet-4-6`. Reading only the current order would answer null
+  // for every legacy id, which is the same answer as "this is not a Claude at all" and
+  // costs a caller that has to tell them apart (see promptCache.ts, which declines to
+  // cache on a generation too old to support it).
+  const m = model.match(/claude-(?:[a-z]+-)?(\d+)(?:[.-](\d+))?/i);
   if (!m) return null;
   const major = Number(m[1]);
   const minor = m[2] === undefined ? 0 : Number(m[2]);
@@ -191,15 +197,23 @@ export function modelGeneration(model: string): ModelGeneration | null {
   return { major, minor };
 }
 
+// Whether a model is at least a given generation. False for an id this cannot read,
+// because every caller is asking whether a capability that arrived in some generation
+// is present, and "I do not know which model this is" must not answer yes.
+//
+// Compared as a PAIR and never as a decimal, for the reason ModelGeneration documents:
+// `Number("4.10")` is 4.1, which sorts below 4.7.
+export function generationAtLeast(model: string, min: ModelGeneration): boolean {
+  const g = modelGeneration(model);
+  if (g === null) return false;
+  return g.major !== min.major ? g.major > min.major : g.minor >= min.minor;
+}
+
 // The long edge one model reads before downscaling.
 export function longEdgeFor(model: string): number {
-  const g = modelGeneration(model);
-  if (g === null) return STANDARD_LONG_EDGE_PX;
-  const highRes =
-    g.major !== HIGH_RES_FROM_GENERATION.major
-      ? g.major > HIGH_RES_FROM_GENERATION.major
-      : g.minor >= HIGH_RES_FROM_GENERATION.minor;
-  return highRes ? HIGH_RES_LONG_EDGE_PX : STANDARD_LONG_EDGE_PX;
+  return generationAtLeast(model, HIGH_RES_FROM_GENERATION)
+    ? HIGH_RES_LONG_EDGE_PX
+    : STANDARD_LONG_EDGE_PX;
 }
 
 // Coerce a configured `image_limits` number: absent, unparseable or nonsensical

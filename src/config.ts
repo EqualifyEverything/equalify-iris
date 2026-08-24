@@ -32,6 +32,13 @@ export interface ProviderBlock {
     // Long edge above which the model downscales. Published, never enforced.
     max_long_edge_px?: number;
   };
+  // Whether this provider's calls may ask the model to cache the prompt prefix they
+  // re-send (providers/promptCache.ts). Defaults to true, and should stay that way:
+  // it makes the same run cheaper and changes nothing about what the model returns.
+  // Set false only for an upstream that REJECTS `cache_control` — a request the
+  // upstream refuses is not a slow call, it is every call — which is a real risk only
+  // behind a broker that chooses the upstream for us. Normalized where it is read.
+  prompt_cache?: boolean;
 }
 
 // How much one caller may ask of this deployment per minute, and how many uploads it
