@@ -56,12 +56,12 @@ semantic structure for what the page actually is: headings in correct nesting or
 paragraphs, lists, tables with <caption>/<thead>/<th scope>, forms with
 <label>/<fieldset>/<legend>, figures with <figcaption>, footnotes, etc. Transcribe visible
 text faithfully and do not invent content: apart from the accessibility scaffolding the rules
-below ask for by name — alt text, a <caption> the page does not print, an accessible name on a
-marker the page prints as a symbol, the ↩ that returns from a footnote, a note about irregular
-numbering held to what the page shows — every word you emit is a word on the page. If content is
-cut off at a page edge, note it in the "log" field.
+below ask for by name — alt text, a placeholder src for a graphic you cannot embed, a <caption>
+the page does not print, an accessible name on a marker the page prints as a symbol, the ↩ that
+returns from a footnote, a note about irregular numbering held to what the page shows — every word
+you emit is a word on the page. If content is cut off at a page edge, note it in the "log" field.
 
-Seven structures are easy to render as something that merely looks right, so be explicit:
+Eight structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
   smaller bold line that introduces a subsection of the section above it is an <h3> under that
@@ -77,6 +77,36 @@ Seven structures are easy to render as something that merely looks right, so be 
   top of your page may be a subsection of a heading you cannot see: give it the level this page's
   own evidence supports, and say in the "log" field that it had no preceding heading on the page
   to place it under.
+- IMAGES AND ALT TEXT: every <img> carries an alt attribute, and what belongs in it is decided
+  by what the picture gives a reader that the words around it do not. An image is decorative —
+  alt="" — only where a reader who cannot see it loses nothing: a rule, a border, a flourish, a
+  bullet glyph, or a graphic whose content this page ALSO carries in full beside it (the notation
+  under a stave, the data table under a chart), where describing it as well hands a screen-reader
+  user the same content twice. Everything else is informative and is described: words printed
+  inside the image, a logo, seal or badge, a diagram, a photograph, a chart, a cover whose
+  appearance is itself the content. Sitting beside a heading that names the section does not make
+  an image decorative, and neither does being hard to describe — a heading names the section, the
+  alt text says what the picture shows. Where you cannot make an image out with confidence,
+  describe what you can and say so in the "log" field: never leave the attribute off, and never
+  leave a filename in it.
+  Do not spend the description on what the page has already said. A screen reader announces a
+  <figcaption>, a label and a heading as well as the alt text, so where the name of the thing
+  pictured is printed beside the image — in its caption, in the label that follows it, in the
+  heading a group of figures sits under — the alt text does not repeat that name; it says what the
+  name does not. This is a redundancy rule and not a brevity one: every detail that is in the
+  picture and not in the words around it stays, and a <figcaption> follows the same rule, carrying
+  what distinguishes ITS figure rather than the category its heading has already established.
+  Where the same subject is pictured more than once with no visible difference between the
+  occurrences, describe them the same way and in the same detail — a fuller description of one
+  tells a reader that the other differs.
+  A graphic whose content is words is still a graphic: emit a logo, a masthead or a wordmark as an
+  <img> with alt text (alt="Acme Corp logo"), never as a heading, a paragraph, or a transcription
+  of its lettering — a logo set as an <h1> tells a reader the document is organised under it. You
+  cannot embed the file, so give src a placeholder that names the page and the graphic
+  (src="page-1-logo.png") and record it in the "log" field for whatever supplies the real asset.
+  Never point src at the source image you were given, and never leave it empty: the image you were
+  given is the whole page rather than the graphic on it, and src="" asks a browser for the document
+  itself.
 - FOOTNOTES: keep them structurally distinct from body text — never inline a footnote into the
   paragraph that references it. Emit the in-text marker as a link
   (<sup><a href="#fn-N" id="fnref-N">N</a></sup>) and the footnote body at the foot of its

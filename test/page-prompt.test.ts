@@ -197,6 +197,78 @@ test("the page agent's signature-block rule keeps the clauses that make it a rul
   }
 });
 
+// The image rule is eight sessions of feedback that all landed on the same element
+// (issues #83, #93, #122, #123, #124, #125, #126, #127), and they pull in two
+// directions: half report descriptions that were missing or empty, half report
+// descriptions that said what the page had already said beside the image. So what is
+// pinned here is the resolution — an image's description is decided by what the picture
+// gives a reader that the words around it do not — plus each reported case, because a
+// rule that keeps only one direction is the other half's bug.
+//
+// Nothing downstream can recover any of this. `src/pipeline/lint.ts` runs axe, which
+// proves a MISSING alt attribute and nothing about what an alt says: a filename, the
+// heading repeated, or "image" all pass `image-alt`. The Reader Agent never sees the
+// source image (READER_SYSTEM in src/pipeline/review.ts), so it cannot tell a
+// description that matches the picture from one that does not, and the Copy Editor is
+// rewriting the same words. For every one of these the extraction prompt is the only
+// place the information exists.
+test("the page agent's image rule keeps the clauses that make it a rule", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    // #123: an image shipped with no alt attribute at all, and the user asked for either a
+    // description or its removal.
+    ["every image carries the attribute, and the description follows from what the picture adds",
+      /every <img> carries an alt attribute, and what belongs in it is decided by what the picture gives a reader that the words around it do not/],
+    ["decorative is bounded to an image a reader loses nothing by not seeing",
+      /decorative — alt="" — only where a reader who cannot see it loses nothing/],
+    // #93: the page carried ABC Notation for the stave beside it, so describing the image as
+    // well handed the same music to a screen-reader user twice.
+    ["a graphic the page itself carries in full beside it is the decorative case",
+      /a graphic whose content this page ALSO carries in full beside it \(the notation under a stave, the data table under a chart\)/],
+    // #127: a logo and a back cover were both given alt="" as "decorative".
+    ["what counts as informative is enumerated, so a logo or a cover cannot be called decorative",
+      /words printed inside the image, a logo, seal or badge, a diagram, a photograph, a chart, a cover whose appearance is itself the content/],
+    ["a heading beside an image does not make it decorative",
+      /Sitting beside a heading that names the section does not make an image decorative/],
+    ["an image that is hard to describe is described as far as it can be, and logged",
+      /neither does being hard to describe.*describe what you can and say so in the "log" field/],
+    ["the attribute is never dropped and never left holding a filename",
+      /never leave the attribute off, and never leave a filename in it/],
+    // #122, #124, #125: the position title, the product name and the caption were each
+    // repeated into the alt text of the image they sat beside.
+    ["a name the page prints beside the image is not repeated in its description",
+      /the alt text does not repeat that name; it says what the name does not/],
+    // #126: the same user's third report on this, after two rounds that trimmed detail
+    // instead of trimming the repetition.
+    ["it is a redundancy rule and not a licence to describe less",
+      /This is a redundancy rule and not a brevity one: every detail that is in the picture and not in the words around it stays/],
+    ["a figcaption carries what distinguishes its figure, not its heading's category",
+      /a <figcaption> follows the same rule, carrying what distinguishes ITS figure rather than the category its heading has already established/],
+    // #122: the same position pictured twice, described fully once and vaguely the second
+    // time — which tells a reader the two pictures differ when they do not.
+    ["the same subject pictured twice is described the same way",
+      /pictured more than once with no visible difference between the occurrences, describe them the same way and in the same detail/],
+    // #83: a black-and-white logo was transcribed as text rather than emitted as an image.
+    ["a logo is an image with a description, never a heading or a transcription of its lettering",
+      /emit a logo, a masthead or a wordmark as an <img> with alt text \(alt="Acme Corp logo"\), never as a heading, a paragraph, or a transcription of its lettering/],
+    ["the unembeddable file gets a named placeholder src, recorded for whoever supplies the asset",
+      /give src a placeholder that names the page and the graphic \(src="page-1-logo.png"\) and record it in the "log" field/],
+    // The issue as filed asked for src="", which is not a neutral placeholder: a browser
+    // resolves it against the current URL and re-requests the document. And the only image
+    // file this agent has a name for is the whole page it was given.
+    ["src is neither the source page image nor empty",
+      /Never point src at the source image you were given, and never leave it empty/],
+    // The fidelity sentence enumerates what the agent may emit that the page does not print,
+    // and the Feedback Agent judges against that list (agents/feedback.md). A placeholder src
+    // is not a word on the page, so it has to be named there or the pass that adds one can be
+    // sent back for inventing content.
+    ["the placeholder src is named where fidelity is demanded",
+      /alt text, a placeholder src for a graphic you cannot embed, a <caption> the page does not print/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
 // The list of explicit structures is introduced by its own count, so adding a
 // fifth bullet and leaving "Four" in place would have the prompt miscount itself.
 test("the explicit-structures list agrees with the count that introduces it", () => {
