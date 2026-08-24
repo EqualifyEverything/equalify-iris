@@ -341,11 +341,16 @@ echo "$diag" | jq -e '.model_calls.count >= 1 and .in_flight == null and (.phase
   || fail "diagnostics" "$diag"
 
 # Waits for the session to return to ready_for_review after a feedback re-run.
+#
+# Both of these read the main session unless LSID names another one — step 9e runs a
+# multi-round session of its own (a document that loses a page must not corrupt the one
+# every later step asserts against) and needs the same waiting and log reading.
 await_ready() {
+  local sid=${LSID:-$SID}
   for i in $(seq 1 60); do
-    status=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID" | jq -r '.status')
+    status=$(curl -s "${AUTH[@]}" "$BASE/sessions/$sid" | jq -r '.status')
     [ "$status" = "ready_for_review" ] && return 0
-    [ "$status" = "failed" ] && fail "$1" "run failed: $(curl -s "${AUTH[@]}" "$BASE/sessions/$SID" | jq -r .error)"
+    [ "$status" = "failed" ] && fail "$1" "run failed: $(curl -s "${AUTH[@]}" "$BASE/sessions/$sid" | jq -r .error)"
     sleep 0.5
   done
   fail "$1" "stuck at $status"
@@ -353,8 +358,14 @@ await_ready() {
 # Reads the last-logged value of a field from a given run-log event type. The logs
 # endpoint is ndjson, so filter line-by-line rather than slurping one document.
 log_field() {
-  curl -s "${AUTH[@]}" "$BASE/sessions/$SID/logs" \
+  curl -s "${AUTH[@]}" "$BASE/sessions/${LSID:-$SID}/logs" \
     | jq -c --arg t "$1" 'select(.type==$t)' | tail -1 | jq -r --arg f "$2" ".[\$f] // \"none\""
+}
+# The same, for a field whose value is an array (compact, so it can be compared as a
+# string): `jq -r` prints an array across several lines.
+log_json() {
+  curl -s "${AUTH[@]}" "$BASE/sessions/${LSID:-$SID}/logs" \
+    | jq -c --arg t "$1" --arg f "$2" 'select(.type==$t) | .[$f] // "none"' | tail -1
 }
 
 echo "==> 9. POST /v1/sessions/{id}/feedback (document-level => review only)"
@@ -446,6 +457,86 @@ echo "$terr" | grep -q 'output ceiling' && echo "$terr" | grep -q 'max_tokens' \
 tout=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/$TSID/output")
 [ "$tout" = "409" ] && pass "no output served for the truncated run (409)" \
   || fail "truncation output" "expected 409, got $tout"
+
+echo "==> 9g. one page failing is a hole the document admits, and a later round fills it"
+# The other side of 9d: when SOME pages produced content, ending the run throws away
+# every page that worked (issue #135), so the run finishes and the page it lost is
+# reported instead — in the document, in the run log, and in diagnostics.
+#
+# Driven over three rounds on a session of its own, because the part that regressed is
+# not the containment but the WIRING that carries the set across rounds: the set is a
+# property of the document, it lives in final.json, and the one report a Copy Editor
+# round cannot delete is the copy wrapDocument re-states after the loop.
+curl -s -X POST -H 'content-type: application/json' -d '{"page":2}' \
+  "http://localhost:$OR_PORT/__fail-page" >/dev/null
+pcreate=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
+  -F "images=@$png;filename=page-001.png" \
+  -F "images=@$png;filename=page-002.png" \
+  -F "images=@$png;filename=page-003.png")
+PSID=$(echo "$pcreate" | jq -r '.session_id')
+LSID=$PSID
+await_ready "run with one failed page"
+pout=$(curl -s "${AUTH[@]}" "$BASE/sessions/$PSID/output")
+echo "$pout" | grep -q 'Page marker 1' && echo "$pout" | grep -q 'Page marker 3' \
+  && pass "the pages that worked were delivered rather than discarded with the run" \
+  || fail "containment" "$(echo "$pout" | grep -o 'Page marker [0-9]*' | tr '\n' ',')"
+echo "$pout" | grep -q '@page-failed 2' \
+  && pass "the document says which page it has no content for" \
+  || fail "page marker" "$pout"
+pfailed=$(curl -s "${AUTH[@]}" "$BASE/sessions/$PSID/diagnostics" | jq -c '.pages_failed')
+[ "$pfailed" = "[2]" ] && pass "diagnostics reports the missing page (pages_failed=$pfailed)" \
+  || fail "pages_failed" "expected [2], got $pfailed"
+[ "$(log_json run_complete failed_pages)" = "[2]" ] \
+  && pass "the run's own completion line names it, not just the per-page event" \
+  || fail "run_complete" "failed_pages=$(log_json run_complete failed_pages)"
+
+# A round that rewrites the whole document: the Copy Editor is handed the body and
+# returns its own, so the in-fragment comment is gone — and the mock editor's HTML
+# claims all three pages. Only the copy wrapDocument re-states after the loop can
+# still say otherwise, and it can only do that if the set survived final.json.
+fb=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$PSID/feedback" -H 'content-type: application/json' \
+  -d '{"feedback":"The headings need a copy-edit pass."}')
+echo "$fb" | jq -e '.status=="running"' >/dev/null || fail "feedback" "$fb"
+await_ready "copy-edit round on a partial document"
+[ "$(log_field feedback_scoped target)" = "document" ] || fail "scope" "expected the review-only path"
+pout2=$(curl -s "${AUTH[@]}" "$BASE/sessions/$PSID/output")
+echo "$pout2" | grep -q 'This document is incomplete' && echo "$pout2" | grep -q '@page-failed 2' \
+  && pass "a second round cannot deliver a document that claims to be whole" \
+  || fail "durable marker" "$pout2"
+pfailed=$(curl -s "${AUTH[@]}" "$BASE/sessions/$PSID/diagnostics" | jq -c '.pages_failed')
+[ "$pfailed" = "[2]" ] && pass "and the page is still reported missing a round later" \
+  || fail "pages_failed" "expected [2], got $pfailed"
+
+# Re-extracting the page is the one thing that fills the hole.
+curl -s -X POST -H 'content-type: application/json' -d '{"page":null}' \
+  "http://localhost:$OR_PORT/__fail-page" >/dev/null
+fb=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$PSID/feedback" -H 'content-type: application/json' \
+  -d '{"feedback":"The revenue figure was misread on page 2 — check it against the source."}')
+echo "$fb" | jq -e '.status=="running"' >/dev/null || fail "feedback" "$fb"
+await_ready "recovery round"
+[ "$(log_field feedback_scoped target)" = "extraction" ] || fail "scope" "expected the re-extraction path"
+pout3=$(curl -s "${AUTH[@]}" "$BASE/sessions/$PSID/output")
+echo "$pout3" | grep -q 'Page marker 2' && ! echo "$pout3" | grep -q '@page-failed' \
+  && ! echo "$pout3" | grep -q 'This document is incomplete' \
+  && pass "the recovered page is in the document, which stops admitting a hole" \
+  || fail "recovery" "$pout3"
+# The mock marks a page "Revised." when the prompt carried a previous output. A page with
+# no content has none worth carrying — its fragment is the failure comment, and handing
+# that back asks the agent to preserve a note about a truncated response as if it were
+# the page.
+! echo "$pout3" | grep -q 'Revised' \
+  && pass "the lost page was re-extracted from the image, not from its own failure note" \
+  || fail "recovery input" "$(echo "$pout3" | grep -o 'Page marker [0-9]*[^<]*')"
+[ "$(log_json page_recovered pages)" = "[2]" ] \
+  && pass "the recovery is logged, so the earlier failure is not the log's last word" \
+  || fail "page_recovered" "pages=$(log_json page_recovered pages)"
+pfailed=$(curl -s "${AUTH[@]}" "$BASE/sessions/$PSID/diagnostics" | jq -c '.pages_failed')
+[ "$pfailed" = "[]" ] && pass "diagnostics no longer reports a page the document now has" \
+  || fail "pages_failed" "expected [], got $pfailed"
+[ "$(log_json run_complete failed_pages)" = '"none"' ] \
+  && pass "and the whole run's completion line says nothing about failed pages" \
+  || fail "run_complete" "failed_pages=$(log_json run_complete failed_pages)"
+LSID=""
 
 echo "==> 9f. specialist dispatch says so in the log, whether it runs or misses"
 # The page agent names the specialist it wants in free text, and the service

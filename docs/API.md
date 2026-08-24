@@ -603,6 +603,10 @@ indistinguishable here from one that delivered the whole document: the failed mo
 underneath shows up in `errors` exactly as a retried-and-recovered one does, and `status` says the
 run succeeded — which it did, on 24 of 25 pages.
 
+It reports the document's current state, not the session's history: a session's log accumulates
+across feedback rounds, so a page lost in round 1 and re-extracted in round 3 (`page_recovered`)
+leaves this list, while one that failed again is still in it.
+
 ## 7c. Partial documents
 
 A page's extraction can fail on its own (a model call that hits the output ceiling, a stalled

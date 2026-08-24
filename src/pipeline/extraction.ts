@@ -767,12 +767,20 @@ export async function reExtractPages(
     concurrency: ctx.extractionConcurrency,
   });
 
+  // A page with no content has nothing worth showing the agent as "your previous
+  // output": its fragment is the failure comment, and handing that back invites the
+  // model to treat a note about a truncated response as prose to preserve — on the one
+  // round whose whole job is to produce the page from scratch. So this page starts clean.
+  const stillFailed = new Set(priorFailedPages);
+  const previousFor = (order: number): string | undefined =>
+    stillFailed.has(order) ? undefined : priorByOrder.get(order)?.innerHtml;
+
   // Contained per page as in runExtraction, but degrading to the PRIOR fragment rather
   // than to a failure marker: this path only runs for pages that already have one, and
   // a re-extraction that throws is a page Iris could not improve, not a page it lost.
   // Replacing good prior content with a marker would make a feedback round destructive.
   const outcomes = await mapWithConcurrency(toRun, ctx.extractionConcurrency, (img) =>
-    extractPage(ctx, pageAgent, img, lessons, priorByOrder.get(img.order)?.innerHtml).catch(
+    extractPage(ctx, pageAgent, img, lessons, previousFor(img.order)).catch(
       (e): PageOutcome => {
         const message = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim();
         ctx.log.event("page_extraction_failed", {

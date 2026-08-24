@@ -253,6 +253,26 @@ test("a page that was missing and failed again is still missing", async () => {
   });
 });
 
+test("the page it lost is re-extracted from scratch, not from its own failure note", async () => {
+  await withTemp(async (dir) => {
+    // A missing page's fragment is the `@page-failed` comment, and this path shows the
+    // agent its prior fragment as "your previous output ... keep everything the feedback
+    // does not concern exactly as it was". Handing it the comment invites a page whose
+    // content is a note about a truncated response — on the one round whose whole job is
+    // to produce the page from nothing.
+    const failed: Fragment = { ...prior(2), innerHtml: "<!-- @page-failed 2: hit the output ceiling -->" };
+    const { ctx, rec } = makeCtx(dir, 3, [], truncated);
+    await reExtractPages(ctx, [prior(1), failed, prior(3)], [2, 3], [2]);
+    const forPage = (n: number) => rec.calls.find((c) => c.includes(`filename: page-00${n}.png`))!;
+    assert.doesNotMatch(forPage(2), /@page-failed/, "the failure note is not shown back to the agent");
+    assert.doesNotMatch(forPage(2), /## Your previous output for this page/);
+    // And only for the page with nothing in it: page 3 has real content, and dropping
+    // that would make every re-extraction a from-scratch one, which is the drift the
+    // previous-output section exists to prevent.
+    assert.match(forPage(3), /<p>prior 3<\/p>/, "a page that HAS content still gets it back");
+  });
+});
+
 test("a page nobody re-extracted stays in the set", async () => {
   await withTemp(async (dir) => {
     // Feedback about page 3 does not fix the hole on page 7, and a document that stops
@@ -318,6 +338,41 @@ test("a page that kept its prior content is not reported as missing", () => {
     now: Date.parse("2026-08-24T00:00:30.000Z"),
   });
   assert.deepEqual(d.pages_failed, []);
+});
+
+// The log of a session outlives any one run, so this field is a fold over it rather than
+// a filter: the same page can be lost, filled in by a feedback round, and lost again.
+const diag = (events: Record<string, unknown>[]) =>
+  summarizeRun(events.map((e) => JSON.stringify({ ts: "2026-08-24T00:00:00.000Z", ...e })).join("\n"), {
+    sessionId: "ses_test",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse("2026-08-24T00:00:30.000Z"),
+  });
+
+test("a page a later round recovered is no longer reported as missing", () => {
+  // Otherwise the field only ever grows, and the client Iris told to check it (docs/API.md
+  // §7c) is sent looking for a hole the round it just paid for filled — on a document that
+  // no longer carries any marker to corroborate it.
+  const d = diag([
+    { type: "page_extraction_failed", image: "page-002.png", page: 2, error: "x" },
+    { type: "page_extraction_failed", image: "page-003.png", page: 3, error: "x" },
+    { type: "page_recovered", pages: [2] },
+    { type: "run_complete", failed_pages: [3] },
+  ]);
+  assert.deepEqual(d.pages_failed, [3]);
+});
+
+test("a page that was recovered and then failed again is missing again", () => {
+  // Which is why this is a fold in event order and not a set difference: the last thing
+  // the log says about a page is what is true of the document.
+  const d = diag([
+    { type: "page_extraction_failed", image: "page-002.png", page: 2, error: "x" },
+    { type: "page_recovered", pages: [2] },
+    { type: "page_extraction_failed", image: "page-002.png", page: 2, error: "x" },
+    { type: "run_complete", failed_pages: [2] },
+  ]);
+  assert.deepEqual(d.pages_failed, [2]);
 });
 
 test("a whole run reports no failed pages", () => {
