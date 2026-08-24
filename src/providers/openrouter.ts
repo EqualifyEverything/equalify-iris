@@ -1,6 +1,7 @@
 import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
 import { StalledStreamError, TruncatedResponseError, type StallKind } from "./types.ts";
 import type { CompletionRequest, CompletionResult, ModelProvider, Usage } from "./types.ts";
+import { cacheableSystemPrompt, cachedTextBlock, promptCacheEnabled } from "./promptCache.ts";
 
 // This adapter streams for the same reason the Bedrock one does: a single
 // non-streaming request cannot tell a stalled call from a slow one, so capping total
@@ -109,6 +110,7 @@ export class OpenRouterProvider implements ModelProvider {
   private apiKey: string;
   private baseUrl: string;
   private maxTokens: number;
+  private promptCache: boolean;
   private firstOutputTimeoutMs: number;
   private idleTimeoutMs: number;
   private maxTotalMs: number;
@@ -125,6 +127,7 @@ export class OpenRouterProvider implements ModelProvider {
     // loadConfig normalizes this, but a directly-constructed provider (tests,
     // embedders) may pass a raw block — so fall back rather than send undefined.
     this.maxTokens = cfg.max_tokens ?? DEFAULT_MAX_TOKENS;
+    this.promptCache = promptCacheEnabled(cfg);
     this.firstOutputTimeoutMs = timeouts.firstOutputTimeoutMs ?? FIRST_OUTPUT_TIMEOUT_MS;
     this.idleTimeoutMs = timeouts.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
     this.maxTotalMs = timeouts.maxTotalMs ?? MAX_TOTAL_MS;
@@ -132,6 +135,15 @@ export class OpenRouterProvider implements ModelProvider {
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
     const messages = req.messages.map((m) => {
+      // A cache breakpoint on the system prompt when it is long enough to be worth one
+      // (promptCache.ts). Sent as OpenAI-style content parts because that is where
+      // OpenRouter takes the field — it forwards `cache_control` on a part to an
+      // Anthropic upstream, and there is nowhere to hang it on a plain string. Same
+      // reasoning as the Bedrock adapter: the system prompt is the one part of the
+      // request that repeats byte for byte across calls.
+      if (m.role === "system" && this.promptCache && cacheableSystemPrompt(req.model, m.content)) {
+        return { role: m.role, content: [cachedTextBlock(m.content)] };
+      }
       // Attach images to the final user message as OpenAI-style content parts.
       if (m.role === "user" && req.images?.length) {
         const parts: unknown[] = [{ type: "text", text: m.content }];

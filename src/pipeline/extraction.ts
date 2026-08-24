@@ -203,6 +203,25 @@ interface PageRender {
   suggestion?: { name: string; reason: string };
 }
 
+// Everything the page agent is told that is NOT about the page in front of it: its own
+// prompt, the accessibility contract, and whatever this deployment has learned from
+// past corrections. One function, used by every page-agent call, so all of them send
+// one byte-identical prefix — which is the condition a cache breakpoint needs to hit
+// (providers/promptCache.ts). On a 25-page document that is one cache write and two
+// dozen reads at a tenth of the price, on the largest single line in the bill: `page`
+// was 779,855 input tokens of the 1.48M measured in issue #136.
+//
+// The requirements moved here from the user message, where they were re-sent per page
+// after the "convert this page" line. That is where the accessibility.ts comment says
+// they belong anyway ("appended to each content-agent system prompt", which is how
+// `runSpecialist` has always used them) — and being instructions that hold for every
+// page, they were never page-specific text. Same for the lessons. What stays in the
+// user message is what actually differs per call: the filename and page number, that
+// page's link targets, the user's feedback, and the page's previous output.
+function pageSystem(agent: AgentSpec, lessons: string): string {
+  return `${agent.content}\n\n${ACCESSIBILITY_REQUIREMENTS}${lessons}`;
+}
+
 async function renderPage(
   ctx: PipelineContext,
   agent: AgentSpec,
@@ -225,12 +244,12 @@ async function renderPage(
   }
   const user =
     `Convert this document page image (filename: ${img.name}, page ${img.order} of ${ctx.images.length}) ` +
-    `to accessible HTML.\n\n${ACCESSIBILITY_REQUIREMENTS}${links.section}${feedbackPreamble(ctx)}${lessons}${priorSection}`;
+    `to accessible HTML.${links.section}${feedbackPreamble(ctx)}${priorSection}`;
   const res = await ctx.router.complete(
     PAGE_AGENT,
     "vision",
     [
-      { role: "system", content: agent.content },
+      { role: "system", content: pageSystem(agent, lessons) },
       { role: "user", content: user },
     ],
     { images: [loadImage(img)] },
@@ -253,6 +272,7 @@ async function correctPage(
   img: InputImage,
   previous: string,
   problems: string[],
+  lessons: string,
 ): Promise<string | null> {
   // The link list is repeated here, not just in the first pass: a dropped link is one
   // of the problems this pass exists to fix, and it cannot re-attach a URL it can no
@@ -261,13 +281,17 @@ async function correctPage(
     `Your previous accessible-HTML output for this page had fidelity/accessibility problems:\n` +
     `${problems.map((p) => `- ${p}`).join("\n")}\n\n` +
     `## Your previous output\n\`\`\`html\n${previous}\n\`\`\`\n\n` +
-    `Look at the source image again and return a corrected version that resolves every problem.\n\n` +
-    `${ACCESSIBILITY_REQUIREMENTS}${pageLinkContext(img.links).section}`;
+    `Look at the source image again and return a corrected version that resolves every problem.` +
+    `${pageLinkContext(img.links).section}`;
   const res = await ctx.router.complete(
     PAGE_AGENT,
     "vision",
     [
-      { role: "system", content: agent.content },
+      // The same prefix the first pass sent, down to the byte, so this call reads the
+      // cache the first one wrote instead of paying for a near-copy of it. It also
+      // gains the lessons, which this pass never had: a correction that re-derives the
+      // page without them can undo the very thing a past correction taught.
+      { role: "system", content: pageSystem(agent, lessons) },
       { role: "user", content: user },
     ],
     { images: [loadImage(img)] },
@@ -604,7 +628,7 @@ async function extractPage(
     ...missing.map(missingLinkProblem),
   ];
   if (problems.length) {
-    const corrected = await correctPage(ctx, pageAgent, img, innerHtml, problems);
+    const corrected = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons);
     if (corrected && corrected !== innerHtml.trim()) {
       // A page that PASSED its fidelity check is being re-rendered here only to
       // recover a link, so the rewrite has to earn the standing the original already

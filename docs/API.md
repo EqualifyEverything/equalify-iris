@@ -554,10 +554,10 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
   "concurrency_factor": 3.8,
   "phase_durations_ms": { "extraction": 60100, "review": 24000 },
   "model_calls": { "count": 7, "failed": 0, "total_ms": 51000, "avg_ms": 7285, "max_ms": 14300 },
-  "tokens": { "input": 48200, "output": 19400, "cache_read": 0, "cache_write": 0, "calls_reported": 7 },
+  "tokens": { "input": 43200, "output": 19400, "cache_read": 2500, "cache_write": 2500, "calls_reported": 7 },
   "by_agent": { "page": { "count": 2, "total_ms": 28200, "max_ms": 15100,
-    "input_tokens": 21400, "output_tokens": 9100,
-    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0 } },
+    "input_tokens": 16400, "output_tokens": 9100,
+    "cache_read_input_tokens": 2500, "cache_creation_input_tokens": 2500 } },
   "slowest_calls": [ { "agent": "table", "model": "...", "capability": "vision", "duration_ms": 14300, "ok": true } ],
   "errors": [],
   "pages_failed": []
@@ -581,6 +581,17 @@ region and model, all of which are deployment config, so the token counts are re
 whoever holds the price sheet does the multiplication. The four counts bill at four different
 rates and are never summed here; note that `input` **excludes** tokens read from the cache, so the
 whole prompt is `input + cache_read + cache_write`.
+
+The last two are non-zero because Iris asks the model to cache the part of each prompt that does
+not change: the agent's own system prompt, which is identical on every page of every document.
+Expect roughly one `cache_write` per agent per run and a `cache_read` on every call after that, so
+on a long document the same prefix is paid for once at 1.25× instead of 25 times at 1×, and a read
+bills at 0.1×. A run that shows `cache_read: 0` with several calls to the same agent is a run that
+is paying full price for the same instructions repeatedly — the cases where that is expected are a
+model whose id Iris cannot recognize as a Claude model, an agent prompt too short to be cacheable
+(the platform minimum is ~1k tokens), and a deployment that set `prompt_cache: false` on the
+provider block. Nothing about the document changes either way; this is a cost field, not a quality
+one.
 
 One caveat on that sum, for whoever is doing the multiplication. It is exact on a provider that
 reports the four counts as disjoint sets, which is what the Anthropic-shaped APIs do. On an

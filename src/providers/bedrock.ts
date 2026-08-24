@@ -6,6 +6,7 @@ import {
 import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
 import { StalledStreamError, TruncatedResponseError, type StallKind } from "./types.ts";
 import type { CompletionRequest, CompletionResult, ModelProvider, Usage } from "./types.ts";
+import { cacheableSystemPrompt, cachedTextBlock, promptCacheEnabled } from "./promptCache.ts";
 
 // How long a call may send NOTHING before we give up on it.
 //
@@ -127,6 +128,7 @@ export class BedrockProvider implements ModelProvider {
 
   private client: BedrockRuntimeClient;
   private maxTokens: number;
+  private promptCache: boolean;
   private firstOutputTimeoutMs: number;
   private idleTimeoutMs: number;
   private maxTotalMs: number;
@@ -141,6 +143,7 @@ export class BedrockProvider implements ModelProvider {
     // loadConfig normalizes this, but a directly-constructed provider (tests,
     // embedders) may pass a raw block — so fall back rather than send undefined.
     this.maxTokens = cfg.max_tokens ?? DEFAULT_MAX_TOKENS;
+    this.promptCache = promptCacheEnabled(cfg);
     this.firstOutputTimeoutMs = timeouts.firstOutputTimeoutMs ?? FIRST_OUTPUT_TIMEOUT_MS;
     this.idleTimeoutMs = timeouts.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
     this.maxTotalMs = timeouts.maxTotalMs ?? MAX_TOTAL_MS;
@@ -177,7 +180,18 @@ export class BedrockProvider implements ModelProvider {
       max_tokens: this.maxTokens,
       messages,
     };
-    if (system) payload.system = system;
+    // The system prompt, and a cache breakpoint on it when it is long enough to be
+    // worth one (promptCache.ts). It is the ONE part of the request that is
+    // byte-identical from call to call — an agent file, the same for every page of
+    // every document — while the page image and the page's own text sit after it in the
+    // user message, which is exactly the shape a cached prefix wants. A breakpoint
+    // requires the block form; a plain string stays a plain string.
+    if (system) {
+      payload.system =
+        this.promptCache && cacheableSystemPrompt(req.model, system)
+          ? [cachedTextBlock(system)]
+          : system;
+    }
 
     const command = new InvokeModelWithResponseStreamCommand({
       modelId: req.model,
