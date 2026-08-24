@@ -898,8 +898,12 @@ jobs:
                small) and any code copied in under an incompatible licence.
 
             9. **CI and workflow security — conditional, and when it applies it comes FIRST.**
-               Skip this item entirely unless the diff touches `.github/workflows/**` or
-               `.github/actions/**`. When it does, do it before item 1: the workflows in this
+               Skip this item entirely unless the diff touches `.github/workflows/**`,
+               `.github/scripts/**` or `.github/actions/**`. `.github/scripts/` counts
+               because a workflow may keep part of itself there — GitHub refuses a `run:`
+               block past 21000 characters, so `issue-triage.yml` holds its enforcement
+               step in `.github/scripts/triage-decide.sh`, and that file decides whether an
+               issue closes. When it does, do it before item 1: the workflows in this
                repo are as much a part of Iris as `src/` is. `code-review.yml` is the review
                capacity §7.14 of `prd.md` promises and `issue-to-pr.yml` opens pull requests
                against this repo on a schedule; both hold `id-token: write` and the Bedrock

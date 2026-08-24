@@ -24,9 +24,17 @@ set -euo pipefail
 # other issues. The type guards below still run. `--json-schema` has the
 # runtime enforce the shape, but a control that only holds while the
 # action keeps behaving is not a control.
+#
+# `type == "object"` and not `jq -e .`, which only asks whether the value
+# is JSON at all. A bare `[1,2]` passes that and then `.verdict` on an
+# array is a jq *error*, which under `set -e` kills the one step built to
+# report on every path — the step would exit non-zero having said nothing,
+# which is the failure mode it exists to prevent. The schema makes an
+# object, so this is only reachable if the action changes; that is exactly
+# the case these guards are for.
 
 VERDICT=""; CANONICAL=""; CONFIDENCE=""; REASON=""; LOST=""; NOTES=""
-if [ -n "${FIND_JSON:-}" ] && printf '%s' "$FIND_JSON" | jq -e . >/dev/null 2>&1; then
+if [ -n "${FIND_JSON:-}" ] && printf '%s' "$FIND_JSON" | jq -e 'type == "object"' >/dev/null 2>&1; then
   VERDICT=$(printf '%s' "$FIND_JSON" | jq -r '.verdict // ""')
   CANONICAL=$(printf '%s' "$FIND_JSON" | jq -r 'if (.canonical | type) == "number" then (.canonical | tostring) else "" end')
   CONFIDENCE=$(printf '%s' "$FIND_JSON" | jq -r '.confidence // ""')
@@ -44,7 +52,7 @@ if [ -n "${FIND_JSON:-}" ] && printf '%s' "$FIND_JSON" | jq -e . >/dev/null 2>&1
 fi
 
 REFUTED=""; REFUTE_REASON=""
-if [ -n "${REFUTE_JSON:-}" ] && printf '%s' "$REFUTE_JSON" | jq -e . >/dev/null 2>&1; then
+if [ -n "${REFUTE_JSON:-}" ] && printf '%s' "$REFUTE_JSON" | jq -e 'type == "object"' >/dev/null 2>&1; then
   REFUTED=$(printf '%s' "$REFUTE_JSON" | jq -r 'if (.refuted | type) == "boolean" then (.refuted | tostring) else "" end')
   REFUTE_REASON=$(printf '%s' "$REFUTE_JSON" | jq -r '.reason // ""')
 fi

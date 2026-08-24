@@ -848,8 +848,14 @@ fail to refute it. Disagreement is not a tie to be broken — it is the answer, 
 "leave it open and tell a human".
 
 The pair the second session reads is fetched fresh from the API, not taken from the corpus the first
-one was given, and the second session gets no `Glob` or `Grep` — no repository, no corpus, just the
-two issues. Independence has to cover the input, not only the argument: the first session runs first
+one was given, and the second session gets no repository and no corpus — just the two issues. Losing
+`Glob` and `Grep` is not what makes that true, and it is worth being exact, because the earlier
+version of this paragraph said it was: `Read` alone still reaches `agents/page.md` and `src/**` by
+path, and a session that can open the prompt can answer the question its instructions tell it is
+unanswerable, then confirm a close on the answer. So the checkout and `/tmp/triage` are denied to
+its `Read` by path, in both the project-relative and absolute spellings, and the pair file was moved
+to a directory of its own so that denying the corpus wholesale does not deny the one file the
+session is meant to read. Independence has to cover the input, not only the argument: the first session runs first
 and in the same workspace, so anything it could leave behind is evidence it could choose. Restate
 issue A's body as a copy of B's and the refutation opens a file in which the two really are
 identical; edit `agents/page.md` and the rule B proposes looks like it is already in the prompt,
