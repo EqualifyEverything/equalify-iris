@@ -1,0 +1,111 @@
+import { decodeEntities } from "../util/html.ts";
+
+// What a self-correction pass actually DID to a page.
+//
+// The pipeline verifies every page against its source image and re-renders the ones
+// that fail (extraction.ts `extractPage`). On three real 25-page runs the Feedback
+// Agent rejected 58 of 75 pages, so "verify, then correct if needed" is in practice
+// always-correct: one document paid for 50 page calls to extract 25 pages, and
+// verification alone was 24% of that document's bill (issue #137).
+//
+// Whether that is honest verification or a verifier calibrated to always find
+// something is not a question the verdict can answer about itself — a page whose alt
+// text was refined from "orange kayak" to "orange-yellow kayak" and a page that lost
+// three table rows are the same `page_verify_failed` line today. So this measures the
+// correction's EFFECT on the delivered HTML instead of asking the model to grade its
+// own findings: a run whose corrections only ever move alt text is buying something
+// very different from one whose corrections bring content back, and the difference is
+// visible in the two fragments without a single extra model call.
+//
+// A scan rather than a parse, for the reason links.ts gives: this runs on model output
+// mid-pipeline, where the fragment need not be well-formed yet, and a parser that
+// repairs one side of a comparison differently from the other would report a change
+// that is an artifact of the repair.
+
+// Every tag name in document order, opening and closing, lowercased. Attributes are
+// deliberately excluded — an `alt` rewrite is not a structural change, and it is the
+// distinction this whole module exists to draw.
+function tagShape(html: string): string {
+  const tags: string[] = [];
+  for (const m of html.matchAll(/<(\/?)([a-z][a-z0-9]*)/gi)) {
+    tags.push(`${m[1]}${m[2].toLowerCase()}`);
+  }
+  return tags.join(",");
+}
+
+// The words a reader would read, with the markup taken out: comments dropped, tags
+// dropped, entities decoded so `&amp;` and `&` are one text, whitespace collapsed so a
+// re-indented fragment is not a changed one. Attribute values do not survive, which is
+// what keeps this independent of `altText` below.
+function visibleText(html: string): string {
+  return decodeEntities(
+    html
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/<[^>]*>/g, " "),
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Every alt attribute's value, in document order, joined on a separator an attribute
+// value cannot itself contain. A space would let a rewrite that moves one word from one
+// image's description into the next one's compare equal to the original: both descriptions
+// changed, and only the boundary between them says so.
+function altText(html: string): string {
+  const values: string[] = [];
+  for (const m of html.matchAll(/\balt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+    values.push(decodeEntities(m[1] ?? m[2] ?? m[3] ?? "").replace(/\s+/g, " ").trim());
+  }
+  return values.join("\u0000");
+}
+
+// The three ways a correction can differ from what it corrected, plus the sizes. Not a
+// partition: a re-render that rebuilds a table changes text and structure both, and
+// only `alt_changed` alone means "nothing but the descriptions moved".
+export interface CorrectionEffect {
+  chars_before: number;
+  chars_after: number;
+  text_changed: boolean;
+  alt_changed: boolean;
+  structure_changed: boolean;
+}
+
+export function correctionEffect(before: string, after: string): CorrectionEffect {
+  return {
+    chars_before: before.length,
+    chars_after: after.length,
+    text_changed: visibleText(before) !== visibleText(after),
+    alt_changed: altText(before) !== altText(after),
+    structure_changed: tagShape(before) !== tagShape(after),
+  };
+}
+
+// How many measurement-only re-verifications a batch of pages may buy.
+//
+// One, because the point is a rate across runs rather than a verdict on any one page,
+// and the cost is the thing under investigation: re-verifying every corrected page
+// would add a Feedback Agent call per correction — on the Meta run, 25 of them, which
+// would roughly double the 24% share the issue is asking about. A sample of one per run
+// costs ~1% of a document and answers the question over a week of them.
+//
+// The links path already re-verifies for its own reasons and that verdict is logged the
+// same way, so a run whose corrections were link-driven contributes more than one.
+export const RECHECKS_PER_BATCH = 1;
+
+export interface RecheckSampler {
+  left: number;
+}
+
+export function recheckSampler(): RecheckSampler {
+  return { left: RECHECKS_PER_BATCH };
+}
+
+// Take the batch's sample slot, if it is still there. Claimed SYNCHRONOUSLY and before
+// the call it authorizes, because pages are extracted concurrently: a check that
+// awaited first would let several pages each see a free slot and every corrected page
+// would be re-verified, which is the cost this bounds.
+export function claimRecheck(sampler: RecheckSampler): boolean {
+  if (sampler.left <= 0) return false;
+  sampler.left -= 1;
+  return true;
+}

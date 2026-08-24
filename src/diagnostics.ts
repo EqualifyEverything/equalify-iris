@@ -94,6 +94,44 @@ export interface Diagnostics {
   >;
   slowest_calls: { agent: string; model: string; capability: string; duration_ms: number; ok: boolean }[];
   errors: { ts: string | null; type: string; message: string }[];
+  // What the verify-then-correct loop did, and what it bought.
+  //
+  // Every page is checked against its source image and a page that fails is re-rendered
+  // once, so a run's page-call count is `pages + failures` and a high failure rate turns
+  // an optional pass into a mandatory one — 58 of 75 pages across three real runs, with
+  // verification alone at 24% of one document's bill (issue #137). None of that was
+  // visible here: the log recorded the verdicts and said nothing about the corrections,
+  // so the loop's cost was inferable from arithmetic and its value not at all.
+  //
+  // The counts, not the rates: `verify_failed / pages_verified` is the rejection rate and
+  // `results.identical + results.empty` is what was paid for and thrown away, but a
+  // consumer that wants a percentage can divide, and a percentage over three pages is not
+  // a measurement. Summed over every run this session has had, like `model_calls` — a
+  // feedback round verifies pages again, and both times count.
+  verification: {
+    pages_verified: number;
+    verify_failed: number;
+    corrections: number;
+    // How each correction pass ended: `kept` is in the delivered document, `rejected` was
+    // discarded in favour of the fragment it was meant to improve (links path only),
+    // `identical` returned the page it was given, `empty` returned nothing usable. The
+    // last two are calls that bought nothing.
+    results: { kept: number; rejected: number; identical: number; empty: number };
+    // What the corrections that DID change something changed, as observed on the two
+    // fragments rather than claimed by the verdict (pipeline/correction.ts). Not a
+    // partition: a re-render that rebuilds a table counts under both `text` and
+    // `structure`. `alt_only` is the one that stands alone, and it is the interesting one
+    // — a run whose corrections only ever refine alt text is paying a page call per page
+    // for image descriptions.
+    effects: { alt_only: number; text: number; structure: number };
+    // Second verdicts on a corrected page: the links path's own re-verification, plus one
+    // measurement-only sample per batch of pages. `ok` counts those the verifier found
+    // nothing in — so `rechecks_ok / rechecks` is whether correction converges, which is
+    // the number that says if the loop is worth its 24%. It accumulates one or two
+    // samples per run, so it is a fleet measurement and not a per-document one.
+    rechecks: number;
+    rechecks_ok: number;
+  };
   // Source pages whose own extraction threw, so the delivered document carries a
   // failure marker instead of that page's content (pipeline/extraction.ts
   // `failedPage`). Its own field because a run that ends `ready_for_review` with a
@@ -116,6 +154,11 @@ function parse(logText: string): LogEvent[] {
   }
   return out;
 }
+
+// How a correction pass can end (pipeline/extraction.ts `page_corrected`). A closed
+// list, so a `result` this version does not know counts as a correction and is
+// attributed to nothing rather than inventing a bucket for it.
+const CORRECTION_RESULTS = ["kept", "rejected", "identical", "empty"] as const;
 
 const ms = (a?: string, b?: string): number =>
   a && b ? Math.max(0, new Date(b).getTime() - new Date(a).getTime()) : 0;
@@ -253,6 +296,44 @@ export function summarizeRun(
   // hole that isn't there (pipeline/extraction.ts reExtractPages). Which is also why a
   // recovered page stays recovered: after the hole is filled, the page HAS content, so
   // every later failure on it is one of these.
+  // The verify/correct tally. A fold over the events rather than four filters, so a
+  // `page_corrected` line with a `result` this predates counts as a correction and lands
+  // in none of the buckets — which is the honest reading of an old log, and better than
+  // silently attributing it to one.
+  const verification: Diagnostics["verification"] = {
+    pages_verified: 0,
+    verify_failed: 0,
+    corrections: 0,
+    results: { kept: 0, rejected: 0, identical: 0, empty: 0 },
+    effects: { alt_only: 0, text: 0, structure: 0 },
+    rechecks: 0,
+    rechecks_ok: 0,
+  };
+  for (const e of events) {
+    if (e.type === "page_verify_ok") {
+      verification.pages_verified += 1;
+    } else if (e.type === "page_verify_failed") {
+      verification.pages_verified += 1;
+      verification.verify_failed += 1;
+    } else if (e.type === "page_corrected") {
+      verification.corrections += 1;
+      // Matched against a fixed list rather than tested with `in`, which answers true
+      // for anything on Object.prototype: a log line reading `result: "constructor"`
+      // would otherwise be added to a function and turn a count into NaN. The same trap
+      // util/html.ts uses a null prototype for.
+      const result = CORRECTION_RESULTS.find((r) => r === e.result);
+      if (result) verification.results[result] += 1;
+      if (e.text_changed === true) verification.effects.text += 1;
+      if (e.structure_changed === true) verification.effects.structure += 1;
+      if (e.alt_changed === true && e.text_changed !== true && e.structure_changed !== true) {
+        verification.effects.alt_only += 1;
+      }
+    } else if (e.type === "page_correction_recheck") {
+      verification.rechecks += 1;
+      if (e.ok === true) verification.rechecks_ok += 1;
+    }
+  }
+
   const failedSet = new Set<number>();
   for (const e of events) {
     if (e.type === "page_extraction_failed" && typeof e.page === "number" && e.kept !== "prior") {
@@ -287,6 +368,7 @@ export function summarizeRun(
     by_agent: byAgent,
     slowest_calls: slowest,
     errors,
+    verification,
     pages_failed: pagesFailed,
   };
 }

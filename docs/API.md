@@ -526,6 +526,9 @@ Useful events to grep for:
 | `extraction_complete` | How many page fragments came out (`pages`) and which page numbers failed (`failed`, always present, `[]` on a whole run). |
 | `page_recovered` | A feedback re-extraction succeeded on a page an earlier run had lost, so the document is whole again for those `pages`. Logged late in the run, once that document has been persisted: a round that re-extracts the page and then throws in review leaves the earlier document — hole and all — as the one the session holds. |
 | `extraction_failed` | **Every** page failed, so the run is ending rather than delivering a document with no content in it. The `run_failed` line that follows carries the first page's provider error. |
+| `page_verify_ok` / `page_verify_failed` | The Feedback Agent's fidelity verdict on one page, checked against its source image. A failure names its `problems` and buys that page one self-correction pass, so a run's `page` call count is `pages + failures`. |
+| `page_corrected` | What a self-correction pass did (`trigger`: `verify`, `links` or `both`; `problems`: how many it was given). `result` is `kept` (in the delivered document), `rejected` (discarded to keep a page that had already passed — links path only), `identical` (it returned the page it was given) or `empty` (nothing usable came back); the last two are calls paid for and thrown away. When it changed something, `text_changed` / `alt_changed` / `structure_changed` and `chars_before` / `chars_after` say **what** changed — observed on the two fragments, not claimed by the verdict, so an alt-text refinement and a restored table row are distinguishable. |
+| `page_correction_recheck` | A second verdict on a corrected page (`ok`, `problems`). `binding: true` is the links path re-verifying a rewrite it may discard; `binding: false` is a measurement-only sample, one page per batch, which changes nothing about what is delivered. `rechecks_ok / rechecks` across many runs is whether correction converges. |
 | `editor_images` | How many source images the Copy Editor received this round (`attached` of `of`, plus `pages`). A `dropped` count means the selection did not fit in one request and was trimmed to the pages issues actually named. `attached == of` on a multi-page document means at least one issue in that round carried no page attribution, so the round asked for everything. |
 | `editor_images_refused` | The provider refused the round's payload as too large, so the same prompt was re-sent **without** images. The correction still had the whole body and every issue; only a fidelity problem that must be checked against the source can go unfixed. |
 | `reader` / `editor` | Per-iteration review-loop progress (issue counts) |
@@ -560,6 +563,12 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
     "cache_read_input_tokens": 2500, "cache_creation_input_tokens": 2500 } },
   "slowest_calls": [ { "agent": "table", "model": "...", "capability": "vision", "duration_ms": 14300, "ok": true } ],
   "errors": [],
+  "verification": {
+    "pages_verified": 25, "verify_failed": 13, "corrections": 13,
+    "results": { "kept": 11, "rejected": 0, "identical": 2, "empty": 0 },
+    "effects": { "alt_only": 4, "text": 7, "structure": 5 },
+    "rechecks": 1, "rechecks_ok": 1
+  },
   "pages_failed": []
 }
 ```
@@ -613,6 +622,30 @@ than `count`, these sums cover only part of the run — a cost derived from them
 an estimate. Some upstreams report nothing; a call that stalls knows its prompt size but never
 learns its output size. Failed calls **are** counted, because a truncation has already paid for
 a full ceiling of output and a stall for its prompt.
+
+`verification` is what the verify-then-correct loop did. Every page is checked against its source
+image and a page that fails is re-rendered once, so a run's `page` call count is
+`pages + verify_failed` — on three real 25-page runs the Feedback Agent rejected 58 of 75 pages,
+which makes the "correct if needed" pass mandatory in practice and put verification alone at 24% of
+one document's bill. `verify_failed / pages_verified` is that rejection rate; the raw counts are
+reported rather than the percentage, because a rate over three pages is not a measurement.
+
+The fields answer different questions about the same loop. `results` is what the corrections
+**cost**: `identical` and `empty` are page calls paid for that produced no change at all. `effects`
+is what they **did**, read off the two fragments rather than taken from the verdict, which is what
+separates a refined alt text from a restored table row — both are one `page_verify_failed` line.
+`text` and `structure` are not exclusive (a re-render is usually both); `alt_only` is the count that
+stands alone, and a run where it dominates is spending a page call per page on image descriptions.
+`rechecks` is whether correction **converges**: a corrected page verified a second time, either
+because the links path had to decide whether to keep a rewrite (`binding: true`) or because the run
+sampled one page for measurement. One sample per batch is deliberate — re-verifying every corrected
+page would roughly double the share of the bill the question is about — so `rechecks_ok / rechecks`
+is a fleet number that accrues over runs, not a verdict on any single document.
+
+Nothing in here gates anything. A verify-driven correction is accepted exactly as it was before
+these fields existed; whether to re-render until a page passes, or to run a cheaper verifier, is a
+policy question that needs the rate first. Like `model_calls`, the counts sum over every run a
+session has had, so a feedback round that re-extracts three pages adds three more verifications.
 
 `pages_failed` is the set of source pages the delivered document has no content for, because their
 own extraction threw (§7c). It has its own field
