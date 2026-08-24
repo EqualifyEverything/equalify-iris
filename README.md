@@ -863,11 +863,17 @@ whatever a session can read, it can publish. The refutation gets `Read` on `/tmp
 else; the find session needs the checkout, so it keeps a broad `Read` with `/proc`, the runner's temp
 directory and `~/.aws` denied, and `Grep` and `Glob` denied the same paths, since a tool that returns
 matching lines is also a way to read a file. `persist-credentials: false` on the checkout keeps the
-token off disk entirely, which costs nothing because no step here runs `git`. Then `Decide and act`
-flattens each model-authored field to one line, caps it at 600 characters and redacts it against the
-live credential values before it can reach a comment. That last layer catches verbatim copying and
-not a re-encoded value — which is why the reading is scoped rather than the publishing merely
-filtered.
+token off disk entirely, which costs nothing because no step here runs `git`. Every deny is written
+in both `/x` and `//x` form, because a deny that resolves the wrong way fails *open* and silently,
+where a wrong allow just refuses a write and turns the run red.
+
+Then `Decide and act` flattens each model-authored prose field to one line, caps it at 600
+characters and redacts it against the live credential values before it can reach a comment. That
+last layer catches verbatim copying and not a re-encoded value — which is why the reading is scoped
+rather than the publishing merely filtered. `verdict` and `confidence` are not sanitized but held to
+their allowed values, which is stronger where it applies: a string outside the enum is not a
+malformed verdict, it is not a verdict, so it is discarded rather than repeated back — and a
+discarded verdict fails the run.
 
 **Four rules hold regardless of what either session says**, because that step re-derives them:
 

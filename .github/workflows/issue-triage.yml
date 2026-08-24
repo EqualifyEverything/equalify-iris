@@ -534,11 +534,11 @@ jobs:
           # the one that matters: these patterns are gitignore-style, where a
           # single leading slash anchors to the project directory and `//` means
           # the filesystem root. `Write(/tmp/triage/**)` alone would resolve to
-          # `$GITHUB_WORKSPACE/tmp/triage/**`, permit no write to the real path,
-          # and leave every run producing no verdict — a green job that quietly
-          # triages nothing, which is a worse failure than a loud one. The extra
-          # rule costs nothing and does not widen anything: both name the same
-          # directory under either reading.
+          # `$GITHUB_WORKSPACE/tmp/triage/**` and permit no write to the real
+          # path, so every run would end with no verdict — which `Decide and act`
+          # turns into a failed run, but a failed run on every issue forever. The
+          # extra rule costs nothing and does not widen anything: both name the
+          # same directory under either reading.
           #
           # `Read` is not left open. This session does need the checkout, so the
           # allowance stays broad and the credential-bearing paths are denied
@@ -552,9 +552,19 @@ jobs:
           # verdict's `notes` and `reason` are posted to a public issue comment,
           # so anything a session can read, it can publish. `Decide and act`
           # redacts those strings against the live values as the second layer.
+          #
+          # Every deny is written in both slash forms, and for a different reason
+          # than the doubled `Write` rule above. `Write` fails safe under the
+          # wrong reading: the write is refused, there is no verdict, and the run
+          # goes red. A deny fails *open* under the wrong reading — the path stays
+          # readable and nothing says so. So the asymmetry is deliberate: an allow
+          # rule can afford to bet on one reading, a deny cannot. The list is also
+          # kept identical across all three reading tools; `Glob` returning only
+          # names still confirms which secrets exist and where, and a name is
+          # enough to aim the next `Read` at.
           claude_args: >-
             --allowedTools "Read,Glob,Grep,Write(//tmp/triage/**),Write(/tmp/triage/**)"
-            --disallowedTools "Read(//proc/**),Read(//sys/**),Read(//home/runner/work/_temp/**),Read(//home/runner/.aws/**),Read(**/.git/**),Grep(//proc/**),Grep(//sys/**),Grep(//home/runner/work/_temp/**),Grep(//home/runner/.aws/**),Glob(//proc/**),Glob(//home/runner/work/_temp/**)"
+            --disallowedTools "Read(//proc/**),Read(/proc/**),Read(//sys/**),Read(/sys/**),Read(//home/runner/work/_temp/**),Read(/home/runner/work/_temp/**),Read(//home/runner/.aws/**),Read(/home/runner/.aws/**),Read(**/.git/**),Grep(//proc/**),Grep(/proc/**),Grep(//sys/**),Grep(/sys/**),Grep(//home/runner/work/_temp/**),Grep(/home/runner/work/_temp/**),Grep(//home/runner/.aws/**),Grep(/home/runner/.aws/**),Grep(**/.git/**),Glob(//proc/**),Glob(/proc/**),Glob(//sys/**),Glob(/sys/**),Glob(//home/runner/work/_temp/**),Glob(/home/runner/work/_temp/**),Glob(//home/runner/.aws/**),Glob(/home/runner/.aws/**),Glob(**/.git/**)"
             --model ${{ vars.BEDROCK_TRIAGE_MODEL || vars.BEDROCK_REVIEW_MODEL || 'us.anthropic.claude-opus-5' }}
           prompt: |
             You are triaging issue #${{ steps.ctx.outputs.target }} in ${{ github.repository }}
@@ -695,6 +705,14 @@ jobs:
           VERDICT=$(jq -r '.verdict // ""' "$FIND")
           CANONICAL=$(jq -r 'if (.canonical | type) == "number" then (.canonical | tostring) else "" end' "$FIND")
           CONFIDENCE=$(jq -r '.confidence // ""' "$FIND")
+
+          # Held to their allowed values, as in `Decide and act`. The sink here is
+          # the job log rather than a comment, and on a public repo that is public
+          # too — the two `echo`s below quote both strings back. Same reasoning as
+          # there: these are enums, so an unrecognised value is discarded rather
+          # than repeated, and an empty one cannot pass the gates that follow.
+          case "$VERDICT" in duplicate|related|distinct) ;; *) VERDICT="" ;; esac
+          case "$CONFIDENCE" in high|medium|low) ;; *) CONFIDENCE="" ;; esac
 
           # `type == "number"` admits `1.5` and `1e30`, and a non-integer there
           # would reach `[ "$CANONICAL" -gt "$TARGET" ]` below, where `test` exits
@@ -958,7 +976,18 @@ jobs:
           # Capped. 600 characters is more than an explanation of two issues
           # needs, and it stops a runaway field from burying the part of the
           # comment this file wrote. Not a security control by itself — an AWS
-          # access key id is 20 characters — but a bound is a bound.
+          # access key id is 20 characters — but a bound is a bound. The cap is a
+          # substring expansion and not `head -c 600`, because `head` in a
+          # pipeline is a reader that stops early: on a 200,000-character field it
+          # exits at 600 bytes, the upstream `tr` takes SIGPIPE, and under
+          # `pipefail` the whole pipeline returns 141, which the assignment
+          # inherits and `set -e` turns into a dead step. That would kill the one
+          # step built to report no matter what — including on the paths where an
+          # issue has already been closed and the comment explaining it has not
+          # been posted yet. `${s:0:600}` has no pipe and no reader to die on, and
+          # it counts characters rather than bytes, so the cut cannot land inside
+          # a UTF-8 sequence and "600 characters" is what it says on the
+          # em-dash-heavy prose this repo tends to produce.
           #
           # Redacted against the live credential values, which is the layer that
           # is actually reliable. The session that wrote these strings had the
@@ -968,7 +997,9 @@ jobs:
           # nothing here could. The control for that is upstream, in what the
           # session is allowed to read, which is why `Read` is scoped as well.
           clean_field() {
-            printf '%s' "$1" | tr -d '\000' | tr '\n\r\t' '   ' | head -c 600
+            local s
+            s=$(printf '%s' "$1" | tr -d '\000' | tr '\n\r\t' '   ')
+            printf '%s' "${s:0:600}"
           }
           redact_field() {
             local s
@@ -988,6 +1019,29 @@ jobs:
           LOST=$(redact_field "$LOST")
           NOTES=$(redact_field "$NOTES")
           REFUTE_REASON=$(redact_field "$REFUTE_REASON")
+
+          # `verdict` and `confidence` come out of the same model-written file and
+          # they also reach the posted comment, through the blocker sentences that
+          # quote them back. They are not sanitized like the prose above, they are
+          # checked against their allowed values, which is the stronger move where
+          # it is available: a string outside the enum is not an over-long or
+          # badly-formatted verdict, it is not a verdict, so there is nothing to
+          # salvage by trimming it. Anything unrecognised becomes empty — for
+          # `verdict` that is the branch immediately below, which reports no
+          # readable verdict and fails the run, and for `confidence` it reads as
+          # `unstated` and cannot satisfy the `high` gate.
+          case "$VERDICT" in
+            duplicate|related|distinct) ;;
+            *)
+              [ -z "$VERDICT" ] ||
+                echo "::warning::The find session wrote a verdict outside the allowed set; discarding it."
+              VERDICT=""
+              ;;
+          esac
+          case "$CONFIDENCE" in
+            high|medium|low) ;;
+            *) CONFIDENCE="" ;;
+          esac
 
           # --- Did anything actually run? -----------------------------------
           # This fails the run rather than warning on a green one, and the
