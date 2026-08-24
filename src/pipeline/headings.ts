@@ -1,4 +1,5 @@
 import { JSDOM } from "jsdom";
+import { INLINE } from "./flatten.ts";
 
 // Two headings at the same level with the same words are ambiguous to anyone
 // navigating by heading: the second announces the same subject as the first, or a
@@ -44,6 +45,8 @@ export interface HeadingRun {
 }
 
 const HEADINGS = "h1, h2, h3, h4, h5, h6";
+const ELEMENT = 1;
+const TEXT = 3;
 
 // More runs than this on one document is not a finding list, it is a symptom of
 // something else (a template repeated per page, an extractor that lost its outline),
@@ -70,19 +73,52 @@ function key(text: string): string {
 
 const textOf = (el: Element): string => (el.textContent ?? "").replace(/\s+/g, " ").trim();
 
-// The words a heading's own section opens with: the text of the elements after it, up to
-// the next heading, capped. Siblings only — a heading wrapped in its own <section> has its
-// content beside it, and following the tree out of that wrapper would quote the NEXT
-// section's words for a heading whose own section is empty, which is the opposite of
-// telling two entries apart.
-function openingAfter(el: Element): string {
-  let out = "";
-  for (let next = el.nextElementSibling; next && out.length < MAX_OPENING; next = next.nextElementSibling) {
-    if (/^h[1-6]$/i.test(next.tagName)) break;
-    const t = textOf(next);
-    if (t) out = out ? `${out} ${t}` : t;
+// The words a heading's own section opens with: the text after it, in document order, up
+// to the next heading, capped.
+//
+// Two things it must not do, both of which read as a distinct entry while being nothing of
+// the kind. It must not run a container's descendants together — `el.textContent` on a spec
+// table gives "SpeedTimeLow2 min", which matches no page excerpt and reads as no sentence,
+// on exactly the manuals these issues came from — so block boundaries keep the word
+// boundary the markup put there, and inline ones do not gain one (INLINE is flatten's, so
+// the two cannot disagree about a page). And it must stop at the next heading wherever that
+// heading is: a twin wrapped in its own <section> is not a sibling, while the run finder
+// flattens the tree and pairs them anyway, so a heading with an empty section would
+// otherwise be quoted its twin's content.
+function textUpToHeading(el: Element, out: string[]): boolean {
+  for (const child of el.childNodes) {
+    if (child.nodeType === TEXT) {
+      out.push(child.nodeValue ?? "");
+      continue;
+    }
+    if (child.nodeType !== ELEMENT) continue;
+    const e = child as Element;
+    const tag = e.tagName.toLowerCase();
+    if (/^h[1-6]$/.test(tag)) return true;
+    const block = !INLINE.has(tag);
+    if (block) out.push(" ");
+    if (textUpToHeading(e, out)) return true;
+    if (block) out.push(" ");
   }
-  return out.length > MAX_OPENING ? `${out.slice(0, MAX_OPENING).trimEnd()}…` : out;
+  return false;
+}
+
+function openingAfter(el: Element): string {
+  const out: string[] = [];
+  try {
+    for (let next = el.nextElementSibling; next; next = next.nextElementSibling) {
+      if (/^h[1-6]$/i.test(next.tagName)) break;
+      out.push(" ");
+      if (textUpToHeading(next, out)) break;
+      if (out.join("").replace(/\s+/g, " ").trim().length >= MAX_OPENING) break;
+    }
+  } catch {
+    // A pathologically nested section overflows the walk. This is a hint in a prompt, so
+    // losing it costs an entry its opening words; it must not cost the caller its list.
+    return "";
+  }
+  const text = out.join("").replace(/\s+/g, " ").trim();
+  return text.length > MAX_OPENING ? `${text.slice(0, MAX_OPENING).trimEnd()}…` : text;
 }
 
 // The runs of same-worded, same-level headings in `body`, in document order.

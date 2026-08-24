@@ -38,7 +38,12 @@ import { JSDOM } from "jsdom";
 // `a` and `img` are here because their whole point is appearing mid-sentence: an
 // `<img>` inside an `<a>` supplies the link's accessible name, so treating either
 // as a leaf loses the other.
-const INLINE = new Set([
+//
+// Exported because `pipeline/headings.ts` needs the same split for the same reason:
+// text pulled out of a container has to keep a word boundary where the markup put one
+// (`<td>Low</td><td>2 min</td>` is two cells, not "Low2 min") and must NOT gain one
+// inside a phrase. Two answers to that question would disagree on some page.
+export const INLINE = new Set([
   "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "dfn", "em", "i",
   "img", "kbd", "mark", "q", "rp", "rt", "ruby", "s", "samp", "small", "span",
   "strong", "sub", "sup", "time", "u", "var", "wbr",

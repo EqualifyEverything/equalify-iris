@@ -397,3 +397,44 @@ test("the words quoted under a heading stop at the next heading and at its own s
   assert.equal(wrapped.length, 1, "a heading wrapped in its own <section> is still found");
   assert.equal(wrapped[0].opening, "Inside.", "and its opening is its own section's words");
 });
+
+test("the opening keeps the word boundaries the markup put there", () => {
+  // A heading followed by a spec table or a list is the ordinary shape of the manuals
+  // these issues came from. Run together, "SpeedTimeLow2 min" matches no page excerpt and
+  // reads as no sentence, so the entry is back to being told apart by its number alone.
+  const table = sameWordedHeadingRuns(
+    "<h2>Operation</h2><table><tr><th>Speed</th><th>Time</th></tr><tr><td>Low</td><td>2 min</td></tr></table>" +
+      "<h2>Operation</h2><p>tail</p>",
+  );
+  assert.equal(table[0].opening, "Speed Time Low 2 min");
+
+  const list = sameWordedHeadingRuns(
+    "<h2>Operation</h2><ul><li>Fill the hopper</li><li>Press start</li></ul><h2>Operation</h2><p>t</p>",
+  );
+  assert.equal(list[0].opening, "Fill the hopper Press start");
+
+  // And it must not gain a boundary inside a phrase: an emphasised word is announced
+  // within the sentence, so INLINE decides this and flatten's set is the one that decides it.
+  const inline = sameWordedHeadingRuns(
+    "<h2>Op</h2><p>Press <strong>start</strong> now.</p><h2>Op</h2><p>t</p>",
+  );
+  assert.equal(inline[0].opening, "Press start now.");
+});
+
+test("a twin wrapped in its own section does not lend its words to an empty one", () => {
+  // The run finder flattens the tree, so these two headings are a pair; the second is not
+  // a SIBLING of the first, so stopping only at sibling headings would quote the wrapped
+  // twin's content for a heading that has none — worse than a collision, since the Reader
+  // is told these words locate the run.
+  const runs = sameWordedHeadingRuns("<h3>Care</h3><section><h3>Care</h3><p>Wipe the plate.</p></section>");
+  assert.equal(runs.length, 1, "the pair is still found across the wrapper");
+  assert.equal(runs[0].opening, "", "the first Care has nothing under it");
+});
+
+test("a long opening is truncated rather than pasted into the prompt whole", () => {
+  const long = sameWordedHeadingRuns(
+    `<h2>Op</h2><p>${"word ".repeat(60)}</p><h2>Op</h2><p>t</p>`,
+  );
+  assert.ok(long[0].opening.length <= 81, `capped, got ${long[0].opening.length}`);
+  assert.match(long[0].opening, /…$/);
+});
