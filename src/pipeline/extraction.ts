@@ -7,6 +7,7 @@ import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } fr
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { verifyAgentOutput, type VerifyVerdict } from "./feedback.ts";
 import {
+  changedAnything,
   claimRecheck,
   correctionEffect,
   recheckSampler,
@@ -642,43 +643,34 @@ async function extractPage(
     const trigger = verifyFailed ? (missing.length ? "both" : "verify") : "links";
     const before = innerHtml.trim();
     const corrected = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons);
-    // What the pass actually changed, decided before anything is decided on it.
-    // `corrected === before` catches only the model handing back the exact string it was
-    // given; a re-emission that reflows the whitespace, re-indents, or writes `&` where it
-    // wrote `&amp;` is a different string and the same page — which is what
-    // `correctionEffect` is for (correction.ts). Bucketing on the effect rather than on
-    // string identity is what keeps `results.kept` meaning "this correction changed the
-    // document": the fold cannot recover it afterwards, because `text` and `structure`
-    // overlap and so cannot be subtracted from `kept`.
+    // What the pass changed, measured but NOT used to decide what ships. Whether the
+    // fragment is adopted stays on string identity, exactly as it was before any of this:
+    // `correctionEffect` observes the text, the descriptions, the attributes and the tag
+    // sequence, and a delivery decision must not turn on a signal being complete — a
+    // correction whose only change is one this cannot see would be silently reverted, and
+    // the page would keep the defect the pass had already fixed. The effect decides the
+    // LABEL, which is all the note it answers asked for: a model that re-indents its own
+    // page, or writes `&` where it wrote `&amp;`, returns a different string and the same
+    // page, and counting that under `results.kept` beside a restored table row is what makes
+    // the number unreadable — `text` and `structure` overlap, so the fold cannot subtract it
+    // out afterwards.
     const effect = corrected ? correctionEffect(before, corrected) : null;
-    const moved = effect !== null && (effect.text_changed || effect.alt_changed || effect.structure_changed);
+    const moved = effect !== null && changedAnything(effect);
     // A correction that produced nothing usable, or produced the page it was given back, is
     // a page call paid for and nothing delivered. Recorded because it was previously
     // invisible: the log said a page failed its check and said nothing about what the
     // pass bought, so the loop's value could only be guessed at from call counts (issue
     // #137). See `correctionEffect` for why the kept case reports what it changed.
-    if (!corrected || !moved) {
+    if (!corrected || corrected === before) {
       ctx.log.event("page_corrected", {
         image: img.name,
         page: img.order,
         trigger,
         problems: problems.length,
         result: corrected ? "identical" : "empty",
-        // The three flags are all false by definition on this branch and are left off for
-        // that reason. The sizes are not: equal to `before` means the model returned exactly
-        // what it was given, and different means it re-typed the page to no effect — the
-        // same bill, and worth telling apart.
-        ...(corrected && corrected !== before
-          ? { chars_before: before.length, chars_after: corrected.length }
-          : {}),
       });
     }
-    // Nothing below runs for a page the pass did not change, which also means it costs no
-    // re-verification: neither the sample (there is no change to check) nor the links path's
-    // own (a rewrite that moved nothing cannot have re-attached a link, so the fragment that
-    // was already there is the one to keep, and the `identical` event above is what says the
-    // link went unrecovered).
-    if (corrected && moved) {
+    if (corrected && corrected !== before) {
       // A page that PASSED its fidelity check is being re-rendered here only to
       // recover a link, so the rewrite has to earn the standing the original already
       // had: it is verified in turn, and a rewrite that lost something is discarded
@@ -699,9 +691,11 @@ async function extractPage(
             problems: recheck.problems,
           });
         }
-      } else if (claimRecheck(sampler)) {
+      } else if (moved && claimRecheck(sampler)) {
         // Measurement only, on at most one page per batch: does a corrected page pass
-        // the check it just failed? Nothing here decides anything — a verify-driven
+        // the check it just failed? A page the pass did not actually change is not worth
+        // the batch's one slot — there is nothing to check, and the answer would be the
+        // verdict already on record. Nothing here decides anything — a verify-driven
         // correction is accepted exactly as it always was, whatever this says — because
         // whether to keep re-rendering until a page passes is a policy question, and the
         // answer to it needs the rate this event exists to produce (issue #137). See
@@ -749,12 +743,16 @@ async function extractPage(
       // verdict, so "the alt text was refined" and "a table came back" are separable in
       // a log where both were `page_verify_failed` — which is the measurement issue #137
       // asks for and the one the verdict cannot give about itself.
+      //
+      // `kept` is reserved for a correction that changed something, so a fragment adopted
+      // because it differs as a string while being the same page is `identical` here: the
+      // page call was paid for and bought nothing, whichever of the two strings ships.
       ctx.log.event("page_corrected", {
         image: img.name,
         page: img.order,
         trigger,
         problems: problems.length,
-        result: keep ? "kept" : "rejected",
+        result: keep ? (moved ? "kept" : "identical") : "rejected",
         ...effect,
       });
       if (keep) {

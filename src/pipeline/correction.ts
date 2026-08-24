@@ -76,14 +76,52 @@ function altText(html: string): string {
   return values.join("\u0000");
 }
 
-// The three ways a correction can differ from what it corrected, plus the sizes. Not a
+// Every attribute EXCEPT alt, tag by tag, in document order.
+//
+// The other three signals are blind to attributes — `tagShape` reads names only, and
+// `visibleText` throws attribute values away — which left the two corrections that matter
+// most invisible: an `href` the model re-typed inexactly, which is the entire reason the
+// links pass exists (links.ts asks for "exactly that URL — without changing anything else
+// about the page", and a model that obeys changes one attribute), and the accessibility
+// attributes agents/page.md requires by name — `<th scope>`, `aria-describedby`, an
+// `aria-label` on a symbol marker, `for`/`id`, `lang`, `colspan`. A pass that fixes exactly
+// what it was asked to fix must not read as a pass that changed nothing.
+//
+// `alt` is excluded because it has its own signal, and keeping them apart is what makes
+// "nothing but the descriptions moved" a thing this module can say. Each tag's attributes
+// are sorted, because their order carries no meaning and a model re-emitting its own tag
+// may reorder them; values are whitespace-collapsed and entity-decoded for the reason the
+// text is — a page re-typed must not register as a page changed.
+//
+// Tags are joined on a separator an attribute value cannot contain, for the reason `altText`
+// is: on a space, an attribute moved from one tag to the next would compare equal to the
+// original, and the tag boundary is the only thing that says otherwise.
+function attrText(html: string): string {
+  const tags: string[] = [];
+  for (const tag of html.match(TAG) ?? []) {
+    const inner = tag.replace(/^<\/?[a-z][a-z0-9]*/i, "").replace(/\/?>?$/, "");
+    const pairs: string[] = [];
+    for (const m of inner.matchAll(/([a-z_:][\w:.-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/gi)) {
+      const name = m[1].toLowerCase();
+      if (name === "alt") continue;
+      pairs.push(`${name}=${decodeEntities(m[2] ?? m[3] ?? m[4] ?? "").replace(/\s+/g, " ").trim()}`);
+    }
+    tags.push(pairs.sort().join(" "));
+  }
+  return tags.join("\u0000");
+}
+
+// The four ways a correction can differ from what it corrected, plus the sizes. Not a
 // partition: a re-render that rebuilds a table changes text and structure both, and
-// only `alt_changed` alone means "nothing but the descriptions moved".
+// only `alt_changed` alone means "nothing but the descriptions moved". All four false
+// together means the page is materially the one it was given, whatever the two strings
+// look like.
 export interface CorrectionEffect {
   chars_before: number;
   chars_after: number;
   text_changed: boolean;
   alt_changed: boolean;
+  attrs_changed: boolean;
   structure_changed: boolean;
 }
 
@@ -93,8 +131,16 @@ export function correctionEffect(before: string, after: string): CorrectionEffec
     chars_after: after.length,
     text_changed: visibleText(before) !== visibleText(after),
     alt_changed: altText(before) !== altText(after),
+    attrs_changed: attrText(before) !== attrText(after),
     structure_changed: tagShape(before) !== tagShape(after),
   };
+}
+
+// Did the pass change the page at all? Read off the effect rather than off string
+// identity, because a model that re-indents its own output, or writes `&` where it wrote
+// `&amp;`, returns a different string and the same page.
+export function changedAnything(e: CorrectionEffect): boolean {
+  return e.text_changed || e.alt_changed || e.attrs_changed || e.structure_changed;
 }
 
 // How many measurement-only re-verifications a batch of pages may buy.

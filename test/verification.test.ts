@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { correctionEffect } from "../src/pipeline/correction.ts";
+import { changedAnything, correctionEffect } from "../src/pipeline/correction.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
@@ -88,10 +88,73 @@ test("an unescaped > inside a description does not make an alt rewrite a text ch
 
 test("an attribute that merely ends in alt is not an alt", () => {
   // `\b` opens on the `alt` of `data-alt`, so a rewrite of a data attribute would be
-  // reported as a change to a description no reader ever hears.
+  // reported as a change to a description no reader ever hears. It is an attribute change,
+  // which is a different signal.
   const e = correctionEffect(`<img src="a.png" alt="a kayak" data-alt="one">`, `<img src="a.png" alt="a kayak" data-alt="two">`);
   assert.equal(e.alt_changed, false);
+  assert.equal(e.attrs_changed, true);
   assert.equal(e.text_changed, false);
+});
+
+test("a re-typed href is a change, though no word on the page moves", () => {
+  // The correction the links pass exists to buy: links.ts asks for "exactly that URL —
+  // without changing anything else about the page", so a model that obeys, on an anchor it
+  // had already emitted with a mangled href, changes one attribute and nothing else. Read
+  // on text, descriptions and tag names alone this is a pass that did nothing — and a
+  // measure that says so about the fix it asked for is measuring the wrong thing.
+  const e = correctionEffect(
+    `<p>Read <a href="https://example.org/rep">the full report</a></p>`,
+    `<p>Read <a href="https://example.org/report">the full report</a></p>`,
+  );
+  assert.equal(e.attrs_changed, true);
+  assert.equal(changedAnything(e), true);
+  assert.equal(e.text_changed, false);
+  assert.equal(e.structure_changed, false);
+  assert.equal(e.alt_changed, false);
+});
+
+test("the accessibility attributes the prompt asks for by name are changes", () => {
+  // Every one of these is a fix agents/page.md requires, and none of them moves a word or a
+  // tag: a scope on a header cell, a name on a symbolic footnote marker, a note associated
+  // with its table, a language change.
+  for (const [before, after] of [
+    [`<table><tr><th>Year</th></tr></table>`, `<table><tr><th scope="col">Year</th></tr></table>`],
+    [`<sup><a href="#fn-1" id="fnref-1">*</a></sup>`, `<sup><a href="#fn-1" id="fnref-1" aria-label="Footnote 1">*</a></sup>`],
+    [`<table><tr><td>1</td></tr></table>`, `<table aria-describedby="numbering-note-1"><tr><td>1</td></tr></table>`],
+    [`<p>Bonjour</p>`, `<p lang="fr">Bonjour</p>`],
+  ] as [string, string][]) {
+    const e = correctionEffect(before, after);
+    assert.equal(e.attrs_changed, true, `not seen as a change: ${after}`);
+    assert.equal(e.text_changed, false, `read as a text change: ${after}`);
+  }
+});
+
+test("attribute order and re-spacing are not a change", () => {
+  // A model re-emitting its own tag may reorder its attributes or space them differently,
+  // and neither is something a reader can tell apart — the same reason re-indentation is not
+  // a change to the text.
+  const e = correctionEffect(
+    `<img src="a.png" class="fig" alt="a kayak">`,
+    `<img  class="fig"   src="a.png"  alt="a kayak">`,
+  );
+  assert.equal(e.attrs_changed, false);
+  assert.equal(changedAnything(e), false);
+});
+
+test("an attribute that moved to the wrong element is a change", () => {
+  // The same attributes, the same words, the same tags — and an `id` that now names the
+  // wrapper instead of the paragraph, which is how a `for`, a `headers` or an
+  // `aria-describedby` pointing at it stops resolving. Nothing but the tag boundary says so,
+  // which is why the tags are joined on something an attribute value cannot contain: on a
+  // space, these two flatten to the same string.
+  const e = correctionEffect(
+    `<div dir="ltr"><p id="x" lang="fr">Bonjour</p></div>`,
+    `<div dir="ltr" id="x"><p lang="fr">Bonjour</p></div>`,
+  );
+  assert.equal(e.attrs_changed, true);
+  assert.equal(e.text_changed, false);
+  assert.equal(e.structure_changed, false);
+  assert.equal(changedAnything(e), true);
 });
 
 test("a page rewritten to nothing reports what it lost", () => {
@@ -220,6 +283,7 @@ test("a correction that changed the page says what it changed", async () => {
         chars_after: fixed.length,
         text_changed: false,
         alt_changed: true,
+        attrs_changed: false,
         structure_changed: false,
       },
     );
@@ -271,12 +335,15 @@ test("a page re-typed to no effect is counted with the calls that bought nothing
     const corrected = of(events, "page_corrected");
     assert.equal(corrected.length, 1);
     assert.equal(corrected[0].result, "identical");
-    // The sizes still say which kind of nothing this was: a model that re-typed the page
-    // and one that handed back the exact string it was given cost the same and are not the
-    // same event.
+    // Every flag false is what makes it `identical`, and the sizes say which kind of nothing
+    // it was: a model that re-typed the page and one that handed back the exact string it
+    // was given cost the same and are not the same event.
+    assert.deepEqual(
+      { t: corrected[0].text_changed, a: corrected[0].alt_changed, at: corrected[0].attrs_changed, s: corrected[0].structure_changed },
+      { t: false, a: false, at: false, s: false },
+    );
     assert.equal(corrected[0].chars_before, rendered.length);
     assert.equal(corrected[0].chars_after, retyped.length);
-    assert.equal("text_changed" in corrected[0], false);
     // And it buys no re-verification either: there is no change to check.
     assert.equal(of(events, "page_correction_recheck").length, 0);
     assert.match(result.fragments[0].innerHtml, /Costs/);
@@ -380,6 +447,53 @@ test("a link-driven correction's own re-verification is logged as the binding on
     assert.equal(rechecks.length, 2);
     assert.deepEqual(rechecks.map((r) => r.binding), [true, true]);
     assert.match(result.fragments[0].innerHtml, /href="https:\/\/example\.org\/report"/);
+  });
+});
+
+test("a correction that only re-typed a URL is delivered, not read as buying nothing", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const link = { text: "the full report", href: "https://example.org/report" };
+    // The page linked the right words to the wrong URL — a mis-typed href is exactly what
+    // the links pass exists to catch, and `missingLinkProblem` asks for the fix that changes
+    // "anything else about the page" not at all. So the corrected fragment differs from the
+    // original in one attribute value and in nothing else: no word moves, no tag changes,
+    // no description changes.
+    //
+    // Which is why the delivery gate is string identity and not the effect. A signal that
+    // could not see attributes would call this correction `identical`, and — because the
+    // decision to deliver rode on the same signal — revert the one thing it was asked to
+    // fix, silently, on the pass whose whole purpose is that URL.
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<p>Read <a href="https://example.org/reprot">the full report</a></p>`,
+        problems: () => [],
+        corrected: () => `<p>Read <a href="https://example.org/report">the full report</a></p>`,
+        recheck: () => [],
+        links: [link],
+      }),
+    );
+    const corrected = of(events, "page_corrected");
+    assert.equal(corrected.length, 2, "both pages missed the link, so both were corrected");
+    assert.equal(corrected[0].trigger, "links");
+    assert.equal(corrected[0].result, "kept");
+    assert.deepEqual(
+      {
+        t: corrected[0].text_changed,
+        a: corrected[0].alt_changed,
+        at: corrected[0].attrs_changed,
+        s: corrected[0].structure_changed,
+      },
+      { t: false, a: false, at: true, s: false },
+    );
+    // And the delivered document carries the URL the source file actually has.
+    for (const f of result.fragments) {
+      assert.match(f.innerHtml, /href="https:\/\/example\.org\/report"/);
+      assert.doesNotMatch(f.innerHtml, /reprot/);
+    }
+    // Nor is the link reported as still lost, which is the other half of the same bug: that
+    // event lives behind the same gate, so a reverted fix would also have gone unmentioned.
+    assert.equal(of(events, "page_links_unrecovered").length, 0);
   });
 });
 

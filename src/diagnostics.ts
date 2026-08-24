@@ -133,8 +133,10 @@ export interface Diagnostics {
     // partition: a re-render that rebuilds a table counts under both `text` and
     // `structure`. `alt_only` is the one that stands alone, and it is the interesting one
     // — a run whose corrections only ever refine alt text is paying a page call per page
-    // for image descriptions.
-    effects: { alt_only: number; text: number; structure: number };
+    // for image descriptions. `attrs` is every attribute but alt, which is where the
+    // cheapest real fixes live: an `href` the model re-typed, a `<th scope>`, an
+    // `aria-describedby` — a correction that moves no word and matters.
+    effects: { alt_only: number; text: number; attrs: number; structure: number };
     // Second verdicts on a corrected page, kept apart by whether the verdict was allowed to
     // decide anything, because the two answer different questions and a single ok-rate over
     // both answers neither.
@@ -329,7 +331,7 @@ export function summarizeRun(
     corrections: 0,
     results: { kept: 0, rejected: 0, identical: 0, empty: 0 },
     triggers: { verify: 0, links: 0, both: 0 },
-    effects: { alt_only: 0, text: 0, structure: 0 },
+    effects: { alt_only: 0, text: 0, attrs: 0, structure: 0 },
     rechecks: { sampled: 0, sampled_ok: 0, binding: 0, binding_ok: 0 },
   };
   for (const e of events) {
@@ -349,8 +351,14 @@ export function summarizeRun(
       const trigger = CORRECTION_TRIGGERS.find((t) => t === e.trigger);
       if (trigger) verification.triggers[trigger] += 1;
       if (e.text_changed === true) verification.effects.text += 1;
+      if (e.attrs_changed === true) verification.effects.attrs += 1;
       if (e.structure_changed === true) verification.effects.structure += 1;
-      if (e.alt_changed === true && e.text_changed !== true && e.structure_changed !== true) {
+      if (
+        e.alt_changed === true &&
+        e.text_changed !== true &&
+        e.attrs_changed !== true &&
+        e.structure_changed !== true
+      ) {
         verification.effects.alt_only += 1;
       }
     } else if (e.type === "page_correction_recheck") {
