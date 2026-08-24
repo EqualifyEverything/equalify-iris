@@ -156,11 +156,12 @@ export interface ExtractionResult {
   // document delivered with a page missing is a different deliverable, and the caller
   // records it alongside the run's other outcome counts.
   //
-  // Always empty from `reExtractPages`, and that is a fact about that path rather than
-  // an omission: it only runs for pages that already have a fragment, so a page whose
-  // re-extraction throws keeps the content it had and the document stays whole. Those
-  // pages are reported as `reextract_complete.failed` instead. Folding them in here
-  // would tell a client its document is missing a page that is in it.
+  // From `reExtractPages` this is the set the document ALREADY had, minus any page the
+  // re-extraction filled in. A re-extraction that throws does not add to it: that path
+  // only runs for pages which already have a fragment, so the page keeps the content it
+  // had and the document is no less whole than it was. Those are reported as
+  // `reextract_complete.failed` instead — folding them in would tell a client its
+  // document is missing a page that is in it.
   failedPages: number[];
 }
 
@@ -741,6 +742,12 @@ export async function reExtractPages(
   ctx: PipelineContext,
   priorFragments: Fragment[],
   pages: number[],
+  // Pages the document being refined has no content for, from the run that lost them.
+  // Passed in because this function is the only thing that can shrink that set: a page
+  // whose fragment is a failure marker still HAS a fragment, so it is re-extractable, and
+  // a round that succeeds on it fills the hole. Anything else about the set is unchanged
+  // by this path.
+  priorFailedPages: number[] = [],
 ): Promise<ExtractionResult> {
   const targets = new Set(pages);
   const pageAgent = loadPageAgent(ctx);
@@ -792,6 +799,13 @@ export async function reExtractPages(
   // Conflating the two tells a client following docs/API.md §7c that it received a
   // partial document when it did not.
   const keptPrior = outcomes.filter((o) => o.failed).map((o) => o.fragment.order);
+  // A page that WAS missing and re-extracted cleanly is no longer missing. One that was
+  // missing and threw again keeps its marker, so it stays in the set.
+  const filled = new Set(outcomes.filter((o) => !o.failed).map((o) => o.fragment.order));
+  const failedPages = priorFailedPages.filter((p) => !filled.has(p));
+  if (priorFailedPages.length !== failedPages.length) {
+    ctx.log.event("page_recovered", { pages: priorFailedPages.filter((p) => filled.has(p)) });
+  }
 
   writeFileSync(
     join(ctx.paths.sessionFragments(ctx.sessionId), "fragments.json"),
@@ -804,5 +818,5 @@ export async function reExtractPages(
     pages: outcomes.filter((o) => !o.failed).map((o) => o.fragment.order).sort((a, b) => a - b),
     ...(keptPrior.length ? { failed: keptPrior } : {}),
   });
-  return { fragments, suggestions, failedPages: [] };
+  return { fragments, suggestions, failedPages };
 }

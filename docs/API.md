@@ -524,6 +524,7 @@ Useful events to grep for:
 | `reextract_start` / `reextract_complete` | Which pages went back to the page agent. `reextract_complete.pages` is what was actually re-extracted; a `failed` list is pages whose re-extraction threw and which therefore kept their **prior** content unchanged. |
 | `page_extraction_failed` | One page's own extraction threw (`page`, `image`, `error`). The rest of the document still ran — see §7c. `kept: "prior"` marks the feedback-re-extraction case, where the page keeps the content it already had and the document stays whole. |
 | `extraction_complete` | How many page fragments came out (`pages`) and which page numbers failed (`failed`, always present, `[]` on a whole run). |
+| `page_recovered` | A feedback re-extraction succeeded on a page an earlier run had lost, so the document is whole again for those `pages`. |
 | `extraction_failed` | **Every** page failed, so the run is ending rather than delivering a document with no content in it. The `run_failed` line that follows carries the first page's provider error. |
 | `editor_images` | How many source images the Copy Editor received this round (`attached` of `of`, plus `pages`). A `dropped` count means the selection did not fit in one request and was trimmed to the pages issues actually named. `attached == of` on a multi-page document means at least one issue in that round carried no page attribution, so the round asked for everything. |
 | `editor_images_refused` | The provider refused the round's payload as too large, so the same prompt was re-sent **without** images. The correction still had the whole body and every issue; only a fidelity problem that must be checked against the source can go unfixed. |
@@ -645,6 +646,16 @@ it already had, because a page Iris could not improve is not a page it lost. Tha
 `page_extraction_failed` with `kept: "prior"`, and it is deliberately **not** counted in
 `pages_failed` or `failed_pages` — the document is whole, it is just not improved. Look for it in
 `reextract_complete.failed`.
+
+A missing page stays missing across feedback rounds, and every round's document says so: the set is
+a property of the document, not of the run that lost the page. Sending feedback that names the
+failed page is what fixes it — re-extracting it successfully removes it from the set and logs
+`page_recovered`. Nothing else does, so `failed_pages` on round 3's `run_complete` still names a page
+lost in round 1 if it is still not there.
+
+Pages missing from the delivered document are also excluded from the regression fixtures captured on
+`POST .../close`: a fixture asserts that some HTML is the *right* output for a page image, and a
+failure comment is not.
 
 ## 8. List sessions
 

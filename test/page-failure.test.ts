@@ -231,6 +231,39 @@ test("a failed re-extraction keeps the page it could not improve", async () => {
   });
 });
 
+test("re-extracting a page that was missing fills the hole", async () => {
+  await withTemp(async (dir) => {
+    // The set is a property of the DOCUMENT, not of the run that lost the page, and this
+    // is the only thing that shrinks it: a failed page's fragment is a marker, but it IS
+    // a fragment, so the page is re-extractable and a clean round fills it in.
+    const { ctx, rec } = makeCtx(dir, 3, [], truncated);
+    const { fragments, failedPages } = await reExtractPages(ctx, [prior(1), prior(2), prior(3)], [2], [2]);
+    assert.deepEqual(failedPages, [], "page 2 has content now");
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "<p>page</p>");
+    assert.deepEqual(ev(rec, "page_recovered")[0].data, { pages: [2] });
+  });
+});
+
+test("a page that was missing and failed again is still missing", async () => {
+  await withTemp(async (dir) => {
+    const { ctx, rec } = makeCtx(dir, 3, [2], truncated);
+    const { failedPages } = await reExtractPages(ctx, [prior(1), prior(2), prior(3)], [2], [2]);
+    assert.deepEqual(failedPages, [2], "it kept its marker, so the document still has no page 2");
+    assert.equal(ev(rec, "page_recovered").length, 0);
+  });
+});
+
+test("a page nobody re-extracted stays in the set", async () => {
+  await withTemp(async (dir) => {
+    // Feedback about page 3 does not fix the hole on page 7, and a document that stops
+    // admitting the hole because a later round did not touch it is the failure the
+    // durable marker exists to prevent.
+    const { ctx } = makeCtx(dir, 3, [], truncated);
+    const { failedPages } = await reExtractPages(ctx, [prior(1), prior(2), prior(3)], [3], [2]);
+    assert.deepEqual(failedPages, [2]);
+  });
+});
+
 test("a page that threw is not counted among the pages re-extracted", async () => {
   await withTemp(async (dir) => {
     const { ctx, rec } = makeCtx(dir, 3, [2], truncated);

@@ -129,10 +129,16 @@ export async function runPipeline(args: {
     // rather than only in the per-page events above it, and re-stated in the document
     // itself once the review loop can no longer edit it (assembly.ts wrapDocument).
     //
+    // A property of the DOCUMENT, not of the run that lost the page, which is why it is
+    // persisted to final.json and read back on a feedback round. The in-fragment marker
+    // travels with the fragment on its own, but it is the one report a Copy Editor round
+    // can delete — so a second round on a session that lost page 7 would deliver a
+    // document free to claim it is whole, which is what the durable marker exists to
+    // prevent. Only re-extracting the page removes it from the set.
+    //
     // A run where EVERY page failed does not reach here at all: runExtraction re-raises
     // instead, because a document containing none of the source's words is not a partial
-    // success. Nor does the review-only feedback path assign this — a page that failed in
-    // some earlier run is that run's fact, and its marker already travels in the fragment.
+    // success.
     let failedPages: number[] = [];
     let mode: string;
 
@@ -140,8 +146,12 @@ export async function runPipeline(args: {
       const saved = JSON.parse(readFileSync(finalFragmentsPath, "utf8")) as {
         fragments?: Fragment[];
         body?: string;
+        failedPages?: number[];
       };
       const priorFragments = saved.fragments ?? [];
+      // Absent in state written before this was recorded, which reads as "no page is
+      // missing" — the same answer that state implied when it was written.
+      failedPages = saved.failedPages ?? [];
       beforeBody = (saved.body ?? assembleBody(priorFragments)).trim();
 
       // Route the feedback: content-level complaints ("you misread the table on
@@ -157,7 +167,10 @@ export async function runPipeline(args: {
         mode = "feedback_reextract";
         log.event("run_start", { images: images.length, feedback: args.feedback ?? null, mode });
 
-        const extraction = await reExtractPages(ctx, priorFragments, scope.pages);
+        // A page that failed earlier is exactly the kind of page feedback names, and
+        // re-extracting it successfully is the one thing that fills the hole — so the
+        // prior set goes in and the updated one comes out.
+        const extraction = await reExtractPages(ctx, priorFragments, scope.pages, failedPages);
         fragments = extraction.fragments;
         suggestions = extraction.suggestions;
         failedPages = extraction.failedPages;
@@ -181,7 +194,7 @@ export async function runPipeline(args: {
         // Re-lint the existing reviewed body (no model call), then let the
         // feedback-aware review loop refine it in place.
         const lint = await runAxe(wrapDocument(beforeBody));
-        review = await runReview(ctx, { body: beforeBody, lint, pages: fragments });
+        review = await runReview(ctx, { body: beforeBody, lint, pages: fragments, failedPages });
       }
     } else {
       mode = "full";
@@ -260,7 +273,7 @@ export async function runPipeline(args: {
     // output keyed to its source image) can be captured on accept (close handler).
     writeFileSync(
       finalFragmentsPath,
-      JSON.stringify({ fragments, body: review.body }, null, 2),
+      JSON.stringify({ fragments, body: review.body, failedPages }, null, 2),
     );
 
     // Feedback -> agent training (PRD §7.12/§7.13): turn the document-level
