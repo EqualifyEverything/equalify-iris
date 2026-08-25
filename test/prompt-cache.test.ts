@@ -22,9 +22,11 @@ import { fileURLToPath } from "node:url";
 import {
   cacheableSystemPrompt,
   cachedTextBlock,
+  promptCacheTtl,
   claudeFamily,
   promptCacheEnabled,
 } from "../src/providers/promptCache.ts";
+import { promptCacheTtlWarning } from "../src/config.ts";
 import { BedrockProvider } from "../src/providers/bedrock.ts";
 import { OpenRouterProvider } from "../src/providers/openrouter.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
@@ -567,4 +569,144 @@ test("the head is the head, and the message is still whole", async () => {
       assert.match(c.user, /Compare the output against the attached source image\.$/);
     }
   });
+});
+
+// --- how long an entry should live -------------------------------------------
+
+// A write costs 1.25x at five minutes and 2x at an hour; a read costs 0.1x either way.
+// So five minutes pays for itself on the second use of a prefix and an hour needs a
+// third — which makes this a question about a DEPLOYMENT's cadence, not about Iris.
+// Within one run it never arises: every page call reads the page agent's prefix and each
+// read refreshes the clock. What an hour buys is the gap between runs.
+test("the default deployment sends the request it always sent", () => {
+  // Byte-identical, not "5m" spelled out: `ttl` is a field an upstream can refuse, and a
+  // default nobody chose must not be the request that finds that out.
+  assert.deepEqual(cachedTextBlock("x"), { type: "text", text: "x", cache_control: { type: "ephemeral" } });
+  assert.deepEqual(cachedTextBlock("x", "5m"), { type: "text", text: "x", cache_control: { type: "ephemeral" } });
+  assert.equal("ttl" in cachedTextBlock("x").cache_control, false);
+});
+
+test("an hour is asked for explicitly, and only when it is recognized", () => {
+  assert.deepEqual(cachedTextBlock("x", "1h"), {
+    type: "text",
+    text: "x",
+    cache_control: { type: "ephemeral", ttl: "1h" },
+  });
+  assert.equal(promptCacheTtl({ prompt_cache_ttl: "1h" }), "1h");
+  assert.equal(promptCacheTtl({ prompt_cache_ttl: " 1H " }), "1h", "spacing and case are an operator's, not a directive");
+  // Everything else is the default, because the two ways of being wrong are not equal:
+  // falling back costs one prefix's saving per run, while forwarding something
+  // unrecognized could take out every call the upstream serves.
+  for (const v of [undefined, null, "", "   ", "5m", "1 hour", "60m", "3600", 1, true, {}]) {
+    assert.equal(promptCacheTtl({ prompt_cache_ttl: v as unknown as string }), "5m", `${JSON.stringify(v)}`);
+  }
+});
+
+test("a provider block's choice reaches the wire, on both adapters", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m", prompt_cache_ttl: "1h" });
+  const sent = captureBedrock(bedrock);
+  await bedrock.complete(bedrockReq(LONG));
+  assert.deepEqual(sent[0].system, [
+    { type: "text", text: LONG, cache_control: { type: "ephemeral", ttl: "1h" } },
+  ]);
+
+  await withStream(async (calls) => {
+    const or = new OpenRouterProvider({
+      api_key: "test-key",
+      base_url: "http://localhost:1/v1",
+      default_model: "m",
+      prompt_cache_ttl: "1h",
+    });
+    await or.complete(orReq(LONG));
+    const messages = calls[0].messages as { content: unknown }[];
+    assert.deepEqual(messages[0].content, [
+      { type: "text", text: LONG, cache_control: { type: "ephemeral", ttl: "1h" } },
+    ]);
+  });
+});
+
+test("an hour on the head of a user message too, since that is where the largest constant is", async () => {
+  // agents/page.md re-stated per page is the biggest prefix Iris sends (#152); a
+  // deployment that asked for an hour meant it for that one as well.
+  const bedrock = new BedrockProvider({ default_model: "m", prompt_cache_ttl: "1h" });
+  const sent = captureBedrock(bedrock);
+  await bedrock.complete(userReq(LONG + "page 1 of 25", LONG));
+  const parts = (sent[0].messages as { content: { cache_control?: unknown }[] }[])[0].content;
+  assert.deepEqual(parts[0].cache_control, { type: "ephemeral", ttl: "1h" });
+});
+
+test("turning caching off outranks any TTL", () => {
+  // The escape hatch is for an upstream that refuses `cache_control` at all, and a TTL
+  // is a field ON that object: honouring it here would send the very thing being
+  // escaped from.
+  const bedrock = new BedrockProvider({ default_model: "m", prompt_cache: false, prompt_cache_ttl: "1h" });
+  const sent = captureBedrock(bedrock);
+  return bedrock.complete(bedrockReq(LONG)).then(() => {
+    assert.equal(sent[0].system, LONG, "a disabled cache sends a plain string, TTL or no TTL");
+  });
+});
+
+test("a TTL nobody can spell is caught at boot, because nothing else can catch it", () => {
+  // The fallback is silent by design — an unrecognized value must not reach an upstream —
+  // and it is invisible afterwards: the two TTLs differ in what a write is BILLED at, not
+  // in the token counts diagnostics publishes, so `60m` would read exactly like `1h` in
+  // every field Iris reports. Boot is the only place an operator finds out.
+  const ok = { default: "bedrock", bedrock: { default_model: "m", prompt_cache_ttl: "1h" } };
+  assert.equal(promptCacheTtlWarning(ok as never), undefined);
+  assert.equal(promptCacheTtlWarning({ default: "b", b: { default_model: "m" } } as never), undefined);
+  assert.equal(
+    promptCacheTtlWarning({ default: "b", b: { default_model: "m", prompt_cache_ttl: "5M" } } as never),
+    undefined,
+    "case is an operator's, not a typo",
+  );
+  // A valueless YAML key is an operator who set nothing, which is what the default is for.
+  assert.equal(
+    promptCacheTtlWarning({ default: "b", b: { default_model: "m", prompt_cache_ttl: null } } as never),
+    undefined,
+  );
+
+  const warned = promptCacheTtlWarning({
+    default: "bedrock",
+    bedrock: { default_model: "m", prompt_cache_ttl: "60m" },
+  } as never);
+  assert.match(warned ?? "", /providers\.bedrock: "60m"/);
+  assert.match(warned ?? "", /is ignored/);
+  // And it says why no dashboard will show it, so the operator does not go looking.
+  assert.match(warned ?? "", /BILLED/);
+
+  // Every block that has one, not just the first: fixing one and rebooting must not
+  // reveal the next as a surprise.
+  const both = promptCacheTtlWarning({
+    default: "bedrock",
+    per_agent: { page: "bedrock" },
+    bedrock: { default_model: "m", prompt_cache_ttl: "1 hour" },
+    openrouter: { default_model: "m", prompt_cache_ttl: "3600" },
+  } as never);
+  assert.match(both ?? "", /providers\.bedrock: "1 hour"/);
+  assert.match(both ?? "", /providers\.openrouter: "3600"/);
+
+  // `default` is a string and `per_agent` is a map of agent overrides; neither is a
+  // provider block, and both are skipped by NAME rather than by shape — `per_agent` is
+  // an object, so a shape test would send it to the lookup and search it for a key that
+  // belongs to a provider.
+  assert.equal(
+    promptCacheTtlWarning({
+      default: "bedrock",
+      per_agent: { prompt_cache_ttl: "60m" },
+      bedrock: { default_model: "m" },
+    } as never),
+    undefined,
+    "an agent override is not a provider block, whatever it happens to be named",
+  );
+
+  // A block that caches nothing still gets its typo named — the value is unusable either
+  // way, and it goes live the day caching is turned back on — so the wording says the
+  // value is ignored rather than claiming a TTL that block does not have.
+  const off = promptCacheTtlWarning({
+    default: "b",
+    b: { default_model: "m", prompt_cache: false, prompt_cache_ttl: "60m" },
+  } as never);
+  assert.match(off ?? "", /providers\.b: "60m"/);
+  assert.doesNotMatch(off ?? "", /Using 5m/, "nothing is cached there, so no TTL is in play");
+  assert.match(off ?? "", /is ignored/);
 });

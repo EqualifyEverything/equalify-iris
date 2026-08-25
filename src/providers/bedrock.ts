@@ -11,6 +11,8 @@ import {
   cacheableUserPrefix,
   cachedTextBlock,
   promptCacheEnabled,
+  promptCacheTtl,
+  type CacheTtl,
 } from "./promptCache.ts";
 
 // How long a call may send NOTHING before we give up on it.
@@ -134,6 +136,7 @@ export class BedrockProvider implements ModelProvider {
   private client: BedrockRuntimeClient;
   private maxTokens: number;
   private promptCache: boolean;
+  private cacheTtl: CacheTtl;
   private firstOutputTimeoutMs: number;
   private idleTimeoutMs: number;
   private maxTotalMs: number;
@@ -149,6 +152,7 @@ export class BedrockProvider implements ModelProvider {
     // embedders) may pass a raw block — so fall back rather than send undefined.
     this.maxTokens = cfg.max_tokens ?? DEFAULT_MAX_TOKENS;
     this.promptCache = promptCacheEnabled(cfg);
+    this.cacheTtl = promptCacheTtl(cfg);
     this.firstOutputTimeoutMs = timeouts.firstOutputTimeoutMs ?? FIRST_OUTPUT_TIMEOUT_MS;
     this.idleTimeoutMs = timeouts.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
     this.maxTotalMs = timeouts.maxTotalMs ?? MAX_TOTAL_MS;
@@ -179,7 +183,7 @@ export class BedrockProvider implements ModelProvider {
             : null;
         if (m.role === "user" && (prefix || req.images?.length)) {
           const content: unknown[] = [];
-          if (prefix) content.push(cachedTextBlock(prefix));
+          if (prefix) content.push(cachedTextBlock(prefix, this.cacheTtl));
           const tail = prefix ? m.content.slice(prefix.length) : m.content;
           // Only when there is one. A caller whose whole message is invariant leaves
           // nothing after the head, and an empty text block is rejected by the API — so
@@ -215,7 +219,7 @@ export class BedrockProvider implements ModelProvider {
     if (system) {
       payload.system =
         this.promptCache && cacheableSystemPrompt(req.model, system)
-          ? [cachedTextBlock(system)]
+          ? [cachedTextBlock(system, this.cacheTtl)]
           : system;
     }
 
