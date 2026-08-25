@@ -72,8 +72,13 @@ test("the Reader is told to find the duplicate-heading pair and say which case i
     // a list of headings it cannot find in its own excerpt as noise.
     ["the computed list is announced, and announced as covering the whole document",
       /a section below lists them, computed from the WHOLE document rather than from the HTML you were given/],
-    ["a heading the list names but the excerpt does not contain is still reported",
-      /a heading it names may sit outside your excerpt, and is to be reported anyway/],
+    // "outside the HTML you were given" rather than "outside your excerpt": what the call was
+    // handed is the whole body on a document that fits in one chunk, and the prompt now says
+    // which of the two it is on the HTML section itself (`window N of M`, issue #188). A
+    // sentence calling that section an excerpt unconditionally contradicts the label 40 lines
+    // down and re-creates the ambiguity the label exists to remove.
+    ["a heading the list names but the given HTML does not contain is still reported",
+      /a heading it names may sit outside the HTML you were given, and is to be reported anyway/],
     ["entries are not argued with, and a pair the list missed is still worth reporting",
       /no entry is a false positive to be argued with, and finding a pair the list missed is still worth reporting/],
   ] as [string, RegExp][]) {

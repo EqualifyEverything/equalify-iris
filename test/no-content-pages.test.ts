@@ -371,6 +371,23 @@ test("the dropped report's text is folded and bounded, like every other model-wr
   assert.equal(reports[0].length, "high: ".length + 300);
 });
 
+test("a reply that omits the issue text costs a log line, not the session", async () => {
+  // The Reader's reply is the model's own: `runReader` normalizes `pages` and nothing else, so
+  // `issue` and `severity` arrive exactly as sent. Everywhere else they are interpolated, where
+  // a missing one prints as `undefined`; this line calls a method on the text, and a TypeError
+  // here leaves the review loop through the orchestrator's outer catch — a failed session, with
+  // extraction and assembly paid for and discarded.
+  const round = await readerRound({
+    chunks: 2,
+    pages: THREE_PAGES,
+    failedPages: [2],
+    issuesFor: () => [{ pages: [2] } as unknown as ReviewIssue],
+  });
+  assert.equal(round.unresolved.length, 1, "the round survived a reply with no issue text in it");
+  const [logged] = round.events.filter((e) => e.name === "reader_page_reports_deduped");
+  assert.deepEqual(logged.data.reports, ["unrated: "]);
+});
+
 test("a body that fits in one chunk carries no window label; a split one labels every chunk", async () => {
   // The label is what conditions the missing-page rule above, so its absence on a
   // single-chunk document is the whole of what gives the Reader that finding back.

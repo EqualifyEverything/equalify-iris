@@ -100,7 +100,7 @@ nothing but its own subject's content between them.
 
 Those pairs are found for you. Where the document has any, a section below lists them, computed
 from the WHOLE document rather than from the HTML you were given — so a heading it names may sit
-outside your excerpt, and is to be reported anyway. Report every entry in that list as an issue,
+outside the HTML you were given, and is to be reported anyway. Report every entry in that list as an issue,
 and say which of the two cases it is; where the excerpts do not tell you, say that instead of
 choosing. The list decides only that a pair EXISTS: no entry is a false positive to be argued
 with, and finding a pair the list missed is still worth reporting.
@@ -618,7 +618,15 @@ async function runReader(
       iteration,
       dropped: dropped.length,
       pages: [...new Set(dropped.flatMap((i) => i.pages ?? []))].sort((a, b) => a - b),
-      reports: dropped.map((i) => `${i.severity}: ${i.issue.replace(/\s+/g, " ").trim().slice(0, 300)}`),
+      // `String(... ?? "")` because these two fields are the model's own: `runReader` normalizes
+      // only `pages`, and everything else that touches an issue interpolates the text into a
+      // prompt or a comment, where a missing one prints as `undefined` and costs a line. This is
+      // the first place that calls a METHOD on it, and a reply that omitted `issue` would throw a
+      // TypeError out of the review loop into the orchestrator's outer catch — a failed session,
+      // extraction and assembly discarded, for a log line about a report being dropped.
+      reports: dropped.map(
+        (i) => `${i.severity ?? "unrated"}: ${String(i.issue ?? "").replace(/\s+/g, " ").trim().slice(0, 300)}`,
+      ),
     });
   }
   return issues;
