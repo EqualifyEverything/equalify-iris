@@ -63,6 +63,13 @@ curl -s "$BASE/stats"
     page's sentence credits the reviewer rather than saying the document came out clean.
   * `mean_rounds` — mean reader/editor passes per document. **0 is the good value:** the loop stops
     as soon as the Reader finds nothing, so a document that reads clean immediately contributes 0.
+    It is not *only* a good value, though, and this number cannot tell the two apart: the loop also
+    stops as soon as a round changes nothing, so a document whose remaining issues are ones the
+    loop is designed not to fix contributes a low count too. Read it beside `clean_rate`, which
+    convergence can only move DOWNWARD — it is the complement of `unresolved_rate`, and stopping
+    early can report issues a further Reader sample might have called clean, never the reverse. So
+    a falling `mean_rounds` beside a steady `clean_rate` is the loop wasting fewer rounds; a
+    falling `mean_rounds` is not by itself evidence of anything improving.
 
 `quality` is `null` until the window holds at least 20 documents (`PUBLIC_QUALITY_MIN_DOCUMENTS`),
 and that floor is a privacy control, not a presentation choice. A rate over three documents is not
@@ -145,13 +152,20 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   loop stops as soon as the Reader finds nothing, so a document that reads clean on the first look
   contributes `0`: low is good, and `0.0` across the window means nothing needed fixing. `null`,
   not `0`, when nothing has run — otherwise an empty deployment reports the best possible score.
+  It also stops as soon as a round changes nothing: an editor that answers and returns the document
+  it was given has said what it would say to the same request next round, so the remaining rounds
+  would rewrite the document into itself. That means a low `mean_rounds` beside a non-zero
+  `unresolved_rate` is now an ordinary reading rather than a contradiction — the document stopped
+  early *because* what was left could not be fixed here, not because it was fixed.
 * `unresolved_rate` — share of documents that finished with issues the review loop could not
   resolve. Only the **count** of those issues is used, never their text — see below. One class of
   issue is deliberately never resolved and so always lands here: two headings the document labels
   alike where nothing the copy editor was given says whether they are one section or two. It is
   reported and left standing rather than guessed at, because merging two real sections cannot be
-  undone — so a document with one spends the full `max_review_iterations` and raises this rate and
-  `mean_rounds` together, which is the honest reading: it shipped with an ambiguity a reader meets.
+  undone — so a document whose only remaining issue is one of these raises this rate while its
+  `mean_rounds` stays low: the first round that leaves it alone changes nothing and the loop stops
+  there. That is the honest reading — it shipped with an ambiguity a reader meets, and the rounds it
+  did not spend would each have rewritten the document into itself.
   A `[not legible]` marker can end the same way: the copy editor is usually given that page's image
   and may well read what the extractor could not — usually, because the per-round image budget
   (`capEditorImages`) and a provider that refuses a request for size both leave it with fewer images
@@ -161,8 +175,9 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   deletion — is the one outcome a reader cannot detect. A `[page not fully transcribed]` marker
   always ends this way, by design: no pass in the review loop can resolve it, because finishing a
   page means returning the rest of it on top of the whole corrected body, and a response that hits
-  its ceiling ends the run with nothing delivered. So it is reported every round and left standing,
-  and it raises this rate for a document that is otherwise sound. Read it as what it is — one page
+  its ceiling ends the run with nothing delivered. So it is reported and left standing, and it
+  raises this rate for a document that is otherwise sound — but only for as many rounds as it takes
+  the editor to leave the document alone once, which is what now ends the loop. Read it as what it is — one page
   arrived short, and the document says where.
 * `links_dropped_rate` — share of documents where an `href` present before the copy editor was
   missing after it.
@@ -489,7 +504,9 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/output" -o output.html
 `text/html` — clean, content-only accessible HTML. Provenance comments (`@source`, `@agent`,
 `@fragment`) are **not** included, a deliberate deviation from PRD §7.4; provenance lives in the
 run log instead (step 7). An `<!-- @unresolved -->` comment listing outstanding issues is
-appended if the review loop hit its iteration cap. Returns `409` while the session is still
+appended if the review loop stopped with any still open — at its iteration cap, or on a round that
+changed nothing, which is how a document whose remaining issues the loop is designed not to fix
+ordinarily ends. Returns `409` while the session is still
 running.
 
 **Image references do not resolve, by design.** A graphic on the page — a logo, a diagram, a
@@ -560,7 +577,9 @@ Useful events to grep for:
 | `editor_images_refused` | The provider refused the round's payload as too large, so the same prompt was re-sent **without** images. The correction still had the whole body and every issue; only a fidelity problem that must be checked against the source can go unfixed. |
 | `editor_links_dropped` | An `href` present before that round's correction was missing after it (`iteration`, `hrefs`). A link's target came from the source **file**, not from a page image, so a dropped one cannot be recovered by looking again — logged rather than repaired, and counted into `links_dropped_rate`. |
 | `editor_markers_changed` | The count of a `[not legible]` or `[page not fully transcribed]` marker changed across one correction round (`iteration`, `before`, `after`, plus `fewer` and/or `more`). `fewer` is expected where the editor read that region off the attached page image, and is a loss anywhere else — nothing downstream can tell those apart, and no other signal sees it at all, since the flattened view strips bracketed tokens before comparing words. `more` is a placeholder written over words the extractor did read, which no instruction in the loop allows. |
-| `reader` / `editor` | Per-iteration review-loop progress (issue counts) |
+| `reader` / `editor` | Per-iteration review-loop progress: the Reader's `issues` count, and whether that round's correction `changed` the document. |
+| `editor_no_output` | The Copy Editor's reply carried no usable body (`chars` of text came back), so the round kept the document it was given. A call paid for and nothing said — which is why it does not end the loop: the next round is a retry, not a repeat. |
+| `review_converged` | The loop stopped early because a round changed nothing (`iteration`, the `issues` that round was given, and the `rounds_left` it did not spend). The editor answered and handed back the document it was given, so the same request next round would be answered the same way; what ships is that document with those issues written to `@unresolved`. Expect this on a document whose remaining issues are the ones the loop is designed not to resolve — an undecidable pair of same-worded headings, a `[page not fully transcribed]` marker. Frequent lines here with `issues` the editor *should* be able to fix are the signal worth chasing: that is the editor declining work, not the loop saving a wasted round. |
 
 ## 7b. Diagnostics (timing / hang detection)
 

@@ -237,6 +237,12 @@ jobs:
           # first look costs 0, so low is good and 0 is best. Above 2.5 the loop is
           # using nearly its whole budget on the average document, which means the
           # first pass is producing work the second and third have to undo.
+          #
+          # This one is a CHURN alarm and only that. A document also stops early when a
+          # round changes nothing, so a falling mean can mean the loop gave up sooner
+          # rather than that documents needed less fixing — which is why quality is
+          # watched by UNRESOLVED_RATE_MAX above, and why a drop here is not on its own
+          # evidence of anything improving.
           MEAN_ROUNDS_MAX=2.5
           # Fraction of documents violating one specific axe-core rule. A rule failing
           # on a quarter of documents is a defect in a prompt, not a property of the

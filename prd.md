@@ -462,8 +462,8 @@ Narrowing requires *full* attribution: if any issue in the round could not be at
 
 - Default `max_review_iterations = 3`.
 - Each iteration: Reader → Copy Editor → Assembler → Reader.
-- Loop exits when Reader returns no issues, or when iteration cap is reached.
-- If iteration cap is reached with issues remaining, the document is still returned but with an `@unresolved` block at the end listing remaining issues and their source references (the attributed page numbers — see §7.8 v1.1 — where the Reader could attribute them).
+- Loop exits when Reader returns no issues, when a round changes nothing, or when the iteration cap is reached. **(Amended v1.2.)** The middle exit is the case the loop cannot make progress on: a Copy Editor that answers and returns the document it was given has decided, and would decide the same way on the same request next round — so the remaining rounds would re-read the document and rewrite it into itself. Some issues are unresolvable here by design and are reported every round (§7.8: an undecidable pair of same-worded headings; a `[page not fully transcribed]` marker, which only re-extraction can settle), so this is the ordinary end for a document carrying one. A reply that could not be used is *not* this case — the editor said nothing, so that round is retried.
+- If the loop stops with issues remaining — at the cap or on a round that changed nothing — the document is still returned but with an `@unresolved` block at the end listing remaining issues and their source references (the attributed page numbers — see §7.8 v1.1 — where the Reader could attribute them).
 
 ### 7.12 User Feedback Re-Run
 
@@ -654,7 +654,7 @@ project/
         ├── new-agents.md    # summary of any session-built agents (whether PR'd or dismissed)
         ├── agent-updates.md # summary of any proposed updates to existing agents
         ├── prs.md           # links to any PRs opened from this session
-        └── unresolved.md    # issues remaining at iteration cap, if any
+        └── unresolved.md    # issues remaining when the review loop stopped, if any
 ```
 
 **Amended (v1.2): `new-agents.md` and `prs.md` are not written.** They are the last two entries of the fork-and-PR flow withdrawn in §7.13 v1.2, and this tree is the place that outlived the withdrawal — every other consequence got an amendment note, so the one that reads as a file layout got a stale line instead. `prs.md` cannot exist: nothing opens a PR. `new-agents.md` was a summary of session-built agents *"whether PR'd or dismissed"*, which is a distinction about PRs; the draft itself lives in `tmp/<session-id>/agents/` for the session and the proposal survives as a filed issue under the user's identity. `paths.ts` carried `sessionNewAgents()` and `sessionPrs()` with zero callers until they were deleted with the flow. The line in §7.6 about logging a session-built agent to `runs/<run-id>/new-agents.md` goes with them.
