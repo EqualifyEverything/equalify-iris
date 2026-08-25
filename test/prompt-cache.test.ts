@@ -670,7 +670,7 @@ test("a TTL nobody can spell is caught at boot, because nothing else can catch i
     bedrock: { default_model: "m", prompt_cache_ttl: "60m" },
   } as never);
   assert.match(warned ?? "", /providers\.bedrock: "60m"/);
-  assert.match(warned ?? "", /Using 5m/);
+  assert.match(warned ?? "", /is ignored/);
   // And it says why no dashboard will show it, so the operator does not go looking.
   assert.match(warned ?? "", /BILLED/);
 
@@ -684,4 +684,29 @@ test("a TTL nobody can spell is caught at boot, because nothing else can catch i
   } as never);
   assert.match(both ?? "", /providers\.bedrock: "1 hour"/);
   assert.match(both ?? "", /providers\.openrouter: "3600"/);
+
+  // `default` is a string and `per_agent` is a map of agent overrides; neither is a
+  // provider block, and both are skipped by NAME rather than by shape — `per_agent` is
+  // an object, so a shape test would send it to the lookup and search it for a key that
+  // belongs to a provider.
+  assert.equal(
+    promptCacheTtlWarning({
+      default: "bedrock",
+      per_agent: { prompt_cache_ttl: "60m" },
+      bedrock: { default_model: "m" },
+    } as never),
+    undefined,
+    "an agent override is not a provider block, whatever it happens to be named",
+  );
+
+  // A block that caches nothing still gets its typo named — the value is unusable either
+  // way, and it goes live the day caching is turned back on — so the wording says the
+  // value is ignored rather than claiming a TTL that block does not have.
+  const off = promptCacheTtlWarning({
+    default: "b",
+    b: { default_model: "m", prompt_cache: false, prompt_cache_ttl: "60m" },
+  } as never);
+  assert.match(off ?? "", /providers\.b: "60m"/);
+  assert.doesNotMatch(off ?? "", /Using 5m/, "nothing is cached there, so no TTL is in play");
+  assert.match(off ?? "", /is ignored/);
 });
