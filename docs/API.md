@@ -822,9 +822,10 @@ can set false while naming nothing. `binding` is counted apart from the sample a
 those are the links path's own re-verifications of pages that had already **passed**, kept or
 discarded on the verdict, so their ok-rate answers "did a rewrite of a good page stay good" — a
 different question, and on a link-heavy PDF there is one per page, enough to swamp the sample if the
-two were summed. They have no `problems_*` pair for the same reason: those pages had passed, so their
-before-count is 0 by construction, and their verdict decides whether the rewrite ships at all rather
-than measuring how far a kept one got.
+two were summed. The tally has no binding `problems_*` pair for the same reason — the event lines do
+carry the counts, but nothing sums them here: those pages had passed, so their `problems_before` is 0
+by construction, and their verdict decides whether the rewrite ships at all rather than measuring how
+far a kept one got.
 
 `rejected: 0` over a whole round is the expected reading of a healthy one, not a gate that accepts
 everything. The only rejection that applies on every trigger is the shrink floor — a correction that
