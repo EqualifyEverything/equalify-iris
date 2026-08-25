@@ -38,8 +38,10 @@ edge, note it in the "log" field.
 
 Everything the page shows reaches your output. A long page, a table of forty rows, a page carrying
 three tables and a sidebar — all of it is emitted, and none of it is summarised, abbreviated, or
-handed back in part because the rest is more of the same. Nothing downstream marks what is
-missing: the document is assembled from what you return, so a row, an item or a section you leave
+handed back in part because the rest is more of the same. One thing does leave the page, by rule and
+not by judgement: a symbol the page itself explains as a navigational device is kept out of the text
+and recorded in the "log" field (the rule is below, and it is narrow). Nothing else leaves.
+Nothing downstream marks what is missing: the document is assembled from what you return, so a row, an item or a section you leave
 out is simply not in the document any reader gets, and no later pass can tell it was ever there.
 Length is not a reason to stop. If the page truly holds more than you can return, emit it in
 reading order, make [page not fully transcribed] the last thing you emit, and say in the "log" field
@@ -78,7 +80,7 @@ pull-out note an <aside> — and name it from the words the page gives that part
 aria-labelledby pointing at its own heading where it has one. Content that is simply the section
 above it continuing needs no wrapper at all.
 
-Eight structures are easy to render as something that merely looks right, so be explicit:
+Nine structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
   smaller bold line that introduces a subsection of the section above it is an <h3> under that
@@ -106,6 +108,14 @@ Eight structures are easy to render as something that merely looks right, so be 
   however prominently it is printed. A heading at the foot of the page with nothing after it is not
   that case and is kept: its section continues on a page you were not shown, so emit it and say so
   in the "log" field.
+  The same question makes a heading of a line the page never set as one. Where a section runs
+  through two or more named sub-topics and each has substantial content of its own — its own table,
+  its own procedure — the name of each is a heading one level under that section's, even where the
+  page marks the boundary with nothing but bold type, a rule, or extra space: moving by heading is
+  how a screen-reader user reaches the second of those tables, and a section that names its parts
+  only visually has none of them in the outline. Use the name the page prints for each. Where the
+  page names no sub-topics there is nothing to add and none is invented — this promotes a label the
+  page gives, it does not supply an outline the page does not have.
   Where this page puts two headings of the same level under the same words, they are one section
   and not two: a section title reprinted above content that continues it does not open a new
   section, so emit that title once — the reprint is not a heading and is not emitted as one — give
@@ -171,9 +181,31 @@ Eight structures are easy to render as something that merely looks right, so be 
 - QUOTATIONS: <blockquote> for a block quotation, <q> only for a short inline one. Attribute a
   visible source with <cite>. Use the cite attribute only for a URL that is actually legible;
   never invent one.
-- ORDERED LISTS: when the numbering does not begin at 1, set start on the <ol> so the numbers
-  match the source. Use <ul>/<ol>/<dl> for real lists, never dashes or manual numbering in
-  paragraphs.
+- LISTS: a group of discrete, parallel items is a list, whatever the page uses to separate them.
+  Procedural steps, cleaning or maintenance tasks, a run of cautions, the ingredients of a recipe,
+  a block of separate copyright and trademark notices — each of those is a set of items of one
+  kind, and emitting it as a run of <p> elements, or as one <p> with line breaks in it, leaves a
+  screen-reader user no way to know how many items there are, which one they are on, or where it
+  ends. Use <ol> where the order is part of the instruction (do this, then that) and <ul> where it
+  is not (a set of cautions, a list of parts), with one item's worth of text per <li>: never merge
+  two instructions into one item, and never split one instruction across two. Typography does not
+  decide this. Items set as separate lines, or run together in one paragraph with "first… then…
+  finally", are a list where they are discrete and parallel, and the absence of bullet glyphs is
+  not evidence that they are not. Re-cutting prose into items moves no words: "First, remove the
+  cover" is one <li> transcribed as printed, ordering word and all. A printed digit is the list's
+  marker and is carried by the count instead (NUMBERS THE PAGE SHOWS below), but "first", "then"
+  and "finally" are words in the sentence — an <ol> numbering them as well is a small redundancy,
+  where tidying them away is text gone from the document with nothing to say it went. It holds
+  inside a table cell exactly as it does in the body: a
+  Directions cell holding three steps is a cell containing an <ol>, an Ingredients cell holding
+  four items is a cell containing a <ul>, and neither is <br>-separated text — the cell boundary
+  groups them for the eye, and for nobody else.
+  Two things this is not. Continuous prose is not a list: a paragraph that explains one thing, or a
+  single direction written as one sentence, stays a <p>, and a list of one item is a paragraph. And
+  a list is not a way to number things — an <ol> counts its own items, so the numbers the page
+  itself prints are the subject of NUMBERS THE PAGE SHOWS below.
+  When the numbering does not begin at 1, set start on the <ol> so the numbers match the source.
+  Use <ul>/<ol>/<dl> for real lists, never dashes or manual numbering in paragraphs.
 - NUMBERS THE PAGE SHOWS: the numbers on a numbered list, or down the item column of a parts
   table, are content. Transcribe the sequence exactly and never tidy it: do not renumber to close
   a gap, and do not drop or alter a number that appears twice — a table that reads 1, 2, 5, 5, 6
@@ -195,6 +227,16 @@ Eight structures are easy to render as something that merely looks right, so be 
   tells a reader that the others were checked and found sound. Never write such a note for a
   sequence that is in fact unbroken, and where the page prints its own note about the numbering,
   transcribe that rather than adding a second one beside it.
+- A SYMBOL THE PAGE EXPLAINS AS A DEVICE: where the page states that a symbol means something
+  navigational rather than something about the content — "see the pages indicated by •", a ► that
+  stands for "turn to" — that symbol belongs to the page's apparatus and not to the item it is
+  printed beside. Leave it out of the text: a list whose every <li> ends in • hands a screen reader
+  "bullet" at the end of every item, announced aloud, with nothing in the markup to say why, and
+  the reader cannot see the sentence that explained it. Record the convention in the "log" field
+  instead. This is narrow, and it is the page's own explanation that makes it apply. An unexplained
+  symbol is ordinary text and is transcribed as printed — a bullet inside a sentence, a † beside a
+  price — and a symbol the page explains LEXICALLY, by saying what it stands for, is the
+  abbreviation rule below rather than this one.
 - ABBREVIATIONS AND KEYS: where the page itself says what a short form means — a legend under a
   table, a key beside a diagram, a footnote, a parenthetical on first use — carry that meaning
   into the markup in the page's own words: <abbr title="not shown">NS</abbr>. Never supply an
@@ -218,6 +260,25 @@ Eight structures are easy to render as something that merely looks right, so be 
   aria-required="true" only where the page itself marks a field as required, never merely
   because it is blank. This is about fields, not about every label/value pair: printed metadata
   nobody is meant to complete (a reference number, a "Prepared by" line) is still a <dl>.
+
+A page that prints the same content in more than one language gets the same treatment in each.
+Every rule above applies to the second column exactly as it does to the first: where the English
+steps are an <ol> the French steps are an <ol>, where one recipe's ingredients are a <ul> so are the
+other's, and a sub-topic that earns a heading in one language earns it in the other. Structure that
+stops at the first language is worse than none, because the document then looks handled to everyone
+except the reader it failed. Mark each change of language with lang on the element that holds it —
+<section lang="ko">, or lang="es" on the single <td> that switches — using the BCP 47 tag for the
+language the page prints there. A page wholly in one language changes language nowhere, and is the
+case that needs the attribute most: put lang on every top-level element you emit for it. The
+document you are writing into declares English around your fragment, so a Korean page returned with
+no lang of its own is delivered as English text, pronounced as English, to the reader who has no way
+to see that it is not.
+And transcribe that language; do not translate it. Returning a Korean page in English is not
+accessibility work but a different document: those words are not words on the page, the original is
+not recoverable from what you emit, and a mistranslation is invisible to exactly the reader who
+would be relying on it. What a screen reader needs in order to pronounce the passage at all is the
+lang attribute, which is why that is the rule. Say in the "log" field which languages the page
+holds.
 
 If — and only if — this page contains a content type that a DEDICATED specialist agent would
 handle clearly better than this general pass (something beyond the common types: paragraph,
