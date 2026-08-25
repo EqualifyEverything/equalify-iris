@@ -41,17 +41,37 @@ const STACK_FRAMES = 6;
 // layout would be disclosed to every uploader whose document degraded the gate. What the
 // frames are FOR is naming the library the throw came from and its caller, and that is
 // exactly what survives the trim: the install root goes, `node_modules/jsdom/lib/…` stays.
+//
+// Exported for the test that pins the frame shapes, because the shapes are the whole
+// argument and only one of them occurs on the failure this environment can provoke: a
+// stack from the deep-nesting `RangeError` is six jsdom frames, so the app's own frames,
+// an ESM `file://` URL and a frame from outside both trees are unreachable through
+// `runAxe` and would otherwise be trimmed on faith.
 const CWD = process.cwd();
-function trimPaths(stack: string): string {
-  return stack
-    .replaceAll(`${CWD}/`, "")
-    .replace(/(?:file:\/\/)?\/\S*?node_modules\//g, "node_modules/");
+export function trimStackPaths(stack: string): string {
+  return (
+    stack
+      // The app's own frames keep their path relative to the repo — `src/pipeline/lint.ts`
+      // is the useful half and says nothing about where the app is installed. `file://`
+      // is stripped with the root it prefixes: a bare scheme left behind reads as a path
+      // that was not trimmed.
+      .replaceAll(`file://${CWD}/`, "")
+      .replaceAll(`${CWD}/`, "")
+      .replace(/(?:file:\/\/)?\/\S*?node_modules\//g, "node_modules/")
+      // Anything still absolute is a frame from neither tree — a global install, a linked
+      // dependency, a runtime outside the app — and there is no relative form of it to
+      // keep, so it is cut to the file name. Anchored to the start of a token (`(` or
+      // whitespace), because a path the rules above already made relative still has
+      // slashes inside it: unanchored, this rule ate `node_modules/jsdom/lib/` out of the
+      // middle of the frame it had just been asked to preserve.
+      .replace(/(^|[\s(])(?:file:\/\/)?\/\S*\//gm, "$1")
+  );
 }
 
 function failure(where: "parse" | "inject" | "run", message: string, e: unknown): LintResult {
   const err = e instanceof Error ? e : undefined;
   const raw = err?.stack?.split("\n").slice(0, STACK_FRAMES + 1).join("\n");
-  const stack = raw === undefined ? undefined : trimPaths(raw);
+  const stack = raw === undefined ? undefined : trimStackPaths(raw);
   return {
     // A document that would not parse is a failure; axe not running in this
     // environment is a degradation. Unchanged by this: only the reporting is new.

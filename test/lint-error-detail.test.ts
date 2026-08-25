@@ -15,7 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { runAxe } from "../src/pipeline/lint.ts";
+import { runAxe, trimStackPaths } from "../src/pipeline/lint.ts";
 import { runAssembly, wrapDocument } from "../src/pipeline/assembly.ts";
 import type { Fragment } from "../src/pipeline/fragment.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
@@ -98,6 +98,36 @@ test("a document that parses and lints reports no failure fields at all", async 
   assert.equal(lint.errorWhere, undefined);
   assert.equal(lint.errorName, undefined);
   assert.equal(lint.errorStack, undefined);
+});
+
+test("every frame shape loses the install path and keeps what the frame is logged for", () => {
+  // The test above exercises one shape, because one shape is all this environment can
+  // provoke: the deep-nesting failure is six jsdom frames. The others are reachable through
+  // `runAxe` only on an "inject"-step throw, or a jsdom whose stack shape changed — so they
+  // are pinned directly rather than trimmed on faith.
+  const cwd = process.cwd();
+  for (const [shape, frame, expected] of [
+    // A dependency: which library threw is the question the stack is logged to answer.
+    ["a dependency frame", `    at Y (${cwd}/node_modules/jsdom/lib/jsdom/x.js:12:3)`, "    at Y (node_modules/jsdom/lib/jsdom/x.js:12:3)"],
+    ["a dependency installed elsewhere", "    at Y (/opt/app/node_modules/jsdom/lib/x.js:12:3)", "    at Y (node_modules/jsdom/lib/x.js:12:3)"],
+    // The app's own frames: the path within the repo is the useful half and discloses nothing.
+    ["an app frame", `    at runAxe (${cwd}/src/pipeline/lint.ts:52:10)`, "    at runAxe (src/pipeline/lint.ts:52:10)"],
+    // ESM stacks carry a URL. A scheme left standing on its own reads as a path that
+    // escaped the trim, which is the note this closes.
+    ["an ESM url", `    at runAxe (file://${cwd}/src/pipeline/lint.ts:52:10)`, "    at runAxe (src/pipeline/lint.ts:52:10)"],
+    // Outside both trees there is no relative form to keep, so the file name is all of it.
+    ["a frame from neither tree", "    at z (/opt/other/lib/x.js:3:1)", "    at z (x.js:3:1)"],
+    ["a runtime frame, already relative", "    at node:internal/modules/run_main:123:5", "    at node:internal/modules/run_main:123:5"],
+  ] as [string, string, string][]) {
+    assert.equal(trimStackPaths(frame), expected, `the trim mishandles ${shape}`);
+    assert.ok(!trimStackPaths(frame).includes(cwd), `${shape} still names the install directory`);
+  }
+  // And the whole stack at once, since the rules run in sequence over one string.
+  const trimmed = trimStackPaths(
+    `RangeError: Maximum call stack size exceeded\n    at Y (${cwd}/node_modules/jsdom/lib/x.js:1:1)\n    at runAxe (file://${cwd}/src/pipeline/lint.ts:52:10)`,
+  );
+  assert.doesNotMatch(trimmed, /file:\/\/|\s\/|\(\//, `an absolute path or bare scheme survived: ${trimmed}`);
+  assert.match(trimmed, /RangeError: Maximum call stack size exceeded/, "the message was mangled");
 });
 
 test("axe-core and jsdom are pinned to exact versions, and to the ones installed", () => {
