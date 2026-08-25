@@ -4,6 +4,7 @@ import { MAX_EDITOR_IMAGES } from "../providers/imageLimits.ts";
 import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseError } from "../providers/types.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
+import { stripDeprecatedRoles } from "./roles.ts";
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { joinSections, splitSections } from "./sections.ts";
 import { flatten } from "./flatten.ts";
@@ -1026,6 +1027,25 @@ export async function runReview(
       if (!round.usable) break;
     }
     body = round.body;
+    // A deprecated role the editor introduced is dropped on the way in, the same way assembly
+    // drops one extraction introduced (roles.ts, issue #187). Both ends are needed and for
+    // different reasons: assembly cannot see a rewrite that has not happened yet, and this
+    // loop is where #187's role actually survived — the Copy Editor was told the rule failed,
+    // rewrote five sections, and left it. Ahead of `changed`, the re-lint and the marker diff
+    // below, so every one of them is about the body that will ship rather than about a
+    // predecessor of it, and ahead of the `body === before` comparisons so a round whose only
+    // effect was a role this strips is not credited as a change. A round that introduced none
+    // leaves the string untouched.
+    const roles = stripDeprecatedRoles(body);
+    if (roles.nodes > 0) {
+      body = roles.html;
+      ctx.log.event("deprecated_roles_stripped", {
+        stage: "correction_round",
+        iteration: iterations,
+        roles: [...new Set(roles.stripped)].sort(),
+        nodes: roles.nodes,
+      });
+    }
     // `sections` on this line is how a run log tells a round that was answered whole from one
     // answered piece by piece — and `corrected` from `of` says how much of the document the
     // second kind actually reached, since a section that truncated in its turn kept its

@@ -235,6 +235,53 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
   }
 });
 
+// Issue #187: a footnote list item shipped `role="doc-endnote"`, which axe deprecates, and the
+// FOOTNOTES rule had prescribed the markup in detail while saying nothing about roles at all —
+// so the model reached for the DPUB pair on its own and picked up the deprecated half. The
+// clauses below are the ones that make this a rule rather than a preference: the shape, the
+// deprecated pair, that the gate fails a document using one, and why nothing is lost by leaving
+// it off.
+//
+// The last four are the correction to this rule's own first version, which said the landmark
+// role "may" go on the `<ol>`. A role replaces the host element's implicit one, so that shape
+// silently cost every footnote list its list semantics — the notes stop being a list, the items
+// lose their position in it — and no axe rule reports it, so the prompt is the only place it can
+// be said. test/deprecated-roles.test.ts pins those facts about axe; src/pipeline/roles.ts is
+// the half of the fix that does not depend on the agent obeying any of this.
+test("the page agent's footnote-role rule keeps the clauses that make it a rule", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    // The shape first, because it is the whole rule for the ordinary case: a plain list.
+    ["the notes are a plain list with no role on either element",
+      /emit a plain <ol> of <li> items with no ARIA role on either/],
+    ["the deprecated pair is named, and named as deprecated",
+      /role="doc-endnote" and role="doc-biblioentry" on the ITEMS are two of the only three roles ARIA deprecates \(the third is directory\)/],
+    // Stated as a consequence, because "deprecated" alone reads as a style note: this is the
+    // accessibility gate failing the document, which is what happened.
+    ["using one fails the gate",
+      /a document that uses one fails the accessibility gate/],
+    // The reason nothing is lost, which is the clause that stops the rule being read as a
+    // trade of semantics for a clean lint — the `<li>` was already saying it.
+    ["nothing is lost, because the list item already says it",
+      /an <li> inside an <ol> is already a list item to a screen reader, and that is the whole of what doc-endnote was adding/],
+    // The clause the first version of this rule got wrong, by prescribing the landmark on the
+    // list. A role replaces the element's own, so the shape it prescribed cost every footnote
+    // list its list semantics — and no gate reports that, which is why the prompt must.
+    ["the landmark roles are not to be reached for on the list instead",
+      /Do not reach for role="doc-endnotes" or role="doc-bibliography" on the <ol> instead/],
+    ["the reason: a role replaces the element's own, and these are landmarks, not lists",
+      /a role REPLACES the element's own rather than adding to it, and both of them are landmarks — neither is a kind of list/],
+    ["what that costs, including that nothing reports it",
+      /<ol role="doc-endnotes"> is not a list any more: the notes stop being announced as a list of N items, each item loses its position in it, and no gate reports the loss/],
+    ["where the landmark does go, with the shape written out",
+      /put it on a wrapper and leave the list a list: <section role="doc-endnotes"><ol><li id="fn-1">…<\/li><\/ol><\/section>/],
+    ["both wrong shapes are named at the end",
+      /Never <ol role="doc-endnotes"> directly, and never <li role="doc-endnote">/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
 // What the agent may say about what it could not read, and how much of the page has to
 // arrive at all (issues #112, #117, #133, and the legibility half of #116).
 //

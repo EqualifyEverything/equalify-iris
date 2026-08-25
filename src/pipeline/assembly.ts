@@ -1,5 +1,6 @@
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { namespaceAnchors, type AnchorReport } from "./anchors.ts";
+import { stripDeprecatedRoles, type RoleStrip } from "./roles.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PipelineContext } from "./context.ts";
 
@@ -27,10 +28,21 @@ export function assembleBody(fragments: Fragment[]): string {
 // `assembleBody` has callers that only want the body (the review loop's re-lint, the
 // re-extraction baseline) and a returned report they ignore would be one more thing
 // to thread through.
-export function assembleBodyWithReport(fragments: Fragment[]): { body: string; anchors: AnchorReport } {
+//
+// A deprecated ARIA role redundant with its host element is dropped here too (roles.ts,
+// issue #187) — for the same reason the namespacing happens here and not in a page: it is a
+// rewrite with no judgement in it that no model call should be spent on. It is done on the
+// joined body rather than per page because there is nothing per-page about it, and a body
+// with no such role comes back the same string.
+export function assembleBodyWithReport(fragments: Fragment[]): {
+  body: string;
+  anchors: AnchorReport;
+  deprecatedRoles: RoleStrip;
+} {
   const ordered = [...fragments].sort((a, b) => a.order - b.order);
   const { pages, report } = namespaceAnchors(ordered.map((f) => ({ order: f.order, innerHtml: f.innerHtml.trim() })));
-  return { body: pages.filter((h) => h.length > 0).join("\n\n"), anchors: report };
+  const joined = stripDeprecatedRoles(pages.filter((h) => h.length > 0).join("\n\n"));
+  return { body: joined.html, anchors: report, deprecatedRoles: joined };
 }
 
 // Wrap body content in a minimal accessible document shell. If issues remain when the
@@ -137,7 +149,7 @@ export async function runAssembly(
   fragments: Fragment[],
   opts: { unresolved?: string[] } = {},
 ): Promise<AssemblyResult> {
-  const { body, anchors } = assembleBodyWithReport(fragments);
+  const { body, anchors, deprecatedRoles } = assembleBodyWithReport(fragments);
   const html = wrapDocument(body, opts);
   const lint = await runAxe(html);
   // `lint_error` is logged because a gate that could not run has to be distinguishable
@@ -188,6 +200,18 @@ export async function runAssembly(
   // ids collided and their FIRST owner was left bare on purpose, so that a reference
   // frozen on an unrewritable page keeps resolving. Without it, `collisions` would claim
   // an id was namespaced when it deliberately was not.
+  // Logged only when something was removed, like `assembly_anchors`. It is worth a line
+  // rather than being silent: this is the prompt's FOOTNOTES rule not being followed, and
+  // the log is the only place that fact survives — the delivered document is clean and the
+  // lint that would have named the role now finds nothing. `roles` is the set and `nodes`
+  // the count, which is what `aria-deprecated-role` would have reported.
+  if (deprecatedRoles.nodes > 0) {
+    ctx.log.event("deprecated_roles_stripped", {
+      stage: "assembly",
+      roles: [...new Set(deprecatedRoles.stripped)].sort(),
+      nodes: deprecatedRoles.nodes,
+    });
+  }
   if (anchors.collisions.length > 0 || anchors.ambiguous.length > 0) {
     ctx.log.event("assembly_anchors", {
       collisions: anchors.collisions,

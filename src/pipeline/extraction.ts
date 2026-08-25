@@ -243,6 +243,19 @@ Nine structures are easy to render as something that merely looks right, so be e
   the page — and never hand one an id that a numbered footnote on this page already uses. Ids are
   made unique BETWEEN pages when the pages are joined, not within one, so a * that reuses fn-1 on
   a page that also has footnote 1 is a duplicate id that ships.
+  Where the notes are collected as a list, emit a plain <ol> of <li> items with no ARIA role on
+  either. role="doc-endnote" and role="doc-biblioentry" on the ITEMS are two of the only three
+  roles ARIA deprecates (the third is directory), and a document that uses one fails the
+  accessibility gate. Nothing is lost by leaving them off, which is why they were deprecated: an
+  <li> inside an <ol> is already a list item to a screen reader, and that is the whole of what
+  doc-endnote was adding. Do not reach for role="doc-endnotes" or role="doc-bibliography" on the
+  <ol> instead. Those two are not deprecated, but a role REPLACES the element's own rather than
+  adding to it, and both of them are landmarks — neither is a kind of list. So
+  <ol role="doc-endnotes"> is not a list any more: the notes stop being announced as a list of N
+  items, each item loses its position in it, and no gate reports the loss. Where the notes deserve
+  a landmark, put it on a wrapper and leave the list a list:
+  <section role="doc-endnotes"><ol><li id="fn-1">…</li></ol></section>. Never
+  <ol role="doc-endnotes"> directly, and never <li role="doc-endnote">.
 - QUOTATIONS: <blockquote> for a block quotation, <q> only for a short inline one. Attribute a
   visible source with <cite>. Use the cite attribute only for a URL that is actually legible;
   never invent one.
