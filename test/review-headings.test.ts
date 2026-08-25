@@ -96,9 +96,12 @@ test("the Copy Editor is told how to resolve each case the Reader reports", () =
       /two sections the document really does label alike keep the label and each gain the words that distinguish them/],
     // This prompt also says "do not invent content", and adding words to a heading is adding
     // words. The exception has to be stated and bounded, or the editor either ignores the
-    // instruction or writes a subtitle of its own.
-    ["the added words are bounded to that section's own content, and named as the only text it may add",
-      /Those words come from that section's own content, which is the one text you may add here/],
+    // instruction or writes a subtitle of its own. There are now two such exceptions — the other
+    // is a `[not legible]` marker resolved from the attached page image — and each names the
+    // count, so a third cannot be added without contradicting one of them
+    // (test/review-legibility.test.ts holds the other end).
+    ["the added words are bounded to that section's own content, and counted against the texts it may add",
+      /Those words come from that section's own content, which is one of the two texts you may add here \(the other is under the markers below, and there is no third\)/],
     ["a subtitle of the editor's own is forbidden", /never write a subtitle of your own/],
     ["sections that are merely named alike are not merged",
       /never merge two sections that are merely named alike/],

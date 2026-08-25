@@ -55,9 +55,12 @@ In the flattened view, anything in square brackets is a structural annotation, n
 [Heading 1-6], [List item], [List item N], [Link], [Image], [Image alt], [Table],
 [Header row], [Row], [Field input|textarea|select|button|summary], [Label], [Quote],
 [Caption], [Term], [Definition], plus [N rows, M columns], [empty], [no caption],
-[spans N columns], [spans N rows], [alt missing] and [decorative, alt empty]. A field's own
-announced name follows its marker, so [Field input text] with nothing after it is a control
-with no accessible name at all. Tables are expanded row by row with cells separated by " | ".
+[spans N columns], [spans N rows], [alt missing] and [decorative, alt empty]. Two bracketed
+tokens are the exception, because the extractor wrote them into the document rather than the
+flattener adding them: [not legible] and [page not fully transcribed] are content — what a page
+said where the source could not be read, or could not be returned in full — and are dealt with
+below. A field's own announced name follows its marker, so [Field input text] with nothing after
+it is a control with no accessible name at all. Tables are expanded row by row with cells separated by " | ".
 
 An item of an ORDERED list carries the number it is announced with — [List item 5] — and an
 item of an unordered or definition list carries none, because there is no number there. Those
@@ -89,6 +92,16 @@ outside your excerpt, and is to be reported anyway. Report every entry in that l
 and say which of the two cases it is; where the excerpts do not tell you, say that instead of
 choosing. The list decides only that a pair EXISTS: no entry is a false positive to be argued
 with, and finding a pair the list missed is still worth reporting.
+
+A [not legible] marker is what the extractor wrote where the marks on its page did not resolve
+into characters, and a [page not fully transcribed] marker is what it wrote where it could not
+return the whole page. Report every one of them with the page it is on, and nothing more. The page
+is what matters: the Copy Editor is given the images for the pages your issues name, and looking at
+that page again is the only thing that can settle the first marker — the second is settled by
+re-extracting that page, which is nobody's job in this loop, so it is reported and left standing.
+You do not see the source images, so never suggest what a marker stood for, and never ask for one to
+be deleted — a document that once said a word could not be read, or a page not finished, and now
+says nothing tells every reader that the page arrived whole.
 
 Treat a table that reports [0 rows], a [Field ...] with nothing announced after it, and an
 [Image] [alt missing] as evidence of a real problem. Do NOT report these, which are correct
@@ -127,13 +140,33 @@ its section continued looks like once the pages are joined. The source images sa
 goes: a title the pages reprint because the section runs across them is ONE heading — drop the
 repeat and put what followed it under the first, at the level its content calls for — while two
 sections the document really does label alike keep the label and each gain the words that
-distinguish them. Those words come from that section's own content, which is the one text you may
-add here; never write a subtitle of your own, and never merge two sections that are merely named
+distinguish them. Those words come from that section's own content, which is one of the two texts you
+may add here (the other is under the markers below, and there is no third); never write a subtitle
+of your own, and never merge two sections that are merely named
 alike. And where nothing you were given decides it — the reviewer says it could not tell, or the
 pages those headings are on were not attached — leave both headings exactly as they are and resolve
 the other issues. An outline that says the same thing twice is a smaller harm to a reader than a
 section merged into another one or a heading dropped, and an issue left alone comes back next round
 or is reported as unresolved, while content you removed on a guess is gone from the document.
+
+A [not legible] marker is not a defect in the markup: it is the extractor saying the marks on that
+page did not resolve into characters. Where that page's image IS attached, look at that region again
+— if the marks resolve for you, put the words the page shows in the marker's place, which is the
+second and last text you may add here, because it comes from the page and not from you. If they do
+not resolve, or that page was not attached, leave the marker exactly where it stands. Never replace
+it with a plausible word, and never simply delete it: a guess reaches a reader as something the page
+says, and a deletion tells every later reader that the page was read in full. A number, a part code
+or a measurement is the case to be strictest about — nothing in the surrounding sentence can confirm
+one, and it is the string a reader will act on.
+
+A [page not fully transcribed] marker is not yours to resolve at all, even with that page's image in
+front of you. It stands where an extraction could not return the whole of one page, so filling it in
+means returning the rest of that page on top of the complete corrected body — the one request in this
+pipeline that can exceed what a response can hold, and hitting that ceiling does not degrade to a
+smaller retry: it ends the run, and the document nobody has been given yet is the document nobody
+gets. Re-extracting that page is what has a whole response to itself. So leave the marker exactly
+where it stands, resolve the other issues around it, and never delete it — an unfinished page that
+says so can be finished, and one that does not looks complete to everyone downstream.
 
 A link's target is content, and it is the one kind you cannot recover: an href came from the
 source FILE, not from the page image, so a URL you drop or alter is gone and a URL you invent
@@ -143,6 +176,37 @@ the TEXT of a link when an issue calls for it (link text that does not describe 
 destination is a real 2.4.4 problem); keep its href.
 
 Respond with ONLY JSON: { "html": "<corrected body content>" }`;
+
+// The two markers the page agent writes INTO the body: what it could not read, and what it
+// could not finish. Both sit inside a fragment, which is the position assembly.ts deliberately
+// keeps its own @page-failed marker out of — a round that returns "the complete corrected body"
+// can drop anything in there, and nothing else in the pipeline would notice. `droppedHrefs`
+// exists for the same reason one file over; `contentCoverage` strips [...] before comparing
+// words, so a marker the editor deleted costs the document nothing any gate can see, and what
+// ships is the one outcome this rule argues a reader cannot detect: a document that reads as
+// transcribed in full.
+//
+// Counted, not restored, and the asymmetry between the two is the reason. A [not legible] marker
+// SHOULD disappear when the editor reads that region off the attached page image — that is the
+// resolution EDITOR_SYSTEM asks for — so a fall in its count is a record and not a verdict.
+// [page not fully transcribed] is never the editor's to resolve, so every one of those that goes
+// missing is a loss. Re-inserting either has no honest position: the words that surrounded it
+// were rewritten by the same round that dropped it.
+//
+// Both directions, because the other one is the harm the page prompt spends a paragraph on. A
+// round that ADDS a marker has put a placeholder where words were — "a placeholder standing for a
+// paragraph you could mostly read costs a reader the part you had" — and it reaches a reader as
+// the source being unreadable when no pass that saw the source said so. The editor is never given
+// that as an option (nothing in EDITOR_SYSTEM writes a marker), which is exactly why an appearance
+// is worth a line: it is the closed enumeration having failed, and the words it replaced are
+// invisible to contentCoverage, which strips [...] before comparing.
+export const BODY_MARKERS = ["[not legible]", "[page not fully transcribed]"] as const;
+
+export function markerCounts(body: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const m of BODY_MARKERS) out[m] = body.split(m).length - 1;
+  return out;
+}
 
 const CHUNK_BUDGET = 24000;
 const CHUNK_OVERLAP = 2000;
@@ -423,6 +487,20 @@ export async function runReview(
     if (dropped.length) {
       droppedLinks += dropped.length;
       ctx.log.event("editor_links_dropped", { iteration: iterations, hrefs: dropped });
+    }
+    // See BODY_MARKERS: the only place a marker's arrival or disappearance is recorded.
+    const was = markerCounts(before);
+    const now = markerCounts(body);
+    const fewer = BODY_MARKERS.filter((m) => now[m] < was[m]);
+    const more = BODY_MARKERS.filter((m) => now[m] > was[m]);
+    if (fewer.length || more.length) {
+      ctx.log.event("editor_markers_changed", {
+        iteration: iterations,
+        ...(fewer.length ? { fewer } : {}),
+        ...(more.length ? { more } : {}),
+        before: was,
+        after: now,
+      });
     }
   }
 

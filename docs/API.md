@@ -152,6 +152,18 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   reported and left standing rather than guessed at, because merging two real sections cannot be
   undone — so a document with one spends the full `max_review_iterations` and raises this rate and
   `mean_rounds` together, which is the honest reading: it shipped with an ambiguity a reader meets.
+  A `[not legible]` marker can end the same way: the copy editor is usually given that page's image
+  and may well read what the extractor could not — usually, because the per-round image budget
+  (`capEditorImages`) and a provider that refuses a request for size both leave it with fewer images
+  than the issues named, or none. Where the image is absent, or the marks do not resolve for it
+  either, the marker stays and the issue is reported unresolved every round. That is the source page being
+  unreadable, not the pipeline failing to try, and the alternative — a plausible word, or a quiet
+  deletion — is the one outcome a reader cannot detect. A `[page not fully transcribed]` marker
+  always ends this way, by design: no pass in the review loop can resolve it, because finishing a
+  page means returning the rest of it on top of the whole corrected body, and a response that hits
+  its ceiling ends the run with nothing delivered. So it is reported every round and left standing,
+  and it raises this rate for a document that is otherwise sound. Read it as what it is — one page
+  arrived short, and the document says where.
 * `links_dropped_rate` — share of documents where an `href` present before the copy editor was
   missing after it.
 * `lint_error_rate` — share of documents whose lint pass **errored** instead of running. Recorded
@@ -546,6 +558,8 @@ Useful events to grep for:
 | `page_correction_recheck_failed` | The measurement-only sample could not be taken — the extra Feedback Agent call hit a provider error (`error`). Logged rather than raised: the page ships as it would have with no measurement at all, and the batch's one sample slot stays spent, so a throttled provider is not retried once per corrected page. A `binding` recheck has no such line, because there the verdict decides whether the rewrite is kept. |
 | `editor_images` | How many source images the Copy Editor received this round (`attached` of `of`, plus `pages`). A `dropped` count means the selection did not fit in one request and was trimmed to the pages issues actually named. `attached == of` on a multi-page document means at least one issue in that round carried no page attribution, so the round asked for everything. |
 | `editor_images_refused` | The provider refused the round's payload as too large, so the same prompt was re-sent **without** images. The correction still had the whole body and every issue; only a fidelity problem that must be checked against the source can go unfixed. |
+| `editor_links_dropped` | An `href` present before that round's correction was missing after it (`iteration`, `hrefs`). A link's target came from the source **file**, not from a page image, so a dropped one cannot be recovered by looking again — logged rather than repaired, and counted into `links_dropped_rate`. |
+| `editor_markers_changed` | The count of a `[not legible]` or `[page not fully transcribed]` marker changed across one correction round (`iteration`, `before`, `after`, plus `fewer` and/or `more`). `fewer` is expected where the editor read that region off the attached page image, and is a loss anywhere else — nothing downstream can tell those apart, and no other signal sees it at all, since the flattened view strips bracketed tokens before comparing words. `more` is a placeholder written over words the extractor did read, which no instruction in the loop allows. |
 | `reader` / `editor` | Per-iteration review-loop progress (issue counts) |
 
 ## 7b. Diagnostics (timing / hang detection)

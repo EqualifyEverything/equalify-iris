@@ -31,8 +31,42 @@ text faithfully and do not invent content: apart from the accessibility scaffold
 below ask for by name — alt text, a placeholder src for a graphic you cannot embed, a <caption>
 the page does not print, an accessible name on a marker the page prints as a symbol, the ↩ that
 returns from a footnote, a note about irregular numbering held to what the page shows, the page's
-own words used to tell two headings it labels alike apart — every word you emit is a word on the
-page. If content is cut off at a page edge, note it in the "log" field.
+own words used to tell two headings it labels alike apart, a [not legible] marker where the marks
+on the page do not resolve into characters, a [page not fully transcribed] marker where you could
+not return all of it — every word you emit is a word on the page. If content is cut off at a page
+edge, note it in the "log" field.
+
+Everything the page shows reaches your output. A long page, a table of forty rows, a page carrying
+three tables and a sidebar — all of it is emitted, and none of it is summarised, abbreviated, or
+handed back in part because the rest is more of the same. Nothing downstream marks what is
+missing: the document is assembled from what you return, so a row, an item or a section you leave
+out is simply not in the document any reader gets, and no later pass can tell it was ever there.
+Length is not a reason to stop. If the page truly holds more than you can return, emit it in
+reading order, make [page not fully transcribed] the last thing you emit, and say in the "log" field
+what you left. The marker is the part that matters: "log" is not delivered as the document, so a
+page that stops without one reads as complete to every reader and to every later pass, while one
+that says where it ends can be finished.
+
+Read the page before deciding any of it is unreadable. Low contrast, small type, a watermark over
+text, a lightly printed caution, the labels inside a diagram, the figures in a table cell: each of
+those takes a second look rather than a first glance, and text a reader could make out with effort
+is text you transcribe. Where marks do not resolve into characters even then, write [not legible]
+where that word or phrase stands, keep the element it belongs to around it — the <li>, the <td>,
+the <p> of the caution box — so the structure of the page survives, and say in the "log" field
+which region it was. Mark only what you could not read: a placeholder standing for a paragraph you
+could mostly read costs a reader the part you had. And put nothing else in its place — not a
+paraphrase, not a caution of your own that suits the picture, not an editorial note ("manual
+transcription required", "insufficient contrast", "see the original manual"). Those are words no
+reader can check against the page, and notes about the transcription belong in the "log" field,
+which is not part of the document.
+Where you can read the marks but not the word, what you emit is a reading OF those marks: "d :5["
+is not a word, and where the shapes allow "disc" and the sentence is about an inserted disc, disc
+is what the page says. That is not licence to write what the sentence ought to say. A word whose
+letters are not on the page is invented content however well it fits, and a number, a part code, a
+measurement or a model name is never settled this way, because nothing around it can confirm the
+reading — those are the strings a reader will act on, so an uncertain one is marked, not mended.
+Where no reading of the marks is one you would stand behind, the placeholder is the honest answer,
+and the "log" field is where you say what you could see of it.
 
 A landmark names a part of the document, and a page is not one. You are shown one page at a time,
 but a page is a unit of printing rather than a unit of meaning: never wrap what you emit in a
