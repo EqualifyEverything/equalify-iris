@@ -774,7 +774,10 @@ raw counts are reported rather than the percentage, because a rate over three pa
 measurement.
 
 The fields answer different questions about the same loop. `results` is what the corrections
-**cost**: `identical` and `empty` are page calls paid for that produced no change at all. `effects`
+**cost**: `identical`, `empty` and `failed` are page calls paid for that produced no change at all,
+and `failed` is the most expensive of the three — a correction that hit the output ceiling paid for a
+full ceiling of tokens before failing, so summing only the first two undercounts the waste by the
+worst of it. `effects`
 is what they **did**, read off the two fragments rather than taken from the verdict, which is what
 separates a refined alt text from a restored table row — both are one `page_verify_failed` line.
 `text` and `structure` are not exclusive (a re-render is usually both); `alt_only` is the count that
