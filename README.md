@@ -130,9 +130,10 @@ from the environment at startup; changes require a restart.
   different road. Conversely the terminal event ends the read then and there, so a connection
   held open after the message is finished cannot let the silence clock discard a whole document.
 - **Concurrency** (§9.4): two independent knobs under `defaults`.
-  `extraction_concurrency` is *within* a run — pages in parallel during extraction, and the
-  Reader's chunk reads in parallel during review, both under that one cap, so a run's in-flight
-  calls never exceed it in either phase; `max_concurrent_runs` is *across* sessions. Peak in-flight model calls is the product of the
+  `extraction_concurrency` is *within* a run — pages in parallel during extraction, and during
+  review both the Reader's chunk reads and the section calls a too-long correction round is
+  re-made with, all under that one cap, so a run's in-flight calls never exceed it in either
+  phase; `max_concurrent_runs` is *across* sessions. Peak in-flight model calls is the product of the
   two, so the second is the one that bounds what the machine is doing — each run also holds a
   jsdom+axe instance. Uploads beyond the cap **wait**, in FIFO order, in `status: "queued"`; the
   wait appears in the session's run log as `run_queued` / `run_dequeued` (`waited_ms`). Nothing
@@ -407,8 +408,10 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
   (`GET /v1/sessions/{id}/logs`) rather than in the deliverable. `@unresolved` **is** emitted
   when the review loop stops with issues outstanding — at its iteration cap, on a round that
   changed nothing, or on a round whose response hit the model's output ceiling (§7.11). That
-  last exit adds a second comment, `@editor-truncated`: the round was discarded, so unlike the
-  other two, no editor pass ever worked on the issues `@unresolved` lists. A third comment,
+  last exit adds a second comment, `@editor-truncated`, saying what that round managed: the
+  editor is asked for the whole document, so a round too long to answer is re-made a section at a
+  time, and the comment reports how many sections came back — or, where nothing could be, that
+  no editor pass ever worked on the issues `@unresolved` lists. A third comment,
   `@lint-unavailable`, is emitted when axe-core could not run on the document at all: nothing in
   it was checked, so an `@unresolved` list that is short — or absent — is not evidence that there
   is nothing left to fix (§7.7).

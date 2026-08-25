@@ -5,6 +5,7 @@ import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseErro
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
+import { joinSections, splitSections } from "./sections.ts";
 import { flatten } from "./flatten.ts";
 import { examplesForPrompt } from "./memory.ts";
 import { knownPages, pageIndex, type IndexedPage } from "./pageindex.ts";
@@ -172,10 +173,10 @@ one, and it is the string a reader will act on.
 A [page not fully transcribed] marker is not yours to resolve at all, even with that page's image in
 front of you. It stands where an extraction could not return the whole of one page, so filling it in
 means returning the rest of that page on top of the complete corrected body — the one request in this
-pipeline that can exceed what a response can hold, and hitting that ceiling does not degrade to a
-smaller retry: the whole round is discarded, so every other correction you made in it is thrown away
-with it and the document is delivered exactly as it reached you. Re-extracting that page is what has
-a whole response to itself. So leave the marker exactly
+pipeline that can exceed what a response can hold, and hitting that ceiling costs this reading of the
+document: the round is re-made one section at a time, by requests that each see a piece of the
+document and not the rest of it, and this is the last round either way. Re-extracting that page is
+what has a whole response to itself. So leave the marker exactly
 where it stands, resolve the other issues around it, and never delete it — an unfinished page that
 says so can be finished, and one that does not looks complete to everyone downstream.
 
@@ -187,6 +188,39 @@ the TEXT of a link when an issue calls for it (link text that does not describe 
 destination is a real 2.4.4 problem); keep its href.
 
 Respond with ONLY JSON: { "html": "<corrected body content>" }`;
+
+// The same editor, asked for one section of a document instead of the whole of it — because the
+// whole of it did not fit in one response (issue #165, and `correctBySection` below for when
+// this is used).
+//
+// Built on EDITOR_SYSTEM rather than written separately: every content rule above still holds
+// for a section (a dropped href is just as lost, a [not legible] marker just as unresolvable
+// without its page), and two prompts that had to be kept in step would drift. What follows
+// overrides exactly one instruction — "the FULL body" — and adds the one hazard that only
+// exists when the editor cannot see the rest of the document.
+export const EDITOR_SECTION_SYSTEM = `${EDITOR_SYSTEM}
+
+## This request is ONE SECTION of the document
+
+The document was too long for its correction to be returned in a single response, so it has been
+cut at top-level boundaries and each section is corrected on its own. Everything above still
+applies, with one change and one warning.
+
+The change: return the corrected version of THIS SECTION only, and nothing from outside it. The
+other sections are being corrected by their own requests and will be joined back around yours in
+order, so anything you repeat from elsewhere would be delivered twice, and anything you leave out
+is simply gone. Do not add a heading, a wrapper or a summary to make the section read as a whole
+document — it is not one, and the sections around it supply what it appears to be missing.
+
+The warning: you cannot see the rest of the document, so some of the issues you are given are
+about content that is not in front of you. Fix the ones that are here and return the rest of this
+section unchanged; an issue you cannot find is in the section that holds it, and is that
+request's to fix. Above all, never remove content because it looks duplicated: the copy you can
+see may be the only one in the document. Two headings with the same words are yours to resolve
+only when BOTH of them are in this section — a heading whose twin is elsewhere stays exactly as
+it is, because dropping the one you can see is how a section loses its title.
+
+Respond with ONLY JSON: { "html": "<corrected section>" }`;
 
 // The two markers the page agent writes INTO the body: what it could not read, and what it
 // could not finish. Both sit inside a fragment, which is the position assembly.ts deliberately
@@ -502,12 +536,22 @@ interface EditorRound {
   // `html` — in which case `body` is what went in. Not evidence about what the editor
   // would do next time, because it never said.
   usable: boolean;
-  // True when the response hit the model's output ceiling (issue #143). A third answer to
-  // the same question, and the only one that also says the NEXT round cannot succeed: the
-  // response length is a function of how long the document is, and the document has not
-  // got shorter. `usable` is false here too — nothing came back to use — but the loop
-  // must not treat this as the retryable case that `usable: false` otherwise means.
+  // True when the whole-body response hit the model's output ceiling (issue #143). A third
+  // answer to the same question, and the only one that also says the NEXT round cannot
+  // succeed: the response length is a function of how long the document is, and the document
+  // has not got shorter. The loop must not treat this as the retryable case that
+  // `usable: false` otherwise means.
+  //
+  // It no longer implies `usable: false`, which is issue #165: the round is retried a section
+  // at a time before it is given up on, so a truncated round can come back with corrections in
+  // it. `truncated` still says the ceiling was hit and the loop still ends on it; `sections`
+  // says what was rescued.
   truncated: boolean;
+  // Set when the round was answered section by section: how many sections the body was cut
+  // into, and how many of them came back corrected. Absent on a round that was answered whole
+  // and on one that could not be sectioned at all — so its presence is what distinguishes a
+  // truncation the document survived with corrections from one it survived without them.
+  sections?: { of: number; corrected: number };
 }
 
 // What the log line about a truncation says. The ceiling and the size of the response are
@@ -571,11 +615,14 @@ async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue
     // is asked for. The caller stops the loop instead.
     if (isTruncatedResponseError(e)) {
       ctx.log.event("editor_truncated", { attached: selected.length, of: ctx.images.length, ...truncation(e) });
-      // `usable: false` for the same reason an unparseable reply is — nothing came back to
-      // use — but the caller must branch on `truncated` FIRST. An unusable round is
-      // allowed to run again, because the editor never said anything; this one has said
-      // all it can say about a document of this length.
-      return { body, usable: false, truncated: true };
+      // The round is not over yet: what cannot be returned in one response can be returned in
+      // several, and the ceiling has just measured how long one of them may be (#165). If that
+      // comes to nothing the result is what it always was — `usable: false` for the same reason
+      // an unparseable reply is, nothing came back to use — but either way the caller must
+      // branch on `truncated` FIRST. An unusable round is allowed to run again, because the
+      // editor never said anything; this one has said all it can say about a document asked for
+      // whole.
+      return sectionRound(ctx, body, issues, e);
     }
     // The images are the only part of this request Iris can give up, and giving them
     // up is far better than what refusing to do so costs: the run ends here, after
@@ -605,7 +652,10 @@ async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue
         ...truncation(retryError),
         after: "images_refused",
       });
-      return { body, usable: false, truncated: true };
+      // And salvaged the same way. The section calls carry no images either (see
+      // `editorSectionCall`), so a request the model refused with them is not made again with
+      // them — this path arrives already text-only and stays that way.
+      return sectionRound(ctx, body, issues, retryError);
     }
   }
 }
@@ -664,6 +714,226 @@ async function editorCall(
   return { body: corrected, usable: true };
 }
 
+// --- a round the editor could not answer in one response ---
+
+// How much of one response is known to fit, as a fraction of what came back when the ceiling
+// was hit.
+//
+// Measured, not estimated, and that distinction is what makes this safe to do at all.
+// `TruncatedResponseError.chars` is how many characters THIS model produced for THIS document
+// before it ran out of ceiling, so it prices this document's HTML in characters per token
+// without anyone having to guess at a ratio — and the guess is the thing PRD §7.11 v1.3 rules out,
+// because measured characters per token vary enough between documents that a wrong one skips
+// corrections the editor would have made. Nothing here is computed until the ceiling has
+// actually been reached, which is why this is a measurement and not a pre-flight estimate.
+//
+// Half of it, so a corrected section has room to come back longer than it went in: a correction
+// adds characters (a `<th>`, a caption, a heading gaining the words that tell it from its twin)
+// and the budget is applied to the section's ORIGINAL text. The same factor absorbs the
+// difference in the other direction — `chars` counts the escaped `{"html":"…"}` the model
+// wrote, which is longer than the HTML inside it — so the headroom is wider than it reads.
+export const SECTION_HEADROOM = 0.5;
+
+// Under this, sectioning is declined. A budget this small would cut a document into dozens of
+// pieces, each carrying the whole issue list and none of them holding enough of the document to
+// be judged in context. It also means the response was cut off almost immediately, which says
+// something went wrong with the call rather than that the document is long — the failure this
+// exists for is a full ceiling of correct output that had nowhere left to go.
+export const MIN_SECTION_BUDGET = 4_000;
+
+// The most requests one salvaged round may make. Every section is a full text call, so this is
+// the round's cost bound, and a document that needs more than this is one whose ceiling is too
+// low for it by more than a factor this loop should be papering over: the deployment's remedy
+// (raise `providers.<name>.max_tokens`, or lower `max_pages`) is the honest one, and
+// `editor_sections_declined` names the number that says so.
+export const MAX_SECTIONS = 12;
+
+// One section, corrected. Returns null when the editor answered with nothing usable, which the
+// caller keeps the original section for.
+async function editorSectionCall(
+  ctx: PipelineContext,
+  section: string,
+  issues: ReviewIssue[],
+  index: number,
+  of: number,
+): Promise<string | null> {
+  const user =
+    `## Section ${index + 1} of ${of} (body content)\n${section}\n\n` +
+    `## Issues found in the whole document — some are in other sections\n${issues
+      .map((i) => {
+        const where = i.pages?.length ? ` (page ${i.pages.join(", ")})` : "";
+        return `- [${i.severity}]${where} ${i.issue} — ${i.suggested_action}`;
+      })
+      .join("\n")}\n\n` +
+    `No source images are available. Return the corrected version of THIS SECTION only.` +
+    feedbackPreamble(ctx);
+  // Text-only, deliberately. The images are what made the failed whole-body call expensive and
+  // they would be re-sent with every section — the same pages, several times over, on a round
+  // that has already paid for one ceiling of output. What that costs is the corrections only a
+  // page image can settle: a [not legible] marker stays where it is, which is what EDITOR_SYSTEM
+  // tells the editor to do when the page is not attached, so the loss is bounded to the issues
+  // the images were for and is the same trade `editor_images_refused` already makes.
+  const res = await ctx.router.complete("copy_editor", "text", [
+    { role: "system", content: EDITOR_SECTION_SYSTEM },
+    { role: "user", content: user },
+  ]);
+  ctx.log.agentCall({
+    agent: {
+      name: "copy_editor",
+      file: "copy_editor.md",
+      content: EDITOR_SECTION_SYSTEM,
+      capabilities: ["text"],
+      sha: null,
+      sessionBuilt: false,
+    },
+    phase: "review",
+    output: res.text,
+  });
+  const corrected = extractJson<{ html?: string }>(res.text)?.html?.trim();
+  if (!corrected) {
+    ctx.log.event("editor_section_failed", { section: index + 1, of, reason: "no_output", chars: res.text.length });
+    return null;
+  }
+  return corrected;
+}
+
+// The round again, a section at a time, after the whole-document answer did not fit.
+//
+// Why this exists: the editor is asked to return the complete corrected body, so the length of
+// its answer follows the length of the DOCUMENT rather than the number of things wrong with it,
+// and a 25-page document is longer than one response may be. Under a fixed ceiling that scales
+// the wrong way — the bigger the document, the more certain it is that its corrections cannot be
+// applied, which is the opposite of where corrections matter most. Two documents of four in one
+// bench round were delivered whole and uncorrected for exactly this reason (issue #165). Cutting
+// the body at top-level boundaries makes the response length a property of the SECTION instead,
+// and a section's size is something this code chooses.
+//
+// What it costs, honestly: one text call per section, on a round that has already paid for a
+// full ceiling of output it could not use. That is roughly one more body's worth of output for
+// the document, and it buys corrections where the alternative buys none. What it loses is the
+// corrections that need the whole document in view at once — deduplicating content that appears
+// on two pages, resolving a heading whose twin is in another section — and the editor is told
+// exactly that (EDITOR_SECTION_SYSTEM), because a section that guesses at what is outside it can
+// delete the only copy of something. Those issues stay unresolved and are reported as such,
+// which is where they already were.
+//
+// Returns null when nothing was attempted or nothing came back, and the caller then behaves as
+// it did before this existed. Every decline is logged with the reason: a round that quietly
+// declines to try is indistinguishable in a log from one that tried and failed.
+async function correctBySection(
+  ctx: PipelineContext,
+  body: string,
+  issues: ReviewIssue[],
+  e: unknown,
+): Promise<{ body: string; of: number; corrected: number } | null> {
+  // No measurement, no budget. `chars` is on the error Iris raised, which is every truncation
+  // except one that lost its prototype at some boundary (see `isTruncatedResponseError`), and
+  // inventing a budget for that case would be the pre-flight guess this deliberately is not.
+  if (!(e instanceof TruncatedResponseError) || !Number.isFinite(e.chars)) {
+    ctx.log.event("editor_sections_declined", { reason: "unmeasured" });
+    return null;
+  }
+  const budget = Math.floor(e.chars * SECTION_HEADROOM);
+  if (budget < MIN_SECTION_BUDGET) {
+    ctx.log.event("editor_sections_declined", { reason: "budget_too_small", budget, chars: e.chars });
+    return null;
+  }
+  // A budget that already covers the whole body says the response was longer than the document
+  // it was correcting, so the sections would be one section: the same request, at the same
+  // length, to the same ceiling. That is a reply that ran away with itself — a repetition, a
+  // preamble that never ended — and not a document too long to answer, so it is reported as
+  // what it is rather than as a body that could not be cut. Reachable, on a short document
+  // whose editor call returned more than twice its characters.
+  if (budget >= body.length) {
+    ctx.log.event("editor_sections_declined", {
+      reason: "budget_exceeds_body",
+      budget,
+      chars: e.chars,
+      body: body.length,
+    });
+    return null;
+  }
+  const sections = splitSections(body, budget);
+  // One section is the body itself: a document with no top-level boundary under the budget —
+  // one enormous table, say — cannot be cut, and asking for it again in one piece would hit the
+  // same ceiling. This is the case a section-size bound genuinely does not solve, and it is
+  // reported rather than retried.
+  if (sections.length < 2) {
+    ctx.log.event("editor_sections_declined", { reason: "indivisible", budget, chars: body.length });
+    return null;
+  }
+  if (sections.length > MAX_SECTIONS) {
+    ctx.log.event("editor_sections_declined", {
+      reason: "too_many_sections",
+      sections: sections.length,
+      max: MAX_SECTIONS,
+      budget,
+      chars: body.length,
+    });
+    return null;
+  }
+  // Concurrent, bounded by the same knob as page extraction and the Reader's chunks: these are
+  // independent calls over disjoint slices of a body nothing mutates while they run, and the
+  // operator's answer to "how many model calls may one run have in flight" is the answer here
+  // too. `|| 1` for a directly-constructed context that never set it (tests, embedders).
+  const limit = Math.max(1, Math.floor(ctx.extractionConcurrency) || 1);
+  ctx.log.event("editor_sections", {
+    sections: sections.length,
+    budget,
+    chars: body.length,
+    concurrency: limit,
+  });
+  const corrected = await mapWithConcurrency(sections, limit, async (section, i) => {
+    try {
+      return await editorSectionCall(ctx, section.html, issues, i, sections.length);
+    } catch (err) {
+      // Per-section containment, and only for the two failures that are about the size of one
+      // request or one response: a section that cannot be returned costs that section, and its
+      // original text is what goes back into the document (`joinSections`). Anything else — a
+      // stall, a stream error, a bad key — is a deployment that is not working, and swallowing
+      // it here would deliver a partly corrected document while reporting nothing wrong.
+      if (!isTruncatedResponseError(err) && !isRequestTooLargeError(err)) throw err;
+      ctx.log.event("editor_section_failed", {
+        section: i + 1,
+        of: sections.length,
+        reason: isTruncatedResponseError(err) ? "truncated" : "too_large",
+        ...truncation(err),
+      });
+      return null;
+    }
+  });
+  const kept = corrected.filter((c) => c !== null).length;
+  return { body: joinSections(sections, corrected), of: sections.length, corrected: kept };
+}
+
+// The truncated round's result, with whatever the section calls rescued. Shared by both
+// truncation paths in `runEditor` — the first call and the images-refused retry — because the
+// remedy for a response that did not fit is the same whatever the request that produced it
+// looked like.
+async function sectionRound(
+  ctx: PipelineContext,
+  body: string,
+  issues: ReviewIssue[],
+  e: unknown,
+): Promise<EditorRound> {
+  const sectioned = await correctBySection(ctx, body, issues, e);
+  // Nothing to use: either the round could not be divided at all, or it was and no section came
+  // back. Both are the state this feature started in — the body that entered the round is the
+  // body that leaves it — and both are reported as that, WITHOUT `sections`. `sections` is what
+  // tells the delivered document it carries corrections made a piece at a time, and a round
+  // that rescued nothing carries none; the `editor_sections` and `editor_section_failed` lines
+  // are where a log reader sees that the attempt was made.
+  if (!sectioned || sectioned.corrected === 0) return { body, usable: false, truncated: true };
+  return {
+    body: sectioned.body,
+    // `usable` is about whether the editor SAID anything, and a section it answered is the
+    // editor having answered.
+    usable: true,
+    truncated: true,
+    sections: { of: sectioned.of, corrected: sectioned.corrected },
+  };
+}
+
 // Reader -> Editor -> re-verify, with three ways out: the Reader reports zero issues,
 // a round changes nothing (see `review_converged` below), or the iteration cap is
 // reached. The loop only stops CLEAN on the first of those — the Reader has actually
@@ -679,6 +949,12 @@ export async function runReview(
   let lastIssues: ReviewIssue[] = [];
   let droppedLinks = 0;
   let editorTruncated = false;
+  // What the truncated round's section calls rescued, when there was one. Only the document
+  // needs it — it is the difference between "this document was not corrected" and "it was
+  // corrected a piece at a time, and the pieces could not see each other" — so it stays a local
+  // rather than joining ReviewResult: the store counts truncations, and a truncation is what
+  // this was either way.
+  let editorSections: { of: number; corrected: number } | undefined;
   // The page index is built from the fragments as they entered review. Pages are
   // deliberately NOT re-indexed as the editor rewrites the body: the index exists
   // to attribute content to a SOURCE page, and the source doesn't change.
@@ -706,7 +982,7 @@ export async function runReview(
         // Reader looked again and found nothing left". That verdict is the Reader's alone
         // when the linter could not run, and a document that says so is the difference
         // between a clean document and an unchecked one (#164).
-        html: wrapDocument(body, { failedPages, editorTruncated, lintUnavailable: lint.error }),
+        html: wrapDocument(body, { failedPages, editorTruncated, editorSections, lintUnavailable: lint.error }),
         body,
         iterationsCompleted: iterations,
         unresolved: [],
@@ -720,30 +996,45 @@ export async function runReview(
     iterations++;
     const before = body;
     const round = await runEditor(ctx, body, issues);
-    // The round returned nothing this loop can use, and the next one would make the
-    // same request against the same body — the response length follows the length of
-    // the document, not the number of issues in it. So the loop ends here rather than
-    // spending another Reader pass and another ceiling of output to learn the same
-    // thing, and what is delivered is the body that entered the round, with the
-    // Reader's issues recorded as unresolved. See runEditor for why this is not
-    // retried and not fatal.
+    // The round could not be answered as one response, and the next one would make the same
+    // request against the same body — the response length follows the length of the document,
+    // not the number of issues in it. So this is the loop's last round however it turned out:
+    // another Reader pass and another ceiling of output would only learn the same thing. See
+    // runEditor for why the whole-body call is not retried and not fatal, and
+    // `correctBySection` for what is asked instead.
     //
-    // Before `body` is taken from the round, and before the two exits below, because both
-    // of those would read this round as something it is not. `body === before` holds here,
-    // as it does for a converged round — but a converged round is one the editor ANSWERED
-    // and would answer the same way again, which is why it stops the loop with rounds
-    // to spare and nothing to disclose; and `usable` is false here, which is the state the
-    // loop otherwise treats as a retryable non-answer. A truncation is neither: it is the
-    // one outcome that says this document cannot be corrected at this length at all.
+    // Read before `body` is taken from the round, and before the two exits below, because both
+    // of those would read this round as something it is not. A round that came back with
+    // nothing leaves `body === before`, as a converged round does — but a converged round is
+    // one the editor ANSWERED and would answer the same way again, which is why it stops the
+    // loop with rounds to spare and nothing to disclose; and `usable` is false here, which is
+    // the state the loop otherwise treats as a retryable non-answer. A truncation is neither:
+    // it is the one outcome that says this document cannot be corrected at this length at all.
+    const lastRound = round.truncated;
     if (round.truncated) {
+      // The ceiling was hit, whatever was rescued afterwards. This is what the store counts
+      // and what the document discloses, because the remedy is the deployment's either way:
+      // `providers.<name>.max_tokens` is too low for the documents it accepts, or `max_pages`
+      // is too high for that ceiling.
       editorTruncated = true;
-      // The round still counts. It was made and paid for — a full ceiling of output at
-      // that — so `iterationsCompleted` reporting it is the honest arithmetic, and the
-      // `editor_truncated` line beside it is what says the round changed nothing.
-      break;
+      editorSections = round.sections;
+      // Nothing came back from the section calls either — or there were none to make — so the
+      // round ends where it used to: the body that entered it is delivered with that round's
+      // issues unresolved. It still counts as a round; it was made and paid for, a full
+      // ceiling of output at that, so `iterationsCompleted` reporting it is the honest
+      // arithmetic and the `editor_truncated` line beside it is what says it changed nothing.
+      if (!round.usable) break;
     }
     body = round.body;
-    ctx.log.event("editor", { iteration: iterations, changed: body !== before });
+    // `sections` on this line is how a run log tells a round that was answered whole from one
+    // answered piece by piece — and `corrected` from `of` says how much of the document the
+    // second kind actually reached, since a section that truncated in its turn kept its
+    // original text.
+    ctx.log.event("editor", {
+      iteration: iterations,
+      changed: body !== before,
+      ...(round.sections ? { sections: round.sections.of, corrected: round.sections.corrected } : {}),
+    });
 
     // A round that changed nothing has said what the next one would say.
     //
@@ -781,7 +1072,14 @@ export async function runReview(
     // decide differently. `review_converged` is logged for exactly that reason — how
     // often this fires, and on which issues, is measurable from a run log, so the policy
     // can be revisited from evidence rather than from either of our guesses.
-    if (round.usable && body === before) {
+    //
+    // And not for a round that was answered section by section, even when every section came
+    // back as it went in. `review_converged` claims the editor read the whole document and
+    // decided it was better left alone, with rounds to spare — here it was never shown the
+    // whole document, and there are no rounds to spare because the next one would truncate
+    // before any section call was made. Those are different facts and the log must not
+    // conflate them; `editor_truncated` beside `editor` is what this round has to say.
+    if (round.usable && body === before && !lastRound) {
       ctx.log.event("review_converged", {
         iteration: iterations,
         issues: issues.length,
@@ -792,7 +1090,10 @@ export async function runReview(
     // Skipped when nothing changed, because every one of these answers a question about
     // a difference: the lint of an unedited body is the lint already in hand, and a link
     // or marker diff against an identical string is empty by construction.
-    if (body === before) continue;
+    if (body === before) {
+      if (lastRound) break;
+      continue;
+    }
 
     lint = await runAxe(wrapDocument(body));
     // The re-lint is the gate on the document that actually ships — the `assembly` event
@@ -826,6 +1127,13 @@ export async function runReview(
         after: now,
       });
     }
+    // Last, so a round that was answered a section at a time is measured like any other — its
+    // lint, its dropped links, its markers — before the loop ends on it. Those checks are
+    // about the difference between two bodies and this round made one; ending the loop above
+    // them would deliver a corrected document with none of them recorded, which is precisely
+    // the disclosure the section calls make more likely (each one sees less of the document
+    // than a whole-body round does).
+    if (lastRound) break;
   }
 
   // Issues remain and the loop has stopped — at the cap, on a round that changed nothing,
@@ -833,6 +1141,14 @@ export async function runReview(
   // a comment, with the source page reference the Reader attributed (§7.8) so a human can
   // find them; the third also states itself in the document, because "the editor tried and
   // could not fix these" and "no editor pass ever worked on these" are different facts.
+  //
+  // On the third, these are the issues the Reader raised BEFORE the section calls ran, and
+  // some of them may since have been fixed — nothing re-read the document, because the round
+  // that would have done so is the one that could not be made. Over-reporting is the
+  // conservative direction and the same one the converged break takes: the list says what is
+  // known to have been found, the `@editor-truncated` comment says it was not re-checked, and
+  // an issue reported as unresolved that was quietly fixed costs a reader a second look, while
+  // the reverse costs them the belief that the document was finished.
   const unresolvedLines = lastIssues.map(
     (i) => `${i.issue} (severity: ${i.severity}${i.pages?.length ? `, page ${i.pages.join(", ")}` : ""})`,
   );
@@ -841,6 +1157,7 @@ export async function runReview(
       unresolved: unresolvedLines,
       failedPages,
       editorTruncated,
+      editorSections,
       lintUnavailable: lint.error,
     }),
     body,
