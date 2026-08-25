@@ -183,7 +183,7 @@ jobs:
               ;;
           esac
 
-          if ! jq -e '.documents? != null and .documents_linted? != null and .rules? != null' /tmp/quality.json >/dev/null 2>&1; then
+          if ! jq -e '.documents? != null and .documents_linted? != null and .window_days? != null and .rules? != null' /tmp/quality.json >/dev/null 2>&1; then
             # A 200 that is not the tally: a login page, a proxy error page, an older
             # deployment. Treated like an unreachable endpoint rather than parsed
             # optimistically, because every threshold below reads a missing field as
@@ -194,8 +194,10 @@ jobs:
             # interpolated into the issue bodies below, and a deployment older than #164
             # answers this endpoint without it. That case is not a silent miss but a
             # public issue reading "1 of null documents that were linted at all", so a
-            # field an issue body quotes has to be a field this gate demands. Whoever
-            # adds the next such field should add it here too.
+            # field an issue body quotes has to be a field this gate demands — which is
+            # why `window_days` is listed too, though every version of the endpoint has
+            # returned it: every one of those bodies opens with it. Whoever adds the next
+            # quoted field should add it here in the same commit.
             echo "should_run=false" >> "$GITHUB_OUTPUT"
             echo "::error::$BASE/v1/quality returned 200 but not a quality tally. Nothing was measured this week."
             exit 1
@@ -498,7 +500,7 @@ jobs:
               # comparison behind it was correct.
               | def pct: (. * 1000 | round) / 10;
               (if .rule then
-                  "Over the last \($tally.window_days) days, **\(.rule_documents) of \($tally.documents_linted) documents that were linted at all** (\(.value | pct)%) came out of Iris still violating the axe-core rule `\(.rule)` — \(.nodes) offending element(s) in total. Impact: **\(.impact)**.\n\nThe threshold is \(.threshold | pct)% of documents.\n\nA rule that fails on this share of documents is a property of how Iris writes HTML, not of the documents people upload. The likely places to look:\n\n- `agents/page.md` and the specialist agents in `agents/` — these files *are* the prompts, so a rule Iris keeps breaking usually means the prompt never told it not to.\n- `agents/copy_editor.md` and `agents/reader.md` — the review loop is meant to catch exactly this and evidently is not; worth asking whether the reader reports it and the editor fails to fix it, or the reader never mentions it at all.\n- `src/pipeline/lint.ts` for what the rule actually checks.\n\nRule reference: <https://dequeuniversity.com/rules/axe/4.10/\(.rule)>"
+                  "Over the last \($tally.window_days) days, **\(.rule_documents) of \($tally.documents_linted) documents that were linted at all** (\(.value | pct)%) came out of Iris still violating the axe-core rule `\(.rule)` — \(.nodes) offending element(s) in total. Impact: **\(.impact)**.\n\nThe threshold is \(.threshold | pct)% of the documents that were linted — the same denominator as the share above, which counts only the documents axe-core could examine.\n\nA rule that fails on this share of documents is a property of how Iris writes HTML, not of the documents people upload. The likely places to look:\n\n- `agents/page.md` and the specialist agents in `agents/` — these files *are* the prompts, so a rule Iris keeps breaking usually means the prompt never told it not to.\n- `agents/copy_editor.md` and `agents/reader.md` — the review loop is meant to catch exactly this and evidently is not; worth asking whether the reader reports it and the editor fails to fix it, or the reader never mentions it at all.\n- `src/pipeline/lint.ts` for what the rule actually checks.\n\nRule reference: <https://dequeuniversity.com/rules/axe/4.10/\(.rule)>"
                 else
                   {
                     "lint-error": "Over the last \($tally.window_days) days, **\(.value | pct)% of \($tally.documents) documents** had a lint pass that errored instead of running.\n\nThe threshold is \(.threshold | pct)% — that is, any occurrence at all.\n\nThis one sorts to the top because those documents have **no accessibility verdict at all**: axe-core could not run on them, so nothing in them was checked, the review loop had no violations to act on, and they were delivered with an `@lint-unavailable` comment saying so. They are excluded from `documents_linted` (\($tally.documents_linted) of \($tally.documents) here), so the rule shares in this report are not dragged down by them — but the unchecked documents were still shipped, and how bad they were is unknown.\n\nStart with `src/pipeline/lint.ts` and the `iris:lint-error` signal recorded in `src/pipeline/orchestrator.ts`; the run log for an affected session carries the error, its stack and where it happened, on the `assembly` line or on a `lint_unavailable` line if a correction round is what broke it.",

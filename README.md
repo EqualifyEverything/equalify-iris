@@ -1188,7 +1188,11 @@ noise wearing a percentage sign); an issue for that threshold **already open** â
 and carry no numbers, so this week's rate cannot make a new title; an issue for it **closed within
 30 days**, because on the day a fix merges the 30-day rate still contains a month of pre-fix
 documents; and a cap of **two issues per run**, with anything over it named in the run summary
-rather than dropped quietly.
+rather than dropped quietly. A fifth condition silences the **rule table alone** rather than the
+whole run: rule shares divide by `documents_linted`, so fewer than 20 documents the linter could
+actually examine leaves that table unevaluated even when 20 were delivered â€” one lint error in a
+20-document window is enough. The run summary says so when it happens, since "no rule crossed its
+threshold" must not stand for "no rule was measured".
 
 The thresholds live in the workflow rather than on the server, so retuning "how bad is too bad" is a
 one-line PR with a reviewer. That has a deliberate consequence: `.github/workflows/**` is on the
