@@ -562,6 +562,19 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   as a subsequence, since counts cannot see a move, equality would refuse every page where the
   parser legitimately adds a tag, and a tag-only sequence misses bare prose being hoisted out of a
   table with every tag left in place.
+- **The document's root `lang` follows the pages, and only where they agree.** `<html lang>` is
+  the default human language of the delivered document (WCAG 3.1.1) and a screen reader picks its
+  voice from it, so the hardcoded `en` it used to carry was a wrong statement on a Korean scan
+  rather than a missing one — and an invisible one, since `html-has-lang` and `html-lang-valid`
+  are both satisfied by a confident `en`. `documentLang` (assembly.ts) declares another language
+  only where **every** top-level element of the assembled body carries the same valid BCP 47
+  `lang`, which is the shape the page prompt asks for on a page wholly in another language; the
+  boilerplate `<title>` then carries `lang="en"` of its own. Where the pages disagree, where any
+  of them is silent, or where bare text sits at the top level, `en` stays: a multilingual document
+  has no single primary language to declare, and a page that reported nothing must not have a
+  language inferred from the pages that did. The value is therefore only as good as the fragments,
+  which is why the prompt half and this half are separate — the root follows the content and never
+  runs ahead of it. Logged as `lang` on the `assembly` event when it moves.
 - **Copy Editor image payload (§7.9).** When every issue in a round is attributed to a page, the
   editor gets only those pages' images (logged per round as `editor_images`). Attaching every
   page's image on every round is the dominant per-round cost of the review loop — on a 25-page

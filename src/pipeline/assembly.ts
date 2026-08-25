@@ -1,3 +1,4 @@
+import { JSDOM, VirtualConsole } from "jsdom";
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { namespaceAnchors, type AnchorReport } from "./anchors.ts";
 import type { Fragment } from "./fragment.ts";
@@ -31,6 +32,86 @@ export function assembleBodyWithReport(fragments: Fragment[]): { body: string; a
   const ordered = [...fragments].sort((a, b) => a.order - b.order);
   const { pages, report } = namespaceAnchors(ordered.map((f) => ({ order: f.order, innerHtml: f.innerHtml.trim() })));
   return { body: pages.filter((h) => h.length > 0).join("\n\n"), anchors: report };
+}
+
+// The language the shell itself is written in, and the value every delivered document
+// declared before this file could derive one. It stays as the fallback rather than being
+// dropped when nothing can be derived, because it is also the truth about the shell's own
+// strings — the `<title>` and the marker prose below are English whatever the pages are.
+const SHELL_LANG = "en";
+
+// A conservative BCP 47 shape: a 2- or 3-letter primary subtag and up to three subtags
+// after it (`ko`, `es-419`, `zh-Hant-TW`). Two jobs, and the narrow one matters most: this
+// value is read out of model-written markup and interpolated into an attribute in a string
+// template, so a value that could carry a quote out of that attribute must never reach it.
+// The other is the gate — `html-lang-valid` fails a root `lang` that is not a real tag, and
+// a fragment that wrote `lang="korean"` would otherwise hoist its mistake into the shell,
+// where no review round can reach it to fix it. Being too strict costs only the fallback to
+// `en`, which is the behaviour this replaces, so the trade runs one way.
+const LANG_TAG = /^[a-z]{2,3}(-[a-z0-9]{2,8}){0,3}$/i;
+
+// The default human language of the assembled document, for `<html lang>` (WCAG 3.1.1,
+// Language of Page). A screen reader picks its voice from that attribute, so `en` on a
+// Korean document is a wrong statement rather than a missing one.
+//
+// Derived, never guessed: the value is `SHELL_LANG` unless EVERY top-level element of the
+// body carries the same `lang`, which is the one arrangement that means "the whole of this
+// document is in that language". `agents/page.md` asks the page agent for exactly that
+// shape on a page wholly in another language ("put lang on every top-level element you emit
+// for it"), so a document assembled from such pages arrives here already saying so on each
+// of its pages — and assembly is the first moment anything can see that they all agree.
+//
+// Three cases keep `SHELL_LANG`, and none of them is a failure:
+//   - the elements disagree — a multilingual document has no single primary language to
+//     declare, and picking one of them is a worse statement than declaring the shell's own;
+//   - one of them says nothing — that page did not report its language, and a language must
+//     not be invented for it from the pages that did;
+//   - bare text sits at the top level — text with no element on it to carry `lang` is text
+//     this cannot account for either way.
+// The value is therefore only ever as good as the fragments, which is why the prompt half of
+// this (#121, in agents/page.md) and this half are separate: the root follows the content and
+// never runs ahead of it.
+//
+// axe cannot check any of this and never could: `html-has-lang` and `html-lang-valid` are
+// both satisfied by a confidently wrong `lang="en"`, which is how the wrong declaration
+// shipped on every document for as long as it did.
+export function documentLang(body: string): string {
+  // Answered without parsing when the answer cannot be anything else: no `lang` anywhere in
+  // the body means no top-level element carries one. That is the ordinary document, and
+  // `wrapDocument` runs on the whole body once per review round, so this parse is worth not
+  // doing. A `lang=` in prose or in a comment defeats the shortcut and costs one parse that
+  // then reaches the same answer on its own.
+  if (!/\slang\s*=/i.test(body)) return SHELL_LANG;
+
+  let doc;
+  try {
+    doc = new JSDOM(`<body>${body}</body>`, { virtualConsole: new VirtualConsole() }).window.document;
+  } catch {
+    // A body that cannot be parsed is a body whose language cannot be read off it, and
+    // assembly is not the phase to fail in over the document's voice: keep the declaration
+    // this replaces. `anchors.ts` reaches the same conclusion about the same parse.
+    return SHELL_LANG;
+  }
+
+  for (const child of doc.body.childNodes) {
+    // Whitespace between joined pages is not content; neither is a comment a fragment
+    // brought with it. Anything else at the top level with words in it is.
+    if (child.nodeType === child.TEXT_NODE && (child.textContent ?? "").trim()) return SHELL_LANG;
+  }
+
+  let tag = "";
+  for (const el of doc.body.children) {
+    const declared = (el.getAttribute("lang") ?? "").trim();
+    if (!declared || !LANG_TAG.test(declared)) return SHELL_LANG;
+    // BCP 47 tags are case-insensitive, so `ko` and `KO` are the same declaration and the
+    // pages do agree. What is being established here is which language they name, not how
+    // they capitalized it, so the first spelling is the one delivered.
+    if (tag && declared.toLowerCase() !== tag.toLowerCase()) return SHELL_LANG;
+    tag ||= declared;
+  }
+  // An empty body — every page failed, or every fragment was blank — has nothing to derive
+  // from, and the loop above never ran.
+  return tag || SHELL_LANG;
 }
 
 // Wrap body content in a minimal accessible document shell. If issues remain when the
@@ -117,11 +198,17 @@ export function wrapDocument(
       `  usual. See the run log (assembly / lint_unavailable) for the failure.\n` +
       `  ${opts.lintUnavailable.slice(0, 300).replace(/\s+/g, " ").replace(/--+>?/g, "—")}\n-->`
     : "";
+  // The root declaration follows the content (see `documentLang`), and the one visible
+  // English string in the shell is then labelled as English so a screen reader does not
+  // announce "Accessible document" in the document's voice. The `<title>` attribute is
+  // omitted when the document is English, where it would only repeat the root.
+  const lang = documentLang(body);
+  const titleLang = lang.toLowerCase() === SHELL_LANG ? "" : ` lang="${SHELL_LANG}"`;
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${lang}">
 <head>
   <meta charset="utf-8">
-  <title>Accessible document</title>
+  <title${titleLang}>Accessible document</title>
 </head>
 <body>
 <main>
@@ -139,6 +226,7 @@ export async function runAssembly(
 ): Promise<AssemblyResult> {
   const { body, anchors } = assembleBodyWithReport(fragments);
   const html = wrapDocument(body, opts);
+  const lang = documentLang(body);
   const lint = await runAxe(html);
   // `lint_error` is logged because a gate that could not run has to be distinguishable
   // from one that found nothing — and for a while this line was the only thing that made
@@ -166,6 +254,14 @@ export async function runAssembly(
   // `fragments.json` is written before this phase runs.
   ctx.log.event("assembly", {
     pages: fragments.length,
+    // Logged only when the pages moved it off the shell's own language, so an ordinary run
+    // adds no field (same convention as `violations` below and `assembly_anchors` further
+    // down). It is worth a line when it does move: the derivation reads the fragments' own
+    // `lang` attributes, and if a document is delivered announcing itself as the wrong
+    // language this is the only place that says the pages asked for it. The second
+    // `documentLang` call `lang` costs is the shortcut's case for most documents — a body
+    // carrying no `lang` at all is not parsed again to answer it.
+    ...(lang === SHELL_LANG ? {} : { lang }),
     lint_ok: lint.ok,
     // Omitted, not zeroed, when the lint did not run: the count of violations in a check
     // that did not happen is unknown. `violations: 0` here was the specific value #164 was

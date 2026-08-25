@@ -635,10 +635,12 @@ test("the page agent's multilingual rule keeps parity, lang, and the refusal to 
     ["lang goes on the element that holds the change, with a BCP 47 tag",
       /Mark each change of language with lang on the element that holds it — <section lang="ko">, or lang="es" on the single <td> that switches — using the BCP 47 tag/],
     // And the case #121 actually reported: a page wholly in one language, which contains no
-    // CHANGE of language, so a rule keyed on changes never fires for it. `wrapDocument`
-    // (src/pipeline/assembly.ts) declares lang="en" on the shell and nothing derives it from
-    // the content, so without this clause that page ships as English text — the one output
-    // where the attribute is the whole of what the reader needed.
+    // CHANGE of language, so a rule keyed on changes never fires for it. Without this clause
+    // that page ships as English text — the one output where the attribute is the whole of
+    // what the reader needed. It is also what the shell's root declaration is derived from
+    // (#163): `documentLang` (src/pipeline/assembly.ts) reads the lang the pages put on their
+    // top-level elements and can only declare a language every one of them named, so this
+    // clause is the input to that and not merely advice to the agent.
     ["a page wholly in another language carries lang on what it emits, change or no change",
       /A page wholly in one language changes language nowhere, and is the case that needs the attribute most: put lang on every top-level element you emit for it/],
     ["and the reason: the document declares English around the fragment",
