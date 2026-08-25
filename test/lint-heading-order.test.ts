@@ -18,12 +18,12 @@ import assert from "node:assert/strict";
 import { runAxe } from "../src/pipeline/lint.ts";
 import { wrapDocument } from "../src/pipeline/assembly.ts";
 
-// The rule ids this document violates. `runAxe` degrades to `ok: true, violations: []`
-// with `error` set when axe cannot run at all, which is not a clean document — the
-// callers in this repo return early on it and so does this helper, via a null result.
+// The rule ids this document violates, or null when there is no verdict to report: a lint
+// that could not run at all returns no `violations` (#164), which is not a clean document
+// and not a dirty one either, and the callers in this repo return early on it.
 async function rules(body: string): Promise<string[] | null> {
   const lint = await runAxe(wrapDocument(body));
-  if (lint.error) return null; // axe could not run here; see runAxe's degradation path
+  if (!lint.violations) return null; // axe could not run here; see runAxe
   assert.equal(lint.ok, lint.violations.length === 0, "lint.ok disagrees with its own violation list");
   return lint.violations.map((v) => v.id);
 }

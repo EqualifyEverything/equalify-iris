@@ -110,7 +110,7 @@ test("a form split across a page break is still axe-clean", async () => {
     frag(2, `<input id="q1" type="text"><p>rest</p>`),
   ]);
   const lint = await runAxe(wrapDocument(body));
-  if (lint.error) return; // axe could not run here; runAxe degrades to a parse check
+  if (!lint.violations) return; // no verdict: axe could not run here (see LintResult)
   assert.equal(
     lint.violations.map((v) => v.id).join(", "),
     "",
@@ -277,7 +277,7 @@ test("a third page claiming an id does not cost a label its field", async () => 
   assert.match(body, /<label for="p2-q1">Your name<\/label>/, "the orphaned label was not repointed");
   assert.match(body, /<label for="p3-q1">Your name<\/label><input id="p3-q1"/, "page 3's own pair was broken");
   const lint = await runAxe(wrapDocument(body));
-  if (lint.error) return;
+  if (!lint.violations) return; // no verdict: axe could not run here (see LintResult)
   assert.equal(
     lint.violations.map((v) => v.id).join(", "),
     "",
@@ -311,10 +311,11 @@ test("runAssembly logs what the join did, and only when it did something", async
 });
 
 test("a lint gate that could not run says so in the log", async () => {
-  // `lint_ok: true` means two different things, and the log used to collapse them.
-  // `runAxe` degrades to `ok: true, violations: []` with `error` set when axe cannot run
-  // rather than failing the session — so a document axe never examined was recorded exactly
-  // like one it cleared.
+  // `lint_ok: true` used to mean two different things, and the log collapsed them: when axe
+  // could not run, `runAxe` reported `ok: true, violations: []` with `error` set rather than
+  // failing the session, so a document axe never examined was recorded exactly like one it
+  // cleared. The pair is no longer produced at all (#164, asserted at the end of this test),
+  // and this line is what made the collapse visible while it was.
   //
   // Reachable on the route this module creates: a page too deeply nested to rewrite is
   // delivered as written, its nesting reaches the linted document, and axe overflows on it
@@ -344,9 +345,15 @@ test("a lint gate that could not run says so in the log", async () => {
     return;
   }
   assert.equal(logged.data.lint_error, lint.error, "the gate could not run and the log did not say so");
-  // The pairing that made this worth fixing: reported clean, and only the error explains why.
-  assert.equal(logged.data.lint_ok, true);
-  assert.equal(logged.data.violations, 0);
+  // And the pairing that made this worth fixing, now the other way round: a gate that did
+  // not run is not a gate that passed, and it reports no violation count at all — a `0` here
+  // was read as "axe found nothing" by everything downstream, including the tally that
+  // divides by it.
+  assert.equal(logged.data.lint_ok, false, "a lint that threw is still logged as a pass");
+  assert.ok(
+    !("violations" in logged.data),
+    `a check that did not happen reported a violation count: ${JSON.stringify(logged.data.violations)}`,
+  );
 });
 
 test("a page that would lose markup on reserialization is left as the agent wrote it", () => {
@@ -384,7 +391,7 @@ test("the prefix cannot land on an id a page already claims", async () => {
   // The pre-existing pair is what it was, and still points at its own field.
   assert.match(body, /<label for="p1-x">Field<\/label><input id="p1-x">/, "an id the page wrote itself was disturbed");
   const lint = await runAxe(wrapDocument(body));
-  if (lint.error) return;
+  if (!lint.violations) return; // no verdict: axe could not run here (see LintResult)
   assert.equal(
     lint.violations.map((v) => v.id).join(", "),
     "",
@@ -722,7 +729,7 @@ test("no reference a page can write escapes the pre-parse sniff", async () => {
     "a page holding only references was not visited",
   );
   const lint = await runAxe(wrapDocument(body));
-  if (lint.error) return;
+  if (!lint.violations) return; // no verdict: axe could not run here (see LintResult)
   // `td-headers-attr` is excluded, and only it: axe requires a `headers` token to name a
   // cell in the SAME table, so a `headers` reference spanning a page break violates that
   // rule whatever assembly does — verified by running the same fixture through a plain
@@ -863,7 +870,7 @@ test("a REFERRING page left as written keeps its first owner bare, so its idref 
   // And the field really is named, which is the accessibility claim rather than a proxy
   // for it — axe's `label` rule is what fires when this regresses.
   const lint = await runAxe(wrapDocument(body));
-  if (lint.error) return;
+  if (!lint.violations) return; // no verdict: axe could not run here (see LintResult)
   assert.deepEqual(
     lint.violations.filter((v) => v.id === "label").map((v) => v.id),
     [],
@@ -922,7 +929,7 @@ test("nothing is pinned when an OWNER of the id was itself skipped", async () =>
   // id ARIA-referenced, so the live rule lint.ts promotes out of `incomplete` is the one
   // that fired when this regressed.
   const lint = await runAxe(wrapDocument(body));
-  if (lint.error) return;
+  if (!lint.violations) return; // no verdict: axe could not run here (see LintResult)
   assert.deepEqual(
     lint.violations.filter((v) => v.id.startsWith("duplicate-id")).map((v) => v.id),
     [],
@@ -1422,7 +1429,7 @@ test("no content is lost on a page the rewrite actually touches", () => {
 test("axe reports a duplicate id, which the WCAG tag filter alone does not", async () => {
   const colliding = `${footnotePage(1)}\n\n${footnotePage(1)}`;
   const lint = await runAxe(wrapDocument(colliding));
-  if (lint.error) return;
+  if (!lint.violations) return; // no verdict: axe could not run here (see LintResult)
   assert.equal(lint.ok, false, 'a document with two id="fn-1" passed the lint gate');
   assert.ok(
     lint.violations.some((v) => v.id.startsWith("duplicate-id")),
@@ -1436,7 +1443,7 @@ test("axe reports a duplicate id, which the WCAG tag filter alone does not", asy
 // gate; they are separate tests so a regression names which third came back.
 test("the duplicate-id backstop covers a static element", async () => {
   const lint = await runAxe(wrapDocument(`<ul><li id="y">1</li><li id="y">2</li></ul>`));
-  if (lint.error) return;
+  if (!lint.violations) return; // no verdict: axe could not run here (see LintResult)
   assert.deepEqual(lint.violations.map((v) => v.id), ["duplicate-id"]);
 });
 
@@ -1445,7 +1452,7 @@ test("the duplicate-id backstop covers a focusable element", async () => {
   // fall to `duplicate-id-active` — obsolete-tagged, therefore excluded by the WCAG tag
   // filter and enabled by name.
   const lint = await runAxe(wrapDocument(`<p><a id="x" href="/a">a</a><a id="x" href="/b">b</a></p>`));
-  if (lint.error) return;
+  if (!lint.violations) return; // no verdict: axe could not run here (see LintResult)
   assert.deepEqual(lint.violations.map((v) => v.id), ["duplicate-id-active"]);
 });
 
@@ -1458,7 +1465,7 @@ test("the duplicate-id backstop covers a referenced element, which axe reports a
   // under one `<label for="q1">` is exactly the shape assembly can produce, and exactly
   // what makes a control announce the wrong name.
   const lint = await runAxe(wrapDocument(`<form><label for="q1">A</label><input id="q1"><input id="q1"></form>`));
-  if (lint.error) return;
+  if (!lint.violations) return; // no verdict: axe could not run here (see LintResult)
   assert.deepEqual(lint.violations.map((v) => v.id), ["duplicate-id-aria"]);
 });
 
@@ -1470,7 +1477,7 @@ test("promoting duplicate-id-aria does not drag the rest of incomplete in with i
   // the filter to all of `incomplete` shows up here as a failure. A document without an
   // ambiguous id must stay clean.
   const lint = await runAxe(wrapDocument(`<iframe title="Chart" src="a"></iframe><iframe title="Chart" src="b"></iframe>`));
-  if (lint.error) return;
+  if (!lint.violations) return; // no verdict: axe could not run here (see LintResult)
   assert.equal(lint.violations.map((v) => v.id).join(", "), "", "an incomplete result other than duplicate-id-aria was promoted");
   assert.equal(lint.ok, true);
 });
@@ -1480,7 +1487,7 @@ test("the assembled document passes the gate that the colliding one fails", asyn
   // gate that fails everything, and the fix would be indistinguishable from a
   // permanently red lint.
   const lint = await runAxe(wrapDocument(assembleBody([frag(1, footnotePage(1)), frag(2, footnotePage(1))])));
-  if (lint.error) return;
+  if (!lint.violations) return; // no verdict: axe could not run here (see LintResult)
   // Compared as a joined string, not with deepEqual: `runAxe` builds this array with
   // the jsdom realm's `Array.prototype.map`, so it fails deepStrictEqual's prototype
   // check against a literal `[]` even when both are empty.

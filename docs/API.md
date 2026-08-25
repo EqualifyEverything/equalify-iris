@@ -137,7 +137,8 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   "mean_rounds": 1.8,
   "unresolved_rate": 0.07,
   "links_dropped_rate": 0.02,
-  "lint_error_rate": 0,
+  "lint_error_rate": 0.01,
+  "documents_linted": 210,
   "editor_truncated_rate": 0.01,
   "rules": [
     { "id": "heading-order", "impact": "moderate", "documents": 81, "share": 0.382, "nodes": 240 }
@@ -146,7 +147,8 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
 ```
 
 * `documents` — delivered documents in the window, **including flawless ones**. This is the
-  denominator for every rate below, and it is the whole reason the tally is stored the way it is: a
+  denominator for every `_rate` below (the rule table divides by `documents_linted` instead, for the
+  reason given there), and it is the whole reason the tally is stored the way it is: a
   clean run produces no violation rows, so counting "documents that had a problem" would divide by
   the bad documents alone and report every rate near 100%.
 * `mean_rounds` — mean **editor** passes per document, against `defaults.max_review_iterations`. The
@@ -184,12 +186,22 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
 * `links_dropped_rate` — share of documents where an `href` present before the copy editor was
   missing after it.
 * `lint_error_rate` — share of documents whose lint pass **errored** instead of running. Recorded
-  explicitly rather than inferred, because `runAxe` degrades to "no violations" when axe cannot run
-  at all, so a broken linter would otherwise read as a deployment that got better. The `assembly`
-  line in that run's log carries `lint_error` with `lint_error_where` (`parse`, `inject` or `run`),
+  explicitly rather than inferred, because a linter that cannot run has no violations to report and
+  a broken one would otherwise read as a deployment that got better. Those documents are delivered
+  with **no accessibility verdict at all**: the run's log line carries `lint_ok: false` and *no*
+  `violations` figure (the count in a check that did not happen is unknown, not zero), and the
+  delivered document carries an `@lint-unavailable` comment saying so to whoever opens it. The
+  `assembly` line — and `lint_unavailable`, if a later correction round's re-lint is the one that
+  failed — carries `lint_error` with `lint_error_where` (`parse`, `inject` or `run`),
   `lint_error_name` and the first frames of `lint_error_stack`, which is what makes one occurrence
   chaseable; `axe-core` and `jsdom` are pinned to exact versions so the linter's behaviour changes
   only when someone changes it.
+* `documents_linted` — how many of `documents` the linter actually examined, i.e. `documents` minus
+  the `lint_error_rate` ones. This is the denominator for `rules[].share`, and it is published
+  because otherwise that share cannot be read: an unexamined document looks exactly like one where
+  the rule did not fire, so a spell of failing lints would make every rule appear to be getting
+  fixed. When it is well below `documents`, the rule table is a measurement of a subset — fix that
+  before reading the rules.
 * `editor_truncated_rate` — share of documents where a correction round's **response** hit the
   model's output-token ceiling. The editor is asked for the whole document, so its output length
   follows the length of the document rather than the number of issues in it: at a large
@@ -202,7 +214,7 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   `providers.<name>.max_tokens` is too low for the pages allowed per session, or `max_pages` is
   too high for it.
 * `rules[]` — axe-core rule ids, **per document**: `documents` is how many documents violated the
-  rule and `share` is that over `documents` above, with `nodes` (total offending elements) alongside
+  rule and `share` is that over `documents_linted`, with `nodes` (total offending elements) alongside
   rather than folded in. One pathological scan with 400 bad headings is a worse `nodes` and the same
   `documents` as any other single failure — "fails on 40% of documents" names a prompt defect,
   while "is 90% of our violations" moves when an unrelated rule is fixed.

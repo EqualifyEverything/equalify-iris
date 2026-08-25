@@ -250,7 +250,7 @@ function ownedIds(document: Document): Set<string> {
 //
 // With one qualification worth stating where the number is chosen, because it is the one
 // place the trade is weaker than it sounds: axe overflows on a deep document too, from a few
-// thousand levels, and `runAxe` degrades to `ok: true` with an `error` rather than failing the
+// thousand levels, and `runAxe` returns no verdict with an `error` set rather than failing the
 // session. So past that depth the duplicate id ships with no lint finding naming it. That is
 // not a reason to fail the run over nesting — a delivered document with a duplicate id beats
 // no document — but it does mean the fallback reporter is silent exactly where this guard is

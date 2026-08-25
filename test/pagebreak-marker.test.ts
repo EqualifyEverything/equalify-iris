@@ -36,13 +36,13 @@ import axe from "axe-core";
 import { runAxe } from "../src/pipeline/lint.ts";
 import { wrapDocument } from "../src/pipeline/assembly.ts";
 
-// The rule ids the document violates, with their impact. `runAxe` degrades to
-// `ok: true, violations: []` with `error` set when axe cannot run at all, which is not a
-// clean document — so that case returns null and the test declines to conclude anything,
-// the same way test/lint-heading-order.test.ts does.
+// The rule ids the document violates, with their impact. A lint that could not run at all
+// reports no `violations` (#164), which is not a clean document — so that case returns null
+// and the test declines to conclude anything, the same way test/lint-heading-order.test.ts
+// does.
 async function rules(body: string): Promise<string[] | null> {
   const lint = await runAxe(wrapDocument(`<h1 id="doc-title">Operator's manual</h1>\n<p>Before use.</p>\n${body}`));
-  if (lint.error) return null;
+  if (!lint.violations) return null;
   assert.equal(lint.ok, lint.violations.length === 0, "lint.ok disagrees with its own violation list");
   return lint.violations.map((v) => `${v.id}[${v.impact}]`);
 }

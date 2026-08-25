@@ -272,7 +272,7 @@ export async function runPipeline(args: {
         { code: SIGNAL_ROUNDS, count: review.iterationsCompleted },
         ...(review.unresolved.length ? [{ code: SIGNAL_UNRESOLVED, count: review.unresolved.length }] : []),
         ...(review.droppedLinks ? [{ code: SIGNAL_LINKS_DROPPED, count: review.droppedLinks }] : []),
-        // A linter that could not run reports zero violations, which is why its
+        // A linter that could not run has no violations to report, which is why its
         // failure is recorded as a signal rather than inferred from an empty list.
         ...(review.lint.error ? [{ code: SIGNAL_LINT_ERROR, count: 1 }] : []),
         // A round that was paid for in full and delivered nothing. Counted per document,
@@ -280,8 +280,10 @@ export async function runPipeline(args: {
         // be the same length as the one that did not fit.
         ...(review.editorTruncated ? [{ code: SIGNAL_EDITOR_TRUNCATED, count: 1 }] : []),
         // The final lint, i.e. what survived the whole review loop. `nodes` is the
-        // offending-element count, kept apart from the per-document tally.
-        ...review.lint.violations.map((v) => ({ code: v.id, impact: v.impact, count: v.nodes })),
+        // offending-element count, kept apart from the per-document tally. Empty when the
+        // lint could not run — and that document is NOT in any rule's numerator, which is
+        // what `documents_linted` exists to divide by (see QualityStats).
+        ...(review.lint.violations ?? []).map((v) => ({ code: v.id, impact: v.impact, count: v.nodes })),
       ]);
     } catch (e) {
       log.event("run_signals_failed", { error: e instanceof Error ? e.message : String(e) });

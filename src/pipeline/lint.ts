@@ -9,13 +9,29 @@ export interface LintViolation {
 }
 
 export interface LintResult {
+  // Whether the document PASSED the gate — which a document the gate never ran on did
+  // not. This used to be `true` on a lint that threw (an environment failure was a
+  // "degradation", and degrading meant reporting a pass), so #164's document shipped
+  // recorded as clean: `lint_ok: true, violations: 0` beside a `lint_error` is the same
+  // pair a flawless document produces, and every reader of it — the review loop, the
+  // quality tally, a human on the log line — was given the good news.
+  //
+  // The degradation itself is unchanged and still deliberate: a linter that cannot run
+  // must not cost a user the document it could not check. What changed is that saying so
+  // is no longer saying the opposite. Which kind of failure it was stays in `errorWhere`;
+  // nothing in the pipeline fails a run on this field.
   ok: boolean;
-  violations: LintViolation[];
+  // ABSENT when the lint did not run, rather than empty. The number of violations in a
+  // check that did not happen is unknown, not none, and an empty array is a claim: every
+  // caller that maps over it — the Reader's lint summary, the per-rule quality signals —
+  // produced "no violations found" from it. Optional so the type makes each of them say
+  // what it does with a lint that has no answer to give.
+  violations?: LintViolation[];
   error?: string;
   // What failed, when something did. `error` is the sentence a human and the Reader
   // Agent both read; these are for whoever has to fix it.
   //
-  // A gate that degrades to "no violations" is only honest if its failure can be
+  // A gate that returns no verdict is only honest if its failure can be
   // chased down, and the first report of this happening on a real document (#144)
   // could not be: the message was "Octal escape sequences are not allowed in strict
   // mode", a JavaScript SyntaxError, which is not the case the code documented as
@@ -81,10 +97,11 @@ function failure(where: "parse" | "inject" | "run", message: string, e: unknown)
   const raw = err?.stack?.split("\n").slice(0, STACK_FRAMES + 1).join("\n");
   const stack = raw === undefined ? undefined : trimStackPaths(raw);
   return {
-    // A document that would not parse is a failure; axe not running in this
-    // environment is a degradation. Unchanged by this: only the reporting is new.
-    ok: where !== "parse",
-    violations: [],
+    // No verdict, whichever step threw. The parse/environment distinction is worth
+    // keeping and is kept — in `errorWhere`, where it is a fact about which call threw
+    // rather than a value that has to double as the gate's answer. It lived in `ok`
+    // before, and the cost was that the environment case reported a pass (#164).
+    ok: false,
     error: message,
     errorWhere: where,
     ...(err?.name ? { errorName: err.name } : {}),
@@ -93,9 +110,21 @@ function failure(where: "parse" | "inject" | "run", message: string, e: unknown)
 }
 
 // PRD §7.7: validate the document parses and basic accessibility lint passes
-// (axe-core in headless mode). We run axe inside a jsdom realm. If axe cannot
-// run in this environment we degrade to a parse check rather than fail the run;
-// either way the result is surfaced to the Reader as input.
+// (axe-core in headless mode). We run axe inside a jsdom realm. If axe cannot run in this
+// environment the session continues rather than failing — but with no verdict rather than
+// with a passing one (`ok: false`, no `violations`; see LintResult), because a document
+// nothing checked is not a document nothing was wrong with. Either way the result is
+// surfaced to the Reader as input.
+//
+// One shape of that failure is a property of the DOCUMENT and reachable from ordinary
+// output — see test/lint-never-ran.test.ts, which builds it in five elements. jsdom's
+// selector engine compiles a selector into JavaScript source, and it splices an attribute
+// NAME into a string literal without converting the CSS escapes in it, so an attribute
+// whose name begins with a digit (`1x=""`, which the HTML parser accepts and which a page
+// of leaked JSON produces by the dozen) reaches V8 as `"\31 x"` — an octal escape, which
+// is a SyntaxError in strict mode, which the compiled selector is. That is the error #144
+// and #164 both saw, and it kills the whole run of the rule set: one such attribute
+// anywhere in a 25-page document and the gate has no answer for any of it.
 //
 // `axe-core` and `jsdom` are pinned to exact versions in package.json rather than
 // carried on a caret range, and this function is the reason. It is a GATE: what it

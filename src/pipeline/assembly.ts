@@ -52,9 +52,21 @@ export function assembleBodyWithReport(fragments: Fragment[]): { body: string; a
 // (issue #143). Without it, a document delivered this way is indistinguishable from one
 // whose issues the editor tried and failed to fix — and the difference is what a reader
 // of `@unresolved` needs, since these issues were never worked on at all.
+// `lintUnavailable` is the fourth statement of the same kind, and the one that is about
+// the CHECKING rather than about the content: axe-core could not run on this document, so
+// nothing here has been through the accessibility gate at all. It belongs in the document
+// for the same reason the others do — a document delivered this way is otherwise
+// indistinguishable from one the linter cleared, and the person who receives it is the one
+// who most needs to know which they have. It is the delivered half of #164: the log line
+// says it to an operator, this says it to whoever opens the file.
 export function wrapDocument(
   body: string,
-  opts: { unresolved?: string[]; failedPages?: number[]; editorTruncated?: boolean } = {},
+  opts: {
+    unresolved?: string[];
+    failedPages?: number[];
+    editorTruncated?: boolean;
+    lintUnavailable?: string;
+  } = {},
 ): string {
   const unresolved = opts.unresolved?.length
     ? `\n<!-- @unresolved\n${opts.unresolved.map((u) => `  - ${u.replace(/--+/g, "—")}`).join("\n")}\n-->`
@@ -73,6 +85,20 @@ export function wrapDocument(
       `  round; any issues listed below were not corrected. See the run log\n` +
       `  (editor_truncated) for the ceiling and the size of the response.\n-->`
     : "";
+  // The message is axe's own, and it is the only text here that comes from outside this
+  // function — `runAxe` builds it from an Error's `message`, so it can be long, can carry a
+  // newline, and would otherwise be able to close this comment early. Bounded like the
+  // extraction note, and `--` folded the way @unresolved folds it, taking any `>` with it so
+  // the fold reads as prose: a marker that says the gate did not run must not be a marker
+  // that breaks the document saying so.
+  const unlinted = opts.lintUnavailable
+    ? `\n<!-- @lint-unavailable\n` +
+      `  This document has NOT been checked for accessibility violations: axe-core could\n` +
+      `  not run on it, so the absence of reported violations here is not evidence that\n` +
+      `  there are none. Everything else in this document was produced and reviewed as\n` +
+      `  usual. See the run log (assembly / lint_unavailable) for the failure.\n` +
+      `  ${opts.lintUnavailable.slice(0, 300).replace(/\s+/g, " ").replace(/--+>?/g, "—")}\n-->`
+    : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -82,7 +108,7 @@ export function wrapDocument(
 <body>
 <main>
 ${body}
-</main>${failed}${truncated}${unresolved}
+</main>${failed}${truncated}${unlinted}${unresolved}
 </body>
 </html>
 `;
@@ -96,15 +122,21 @@ export async function runAssembly(
   const { body, anchors } = assembleBodyWithReport(fragments);
   const html = wrapDocument(body, opts);
   const lint = await runAxe(html);
-  // `lint_error` is logged because `lint_ok: true` means two different things. When axe
-  // cannot run, `runAxe` degrades to `ok: true, violations: []` with `error` set rather than
-  // failing the session — so without this field a document axe never examined is recorded
-  // exactly like one it cleared. That is reachable, not theoretical: `anchors.ts` delivers a
-  // page too deeply nested to rewrite, its nesting reaches the linted document, and axe
-  // overflows on it from a few thousand levels — precisely the document whose delivered-as-
-  // written page may still carry the duplicate ids the join could not fix, recorded as clean.
-  // Same disclosure argument as `pinned_ids` below: the reason a gate passed has to be
-  // distinguishable from the gate having found nothing.
+  // `lint_error` is logged because a gate that could not run has to be distinguishable
+  // from one that found nothing — and for a while this line was the only thing that made
+  // it so, because `runAxe` reported the environment failure as `ok: true, violations: []`
+  // and the two readings of `lint_ok: true` came apart here. They no longer do: a lint that
+  // threw is `lint_ok: false` with no `violations` figure at all (#164, see LintResult). The
+  // fields below are still logged, and are still the useful half — WHICH failure it was, on
+  // a line an operator reads without opening the document.
+  //
+  // The failure is reachable two ways, neither theoretical. `anchors.ts` delivers a page too
+  // deeply nested to rewrite, its nesting reaches the linted document, and axe overflows on
+  // it from a few thousand levels — precisely the document whose delivered-as-written page
+  // may still carry the duplicate ids the join could not fix. And a single attribute name
+  // that begins with a digit anywhere in the document makes jsdom's selector engine emit
+  // JavaScript it cannot compile (see runAxe), which is what #144 and #164 hit on real
+  // output. Same disclosure argument as `pinned_ids` below.
   //
   // The message alone turned out not to be enough. The first real occurrence (#144) read
   // "Octal escape sequences are not allowed in strict mode" — a JavaScript SyntaxError,
@@ -126,7 +158,13 @@ export async function runAssembly(
   ctx.log.event("assembly", {
     pages: fragments.length,
     lint_ok: lint.ok,
-    violations: lint.violations.length,
+    // Omitted, not zeroed, when the lint did not run: the count of violations in a check
+    // that did not happen is unknown. `violations: 0` here was the specific value #164 was
+    // filed about — read beside `lint_ok: true` it was a clean bill of health for a document
+    // axe had not looked at, and anything tallying these lines summed it as a real zero.
+    // Omission follows the convention the `lint_error*` fields above already use: a field
+    // that has nothing to say is absent, so a field that is present means something.
+    ...(lint.violations ? { violations: lint.violations.length } : {}),
     ...lintError,
   });
   // Logged only when the join actually had to do something, so the ordinary run adds

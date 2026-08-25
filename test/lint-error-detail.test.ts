@@ -1,7 +1,8 @@
-// `runAxe` degrades rather than fails: when axe cannot run it returns `ok: true,
-// violations: []` with `error` set, so a document the gate never examined ships. That
-// trade is deliberate — a linter that cannot load must not cost a user their document —
-// and it only stays honest if the failure can be chased down afterwards.
+// `runAxe` degrades rather than fails: when axe cannot run it returns no verdict —
+// `ok: false` and no `violations` at all, with `error` set — and the document ships
+// unchecked. That trade is deliberate — a linter that cannot load must not cost a user
+// their document — and it only stays honest if the failure can be chased down afterwards.
+// (It used to report `ok: true, violations: []`, i.e. a pass, which is #164.)
 //
 // It could not be. The first report of this happening on a real document (#144) carried
 // one sentence: "Octal escape sequences are not allowed in strict mode". A JavaScript
@@ -47,8 +48,11 @@ test("a lint that could not run says which step threw, and what threw", async ()
   // evaluate, which sends them to a version. It is read off which call threw rather than
   // out of the text, which is why lint.ts keeps the two in separate try blocks.
   assert.equal(lint.errorWhere, "run", "the step is guessed from the message rather than recorded");
-  assert.equal(lint.ok, true, "the degradation stopped being a degradation");
-  assert.deepEqual(lint.violations, []);
+  // The degradation is still a degradation — the session continues — but it no longer
+  // reports a pass: `ok: true, violations: []` was the pair a flawless document produces
+  // (#164). What the caller gets instead is no verdict, and no violation list to map over.
+  assert.equal(lint.ok, false, "a lint that threw is still reported as one the document passed");
+  assert.equal(lint.violations, undefined, "a check that did not happen still reports a violation count");
   assert.ok(lint.errorName, "the error class is missing, which is the first thing to look at");
   assert.equal(lint.errorName, "RangeError", "a stack overflow is what this document provokes");
   assert.ok(lint.errorStack?.includes(lint.errorName), "the stack does not even name its own error");
@@ -77,9 +81,11 @@ test("the three fields reach the log line an operator reads", async () => {
   assert.equal(logged.data.lint_error_where, lint.errorWhere);
   assert.equal(logged.data.lint_error_name, lint.errorName);
   assert.equal(logged.data.lint_error_stack, lint.errorStack);
-  // Paired with the reading that makes them necessary: this run is on the record as clean.
-  assert.equal(logged.data.lint_ok, true);
-  assert.equal(logged.data.violations, 0);
+  // Paired with the reading that makes them necessary. This run used to be on the record as
+  // clean — `lint_ok: true, violations: 0` — which is why the fields above had to carry the
+  // whole disclosure on their own; now the verdict itself says there is none.
+  assert.equal(logged.data.lint_ok, false);
+  assert.ok(!("violations" in logged.data), "a lint that did not run still logged a violation count");
 });
 
 test("an ordinary run carries none of them", async () => {
