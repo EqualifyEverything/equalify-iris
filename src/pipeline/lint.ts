@@ -57,7 +57,15 @@ export function trimStackPaths(stack: string): string {
       // that was not trimmed.
       .replaceAll(`file://${CWD}/`, "")
       .replaceAll(`${CWD}/`, "")
-      .replace(/(?:file:\/\/)?\/\S*?node_modules\//g, "node_modules/")
+      // A dependency frame keeps `node_modules/<lib>/…`, which is the part that answers
+      // which library threw. Greedy and anchored to the start of a token, so a layout that
+      // nests one `node_modules` inside another — pnpm's
+      // `node_modules/.pnpm/jsdom@25.0.1/node_modules/jsdom/…` — is cut at the LAST of
+      // them and names the library once. Lazy, this matched twice on such a path and the
+      // second match ate the separator between the segments, gluing them into
+      // `node_modules/.pnpmnode_modules/jsdom/…`: no disclosure, but a garbled frame in the
+      // one field logged to make a failure chaseable.
+      .replace(/(^|[\s(])(?:file:\/\/)?\/\S*node_modules\//gm, "$1node_modules/")
       // Anything still absolute is a frame from neither tree — a global install, a linked
       // dependency, a runtime outside the app — and there is no relative form of it to
       // keep, so it is cut to the file name. Anchored to the start of a token (`(` or

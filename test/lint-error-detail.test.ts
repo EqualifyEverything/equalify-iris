@@ -110,6 +110,15 @@ test("every frame shape loses the install path and keeps what the frame is logge
     // A dependency: which library threw is the question the stack is logged to answer.
     ["a dependency frame", `    at Y (${cwd}/node_modules/jsdom/lib/jsdom/x.js:12:3)`, "    at Y (node_modules/jsdom/lib/jsdom/x.js:12:3)"],
     ["a dependency installed elsewhere", "    at Y (/opt/app/node_modules/jsdom/lib/x.js:12:3)", "    at Y (node_modules/jsdom/lib/x.js:12:3)"],
+    // A store-based installer nests one node_modules inside another. Cut at the last of
+    // them, so the frame names the library once rather than twice or, worse, glues the two
+    // segments together — this repo installs flat, so what would reach it is a deployment
+    // that installs with pnpm.
+    [
+      "a nested dependency layout",
+      "    at Y (/opt/x/node_modules/.pnpm/jsdom@25.0.1/node_modules/jsdom/lib/a.js:1:1)",
+      "    at Y (node_modules/jsdom/lib/a.js:1:1)",
+    ],
     // The app's own frames: the path within the repo is the useful half and discloses nothing.
     ["an app frame", `    at runAxe (${cwd}/src/pipeline/lint.ts:52:10)`, "    at runAxe (src/pipeline/lint.ts:52:10)"],
     // ESM stacks carry a URL. A scheme left standing on its own reads as a path that
