@@ -87,6 +87,159 @@ test("in_flight is null once the run is no longer running", () => {
   const d = summarizeRun(text, { sessionId: "ses_1", status: "failed", phase: "extraction", now: Date.parse(T(9)) });
   assert.equal(d.in_flight, null, "a finished run is not 'hung'");
   assert.equal(d.in_flight_count, 0);
+  // And specifically not when the log has an open call and no terminal line, which is
+  // what a run killed mid-flight leaves behind: `failStaleSessions` rewrites the status
+  // of a process that can no longer append to its own log, so "no run_failed" must not
+  // be read as "still working".
+});
+
+test("a call still open after the document was delivered is still in flight", () => {
+  // A feedback round trains the page agent AFTER marking the session ready_for_review
+  // (pipeline/orchestrator.ts): the document is delivered, but the run is not over and
+  // still holds its max_concurrent_runs slot. A provider hanging in there delays every
+  // upload behind it, and the status alone would report the run as finished — which is
+  // the one question this field exists to answer.
+  const text = log({ ts: T(0), type: "run_start" }, start(T(1), "feedback"));
+  const ready = { sessionId: "ses_1", status: "ready_for_review", phase: "done", now: Date.parse(T(300)) };
+  const d = summarizeRun(text, ready);
+  assert.ok(d.in_flight, "the training call never returned");
+  assert.equal(d.in_flight.agent, "feedback");
+  assert.equal(d.in_flight_count, 1);
+
+  // Once the round writes its terminal line the run really is over, open call or not.
+  const done = log({ ts: T(0), type: "run_start" }, start(T(1), "feedback"), { ts: T(2), type: "run_complete" });
+  const after = summarizeRun(done, ready);
+  assert.equal(after.in_flight, null, "run_complete ends the run whatever the log's last call did");
+  assert.equal(after.in_flight_count, 0);
+});
+
+test("a feedback round is read against its OWN terminal line, not the first run's", () => {
+  // The shape this actually happens in, and the one a single-run fixture cannot produce:
+  // a session's log is one append-only file across every round, and a feedback round is
+  // only accepted on a session that already reached ready_for_review — so run 1's
+  // `run_complete` is always in the file by the time run 2 exists. Reading the file's
+  // FIRST terminal event answers "did run 1 finish?", which is always yes, and every
+  // question asked of it is then about the wrong run.
+  const twoRounds = log(
+    { ts: T(0), type: "run_start" },
+    start(T(1), "page"),
+    end(T(2), "page", 1000),
+    { ts: T(3), type: "run_complete" },
+    { ts: T(100), type: "run_start" },
+    start(T(101), "feedback"), // the training call, still open
+  );
+  const d = summarizeRun(twoRounds, {
+    sessionId: "ses_1",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse(T(400)),
+  });
+  assert.ok(d.in_flight, "the second round's open call is what this session is stuck on");
+  assert.equal(d.in_flight.agent, "feedback");
+  assert.equal(d.in_flight_count, 1);
+  // And the round's own elapsed time keeps running, rather than having stopped at the
+  // first round's completion.
+  assert.ok(d.elapsed_ms > 300_000, `elapsed_ms=${d.elapsed_ms} stopped at the first run`);
+});
+
+test("a run whose process died stops claiming to be stuck", () => {
+  // The status sweep at boot rewrites `running` and `queued` rows, and deliberately not
+  // `ready_for_review` ones — the document is delivered and that status is right. So a
+  // process killed inside the post-delivery window leaves a row nobody will correct, and
+  // "no terminal line" alone would report its abandoned call as hanging for ever. What
+  // bounds the claim is what a call can actually do: past an hour open it is not a slow
+  // call, it is a process that is gone.
+  const killed = log({ ts: T(0), type: "run_start" }, start(T(1), "feedback"));
+  const ready = (nowSeconds: number) => ({
+    sessionId: "ses_1",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse(T(nowSeconds)),
+  });
+
+  const soon = summarizeRun(killed, ready(600)); // ten minutes in — a slow call
+  assert.ok(soon.in_flight, "a call open for ten minutes is still a call");
+
+  const later = summarizeRun(killed, ready(2 * 60 * 60)); // two hours in — a dead process
+  assert.equal(later.in_flight, null, "an hour past the adapters' own ceiling, nothing is running");
+  assert.equal(later.in_flight_count, 0);
+  // And the clock stops with it, rather than counting up from a run that ended when its
+  // process did.
+  assert.ok(later.elapsed_ms < 60_000, `elapsed_ms=${later.elapsed_ms} is still counting`);
+});
+
+test("a round killed between calls does not count the clock up for ever", () => {
+  // The other shape of a dead process, and the one the open-call ceiling cannot bound:
+  // killed in the post-delivery window between model calls, so the round never
+  // terminates, nothing is open to age out, and no sweep rewrites a ready_for_review
+  // status. Measuring that to `now` reads an idle, delivered session as one that has
+  // been working since the day it died.
+  const killedBetweenCalls = log(
+    { ts: T(0), type: "run_start" },
+    start(T(1), "feedback"),
+    end(T(2), "feedback", 1000), // the call returned; the process died after it
+  );
+  const d = summarizeRun(killedBetweenCalls, {
+    sessionId: "ses_1",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse(T(3 * 24 * 60 * 60)), // three days later
+  });
+  assert.equal(d.in_flight, null, "nothing was open when it died");
+  assert.ok(d.elapsed_ms <= 2000, `elapsed_ms=${d.elapsed_ms} is measured to now, not to its last event`);
+
+  // But a run that is merely BETWEEN calls is still working, and it is the one holding a
+  // slot: the longest step in this window can be the GitHub filing, which logs nothing
+  // while it runs. Keying this on an open model call would freeze the clock on exactly
+  // that run.
+  const live = summarizeRun(killedBetweenCalls, {
+    sessionId: "ses_1",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse(T(600)), // ten minutes after its last event
+  });
+  assert.ok(live.elapsed_ms > 500_000, `elapsed_ms=${live.elapsed_ms} stopped while the run was still going`);
+});
+
+test("rounds are counted, so an interleaved second round is not read as finished", () => {
+  // A client can POST /feedback during a round's post-delivery window, and with
+  // max_concurrent_runs above 1 the second round's run_start is appended BEFORE the
+  // first round's run_complete. Slicing from the last run_start then hands the slice a
+  // trailing terminal line that belongs to the other round.
+  const interleaved = log(
+    { ts: T(0), type: "run_start" }, // round 1
+    { ts: T(100), type: "run_start" }, // round 2 claims the session mid-window
+    start(T(101), "feedback"), // round 2's training call, still open
+    { ts: T(102), type: "run_complete" }, // round 1 finishing, after round 2 began
+  );
+  const d = summarizeRun(interleaved, {
+    sessionId: "ses_1",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse(T(300)),
+  });
+  assert.ok(d.in_flight, "two rounds started and one finished, so one is still working");
+  assert.equal(d.in_flight.agent, "feedback");
+});
+
+test("an earlier round's abandoned call is not what this run is stuck on", () => {
+  // A process killed mid-round leaves a start with no end. That call belongs to a run
+  // that is over; attributing it to the current one is the phantom hang by another route.
+  const orphaned = log(
+    { ts: T(0), type: "run_start" },
+    start(T(1), "page"), // never closed — the process died here
+    { ts: T(100), type: "run_start" },
+    start(T(101), "feedback"),
+    end(T(102), "feedback", 1000),
+  );
+  const d = summarizeRun(orphaned, {
+    sessionId: "ses_1",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse(T(400)),
+  });
+  assert.equal(d.in_flight, null, "the current round has no open call");
+  assert.equal(d.in_flight_count, 0);
 });
 
 test("token totals are summed per run and attributed per agent", () => {

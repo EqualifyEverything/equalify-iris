@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -152,4 +152,42 @@ test("an unsluggable lesson yields nothing rather than a fragment", () => {
   // between lessons, an empty slug does not.
   const long = "a".repeat(80);
   assert.equal(lessonSlug(long), long);
+});
+
+// The bank is shared: it is keyed by AGENT FILE, not by session, and
+// `defaults.max_concurrent_runs` allows more than one run at a time — so a page being
+// extracted in one run reads this file while another run records a lesson to it. A
+// plain write is not atomic, and `loadExamples` answers a partial read with `[]`: that
+// page would be extracted with no lessons at all, accessibility-policy ones included,
+// and nothing would say so.
+test("a lesson is written atomically, so a concurrent reader never sees half of it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-memory-atomic-"));
+  try {
+    const p = fakePaths(dir);
+    for (let i = 0; i < 8; i++) {
+      recordExample(p, {
+        agent: "page.md",
+        kind: "a11y_policy",
+        instruction: `Lesson number ${i} with enough words to make the file worth tearing.`,
+        before: "<h2>Sub</h2>",
+        after: "<h3>Sub</h3>",
+        feedback: "the subheadings are all h2",
+        session: `ses_${i}`,
+      });
+    }
+    const file = join(dir, "page.json");
+    // Whatever a reader opens must parse: the write goes to a temporary and is renamed
+    // into place, so the path is never a half-written file.
+    const raw = readFileSync(file, "utf8");
+    assert.doesNotThrow(() => JSON.parse(raw), "the bank on disk is not parseable JSON");
+    assert.equal(JSON.parse(raw).length, 8);
+    // And the temporary does not survive to be mistaken for the bank.
+    assert.deepEqual(
+      readdirSync(dir).filter((f) => f.includes(".tmp")),
+      [],
+      "a temporary file was left behind",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
