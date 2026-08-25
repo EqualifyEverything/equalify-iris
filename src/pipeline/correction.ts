@@ -174,6 +174,16 @@ export function changedAnything(e: CorrectionEffect): boolean {
 // candidate is a guess about what the model meant, and this is the floor under the guess —
 // whatever the parser picked, a pass that returns a fraction of the page does not get to
 // replace it. A correction is single-shot, so what it returns is what the document keeps.
+//
+// What it cannot tell is which side of the comparison was wrong. The same ratio comes out of a
+// page that was BLOATED plus a correction that fixed it — degenerate repetition, a row or a
+// paragraph emitted dozens of times, is a real vision-model failure and one the Feedback Agent
+// flags — and on such a page this refuses the fix and ships the repeated version. Distinguishing
+// the two means deciding which content is redundant, which is a judgement about the page rather
+// than about its size, and nothing in the 265 corrections shows the shape to calibrate it on.
+// So it is left as the cheap comparison, and `page_correction_rejected` carries both sizes: a
+// correction refused for a shrink that was the point of it is visible in the log, which is where
+// the evidence for anything cleverer would have to come from.
 export const CORRECTION_SHRINK_FLOOR = 4;
 
 // Did the correction lose the page rather than correct it?

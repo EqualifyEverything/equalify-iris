@@ -36,8 +36,14 @@
 // and both come before the answer the model settles on. And note that last shape, where the
 // corrected envelope is 85 characters SHORTER than the one it replaces: "the biggest
 // candidate" would deliver the version the model had just rejected, so size cannot be the
-// discriminator either. On the page path a correction that comes back a fraction of the size
-// it replaces is refused anyway (extraction.ts).
+// discriminator either.
+//
+// One path has a floor under this judgement and the others do not, which is worth stating
+// precisely: a self-CORRECTION that comes back a fraction of the size of the page it was given
+// is refused outright (`destroyedPage` in pipeline/correction.ts). The initial page render and
+// the Copy Editor's whole-body replacement adopt `html` as it comes, so on those two a decoy
+// placed after the answer would ship — the editor's at document scale. Nothing in the corpus
+// does it, and a comparable floor there needs its own calibration rather than this one's.
 export function extractJson<T = unknown>(text: string): T | null {
   // A reply that is nothing but its JSON: much the commonest case, and no scan can improve
   // on it. Note this is the whole text and not a fenced block's content — the fenced case is
