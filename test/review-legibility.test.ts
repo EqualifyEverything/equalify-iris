@@ -210,18 +210,35 @@ test("a marker the editor dropped is on the record, and one it kept is not", asy
   const withMarkers = "<p>Torque to [not legible] Nm.</p><p>[page not fully transcribed]</p>";
 
   const lost = await eventsForEditorRound(withMarkers, "<p>Torque to 40 Nm.</p><p>Done.</p>");
-  const fewer = lost.find((e) => e.name === "editor_markers_fewer");
-  assert.ok(fewer, "a round that deleted both markers logged nothing");
-  assert.deepEqual(fewer.data.markers, ["[not legible]", "[page not fully transcribed]"]);
-  assert.equal(fewer.data.iteration, 1);
+  const changed = lost.find((e) => e.name === "editor_markers_changed");
+  assert.ok(changed, "a round that deleted both markers logged nothing");
+  assert.deepEqual(changed.data.fewer, ["[not legible]", "[page not fully transcribed]"]);
+  assert.equal(changed.data.more, undefined, "nothing was added, so the line does not say so");
+  assert.equal(changed.data.iteration, 1);
   // Before and after both, so the line says how many went rather than only that some did:
   // a document with fourteen markers that comes back with one is not the same round as a
   // document with two that comes back with one.
-  assert.deepEqual(fewer.data.before, { "[not legible]": 1, "[page not fully transcribed]": 1 });
-  assert.deepEqual(fewer.data.after, { "[not legible]": 0, "[page not fully transcribed]": 0 });
+  assert.deepEqual(changed.data.before, { "[not legible]": 1, "[page not fully transcribed]": 1 });
+  assert.deepEqual(changed.data.after, { "[not legible]": 0, "[page not fully transcribed]": 0 });
 
   // The ordinary round. An editor that fixed the reported issue and left both markers alone
   // must not add a line, or the record is noise and the one round that matters is buried.
   const kept = await eventsForEditorRound(withMarkers, `<h2>Setup</h2>${withMarkers}`);
-  assert.equal(kept.find((e) => e.name === "editor_markers_fewer"), undefined);
+  assert.equal(kept.find((e) => e.name === "editor_markers_changed"), undefined);
+});
+
+test("a marker the editor ADDED is on the record too, which is the worse direction", async () => {
+  // The page prompt spends a paragraph on this exact harm — "a placeholder standing for a
+  // paragraph you could mostly read costs a reader the part you had" — and here it is words the
+  // extractor DID read, replaced downstream by a pass that never saw the page's marks. It
+  // reaches a reader as the source being illegible, which nothing that saw the source said.
+  // Nothing else notices: contentCoverage strips [...] before comparing words, so the words
+  // that went look like ordinary editor drift and what replaced them is not words at all.
+  const readable = "<p>Torque to 40 Nm.</p>";
+  const events = await eventsForEditorRound(readable, "<p>Torque to [not legible] Nm.</p>");
+  const changed = events.find((e) => e.name === "editor_markers_changed");
+  assert.ok(changed, "a round that invented a marker logged nothing");
+  assert.deepEqual(changed.data.more, ["[not legible]"]);
+  assert.equal(changed.data.fewer, undefined, "nothing was removed, so the line does not say so");
+  assert.deepEqual(changed.data.after, { "[not legible]": 1, "[page not fully transcribed]": 0 });
 });

@@ -192,6 +192,14 @@ Respond with ONLY JSON: { "html": "<corrected body content>" }`;
 // [page not fully transcribed] is never the editor's to resolve, so every one of those that goes
 // missing is a loss. Re-inserting either has no honest position: the words that surrounded it
 // were rewritten by the same round that dropped it.
+//
+// Both directions, because the other one is the harm the page prompt spends a paragraph on. A
+// round that ADDS a marker has put a placeholder where words were — "a placeholder standing for a
+// paragraph you could mostly read costs a reader the part you had" — and it reaches a reader as
+// the source being unreadable when no pass that saw the source said so. The editor is never given
+// that as an option (nothing in EDITOR_SYSTEM writes a marker), which is exactly why an appearance
+// is worth a line: it is the closed enumeration having failed, and the words it replaced are
+// invisible to contentCoverage, which strips [...] before comparing.
 export const BODY_MARKERS = ["[not legible]", "[page not fully transcribed]"] as const;
 
 export function markerCounts(body: string): Record<string, number> {
@@ -480,12 +488,19 @@ export async function runReview(
       droppedLinks += dropped.length;
       ctx.log.event("editor_links_dropped", { iteration: iterations, hrefs: dropped });
     }
-    // See BODY_MARKERS: the only place a marker's disappearance is recorded.
+    // See BODY_MARKERS: the only place a marker's arrival or disappearance is recorded.
     const was = markerCounts(before);
     const now = markerCounts(body);
     const fewer = BODY_MARKERS.filter((m) => now[m] < was[m]);
-    if (fewer.length) {
-      ctx.log.event("editor_markers_fewer", { iteration: iterations, markers: fewer, before: was, after: now });
+    const more = BODY_MARKERS.filter((m) => now[m] > was[m]);
+    if (fewer.length || more.length) {
+      ctx.log.event("editor_markers_changed", {
+        iteration: iterations,
+        ...(fewer.length ? { fewer } : {}),
+        ...(more.length ? { more } : {}),
+        before: was,
+        after: now,
+      });
     }
   }
 
