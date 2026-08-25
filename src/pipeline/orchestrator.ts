@@ -289,29 +289,62 @@ export async function runPipeline(args: {
     // Now that the document that HAS these pages is the persisted one (see `recovered`).
     if (recovered.length) log.event("page_recovered", { pages: recovered });
 
-    // Feedback -> agent training (PRD §7.12/§7.13): turn the document-level
-    // correction this feedback run produced into a proposed improvement to the
-    // page agent, recorded (gated by its regression fixtures) for review; or
-    // in-place training if a session-built page agent is in use.
-    if (args.feedback) {
-      const learnArgs = { agentFile: "page.md", before: beforeBody, after: review.body, feedback: args.feedback };
-      // Primary: record a corroborated, generalized lesson to the agent's example
-      // bank (injected into future runs). Secondary: a well-corroborated, higher-
-      // impact lesson may also be proposed as a gated prompt change (issue).
-      //
-      // The lesson is threaded from the first into the second because the issue the
-      // second files is titled and deduped by it. `agentFile` here is a constant, so
-      // without the lesson every proposal ever made computes one identical title, and
-      // the first open issue suppresses all of them (see memory.ts `lessonSlug`).
-      const lesson = await learnFromFeedback(ctx, learnArgs);
-      await proposeAgentUpdatesFromFeedback(ctx, { ...learnArgs, lesson });
-    }
-
     store.updateSession(sessionId, {
       status: "ready_for_review",
       phase: "done",
       iterations_completed: review.iterationsCompleted,
     });
+
+    // Feedback -> agent training (PRD §7.12/§7.13): turn the document-level
+    // correction this feedback run produced into a proposed improvement to the
+    // page agent, recorded (gated by its regression fixtures) for review; or
+    // in-place training if a session-built page agent is in use.
+    //
+    // AFTER the status is set, which is what the caller polls. None of this can change
+    // the document — it has been written, linted and persisted above — and it is not
+    // cheap: a classify call, a train call, and then the candidate prompt run against
+    // the agent's fixtures twice over (pipeline/feedback.ts). On a feedback round the
+    // user was waiting through all of it for work about a FUTURE document, and so was
+    // every upload behind them in the queue. This is the same principle the contribution
+    // step below already states — never block the result — applied to the other side
+    // effect that was blocking it.
+    //
+    // Contained, because after this point a throw would be reported as a failed run over
+    // a document the user already has. That was true before this moved, and worse: a
+    // provider error in training marked a session `failed` whose output.html was on disk
+    // and whose Reader had signed it off. Training is best-effort; the delivered document
+    // is not its to revoke.
+    //
+    // The one thing this ordering admits is a race with `POST /close`, which deletes the
+    // session's tmp tree: a caller who closes the instant it sees `ready_for_review` can
+    // pull `tmp/<id>/agents` out from under a session-built agent's in-place training.
+    // That costs the training round, is logged as one, and is the same exposure
+    // `runContribution` has always had below — the alternative is making every feedback
+    // round wait minutes for it, which is what this is fixing.
+    if (args.feedback) {
+      const learnArgs = { agentFile: "page.md", before: beforeBody, after: review.body, feedback: args.feedback };
+      try {
+        // Primary: record a corroborated, generalized lesson to the agent's example
+        // bank (injected into future runs). Secondary: a well-corroborated, higher-
+        // impact lesson may also be proposed as a gated prompt change (issue).
+        //
+        // The lesson is threaded from the first into the second because the issue the
+        // second files is titled and deduped by it. `agentFile` here is a constant, so
+        // without the lesson every proposal ever made computes one identical title, and
+        // the first open issue suppresses all of them (see memory.ts `lessonSlug`).
+        const lesson = await learnFromFeedback(ctx, learnArgs);
+        await proposeAgentUpdatesFromFeedback(ctx, { ...learnArgs, lesson });
+      } catch (e) {
+        log.event("feedback_training_failed", { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    // Logged after the training above rather than before it, even though the session is
+    // already `ready_for_review`: this is the run's own terminal marker, and diagnostics
+    // measures a finished run's duration up to it (src/diagnostics.ts). The run holds its
+    // `max_concurrent_runs` slot until this function returns, so a `run_complete` written
+    // before the training would report a run as shorter than the time it actually
+    // occupied the machine.
     log.event("run_complete", {
       iterations: review.iterationsCompleted,
       unresolved: review.unresolved.length,
