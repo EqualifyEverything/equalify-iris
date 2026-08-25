@@ -3,6 +3,20 @@ import type { Capability } from "../config.ts";
 export interface Message {
   role: "system" | "user" | "assistant";
   content: string;
+  // The leading part of `content` that is byte-identical from call to call, declared so
+  // an adapter can put a cache breakpoint after it (providers/promptCache.ts). Only
+  // meaningful on a user message, and only worth setting where a caller genuinely sends
+  // the same head repeatedly — the verify task re-states the whole contract of the agent
+  // it is judging on every page of a document, which is the case this exists for.
+  //
+  // It is a PREFIX OF `content`, not a replacement for part of it: `content` stays the
+  // complete message, so anything reading a Message sees exactly the text it saw before
+  // this field existed, and an adapter that ignores the field sends exactly the same
+  // request. An adapter that honours it splits `content` at the prefix and sends two
+  // text blocks whose concatenation is the same string. A value that is not actually a
+  // prefix of `content` is ignored rather than trusted, since acting on it would send a
+  // prompt the caller did not write.
+  cachedPrefix?: string;
 }
 
 export interface Image {

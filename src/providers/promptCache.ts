@@ -12,8 +12,10 @@ import { generationAtLeast } from "./imageLimits.ts";
 //
 // A cache read bills at 0.1x the input rate and a cache write at 1.25x. So a prefix
 // used twice has already more than paid for the write, and the page agent's prompt on
-// a 25-page document — one write, two dozen reads — costs roughly a tenth of what it
-// costs today.
+// a 25-page document — a handful of writes and the rest reads — costs a fraction of what
+// it costs today. A handful rather than one, because the pages of a run are extracted
+// concurrently (defaults.extraction_concurrency): the first calls go out together, before
+// any of them has written the entry the others would have read.
 //
 // Everything below is a fact about a MODEL rather than about Iris, and this project
 // switches models often, so it is collected HERE and nowhere else — the same reason
@@ -125,4 +127,19 @@ export function cacheableSystemPrompt(model: string, system: string): boolean {
   if (!family) return false;
   if (!generationAtLeast(model, CACHING_FROM_GENERATION)) return false;
   return system.length >= MIN_CACHEABLE_TOKENS[family] * MIN_CHARS_PER_TOKEN;
+}
+
+// The same question about the invariant head of a USER message (`Message.cachedPrefix`),
+// and deliberately the same answer: which model this is, and whether the text is long
+// enough to be worth asking about, are facts about the model rather than about which
+// message the text sits in.
+//
+// The length test is conservative here, and in the safe direction. What has to clear the
+// minimum is the whole PREFIX up to the breakpoint — the system prompt and this head
+// together — so a head that is judged too short may in fact have been cacheable. The
+// cost of that is one prefix left uncached; the cost of the opposite would be nothing at
+// all, since a breakpoint under the minimum is ignored rather than charged. Measuring the
+// head alone keeps the decision local to the block being marked.
+export function cacheableUserPrefix(model: string, prefix: string): boolean {
+  return cacheableSystemPrompt(model, prefix);
 }

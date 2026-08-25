@@ -1,7 +1,12 @@
 import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
 import { StalledStreamError, TruncatedResponseError, type StallKind } from "./types.ts";
 import type { CompletionRequest, CompletionResult, ModelProvider, Usage } from "./types.ts";
-import { cacheableSystemPrompt, cachedTextBlock, promptCacheEnabled } from "./promptCache.ts";
+import {
+  cacheableSystemPrompt,
+  cacheableUserPrefix,
+  cachedTextBlock,
+  promptCacheEnabled,
+} from "./promptCache.ts";
 
 // This adapter streams for the same reason the Bedrock one does: a single
 // non-streaming request cannot tell a stalled call from a slow one, so capping total
@@ -144,10 +149,31 @@ export class OpenRouterProvider implements ModelProvider {
       if (m.role === "system" && this.promptCache && cacheableSystemPrompt(req.model, m.content)) {
         return { role: m.role, content: [cachedTextBlock(m.content)] };
       }
+      // The invariant head of a user message, split off into its own part with a cache
+      // breakpoint on it (see Message.cachedPrefix). The parts concatenate to the string
+      // `content` already is, so this changes what is BILLED and not what is said.
+      // Declined for a model that cannot cache, for a head too short to be worth it, and
+      // for a `cachedPrefix` that is not actually a prefix of `content` — in every one of
+      // those cases the message is sent exactly as it was.
+      const prefix =
+        m.role === "user" &&
+        m.cachedPrefix &&
+        m.content.startsWith(m.cachedPrefix) &&
+        this.promptCache &&
+        cacheableUserPrefix(req.model, m.cachedPrefix)
+          ? m.cachedPrefix
+          : null;
       // Attach images to the final user message as OpenAI-style content parts.
-      if (m.role === "user" && req.images?.length) {
-        const parts: unknown[] = [{ type: "text", text: m.content }];
-        for (const img of req.images) {
+      if (m.role === "user" && (prefix || req.images?.length)) {
+        const parts: unknown[] = [];
+        if (prefix) parts.push(cachedTextBlock(prefix));
+        const tail = prefix ? m.content.slice(prefix.length) : m.content;
+        // Only when there is one. A caller whose whole message is invariant leaves nothing
+        // after the head, and an empty text block is rejected upstream — so the guarantee
+        // that a declared head never breaks a call would fail on the one input that needs
+        // no tail at all.
+        if (tail) parts.push({ type: "text", text: tail });
+        for (const img of req.images ?? []) {
           const b64 = img.data.toString("base64");
           parts.push({
             type: "image_url",

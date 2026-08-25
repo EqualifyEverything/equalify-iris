@@ -95,9 +95,36 @@ export async function verifyAgentOutput(
   if (!fb || blocks.length === 0) return { ok: true, problems: [] };
 
   const html = blocks.map((b) => b.html).join("\n\n");
-  const user =
+  // Everything this task says that is not about the page in front of it: the task marker
+  // and the whole contract of the agent being judged. It is the same bytes on every page
+  // of a document — `agents/page.md` is 16 KB of it, re-sent per page and per correction
+  // recheck — so it is declared as this message's invariant head and gets a cache
+  // breakpoint after it (providers/promptCache.ts). On a 25-page document that is a
+  // handful of writes at 1.25x and the rest reads at 0.1x, against 25 full-price copies.
+  //
+  // A handful rather than one, because pages are extracted concurrently: the first
+  // `extraction_concurrency` verify calls are in flight before any of them has written
+  // the head, so each of those misses. At the default of 5 that is ~5 writes and ~20
+  // reads, which is most of the saving and not all of it.
+  //
+  // The case that does not win is a ONE-PAGE run with no recheck: its single verify call
+  // pays 1.25x for a head nothing reads back, ~25% on ~4k tokens. That is the same trade
+  // `promptCache.ts` reasons through for a system prompt, and it is deliberate — a
+  // screenshot upload is exactly that case, and a quarter of one prompt on it is worth
+  // the four fifths saved on every document with pages in it.
+  //
+  // It stays in the USER message, in the position it was already in, rather than moving
+  // into the system prompt to ride the breakpoint already there. The system prompt is
+  // where the Feedback Agent's OWN instructions live, and an agent's contract is
+  // quoted material to be judged against — `page.md` ends "Respond with ONLY this JSON:
+  // { "html": ... }", which is the wrong answer to this task and is exactly what putting
+  // it in the verifier's own role invites. `user` below is still the complete message and
+  // still starts with this text; the split changes what is billed, not what is said.
+  const contract =
     `TASK: verify\n\n` +
-    `## Agent under test: ${agent.file}\n\`\`\`markdown\n${agent.content}\n\`\`\`\n\n` +
+    `## Agent under test: ${agent.file}\n\`\`\`markdown\n${agent.content}\n\`\`\`\n\n`;
+  const user =
+    contract +
     `## The agent's output for source image "${img.name}"\n\`\`\`html\n${html}\n\`\`\`\n\n` +
     `Compare the output against the attached source image.`;
 
@@ -106,7 +133,7 @@ export async function verifyAgentOutput(
     "vision",
     [
       { role: "system", content: fb.content },
-      { role: "user", content: user },
+      { role: "user", content: user, cachedPrefix: contract },
     ],
     { images: [loadImage(img)] },
   );
