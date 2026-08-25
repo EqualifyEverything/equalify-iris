@@ -419,6 +419,41 @@ function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void
 // refusal here could break a working deployment over a format this code has not
 // seen. But the consequence of being wrong is invisible at boot and expensive — an
 // OAuth App files nothing while looking healthy — so it is worth a line.
+// A boot-time warning for a `prompt_cache_ttl` that is set to something this does not
+// recognize (providers/promptCache.ts `promptCacheTtl`).
+//
+// This one has to be said out loud because it is the only place it CAN be. An
+// unrecognized value falls back to the five-minute default, and the two TTLs differ in
+// what they are billed at rather than in what they report: the same prefix written either
+// way produces the same `cache_creation_input_tokens`, so no diagnostics field
+// distinguishes them and an operator who typed `60m` would go on believing they had
+// bought the hour. Every other unusable value in this config already says so at startup.
+//
+// Returns one warning naming every provider block that has one, since a deployment
+// configures more than one and fixing the first would otherwise hide the second.
+export function promptCacheTtlWarning(providers: IrisConfig["providers"]): string | undefined {
+  const bad: string[] = [];
+  for (const [name, block] of Object.entries(providers)) {
+    // `providers` also holds `default` (a string) and `per_agent` (a map), neither of
+    // which is a provider block.
+    if (!block || typeof block !== "object" || Array.isArray(block)) continue;
+    const v = (block as ProviderBlock).prompt_cache_ttl as unknown;
+    if (v === null || v === undefined) continue;
+    const text = String(v).trim();
+    // An empty value is an operator who set nothing, which is what the default is for.
+    if (text === "") continue;
+    const normalized = text.toLowerCase();
+    if (normalized !== "5m" && normalized !== "1h") bad.push(`${name}: "${text}"`);
+  }
+  if (bad.length === 0) return undefined;
+  return (
+    `providers.${bad.join(", providers.")} — prompt_cache_ttl must be "5m" or "1h". ` +
+    `Using 5m. Nothing downstream will report this: the two differ in what a cache write ` +
+    `is BILLED at (1.25x against 2x), not in the token counts diagnostics publishes, so a ` +
+    `deployment that meant to hold its cache for an hour would never find out from Iris.`
+  );
+}
+
 export function clientIdWarning(clientId: string): string | undefined {
   if (!clientId || clientId.startsWith("Iv")) return undefined;
   return (

@@ -136,8 +136,16 @@ export function promptCacheEnabled(cfg: Pick<ProviderBlock, "prompt_cache">): bo
 // key, a typo, a number, "1 hour" — is the five-minute default, because the two ways of
 // being wrong here are not equal: falling back to the default costs a deployment the
 // saving it hoped for on ONE prefix per run, while honouring something unrecognized would
-// send an upstream a `ttl` nobody wrote and could take out every call it serves. A typo is
-// visible either way in `GET /v1/sessions/:id/diagnostics`, where the writes stay 1.25x.
+// send an upstream a `ttl` nobody wrote and could take out every call it serves.
+//
+// A typo therefore has to be caught at BOOT (config.ts `promptCacheTtlWarning`), because
+// it is invisible everywhere else. The difference between the two TTLs is a price
+// multiplier, not a token count: the same prefix written either way reports the same
+// `cache_creation_input_tokens`, so nothing in `GET /v1/sessions/:id/diagnostics` can tell
+// them apart, and the only field that could — the nested `cache_creation` breakdown of
+// 5m against 1h tokens — is deliberately dropped by the adapters' `pickUsage`. An operator
+// who wrote `60m` would otherwise believe they had bought the hour, with no way to find
+// out but the bill.
 //
 // Verified for the first-party Claude API and for Amazon Bedrock, which is what this
 // repo deploys on. A broker that forwards to an upstream of its own choosing may or may

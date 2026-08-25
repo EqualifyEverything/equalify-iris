@@ -2,7 +2,13 @@ import express from "express";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { applyTrustProxy, bundledAppWarning, clientIdWarning, loadConfig } from "./config.ts";
+import {
+  applyTrustProxy,
+  bundledAppWarning,
+  clientIdWarning,
+  loadConfig,
+  promptCacheTtlWarning,
+} from "./config.ts";
 import { Store } from "./store/db.ts";
 import { makeAuthMiddleware } from "./auth/middleware.ts";
 import { authRouter } from "./routes/auth.ts";
@@ -25,6 +31,11 @@ if (cidWarning) console.warn(`WARNING: ${cidWarning}`);
 // elsewhere without registering your own app files nothing for anyone.
 const appWarning = bundledAppWarning(cfg.github.client_id, cfg.github.upstream_repo);
 if (appWarning) console.warn(`WARNING: ${appWarning}`);
+
+// A cache TTL nobody can spell is worth saying here, because boot is the only place it
+// is observable at all — the two TTLs differ in price, not in reported tokens.
+const ttlWarning = promptCacheTtlWarning(cfg.providers);
+if (ttlWarning) console.warn(`WARNING: ${ttlWarning}`);
 
 // Ensure the on-disk layout exists (PRD §8.1).
 mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });

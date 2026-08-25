@@ -26,6 +26,7 @@ import {
   claudeFamily,
   promptCacheEnabled,
 } from "../src/providers/promptCache.ts";
+import { promptCacheTtlWarning } from "../src/config.ts";
 import { BedrockProvider } from "../src/providers/bedrock.ts";
 import { OpenRouterProvider } from "../src/providers/openrouter.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
@@ -643,4 +644,44 @@ test("turning caching off outranks any TTL", () => {
   return bedrock.complete(bedrockReq(LONG)).then(() => {
     assert.equal(sent[0].system, LONG, "a disabled cache sends a plain string, TTL or no TTL");
   });
+});
+
+test("a TTL nobody can spell is caught at boot, because nothing else can catch it", () => {
+  // The fallback is silent by design — an unrecognized value must not reach an upstream —
+  // and it is invisible afterwards: the two TTLs differ in what a write is BILLED at, not
+  // in the token counts diagnostics publishes, so `60m` would read exactly like `1h` in
+  // every field Iris reports. Boot is the only place an operator finds out.
+  const ok = { default: "bedrock", bedrock: { default_model: "m", prompt_cache_ttl: "1h" } };
+  assert.equal(promptCacheTtlWarning(ok as never), undefined);
+  assert.equal(promptCacheTtlWarning({ default: "b", b: { default_model: "m" } } as never), undefined);
+  assert.equal(
+    promptCacheTtlWarning({ default: "b", b: { default_model: "m", prompt_cache_ttl: "5M" } } as never),
+    undefined,
+    "case is an operator's, not a typo",
+  );
+  // A valueless YAML key is an operator who set nothing, which is what the default is for.
+  assert.equal(
+    promptCacheTtlWarning({ default: "b", b: { default_model: "m", prompt_cache_ttl: null } } as never),
+    undefined,
+  );
+
+  const warned = promptCacheTtlWarning({
+    default: "bedrock",
+    bedrock: { default_model: "m", prompt_cache_ttl: "60m" },
+  } as never);
+  assert.match(warned ?? "", /providers\.bedrock: "60m"/);
+  assert.match(warned ?? "", /Using 5m/);
+  // And it says why no dashboard will show it, so the operator does not go looking.
+  assert.match(warned ?? "", /BILLED/);
+
+  // Every block that has one, not just the first: fixing one and rebooting must not
+  // reveal the next as a surprise.
+  const both = promptCacheTtlWarning({
+    default: "bedrock",
+    per_agent: { page: "bedrock" },
+    bedrock: { default_model: "m", prompt_cache_ttl: "1 hour" },
+    openrouter: { default_model: "m", prompt_cache_ttl: "3600" },
+  } as never);
+  assert.match(both ?? "", /providers\.bedrock: "1 hour"/);
+  assert.match(both ?? "", /providers\.openrouter: "3600"/);
 });

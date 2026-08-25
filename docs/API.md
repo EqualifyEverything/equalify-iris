@@ -673,6 +673,13 @@ hour-long entry is written at 2× instead of 1.25×, so it needs a third use to 
 where five minutes needs a second. A deployment converting a document a day should leave it
 alone.
 
+**These fields cannot tell you which TTL you got.** The difference between the two is a price
+multiplier on a write, not a token count — the same prefix written either way reports the same
+`cache_write` — so a broker that silently strips the field reads exactly like one that honours
+it, and your provider's own billing is where that question is answered. A value Iris cannot
+read (`60m`, `1 hour`) is caught at startup instead, with a warning, and falls back to five
+minutes.
+
 `cache_write` is the weaker signal of the two, and a zero there means less than a zero read. It is
 reported by the provider, and on an OpenAI-shaped upstream the field it would come from is
 undocumented, so a deployment can see reads climbing with writes sitting at 0 forever. That is a
