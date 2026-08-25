@@ -368,9 +368,69 @@ export interface ExtractionResult {
   recovered?: number[];
 }
 
-function stripFences(t: string): string {
-  const m = t.match(/```(?:html)?\s*([\s\S]*?)```/i);
+// The content of the first fenced block, or the text as it stands.
+//
+// Any info string, not only `html`: a ```json fence is what a page agent writes when it
+// wraps the envelope, and a regex that knew only `html` left the word "json" INSIDE the
+// content it returned — which is why every leaked envelope in issue #168 begins with the
+// literal line `json`. `extractJson` has always known both spellings; this now does too.
+//
+// Exported for test/envelope-as-content.test.ts: the four reply shapes this and `bareHtml`
+// have to agree about were all read off real bench logs, and a unit test names them.
+export function stripFences(t: string): string {
+  const m = t.match(/```[a-z]*[ \t]*\r?\n?([\s\S]*?)```/i);
   return (m ? m[1] : t).trim();
+}
+
+// A reply that is not the JSON envelope, but IS plainly the page's HTML.
+//
+// The page agent is asked for `{"html": "…"}`, and a model that answers with bare HTML
+// instead should not cost a page — that is the fallback this replaces, and it was right to
+// want it. What it could not do is tell "answered with HTML" from "answered with anything at
+// all": on a reply whose envelope did not parse it handed back the envelope, prose and all,
+// and that text was delivered to the user as the page's content (issue #168). It is not only
+// wrong content. The escaped markup inside a leaked envelope parses as tags whose ATTRIBUTE
+// NAMES begin with a digit or a backslash, which is what took axe-core down on the same
+// documents (#164) — so one unreadable reply cost the page AND the whole document's
+// accessibility verdict.
+//
+// So the raw text is accepted only when nothing about it suggests an envelope: it does not
+// begin with `{`, it carries no `"html":` key anywhere, and it starts at a tag rather than
+// at prose about the page. Anything else is a reply that could not be read, which is a
+// reported outcome and not a page's content.
+//
+// Unfenced prose followed by markup ("Here is the page:\n<h1>…") is therefore refused, and
+// deliberately: nothing here can say where the sentence ends and the page begins, and the
+// old fallback's answer — deliver both — put a sentence Iris wrote into a document whose
+// whole contract is that every word in it is a word on the page. Prose around a FENCED block
+// costs nothing, because `stripFences` finds the fence wherever it starts.
+export function bareHtml(text: string): string | null {
+  const t = stripFences(text);
+  if (!t || !t.startsWith("<")) return null;
+  if (/"html"\s*:/.test(t)) return null;
+  return t;
+}
+
+// What an unreadable reply looked like, for the log line. The point of the field is that the
+// shapes have DIFFERENT remedies, so it is worth the few lines to name them apart: a
+// `truncated_envelope` is the output ceiling (raise `max_tokens`), an `envelope` that will not
+// parse is escaping the page's own punctuation (util/json.ts), `prose` is the agent answering
+// conversationally and `empty_html` is it answering with no page at all — both prompt problems,
+// and nothing about the parser.
+//
+// `parsed` decides the first question, because it settles it: if the envelope was read, then
+// whatever is missing was missing from a reply this pipeline understood, and pointing the
+// operator at escaping would be pointing at the one thing that worked. A blank verso in a
+// scanned PDF is the realistic way to get here, and it is still reported as a lost page rather
+// than delivered as an empty one: agents/page.md does not say what to return for a page with
+// nothing on it, so `""` is as likely to be a model that gave up as a page that is blank, and
+// a document quietly missing a page is the failure `failedPage` exists to avoid. The marker
+// says "look at this page", which for a blank one costs a glance.
+function replyShape(text: string, parsed: unknown): string {
+  if (parsed) return "empty_html";
+  const t = stripFences(text);
+  if (t.startsWith("{") || /"html"\s*:/.test(t)) return /}\s*$/.test(t) ? "envelope" : "truncated_envelope";
+  return t ? "prose" : "empty";
 }
 
 // Load the page agent, preferring a session-built/trained copy (tmp/), then the
@@ -451,9 +511,23 @@ async function renderPage(
   );
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
   const parsed = extractJson<{ html?: string; log?: string; suggested_agent?: { name?: string; reason?: string } }>(res.text);
+  const html = parsed?.html ?? bareHtml(res.text);
+  // No HTML in this reply at all. Throwing hands the page to `failedPage`, which is what
+  // every other unusable answer in this file already does: the page is lost, and the run
+  // SAYS the page is lost (`page_extraction_failed`, `pages_failed`, a @page-failed
+  // comment where the content would have been). The alternative — the old fallback's —
+  // was to deliver whatever the model wrote as the page, which reports 100 of 100 pages
+  // delivered while one of them is a JSON envelope with prose around it. On a feedback
+  // re-extraction the throw is cheaper still: `previous` is kept, so the page keeps the
+  // content it already had.
+  if (!html?.trim()) {
+    const shape = replyShape(res.text, parsed);
+    ctx.log.event("page_no_output", { image: img.name, page: img.order, chars: res.text.length, shape });
+    throw new Error(`page agent returned no HTML (${shape}, ${res.text.length} chars)`);
+  }
   const sa = parsed?.suggested_agent;
   return {
-    html: parsed?.html ?? stripFences(res.text),
+    html,
     log: parsed?.log ?? "",
     suggestion: sa?.name ? { name: sa.name, reason: sa.reason ?? "" } : undefined,
   };
@@ -493,8 +567,21 @@ async function correctPage(
   );
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
   const parsed = extractJson<{ html?: string }>(res.text);
-  const corrected = (parsed?.html ?? stripFences(res.text)).trim();
-  return corrected || null;
+  const corrected = (parsed?.html ?? bareHtml(res.text) ?? "").trim();
+  // A correction that cannot be read is not a correction. Null keeps the version this
+  // page already had, which passed everything except the fidelity check — strictly better
+  // than replacing it with the reply's own envelope, and the caller has always treated a
+  // null here as "nothing to correct".
+  if (!corrected) {
+    ctx.log.event("page_correction_no_output", {
+      image: img.name,
+      page: img.order,
+      chars: res.text.length,
+      shape: replyShape(res.text, parsed),
+    });
+    return null;
+  }
+  return corrected;
 }
 
 // Merge instruction for splicing a specialist fragment into the page output.
