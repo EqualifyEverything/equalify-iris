@@ -270,20 +270,35 @@ test(
 // which pdftoppm refuses outright rather than ignoring.
 
 test("a shard count never exceeds the pages there are to render", () => {
-  assert.equal(rasterShards(MAX_PDF_PAGES, 4), 4);
+  assert.equal(rasterShards(MAX_PDF_PAGES, 4, 0), 4);
   // One page cannot be split four ways, and a shard past the end is a failed render.
-  assert.equal(rasterShards(1, 8), 1);
-  assert.equal(rasterShards(2, 8), 2);
+  assert.equal(rasterShards(1, 8, 0), 1);
+  assert.equal(rasterShards(2, 8, 0), 2);
   // A machine that reports nothing usable renders the way it always did.
   for (const cpus of [0, -3, Number.NaN, 1.9]) {
-    assert.equal(rasterShards(MAX_PDF_PAGES, cpus), 1, `cpus=${cpus} falls back to one process`);
+    assert.equal(rasterShards(MAX_PDF_PAGES, cpus, 0), 1, `cpus=${cpus} falls back to one process`);
   }
+});
+
+test("the core budget is the host's, and a busy host still renders", () => {
+  // Rasterization runs on the upload request, before anything queues it, so several
+  // documents can be in pdftoppm at once. Each takes what is LEFT rather than a fresh
+  // core count — otherwise a 32-core host serving four uploads runs a hundred renders.
+  assert.equal(rasterShards(MAX_PDF_PAGES, 8, 0), 8);
+  assert.equal(rasterShards(MAX_PDF_PAGES, 8, 5), 3);
+  // Exhausted, and past exhausted: one process each, which is exactly what a document
+  // got before the range was split at all. A stall here would be far worse than a slow
+  // render — the uploader is waiting on this call.
+  assert.equal(rasterShards(MAX_PDF_PAGES, 8, 8), 1);
+  assert.equal(rasterShards(MAX_PDF_PAGES, 8, 99), 1);
+  // A count that has somehow gone negative must not hand out MORE than the host has.
+  assert.equal(rasterShards(MAX_PDF_PAGES, 8, -4), 8);
 });
 
 test("the ranges partition the document: every page once, none past the end", () => {
   for (let pages = 1; pages <= MAX_PDF_PAGES; pages++) {
     for (let cpus = 1; cpus <= 16; cpus++) {
-      const ranges = pageRanges(pages, rasterShards(pages, cpus));
+      const ranges = pageRanges(pages, rasterShards(pages, cpus, 0));
       const covered: number[] = [];
       for (const [first, last] of ranges) {
         assert.ok(first >= 1 && last <= pages, `range ${first}-${last} inside 1-${pages} (cpus=${cpus})`);
@@ -346,6 +361,47 @@ test(
   },
 );
 
+// Long enough that poppler pads the filename to two digits and a shard holds more than
+// one page on an ordinary host, short enough that the serial render it is compared
+// against does not dominate the suite.
+const SPLIT_PAGES = 12;
+
+test(
+  "a render in flight is subtracted from what the next document may take",
+  {
+    skip: !hasPoppler()
+      ? "poppler-utils not installed"
+      : // With one core a document takes one process whether or not anything else is
+        // rendering, so there is no reduction to observe.
+        rasterShards(MAX_PDF_PAGES, undefined, 0) < 2
+        ? "single-core machine: nothing to subtract"
+        : false,
+  },
+  async () => {
+    // The arithmetic is covered above; what this covers is that it is WIRED — that
+    // `rasterizePages` actually reserves its shards for as long as they run, so a second
+    // upload arriving mid-render sees a smaller budget rather than a fresh core count.
+    const idle = rasterShards(MAX_PDF_PAGES);
+    let done = false;
+    const inFlight = rasterizePdf(plainPdf(MAX_PDF_PAGES), "busy.pdf").finally(() => {
+      done = true;
+    });
+    // Sampled until it moves or the render ends, rather than after a fixed sleep: the
+    // reservation is held for the whole render, so any sample inside it will do, and
+    // bounding the loop on `done` means a reservation that never happens fails the
+    // assertion below instead of hanging.
+    let seen = idle;
+    while (!done && seen === idle) {
+      await new Promise((r) => setTimeout(r, 2));
+      seen = rasterShards(MAX_PDF_PAGES);
+    }
+    await inFlight;
+    assert.ok(seen < idle, `a document rendering on ${idle} cores left fewer than ${idle} for the next`);
+    // And released again: the next upload gets the whole host back.
+    assert.equal(rasterShards(MAX_PDF_PAGES), idle, "the reservation is released when the render ends");
+  },
+);
+
 test(
   "a document rendered in shards is the same document rendered in one process",
   {
@@ -353,7 +409,7 @@ test(
       ? "poppler-utils not installed"
       : // A one-core machine renders in one process, so there would be no split to
         // compare against and the assertions below would pass without testing anything.
-        rasterShards(2) < 2
+        rasterShards(SPLIT_PAGES, undefined, 0) < 2
         ? "single-core machine: nothing is split here"
         : false,
   },
@@ -363,9 +419,16 @@ test(
     // Compared against poppler run the way this code used to run it — one process over
     // the whole capped range — so a future poppler that stopped being page-local would
     // fail here rather than quietly shipping different images.
-    const pdf = linkPdf();
+    //
+    // Twelve pages rather than two, for the failure a split could hide silently.
+    // poppler pads the output filename to the DOCUMENT's page count, so the shards
+    // write pg-01..pg-12 into one directory and never collide; a build that numbered a
+    // shard's output from 1 instead would have every shard overwrite pg-01, and what
+    // came back would be a short document with no error anywhere. A two-page document
+    // cannot show that — one page per shard, one digit either way.
+    const pdf = plainPdf(SPLIT_PAGES);
     const sharded = await rasterizePdf(pdf, "report.pdf");
-    assert.equal(sharded.length, 2);
+    assert.equal(sharded.length, SPLIT_PAGES, "every page survives the split");
 
     const dir = mkdtempSync(join(tmpdir(), "iris-pdf-serial-"));
     try {
@@ -373,7 +436,7 @@ test(
       writeFileSync(path, pdf);
       execFileSync("pdftoppm", ["-png", "-r", "150", "-l", String(MAX_PDF_PAGES), path, join(dir, "pg")]);
       for (let i = 0; i < sharded.length; i++) {
-        const serial = readFileSync(join(dir, `pg-${i + 1}.png`));
+        const serial = readFileSync(join(dir, `pg-${String(i + 1).padStart(2, "0")}.png`));
         assert.ok(serial.equals(sharded[i].buffer), `page ${i + 1} is byte-identical`);
       }
     } finally {

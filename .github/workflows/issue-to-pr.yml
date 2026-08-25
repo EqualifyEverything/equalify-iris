@@ -401,6 +401,15 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      # poppler-utils, so the baseline `npm test` below (and the one Claude runs against
+      # its own change) exercises the PDF path instead of skipping it. `rasterizePdf`
+      # shells out to pdftoppm/pdfinfo/pdftohtml, and `hasPoppler` in
+      # test/pdf-links.test.ts skips those tests when they are absent — which reads as a
+      # green baseline for a path nothing ran. Same install the Dockerfile does.
+      - name: Install poppler-utils (PDF rasterization tests)
+        if: steps.triage.outputs.should_run == 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+
       - name: Build triage context
         if: steps.triage.outputs.should_run == 'true'
         env:

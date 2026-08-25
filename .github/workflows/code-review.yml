@@ -343,6 +343,19 @@ jobs:
           echo "result=$RESULT" >> "$GITHUB_OUTPUT"
           echo "shellcheck over .github/scripts: $RESULT"
 
+      # poppler-utils, for the same reason the Dockerfile installs it: `rasterizePdf`
+      # shells out to pdftoppm/pdfinfo/pdftohtml, and the tests that exercise it skip
+      # themselves when those are absent (`hasPoppler` in test/pdf-links.test.ts).
+      # Without this the PDF path's only end-to-end guards — that a document renders to
+      # the same pages whether the range is split across processes or not, and that one
+      # over the page cap is refused — report as passes when they never ran.
+      #
+      # Guarded like the step it exists for: `npm test` runs inside "Build review
+      # context", so on a commit already reviewed there is nothing here to install for.
+      - name: Install poppler-utils (PDF rasterization tests)
+        if: steps.guard.outputs.already_reviewed != 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+
       - name: Build review context
         if: steps.guard.outputs.already_reviewed != 'true'
         # `emit_source` below marks where `head -n $MAX_LINES_PER_FILE` cut a file.

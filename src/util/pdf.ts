@@ -170,6 +170,13 @@ async function extractPdfLinks(pdfPath: string): Promise<Map<number, PdfLink[]>>
   }
 }
 
+// Shards currently rendering, across every upload this process is serving. Read and
+// written only by `rasterShards` and `rasterizePages`, and only between synchronous
+// statements — Node runs one of those at a time, so the reserve-then-spawn in
+// `rasterizePages` cannot interleave with another document's and hand out the same
+// cores twice.
+let shardsRunning = 0;
+
 // How many pdftoppm processes one rasterization is split across.
 //
 // pdftoppm renders pages one after another in a single thread, so a 25-page document
@@ -185,15 +192,36 @@ async function extractPdfLinks(pdfPath: string): Promise<Map<number, PdfLink[]>>
 // run may have in flight, and borrowing that knob would tie a provider's rate limit to
 // this machine's core count.
 //
-// Over-subscription is deliberately not guarded against. `availableParallelism` reports
-// cores, not a container's CPU quota, and two runs may rasterize at once
-// (`defaults.max_concurrent_runs`), so more shards than usable cores is a normal case.
-// It degrades gracefully rather than badly: eight pdftoppm shards on four cores
-// measured 3.6 s against 3.8 s for four — the scheduler time-slices them and it is the
-// same work either way. A shard holds one page's raster (~6 MB at this DPI), so the
-// memory this costs is bounded by the shard count too.
-export function rasterShards(pages: number, cpus: number = availableParallelism()): number {
-  return Math.max(1, Math.min(Math.floor(cpus) || 1, pages));
+// The budget is the HOST's, not the document's, because nothing else in Iris bounds how
+// many of these run at once. Rasterization happens on the upload request — routes/
+// sessions.ts calls this before `enqueueRun`, since the pages have to be measured
+// against the image limits and written to disk before there is a session to queue — so
+// `defaults.max_concurrent_runs` is downstream of it and never applies. The only thing
+// metering concurrent uploads is `uploadGate`'s bytes-in-flight budget, which charges
+// Content-Length, and a 25-page text PDF is a few hundred KB: many are admitted at once.
+// Per-document, then, "one process per core" would be `uploads x cores` processes on a
+// busy host — on a 32-core box, 25 per upload where there used to be one.
+//
+// So a shard is reserved out of a host-wide count for as long as it runs, and what is
+// left is what the next document may take. An upload always gets at least one process,
+// which is exactly what it got before any of this, so a busy host degrades to the old
+// behaviour instead of stalling — and the ceiling is one core's worth of shards plus
+// that floor per concurrent upload, rather than a multiple of the core count.
+//
+// Over-subscribing the CPU is not itself the harm: eight pdftoppm shards on four cores
+// measured 3.6 s against 3.8 s for four, because the scheduler time-slices them and it
+// is the same work either way. Memory is the reason for a ceiling — a shard holds one
+// page's raster (~6 MB at this DPI) — and `availableParallelism` reports cores rather
+// than a container's CPU quota, so the count it hands out is generous already.
+export function rasterShards(
+  pages: number,
+  cpus: number = availableParallelism(),
+  // Shards already rendering elsewhere on this host. A parameter so the rule is
+  // testable without spawning anything; the default is the live count below.
+  busy: number = shardsRunning,
+): number {
+  const free = (Math.floor(cpus) || 1) - Math.max(0, busy);
+  return Math.max(1, Math.min(free, pages));
 }
 
 // The `-f`/`-l` page ranges those shards cover: contiguous, in order, and together
@@ -204,6 +232,13 @@ export function rasterShards(pages: number, cpus: number = availableParallelism(
 // outran a short document would turn a working conversion into a failed one — which is
 // why `rasterShards` never returns more shards than there are pages, and why this is
 // derived from the page count rather than from a fixed chunk size.
+//
+// FEWER ranges than `shards` when the pages do not divide evenly: 25 pages across 24
+// shards is 13 ranges of two, not 24 of one. That costs nothing, because what a
+// rasterization waits on is the LARGEST range — and a balanced 24-way split of 25 pages
+// still leaves one shard holding two pages, so it finishes no sooner than this does,
+// having spawned eleven more processes to idle. It is only the count that is
+// approximate; every page is still rendered exactly once.
 export function pageRanges(pages: number, shards: number): [number, number][] {
   const per = Math.ceil(pages / shards);
   const ranges: [number, number][] = [];
@@ -232,14 +267,23 @@ async function rasterizePages(pdfPath: string, dir: string, pages: number | null
     await execFileP("pdftoppm", [...opts, "-l", String(MAX_PDF_PAGES), pdfPath, out]);
     return;
   }
+  // Reserved before anything is spawned and released once every shard has settled, so
+  // the count reflects processes that exist rather than ones this intends to start.
+  // Nothing awaits between the two statements, which is what makes the reservation
+  // atomic (see `shardsRunning`).
   const ranges = pageRanges(pages, rasterShards(pages));
-  const settled = await Promise.allSettled(
-    ranges.map(([first, last]) =>
-      execFileP("pdftoppm", [...opts, "-f", String(first), "-l", String(last), pdfPath, out]),
-    ),
-  );
-  const failed = settled.find((s) => s.status === "rejected");
-  if (failed) throw (failed as PromiseRejectedResult).reason;
+  shardsRunning += ranges.length;
+  try {
+    const settled = await Promise.allSettled(
+      ranges.map(([first, last]) =>
+        execFileP("pdftoppm", [...opts, "-f", String(first), "-l", String(last), pdfPath, out]),
+      ),
+    );
+    const failed = settled.find((s) => s.status === "rejected");
+    if (failed) throw (failed as PromiseRejectedResult).reason;
+  } finally {
+    shardsRunning -= ranges.length;
+  }
 }
 
 // How many pages this PDF has, or null if pdfinfo could not say.
