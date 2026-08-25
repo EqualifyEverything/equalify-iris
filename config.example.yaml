@@ -254,6 +254,11 @@ defaults:
   # document costs up to ~5 sequential model calls per page, and extracting
   # pages serially is the dominant source of end-to-end latency.
   #
+  # It bounds the review phase the same way: the Reader reads the assembled
+  # document a window at a time, and those calls are independent too, so they go
+  # out together under this same cap. One run's in-flight model calls therefore
+  # never exceed this number, whichever phase it is in.
+  #
   # Raise it if your provider's rate limits allow; lower it (or set 1 for fully
   # serial) if you hit 429s. Both adapters retry throttling responses (OpenRouter
   # by hand, Bedrock via the AWS SDK's standard strategy), but backing off is
