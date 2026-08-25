@@ -159,6 +159,62 @@ test("the page agent's heading rules keep the clauses that place a section's par
   }
 });
 
+// The other half of the page boundary (#145). The rule above tells the agent not to wrap
+// its page in a landmark; this one tells it what the page's own printed number IS, because
+// forbidding the wrapper left the agent to invent something for the one boundary it can
+// always see. What it invented was `<p role="doc-pagebreak" aria-label="Page 5"
+// id="page-5"></p>`, on one of seven markers in a 25-page document, and that shipped a
+// SERIOUS `aria-prohibited-attr` violation: naming attributes are prohibited on that role.
+//
+// The lint gate does see this one, unlike the alt-text and heading-level rules above — so
+// the argument for pinning it here is different. It is that the gate sees it too late to
+// help: `lintSummary` (src/pipeline/review.ts) hands the Reader the rule id, its
+// description and a node COUNT with no selector, the deployment that reported this runs
+// `iterations_max: 1` so the re-lint after the editor's pass is the last thing that
+// happens, and a document that has to spend a correction round on a defect the prompt
+// could have prevented has already paid for it. The same document came back clean on an
+// earlier round with three markers, every one carrying its number and every one carrying
+// the same prohibited attribute — so this is output variation around a rule that was never
+// stated, and the place to state it is the prompt.
+//
+// Pinned as clauses, and both directions of the shape: the prescribed element AND why an
+// empty one is wrong independently of axe. test/pagebreak-marker.test.ts holds the gate to
+// the same claims.
+test("the page agent's page-break rule keeps the clauses that make it a rule", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["there is one correct shape, and it is written out",
+      /exactly one correct shape: <p role="doc-pagebreak" id="page-5">5<\/p> — the number as printed, as the element's own text/],
+    // Why this role rather than the <section> wrapper the rule above forbids: it marks the
+    // break instead of claiming a region, so it does not announce a section beginning where
+    // only the paper ran out.
+    ["the role marks the break rather than claiming a region",
+      /That role marks the break itself rather than claiming a region, so it says where the printed page turned without announcing a section that begins there/],
+    // The reported violation, named exactly, so the rule cannot be read as being about
+    // something else — and named as prohibited rather than as discouraged.
+    ["naming attributes are prohibited on the role, and the reported element is quoted",
+      /Never name that marker with aria-label or aria-labelledby: naming attributes are PROHIBITED on this role, so <p role="doc-pagebreak" aria-label="Page 5"><\/p> is a serious violation/],
+    // The asymmetry is what made it intermittent, and stating it is what stops the rule
+    // being read as "only empty markers are a problem".
+    ["the violation is intermittent because only the empty marker reports it",
+      /shows itself only when the element is empty — which is how the same habit passes on six markers in a document and fails on the seventh/],
+    // And the independent reason: an empty marker has no permitted way to be named at all,
+    // which axe does not report. Both halves, so neither can be dropped as redundant.
+    ["an empty marker is forbidden for having no name, not for failing the gate",
+      /The text is the name, so a marker with no text has no name and nothing to tell the reader it was emitted for: where the page prints no number, emit no marker/],
+    // The consistency half of the report: seven markers in a 25-page document is arbitrary,
+    // and a page-local rule is what makes it not arbitrary.
+    ["a marker is emitted wherever the page prints its number, first in the page's output",
+      /Emit one wherever the page prints its number, as the first thing you emit for that page/],
+    // The number is the page's own, not the position of the image in the upload — which is
+    // the other number this agent is given (`page N of M` in the user message).
+    ["the number is the one the page shows, never the image's position in the file",
+      /use the number the page shows \(iv, 5, A-3\), never the position of the image you were given in the file/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
 // What the agent may say about what it could not read, and how much of the page has to
 // arrive at all (issues #112, #117, #133, and the legibility half of #116).
 //

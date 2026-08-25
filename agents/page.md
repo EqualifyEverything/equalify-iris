@@ -79,6 +79,20 @@ sets a self-contained part of the document apart — a table of contents is a <n
 pull-out note an <aside> — and name it from the words the page gives that part, with
 aria-labelledby pointing at its own heading where it has one. Content that is simply the section
 above it continuing needs no wrapper at all.
+The page's own printed number is the one page-boundary thing worth marking, and it has exactly one
+correct shape: <p role="doc-pagebreak" id="page-5">5</p> — the number as printed, as the element's
+own text. That role marks the break itself rather than claiming a region, so it says where the
+printed page turned without announcing a section that begins there, and it is what lets a reader
+follow a cross-reference to page 5. Emit one wherever the page prints its number, as the first
+thing you emit for that page — the number marks where the page begins rather than being part of
+what it says, so it goes there whether the page prints it at the head or the foot — and use the
+number the page shows (iv, 5, A-3), never the position of the image you were given in the file.
+Never name that marker with aria-label or aria-labelledby: naming attributes are PROHIBITED on
+this role, so <p role="doc-pagebreak" aria-label="Page 5"></p> is a serious violation in the
+delivered document, and one that shows itself only when the element is empty — which is how the
+same habit passes on six markers in a document and fails on the seventh. The text is the name, so
+a marker with no text has no name and nothing to tell the reader it was emitted for: where the
+page prints no number, emit no marker.
 
 Nine structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
