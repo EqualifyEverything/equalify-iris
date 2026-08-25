@@ -283,6 +283,28 @@ test("an unreadable reply that answers with nothing at all is the same lost page
   });
 });
 
+test("an envelope that was read and carried no page is not blamed on the parser", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The one shape that reaches the guard through `parsed` rather than through `bareHtml`:
+    // `??` does not fall through on an empty string. A blank verso in a scanned PDF is the
+    // realistic way to get here, and the reply is perfect JSON — so reporting it as an
+    // `envelope` would send an operator to look at escaping, the one thing that worked.
+    const { failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) =>
+          o === 1 ? '{"html": "", "log": "this page is blank"}' : o === 2 ? '{"log": "no content"}' : good(o),
+      }),
+    );
+    // Still a lost page rather than a silently absent one: agents/page.md does not say what to
+    // return for a page with nothing on it, so `""` is as likely to be a model that gave up as
+    // a page that is blank, and an empty fragment is filtered out at assembly with nothing
+    // left to say the page was ever there.
+    assert.deepEqual(failedPages, [1, 2]);
+    assert.deepEqual(of(events, "page_no_output").map((e) => e.shape), ["empty_html", "empty_html"]);
+  });
+});
+
 test("an unreadable correction keeps the page it could not correct", async () => {
   await withTemp(async (dir) => {
     const events: Event[] = [];
@@ -302,6 +324,17 @@ test("an unreadable correction keeps the page it could not correct", async () =>
     assert.equal(no.length, 1);
     assert.equal(no[0].page, 1);
     assert.equal(no[0].shape, "truncated_envelope");
+    // A correction whose envelope parsed and held no HTML is the same outcome — the page is
+    // kept — under the shape that names the right remedy.
+    const blank: Event[] = [];
+    await runExtraction(
+      makeCtx(dir, blank, {
+        render: (o) => good(o),
+        problems: (o) => (o === 1 ? ["the heading level is wrong"] : []),
+        correct: () => '{"html": ""}',
+      }),
+    );
+    assert.equal(of(blank, "page_correction_no_output")[0].shape, "empty_html");
     // The existing record of a correction that bought nothing still fires, so the rate in
     // docs/API.md §0c does not move because of this event.
     assert.equal(of(events, "page_corrected")[0].result, "empty");

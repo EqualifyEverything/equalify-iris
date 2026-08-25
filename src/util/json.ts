@@ -144,6 +144,11 @@ function repairedSpan(candidate: string, start: number): string | null {
       // a backslash. The real one is a title page describing its own decoration — "decorative
       // diagonal slash marks (visible as '\' before 'MEASURES')" — where `\'` is not a JSON
       // escape and stops the parse at that character.
+      //
+      // Where the two readings collide, the escape wins: a page printing `C:\new` gets a
+      // newline, because the letter after the backslash is one JSON escapes use. Reading it
+      // the other way would break every genuinely escaped `\n` in every reply that reaches
+      // this pass, which is a far larger set than the paths that print one.
       if (!isEscape(candidate, i)) {
         out += "\\\\";
         continue;

@@ -411,15 +411,25 @@ export function bareHtml(text: string): string | null {
   return t;
 }
 
-// What an unreadable reply looked like, for the log line — the shapes are the ones observed
-// in real replies, and they have different remedies: a `truncated_envelope` is the output
-// ceiling (raise `max_tokens`), an `envelope` that will not parse is escaping the page's own
-// punctuation (see util/json.ts), and `prose` is the agent answering conversationally, which
-// is the prompt's problem.
-function replyShape(text: string): string {
+// What an unreadable reply looked like, for the log line. The point of the field is that the
+// shapes have DIFFERENT remedies, so it is worth the few lines to name them apart: a
+// `truncated_envelope` is the output ceiling (raise `max_tokens`), an `envelope` that will not
+// parse is escaping the page's own punctuation (util/json.ts), `prose` is the agent answering
+// conversationally and `empty_html` is it answering with no page at all — both prompt problems,
+// and nothing about the parser.
+//
+// `parsed` decides the first question, because it settles it: if the envelope was read, then
+// whatever is missing was missing from a reply this pipeline understood, and pointing the
+// operator at escaping would be pointing at the one thing that worked. A blank verso in a
+// scanned PDF is the realistic way to get here, and it is still reported as a lost page rather
+// than delivered as an empty one: agents/page.md does not say what to return for a page with
+// nothing on it, so `""` is as likely to be a model that gave up as a page that is blank, and
+// a document quietly missing a page is the failure `failedPage` exists to avoid. The marker
+// says "look at this page", which for a blank one costs a glance.
+function replyShape(text: string, parsed: unknown): string {
+  if (parsed) return "empty_html";
   const t = stripFences(text);
   if (t.startsWith("{") || /"html"\s*:/.test(t)) return /}\s*$/.test(t) ? "envelope" : "truncated_envelope";
-  if (t.startsWith("<")) return "html";
   return t ? "prose" : "empty";
 }
 
@@ -511,8 +521,9 @@ async function renderPage(
   // re-extraction the throw is cheaper still: `previous` is kept, so the page keeps the
   // content it already had.
   if (!html?.trim()) {
-    ctx.log.event("page_no_output", { image: img.name, page: img.order, chars: res.text.length, shape: replyShape(res.text) });
-    throw new Error(`page agent returned no HTML (${replyShape(res.text)}, ${res.text.length} chars)`);
+    const shape = replyShape(res.text, parsed);
+    ctx.log.event("page_no_output", { image: img.name, page: img.order, chars: res.text.length, shape });
+    throw new Error(`page agent returned no HTML (${shape}, ${res.text.length} chars)`);
   }
   const sa = parsed?.suggested_agent;
   return {
@@ -566,7 +577,7 @@ async function correctPage(
       image: img.name,
       page: img.order,
       chars: res.text.length,
-      shape: replyShape(res.text),
+      shape: replyShape(res.text, parsed),
     });
     return null;
   }
