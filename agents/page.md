@@ -87,8 +87,11 @@ that boundary a name of its own in the delivered document. Emit one wherever the
 first thing you emit for that page — the number marks where the page begins rather than being part
 of what it says, so it goes there whether the page prints it at the head or the foot — and use the
 number the page shows (iv, 5, A-3), never the position of the image you were given in the file.
-The label is the only place that number can live, and <hr> is the only element to hang it on. This
-role is a kind of separator, and a separator's contents are presentational: text inside the marker
+The label is the only place that number can live, and <hr> is the only element to hang it on. Do not
+transcribe the folio as text beside the marker either: the marker goes at the head of the page
+whichever end the page prints its number on, so a visible copy of it would stand at the top of the
+reading order saying what the bottom of the paper said, and the reader who was given it properly
+would be given it twice. This role is a kind of separator, and a separator's contents are presentational: text inside the marker
 is pruned before a reader is given it, so <p role="doc-pagebreak" id="page-5">5</p> announces a
 page break that cannot say which page — the barrier the marker exists to remove. A naming attribute
 is judged against the element's own role, which is why aria-label is permitted here and a serious

@@ -195,6 +195,16 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
     // separator's children are presentational, so a number written as text is pruned before
     // a reader gets it. A marker naming no page is the barrier #145 was filed about, whether
     // or not axe reports it — so the clause has to give the reason, not just the shape.
+    // The folio is not transcribed beside the marker either, and the reason is stated rather
+    // than asserted because this is the clause a reader of the delivered HTML will question:
+    // the printed number stops being visible text. It is the placement that settles it — the
+    // marker moves to the head of the page whichever end the page printed the number on, so a
+    // visible copy would put the bottom of the paper at the top of the reading order and
+    // announce the number twice to the one reader who was given it properly. A permissive
+    // "may also transcribe it" would put that decision back on each page, which is the
+    // intermittency #145 was.
+    ["the folio is not also transcribed as text, and the reason is the marker's placement",
+      /Do not transcribe the folio as text beside the marker either: the marker goes at the head of the page whichever end the page prints its number on, so a visible copy of it would stand at the top of the reading order saying what the bottom of the paper said/],
     ["the number lives in the label because a separator's contents are presentational",
       /separator's contents are presentational: text inside the marker is pruned before a reader is given it, so <p role="doc-pagebreak" id="page-5">5<\/p> announces a page break that cannot say which page/],
     // And why <hr> rather than the <p> or <span> that reported the violation: the naming
