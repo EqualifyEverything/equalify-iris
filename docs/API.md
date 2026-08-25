@@ -641,16 +641,20 @@ rates and are never summed here; note that `input` **excludes** tokens read from
 whole prompt is `input + cache_read + cache_write`.
 
 The last two are non-zero because Iris asks the model to cache the part of each prompt that does
-not change: the agent's own system prompt, which is identical on every page of every document, and
-— on the fidelity check — the contract of the agent it is judging, which that task re-states in
-full on every page and which is the largest single constant Iris sends.
+not change. Three things qualify: the agent's own system prompt, which is identical on every page
+of every document; on the fidelity check, the contract of the agent it is judging, which that task
+re-states in full on every page and which is the largest single constant Iris sends; and on the
+Reader, the index of the document's source pages, which every chunk of every review round is given
+and which does not change while the loop runs. The last of those is per-document rather than
+per-deployment, so its entry is cold once per session by construction, and it is only asked for
+when the index is long enough to be worth a breakpoint — roughly ten pages.
 Expect a `cache_write` on the first calls of a run and a `cache_read` on every call after them —
 a handful of writes rather than exactly one, because pages are converted concurrently
 (`defaults.extraction_concurrency`), so the first few calls of a phase go out together before any
 of them has written the entry the others would have read. A request may carry more than one cached
-prefix — the fidelity check caches its system prompt and the contract it is judging — and they
-share one `cache_creation_input_tokens` figure on that call's `model_call` line rather than
-appearing as separate writes. So
+prefix — the fidelity check caches its system prompt and the contract it is judging, and a Reader
+call caches its system prompt and the page index — and they share one `cache_creation_input_tokens`
+figure on that call's `model_call` line rather than appearing as separate writes. So
 on a long document the same prefix is paid for a few times at 1.25× instead of 25 times at 1×, and
 every other call reads it at 0.1×. A run that shows `cache_read: 0` with several calls to the same agent is a run that
 is paying full price for the same instructions repeatedly — the cases where that is expected are a

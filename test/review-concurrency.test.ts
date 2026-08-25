@@ -16,6 +16,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runReview } from "../src/pipeline/review.ts";
+import { cacheableUserPrefix } from "../src/providers/promptCache.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 
@@ -131,6 +132,106 @@ test("a short document is one call, as it was", async () => {
   const run = await readerRound(1, 4, () => 1);
   assert.equal(run.calls, 1);
   assert.equal(run.maxInFlight, 1);
+});
+
+test("the page index leads the prompt, and is declared as its invariant head", async () => {
+  // The index is the one part of a Reader prompt that is about the document rather than
+  // the chunk, and it does not change while the loop runs — so every chunk of every round
+  // was re-sending the same ~1.5k tokens at full price. It now leads the message and is
+  // declared as the head, which is the only position a cache breakpoint can mark.
+  const dir = mkdtempSync(join(tmpdir(), "iris-review-head-"));
+  try {
+    const sent: { content: string; cachedPrefix?: string }[] = [];
+    const pages = Array.from({ length: 12 }, (_, i) => ({
+      order: i + 1,
+      innerHtml: `<h2>Section ${i + 1}</h2><p>${"content ".repeat(30)}</p>`,
+    }));
+    const ctx = {
+      sessionId: "ses_test",
+      images: [],
+      maxReviewIterations: 0,
+      extractionConcurrency: 4,
+      paths: {
+        agentsDir: join(dir, "agents"),
+        tmpAgentsDir: () => join(dir, "tmp-agents"),
+        agentMemory: () => join(dir, "memory", "page.json"),
+      } as unknown as Paths,
+      router: {
+        complete: async (agent: string, _cap: string, messages: { role: string; content: string; cachedPrefix?: string }[]) => {
+          if (agent === "reader") {
+            const user = messages.find((m) => m.role === "user")!;
+            sent.push({ content: user.content, cachedPrefix: user.cachedPrefix });
+          }
+          return { text: JSON.stringify({ issues: [] }) };
+        },
+      },
+      log: { event: () => {}, agentCall: () => {} },
+    } as unknown as PipelineContext;
+
+    await runReview(ctx, { body: markedBody(3), lint: { ok: true, violations: [] }, pages });
+    assert.ok(sent.length > 1, "the body must span more than one chunk for this to prove anything");
+
+    const heads = new Set(sent.map((s) => s.cachedPrefix));
+    assert.equal(heads.size, 1, "every chunk of a round must declare the same head, or nothing is cached");
+    const [headText] = [...heads];
+    assert.ok(headText, "no head was declared, so the index is paid for once per chunk");
+    assert.match(headText, /^## Source pages in this document/);
+    assert.match(headText, /Section 1/);
+    // Declaring a head buys nothing unless the adapters will actually mark it: below
+    // `cacheableUserPrefix`'s minimum the breakpoint is dropped and every chunk pays for
+    // the index again, with nothing failing. At READER_INDEX_EXCERPT_CHARS a twelve-page
+    // index clears it with little to spare, so shortening that constant — or the excerpt
+    // format — would hand the whole saving back silently. This is the tripwire for that.
+    assert.equal(
+      cacheableUserPrefix("us.anthropic.claude-sonnet-4-6", headText),
+      true,
+      `a 12-page index is ${headText.length} chars — too short for the adapters to cache`,
+    );
+    // The head has to be the START of the message — that is what the adapters slice on —
+    // and the chunk's own material still has to be there, after it.
+    for (const s of sent) {
+      assert.ok(s.content.startsWith(headText), "the declared head is not the start of the message");
+      assert.match(s.content, /## HTML/);
+      assert.match(s.content, /## Flattened screen-reader view/);
+      assert.match(s.content, /## axe-core lint/);
+      assert.equal(s.content.indexOf("## Source pages"), 0, "the index leads, so it can be a prefix");
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a document with no page index declares no head at all", async () => {
+  // An empty head is not a prefix worth naming, and passing "" would ask the adapter to
+  // slice a message at nothing.
+  const dir = mkdtempSync(join(tmpdir(), "iris-review-nohead-"));
+  try {
+    const sent: { cachedPrefix?: string }[] = [];
+    const ctx = {
+      sessionId: "ses_test",
+      images: [],
+      maxReviewIterations: 0,
+      extractionConcurrency: 2,
+      paths: {
+        agentsDir: join(dir, "agents"),
+        tmpAgentsDir: () => join(dir, "tmp-agents"),
+        agentMemory: () => join(dir, "memory", "page.json"),
+      } as unknown as Paths,
+      router: {
+        complete: async (agent: string, _cap: string, messages: { role: string; cachedPrefix?: string }[]) => {
+          if (agent === "reader") sent.push({ cachedPrefix: messages.find((m) => m.role === "user")!.cachedPrefix });
+          return { text: JSON.stringify({ issues: [] }) };
+        },
+      },
+      log: { event: () => {}, agentCall: () => {} },
+    } as unknown as PipelineContext;
+
+    await runReview(ctx, { body: markedBody(1), lint: { ok: true, violations: [] } });
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].cachedPrefix, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("the round says how it was read, so a slow one can be diagnosed", async () => {
