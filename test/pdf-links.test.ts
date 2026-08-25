@@ -1,10 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MAX_LINKS_PER_PAGE, parsePdfHtmlLinks, rasterizePdf, type PdfLink } from "../src/util/pdf.ts";
+import {
+  MAX_LINKS_PER_PAGE,
+  MAX_PDF_PAGES,
+  PdfTooLargeError,
+  pageRanges,
+  parsePdfHtmlLinks,
+  rasterShards,
+  rasterizePdf,
+  type PdfLink,
+} from "../src/util/pdf.ts";
 import {
   droppedHrefs,
   missingLinkProblem,
@@ -248,6 +257,128 @@ test(
     const pages = await rasterizePdf(hostile, "hostile.pdf");
     assert.deepEqual(pages[0].links, []);
     assert.deepEqual(pages[1].links, [{ text: "Email the team", href: "mailto:team@example.org" }]);
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Dividing the render between processes
+// ---------------------------------------------------------------------------
+
+// pdftoppm is single-threaded, so a document is rasterized by splitting its page range
+// across processes. What has to hold is that the split is a partition of the document —
+// every page rendered, once, and no shard asking for a page the file does not have,
+// which pdftoppm refuses outright rather than ignoring.
+
+test("a shard count never exceeds the pages there are to render", () => {
+  assert.equal(rasterShards(MAX_PDF_PAGES, 4), 4);
+  // One page cannot be split four ways, and a shard past the end is a failed render.
+  assert.equal(rasterShards(1, 8), 1);
+  assert.equal(rasterShards(2, 8), 2);
+  // A machine that reports nothing usable renders the way it always did.
+  for (const cpus of [0, -3, Number.NaN, 1.9]) {
+    assert.equal(rasterShards(MAX_PDF_PAGES, cpus), 1, `cpus=${cpus} falls back to one process`);
+  }
+});
+
+test("the ranges partition the document: every page once, none past the end", () => {
+  for (let pages = 1; pages <= MAX_PDF_PAGES; pages++) {
+    for (let cpus = 1; cpus <= 16; cpus++) {
+      const ranges = pageRanges(pages, rasterShards(pages, cpus));
+      const covered: number[] = [];
+      for (const [first, last] of ranges) {
+        assert.ok(first >= 1 && last <= pages, `range ${first}-${last} inside 1-${pages} (cpus=${cpus})`);
+        assert.ok(first <= last, `range ${first}-${last} is not inverted (cpus=${cpus})`);
+        for (let p = first; p <= last; p++) covered.push(p);
+      }
+      assert.deepEqual(
+        covered,
+        Array.from({ length: pages }, (_, i) => i + 1),
+        `pages=${pages} cpus=${cpus} renders each page exactly once, in order`,
+      );
+    }
+  }
+});
+
+// An n-page PDF with one line of text per page and no annotations. Built the same way
+// as linkPdf, and used only where the page COUNT is the subject.
+function plainPdf(n: number): Buffer {
+  const objs: string[] = ["<< /Type /Catalog /Pages 2 0 R >>", "", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"];
+  const kids: string[] = [];
+  for (let p = 1; p <= n; p++) {
+    const text = `BT /F1 14 Tf 72 700 Td (Page ${p}) Tj ET`;
+    objs.push(`<< /Length ${text.length} >>\nstream\n${text}\nendstream`);
+    objs.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> ` +
+        `/Contents ${objs.length} 0 R >>`,
+    );
+    kids.push(`${objs.length} 0 R`);
+  }
+  objs[1] = `<< /Type /Pages /Kids [${kids.join(" ")}] /Count ${n} >>`;
+  let body = "%PDF-1.7\n";
+  const offsets: number[] = [];
+  objs.forEach((o, i) => {
+    offsets.push(body.length);
+    body += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const startxref = body.length;
+  body += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  for (const off of offsets) body += `${String(off).padStart(10, "0")} 00000 n \n`;
+  body += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${startxref}\n%%EOF\n`;
+  return Buffer.from(body, "latin1");
+}
+
+test(
+  "a document over the page cap is refused before anything is rendered",
+  { skip: hasPoppler() ? false : "poppler-utils not installed" },
+  async () => {
+    // The page count is read for two reasons now — the cap and the shard count — and
+    // the cap is the one a user meets: it is what turns an unbounded rasterization into
+    // a clean 400 at the upload route.
+    await assert.rejects(
+      () => rasterizePdf(plainPdf(MAX_PDF_PAGES + 1), "long.pdf"),
+      (e: Error) => e instanceof PdfTooLargeError && e.message.includes(String(MAX_PDF_PAGES + 1)),
+    );
+    // And a document exactly at the cap is not: the boundary is "more than", as the
+    // message a user is shown claims.
+    const pages = await rasterizePdf(plainPdf(MAX_PDF_PAGES), "atcap.pdf");
+    assert.equal(pages.length, MAX_PDF_PAGES);
+    assert.deepEqual(pages.map((p) => p.name).slice(0, 2), ["atcap-p1.png", "atcap-p2.png"]);
+  },
+);
+
+test(
+  "a document rendered in shards is the same document rendered in one process",
+  {
+    skip: !hasPoppler()
+      ? "poppler-utils not installed"
+      : // A one-core machine renders in one process, so there would be no split to
+        // compare against and the assertions below would pass without testing anything.
+        rasterShards(2) < 2
+        ? "single-core machine: nothing is split here"
+        : false,
+  },
+  async () => {
+    // The saving is only worth having if the pixels are identical, and they are for the
+    // reason the split is safe at all: a page render reads that page and nothing else.
+    // Compared against poppler run the way this code used to run it — one process over
+    // the whole capped range — so a future poppler that stopped being page-local would
+    // fail here rather than quietly shipping different images.
+    const pdf = linkPdf();
+    const sharded = await rasterizePdf(pdf, "report.pdf");
+    assert.equal(sharded.length, 2);
+
+    const dir = mkdtempSync(join(tmpdir(), "iris-pdf-serial-"));
+    try {
+      const path = join(dir, "in.pdf");
+      writeFileSync(path, pdf);
+      execFileSync("pdftoppm", ["-png", "-r", "150", "-l", String(MAX_PDF_PAGES), path, join(dir, "pg")]);
+      for (let i = 0; i < sharded.length; i++) {
+        const serial = readFileSync(join(dir, `pg-${i + 1}.png`));
+        assert.ok(serial.equals(sharded[i].buffer), `page ${i + 1} is byte-identical`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   },
 );
 
