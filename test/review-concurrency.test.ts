@@ -144,15 +144,12 @@ test("the round says how it was read, so a slow one can be diagnosed", async () 
   assert.deepEqual(starts[0].data, { iteration: 0, chunks: 3, concurrency: 2 });
 });
 
-test("a chunk that fails stops the round paying for the chunks behind it", async () => {
-  // mapWithConcurrency rejects with the first error, matching the serial loop — but its
-  // workers keep pulling items, so without the guard a chunk-0 failure on a 5-chunk body
-  // at a limit of 2 still buys three more full-price reader calls for a round whose
-  // result is already discarded.
+// The same body, against a router whose chunk 0 fails however it likes. Returns how many
+// reader calls were paid for and what the round rejected with.
+async function failingRound(throwValue: unknown): Promise<{ calls: number; rejected: unknown }> {
   const dir = mkdtempSync(join(tmpdir(), "iris-review-fail-"));
   try {
     let calls = 0;
-    const boom = new Error("provider said no");
     const ctx = {
       sessionId: "ses_test",
       images: [],
@@ -169,21 +166,44 @@ test("a chunk that fails stops the round paying for the chunks behind it", async
           calls++;
           const which = chunkOf(messages.map((m) => m.content).join("\n"));
           await sleep(which === 0 ? 1 : 30);
-          if (which === 0) throw boom;
+          if (which === 0) throw throwValue;
           return { text: JSON.stringify({ issues: [] }) };
         },
       },
       log: { event: () => {}, agentCall: () => {} },
     } as unknown as PipelineContext;
 
-    await assert.rejects(
-      runReview(ctx, { body: markedBody(5), lint: { ok: true, violations: [] } }),
-      // The error the round rejects with is the one that actually happened, not a
-      // stand-in raised by a chunk that read the flag.
-      (e: unknown) => e === boom,
-    );
-    assert.ok(calls <= 2, `only the calls already in flight should have been paid for, got ${calls}`);
+    let rejected: unknown = "did not reject";
+    try {
+      await runReview(ctx, { body: markedBody(5), lint: { ok: true, violations: [] } });
+    } catch (e) {
+      rejected = e;
+    }
+    return { calls, rejected };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+test("a chunk that fails without an error to show for it still stops the round", async () => {
+  // The guard is a flag rather than a test on the recorded error, because the thrown
+  // value is not ours: an adapter or a mock that throws a bare `undefined` is still a
+  // chunk that failed, and a guard read off the error would be disarmed on exactly that
+  // call — every queued chunk then paying in full.
+  const run = await failingRound(undefined);
+  assert.ok(run.calls <= 2, `a nullish failure must arm the guard too, got ${run.calls} calls`);
+  assert.equal(run.rejected, undefined, "and the round still rejects with what was thrown");
+});
+
+test("a chunk that fails stops the round paying for the chunks behind it", async () => {
+  // mapWithConcurrency rejects with the first error, matching the serial loop — but its
+  // workers keep pulling items, so without the guard a chunk-0 failure on a 5-chunk body
+  // at a limit of 2 still buys three more full-price reader calls for a round whose
+  // result is already discarded.
+  const boom = new Error("provider said no");
+  const run = await failingRound(boom);
+  assert.ok(run.calls <= 2, `only the calls already in flight should have been paid for, got ${run.calls}`);
+  // The error the round rejects with is the one that actually happened, not a stand-in
+  // raised by a chunk that read the flag.
+  assert.equal(run.rejected, boom);
 });

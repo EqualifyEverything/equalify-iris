@@ -228,9 +228,16 @@ async function runReader(
   // first records it here and the rest decline to send. This is the first caller that can
   // reject at all: extraction contains each page in a `.catch`, so nothing before it ever
   // reached this path.
+  //
+  // Whether one failed is its own flag rather than a test on the error, because the value
+  // thrown is not ours: a `throw undefined` from an adapter or a mock is still a chunk
+  // that failed, and reading the guard off the error itself would leave it disarmed on
+  // exactly that call — every queued chunk then paying in full, which is the case the
+  // guard exists for.
+  let failed = false;
   let failure: unknown = null;
   const perChunk = await mapWithConcurrency(chunks, limit, async (c, i) => {
-    if (failure !== null) throw failure;
+    if (failed) throw failure;
     const user =
       `## HTML\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint)}` +
       (i === 0 && duplicateHeadings
@@ -247,7 +254,10 @@ async function runReader(
     } catch (e) {
       // The first one wins, so the error the round rejects with is the one that
       // actually happened rather than whichever chunk noticed the flag.
-      failure ??= e;
+      if (!failed) {
+        failed = true;
+        failure = e;
+      }
       throw e;
     }
     ctx.log.agentCall({
