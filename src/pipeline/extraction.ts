@@ -512,7 +512,7 @@ const BLANK_LOG =
 const UNREADABLE_LOG =
   /\b(illegible|unreadable|not legible|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry)|blurr\w*|obscur\w*|resolve|corrupt\w*|partial\w*|error)\b/i;
 const DEGRADED_IMAGE_LOG =
-  /\b(dark|faint|washed|blurry|blurred|noisy|noise|grainy|pixelat\w*|low[- ]?res\w*|resolution|(poor|low|bad|degraded) quality|out of focus|did ?n[o']?t load|not load\w*)\b/i;
+  /\b(dark|faint|washed|blurry|blurred|noisy|noise|grainy|pixelat\w*|low[- ]?res\w*|resolution|(poor|low|bad|degraded)( \w+)? quality|quality (is|was|of)|(out of|not in|soft) focus|did ?n[o']?t load|not load\w*)\b/i;
 
 // Exported for the unit test: this predicate is the whole distinction between a page delivered
 // empty and a page reported lost, and it is worth pinning on the reply shapes directly.

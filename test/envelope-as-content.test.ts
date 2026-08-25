@@ -225,6 +225,12 @@ test("only a reply that says the page is blank is read as a blank page", () => {
   assert.equal(declaredBlank({ html: "", log: "Low resolution scan; no text." }), false);
   assert.equal(declaredBlank({ html: "", log: "The image is too noisy to read; no text." }), false);
   assert.equal(declaredBlank({ html: "", log: "The image did not load; no content." }), false);
+  // The predicative form, which is how a model usually writes it — and the fixture above is
+  // refused by `too poor` rather than by anything about quality, so without these two the
+  // quality wording has no test at all.
+  assert.equal(declaredBlank({ html: "", log: "The page appears empty; the scan quality is poor." }), false);
+  assert.equal(declaredBlank({ html: "", log: "The page appears blank; the image quality is degraded." }), false);
+  assert.equal(declaredBlank({ html: "", log: "The page is blank; the text is not in focus." }), false);
   // A hedge with no infinitive after it is still a hedge.
   assert.equal(declaredBlank({ html: "", log: "The page appears blank; the contrast is too low." }), false);
   assert.equal(declaredBlank({ html: "", log: "The page appears blank; the exposure is too low." }), false);
