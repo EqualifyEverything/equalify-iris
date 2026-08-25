@@ -90,7 +90,15 @@ test("the shape the page agent is now told to emit is clean", async () => {
 // either one, the prompt's stated reasoning would be wrong even though every verdict above
 // still held, and nothing else in the suite would notice.
 test("axe's own role table is why the marker is a named <hr> and not a <p> with text", () => {
-  const roles = axe.utils.getStandards().ariaRoles;
+  // axe's shipped `AriaRoles` type declares none of these members, though every entry in
+  // the table carries them — so the assertions below are cast to the shape axe actually
+  // ships. Widening it rather than picking members out keeps the assertion honest: an
+  // absent key reads as `undefined` and fails on comparison, which is what the first
+  // assertion depends on.
+  const roles = axe.utils.getStandards().ariaRoles as unknown as Record<
+    string,
+    { prohibitedAttrs?: string[]; superclassRole?: string[]; childrenPresentational?: boolean }
+  >;
 
   // Naming is permitted on the role: the report above is the host element's doing.
   assert.equal(roles["doc-pagebreak"].prohibitedAttrs, undefined, "doc-pagebreak now prohibits attributes itself");

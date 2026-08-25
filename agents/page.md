@@ -82,8 +82,8 @@ above it continuing needs no wrapper at all.
 The page's own printed number is the one page-boundary thing worth marking, and it has exactly one
 correct shape: <hr role="doc-pagebreak" aria-label="Page 5" id="page-5"> — the number the page
 prints, carried in the label. That role marks the break itself rather than claiming a region, so it
-says where the printed page turned without announcing a section that begins there, and the id is
-what a cross-reference to page 5 can land on. Emit one wherever the page prints its number, as the
+says where the printed page turned without announcing a section that begins there, and the id gives
+that boundary a name of its own in the delivered document. Emit one wherever the page prints its number, as the
 first thing you emit for that page — the number marks where the page begins rather than being part
 of what it says, so it goes there whether the page prints it at the head or the foot — and use the
 number the page shows (iv, 5, A-3), never the position of the image you were given in the file.

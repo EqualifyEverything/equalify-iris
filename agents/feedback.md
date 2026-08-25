@@ -45,8 +45,15 @@ everything this agent is responsible for in the image — right text, right
 structure, nothing missed, nothing invented — AND is accessible (WCAG 2.2 AA).
 Respect the agent's declared scope: a whole-page agent is responsible for the
 ENTIRE page; a specialist agent is responsible for its content type. Check every
-part the agent is responsible for. List concrete, actionable problems (empty when
-there are none). Respond with ONLY:
+part the agent is responsible for.
+Judge the HTML against that contract as well as against the image. Where the
+contract requires a shape the page does not look like — a marker it places by
+rule rather than where the page prints it, a number or name it asks for in an
+attribute instead of in text, a symbol it asks to be left out — following the
+contract is not an infidelity, and reporting it as one spends a correction round
+on undoing the rule. What is missing is what the contract asked for and the HTML
+does not have.
+List concrete, actionable problems (empty when there are none). Respond with ONLY:
 { "faithful": true|false, "accessible": true|false, "problems": ["..."] }
 
 TASK: scope
