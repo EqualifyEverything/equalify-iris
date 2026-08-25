@@ -496,6 +496,18 @@ function replyShape(text: string, parsed: unknown): string {
 // direction to be wrong in: a page wrongly reported as failed costs a glance, a page wrongly
 // dropped costs the page.
 //
+// The one place the doubt is not fatal is a clause about the marks on the paper (`SCAN_MARKS`
+// below): "a few faint specks, no legible text" describes an empty sheet, and reading `faint` there
+// as doubt about the scan cost the bench four pages. Such a clause has to deny that the marks are
+// text, and it still cannot carry a word that says the reading failed, so the exemption narrows
+// what the veto words are ABOUT without moving where a real doubt lands. Not done here is the
+// issue's preferred fix, sending a vetoed declaration to the fidelity check instead of reporting
+// the page failed: the paragraph above is why — the check is the same model on the same image, so
+// on the unreadable page it agrees there is nothing there, and a page delivered blank on that
+// agreement has no marker, no notice and no entry in `pages_failed` to look at. The failure path
+// is the disclosure. What a refusal now leaves behind is the `blank_vetoed` field on
+// `page_no_output`, so which word refused which page is a log read rather than an investigation.
+//
 // What is NOT done here is the issue's preferred fix — a page-break marker labelled with the
 // page's position in the file. The prompt forbids exactly that ("use the number the page shows
 // (iv, 5, A-3), never the position of the image you were given in the file"), and it is the
@@ -527,13 +539,72 @@ const UNREADABLE_LOG =
 const DEGRADED_IMAGE_LOG =
   /\b(dark|faint|washed|blurry|blurred|noisy|noise|grainy|pixelat\w*|low[- ]?res\w*|resolution|(poor|low|bad|degraded)( \w+)? quality|quality (is|was|of)|(out of|not in|soft) focus|did ?n[o']?t load|not load\w*)\b/i;
 
+// The marks a scanner leaves on an empty sheet. A log that names these is describing what is
+// physically on the paper, not the condition of the image — which matters because the words for
+// the two overlap almost completely (`faint`, `noise`, `dark`), and round 9 of the bench lost
+// four blank pages of 100 to that overlap: an agent that answered the prompt's request for a
+// description ("Specks/dots are visible on the page but do not resolve into any characters or
+// content") was punished for it, while an agent that said only "Page is blank." was believed
+// (issue #190). Two pages of one document opened with a verbatim identical sentence and only the
+// one that went on to explain itself was refused, so what was being measured was the wording.
+const SCAN_MARKS =
+  /\b(specks?|speckles?|flecks?|dots?|dust|debris|smudges?|blemishes?|artifacts?|noise|stray marks?)\b/i;
+// The clause says there is no text in those marks. This is the blank declaration itself, stated
+// about the marks rather than about the page, and it is what makes the exemption below safe:
+// without it, any mention of dust would disarm the veto.
+const NOT_TEXT =
+  /\b(no|not|none|nothing|never|n[o']t)\b[^.;]*\b(legible|text|characters?|content|words?|letters?|writing|print(ed|ing)?|typograph\w*)\b/i;
+// Terms the exemption never reaches, because they are claims about the page rather than about the
+// marks and stay claims about the page whatever clause they sit in: a failure to read ("a few
+// specks and no text, the scan is too dark"), something hidden ("dust and noise obscure the text"
+// — which names marks and denies nothing), or a concession ("a few specks and no text, though the
+// scan is very faint"). A concession word is free to include here: the exemption only ever matters
+// in a clause that has a doubt word in it, so blocking it on `though` costs nothing anywhere else.
+// A blank declaration carrying one of these is a failed page, exemption or not.
+const HARD_DOUBT =
+  /\b(illegible|unreadable|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry|grainy)|obscur\w*|hidden|corrupt\w*|error|did ?n[o']?t load|not load\w*|though|although|however|uncertain|not (entirely |fully )?(sure|certain))\b/i;
+
+// The text the veto lists are run over: the log, minus any clause whose subject is the marks on
+// the paper and which asserts they are not text. Clauses are split on sentence and semicolon
+// boundaries only, NOT on `but`/`and` — "Specks are visible on the page but do not resolve into
+// any characters" is one statement, and splitting it would strand the denial from its subject and
+// veto on `resolve` again.
+function vetoScope(log: string): string {
+  return log
+    .split(/[.;]+/)
+    .filter((clause) => !(SCAN_MARKS.test(clause) && NOT_TEXT.test(clause) && !HARD_DOUBT.test(clause)))
+    .join(". ");
+}
+
+function matches(re: RegExp, text: string): string[] {
+  return [...text.matchAll(new RegExp(re.source, "gi"))].map((m) => m[0].toLowerCase());
+}
+
+export interface BlankDeclaration {
+  // The log says the page has nothing on it, in some words.
+  asserted: boolean;
+  // ...and nothing in it casts doubt on that, so the page is delivered empty.
+  blank: boolean;
+  // The doubt words that refused an assertion, for the log line. Without this the only record of
+  // a refusal was the reply itself, and working out WHICH word did it is a regex read per page —
+  // which is what issue #190 had to do by hand for four pages.
+  vetoes: string[];
+}
+
 // Exported for the unit test: this predicate is the whole distinction between a page delivered
 // empty and a page reported lost, and it is worth pinning on the reply shapes directly.
-export function declaredBlank(parsed: { html?: string; log?: string } | null): boolean {
-  if (typeof parsed?.html !== "string" || parsed.html.trim()) return false;
+export function blankDeclaration(parsed: { html?: string; log?: string } | null): BlankDeclaration {
+  const none = { asserted: false, blank: false, vetoes: [] };
+  if (typeof parsed?.html !== "string" || parsed.html.trim()) return none;
   const log = parsed.log?.trim();
-  if (!log) return false;
-  return BLANK_LOG.test(log) && !UNREADABLE_LOG.test(log) && !DEGRADED_IMAGE_LOG.test(log);
+  if (!log || !BLANK_LOG.test(log)) return none;
+  const scope = vetoScope(log);
+  const vetoes = [...new Set([...matches(UNREADABLE_LOG, scope), ...matches(DEGRADED_IMAGE_LOG, scope)])];
+  return { asserted: true, blank: vetoes.length === 0, vetoes };
+}
+
+export function declaredBlank(parsed: { html?: string; log?: string } | null): boolean {
+  return blankDeclaration(parsed).blank;
 }
 
 // Load the page agent, preferring a session-built/trained copy (tmp/), then the
@@ -646,7 +717,8 @@ async function renderPage(
     // deleting it (`page_extraction_failed` with `kept: "prior"`). Nothing else on the
     // re-extraction path would catch it: `destroyedPage` guards the correction pass, where
     // `before` is this round's own render, so prior → empty never reaches a size comparison.
-    if (declaredBlank(parsed) && previous?.trim()) {
+    const declaration = blankDeclaration(parsed);
+    if (declaration.blank && previous?.trim()) {
       ctx.log.event("page_blank_refused", {
         image: img.name,
         page: img.order,
@@ -657,12 +729,21 @@ async function renderPage(
         `page agent declared a blank page that already had ${previous.trim().length} chars of content`,
       );
     }
-    if (declaredBlank(parsed)) {
+    if (declaration.blank) {
       ctx.log.event("page_blank", { image: img.name, page: img.order, log: parsed?.log ?? "" });
       return { html: "", log: parsed?.log ?? "" };
     }
     const shape = replyShape(res.text, parsed);
-    ctx.log.event("page_no_output", { image: img.name, page: img.order, chars: res.text.length, shape });
+    // A declaration the veto refused is recorded as the refusal it is, with the words that did it:
+    // the failure line alone reads as "the model answered with no page", which is the opposite of
+    // what happened, and every page issue #190 recovered had to be traced back to a word by hand.
+    ctx.log.event("page_no_output", {
+      image: img.name,
+      page: img.order,
+      chars: res.text.length,
+      shape,
+      ...(declaration.asserted ? { blank_vetoed: declaration.vetoes, log: parsed?.log ?? "" } : {}),
+    });
     throw new Error(`page agent returned no HTML (${shape}, ${res.text.length} chars)`);
   }
   const sa = parsed?.suggested_agent;

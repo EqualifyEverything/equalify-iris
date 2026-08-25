@@ -33,7 +33,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runExtraction, stripFences, bareHtml, declaredBlank } from "../src/pipeline/extraction.ts";
+import { runExtraction, stripFences, bareHtml, declaredBlank, blankDeclaration } from "../src/pipeline/extraction.ts";
 import { extractJson } from "../src/util/json.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
@@ -255,6 +255,101 @@ test("only a reply that says the page is blank is read as a blank page", () => {
   assert.equal(declaredBlank(null), false);
   // A page with content in it is a page, whatever its log says.
   assert.equal(declaredBlank({ html: "<p>Hi</p>", log: "This page is blank." }), false);
+});
+
+test("a log describing the specks on an empty sheet is not a log doubting the scan", () => {
+  // Round 9 of the bench delivered five blank pages and lost four, and all four were lost to one
+  // word inside the agent's own explanation of WHY the page is blank (issue #190). The same
+  // vocabulary means opposite things depending on what it is about: `faint specks` is what is on
+  // the paper, `the scan is faint` is what is wrong with the image. Two pages of one document
+  // opened with a verbatim identical sentence and only the one that went on to explain itself was
+  // refused, which is the proof the wording was being measured and not the page.
+  //
+  // These four are the real logs, at the length the round produced them.
+  assert.equal(
+    declaredBlank({
+      html: "",
+      log: "Page is blank. Specks/dots are visible on the page but do not resolve into any characters or content.",
+    }),
+    true,
+    "`do not resolve into characters` IS the blank declaration, stated about the marks",
+  );
+  assert.equal(
+    declaredBlank({
+      html: "",
+      log:
+        "Page is blank. The visible marks are artifacts of the scan (dust/noise) and do not resolve " +
+        "into any characters or content.",
+    }),
+    true,
+  );
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. A few faint specks/artifacts are visible but no legible text or content." }),
+    true,
+  );
+  assert.equal(
+    declaredBlank({
+      html: "",
+      log:
+        "Page is blank. No printed page number is visible, so no page-break marker is emitted. The page " +
+        "contains only a few scattered specks/dots that appear to be scanning artifacts, not legible text " +
+        "or meaningful content.",
+    }),
+    true,
+    "the page whose only difference from a delivered one was the sentence explaining itself",
+  );
+
+  // The exemption is a clause about the MARKS that denies they are text. Naming dust is not
+  // enough on its own, and neither is denying text on its own.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Dust and noise cover the sheet." }), false);
+  assert.equal(declaredBlank({ html: "", log: "The page is blank; there is faint text on it." }), false);
+  // And it never reaches a word that says the reading failed or that hedges the answer, wherever
+  // that word sits. Each of these is the reply that most needs a human to look at the page.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Dust and noise obscure the text." }), false);
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. A few specks are visible and no text is legible, the scan is too dark." }),
+    false,
+  );
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. Only specks and no text, though the scan is very faint." }),
+    false,
+    "a concession inside the clause is still a concession",
+  );
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. Specks and dust, no characters — I could not read this page at all." }),
+    false,
+  );
+  // Clauses are split on sentences, so doubt in ONE clause is not disarmed by marks in another.
+  assert.equal(
+    declaredBlank({ html: "", log: "The scan is noisy with artifacts, no text; the words are illegible." }),
+    false,
+  );
+  assert.equal(declaredBlank({ html: "", log: "Low resolution scan. A few specks/dots, no legible text." }), false);
+});
+
+test("a refused blank declaration says which word refused it", () => {
+  // What the log line owed whoever reads it. Every one of #190's four pages had to be traced from
+  // `shape: "empty_html"` — which reads as "the model answered with no page", the opposite of what
+  // happened — back to a word, by rerunning the regexes on the reply by hand.
+  const vetoed = blankDeclaration({ html: "", log: "The page is blank; the scan is too dark to resolve any text." });
+  assert.equal(vetoed.asserted, true, "the log did claim the page was blank");
+  assert.equal(vetoed.blank, false);
+  assert.deepEqual(vetoed.vetoes, ["too dark to", "resolve", "dark"], "in the order the lists are checked");
+
+  // Nothing to say where nothing was refused, and nothing to say where no claim was made.
+  const clean = blankDeclaration({ html: "", log: "Page is blank." });
+  assert.deepEqual(clean, { asserted: true, blank: true, vetoes: [] });
+  assert.deepEqual(blankDeclaration({ html: "", log: "Converted the page." }), {
+    asserted: false,
+    blank: false,
+    vetoes: [],
+  });
+  assert.deepEqual(blankDeclaration({ log: "no content" }), { asserted: false, blank: false, vetoes: [] });
+  // A word inside an exempt clause is not a veto and is not reported as one.
+  assert.deepEqual(
+    blankDeclaration({ html: "", log: "Page is blank. A few faint specks are visible but no legible text." }),
+    { asserted: true, blank: true, vetoes: [] },
+  );
 });
 
 // --- through the pipeline ------------------------------------------------------
@@ -481,6 +576,48 @@ test("a page the agent could not read is still a lost page, not a blank one", as
     assert.equal(of(events, "page_blank").length, 0);
     assert.equal(of(events, "page_no_output")[0].shape, "empty_html");
     assert.match(fragments.find((f) => f.order === 2)!.innerHtml, /@page-failed 2:/);
+  });
+});
+
+test("a blank page that explains itself is delivered, and a refusal names the word", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // Page 2 is #190's `p1-25` page 4, verbatim: a blank leaf whose log describes the specks that
+    // establish it is blank. It was reported lost. Page 3 is the reply the veto is FOR, and its
+    // failure line now carries the words that refused it, so the next round of this can be read
+    // out of the log instead of reconstructed from the regexes.
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) =>
+          o === 2
+            ? '{"html": "", "log": "Page is blank. Specks/dots are visible on the page but do not resolve into any characters or content."}'
+            : o === 3
+              ? '{"html": "", "log": "Page is blank, but the scan is too dark to be sure."}'
+              : good(o),
+      }),
+    );
+    assert.deepEqual(failedPages, [3], "the described blank page is not a loss; the doubtful one is");
+    assert.deepEqual(of(events, "page_blank").map((e) => e.page), [2]);
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "");
+    assert.match(fragments.find((f) => f.order === 3)!.innerHtml, /@page-failed 3:/);
+    const refused = of(events, "page_no_output");
+    assert.equal(refused.length, 1);
+    assert.equal(refused[0].shape, "empty_html");
+    assert.deepEqual(refused[0].blank_vetoed, ["too dark to", "dark"]);
+    assert.equal(refused[0].log, "Page is blank, but the scan is too dark to be sure.");
+  });
+});
+
+test("a reply that made no blank claim says nothing about a veto", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The `empty_html` line's original meaning — an envelope that carried no page and did not say
+    // why — is unchanged, and it must not grow a field implying a declaration was refused.
+    await runExtraction(makeCtx(dir, events, { render: (o) => (o === 2 ? '{"html": ""}' : good(o)) }));
+    const no = of(events, "page_no_output");
+    assert.equal(no.length, 1);
+    assert.equal("blank_vetoed" in no[0], false);
+    assert.equal("log" in no[0], false);
   });
 });
 
