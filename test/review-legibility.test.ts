@@ -94,21 +94,26 @@ test("the unfinished-page marker is nobody's to resolve in this loop, and the ed
   // The asymmetry is the whole point of splitting the two paragraphs. Reading a smudge off an
   // attached image costs a phrase; finishing a page costs the rest of that page ON TOP of the
   // complete corrected body, and the editor has one response for both. A TruncatedResponseError
-  // is not a size refusal, so review.ts's retry does not catch it — since #143 the round is
-  // discarded and the entering body delivered, which takes every other correction that round
-  // made with it (test/review-truncation.test.ts). An editor told only "resolve markers where
-  // the image is attached" would read this marker as its job.
+  // is not a size refusal, so review.ts's retry does not catch it — since #143 the round costs
+  // itself rather than the run, and since #165 it is re-made a section at a time by requests
+  // that each see one piece of the document, which cannot finish a page either
+  // (test/review-truncation.test.ts, test/editor-sections.test.ts). An editor told only "resolve
+  // markers where the image is attached" would read this marker as its job.
   for (const [what, re] of [
     ["it is not the editor's to resolve even with the image in hand",
       /A \[page not fully transcribed\] marker is not yours to resolve at all, even with that page's image in front of you/],
     ["the cost is named: the rest of the page on top of the whole body",
       /filling it in means returning the rest of that page on top of the complete corrected body — the one request in this pipeline that can exceed what a response can hold/],
-    // The cost of hitting it, stated as it now stands: since #143 a truncated response
-    // costs the round rather than the run, and the prompt has to say the true thing —
-    // every OTHER correction made in that round goes with it, which is a reason to leave
-    // this marker alone that does not depend on the old failure mode.
-    ["and the consequence of hitting that ceiling is the whole round, not a smaller retry",
-      /hitting that ceiling does not degrade to a smaller retry: the whole round is discarded, so every other correction you made in it is thrown away with it and the document is delivered exactly as it reached you/],
+    // The cost of hitting it, stated as it now stands — and it has moved twice. #143 made a
+    // truncated response cost the round rather than the run; #165 made that round be re-made a
+    // section at a time, by requests that each see one piece of the document. So the prompt no
+    // longer says the round is discarded, because it is not, and this string is checked because
+    // EDITOR_SECTION_SYSTEM is built on EDITOR_SYSTEM: a stale sentence here would be carried
+    // verbatim into the salvage of exactly such a round, telling the editor that the round it is
+    // rescuing was thrown away. What is still true is the reason to leave the marker alone: this
+    // reading of the document is over either way, and no section call can finish that page.
+    ["and the consequence of hitting that ceiling is this reading of the document",
+      /hitting that ceiling costs this reading of the document: the round is re-made one section at a time, by requests that each see a piece of the document and not the rest of it, and this is the last round either way/],
     ["what would resolve it is named, so leaving it is not read as giving up",
       /Re-extracting that page is what has a whole response to itself/],
     ["so it is left standing, and never deleted",

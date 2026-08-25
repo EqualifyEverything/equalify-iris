@@ -149,6 +149,18 @@ export function cutPoints(html: string): number[] {
       if (stack.length === 0) out.push(i);
       continue;
     }
+    // Implied ends are settled before anything else about this tag, because a tag that opens
+    // nothing can still CLOSE something: `<hr>` ends an open `<p>` (which is what `hr` is in
+    // BLOCK for), and a check that returned early for void elements would never apply the rule.
+    //
+    // An omitted end tag ends its element HERE, at the `<` of the tag that implies it — so the
+    // cut point is `lt` and not `i`: the element that just ended is behind us, and the one whose
+    // tag we have just read belongs to the next section. Recorded only when something was
+    // actually popped, because a tag that opens with nothing already open is a new top-level
+    // node whose boundary was recorded when the previous one closed.
+    const openBefore = stack.length;
+    while (stack.length && impliedEnd(tag.name, stack[stack.length - 1])) stack.pop();
+    if (openBefore > 0 && stack.length === 0) out.push(lt);
     if (RAW_TEXT.has(tag.name)) {
       const close = new RegExp(`</${tag.name}\\s*>`, "i").exec(html.slice(i));
       i = close ? i + close.index + close[0].length : html.length;
@@ -159,14 +171,6 @@ export function cutPoints(html: string): number[] {
       if (stack.length === 0) out.push(i);
       continue;
     }
-    // An omitted end tag ends its element HERE, at the `<` of the tag that implies it — so the
-    // cut point is `lt` and not `i`: the element that just ended is behind us, and the one whose
-    // tag we have just read belongs to the next section. Recorded only when something was
-    // actually popped, because a tag that opens with nothing already open is a new top-level
-    // node whose boundary was recorded when the previous one closed.
-    const openBefore = stack.length;
-    while (stack.length && impliedEnd(tag.name, stack[stack.length - 1])) stack.pop();
-    if (openBefore > 0 && stack.length === 0) out.push(lt);
     stack.push(tag.name);
   }
   // A cut at the very end of the body is not a cut: it would open a section with nothing in

@@ -85,6 +85,9 @@ test("an end tag the document leaves out does not swallow the rest of it", () =>
     `<dl><dt>t<dd>d</dl>`,
     `<h2>End</h2>`,
   ]);
+  // A tag that opens nothing can still close something: `<hr>` ends an open `<p>`, and the
+  // paragraph before it is a section that can be corrected on its own.
+  assert.deepEqual(splitSections(`<p>one<hr><p>two</p>`, 6).map((s) => s.html), [`<p>one`, `<hr>`, `<p>two</p>`]);
   // A table written the same way, where the omissions nest three deep.
   assert.deepEqual(
     splitSections(`<table><tr><td>1<td>2<tr><td>3</table><p>after</p>`, 12).map((s) => s.html),
@@ -475,7 +478,7 @@ test("anything but a size failure in a section still ends the run", async () => 
 test("every reason for not sectioning at all is logged with its number", async () => {
   await withTemp(async (dir) => {
     // A round that quietly declines to try reads in a log exactly like one that tried and
-    // failed, and the four reasons have four different remedies.
+    // failed, and the reasons have different remedies.
     const declined = async (o: Parameters<typeof ctxWith>[1], body?: string) => {
       const { ctx, rec } = ctxWith(dir, o);
       const result = await review(ctx, body);
@@ -486,7 +489,7 @@ test("every reason for not sectioning at all is logged with its number", async (
 
     // No measurement: a truncation that lost its prototype at some boundary is recognised by
     // its message, but its `chars` are not on it, and inventing a budget would be the
-    // pre-flight guess this deliberately is not (PRD §7.7).
+    // pre-flight guess this deliberately is not (PRD §7.11 v1.3).
     assert.equal(
       (
         await declined({
@@ -504,6 +507,16 @@ test("every reason for not sectioning at all is logged with its number", async (
     const small = await declined({ wholeBody: () => truncated(MIN_SECTION_BUDGET * 2 - 2) });
     assert.equal(small.reason, "budget_too_small");
     assert.equal(small.budget, MIN_SECTION_BUDGET - 1);
+    // A response longer than the document it was correcting: the budget covers the whole body,
+    // so a section call would be the same request at the same length. That is a reply that ran
+    // away with itself, not a document too long to answer, and reporting it as "indivisible"
+    // would send an operator looking for an enormous table in a document made of paragraphs.
+    const short = `<p>one</p>\n\n<p>two</p>`;
+    const runaway = await declined({ wholeBody: () => truncated(CHARS) }, short);
+    assert.equal(runaway.reason, "budget_exceeds_body");
+    assert.equal(runaway.body, short.length);
+    assert.equal(runaway.chars, CHARS);
+    assert.ok(Number(runaway.budget) >= short.length);
     // One indivisible node: the case a section-size bound does not solve.
     const huge = `<table>${`<tr><td>cell</td></tr>`.repeat(1_500)}</table>`;
     const indivisible = await declined({}, huge);

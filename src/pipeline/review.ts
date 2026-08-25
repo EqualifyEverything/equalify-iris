@@ -173,10 +173,10 @@ one, and it is the string a reader will act on.
 A [page not fully transcribed] marker is not yours to resolve at all, even with that page's image in
 front of you. It stands where an extraction could not return the whole of one page, so filling it in
 means returning the rest of that page on top of the complete corrected body — the one request in this
-pipeline that can exceed what a response can hold, and hitting that ceiling does not degrade to a
-smaller retry: the whole round is discarded, so every other correction you made in it is thrown away
-with it and the document is delivered exactly as it reached you. Re-extracting that page is what has
-a whole response to itself. So leave the marker exactly
+pipeline that can exceed what a response can hold, and hitting that ceiling costs this reading of the
+document: the round is re-made one section at a time, by requests that each see a piece of the
+document and not the rest of it, and this is the last round either way. Re-extracting that page is
+what has a whole response to itself. So leave the marker exactly
 where it stands, resolve the other issues around it, and never delete it — an unfinished page that
 says so can be finished, and one that does not looks complete to everyone downstream.
 
@@ -722,7 +722,7 @@ async function editorCall(
 // Measured, not estimated, and that distinction is what makes this safe to do at all.
 // `TruncatedResponseError.chars` is how many characters THIS model produced for THIS document
 // before it ran out of ceiling, so it prices this document's HTML in characters per token
-// without anyone having to guess at a ratio — and the guess is the thing PRD §7.7 rules out,
+// without anyone having to guess at a ratio — and the guess is the thing PRD §7.11 v1.3 rules out,
 // because measured characters per token vary enough between documents that a wrong one skips
 // corrections the editor would have made. Nothing here is computed until the ceiling has
 // actually been reached, which is why this is a measurement and not a pre-flight estimate.
@@ -836,6 +836,21 @@ async function correctBySection(
   const budget = Math.floor(e.chars * SECTION_HEADROOM);
   if (budget < MIN_SECTION_BUDGET) {
     ctx.log.event("editor_sections_declined", { reason: "budget_too_small", budget, chars: e.chars });
+    return null;
+  }
+  // A budget that already covers the whole body says the response was longer than the document
+  // it was correcting, so the sections would be one section: the same request, at the same
+  // length, to the same ceiling. That is a reply that ran away with itself — a repetition, a
+  // preamble that never ended — and not a document too long to answer, so it is reported as
+  // what it is rather than as a body that could not be cut. Reachable, on a short document
+  // whose editor call returned more than twice its characters.
+  if (budget >= body.length) {
+    ctx.log.event("editor_sections_declined", {
+      reason: "budget_exceeds_body",
+      budget,
+      chars: e.chars,
+      body: body.length,
+    });
     return null;
   }
   const sections = splitSections(body, budget);
