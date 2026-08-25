@@ -107,9 +107,12 @@ export interface Diagnostics {
   // so the loop's cost was inferable from arithmetic and its value not at all.
   //
   // The counts, not the rates: `verify_failed / pages_verified` is the rejection rate and
-  // `results.identical + results.empty` is what was paid for and bought nothing — bought,
-  // not discarded: an `identical` fragment is still what ships, since what the page call
-  // failed to buy is a change and not a page. `rejected` is the one that was thrown away. But a
+  // `results.identical + results.empty + results.failed` is what was paid for and bought
+  // nothing — bought, not discarded: an `identical` fragment is still what ships, since what
+  // the page call failed to buy is a change and not a page. `rejected` is the one that was
+  // thrown away, and `failed` the one that cost the most, since a correction that hit the
+  // output ceiling paid for a full ceiling of tokens before failing (issue #171) — leaving it
+  // out of that sum would hide the most expensive of the three. But a
   // consumer that wants a percentage can divide, and a percentage over three pages is not
   // a measurement. Summed over every run this session has had, like `model_calls` — a
   // feedback round verifies pages again, and both times count.
@@ -121,11 +124,18 @@ export interface Diagnostics {
     // discarded in favour of the fragment it was meant to improve — either because it came
     // back at a fraction of that fragment's size, on any trigger, or because the links path's
     // re-verification found the rewrite had lost something — `identical` changed nothing about
-    // the page, `empty` returned nothing usable. The last
-    // two are calls that bought nothing — `identical` on the effect and not on string
-    // identity, so a model that re-typed its own page to no purpose is counted here rather
-    // than inflating `kept`, which is the number these fields exist to make honest.
-    results: { kept: number; rejected: number; identical: number; empty: number };
+    // the page, `empty` returned nothing usable, `failed` never answered at all — the model
+    // call threw (a truncation, a stall, a throttle) and the page kept the version it had.
+    // The last three are calls that bought nothing — `identical` on the effect and not on
+    // string identity, so a model that re-typed its own page to no purpose is counted here
+    // rather than inflating `kept`, which is the number these fields exist to make honest.
+    //
+    // `failed` is apart from `empty` because it is the expensive one: a correction that hit
+    // the output ceiling has paid for a full ceiling of tokens before failing, where an
+    // `empty` one usually answered briefly and said nothing. A run whose `failed` count is
+    // not zero has a `providers.*.max_tokens` to raise or a page too large to correct in one
+    // reply, and neither is visible if the two are summed (issue #171).
+    results: { kept: number; rejected: number; identical: number; empty: number; failed: number };
     // Why each correction ran: `verify` is a page the Feedback Agent rejected, `links` is a
     // page that passed and lost a link the code found in the PDF, `both` is one that did
     // each. These are the split that makes `corrections` readable as a bill — a `links`
@@ -184,7 +194,7 @@ function parse(logText: string): LogEvent[] {
 // How a correction pass can end (pipeline/extraction.ts `page_corrected`). A closed
 // list, so a `result` this version does not know counts as a correction and is
 // attributed to nothing rather than inventing a bucket for it.
-const CORRECTION_RESULTS = ["kept", "rejected", "identical", "empty"] as const;
+const CORRECTION_RESULTS = ["kept", "rejected", "identical", "empty", "failed"] as const;
 
 // And why it ran. A closed list for the same reason, and read off the same event.
 const CORRECTION_TRIGGERS = ["verify", "links", "both"] as const;
@@ -435,7 +445,7 @@ export function summarizeRun(
     pages_verified: 0,
     verify_failed: 0,
     corrections: 0,
-    results: { kept: 0, rejected: 0, identical: 0, empty: 0 },
+    results: { kept: 0, rejected: 0, identical: 0, empty: 0, failed: 0 },
     triggers: { verify: 0, links: 0, both: 0 },
     effects: { alt_only: 0, text: 0, attrs: 0, structure: 0 },
     rechecks: { sampled: 0, sampled_ok: 0, binding: 0, binding_ok: 0 },

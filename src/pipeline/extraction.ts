@@ -17,6 +17,7 @@ import {
 import { examplesForPrompt } from "./memory.ts";
 import { missingLinkProblem, missingLinks, pageLinkContext, unexpectedHrefs } from "./links.ts";
 import { STANDARD as STANDARD_AGENTS, isStandardType, logicalType } from "./contribute.ts";
+import { isTruncatedResponseError } from "../providers/types.ts";
 import type { Fragment } from "./fragment.ts";
 
 const PAGE_AGENT = "page";
@@ -926,7 +927,59 @@ async function extractPage(
     // Feedback Agent's judgement.
     const trigger = verifyFailed ? (missing.length ? "both" : "verify") : "links";
     const before = innerHtml.trim();
-    const corrected = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons);
+    // A correction that cannot complete costs the CORRECTION, not the page.
+    //
+    // This page has already been rendered, verified, and — on the links path — found to be
+    // good. The correction is an improvement step, and an improvement step that throws must
+    // not be able to delete the thing it was improving: before this, a provider error here
+    // propagated out of `extractPage` into `failedPage`, which logged
+    // `page_extraction_failed` and shipped a `@page-failed` marker for a page whose
+    // extraction had succeeded minutes earlier and was sitting in `innerHtml`. On a real
+    // 50-page run that cost page 25 outright — a valid 17,721-character extraction deleted
+    // because its correction hit the 32,000-token output ceiling, 522 seconds and a full
+    // ceiling of output spent to lose a page the run already had, and the two problems the
+    // correction was asked to fix were a transcribed folio and an unwarranted `<section>`
+    // (issue #171). It also named the wrong stage: anything reading
+    // `page_extraction_failed` — `pages_failed`, the markers, any triage of why pages fail —
+    // concluded the vision call could not read the page. It read it fine.
+    //
+    // Which is the trade PR #151 already makes one layer up for the Copy Editor (a round the
+    // editor cannot finish costs that round, not the document) and that this file makes
+    // everywhere else: a specialist that fails leaves the page as the general pass wrote it,
+    // a fidelity check that cannot run counts as nothing to correct, a sampled recheck that
+    // throws is a sample not taken. The correction was the last of those still fatal.
+    //
+    // Every error, not only a truncation. A throttle, a stall and a ceiling all leave the
+    // same thing behind — a page that is good enough to have been worth correcting — and a
+    // list of which provider failures are survivable would go stale in exactly the direction
+    // that loses pages. Nothing is retried: a correction truncating because the PAGE is large
+    // will truncate again, and the retry would buy a second full ceiling of output to prove
+    // it (the providers agree — `TruncatedResponseError` is thrown from inside their retry
+    // loops precisely so it is not re-billed).
+    const attempt = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons).then(
+      (html) => ({ html, error: null as unknown }),
+      (error: unknown) => ({ html: null, error }),
+    );
+    const corrected = attempt.html;
+    if (attempt.error !== null) {
+      const message = (attempt.error instanceof Error ? attempt.error.message : String(attempt.error))
+        .replace(/\s+/g, " ")
+        .trim();
+      ctx.log.event("page_correction_failed", {
+        image: img.name,
+        page: img.order,
+        trigger,
+        problems: problems.length,
+        error: message,
+        // Named rather than left to be read out of the message, because it is the one shape
+        // with a configuration remedy (`providers.*.max_tokens`) and the one that says the
+        // model wrote an essay where a page was asked for — a 32,000-token correction of a
+        // 17,721-character page is not a rewrite of it.
+        truncated: isTruncatedResponseError(attempt.error),
+        // What the page kept, so the log shows this was a page retained and not a page lost.
+        chars_kept: before.length,
+      });
+    }
     // What the pass changed, measured but NOT used to decide what ships. Whether the
     // fragment is adopted stays on string identity, exactly as it was before any of this:
     // `correctionEffect` observes the text, the descriptions, the attributes and the tag
@@ -945,13 +998,19 @@ async function extractPage(
     // invisible: the log said a page failed its check and said nothing about what the
     // pass bought, so the loop's value could only be guessed at from call counts (issue
     // #137). See `correctionEffect` for why the kept case reports what it changed.
+    //
+    // `failed` is kept apart from `empty` because the bill and the remedy are different: an
+    // `empty` correction answered and carried no HTML, while a `failed` one never answered —
+    // and the expensive case is precisely that one, since a truncation has already paid for a
+    // full ceiling of output. Folding them together would hide the most costly correction
+    // shape inside the cheapest.
     if (!corrected || corrected === before) {
       ctx.log.event("page_corrected", {
         image: img.name,
         page: img.order,
         trigger,
         problems: problems.length,
-        result: corrected ? "identical" : "empty",
+        result: corrected ? "identical" : attempt.error !== null ? "failed" : "empty",
       });
     }
     if (corrected && corrected !== before) {

@@ -413,7 +413,7 @@ test("the verification tally counts what was checked, corrected and re-checked",
   assert.equal(d.verification.pages_verified, 3);
   assert.equal(d.verification.verify_failed, 2);
   assert.equal(d.verification.corrections, 3);
-  assert.deepEqual(d.verification.results, { kept: 3, rejected: 0, identical: 0, empty: 0 });
+  assert.deepEqual(d.verification.results, { kept: 3, rejected: 0, identical: 0, empty: 0, failed: 0 });
   // `text` and `structure` are not exclusive — one re-render is both — while `alt_only`
   // is the count of corrections that moved nothing but a description.
   assert.deepEqual(d.verification.effects, { alt_only: 1, text: 1, attrs: 1, structure: 1 });
@@ -428,6 +428,13 @@ test("a correction that bought nothing is counted apart from one that was kept",
     { ts: T(0), type: "run_start" },
     { ts: T(1), type: "page_corrected", image: "a.png", page: 1, trigger: "verify", problems: 2, result: "identical" },
     { ts: T(1), type: "page_corrected", image: "b.png", page: 2, trigger: "verify", problems: 1, result: "empty" },
+    // A correction whose model call never came back — the output ceiling, on the page the
+    // run kept anyway (issue #171). Apart from `empty` because it is the expensive one: this
+    // call paid for a full ceiling of output before failing.
+    { ts: T(1), type: "page_correction_failed", image: "e.png", page: 5, trigger: "verify",
+      problems: 2, error: "bedrock: response hit the 32000-token output ceiling and was truncated (93039 chars returned). Raise providers.bedrock.max_tokens.",
+      truncated: true, chars_kept: 17721 },
+    { ts: T(1), type: "page_corrected", image: "e.png", page: 5, trigger: "verify", problems: 2, result: "failed" },
     { ts: T(2), type: "page_corrected", image: "c.png", page: 3, trigger: "links", problems: 1, result: "rejected",
       chars_before: 500, chars_after: 480, text_changed: true, alt_changed: false,
       attrs_changed: false, structure_changed: true },
@@ -442,12 +449,12 @@ test("a correction that bought nothing is counted apart from one that was kept",
     { ts: T(4), type: "run_complete" },
   );
   const d = summarizeRun(text, done(Date.parse(T(4))));
-  assert.equal(d.verification.corrections, 4);
-  assert.deepEqual(d.verification.results, { kept: 1, rejected: 1, identical: 1, empty: 1 });
+  assert.equal(d.verification.corrections, 5);
+  assert.deepEqual(d.verification.results, { kept: 1, rejected: 1, identical: 1, empty: 1, failed: 1 });
   // A rejected correction's effect is still what it changed — it says what the rewrite
   // would have done to a page that had passed.
   assert.deepEqual(d.verification.effects, { alt_only: 0, text: 1, attrs: 1, structure: 1 });
-  assert.deepEqual(d.verification.triggers, { verify: 2, links: 1, both: 1 });
+  assert.deepEqual(d.verification.triggers, { verify: 3, links: 1, both: 1 });
   // The links path's re-verification is `binding`, and stays out of the sample it would
   // otherwise outnumber: this page had PASSED its check and was rewritten for a link, so
   // its failure says nothing about whether correcting a FAILED page converges.
@@ -476,7 +483,7 @@ test("a log from before these events reports zeros, not absences", () => {
   for (const [k, v] of Object.entries({ ...d.verification.results, ...d.verification.triggers })) {
     assert.equal(typeof v, "number", `${k} is not a number`);
   }
-  assert.deepEqual(d.verification.results, { kept: 0, rejected: 0, identical: 0, empty: 0 });
+  assert.deepEqual(d.verification.results, { kept: 0, rejected: 0, identical: 0, empty: 0, failed: 0 });
   assert.deepEqual(d.verification.triggers, { verify: 0, links: 0, both: 0 });
   assert.deepEqual(d.verification.effects, { alt_only: 0, text: 0, attrs: 0, structure: 0 });
   assert.deepEqual(d.verification.rechecks, { sampled: 0, sampled_ok: 0, binding: 0, binding_ok: 0 });
