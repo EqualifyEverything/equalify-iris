@@ -462,8 +462,8 @@ Narrowing requires *full* attribution: if any issue in the round could not be at
 
 - Default `max_review_iterations = 3`.
 - Each iteration: Reader → Copy Editor → Assembler → Reader.
-- Loop exits when Reader returns no issues, or when iteration cap is reached.
-- If iteration cap is reached with issues remaining, the document is still returned but with an `@unresolved` block at the end listing remaining issues and their source references (the attributed page numbers — see §7.8 v1.1 — where the Reader could attribute them).
+- Loop exits when Reader returns no issues, when a round changes nothing, or when the iteration cap is reached. **(Amended v1.2.)** The middle exit is the case the loop cannot make progress on: a Copy Editor that answers and returns the document it was given has decided, and would decide the same way on the same request next round — so the remaining rounds would re-read the document and rewrite it into itself. Some issues are unresolvable here by design and are reported every round (§7.8: an undecidable pair of same-worded headings; a `[page not fully transcribed]` marker, which only re-extraction can settle), so this is the ordinary end for a document carrying one. A reply that could not be used is *not* this case — the editor said nothing, so that round is retried.
+- If the loop stops with issues remaining — at the cap or on a round that changed nothing — the document is still returned but with an `@unresolved` block at the end listing remaining issues and their source references (the attributed page numbers — see §7.8 v1.1 — where the Reader could attribute them).
 
 ### 7.12 User Feedback Re-Run
 

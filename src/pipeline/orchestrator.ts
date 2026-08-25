@@ -231,7 +231,11 @@ export async function runPipeline(args: {
     if (review.unresolved.length) {
       writeFileSync(
         paths.sessionUnresolved(sessionId),
-        `# Unresolved issues at iteration cap\n\n` +
+        // Not "at the iteration cap": the loop also stops on a round that changed
+        // nothing, which is precisely how a document whose remaining issues cannot be
+        // fixed here ends up with a list (pipeline/review.ts `review_converged`). This
+        // file is what a human reads on close (§7.13), so it says what is true of both.
+        `# Unresolved issues when the review loop stopped\n\n` +
           review.unresolved
             .map(
               (i) =>

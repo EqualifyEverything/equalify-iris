@@ -524,9 +524,11 @@ async function editorCall(
   return { body: corrected, usable: true };
 }
 
-// Reader -> Editor -> re-verify, looping until the Reader reports zero issues or
-// the iteration cap is reached. The loop only stops clean when the Reader has
-// actually re-confirmed it, so reported issues are verified-fixed, not assumed.
+// Reader -> Editor -> re-verify, with three ways out: the Reader reports zero issues,
+// a round changes nothing (see `review_converged` below), or the iteration cap is
+// reached. The loop only stops CLEAN on the first of those — the Reader has actually
+// re-confirmed it — so reported issues are verified-fixed, not assumed; the other two
+// deliver the body with what is left written to @unresolved.
 export async function runReview(
   ctx: PipelineContext,
   initial: { body: string; lint: LintResult; pages?: IndexedPage[]; failedPages?: number[] },
@@ -585,6 +587,17 @@ export async function runReview(
     // @unresolved — which is what the cap would have produced, since neither the body nor
     // the issues about it were going to move.
     //
+    // Exactly so for the BODY. The @unresolved list is one Reader sample short of it: the
+    // cap path takes a final read of the finished body, and that read can come back with
+    // nothing — the same body, the same prompt, a different sample — which returns early
+    // and credits the document clean. Breaking here stops at the read that preceded this
+    // round, so a document that would have won that coin toss is now reported with the
+    // issues it actually has. The direction is the conservative one (this rate goes up,
+    // never down, and the delivered HTML is the same either way), and the reading it
+    // costs is the less trustworthy of the two: a Reader that says "issues" and then
+    // "clean" about one unchanged document has not found the document clean, it has
+    // disagreed with itself.
+    //
     // Only when the editor ANSWERED. A reply that could not be parsed leaves the body
     // untouched for a different reason — the editor never said anything — and the next
     // round is a real retry rather than a repeat, so it is allowed to run.
@@ -630,8 +643,9 @@ export async function runReview(
     }
   }
 
-  // Cap reached with issues remaining (§7.11): record them as a comment, with the
-  // source page reference the Reader attributed (§7.8) so a human can find them.
+  // Issues remain and the loop has stopped — at the cap, or on a round that changed
+  // nothing (§7.11). Either way they are recorded as a comment, with the source page
+  // reference the Reader attributed (§7.8) so a human can find them.
   const unresolvedLines = lastIssues.map(
     (i) => `${i.issue} (severity: ${i.severity}${i.pages?.length ? `, page ${i.pages.join(", ")}` : ""})`,
   );

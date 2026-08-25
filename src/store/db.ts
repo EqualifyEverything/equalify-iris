@@ -168,10 +168,12 @@ export function pageSessions(
 // unresolved row, so counting documents by "has any signal" would have divided by
 // the problem documents alone and reported every rate as ~100%.
 export const SIGNAL_ROUNDS = "iris:rounds";
-// How many issues the review loop still had open when it hit its iteration cap.
-// Recorded only when non-zero. Needed as its own signal because
-// `iterations_completed = iterations_max` is ambiguous — it is equally what a
-// document that came back clean on the very last permitted round looks like.
+// How many issues the review loop still had open when it stopped — at its iteration
+// cap, or on a round that changed nothing (pipeline/review.ts). Recorded only when
+// non-zero. Needed as its own signal because the round count cannot answer this:
+// `iterations_completed = iterations_max` is equally what a document that came back
+// clean on the very last permitted round looks like, and since the loop can also stop
+// early, a LOW round count no longer implies a document that needed little fixing.
 export const SIGNAL_UNRESOLVED = "iris:unresolved";
 // How many hrefs the Copy Editor dropped while rewriting. Unrecoverable content
 // loss (the href came from the source FILE, not the page image), invisible to every

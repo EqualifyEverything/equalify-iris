@@ -63,6 +63,10 @@ curl -s "$BASE/stats"
     page's sentence credits the reviewer rather than saying the document came out clean.
   * `mean_rounds` — mean reader/editor passes per document. **0 is the good value:** the loop stops
     as soon as the Reader finds nothing, so a document that reads clean immediately contributes 0.
+    It is not *only* a good value, though, and this number cannot tell the two apart: the loop also
+    stops as soon as a round changes nothing, so a document whose remaining issues are ones the
+    loop is designed not to fix contributes a low count too. Read it beside `clean_rate` — which
+    convergence does not move — rather than on its own.
 
 `quality` is `null` until the window holds at least 20 documents (`PUBLIC_QUALITY_MIN_DOCUMENTS`),
 and that floor is a privacy control, not a presentation choice. A rate over three documents is not
