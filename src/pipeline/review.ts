@@ -249,8 +249,23 @@ const READER_INDEX_EXCERPT_CHARS = 200;
 // be cached at all. Nothing else moved, and the sections are self-labelled — the Reader
 // is told it is "given an index of the document's source pages", not told where to look
 // for it — so this is the same prompt with its stable half first. Below the minimum
-// length (a short document's index) the breakpoint is declined and the message is sent
-// as one piece, which is what it was.
+// length the breakpoint is declined and the message is sent as one piece, which is what
+// it was: at READER_INDEX_EXCERPT_CHARS that is a document of fewer than about ten pages,
+// which is also where there was least to save.
+//
+// This entry's economics are NOT the system prompt's, and the argument a few lines below
+// for why concurrent chunks may all pay a write does not transfer. READER_SYSTEM is static
+// across sessions, so a busy deployment finds it warm; an index is built from THIS
+// document, so it is cold once per session by construction and the chunks of the first
+// round — sent together — each pay 1.25x where they used to pay 1x. That is the whole
+// cost, and one further round clears it several times over: every later chunk reads the
+// index at 0.1x instead of paying for it again. Concretely, three chunks pay +0.75 of one
+// index on the first round and save 2.7 of it on each round after, so break-even is at
+// roughly a quarter of a second round. The document that does not win is the one that
+// reads clean on the first look and has no second round — it pays about a quarter of its
+// index, ~300 tokens per chunk on a 25-page document — and that is the trade: a small
+// certain cost on the documents that need no fixing, against a large one on every
+// document that iterates, which is the expensive case.
 function readerIndexHead(index: string): string {
   return index ? `## Source pages in this document (extracted HTML, truncated)\n${index}\n\n` : "";
 }

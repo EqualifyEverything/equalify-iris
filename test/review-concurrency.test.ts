@@ -16,6 +16,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runReview } from "../src/pipeline/review.ts";
+import { cacheableUserPrefix } from "../src/providers/promptCache.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 
@@ -176,6 +177,16 @@ test("the page index leads the prompt, and is declared as its invariant head", a
     assert.ok(headText, "no head was declared, so the index is paid for once per chunk");
     assert.match(headText, /^## Source pages in this document/);
     assert.match(headText, /Section 1/);
+    // Declaring a head buys nothing unless the adapters will actually mark it: below
+    // `cacheableUserPrefix`'s minimum the breakpoint is dropped and every chunk pays for
+    // the index again, with nothing failing. At READER_INDEX_EXCERPT_CHARS a twelve-page
+    // index clears it with little to spare, so shortening that constant — or the excerpt
+    // format — would hand the whole saving back silently. This is the tripwire for that.
+    assert.equal(
+      cacheableUserPrefix("us.anthropic.claude-sonnet-4-6", headText),
+      true,
+      `a 12-page index is ${headText.length} chars — too short for the adapters to cache`,
+    );
     // The head has to be the START of the message — that is what the adapters slice on —
     // and the chunk's own material still has to be there, after it.
     for (const s of sent) {
