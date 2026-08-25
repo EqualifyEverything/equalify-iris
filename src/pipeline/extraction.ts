@@ -66,9 +66,11 @@ edge, note it in the "log" field.
 
 Everything the page shows reaches your output. A long page, a table of forty rows, a page carrying
 three tables and a sidebar — all of it is emitted, and none of it is summarised, abbreviated, or
-handed back in part because the rest is more of the same. One thing does leave the page, by rule and
+handed back in part because the rest is more of the same. Two things leave the page, by rule and
 not by judgement: a symbol the page itself explains as a navigational device is kept out of the text
-and recorded in the "log" field (the rule is below, and it is narrow). Nothing else leaves.
+and recorded in the "log" field, and the number the page prints on itself is carried by the name of
+the page-break marker rather than transcribed beside it. Both rules are below, and both are narrow.
+Nothing else leaves.
 Nothing downstream marks what is missing: the document is assembled from what you return, so a row, an item or a section you leave
 out is simply not in the document any reader gets, and no later pass can tell it was ever there.
 Length is not a reason to stop. If the page truly holds more than you can return, emit it in
@@ -107,6 +109,28 @@ sets a self-contained part of the document apart — a table of contents is a <n
 pull-out note an <aside> — and name it from the words the page gives that part, with
 aria-labelledby pointing at its own heading where it has one. Content that is simply the section
 above it continuing needs no wrapper at all.
+The page's own printed number is the one page-boundary thing worth marking, and it has exactly one
+correct shape: <hr role="doc-pagebreak" aria-label="Page 5" id="page-5"> — the number the page
+prints, carried in the label. That role marks the break itself rather than claiming a region, so it
+says where the printed page turned without announcing a section that begins there, and the id gives
+that boundary a name of its own in the delivered document. Emit one wherever the page prints its number, as the
+first thing you emit for that page — the number marks where the page begins rather than being part
+of what it says, so it goes there whether the page prints it at the head or the foot — and use the
+number the page shows (iv, 5, A-3), never the position of the image you were given in the file.
+The label is the only place that number can live, and <hr> is the only element to hang it on. Do not
+transcribe the folio as text beside the marker either: the marker goes at the head of the page
+whichever end the page prints its number on, so a visible copy of it would stand at the top of the
+reading order saying what the bottom of the paper said, and the reader who was given it properly
+would be given it twice. This role is a kind of separator, and a separator's contents are presentational: text inside the marker
+is pruned before a reader is given it, so <p role="doc-pagebreak" id="page-5">5</p> announces a
+page break that cannot say which page — the barrier the marker exists to remove. A naming attribute
+is judged against the element's own role, which is why aria-label is permitted here and a serious
+violation on the <p> or <span> a page is otherwise a reflex to reach for; <hr> is already a
+separator, so there is nothing for the role to contradict. Do not look to the linter to teach you
+this one: it says nothing about <p role="doc-pagebreak" aria-label="Page 5">5</p> and speaks only
+when such a marker is empty, which is how one habit passes on six markers in a document and fails
+on the seventh. Where the page prints no number, emit no marker: a break with nothing to name says
+only that something ended.
 
 Nine structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large

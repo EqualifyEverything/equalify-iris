@@ -159,6 +159,82 @@ test("the page agent's heading rules keep the clauses that place a section's par
   }
 });
 
+// The other half of the page boundary (#145). The rule above tells the agent not to wrap
+// its page in a landmark; this one tells it what the page's own printed number IS, because
+// forbidding the wrapper left the agent to invent something for the one boundary it can
+// always see. What it invented was `<p role="doc-pagebreak" aria-label="Page 5"
+// id="page-5"></p>`, on one of seven markers in a 25-page document, and that shipped a
+// SERIOUS `aria-prohibited-attr` violation: naming attributes are prohibited on that role.
+//
+// The lint gate does see this one, unlike the alt-text and heading-level rules above — so
+// the argument for pinning it here is different. It is that the gate sees it too late to
+// help: `lintSummary` (src/pipeline/review.ts) hands the Reader the rule id, its
+// description and a node COUNT with no selector, the deployment that reported this runs
+// `iterations_max: 1` so the re-lint after the editor's pass is the last thing that
+// happens, and a document that has to spend a correction round on a defect the prompt
+// could have prevented has already paid for it. The same document came back clean on an
+// earlier round with three markers, every one carrying its number and every one carrying
+// the same prohibited attribute — so this is output variation around a rule that was never
+// stated, and the place to state it is the prompt.
+//
+// Pinned as clauses, and both directions of the shape: the prescribed element AND why an
+// empty one is wrong independently of axe. test/pagebreak-marker.test.ts holds the gate to
+// the same claims.
+test("the page agent's page-break rule keeps the clauses that make it a rule", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["there is one correct shape, and it is written out",
+      /exactly one correct shape: <hr role="doc-pagebreak" aria-label="Page 5" id="page-5"> — the number the page prints, carried in the label/],
+    // Why this role rather than the <section> wrapper the rule above forbids: it marks the
+    // break instead of claiming a region, so it does not announce a section beginning where
+    // only the paper ran out.
+    ["the role marks the break rather than claiming a region",
+      /That role marks the break itself rather than claiming a region, so it says where the printed page turned without announcing a section that begins there/],
+    // Why the number goes in the label and not in the element's text, which is the half of
+    // this rule a page agent is likeliest to "improve": the role is a separator, and a
+    // separator's children are presentational, so a number written as text is pruned before
+    // a reader gets it. A marker naming no page is the barrier #145 was filed about, whether
+    // or not axe reports it — so the clause has to give the reason, not just the shape.
+    // The folio is not transcribed beside the marker either, and the reason is stated rather
+    // than asserted because this is the clause a reader of the delivered HTML will question:
+    // the printed number stops being visible text. It is the placement that settles it — the
+    // marker moves to the head of the page whichever end the page printed the number on, so a
+    // visible copy would put the bottom of the paper at the top of the reading order and
+    // announce the number twice to the one reader who was given it properly. A permissive
+    // "may also transcribe it" would put that decision back on each page, which is the
+    // intermittency #145 was.
+    ["the folio is not also transcribed as text, and the reason is the marker's placement",
+      /Do not transcribe the folio as text beside the marker either: the marker goes at the head of the page whichever end the page prints its number on, so a visible copy of it would stand at the top of the reading order saying what the bottom of the paper said/],
+    ["the number lives in the label because a separator's contents are presentational",
+      /separator's contents are presentational: text inside the marker is pruned before a reader is given it, so <p role="doc-pagebreak" id="page-5">5<\/p> announces a page break that cannot say which page/],
+    // And why <hr> rather than the <p> or <span> that reported the violation: the naming
+    // attribute is judged against the element's OWN role (`paragraph` and `generic` prohibit
+    // it, `separator` does not), which is the mechanism the first version of this rule got
+    // wrong by reading the report as "naming is prohibited on doc-pagebreak".
+    ["the element is an <hr> because the naming attribute is judged against its own role",
+      /A naming attribute is judged against the element's own role, which is why aria-label is permitted here and a serious violation on the <p> or <span>/],
+    // The asymmetry is what made it intermittent, and stating it is what stops the rule
+    // being read as "only empty markers are a problem" — with the warning that the gate is
+    // not the teacher here, since the shape it stays quiet about is also wrong.
+    ["the linter is not the teacher, because only the empty marker reports it",
+      /Do not look to the linter to teach you this one: it says nothing about <p role="doc-pagebreak" aria-label="Page 5">5<\/p> and speaks only when such a marker is empty, which is how one habit passes on six markers in a document and fails on the seventh/],
+    // A page with no printed number gets no marker: there would be nothing to name it with,
+    // and an unnamed break is the same dead end as a pruned one.
+    ["a page that prints no number gets no marker",
+      /Where the page prints no number, emit no marker: a break with nothing to name says only that something ended/],
+    // The consistency half of the report: seven markers in a 25-page document is arbitrary,
+    // and a page-local rule is what makes it not arbitrary.
+    ["a marker is emitted wherever the page prints its number, first in the page's output",
+      /Emit one wherever the page prints its number, as the first thing you emit for that page/],
+    // The number is the page's own, not the position of the image in the upload — which is
+    // the other number this agent is given (`page N of M` in the user message).
+    ["the number is the one the page shows, never the image's position in the file",
+      /use the number the page shows \(iv, 5, A-3\), never the position of the image you were given in the file/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
 // What the agent may say about what it could not read, and how much of the page has to
 // arrive at all (issues #112, #117, #133, and the legibility half of #116).
 //
@@ -187,14 +263,19 @@ test("the page agent says what to do with what it cannot read, and emits the who
       /Everything the page shows reaches your output/],
     ["nothing is summarised or handed back in part",
       /none of it is summarised, abbreviated, or handed back in part because the rest is more of the same/],
-    // The one subtraction any rule below asks for (#110's explained symbol) is named HERE, in
-    // the absolute clause, because this paragraph is what would otherwise contradict it — and
-    // because `verifyAgentOutput` quotes this whole file into the verify prompt
-    // (src/pipeline/feedback.ts), so the verifier reads both and would score a rule-compliant
-    // omission as a fidelity problem, spending a correction round on re-adding the symbol the
-    // rule just removed.
-    ["the one thing that leaves the page by rule is named where the absolute rule is stated",
-      /One thing does leave the page, by rule and not by judgement: a symbol the page itself explains as a navigational device is kept out of the text and recorded in the "log" field .* Nothing else leaves/],
+    // Every subtraction a rule below asks for is enumerated HERE, in the absolute clause,
+    // because this paragraph is what would otherwise contradict them — #110's explained symbol
+    // and #145's printed folio, which the page-break marker carries as a name instead. Both
+    // halves have to stay in step: a rule elsewhere that removes something the page shows,
+    // with this paragraph still calling the list closed, leaves a model reconciling two
+    // unconditional sentences page by page, which is the per-page variation #145 was.
+    //
+    // It also has to be stated here for a second reader: `verifyAgentOutput` quotes this whole
+    // file into the verify prompt (src/pipeline/feedback.ts), so the verifier reads the
+    // absolute rule too and would score a rule-compliant omission as a fidelity problem,
+    // spending a correction round on re-adding what the rule removed.
+    ["the things that leave the page by rule are enumerated where the absolute rule is stated",
+      /Two things leave the page, by rule and not by judgement: a symbol the page itself explains as a navigational device is kept out of the text and recorded in the "log" field, and the number the page prints on itself is carried by the name of the page-break marker rather than transcribed beside it\. Both rules are below, and both are narrow\. Nothing else leaves/],
     ["the reason it matters: no later pass can tell a dropped row was ever there",
       /the document is assembled from what you return, so a row, an item or a section you leave out is simply not in the document any reader gets/],
     // A page that stops early is recorded only in `fragment.log` otherwise, and "log" is not
