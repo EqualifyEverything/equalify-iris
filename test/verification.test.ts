@@ -741,6 +741,43 @@ test("a correction that fixed three of four problems is not the same not-ok as o
   });
 });
 
+test("a missing link is not counted as a problem the second verdict could have cleared", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const link = { text: "the full report", href: "https://example.org/report" };
+    await runExtraction(
+      makeCtx(dir, events, {
+        // Page 1 fails its fidelity check AND lost the link, which is `trigger: "both"` — and
+        // it can win the batch's one sample slot, because that branch is guarded on the verify
+        // failure alone. Page 2 passed and only lost the link.
+        html: () => `<p>Read the full report</p>`,
+        problems: (o) => (o === 1 ? ["the figure has no caption"] : []),
+        corrected: () => `<p>Read <a href="https://example.org/report">the full report</a></p>`,
+        recheck: (o) => (o === 1 ? ["the figure still has no caption"] : []),
+        links: [link],
+      }),
+    );
+    const rechecks = of(events, "page_correction_recheck");
+    const sampled = rechecks.find((r) => r.binding === false);
+    assert.ok(sampled, "the page that failed its check took the sample slot");
+    // One fidelity problem in, one out: the correction re-attached the link and fixed nothing
+    // the verifier named. Counting the link would have made this two-in-one-out — a loop
+    // converging, on a page where it converged on nothing. The second verdict judges the
+    // fragment against the image, where a link target does not appear, so it could never have
+    // named the link either way.
+    assert.equal(sampled.problems_before, 1);
+    assert.equal(sampled.problems_after, 1);
+    assert.equal(sampled.links_before, 1, "the link share is carried, not folded in");
+    // And the links path's own verdict, on a page that had PASSED: nothing was named going in,
+    // so a problem named here would be a rewrite that lost something rather than a correction
+    // that fell short.
+    const binding = rechecks.find((r) => r.binding === true);
+    assert.ok(binding);
+    assert.equal(binding.problems_before, 0);
+    assert.equal(binding.links_before, 1);
+  });
+});
+
 test("a link-driven correction's own re-verification is logged as the binding one", async () => {
   await withTemp(async (dir) => {
     const events: Event[] = [];

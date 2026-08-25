@@ -457,7 +457,11 @@ test("a correction that bought nothing is counted apart from one that was kept",
       chars_before: 500, chars_after: 530, text_changed: false, alt_changed: true,
       attrs_changed: true, structure_changed: false },
     { ts: T(3), type: "page_correction_recheck", image: "c.png", page: 3, ok: false,
-      problems: ["a heading level was lost"], problems_before: 1, problems_after: 1, binding: true },
+      // A binding line's `problems_before` is 0 by construction — the page had PASSED — so a
+      // problem named here is a rewrite that lost something, and it must not be summed into a
+      // convergence ratio for pages that had failed.
+      problems: ["a heading level was lost"], problems_before: 0, links_before: 1,
+      problems_after: 1, binding: true },
     { ts: T(4), type: "run_complete" },
   );
   const d = summarizeRun(text, done(Date.parse(T(4))));

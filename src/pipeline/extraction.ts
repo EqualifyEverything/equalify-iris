@@ -1125,12 +1125,25 @@ async function extractPage(
           // "fewer" is the outcome it can realistically produce and "none" is not the bar it
           // was built to clear.
           //
-          // Counts and not a comparison of the two lists: the problems are the Feedback
-          // Agent's prose, and deciding whether "the table's third column is misaligned" and
-          // "column 3 of the table does not line up" are the same problem is fuzzy matching
-          // on model output with a threshold nothing here can calibrate. Both lists are on
-          // the line in full for a reader who wants to make that judgement themselves.
-          problems_before: problems.length,
+          // The FIDELITY problems only, which is not the same as the problems the correction
+          // was given: `problems` above is the Feedback Agent's verdict plus one entry per
+          // missing link, and the second verdict comes from the same agent judging the
+          // fragment against the IMAGE, where a link target does not appear at all (see the
+          // comment on `missing`). So a link can be counted going in and cannot be counted
+          // coming out, whether the correction re-attached it or not, and a page with one
+          // fidelity problem and three missing links would read as four-in-one-out — a
+          // correction that fixed nothing the verifier named, logged as converging. Which is
+          // the reading this pair exists to remove, so the two sides are made comparable
+          // instead: `links_before` carries the other share, `page_links_unrecovered` says
+          // whether the links came back, and `page_corrected`'s `problems` is still the
+          // correction's whole bill.
+          //
+          // On the links path that leaves `problems_before: 0` — those pages PASSED their
+          // check — and it is the right zero: a binding verdict naming a problem there is a
+          // rewrite of a good page that lost something, which is exactly what that check is
+          // for, and reading it as "one problem in, one out" hid that.
+          problems_before: verifyFailed ? verdict.problems.length : 0,
+          links_before: missing.length,
           problems_after: recheck.problems.length,
           // Whether this verdict was allowed to change what is delivered. False for the
           // sample, so a consumer cannot read it as the loop having gained a gate.
