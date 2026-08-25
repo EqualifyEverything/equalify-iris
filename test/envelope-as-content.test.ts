@@ -217,6 +217,18 @@ test("only a reply that says the page is blank is read as a blank page", () => {
     false,
   );
 
+  // A model describing the IMAGE's condition has said why its answer is unreliable without ever
+  // saying it failed, which is the half a wordlist of ways to say "I could not" misses. Every one
+  // of these read as a blank declaration until it was checked.
+  assert.equal(declaredBlank({ html: "", log: "The page is very dark and appears empty." }), false);
+  assert.equal(declaredBlank({ html: "", log: "The scan quality is too poor; no text is discernible." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Low resolution scan; no text." }), false);
+  assert.equal(declaredBlank({ html: "", log: "The image is too noisy to read; no text." }), false);
+  assert.equal(declaredBlank({ html: "", log: "The image did not load; no content." }), false);
+  // The veto is over-wide on purpose, so a blank page whose log mentions the scan is a failed
+  // page. That costs a glance, which is the cheap side of this trade.
+  assert.equal(declaredBlank({ html: "", log: "The page is blank, and the scan is faint." }), false);
+
   // And the shapes that answered nothing at all.
   assert.equal(declaredBlank({ log: "no content" }), false, "no `html` key: the question went unanswered");
   assert.equal(declaredBlank({ html: "" }), false, "nothing said about why");

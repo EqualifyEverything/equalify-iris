@@ -476,8 +476,9 @@ function replyShape(text: string, parsed: unknown): string {
 // the same model, so it agrees there is nothing there.
 //
 // So the test is positive and the doubt is fatal. `BLANK_LOG` wants the log to assert emptiness
-// in some words; `UNREADABLE_LOG` refuses the declaration whatever else the log says, so a hedge
-// ("appears blank, though the scan is very faint") is a failure and not a blank page. A blank
+// in some words; `UNREADABLE_LOG` and `DEGRADED_IMAGE_LOG` refuse the declaration whatever else
+// the log says, so a hedge ("appears blank, though the scan is very faint") and a description of
+// the image's own condition ("the page is very dark and appears empty") are failures. A blank
 // page whose log is phrased outside both patterns is reported as a failed page, which is the
 // direction to be wrong in: a page wrongly reported as failed costs a glance, a page wrongly
 // dropped costs the page.
@@ -499,8 +500,17 @@ const BLANK_LOG =
 // The page could not be READ, whatever else the log says about it. Checked second and given the
 // last word, because these two overlap in exactly the reply that must not be trusted: a page the
 // model calls blank because it cannot make anything out is not a page it read.
+//
+// Two families, and the second is why this is not a list of ways to say "I could not": a model
+// describing the IMAGE's condition ("the page is very dark and appears empty", "low resolution
+// scan; no text") has told you why its answer is unreliable without ever saying it failed. Those
+// words veto the declaration too. Both lists are deliberately over-wide — a page wrongly reported
+// as failed costs a glance, and a page wrongly dropped costs the page — so a blank page whose log
+// happens to mention the scan is a failed page, and that is the trade being made.
 const UNREADABLE_LOG =
-  /\b(illegible|unreadable|not legible|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too (dark|faint|blurry|low)|blurr\w*|obscur\w*|resolve|corrupt\w*|partial\w*|error)\b/i;
+  /\b(illegible|unreadable|not legible|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|blurr\w*|obscur\w*|resolve|corrupt\w*|partial\w*|error)\b/i;
+const DEGRADED_IMAGE_LOG =
+  /\b(dark|faint|washed|blurry|blurred|noisy|noise|grainy|pixelat\w*|low[- ]?res\w*|resolution|quality|focus|skew\w*|rotat\w*|distort\w*|did ?n[o']?t load|not load\w*)\b/i;
 
 // Exported for the unit test: this predicate is the whole distinction between a page delivered
 // empty and a page reported lost, and it is worth pinning on the reply shapes directly.
@@ -508,7 +518,7 @@ export function declaredBlank(parsed: { html?: string; log?: string } | null): b
   if (typeof parsed?.html !== "string" || parsed.html.trim()) return false;
   const log = parsed.log?.trim();
   if (!log) return false;
-  return BLANK_LOG.test(log) && !UNREADABLE_LOG.test(log);
+  return BLANK_LOG.test(log) && !UNREADABLE_LOG.test(log) && !DEGRADED_IMAGE_LOG.test(log);
 }
 
 // Load the page agent, preferring a session-built/trained copy (tmp/), then the

@@ -626,6 +626,14 @@ export function summarizeRun(
   // for a blank page is the empty one, so the page is still blank and the withdrawal has
   // to be undone. Without it that page would appear in neither set while having no
   // content, which is the reading this whole field exists to prevent.
+  //
+  // That re-add is made on every throw, including a round where the reply was unreadable —
+  // so the last thing the log knows about the page is that the model gave up, and this still
+  // says blank. Deliberate, and the least wrong of the cheap answers: the field describes the
+  // DOCUMENT, whose fragment for that page is the empty one an accepted declaration produced,
+  // and moving the page to `pages_failed` instead would send a client looking for a
+  // `@page-failed` marker that is not in the body. The round's own account is in the log
+  // (`page_no_output`, `page_extraction_failed` with `kept: "prior"`).
   const blankSet = new Set<number>();
   let staleBlank = new Set<number>();
   for (const e of events) {
