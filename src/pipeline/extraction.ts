@@ -467,9 +467,19 @@ function replyShape(text: string, parsed: unknown): string {
 //
 // The key must be PRESENT: `{"log": "no content"}` is a reply that did not answer the question,
 // and it stays a failure, which is the distinction the issue's fallback asks for. And the `log`
-// must be there, because that is what makes this a declaration rather than an inference — a
-// bare `{"html": ""}` says nothing about why, so it is still read as the model giving up. Both
-// are the safe direction: a page wrongly reported as failed costs a glance, a page wrongly
+// must SAY the page is blank, not merely be non-empty: the commonest shape a vision model gives
+// up in is an empty `html` with a sentence about why, and `{"html": "", "log": "the scan is too
+// dark to resolve any text"}` is the reply that most needs a human to look at the page. Read as a
+// declaration it would leave nothing in the delivered document to look at — no marker, no notice,
+// no entry in `pages_failed` — and `pages_blank` would positively assert the paper was empty.
+// The fidelity check does not cover that case either: it is shown the same unreadable image by
+// the same model, so it agrees there is nothing there.
+//
+// So the test is positive and the doubt is fatal. `BLANK_LOG` wants the log to assert emptiness
+// in some words; `UNREADABLE_LOG` refuses the declaration whatever else the log says, so a hedge
+// ("appears blank, though the scan is very faint") is a failure and not a blank page. A blank
+// page whose log is phrased outside both patterns is reported as a failed page, which is the
+// direction to be wrong in: a page wrongly reported as failed costs a glance, a page wrongly
 // dropped costs the page.
 //
 // What is NOT done here is the issue's preferred fix — a page-break marker labelled with the
@@ -482,8 +492,23 @@ function replyShape(text: string, parsed: unknown): string {
 // the marker's whole contract is that its label is the number the paper shows. A page that
 // prints no folio has no anchor whether it is blank or not, so the gap the issue notes in the
 // anchor sequence is not new and not a defect.
-function declaredBlank(parsed: { html?: string; log?: string } | null): boolean {
-  return typeof parsed?.html === "string" && !parsed.html.trim() && !!parsed.log?.trim();
+// The page has nothing on it. Wide enough for the phrasings the bench replies used and for the
+// wording the prompt now asks for ("say in the log field that the page is blank"), and no wider.
+const BLANK_LOG =
+  /\b(blank|empty|no (visible |printed |discernible )?(content|text|markings?|marks|words)|nothing (on|printed|visible|at all)|intentionally left blank)\b/i;
+// The page could not be READ, whatever else the log says about it. Checked second and given the
+// last word, because these two overlap in exactly the reply that must not be trusted: a page the
+// model calls blank because it cannot make anything out is not a page it read.
+const UNREADABLE_LOG =
+  /\b(illegible|unreadable|not legible|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too (dark|faint|blurry|low)|blurr\w*|obscur\w*|resolve|corrupt\w*|partial\w*|error)\b/i;
+
+// Exported for the unit test: this predicate is the whole distinction between a page delivered
+// empty and a page reported lost, and it is worth pinning on the reply shapes directly.
+export function declaredBlank(parsed: { html?: string; log?: string } | null): boolean {
+  if (typeof parsed?.html !== "string" || parsed.html.trim()) return false;
+  const log = parsed.log?.trim();
+  if (!log) return false;
+  return BLANK_LOG.test(log) && !UNREADABLE_LOG.test(log);
 }
 
 // Load the page agent, preferring a session-built/trained copy (tmp/), then the
@@ -586,6 +611,27 @@ async function renderPage(
     // corrected, on the same path and at the same cost as any other page that arrived wrong.
     // Short-circuiting here would buy one saved call by trading a reported failure for a silent
     // hole, which is the wrong side of the trade this whole file is built around.
+    //
+    // And not on a page Iris already has content for. `previous` is set only on a feedback
+    // re-extraction, and only for a page whose fragment is real content (`previousFor` in
+    // reExtractPages withholds it from a failed page, so a lost page CAN come back blank and be
+    // recovered). Where it is set, the model has been shown that content and is now saying the
+    // paper is empty, which contradicts evidence this pipeline already holds — so the throw is
+    // taken after all, and the containment on that path keeps the prior fragment rather than
+    // deleting it (`page_extraction_failed` with `kept: "prior"`). Nothing else on the
+    // re-extraction path would catch it: `destroyedPage` guards the correction pass, where
+    // `before` is this round's own render, so prior → empty never reaches a size comparison.
+    if (declaredBlank(parsed) && previous?.trim()) {
+      ctx.log.event("page_blank_refused", {
+        image: img.name,
+        page: img.order,
+        chars_kept: previous.trim().length,
+        log: parsed?.log ?? "",
+      });
+      throw new Error(
+        `page agent declared a blank page that already had ${previous.trim().length} chars of content`,
+      );
+    }
     if (declaredBlank(parsed)) {
       ctx.log.event("page_blank", { image: img.name, page: img.order, log: parsed?.log ?? "" });
       return { html: "", log: parsed?.log ?? "" };
@@ -1322,12 +1368,30 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
   // The FIRST page's error, unwrapped, because it is the diagnosis: a message written
   // here would say "every page failed" and drop the provider's account of why. The
   // remaining pages' errors are already in the log, one event each.
-  if (outcomes.length > 0 && failedPages.length === outcomes.length) {
-    ctx.log.event("extraction_failed", { pages: failedPages.length, reason: "no page produced content" });
+  //
+  // A page reported BLANK produces no content either, and the test is on the content rather
+  // than on `failedPages` for that reason: a source whose every page is empty — one blank scan
+  // uploaded alone, a rasterization that yielded white pages — would otherwise walk past this
+  // guard and be delivered as `<main>\n\n</main>`, a document of no words that says nothing
+  // about why, with no marker and no notice, from a run reporting success. Failing names it: the
+  // message says how many pages were blank, which is a statement about the source and answers
+  // the question an empty file would leave.
+  const produced = outcomes.filter((o) => !o.failed && o.fragment.innerHtml.trim().length > 0);
+  if (outcomes.length > 0 && produced.length === 0) {
+    const blank = outcomes.length - failedPages.length;
+    ctx.log.event("extraction_failed", {
+      pages: failedPages.length,
+      blank,
+      reason: "no page produced content",
+    });
     // The `??` is unreachable — `failed` is only ever set alongside `error` — but a
     // thrown `undefined` would reach the operator as the string "undefined", which is
     // the one outcome this branch exists to prevent.
-    throw outcomes[0].error ?? new Error("extraction failed for every page");
+    if (blank === 0) throw outcomes[0].error ?? new Error("extraction failed for every page");
+    throw new Error(
+      `no page produced any content: ${blank} of ${outcomes.length} source pages were reported blank` +
+        (failedPages.length ? ` and ${failedPages.length} could not be extracted` : ""),
+    );
   }
 
   writeFileSync(

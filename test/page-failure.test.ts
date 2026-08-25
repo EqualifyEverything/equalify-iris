@@ -46,6 +46,9 @@ function makeCtx(
   pageCount: number,
   failing: number[],
   error: () => Error,
+  // The reply for a page that is not in `failing`, when a test needs something other than
+  // ordinary HTML — a blank declaration, say. Keyed by page number.
+  reply?: (order: number) => string | undefined,
 ): { ctx: PipelineContext; rec: Recorded } {
   const agentsDir = join(dir, "agents");
   const fragDir = join(dir, "fragments");
@@ -53,7 +56,7 @@ function makeCtx(
   for (const d of [agentsDir, fragDir, inputDir]) mkdirSync(d, { recursive: true });
   writeFileSync(join(agentsDir, "page.md"), "# Page Agent\n\n## Required capability\nvision\n");
 
-  const images = [];
+  const images: { name: string; order: number; path: string }[] = [];
   for (let order = 1; order <= pageCount; order++) {
     const name = `page-00${order}.png`;
     writeFileSync(join(inputDir, name), "not-a-real-png");
@@ -81,6 +84,14 @@ function makeCtx(
         // the only handle a stub has on which concurrent call it is serving.
         for (const name of failingNames) {
           if (prompt.includes(`filename: ${name}`)) throw error();
+        }
+        if (reply) {
+          for (const img of images) {
+            if (prompt.includes(`filename: ${img.name}`)) {
+              const custom = reply(img.order);
+              if (custom !== undefined) return { text: custom };
+            }
+          }
         }
         return { text: JSON.stringify({ html: `<p>page</p>`, log: "" }) };
       },
@@ -286,6 +297,77 @@ test("a page nobody re-extracted stays in the set", async () => {
     const { ctx } = makeCtx(dir, 3, [], truncated);
     const { failedPages } = await reExtractPages(ctx, [prior(1), prior(2), prior(3)], [3], [2]);
     assert.deepEqual(failedPages, [2]);
+  });
+});
+
+const BLANK = JSON.stringify({ html: "", log: "This page is blank." });
+
+test("a re-extraction cannot blank a page the document has content for", async () => {
+  await withTemp(async (dir) => {
+    // The declaration is refused rather than believed: the agent was shown page 2's own
+    // previous output and then said the paper was empty, which contradicts what Iris already
+    // holds. Believing it would replace real content with an empty fragment and report
+    // nothing missing — a feedback round that deletes a page, which is exactly what the
+    // `kept: "prior"` containment exists to prevent.
+    const { ctx, rec } = makeCtx(dir, 3, [], truncated, (o) => (o === 2 ? BLANK : undefined));
+    const { fragments, failedPages } = await reExtractPages(ctx, [prior(1), prior(2), prior(3)], [2, 3]);
+    assert.deepEqual(failedPages, [], "the document is whole: page 2 still has its content");
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "<p>prior 2</p>");
+    const refused = ev(rec, "page_blank_refused");
+    assert.equal(refused.length, 1);
+    assert.equal(refused[0].data.page, 2);
+    assert.equal(refused[0].data.chars_kept, "<p>prior 2</p>".length);
+    assert.equal(ev(rec, "page_blank").length, 0, "nothing recorded the page as blank");
+    assert.equal(ev(rec, "page_extraction_failed")[0].data.kept, "prior");
+    assert.deepEqual(ev(rec, "reextract_complete")[0].data, { pages: [3], failed: [2] });
+  });
+});
+
+test("a page that was lost can come back blank, and that fills the hole", async () => {
+  await withTemp(async (dir) => {
+    // The other side of the refusal: a failed page is shown no previous output (its fragment
+    // is the failure marker), so there is no content for the declaration to contradict. "There
+    // was nothing on it" is an answer, and an answered page is not a missing one.
+    const failed: Fragment = { ...prior(2), innerHtml: "<!-- @page-failed 2: hit the output ceiling -->" };
+    const { ctx, rec } = makeCtx(dir, 3, [], truncated, (o) => (o === 2 ? BLANK : undefined));
+    const { fragments, failedPages, recovered } = await reExtractPages(ctx, [prior(1), failed, prior(3)], [2], [2]);
+    assert.deepEqual(failedPages, []);
+    assert.deepEqual(recovered, [2]);
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "", "and the marker is gone with it");
+    assert.equal(ev(rec, "page_blank").length, 1);
+    assert.equal(ev(rec, "page_blank_refused").length, 0);
+  });
+});
+
+test("a source whose every page is blank is a failed run, not an empty document", async () => {
+  await withTemp(async (dir) => {
+    // Same rule as every page failing, and the test is on the content rather than on the
+    // failed set for that reason: one blank scan uploaded alone, or a rasterization that
+    // yielded white pages, would otherwise be delivered as `<main></main>` — a document of no
+    // words, with no marker and no notice, from a run reporting success. The error says how
+    // many pages were blank, which is a statement about the source that an empty file is not.
+    const { ctx, rec } = makeCtx(dir, 3, [], truncated, () => BLANK);
+    await assert.rejects(runExtraction(ctx), /3 of 3 source pages were reported blank/);
+    assert.deepEqual(ev(rec, "extraction_complete")[0].data, { pages: 3, failed: [] });
+    assert.deepEqual(ev(rec, "extraction_failed")[0].data, {
+      pages: 0,
+      blank: 3,
+      reason: "no page produced content",
+    });
+  });
+});
+
+test("a document with one page of content and the rest blank is delivered", async () => {
+  await withTemp(async (dir) => {
+    // The guard is "no page produced content", not "any page was blank": one page of words is
+    // a document, and the two blank pages contribute nothing because there was nothing on them.
+    const { ctx, rec } = makeCtx(dir, 3, [], truncated, (o) => (o === 1 ? undefined : BLANK));
+    const { fragments, failedPages } = await runExtraction(ctx);
+    assert.deepEqual(failedPages, []);
+    assert.equal(assembleBody(fragments).split("<p>page</p>").length - 1, 1);
+    // Sorted, because the pages run concurrently and the log order is whichever finished first.
+    assert.deepEqual(ev(rec, "page_blank").map((e) => Number(e.data.page)).sort((a, b) => a - b), [2, 3]);
+    assert.equal(ev(rec, "extraction_failed").length, 0);
   });
 });
 

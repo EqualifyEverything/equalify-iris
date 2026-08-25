@@ -33,7 +33,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runExtraction, stripFences, bareHtml } from "../src/pipeline/extraction.ts";
+import { runExtraction, stripFences, bareHtml, declaredBlank } from "../src/pipeline/extraction.ts";
 import { extractJson } from "../src/util/json.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
@@ -194,6 +194,37 @@ test("bareHtml accepts an HTML answer and refuses an envelope", () => {
   assert.equal(bareHtml('I had trouble here.\n{"html": "<p>Hi</p>"'), null);
   assert.equal(bareHtml("I could not read this page."), null, "prose is not the page");
   assert.equal(bareHtml("   "), null);
+});
+
+test("only a reply that says the page is blank is read as a blank page", () => {
+  // The whole distinction between a page delivered empty and a page reported lost. It has to
+  // be a positive test: an empty `html` with a sentence about why is the commonest shape a
+  // vision model GIVES UP in, and read as a declaration it leaves nothing in the delivered
+  // document to look at — no marker, no notice, no entry in `pages_failed`.
+  assert.equal(declaredBlank({ html: "", log: "This page is blank." }), true);
+  assert.equal(declaredBlank({ html: "   ", log: "The page is empty; there is nothing to transcribe." }), true);
+  assert.equal(declaredBlank({ html: "", log: "No visible content on this page." }), true);
+  assert.equal(declaredBlank({ html: "", log: "This page is intentionally left blank." }), true);
+
+  // The reply that most needs a human to look at the page. Every one of these stays a failure.
+  assert.equal(declaredBlank({ html: "", log: "The scan is too dark to resolve any text." }), false);
+  assert.equal(declaredBlank({ html: "", log: "I could not read this page." }), false);
+  assert.equal(declaredBlank({ html: "", log: "The image is illegible." }), false);
+  // A hedge is not a declaration: doubt about whether the paper is empty is the doubt that
+  // decides this, so the unreadable wording has the last word over the blank wording.
+  assert.equal(
+    declaredBlank({ html: "", log: "The page appears blank, though the scan is too faint to be sure." }),
+    false,
+  );
+
+  // And the shapes that answered nothing at all.
+  assert.equal(declaredBlank({ log: "no content" }), false, "no `html` key: the question went unanswered");
+  assert.equal(declaredBlank({ html: "" }), false, "nothing said about why");
+  assert.equal(declaredBlank({ html: "", log: "   " }), false);
+  assert.equal(declaredBlank({ html: "", log: "Converted the page." }), false, "which says nothing about emptiness");
+  assert.equal(declaredBlank(null), false);
+  // A page with content in it is a page, whatever its log says.
+  assert.equal(declaredBlank({ html: "<p>Hi</p>", log: "This page is blank." }), false);
 });
 
 // --- through the pipeline ------------------------------------------------------
@@ -401,6 +432,25 @@ test("a page the agent reports blank is a page, not a lost one", async () => {
       fragments.filter((f) => f.order !== 2).map((f) => f.innerHtml),
       ["<p>page 1</p>", "<p>page 3</p>"],
     );
+  });
+});
+
+test("a page the agent could not read is still a lost page, not a blank one", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // Same reply shape as a blank declaration — a perfect envelope with an empty `html` — and
+    // the opposite meaning. If this were delivered as an empty page, the one page that most
+    // needs someone to look at it would be the one the document says nothing about.
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) =>
+          o === 2 ? '{"html": "", "log": "The scan of this page is too dark to resolve any text."}' : good(o),
+      }),
+    );
+    assert.deepEqual(failedPages, [2]);
+    assert.equal(of(events, "page_blank").length, 0);
+    assert.equal(of(events, "page_no_output")[0].shape, "empty_html");
+    assert.match(fragments.find((f) => f.order === 2)!.innerHtml, /@page-failed 2:/);
   });
 });
 
