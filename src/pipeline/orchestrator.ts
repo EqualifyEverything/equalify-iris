@@ -16,7 +16,7 @@ import type { InputImage, PipelineContext } from "./context.ts";
 import { runExtraction, reExtractPages } from "./extraction.ts";
 import { runAssembly, assembleBody, wrapDocument } from "./assembly.ts";
 import { runReview, type ReviewResult } from "./review.ts";
-import { runAxe } from "./lint.ts";
+import { runAxe, lintErrorFields } from "./lint.ts";
 import { learnFromFeedback, proposeAgentUpdatesFromFeedback, scopeFeedback } from "./feedback.ts";
 import { runContribution } from "./contribute.ts";
 import type { Fragment } from "./fragment.ts";
@@ -202,6 +202,13 @@ export async function runPipeline(args: {
         // Re-lint the existing reviewed body (no model call), then let the
         // feedback-aware review loop refine it in place.
         const lint = await runAxe(wrapDocument(beforeBody));
+        // This path runs no assembly, so there is no `assembly` line to carry a failure here,
+        // and the loop's own re-lint only happens on a round that CHANGED something — a
+        // feedback re-run whose Reader is satisfied, or that converges, would otherwise
+        // record `iris:lint-error` and deliver `@lint-unavailable` with no error, stack or
+        // step anywhere in the log to chase it by. Reachable on exactly #164's document: its
+        // own feedback re-run.
+        if (lint.error) log.event("lint_unavailable", { stage: "feedback_relint", ...lintErrorFields(lint) });
         review = await runReview(ctx, { body: beforeBody, lint, pages: fragments, failedPages });
       }
     } else {
@@ -272,7 +279,7 @@ export async function runPipeline(args: {
         { code: SIGNAL_ROUNDS, count: review.iterationsCompleted },
         ...(review.unresolved.length ? [{ code: SIGNAL_UNRESOLVED, count: review.unresolved.length }] : []),
         ...(review.droppedLinks ? [{ code: SIGNAL_LINKS_DROPPED, count: review.droppedLinks }] : []),
-        // A linter that could not run reports zero violations, which is why its
+        // A linter that could not run has no violations to report, which is why its
         // failure is recorded as a signal rather than inferred from an empty list.
         ...(review.lint.error ? [{ code: SIGNAL_LINT_ERROR, count: 1 }] : []),
         // A round that was paid for in full and delivered nothing. Counted per document,
@@ -280,8 +287,10 @@ export async function runPipeline(args: {
         // be the same length as the one that did not fit.
         ...(review.editorTruncated ? [{ code: SIGNAL_EDITOR_TRUNCATED, count: 1 }] : []),
         // The final lint, i.e. what survived the whole review loop. `nodes` is the
-        // offending-element count, kept apart from the per-document tally.
-        ...review.lint.violations.map((v) => ({ code: v.id, impact: v.impact, count: v.nodes })),
+        // offending-element count, kept apart from the per-document tally. Empty when the
+        // lint could not run — and that document is NOT in any rule's numerator, which is
+        // what `documents_linted` exists to divide by (see QualityStats).
+        ...(review.lint.violations ?? []).map((v) => ({ code: v.id, impact: v.impact, count: v.nodes })),
       ]);
     } catch (e) {
       log.event("run_signals_failed", { error: e instanceof Error ? e.message : String(e) });

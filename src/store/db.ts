@@ -181,10 +181,11 @@ export const SIGNAL_UNRESOLVED = "iris:unresolved";
 // loss (the href came from the source FILE, not the page image), invisible to every
 // later check in the loop, and previously only a line in one session's log.
 export const SIGNAL_LINKS_DROPPED = "iris:links-dropped";
-// axe-core failed to run at all. Recorded because its absence is otherwise
-// indistinguishable from success: `runAxe` degrades to `{ ok: true, violations: [] }`
-// on an environment error, so a broken linter would quietly drive every
-// accessibility rate in this table to zero and read as a fixed deployment.
+// axe-core failed to run at all. Recorded because a linter that did not run reports no
+// violations, so without this signal a broken linter would quietly drive every
+// accessibility rate in this table to zero and read as a fixed deployment. It is also
+// what `documents_linted` is derived from, i.e. what keeps those rates' denominator
+// meaning "documents this was actually measured on" (#164).
 export const SIGNAL_LINT_ERROR = "iris:lint-error";
 // A correction round's response hit the model's output token ceiling, so the round was
 // abandoned and the document delivered as it entered it (issue #143). Recorded because
@@ -234,6 +235,13 @@ export interface QualityStats {
   links_dropped_rate: number;
   // Share of documents where axe-core could not run.
   lint_error_rate: number;
+  // How many of `documents` the linter actually examined — the rest are the
+  // `lint_error_rate` ones, on which there is no verdict at all rather than a clean one
+  // (#164). This is the denominator `rules[].share` divides by, and it is reported
+  // because without it that share cannot be interpreted: over `documents` it silently
+  // counts every unexamined document as one where the rule did not fire, so a run of
+  // failing lints makes every rule look like it is being fixed.
+  documents_linted: number;
   // Share of documents where a correction round's response hit the output ceiling and
   // was discarded. Those documents are delivered, with that round's issues unresolved.
   editor_truncated_rate: number;
@@ -241,7 +249,10 @@ export interface QualityStats {
     id: string;
     impact: string | null;
     documents: number;
-    // documents / total documents, i.e. "fails on this share of what we ship".
+    // documents / documents_linted, i.e. "fails on this share of what we ship AND
+    // checked". Not over every delivered document: a document axe could not run on
+    // cannot fail this rule or pass it, so counting it in the denominator moves the
+    // share down by exactly the wrong thing (#164).
     share: number;
     // Total offending nodes across those documents. A rule can be rare but
     // enormous, or ubiquitous and a single node each; the two ranks differently.
@@ -948,6 +959,13 @@ export class Store {
       ours.set(row.code, Number(row.documents));
     }
 
+    // Documents the linter actually examined. A document whose lint could not run
+    // contributes no rule rows at all, so it belongs in neither half of a rule's ratio —
+    // see QualityStats.rules.share. Floored at 0 rather than trusted: the two counts come
+    // from separate queries over the same window, and a negative denominator would turn a
+    // share into something a threshold comparison reads as fine.
+    const documentsLinted = Math.max(0, documents - (ours.get(SIGNAL_LINT_ERROR) ?? 0));
+
     // Everything that is not ours is an axe rule id.
     const rules = (
       this.db
@@ -966,7 +984,7 @@ export class Store {
       id: r.code,
       impact: r.impact ?? null,
       documents: Number(r.documents),
-      share: documents ? Number(r.documents) / documents : 0,
+      share: documentsLinted ? Number(r.documents) / documentsLinted : 0,
       nodes: Number(r.nodes),
     }));
 
@@ -983,6 +1001,7 @@ export class Store {
       unresolved_rate: rate(SIGNAL_UNRESOLVED),
       links_dropped_rate: rate(SIGNAL_LINKS_DROPPED),
       lint_error_rate: rate(SIGNAL_LINT_ERROR),
+      documents_linted: documentsLinted,
       editor_truncated_rate: rate(SIGNAL_EDITOR_TRUNCATED),
       rules,
     };

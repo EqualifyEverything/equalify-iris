@@ -408,7 +408,10 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
   when the review loop stops with issues outstanding — at its iteration cap, on a round that
   changed nothing, or on a round whose response hit the model's output ceiling (§7.11). That
   last exit adds a second comment, `@editor-truncated`: the round was discarded, so unlike the
-  other two, no editor pass ever worked on the issues `@unresolved` lists.
+  other two, no editor pass ever worked on the issues `@unresolved` lists. A third comment,
+  `@lint-unavailable`, is emitted when axe-core could not run on the document at all: nothing in
+  it was checked, so an `@unresolved` list that is short — or absent — is not evidence that there
+  is nothing left to fix (§7.7).
 - **Contributions are issues, not PRs (§7.13/§9.2).** Instead of fork+PR-on-close, when the
   extractor flags content a specialist would handle better, Iris drafts that agent and files a
   `New agent suggestion: <type>` GitHub issue with the agent code + context; feedback that
@@ -1185,7 +1188,11 @@ noise wearing a percentage sign); an issue for that threshold **already open** �
 and carry no numbers, so this week's rate cannot make a new title; an issue for it **closed within
 30 days**, because on the day a fix merges the 30-day rate still contains a month of pre-fix
 documents; and a cap of **two issues per run**, with anything over it named in the run summary
-rather than dropped quietly.
+rather than dropped quietly. A fifth condition silences the **rule table alone** rather than the
+whole run: rule shares divide by `documents_linted`, so fewer than 20 documents the linter could
+actually examine leaves that table unevaluated even when 20 were delivered — one lint error in a
+20-document window is enough. The run summary says so when it happens, since "no rule crossed its
+threshold" must not stand for "no rule was measured".
 
 The thresholds live in the workflow rather than on the server, so retuning "how bad is too bad" is a
 one-line PR with a reviewer. That has a deliberate consequence: `.github/workflows/**` is on the

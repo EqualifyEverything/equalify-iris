@@ -137,7 +137,8 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   "mean_rounds": 1.8,
   "unresolved_rate": 0.07,
   "links_dropped_rate": 0.02,
-  "lint_error_rate": 0,
+  "lint_error_rate": 0.01,
+  "documents_linted": 210,
   "editor_truncated_rate": 0.01,
   "rules": [
     { "id": "heading-order", "impact": "moderate", "documents": 81, "share": 0.382, "nodes": 240 }
@@ -146,7 +147,8 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
 ```
 
 * `documents` — delivered documents in the window, **including flawless ones**. This is the
-  denominator for every rate below, and it is the whole reason the tally is stored the way it is: a
+  denominator for every `_rate` below (the rule table divides by `documents_linted` instead, for the
+  reason given there), and it is the whole reason the tally is stored the way it is: a
   clean run produces no violation rows, so counting "documents that had a problem" would divide by
   the bad documents alone and report every rate near 100%.
 * `mean_rounds` — mean **editor** passes per document, against `defaults.max_review_iterations`. The
@@ -184,12 +186,22 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
 * `links_dropped_rate` — share of documents where an `href` present before the copy editor was
   missing after it.
 * `lint_error_rate` — share of documents whose lint pass **errored** instead of running. Recorded
-  explicitly rather than inferred, because `runAxe` degrades to "no violations" when axe cannot run
-  at all, so a broken linter would otherwise read as a deployment that got better. The `assembly`
-  line in that run's log carries `lint_error` with `lint_error_where` (`parse`, `inject` or `run`),
+  explicitly rather than inferred, because a linter that cannot run has no violations to report and
+  a broken one would otherwise read as a deployment that got better. Those documents are delivered
+  with **no accessibility verdict at all**: the run's log line carries `lint_ok: false` and *no*
+  `violations` figure (the count in a check that did not happen is unknown, not zero), and the
+  delivered document carries an `@lint-unavailable` comment saying so to whoever opens it. The
+  `assembly` line — and `lint_unavailable`, if a later correction round's re-lint is the one that
+  failed — carries `lint_error` with `lint_error_where` (`parse`, `inject` or `run`),
   `lint_error_name` and the first frames of `lint_error_stack`, which is what makes one occurrence
   chaseable; `axe-core` and `jsdom` are pinned to exact versions so the linter's behaviour changes
   only when someone changes it.
+* `documents_linted` — how many of `documents` the linter actually examined, i.e. `documents` minus
+  the `lint_error_rate` ones. This is the denominator for `rules[].share`, and it is published
+  because otherwise that share cannot be read: an unexamined document looks exactly like one where
+  the rule did not fire, so a spell of failing lints would make every rule appear to be getting
+  fixed. When it is well below `documents`, the rule table is a measurement of a subset — fix that
+  before reading the rules.
 * `editor_truncated_rate` — share of documents where a correction round's **response** hit the
   model's output-token ceiling. The editor is asked for the whole document, so its output length
   follows the length of the document rather than the number of issues in it: at a large
@@ -202,7 +214,7 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   `providers.<name>.max_tokens` is too low for the pages allowed per session, or `max_pages` is
   too high for it.
 * `rules[]` — axe-core rule ids, **per document**: `documents` is how many documents violated the
-  rule and `share` is that over `documents` above, with `nodes` (total offending elements) alongside
+  rule and `share` is that over `documents_linted`, with `nodes` (total offending elements) alongside
   rather than folded in. One pathological scan with 400 bad headings is a worse `nodes` and the same
   `documents` as any other single failure — "fails on 40% of documents" names a prompt defect,
   while "is 90% of our violations" moves when an unrelated rule is fixed.
@@ -526,8 +538,10 @@ changed nothing, which is how a document whose remaining issues the loop is desi
 ordinarily ends. A third stop reason adds a second comment: `<!-- @editor-truncated -->` says a
 correction round's response hit the model's output ceiling, so the round was discarded and **none**
 of the issues below it were worked on — read together with `@unresolved`, which on its own would
-say the editor tried and could not fix them (§0c `editor_truncated_rate`). Returns `409` while the
-session is still running.
+say the editor tried and could not fix them (§0c `editor_truncated_rate`). A third comment,
+`<!-- @lint-unavailable -->`, says axe-core could not run on this document at all, so **nothing**
+in it was checked for accessibility violations and an empty `@unresolved` is not a clean bill of
+health (§0c `lint_error_rate`). Returns `409` while the session is still running.
 
 **Image references do not resolve, by design.** A graphic on the page — a logo, a diagram, a
 photograph — is emitted as an `<img>` with a description and a placeholder `src` naming the page
@@ -599,6 +613,7 @@ Useful events to grep for:
 | `editor_markers_changed` | The count of a `[not legible]` or `[page not fully transcribed]` marker changed across one correction round (`iteration`, `before`, `after`, plus `fewer` and/or `more`). `fewer` is expected where the editor read that region off the attached page image, and is a loss anywhere else — nothing downstream can tell those apart, and no other signal sees it at all, since the flattened view strips bracketed tokens before comparing words. `more` is a placeholder written over words the extractor did read, which no instruction in the loop allows. |
 | `editor_truncated` | A correction round's response hit the model's output ceiling (`max_tokens`, `chars` returned, plus `attached`/`of` images and `after: "images_refused"` when it was the retry that truncated). The round is discarded, the review loop stops, and the document that entered the round is delivered with that round's issues unresolved — a round may fail without the document. There is no `editor` line for such a round, which is how it is told apart from a round that ran and changed nothing (`review_converged`). The whole ceiling of output was billed, so this is the log's most expensive line. |
 | `reader` / `editor` | Per-iteration review-loop progress: the Reader's `issues` count, and whether that round's correction `changed` the document. |
+| `lint_unavailable` | axe-core could not run on a body no `assembly` line covers, with the same `lint_error` / `lint_error_where` / `lint_error_name` / `lint_error_stack` fields that line carries. `stage: "correction_round"` is the review loop's re-lint of a body an editor round changed, with the `iteration` that produced it; `stage: "feedback_relint"` is a feedback re-run that skipped extraction, where there is no assembly to report one. The document ships with **no accessibility verdict** either way: the loop had no violations to work from, and the delivered HTML says so in an `@lint-unavailable` comment. |
 | `editor_no_output` | The Copy Editor's reply carried no usable body (`chars` of text came back), so the round kept the document it was given. A call paid for and nothing said — which is why it does not end the loop: the next round is a retry, not a repeat. |
 | `review_converged` | The loop stopped early because a round changed nothing (`iteration`, the `issues` that round was given, and the `rounds_left` it did not spend). The editor answered and handed back the document it was given, so the same request next round would be answered the same way; what ships is that document with those issues written to `@unresolved`. Expect this on a document whose remaining issues are the ones the loop is designed not to resolve — an undecidable pair of same-worded headings, a `[page not fully transcribed]` marker. Frequent lines here with `issues` the editor *should* be able to fix are the signal worth chasing: that is the editor declining work, not the loop saving a wasted round. |
 

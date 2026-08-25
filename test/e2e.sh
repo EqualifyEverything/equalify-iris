@@ -899,6 +899,12 @@ docs=$(echo "$q" | jq -r '.documents')
 [ "$docs" -ge 1 ] \
   && pass "the completed runs are in the denominator ($docs document(s))" \
   || fail "quality" "documents=$docs after successful runs — recordRunSignals is not being called"
+# ...and the rule table's own denominator, which counts only the documents axe-core
+# actually examined (#164). It can be smaller than `documents` but never larger, and
+# never absent: a missing key here would make every rule share divide by zero.
+echo "$q" | jq -e '.documents_linted != null and .documents_linted >= 0 and .documents_linted <= .documents' >/dev/null \
+  && pass "documents_linted is $(echo "$q" | jq -r '.documents_linted'), within 0..$docs" \
+  || fail "quality" "documents_linted=$(echo "$q" | jq -r '.documents_linted') against documents=$docs"
 # A round is an EDITOR pass, not a reader pass: the loop returns as soon as the
 # Reader finds nothing, before incrementing, so a document that comes back clean on
 # the first look completes with 0 rounds and that is the good outcome. The mock model
@@ -927,7 +933,7 @@ done
 # `inside` compares strings with `contains`, i.e. substring containment, so
 # `["doc"] | inside(["documents"])` is true and any new leaf whose name happens to be a
 # substring of an allowed one would slip through the one check that enforces this.
-allowed='["window_days","documents","since","mean_rounds","unresolved_rate","links_dropped_rate","lint_error_rate","editor_truncated_rate","id","impact","share","nodes"]'
+allowed='["window_days","documents","since","mean_rounds","unresolved_rate","links_dropped_rate","lint_error_rate","documents_linted","editor_truncated_rate","id","impact","share","nodes"]'
 extra=$(echo "$q" | jq -c --argjson allowed "$allowed" '([paths(scalars) | last] | unique) - $allowed')
 [ "$extra" = "[]" ] \
   && pass "the payload's key set is exactly the documented one (no session id, login or document content)" \

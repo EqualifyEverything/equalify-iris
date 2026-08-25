@@ -4,7 +4,7 @@ import { MAX_EDITOR_IMAGES } from "../providers/imageLimits.ts";
 import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseError } from "../providers/types.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
-import { runAxe, type LintResult } from "./lint.ts";
+import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { flatten } from "./flatten.ts";
 import { examplesForPrompt } from "./memory.ts";
 import { knownPages, pageIndex, type IndexedPage } from "./pageindex.ts";
@@ -233,8 +233,21 @@ function chunk(s: string): string[] {
   return out;
 }
 
+// What the Reader is told the linter found. The no-verdict case is spelled out rather than
+// stated as a failure, because this text sits under a "## axe-core lint" heading in a prompt
+// that also says the review is against "the axe-core lint results provided": a Reader given
+// only an error message can read the section as an empty result and take the document to
+// have been checked (#164). It is told the opposite, in the sentence it would otherwise
+// have to infer.
 function lintSummary(lint: LintResult): string {
-  if (lint.error) return `axe-core could not run (${lint.error})`;
+  if (lint.violations === undefined) {
+    return (
+      `axe-core could not run, so NOTHING in this document has been checked for ` +
+      `accessibility violations. Treat this section as absent, not as empty: there is no ` +
+      `machine verdict on this document either way, and anything a linter would have caught ` +
+      `is still in it unless you catch it. (${lint.error ?? "no result"})`
+    );
+  }
   if (lint.ok) return "axe-core: no violations";
   return lint.violations.map((v) => `- ${v.id} (${v.impact}): ${v.description} [${v.nodes} nodes]`).join("\n");
 }
@@ -688,7 +701,12 @@ export async function runReview(
         // handing the user a document that does not say so, and a later change that lets
         // the loop continue past a truncation would otherwise create exactly that
         // disagreement here, in the return that looks like the clean one.
-        html: wrapDocument(body, { failedPages, editorTruncated }),
+        //
+        // `lintUnavailable` matters most on THIS return, which is the one that means "the
+        // Reader looked again and found nothing left". That verdict is the Reader's alone
+        // when the linter could not run, and a document that says so is the difference
+        // between a clean document and an unchecked one (#164).
+        html: wrapDocument(body, { failedPages, editorTruncated, lintUnavailable: lint.error }),
         body,
         iterationsCompleted: iterations,
         unresolved: [],
@@ -777,6 +795,16 @@ export async function runReview(
     if (body === before) continue;
 
     lint = await runAxe(wrapDocument(body));
+    // The re-lint is the gate on the document that actually ships — the `assembly` event
+    // reports the lint of the body BEFORE any correction round — and until now a failure
+    // here was logged nowhere at all: the editor could introduce the very attribute that
+    // breaks the selector engine (see runAxe) and the only trace would be one signal in
+    // the quality table. Logged with the same fields as `assembly`, so both failures read
+    // the same way in a run log, and per iteration, because which round broke it is the
+    // question a person reading this asks next.
+    if (lint.error) {
+      ctx.log.event("lint_unavailable", { stage: "correction_round", iteration: iterations, ...lintErrorFields(lint) });
+    }
     // A link the editor dropped is unrecoverable and invisible to every later check
     // in the loop — see droppedHrefs for why this is checked here and in code.
     const dropped = droppedHrefs(before, body);
@@ -809,7 +837,12 @@ export async function runReview(
     (i) => `${i.issue} (severity: ${i.severity}${i.pages?.length ? `, page ${i.pages.join(", ")}` : ""})`,
   );
   return {
-    html: wrapDocument(body, { unresolved: unresolvedLines, failedPages, editorTruncated }),
+    html: wrapDocument(body, {
+      unresolved: unresolvedLines,
+      failedPages,
+      editorTruncated,
+      lintUnavailable: lint.error,
+    }),
     body,
     iterationsCompleted: iterations,
     unresolved: lastIssues,

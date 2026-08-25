@@ -174,14 +174,52 @@ test("our own measurements never collide with an axe rule id", () => {
 
 test("a linter that could not run is recorded, not inferred from silence", () => {
   withStore((store) => {
-    // runAxe degrades to `{ ok: true, violations: [] }` when axe cannot run at all, so
-    // a broken linter drives every accessibility rate to zero and reads as a deployment
-    // that got better. This is the signal that tells the two apart.
+    // A linter that could not run has no violations to report, so on its own a broken
+    // linter drives every accessibility rate to zero and reads as a deployment that got
+    // better. This is the signal that tells the two apart.
     delivered(store, "broken", [{ code: SIGNAL_LINT_ERROR, count: 1 }]);
     delivered(store, "fine");
     const q = store.qualityStats();
     assert.equal(q.lint_error_rate, 1 / 2);
     assert.deepEqual(q.rules, [], "and it is not mistaken for a rule");
+  });
+});
+
+// The other half of the same problem, and the reason the signal alone was not enough
+// (#164): a document the linter never examined was still in every rule's denominator, so
+// each unrunnable lint moved every rule's share DOWN. A spell of them reads exactly like
+// the prompts getting better, on the one endpoint whose job is to notice they have not.
+test("a document the linter never examined is in no rule's denominator", () => {
+  withStore((store) => {
+    delivered(store, "checked-bad", [{ code: "heading-order", impact: "moderate", count: 2 }]);
+    delivered(store, "checked-good");
+    delivered(store, "never-linted", [{ code: SIGNAL_LINT_ERROR, count: 1 }]);
+
+    const q = store.qualityStats();
+    assert.equal(q.documents, 3, "all three were delivered, so all three are the rate denominator");
+    assert.equal(q.documents_linted, 2, "the unexamined document is still counted as examined");
+    // 1 in 2 of the documents that were actually checked, not 1 in 3 of the documents
+    // that were shipped.
+    assert.equal(q.rules[0].share, 1 / 2);
+    // And the rate that says why the two differ is unchanged — this does not hide the
+    // failure, it stops the failure from flattering the rules.
+    assert.equal(q.lint_error_rate, 1 / 3);
+  });
+});
+
+test("a window where nothing could be linted reports no rule shares rather than NaN", () => {
+  withStore((store) => {
+    // The degenerate case the guard exists for: every document in the window failed to
+    // lint, so `documents_linted` is 0. A rule row cannot exist here — a document with no
+    // lint has no violations to record — but 0/0 serializes to `null` and would reach the
+    // workflow's threshold comparison as a silent false, so the division is guarded rather
+    // than trusted, the same way the rates are.
+    delivered(store, "broken-1", [{ code: SIGNAL_LINT_ERROR, count: 1 }]);
+    delivered(store, "broken-2", [{ code: SIGNAL_LINT_ERROR, count: 1 }]);
+    const q = store.qualityStats();
+    assert.equal(q.documents_linted, 0);
+    assert.equal(q.lint_error_rate, 1);
+    assert.deepEqual(q.rules, []);
   });
 });
 
@@ -248,6 +286,7 @@ test("nothing per-session, per-user or per-document is exposed", () => {
       Object.keys(store.qualityStats()).sort(),
       [
         "documents",
+        "documents_linted",
         "editor_truncated_rate",
         "links_dropped_rate",
         "lint_error_rate",
