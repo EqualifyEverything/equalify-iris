@@ -252,6 +252,19 @@ export interface Diagnostics {
   // a retried-and-recovered one does, and `status` says the run succeeded — which it
   // did, on 24 of 25 pages.
   pages_failed: number[];
+  // Source pages the agent read and reported empty, so the document has no content for
+  // them BECAUSE THERE WAS NONE (pipeline/extraction.ts `declaredBlank`). Kept apart from
+  // `pages_failed` because the remedy is opposite: a failed page is work to redo, and a
+  // blank page is work already finished. Six pages across three of four bench documents
+  // were reported as failures before this split, which made a document with a blank verso
+  // look partial to every client following docs/API.md §7c.
+  //
+  // Not subtracted from anything: `pages` in `run_complete` counts source images, blank
+  // ones included, so `pages - pages_blank.length` is the count that produced markup. The
+  // two sets are disjoint, and stay disjoint across feedback rounds: a page that failed in
+  // round 1 and came back blank in round 3 has been answered, so it leaves `pages_failed`
+  // (as `page_recovered`) and arrives here.
+  pages_blank: number[];
 }
 
 function parse(logText: string): LogEvent[] {
@@ -601,14 +614,42 @@ export function summarizeRun(
   }
 
   const failedSet = new Set<number>();
+  // Blank pages fold the same way and for the same reason: feedback can name a page the
+  // agent reported empty ("you missed the table on page 4"), and a re-extraction that
+  // finds content there means the page is not blank after all. So `reextract_start`
+  // withdraws the earlier answer for the pages it is about to redo, and the `page_blank`
+  // lines that follow it — written by extractPage, before the round's completion line —
+  // give the new one. A page that comes back blank again is added straight back.
+  //
+  // `staleBlank` covers the one path that produces no new answer: a re-extraction that
+  // THROWS keeps the page's prior fragment (pipeline/extraction.ts reExtractPages), which
+  // for a blank page is the empty one, so the page is still blank and the withdrawal has
+  // to be undone. Without it that page would appear in neither set while having no
+  // content, which is the reading this whole field exists to prevent.
+  const blankSet = new Set<number>();
+  let staleBlank = new Set<number>();
   for (const e of events) {
     if (e.type === "page_extraction_failed" && typeof e.page === "number" && e.kept !== "prior") {
       failedSet.add(e.page);
     } else if (e.type === "page_recovered" && Array.isArray(e.pages)) {
       for (const p of e.pages) if (typeof p === "number") failedSet.delete(p);
     }
+    if (e.type === "page_blank" && typeof e.page === "number") {
+      blankSet.add(e.page);
+    } else if (e.type === "reextract_start" && Array.isArray(e.pages)) {
+      staleBlank = new Set(e.pages.filter((p): p is number => typeof p === "number" && blankSet.has(p)));
+      for (const p of staleBlank) blankSet.delete(p);
+    } else if (
+      e.type === "page_extraction_failed" &&
+      e.kept === "prior" &&
+      typeof e.page === "number" &&
+      staleBlank.has(e.page)
+    ) {
+      blankSet.add(e.page);
+    }
   }
   const pagesFailed = [...failedSet].sort((a, b) => a - b);
+  const pagesBlank = [...blankSet].sort((a, b) => a - b);
 
   const elapsed = ms(startedAt ?? undefined, endRef);
 
@@ -636,5 +677,6 @@ export function summarizeRun(
     errors,
     verification,
     pages_failed: pagesFailed,
+    pages_blank: pagesBlank,
   };
 }

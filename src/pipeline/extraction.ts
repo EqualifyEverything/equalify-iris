@@ -134,6 +134,17 @@ when such a marker is empty, which is how one habit passes on six markers in a d
 on the seventh. Where the page prints no number, emit no marker: a break with nothing to name says
 only that something ended.
 
+A page with nothing on it is a page you can answer completely. Return "html" as an empty string and
+say in the "log" field that the page is blank — that is the whole answer, and it is a correct one:
+there is no content to transcribe, so there is nothing to put in the document for this page. Emit the
+page-break marker only if the page prints its own number, by the rule above; a blank page usually
+prints nothing at all, and the position of the image in the file is never a number to label a marker
+with. Do not fill the page instead — not a note that it is blank, not [not legible], not a marker
+standing for content you did not find. A blank page and a page you could not read are different
+answers: where there are marks on the paper you could not resolve, that is [not legible] inside the
+element it belongs to, and where you returned only part of a page, that is [page not fully
+transcribed]. An empty "html" says the paper is empty, and it is read that way.
+
 Nine structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
@@ -430,17 +441,49 @@ export function bareHtml(text: string): string | null {
 //
 // `parsed` decides the first question, because it settles it: if the envelope was read, then
 // whatever is missing was missing from a reply this pipeline understood, and pointing the
-// operator at escaping would be pointing at the one thing that worked. A blank verso in a
-// scanned PDF is the realistic way to get here, and it is still reported as a lost page rather
-// than delivered as an empty one: agents/page.md does not say what to return for a page with
-// nothing on it, so `""` is as likely to be a model that gave up as a page that is blank, and
-// a document quietly missing a page is the failure `failedPage` exists to avoid. The marker
-// says "look at this page", which for a blank one costs a glance.
+// operator at escaping would be pointing at the one thing that worked. What `empty_html` means
+// is now narrower than it was: a blank page DECLARED as one is `declaredBlank` below and not a
+// failure at all, so what reaches this shape is an envelope that carried no page and did not
+// say why — the model that gave up, which is the prompt problem this field names.
 function replyShape(text: string, parsed: unknown): string {
   if (parsed) return "empty_html";
   const t = stripFences(text);
   if (t.startsWith("{") || /"html"\s*:/.test(t)) return /}\s*$/.test(t) ? "envelope" : "truncated_envelope";
   return t ? "prose" : "empty";
+}
+
+// A page the agent says has nothing on it: `html` PRESENT and empty, with a `log` line saying
+// so. Both halves are load-bearing.
+//
+// This used to be a reported page failure, and the comment here defended that on the grounds
+// that `agents/page.md` did not say what to return for a page with nothing on it, so `""` was
+// as likely to be a model that gave up as a page that is blank. Then round 7 of the bench
+// measured the rate: six pages of 100, in three of four documents, every one a well-formed
+// 155–210-character envelope saying correctly that the page is blank, every one delivered as a
+// `@page-failed` marker and counted as a lost source page (issue #179). A document that
+// declares a hole where there is no hole is its own defect — it costs a reviewer a glance per
+// page and it makes the run's own report untrue — so the prompt now names the case and this
+// reads the answer it asks for.
+//
+// The key must be PRESENT: `{"log": "no content"}` is a reply that did not answer the question,
+// and it stays a failure, which is the distinction the issue's fallback asks for. And the `log`
+// must be there, because that is what makes this a declaration rather than an inference — a
+// bare `{"html": ""}` says nothing about why, so it is still read as the model giving up. Both
+// are the safe direction: a page wrongly reported as failed costs a glance, a page wrongly
+// dropped costs the page.
+//
+// What is NOT done here is the issue's preferred fix — a page-break marker labelled with the
+// page's position in the file. The prompt forbids exactly that ("use the number the page shows
+// (iv, 5, A-3), never the position of the image you were given in the file"), and it is the
+// same rule that produced the split the issue reports: the three blank pages that were
+// delivered carried `aria-label="Page 4"` from the file position, and the two that failed had
+// obeyed the rule and emitted nothing. An anchor named for a position rather than a printed
+// folio claims the document's page 4 is here, which on front matter or an insert is false — and
+// the marker's whole contract is that its label is the number the paper shows. A page that
+// prints no folio has no anchor whether it is blank or not, so the gap the issue notes in the
+// anchor sequence is not new and not a defect.
+function declaredBlank(parsed: { html?: string; log?: string } | null): boolean {
+  return typeof parsed?.html === "string" && !parsed.html.trim() && !!parsed.log?.trim();
 }
 
 // Load the page agent, preferring a session-built/trained copy (tmp/), then the
@@ -531,6 +574,22 @@ async function renderPage(
   // re-extraction the throw is cheaper still: `previous` is kept, so the page keeps the
   // content it already had.
   if (!html?.trim()) {
+    // Unless the agent said the page is blank, in which case an empty page is the answer and
+    // not the absence of one (see `declaredBlank`). Reported on its own event and counted apart
+    // from failure, because the two need different things from whoever reads the run: a failed
+    // page is work to redo, a blank page is nothing to do. The empty fragment is dropped at
+    // assembly, which for a page with nothing on it is what the document should say.
+    //
+    // The claim is not taken on trust. This returns like any other page, so the fidelity check
+    // runs on it exactly as it runs on the rest — the Feedback Agent is shown the source image
+    // and an empty fragment, and a page that in fact has content on it fails that check and is
+    // corrected, on the same path and at the same cost as any other page that arrived wrong.
+    // Short-circuiting here would buy one saved call by trading a reported failure for a silent
+    // hole, which is the wrong side of the trade this whole file is built around.
+    if (declaredBlank(parsed)) {
+      ctx.log.event("page_blank", { image: img.name, page: img.order, log: parsed?.log ?? "" });
+      return { html: "", log: parsed?.log ?? "" };
+    }
     const shape = replyShape(res.text, parsed);
     ctx.log.event("page_no_output", { image: img.name, page: img.order, chars: res.text.length, shape });
     throw new Error(`page agent returned no HTML (${shape}, ${res.text.length} chars)`);

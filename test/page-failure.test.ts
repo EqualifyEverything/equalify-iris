@@ -404,4 +404,74 @@ test("a whole run reports no failed pages", () => {
     now: Date.parse("2026-08-24T00:00:30.000Z"),
   });
   assert.deepEqual(d.pages_failed, []);
+  assert.deepEqual(d.pages_blank, [], "and no blank ones, which is a different empty set");
+});
+
+// --- blank pages -------------------------------------------------------------
+
+test("a blank page is reported apart from a failed one", () => {
+  // The two mean opposite things to whoever reads the run: page 2 is work to redo, page 4 is
+  // work already finished. Six of 100 bench pages were blank versos counted as lost source
+  // pages, which made three of four complete documents read as partial (issue #179).
+  const d = diag([
+    { type: "page_extraction_failed", image: "page-002.png", page: 2, error: "x" },
+    { type: "page_blank", image: "page-004.png", page: 4, log: "This page is blank." },
+    { type: "run_complete", failed_pages: [2] },
+  ]);
+  assert.deepEqual(d.pages_failed, [2]);
+  assert.deepEqual(d.pages_blank, [4]);
+});
+
+test("a page re-extracted with content is no longer reported blank", () => {
+  // Feedback can name a page the agent reported empty ("you missed the table on page 4"), and
+  // a round that finds content there means the page was not blank after all. Same rule as
+  // `pages_failed`: what the log says LAST about a page is what is true of the document.
+  const d = diag([
+    { type: "page_blank", image: "page-004.png", page: 4, log: "This page is blank." },
+    { type: "reextract_start", pages: [4], of: 5 },
+    { type: "reextract_complete", pages: [4] },
+    { type: "run_complete" },
+  ]);
+  assert.deepEqual(d.pages_blank, []);
+});
+
+test("a page that came back blank again is still blank", () => {
+  const d = diag([
+    { type: "page_blank", image: "page-004.png", page: 4, log: "This page is blank." },
+    { type: "reextract_start", pages: [4], of: 5 },
+    { type: "page_blank", image: "page-004.png", page: 4, log: "There is nothing on this page." },
+    { type: "reextract_complete", pages: [4] },
+    { type: "run_complete" },
+  ]);
+  assert.deepEqual(d.pages_blank, [4]);
+});
+
+test("a re-extraction that threw leaves a blank page blank", () => {
+  // The one path that produces no new answer: the throw keeps the page's prior fragment,
+  // which for a blank page is the empty one. Dropping it here would put the page in neither
+  // set while the document has no content for it — the reading this field exists to prevent.
+  const d = diag([
+    { type: "page_blank", image: "page-004.png", page: 4, log: "This page is blank." },
+    { type: "reextract_start", pages: [4], of: 5 },
+    { type: "page_extraction_failed", image: "page-004.png", page: 4, error: "x", kept: "prior" },
+    { type: "reextract_complete", pages: [], failed: [4] },
+    { type: "run_complete" },
+  ]);
+  assert.deepEqual(d.pages_blank, [4]);
+  assert.deepEqual(d.pages_failed, [], "and the round that failed to improve it lost nothing");
+});
+
+test("a page that failed and came back blank leaves the failed set", () => {
+  // The document is whole once the page has been answered, and "nothing on it" is an answer.
+  // The two sets stay disjoint: the page is in exactly one of them at every point.
+  const d = diag([
+    { type: "page_extraction_failed", image: "page-004.png", page: 4, error: "x" },
+    { type: "reextract_start", pages: [4], of: 5 },
+    { type: "page_blank", image: "page-004.png", page: 4, log: "This page is blank." },
+    { type: "reextract_complete", pages: [4] },
+    { type: "page_recovered", pages: [4] },
+    { type: "run_complete" },
+  ]);
+  assert.deepEqual(d.pages_failed, []);
+  assert.deepEqual(d.pages_blank, [4]);
 });

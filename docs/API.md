@@ -616,7 +616,8 @@ Useful events to grep for:
 | `run_queued` / `run_dequeued` | The run's wait for a concurrency slot: how busy the queue was when it was admitted (`running` of `limit`, plus `waiting`), and `waited_ms` when it actually started. A large `waited_ms` means the deployment is saturated, not that this run is slow. |
 | `feedback_scoped` | How a feedback re-run was routed (`document` vs `extraction`, and which pages) |
 | `reextract_start` / `reextract_complete` | Which pages went back to the page agent. `reextract_complete.pages` is what was actually re-extracted; a `failed` list is pages whose re-extraction threw and which therefore kept their **prior** content unchanged. |
-| `page_no_output` | The page agent answered, and no HTML could be read out of the answer (`page`, `image`, `chars` of text, and the `shape` it was in). The page is then lost the way any failed page is lost — the `page_extraction_failed` line below follows it — because "the reply could not be read" and "this text is the page" are different claims, and a reply delivered as content puts a JSON envelope, or an apology, into the document while the run reports every page delivered. `shape` names the remedy: `truncated_envelope` is the output ceiling (raise `providers.*.max_tokens`), `envelope` is a complete reply whose escaping defeated the parser (rare, because a reply whose only fault is the page's own unescaped punctuation is repaired before it reaches here), `prose` is the agent answering conversationally, `empty_html` is an envelope that was read perfectly and carried no HTML in it (an empty string, or no `html` key — a blank verso in a scanned PDF is the realistic cause), and `empty` is a reply with nothing in it at all. The last three are prompt problems and say nothing about the parser. |
+| `page_no_output` | The page agent answered, and no HTML could be read out of the answer (`page`, `image`, `chars` of text, and the `shape` it was in). The page is then lost the way any failed page is lost — the `page_extraction_failed` line below follows it — because "the reply could not be read" and "this text is the page" are different claims, and a reply delivered as content puts a JSON envelope, or an apology, into the document while the run reports every page delivered. `shape` names the remedy: `truncated_envelope` is the output ceiling (raise `providers.*.max_tokens`), `envelope` is a complete reply whose escaping defeated the parser (rare, because a reply whose only fault is the page's own unescaped punctuation is repaired before it reaches here), `prose` is the agent answering conversationally, `empty_html` is an envelope that was read perfectly and carried no HTML in it (an empty string with no `log` line, or no `html` key at all — the model answering with no page and not saying why), and `empty` is a reply with nothing in it at all. The last three are prompt problems and say nothing about the parser. A page the agent reports as **blank** is not one of them: that is `page_blank` below and not a failure. |
+| `page_blank` | The page agent read the page and reported it empty (`page`, `image`, and its own `log` line), so the document carries no content for it because there was none. Not a failure and not in `pages_failed`: the remedies are opposite, since a failed page is work to redo and a blank page is work already finished. The reply that earns this is a complete envelope whose `html` is present and empty **and** whose `log` says the page is blank — an absent `html` key, or an empty one with nothing said about it, is still the model giving up (`page_no_output`). The claim is not taken on trust: the fragment goes through the same fidelity check as every other page, so a page that in fact has content on it fails that check and is corrected on the normal path. Before this existed, six of 100 bench pages across three of four documents were well-formed envelopes correctly saying the page was blank, and every one shipped a `@page-failed` marker and counted as a lost source page (issue #179). No page-break marker is emitted for a blank page unless the paper prints its own number, which a blank page almost never does — the marker's label is the folio the page shows, never the image's position in the file. |
 | `page_extraction_failed` | One page's own extraction threw (`page`, `image`, `error`). The rest of the document still ran — see §7c. `kept: "prior"` marks the feedback-re-extraction case, where the page keeps the content it already had and the document stays whole. |
 | `extraction_complete` | How many page fragments came out (`pages`) and which page numbers failed (`failed`, always present, `[]` on a whole run). |
 | `page_recovered` | A feedback re-extraction succeeded on a page an earlier run had lost, so the document is whole again for those `pages`. Logged late in the run, once that document has been persisted: a round that re-extracts the page and then throws in review leaves the earlier document — hole and all — as the one the session holds. |
@@ -681,7 +682,8 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
       "binding": 1, "binding_ok": 1
     }
   },
-  "pages_failed": []
+  "pages_failed": [],
+  "pages_blank": [17]
 }
 ```
 
@@ -856,11 +858,26 @@ It reports the document's current state, not the session's history: a session's 
 across feedback rounds, so a page lost in round 1 and re-extracted in round 3 (`page_recovered`)
 leaves this list, while one that failed again is still in it.
 
+`pages_blank` is the other reason a source page contributes nothing to the document, and the
+opposite one: the agent read the page and reported it empty (`page_blank` in §7a). Kept apart from
+`pages_failed` because what a reader should do about the two is opposite — a failed page is work to
+redo, a blank page is work already finished — and because the alternative was measured: six of 100
+bench pages were blank versos reported as lost source pages, which made three of four documents read
+as partial when all four were complete (issue #179). Nothing is subtracted for them: `pages` on
+`run_complete` counts source images, so `pages - pages_blank.length` is how many produced markup.
+The two sets are disjoint, and follow the document the same way — a page that failed in round 1 and
+came back blank in round 3 has been answered, so it leaves `pages_failed` and arrives here.
+
 ## 7c. Partial documents
 
 A page's extraction can fail on its own (a model call that hits the output ceiling, a stalled
 stream, a reply with no readable HTML in it — `page_no_output`). That page fails; the run does not. Every other page is still rendered, verified,
 assembled and reviewed, and the document is delivered.
+
+A page that carries nothing is **not** one of these. A blank verso is a page the agent can answer
+completely, and it answers with an empty `html` and a `log` line saying the page is blank
+(`page_blank`, `pages_blank`); that page contributes nothing to the document because there was
+nothing on it, the document is whole, and none of the markers below are written for it.
 
 **Unless every page failed.** Then the run ends `failed`, with the page's own provider error as
 `error` — a document containing none of the source's words is not a partial success, and the error

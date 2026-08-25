@@ -17,6 +17,12 @@
 // not the page is lost the way every other unusable answer in this file is lost: an event, a
 // `@page-failed` marker, and the page in `pages_failed` (test/page-failure.test.ts).
 //
+// One reply that used to be lost here is not unreadable at all: an envelope whose `html` is
+// empty and whose `log` says the page is blank has answered the question completely, and it is
+// now delivered as an empty page (`page_blank`, issue #179). That is the only empty reply that
+// is — an absent `html` key, or an empty one that says nothing about why, is still the model
+// giving up.
+//
 // The other half of the fix is upstream, in util/json.ts: most of these envelopes were
 // complete, well-formed replies that `extractJson` refused only because the page's own
 // quotation marks were unescaped inside the JSON string. Those are now parsed, so they never
@@ -353,21 +359,76 @@ test("an envelope that was read and carried no page is not blamed on the parser"
   await withTemp(async (dir) => {
     const events: Event[] = [];
     // The one shape that reaches the guard through `parsed` rather than through `bareHtml`:
-    // `??` does not fall through on an empty string. A blank verso in a scanned PDF is the
-    // realistic way to get here, and the reply is perfect JSON — so reporting it as an
-    // `envelope` would send an operator to look at escaping, the one thing that worked.
+    // `??` does not fall through on an empty string. And the reply is perfect JSON — so
+    // reporting it as an `envelope` would send an operator to look at escaping, the one thing
+    // that worked.
     const { failedPages } = await runExtraction(
       makeCtx(dir, events, {
-        render: (o) =>
-          o === 1 ? '{"html": "", "log": "this page is blank"}' : o === 2 ? '{"log": "no content"}' : good(o),
+        // Page 1 did not answer the question (no `html` key at all); page 2 answered with an
+        // empty page and said nothing about why. Neither is a declaration that the page is
+        // blank, and both are the model giving up — which is what `empty_html` names.
+        render: (o) => (o === 1 ? '{"log": "no content"}' : o === 2 ? '{"html": "   "}' : good(o)),
       }),
     );
-    // Still a lost page rather than a silently absent one: agents/page.md does not say what to
-    // return for a page with nothing on it, so `""` is as likely to be a model that gave up as
-    // a page that is blank, and an empty fragment is filtered out at assembly with nothing
-    // left to say the page was ever there.
     assert.deepEqual(failedPages, [1, 2]);
     assert.deepEqual(of(events, "page_no_output").map((e) => e.shape), ["empty_html", "empty_html"]);
+    assert.equal(of(events, "page_blank").length, 0, "neither reply claimed the page was blank");
+  });
+});
+
+test("a page the agent reports blank is a page, not a lost one", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) => (o === 2 ? '{"html": "", "log": "This page is blank."}' : good(o)),
+      }),
+    );
+    // What this used to be: `failedPages: [2]`, a `@page-failed 2` marker where the page's
+    // content would go, and the whole-document notice after `</main>` saying the delivered
+    // document is incomplete — for a document that is complete (issue #179).
+    assert.deepEqual(failedPages, [], "the document is whole: there was nothing on that page");
+    assert.equal(of(events, "page_extraction_failed").length, 0);
+    assert.equal(of(events, "page_no_output").length, 0, "nothing about this reply was unreadable");
+    const blank = of(events, "page_blank");
+    assert.equal(blank.length, 1);
+    assert.equal(blank[0].page, 2);
+    assert.equal(blank[0].log, "This page is blank.", "the agent's own words, for whoever reads the run");
+    // An empty fragment rather than a marker: assembly drops it, which for a page with
+    // nothing on it is what the document should say.
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "");
+    assert.deepEqual(
+      fragments.filter((f) => f.order !== 2).map((f) => f.innerHtml),
+      ["<p>page 1</p>", "<p>page 3</p>"],
+    );
+  });
+});
+
+test("a page wrongly reported blank is still caught by the fidelity check", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The reason the blank claim is not short-circuited: it is checked against the source
+    // image like any other page, so a page that DOES have content on it fails that check and
+    // is corrected on the normal path, at the normal cost. Trusting the claim would buy one
+    // saved call by trading a reported failure for a silent hole.
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) => (o === 2 ? '{"html": "", "log": "This page is blank."}' : good(o)),
+        problems: (o) => (o === 2 ? ["The page has a table on it. The output has nothing."] : []),
+        // Not keyed to the page: the correction prompt does not carry the image filename, so
+        // `orderOf` cannot see which page it is about. Page 2 is the only one corrected.
+        correct: () => '{"html": "<table><tr><td>1</td></tr></table>"}',
+      }),
+    );
+    assert.deepEqual(failedPages, []);
+    assert.equal(of(events, "page_blank").length, 1, "the claim was made and recorded");
+    assert.deepEqual(of(events, "page_verify_failed").map((e) => e.image), ["page-002.png"]);
+    assert.equal(
+      fragments.find((f) => f.order === 2)!.innerHtml,
+      "<table><tr><td>1</td></tr></table>",
+      "the content the page actually had is in the document",
+    );
+    assert.equal(of(events, "page_corrected")[0].result, "kept");
   });
 });
 
