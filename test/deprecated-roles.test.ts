@@ -113,6 +113,24 @@ test("a landmark role on the <ol> costs the list its list semantics, and no rule
   );
 });
 
+// The other half of that: the shape the prompt now prescribes INSTEAD has to be right, and its
+// being right depends on one more axe fact — `doc-endnotes` is a role a `<section>` is allowed to
+// take. If a version bump narrowed that list, the prompt would be prescribing markup that fails
+// `aria-allowed-role` on every footnote list, and the test above would stay green while it did.
+test("the wrapper shape the prompt prescribes instead is clean, and allowed on a <section>", async () => {
+  const sectionElm = axe.utils.getStandards().htmlElms.section as unknown as { allowedRoles?: string[] | boolean };
+  assert.ok(Array.isArray(sectionElm.allowedRoles), "axe no longer lists <section>'s allowed roles");
+  for (const landmark of ["doc-endnotes", "doc-bibliography"]) {
+    assert.ok(
+      (sectionElm.allowedRoles as string[]).includes(landmark),
+      `<section> may no longer take role="${landmark}" — the prompt prescribes markup that now fails`,
+    );
+  }
+  const found = await rules('<section role="doc-endnotes"><ol><li id="fn-1">A note.</li></ol></section>');
+  if (found === null) return;
+  assert.deepEqual(found, [], `the prescribed shape should lint clean, got: ${found.join(", ")}`);
+});
+
 // A repeated attribute is the HTML parser's business, and it keeps the FIRST: this is
 // `<li role="listitem">` in the tree, the deprecated token never reaches axe, and rewriting it
 // would edit a string nothing reads. So the strip considers only the first `role` in a tag, and
