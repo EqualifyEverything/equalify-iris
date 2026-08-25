@@ -401,6 +401,27 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      # poppler-utils, so the baseline `npm test` below (and the one Claude runs against
+      # its own change) exercises the PDF path instead of skipping it. `rasterizePdf`
+      # shells out to pdftoppm/pdfinfo/pdftohtml, and `hasPoppler` in
+      # test/pdf-links.test.ts skips those tests when they are absent — which reads as a
+      # green baseline for a path nothing ran. Same install the Dockerfile does.
+      #
+      # Failure-tolerant for the same reason as its twin in code-review.yml: a step's
+      # `if:` carries an implicit `success()` unless it names a status function, so a
+      # non-zero exit here would skip the rest of the job. `Verify and report` below is
+      # `always()`-gated, so that would be annotated rather than silent — but the cost is
+      # a whole scheduled proposal, to save an install the tests already handle missing.
+      - name: Install poppler-utils (PDF rasterization tests)
+        if: steps.triage.outputs.should_run == 'true'
+        continue-on-error: true
+        run: |
+          if sudo apt-get update && sudo apt-get install -y poppler-utils; then
+            echo "poppler-utils installed"
+          else
+            echo "::warning::poppler-utils failed to install; the PDF rasterization tests will skip themselves (hasPoppler)."
+          fi
+
       - name: Build triage context
         if: steps.triage.outputs.should_run == 'true'
         env:

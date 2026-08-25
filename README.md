@@ -52,7 +52,15 @@ stripping and uses the built-in `node:sqlite`), and a **git** checkout of the ag
 (this repo's `agents/` directory works). For **PDF uploads**, install **poppler-utils**
 (`pdftoppm`/`pdfinfo`, plus `pdftohtml` to carry the PDF's links into the output) —
 `brew install poppler` on macOS, `apt-get install poppler-utils` on Debian/Ubuntu. (The
-Docker image includes it.)
+Docker image includes it.) `pdftoppm` renders one page at a time on one core, so Iris
+divides a PDF's page range between several of them — up to one per core the host
+reports, and never more than the document has pages: a 25-page document that took 12.5 s
+in one process takes 3.9 s across four. (Past about a dozen cores a 25-page document
+stops getting faster, since the shards are already down to two pages each.) It is the
+uploader who waits for this — the route rasterizes before it answers — so cores are
+worth giving a deployment that takes PDFs. The budget is shared across concurrent
+uploads rather than granted to each: a second document arriving mid-render takes what is
+left, down to the single process it would have had before.
 
 ```bash
 git clone https://github.com/EqualifyEverything/equalify-iris
