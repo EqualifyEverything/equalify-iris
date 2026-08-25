@@ -100,7 +100,7 @@ nothing but its own subject's content between them.
 
 Those pairs are found for you. Where the document has any, a section below lists them, computed
 from the WHOLE document rather than from the HTML you were given — so a heading it names may sit
-outside your excerpt, and is to be reported anyway. Report every entry in that list as an issue,
+outside the HTML you were given, and is to be reported anyway. Report every entry in that list as an issue,
 and say which of the two cases it is; where the excerpts do not tell you, say that instead of
 choosing. The list decides only that a pair EXISTS: no entry is a false positive to be argued
 with, and finding a pair the list missed is still worth reporting.
@@ -127,6 +127,20 @@ HTML extracted from that page). For every issue, attribute it to the source "pag
 on, by matching the offending content against those excerpts. This is what lets the Copy Editor
 fetch the right page images. Name only pages you have concrete evidence for; if you cannot tell
 which page an issue is on, return an empty "pages" list rather than guessing or listing them all.
+
+Some entries in that index say the page contributed no content instead of showing an excerpt, and
+neither kind of entry is an issue to report. A page whose extraction FAILED is content this pipeline
+lost: the document already records it, both in that entry and in a @page-failed comment where the
+content would have been, and no edit to the HTML can bring the page back — so reporting it spends a
+correction round on the one defect this loop cannot fix, and reports it again on every round after.
+A page that is BLANK in the source contributed nothing because there was nothing on it to
+transcribe, which makes the document correct as it stands. Say nothing about either.
+
+Be careful in the other direction too, about content you cannot find. Where the HTML section is
+labelled as one window of several, the rest of the document is another call's to read, so a page
+whose content is not in your window is not a missing page and is not yours to report. Where it
+carries no such label you have the whole body, and content genuinely absent from it — a page the
+index shows as extracted with nothing of it in the document — is a real finding and yours to make.
 
 Respond with ONLY JSON:
 { "issues": [ { "issue": "...", "pages": [3], "severity": "low|medium|high", "suggested_action": "..." } ] }
@@ -292,6 +306,124 @@ function lintSummary(lint: LintResult): string {
 // back to a page.
 const READER_INDEX_EXCERPT_CHARS = 200;
 
+// What the index says instead of an excerpt for a page the document has no content for.
+// Both are under READER_INDEX_EXCERPT_CHARS, so neither is delivered half-said.
+//
+// The two are worded apart because they are opposite facts about the run and a reader of a
+// log or a prompt has to be able to tell them apart: one is content this pipeline lost, the
+// other is a page with nothing on it, correctly delivered as such (issue #184). What they
+// share is that no correction round can act on either, which is why each says so where the
+// Reader reads it rather than only in READER_SYSTEM — the rule is one paragraph away from a
+// numbered entry the Reader is matching content against, and the entry it is about is the
+// one that used to read as a hole.
+const FAILED_PAGE_NOTE =
+  "(no content — this page could not be extracted, so the document has none of it. " +
+  "Already recorded, and no edit can fix it: not an issue to report.)";
+const BLANK_PAGE_NOTE =
+  "(no content — this page is blank in the source, so there was nothing to extract. " +
+  "The document is correct as it stands: not an issue to report.)";
+
+// The pages the document has no content for, and which of the two reasons it is.
+//
+// `failed` comes from the caller, because only extraction knows it: the fragment of a failed
+// page is not empty — it is the `@page-failed` comment that says where the hole is — so
+// nothing about its own bytes distinguishes it from a page whose content happens to be short.
+// `blank` is read off the fragment, because an empty fragment can only be a page the page
+// agent declared blank: extraction throws on an empty reply it was not told to expect, and a
+// throw takes the `failed` path above (see extraction.ts `declaredBlank`).
+//
+// Both are things the review loop is asked about today and can do nothing with. The failed
+// page is the case runReview's `failedPages` comment already names — "the Reader would raise
+// 'this page is missing' every round against a body no editor can repair" — and the guard it
+// describes only kept the disclosure out of the editor's reach, never the question out of the
+// Reader's prompt (issue #188). The blank page is the same shape with nothing wrong behind it:
+// its index entry was an empty line, an empty line reads as a hole, and #184's correctly
+// delivered blank pages came back as unresolved issues on the next round of the bench.
+export function noContentPages(pages: IndexedPage[], failedPages: number[]): Map<number, "failed" | "blank"> {
+  const failed = new Set(failedPages);
+  const out = new Map<number, "failed" | "blank">();
+  for (const p of pages) {
+    if (failed.has(p.order)) out.set(p.order, "failed");
+    else if (!p.innerHtml.trim()) out.set(p.order, "blank");
+  }
+  return out;
+}
+
+// The Reader's view of the index: those pages' entries say what they are instead of showing
+// an excerpt of content that is not there.
+//
+// Annotated rather than REMOVED, which was the other half of #188's proposal. A removed entry
+// leaves a gap in the numbering — page 7 then page 9 — and a gap is exactly what invites the
+// report it was meant to prevent, from a Reader that now has to guess what happened to 8. It
+// would also cost the entry its one honest use: a failed page still narrows a nearby issue's
+// attribution, because "the content around here is on 7 and 9" is what the pages either side
+// of it say.
+//
+// A copy, not a mutation: `pages` is the array runReview holds for the whole loop and hands to
+// `knownPages`, and an attribution to a page with no content must stay valid — it is how the
+// one report this still allows carries its page number.
+export function readerIndexPages(pages: IndexedPage[], noContent: Map<number, "failed" | "blank">): IndexedPage[] {
+  if (noContent.size === 0) return pages;
+  return pages.map((p) => {
+    const state = noContent.get(p.order);
+    if (!state) return p;
+    return { ...p, innerHtml: state === "failed" ? FAILED_PAGE_NOTE : BLANK_PAGE_NOTE };
+  });
+}
+
+// One report per page with no content, however many chunks reported it.
+//
+// The prompt above is the primary fix and this is the backstop, in the order the pipeline
+// prefers everywhere else: say it where it can be understood, then make the thing that cannot
+// be understood impossible. The Reader is a sampled model told not to raise these, and on the
+// round that filed #188 every chunk raised them anyway — six reports of one page in six
+// different wordings, six of that document's 26 unresolved issues.
+//
+// Per CHUNK, and only the final round's chunks: `@unresolved` is written from `lastIssues`,
+// which every round overwrites, so the delivered list is one read of the document and the
+// number of copies in it is that read's chunk count. What the ROUNDS multiplied is the spend —
+// every round's editor was handed the same reports about a page it cannot repair, and paid a
+// whole-body correction to say nothing about them.
+//
+// Which is why the key is `(no content, page)` rather than the issue text. The reports come
+// from independent calls that never see each other, so no two are worded alike and exact-string
+// dedupe catches none of them; what makes them the same issue is the page, and the pipeline
+// already knows which pages these are. An issue is one of them when it is attributed AND every
+// page it names has no content in the document — a page with no content cannot hold content
+// that is wrong, so an issue about nothing else is an issue about the absence.
+//
+// The FIRST is kept, not all of them dropped, and the difference is deliberate. Dropping them
+// all would make this code decide that a report is worthless on evidence it does not have: the
+// attribution is the Reader's, and a misattributed real issue — structure the Reader could not
+// place, pinned on a failed page — would vanish with no trace anywhere. Keeping one costs a
+// reader of `@unresolved` a line they can act on (it names the page, and the document's
+// `@page-failed` comment says the rest) and leaves one copy where there was one per chunk. It
+// does mean a document with a failed page still cannot end the loop clean, which is the
+// behaviour it has today and a separate question from counting it once.
+//
+// Unattributed reports are not caught and cannot be: "the document is missing a page" with an
+// empty `pages` list is indistinguishable here from any other issue the Reader could not place.
+// The prompt is the only reach into that case, which is the other reason it is not the backstop.
+export function dedupeNoContentIssues(
+  issues: ReviewIssue[],
+  noContent: Map<number, "failed" | "blank">,
+): { issues: ReviewIssue[]; dropped: ReviewIssue[] } {
+  if (noContent.size === 0) return { issues, dropped: [] };
+  const reported = new Set<number>();
+  const dropped: ReviewIssue[] = [];
+  const kept = issues.filter((issue) => {
+    const pages = issue.pages ?? [];
+    if (pages.length === 0 || !pages.every((p) => noContent.has(p))) return true;
+    if (pages.every((p) => reported.has(p))) {
+      dropped.push(issue);
+      return false;
+    }
+    for (const p of pages) reported.add(p);
+    return true;
+  });
+  return { issues: kept, dropped };
+}
+
 // The index, as the head of a Reader prompt.
 //
 // It is the one part of that prompt which is about the DOCUMENT rather than about the
@@ -341,8 +473,12 @@ async function runReader(
   // Only so the line this logs can say which round it belongs to, the way `reader` and
   // `editor` already do. Nothing here reads it.
   iteration: number,
+  // The pages extraction lost, so this call can say so in the index instead of showing an
+  // empty entry and being asked about it once per chunk (see noContentPages).
+  failedPages: number[],
 ): Promise<ReviewIssue[]> {
-  const index = pages.length ? pageIndex(pages, READER_INDEX_EXCERPT_CHARS) : "";
+  const noContent = noContentPages(pages, failedPages);
+  const index = pages.length ? pageIndex(readerIndexPages(pages, noContent), READER_INDEX_EXCERPT_CHARS) : "";
   // Computed over the whole body, once, and given to the FIRST chunk only. Both halves
   // of that matter. Whole-body, because a chunk is a character window and the pair this
   // finds is a page apart (see sameWordedHeadingRuns). First chunk only, because every
@@ -411,9 +547,18 @@ async function runReader(
   let failure: unknown = null;
   const perChunk = await mapWithConcurrency(chunks, limit, async (c, i) => {
     if (failed) throw failure;
+    // Whether this call has the whole body or a window of it, said where the body is handed
+    // over. The Reader is told not to report a page as missing on the strength of content it
+    // cannot find (READER_SYSTEM, issue #188) — which is right for a window and wrong for the
+    // whole document, where a page whose content an editor round dropped is a finding nothing
+    // else in this loop can make. `contentCoverage` and `destroyedPage` guard extraction, not
+    // this loop, so on a single-chunk document the Reader is the only check there is. Absent
+    // rather than "window 1 of 1", because a label that has to be read as "you have all of it"
+    // is one more thing to get wrong.
+    const window = chunks.length > 1 ? ` (window ${i + 1} of ${chunks.length} of the document)` : "";
     const user =
       head +
-      `## HTML\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint)}` +
+      `## HTML${window}\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint)}` +
       (i === 0 && duplicateHeadings
         ? `\n\n## Headings with the same words at the same level, nothing but their own content between them (whole document)\n${duplicateHeadings}`
         : "") +
@@ -453,7 +598,38 @@ async function runReader(
   // serial loop produced — which matters downstream: `imagesForIssues` unions the pages
   // and `unresolved` is written in this order, so a document's unresolved list must not
   // depend on which chunk's call happened to finish first.
-  return perChunk.flat();
+  //
+  // Which is also why the dedupe runs here, on the flattened list, rather than inside the
+  // per-chunk callback: what it removes is the SECOND report of a page, and which report is
+  // second is a fact about the assembled list. Applied per chunk it would be a no-op — no
+  // chunk reports a page twice on its own — and applied to whichever call finished first it
+  // would keep a different one each run.
+  const { issues, dropped } = dedupeNoContentIssues(perChunk.flat(), noContent);
+  // Logged only when something was dropped, and with the reports themselves rather than a count
+  // alone. The count says how much of `@unresolved` this round would have spent on repeats and
+  // the pages say which entries the kept report stands for, but neither would let anyone read
+  // what went: keeping the first is defended above on the grounds that a misattributed real
+  // issue must not vanish without a trace, and WHICH report is first is an accident of chunk
+  // order — the chunk that pinned a real defect on a lost page may not be chunk 0. So the text
+  // and severity of each dropped report are here, whitespace-folded and bounded the way every
+  // other model-written string this pipeline logs is bounded.
+  if (dropped.length > 0) {
+    ctx.log.event("reader_page_reports_deduped", {
+      iteration,
+      dropped: dropped.length,
+      pages: [...new Set(dropped.flatMap((i) => i.pages ?? []))].sort((a, b) => a - b),
+      // `String(... ?? "")` because these two fields are the model's own: `runReader` normalizes
+      // only `pages`, and everything else that touches an issue interpolates the text into a
+      // prompt or a comment, where a missing one prints as `undefined` and costs a line. This is
+      // the first place that calls a METHOD on it, and a reply that omitted `issue` would throw a
+      // TypeError out of the review loop into the orchestrator's outer catch — a failed session,
+      // extraction and assembly discarded, for a log line about a report being dropped.
+      reports: dropped.map(
+        (i) => `${i.severity ?? "unrated"}: ${String(i.issue ?? "").replace(/\s+/g, " ").trim().slice(0, 300)}`,
+      ),
+    });
+  }
+  return issues;
 }
 
 // Which source images the Copy Editor needs this round: the union of the pages the
@@ -960,14 +1136,20 @@ export async function runReview(
   // deliberately NOT re-indexed as the editor rewrites the body: the index exists
   // to attribute content to a SOURCE page, and the source doesn't change.
   const pages = initial.pages ?? [];
-  // Carried through the loop only to be re-stated in the wrapper at the end. The review
-  // loop cannot fix a page that was never extracted, and must not be asked to: the
+  // Re-stated in the wrapper at the end, and — since #188 — given to the Reader as well. The
+  // review loop cannot fix a page that was never extracted, and must not be asked to: the
   // Reader would raise "this page is missing" every round against a body no editor can
   // repair, spending the whole iteration budget on it. See wrapDocument.
+  //
+  // "Must not be asked to" was the intent all along; for a while it was only the disclosure that
+  // was kept out of the editor's reach, and the question went to the Reader unchanged — once per
+  // chunk, per round, so a longer document raised the same lost page more times. `runReader` is
+  // where that is now said (noContentPages), which is also the only place that can say it: the
+  // index it builds is the route the reports came in by.
   const failedPages = initial.failedPages ?? [];
 
   while (iterations <= ctx.maxReviewIterations) {
-    const issues = await runReader(ctx, body, lint, pages, iterations);
+    const issues = await runReader(ctx, body, lint, pages, iterations, failedPages);
     lastIssues = issues;
     ctx.log.event("reader", { iteration: iterations, issues: issues.length });
     if (issues.length === 0) {
