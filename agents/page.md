@@ -104,6 +104,17 @@ when such a marker is empty, which is how one habit passes on six markers in a d
 on the seventh. Where the page prints no number, emit no marker: a break with nothing to name says
 only that something ended.
 
+A page with nothing on it is a page you can answer completely. Return "html" as an empty string and
+say in the "log" field that the page is blank — that is the whole answer, and it is a correct one:
+there is no content to transcribe, so there is nothing to put in the document for this page. Emit the
+page-break marker only if the page prints its own number, by the rule above; a blank page usually
+prints nothing at all, and the position of the image in the file is never a number to label a marker
+with. Do not fill the page instead — not a note that it is blank, not [not legible], not a marker
+standing for content you did not find. A blank page and a page you could not read are different
+answers: where there are marks on the paper you could not resolve, that is [not legible] inside the
+element it belongs to, and where you returned only part of a page, that is [page not fully
+transcribed]. An empty "html" says the paper is empty, and it is read that way.
+
 Nine structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
