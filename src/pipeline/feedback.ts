@@ -99,8 +99,19 @@ export async function verifyAgentOutput(
   // and the whole contract of the agent being judged. It is the same bytes on every page
   // of a document — `agents/page.md` is 16 KB of it, re-sent per page and per correction
   // recheck — so it is declared as this message's invariant head and gets a cache
-  // breakpoint after it (providers/promptCache.ts). On a 25-page document that is one
-  // write and two dozen reads at a tenth of the price, against 25 full-price copies.
+  // breakpoint after it (providers/promptCache.ts). On a 25-page document that is a
+  // handful of writes at 1.25x and the rest reads at 0.1x, against 25 full-price copies.
+  //
+  // A handful rather than one, because pages are extracted concurrently: the first
+  // `extraction_concurrency` verify calls are in flight before any of them has written
+  // the head, so each of those misses. At the default of 5 that is ~5 writes and ~20
+  // reads, which is most of the saving and not all of it.
+  //
+  // The case that does not win is a ONE-PAGE run with no recheck: its single verify call
+  // pays 1.25x for a head nothing reads back, ~25% on ~4k tokens. That is the same trade
+  // `promptCache.ts` reasons through for a system prompt, and it is deliberate — a
+  // screenshot upload is exactly that case, and a quarter of one prompt on it is worth
+  // the four fifths saved on every document with pages in it.
   //
   // It stays in the USER message, in the position it was already in, rather than moving
   // into the system prompt to ride the breakpoint already there. The system prompt is

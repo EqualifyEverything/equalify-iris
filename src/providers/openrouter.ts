@@ -167,7 +167,12 @@ export class OpenRouterProvider implements ModelProvider {
       if (m.role === "user" && (prefix || req.images?.length)) {
         const parts: unknown[] = [];
         if (prefix) parts.push(cachedTextBlock(prefix));
-        parts.push({ type: "text", text: prefix ? m.content.slice(prefix.length) : m.content });
+        const tail = prefix ? m.content.slice(prefix.length) : m.content;
+        // Only when there is one. A caller whose whole message is invariant leaves nothing
+        // after the head, and an empty text block is rejected upstream — so the guarantee
+        // that a declared head never breaks a call would fail on the one input that needs
+        // no tail at all.
+        if (tail) parts.push({ type: "text", text: tail });
         for (const img of req.images ?? []) {
           const b64 = img.data.toString("base64");
           parts.push({

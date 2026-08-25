@@ -12,8 +12,10 @@ import { generationAtLeast } from "./imageLimits.ts";
 //
 // A cache read bills at 0.1x the input rate and a cache write at 1.25x. So a prefix
 // used twice has already more than paid for the write, and the page agent's prompt on
-// a 25-page document — one write, two dozen reads — costs roughly a tenth of what it
-// costs today.
+// a 25-page document — a handful of writes and the rest reads — costs a fraction of what
+// it costs today. A handful rather than one, because the pages of a run are extracted
+// concurrently (defaults.extraction_concurrency): the first calls go out together, before
+// any of them has written the entry the others would have read.
 //
 // Everything below is a fact about a MODEL rather than about Iris, and this project
 // switches models often, so it is collected HERE and nowhere else — the same reason

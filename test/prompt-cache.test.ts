@@ -303,13 +303,38 @@ test("Bedrock keeps the message whole when the head cannot carry a breakpoint", 
     ["nothing declared", new BedrockProvider({ default_model: "m" }), userReq(LONG + "tail")],
     ["a short head", new BedrockProvider({ default_model: "m" }), userReq(SHORT + "tail", SHORT)],
     ["caching off", new BedrockProvider({ default_model: "m", prompt_cache: false }), userReq(LONG + "tail", LONG)],
-    ["a head that is not the head", new BedrockProvider({ default_model: "m" }), userReq(LONG + "tail", "elsewhere")],
+    // Long enough to pass every caching test, so what declines it is the one check that
+    // is not about caching: this is not the start of the message. A short non-prefix
+    // would be declined for its length and prove nothing.
+    ["a head that is not the head", new BedrockProvider({ default_model: "m" }), userReq(LONG + "tail", "z" + LONG)],
   ] as [string, BedrockProvider, ReturnType<typeof userReq>][]) {
     const sent = captureBedrock(provider);
     await provider.complete(req);
     const messages = sent[0].messages as { role: string; content: unknown }[];
     assert.equal(messages[0].content, req.messages[1].content, `${what}: the message should be untouched`);
   }
+});
+
+test("a message that is all head sends no empty block after it", async () => {
+  // An empty text block is rejected by the API, so a caller whose whole message is
+  // invariant — nothing after the head — would have every one of its calls 400 inside
+  // the adapter. Nothing does that today; the field accepts it, so it has to hold.
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  const sentBedrock = captureBedrock(bedrock);
+  await bedrock.complete(userReq(LONG, LONG));
+  assert.deepEqual((sentBedrock[0].messages as { content: unknown }[])[0].content, [
+    { type: "text", text: LONG, cache_control: { type: "ephemeral" } },
+  ]);
+
+  await withStream(async (calls) => {
+    await openrouter().complete({
+      capability: "text" as const,
+      model: "anthropic/claude-sonnet-4.6",
+      messages: [{ role: "user" as const, content: LONG, cachedPrefix: LONG }],
+    });
+    const parts = (calls[0].messages as { content: { type: string }[] }[])[0].content;
+    assert.deepEqual(parts.map((p) => p.type), ["text"]);
+  });
 });
 
 test("Bedrock keeps the image after the breakpoint, and the text before it", async () => {
@@ -357,7 +382,9 @@ test("OpenRouter keeps the message whole when the head cannot carry a breakpoint
     await openrouter().complete(req(LONG + "tail"));
     await openrouter().complete(req(SHORT + "tail", SHORT));
     await openrouter(false).complete(req(LONG + "tail", LONG));
-    await openrouter().complete(req(LONG + "tail", "elsewhere"));
+    // Long enough to pass every caching test, so what declines it is the one check that
+    // is not about caching: this is not the start of the message.
+    await openrouter().complete(req(LONG + "tail", "z" + LONG));
     for (const call of calls) {
       const messages = call.messages as { content: unknown }[];
       assert.equal(typeof messages[0].content, "string", "an image-less, uncacheable message stays a plain string");
