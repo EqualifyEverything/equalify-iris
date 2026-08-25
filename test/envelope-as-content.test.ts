@@ -225,9 +225,21 @@ test("only a reply that says the page is blank is read as a blank page", () => {
   assert.equal(declaredBlank({ html: "", log: "Low resolution scan; no text." }), false);
   assert.equal(declaredBlank({ html: "", log: "The image is too noisy to read; no text." }), false);
   assert.equal(declaredBlank({ html: "", log: "The image did not load; no content." }), false);
-  // The veto is over-wide on purpose, so a blank page whose log mentions the scan is a failed
-  // page. That costs a glance, which is the cheap side of this trade.
+  // A hedge with no infinitive after it is still a hedge.
+  assert.equal(declaredBlank({ html: "", log: "The page appears blank; the contrast is too low." }), false);
+  assert.equal(declaredBlank({ html: "", log: "The page appears blank; the exposure is too low." }), false);
+  // The veto leans wide, so a blank page whose log mentions the scan is a failed page. That costs
+  // a glance, which is the cheap side of this trade.
   assert.equal(declaredBlank({ html: "", log: "The page is blank, and the scan is faint." }), false);
+  // But only over words that carry doubt. These logs express none, and refusing them would put a
+  // `@page-failed` marker and an incompleteness notice on a complete document — the #179 defect,
+  // back again on the pages the veto overshot.
+  assert.equal(declaredBlank({ html: "", log: "Page is empty. High quality scan, nothing printed." }), true);
+  assert.equal(
+    declaredBlank({ html: "", log: "The page is blank; the image is slightly rotated, no content." }),
+    true,
+    "geometry is not legibility: a rotated page reads fine",
+  );
 
   // And the shapes that answered nothing at all.
   assert.equal(declaredBlank({ log: "no content" }), false, "no `html` key: the question went unanswered");

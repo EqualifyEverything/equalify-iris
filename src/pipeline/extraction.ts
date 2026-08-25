@@ -504,13 +504,15 @@ const BLANK_LOG =
 // Two families, and the second is why this is not a list of ways to say "I could not": a model
 // describing the IMAGE's condition ("the page is very dark and appears empty", "low resolution
 // scan; no text") has told you why its answer is unreliable without ever saying it failed. Those
-// words veto the declaration too. Both lists are deliberately over-wide — a page wrongly reported
-// as failed costs a glance, and a page wrongly dropped costs the page — so a blank page whose log
-// happens to mention the scan is a failed page, and that is the trade being made.
+// words veto the declaration too. Both lists lean wide — a page wrongly reported as failed costs a
+// glance, and a page wrongly dropped costs the page — but only over words that carry doubt: `too
+// low` vetoes with or without an infinitive after it, while `quality` is scoped to the poor kind
+// (it matches "high quality" as readily as the other), and geometry is not legibility, so a
+// rotated or skewed page says nothing about whether its words could be read.
 const UNREADABLE_LOG =
-  /\b(illegible|unreadable|not legible|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|blurr\w*|obscur\w*|resolve|corrupt\w*|partial\w*|error)\b/i;
+  /\b(illegible|unreadable|not legible|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry)|blurr\w*|obscur\w*|resolve|corrupt\w*|partial\w*|error)\b/i;
 const DEGRADED_IMAGE_LOG =
-  /\b(dark|faint|washed|blurry|blurred|noisy|noise|grainy|pixelat\w*|low[- ]?res\w*|resolution|quality|focus|skew\w*|rotat\w*|distort\w*|did ?n[o']?t load|not load\w*)\b/i;
+  /\b(dark|faint|washed|blurry|blurred|noisy|noise|grainy|pixelat\w*|low[- ]?res\w*|resolution|(poor|low|bad|degraded) quality|out of focus|did ?n[o']?t load|not load\w*)\b/i;
 
 // Exported for the unit test: this predicate is the whole distinction between a page delivered
 // empty and a page reported lost, and it is worth pinning on the reply shapes directly.
