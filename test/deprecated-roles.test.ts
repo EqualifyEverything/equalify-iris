@@ -4,8 +4,10 @@
 // told the rule had failed and rewrote five sections, and the role survived to delivery.
 //
 // Two things are pinned here. The axe facts the fix reasons from — which roles are deprecated,
-// that the list role is not one of them, and that the shipped gate really does fail the
-// reported markup and pass the stripped markup. And the strip itself (src/pipeline/roles.ts):
+// that the deprecated item roles really are kinds of `listitem` (which is what makes removing
+// them lossless), that the shipped gate fails the reported markup and passes the stripped
+// markup, and that a landmark role on the `<ol>` costs the list its list semantics with no rule
+// to report it. And the strip itself (src/pipeline/roles.ts):
 // what it removes, what it deliberately leaves for the gate, and that a document with nothing
 // to strip comes back the same string, which is what the review loop's change detection and
 // `anchors.ts`'s reserialization caution both depend on.
@@ -67,10 +69,60 @@ test("axe deprecates exactly the three roles the strip knows about", () => {
     .filter((r) => roles[r].deprecated)
     .sort();
   assert.deepEqual(deprecated, ["directory", "doc-biblioentry", "doc-endnote"]);
-  // And the role on the LIST is not one of them, which is why the strip is about items: taking
-  // `doc-endnotes` off would remove a landmark the document is entitled to.
+  // And the role a page agent reaches for on the LIST is not one of them, which is why this pass
+  // is about items only. It is wrong on an `<ol>` for a different reason — the test below.
   assert.notEqual(roles["doc-endnotes"].deprecated, true, "doc-endnotes is now deprecated too");
   assert.notEqual(roles["doc-bibliography"].deprecated, true, "doc-bibliography is now deprecated too");
+});
+
+// Why the prompt tells the agent to keep `role="doc-endnotes"` off the `<ol>` and put it on a
+// wrapper, and why no amount of linting could have taught it that. A `role` REPLACES the host
+// element's implicit role rather than adding to it, and `doc-endnotes` is a landmark that is not
+// a kind of list — so `<ol role="doc-endnotes">` is not a list at all: the notes stop being
+// announced as a list of N items, and each `<li>` loses the `list` context `listitem` requires.
+//
+// The gate is silent on all of it. axe's `listitem` rule checks DOM parentage and the `<li>`
+// really is inside an `<ol>`; a landmark declares no `requiredOwned`, so nothing checks the
+// children either. The role table is where the facts live, so that is what is pinned — the first
+// version of the #187 prompt rule prescribed this shape, and a clean axe verdict is exactly the
+// evidence that would have kept it.
+test("a landmark role on the <ol> costs the list its list semantics, and no rule reports it", async () => {
+  const roles = axe.utils.getStandards().ariaRoles as unknown as Record<
+    string,
+    { type?: string; superclassRole?: string[]; requiredContext?: string[]; requiredOwned?: string[] }
+  >;
+  for (const landmark of ["doc-endnotes", "doc-bibliography"]) {
+    assert.equal(roles[landmark].type, "landmark");
+    assert.deepEqual(roles[landmark].superclassRole, ["landmark"], `${landmark} is not a kind of list`);
+    assert.equal(roles[landmark].requiredOwned, undefined, `${landmark} now constrains its children`);
+  }
+  // What the `<ol>` stops being, and what its items needed from it.
+  assert.deepEqual(roles.list.requiredOwned, ["listitem"]);
+  assert.deepEqual(roles.listitem.requiredContext, ["list"]);
+  // The two deprecated item roles ARE kinds of listitem, which is what makes removing them safe.
+  assert.deepEqual(roles["doc-endnote"].superclassRole, ["listitem"]);
+  assert.deepEqual(roles["doc-biblioentry"].superclassRole, ["listitem"]);
+
+  const found = await rules('<ol role="doc-endnotes"><li id="fn-1">A note.</li></ol>');
+  if (found === null) return;
+  assert.deepEqual(
+    found,
+    [],
+    "the gate has caught up with the prompt — this test's argument needs rewriting, not deleting: " +
+      found.join(", "),
+  );
+});
+
+// A repeated attribute is the HTML parser's business, and it keeps the FIRST: this is
+// `<li role="listitem">` in the tree, the deprecated token never reaches axe, and rewriting it
+// would edit a string nothing reads. So the strip considers only the first `role` in a tag, and
+// the gate's silence here is correct rather than a miss.
+test("a repeated role attribute leaves nothing to strip, because the parser drops the second", async () => {
+  const markup = '<ol><li role="listitem" role="doc-endnote">A note.</li></ol>';
+  assert.equal(stripDeprecatedRoles(markup).html, markup);
+  const found = await rules(markup);
+  if (found === null) return;
+  assert.deepEqual(found, [], `the parsed document has no deprecated role in it, got: ${found.join(", ")}`);
 });
 
 test("a deprecated role is removed from the element whose own role already says it", () => {
@@ -92,6 +144,10 @@ test("a deprecated role is removed from the element whose own role already says 
     ['<li role="listitem doc-endnote">A note.</li>', '<li role="listitem">A note.</li>'],
     ['<li role="doc-endnote listitem">A note.</li>', '<li role="listitem">A note.</li>'],
     ["<li role='doc-endnote listitem'>A note.</li>", "<li role='listitem'>A note.</li>"],
+    // An unencoded `>` inside an earlier attribute value, which is the case the tag scan reads
+    // quoted values as units for. If it ended the tag at that `>` instead, the slice would hold
+    // no `role` and this strip would silently not happen.
+    ['<li title="If x > y, stop" role="doc-endnote">A note.</li>', '<li title="If x > y, stop">A note.</li>'],
   ]) {
     assert.equal(stripDeprecatedRoles(before).html, after, `strip of: ${before}`);
   }
@@ -129,8 +185,14 @@ test("what was removed is reported, one entry per node, so a log can say how man
     '<ul role="directory"><li>Ash</li></ul>';
   const strip = stripDeprecatedRoles(body);
   assert.deepEqual(strip.stripped, ["doc-endnote", "doc-endnote", "directory"]);
+  assert.equal(strip.nodes, 3, "three elements were edited, which is what axe would have reported");
   assert.equal(strip.html.includes("doc-endnote>"), false);
-  assert.match(strip.html, /<ol role="doc-endnotes">/, "the list's own landmark role must survive");
+  // `stripped` is token-wise and `nodes` is element-wise, and they come apart only on markup
+  // nothing real produces. `nodes` is the one a log reports, so the difference is pinned.
+  const two = stripDeprecatedRoles('<li role="doc-endnote doc-biblioentry">1</li>');
+  assert.deepEqual(two.stripped, ["doc-endnote", "doc-biblioentry"]);
+  assert.equal(two.nodes, 1);
+  assert.equal(two.html, "<li>1</li>");
 });
 
 // The property the review loop depends on. `review_converged` decides a round changed nothing
@@ -143,9 +205,9 @@ test("a document with nothing to strip comes back byte-identical", () => {
     '<ol role="doc-endnotes">\n  <li id="fn-1">A note. <a href="#fnref-1">↩</a></li>\n</ol>',
     '<p>The deprecated roles are <code>directory</code>, <code>doc-biblioentry</code> and <code>doc-endnote</code>.</p>',
     '<p>See the <a href="#directory">directory</a>, or the staff directory on page 4.</p>',
-    // An unencoded `>` inside an attribute value: the tag scan reads quoted values as units,
-    // so this neither ends the tag early nor is edited.
-    '<img src="a.png" alt="If x > y, stop">\n<li role="listitem">Fine</li>',
+    // Reaches the tag scan — the pre-check matches a `role` attribute naming a deprecated role
+    // — and comes back unchanged because neither host element implies the role.
+    '<div role="doc-endnote">A note.</div>\n<dl role="directory"><dt>Ash</dt><dd>2</dd></dl>',
     "<li>A note.</li>",
   ]) {
     const strip = stripDeprecatedRoles(body);
@@ -175,9 +237,12 @@ test("the strip runs where pages are joined, and reports what it removed", () =>
     },
   ] as unknown as Parameters<typeof assembleBodyWithReport>[0];
   const { body, deprecatedRoles } = assembleBodyWithReport(fragments);
-  assert.deepEqual(deprecatedRoles, ["doc-endnote"]);
+  assert.deepEqual(deprecatedRoles.stripped, ["doc-endnote"]);
+  assert.equal(deprecatedRoles.nodes, 1);
   assert.match(body, /<li id="fn-1">A note\.<\/li>/, "the item should have lost only its role");
-  assert.match(body, /<ol role="doc-endnotes">/, "the list should keep its landmark");
+  // Not deprecated, so not this pass's business — and see the landmark test below for why the
+  // prompt tells the agent not to put it there in the first place.
+  assert.match(body, /<ol role="doc-endnotes">/);
 });
 
 // The other end of the fix, and the one #187 actually needed: the role survived a Copy Editor
@@ -288,6 +353,7 @@ test("an ordinary join reports no strip and is not rewritten", () => {
     { order: 2, innerHtml: '<ol role="doc-endnotes"><li id="fn-1">A note.</li></ol>', page: 2, source: "p2.png" },
   ] as unknown as Parameters<typeof assembleBodyWithReport>[0];
   const { body, deprecatedRoles } = assembleBodyWithReport(fragments);
-  assert.deepEqual(deprecatedRoles, []);
+  assert.deepEqual(deprecatedRoles.stripped, []);
+  assert.equal(deprecatedRoles.nodes, 0);
   assert.equal(body, '<h1>Manual</h1>\n\n<ol role="doc-endnotes"><li id="fn-1">A note.</li></ol>');
 });

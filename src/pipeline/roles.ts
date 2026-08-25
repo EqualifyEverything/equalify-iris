@@ -37,10 +37,13 @@ const REDUNDANT_ON: Record<string, string[]> = {
   directory: ["ul", "ol", "menu"],
 };
 
-// Cheap pre-check so the ordinary document does no scanning work. Deliberately loose — it
-// matches the role names anywhere, including in prose — because a false positive here only
-// costs the scan below, which then finds nothing to change.
-const ANY_DEPRECATED = /doc-endnote\b|doc-biblioentry\b|directory\b/i;
+// Cheap pre-check so the ordinary document does no scanning work. It looks for the role name
+// in something shaped like a `role` attribute rather than for the name alone: `directory` is an
+// ordinary English word and `doc-endnote` appears in prose about this very rule, and a
+// transcribed page that mentions a staff directory should not pay for a scan of the whole
+// joined body. Still only a pre-check — it matches `role=directory` written in text too, and a
+// false positive costs the scan below, which then finds no tag to change.
+const ANY_DEPRECATED = /role\s*=\s*["']?[^"'>]*(?:doc-endnote|doc-biblioentry|directory)\b/i;
 
 // A start tag, with its attributes read as text-or-quoted-string so a `>` inside an
 // attribute value does not end the tag early. The alternation is unambiguous (`[^>"']`
@@ -54,18 +57,31 @@ const START_TAG = /<([a-z][a-z0-9-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
 // `role` in the attribute text: double-quoted, single-quoted, or bare. The leading
 // whitespace is captured so the attribute can be removed WITH its separator when the last
 // token goes, rather than leaving `<li  id="x">`.
+//
+// Non-global, so only the FIRST `role` in a start tag is considered — which is the only one
+// that exists as far as anything downstream is concerned. The HTML parser drops a repeated
+// attribute and keeps the first, so `<li role="listitem" role="doc-endnote">` is
+// `<li role="listitem">` in the tree, axe never sees the deprecated one, and rewriting it here
+// would edit a string nobody reads. (anchors.ts's source scan takes the first of a repeated
+// attribute for the same reason.)
 const ROLE_ATTR = /(\s+)role\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i;
 
 export interface RoleStrip {
   html: string;
-  // One entry per attribute token removed, in document order, so `stripped.length` is the
-  // node count axe would have reported and `new Set(stripped)` is which roles they were.
+  // One entry per attribute token removed, in document order, so `new Set(stripped)` is which
+  // roles they were. Token-wise rather than element-wise: an element carrying two deprecated
+  // tokens contributes two entries, which is why `nodes` is counted separately.
   stripped: string[];
+  // Elements edited, which is the figure `aria-deprecated-role` would have reported. The same
+  // as `stripped.length` for anything real — two deprecated roles on one element is not markup
+  // a page agent produces — and the two are kept apart so the log's `nodes` means nodes.
+  nodes: number;
 }
 
 export function stripDeprecatedRoles(html: string): RoleStrip {
-  if (!ANY_DEPRECATED.test(html)) return { html, stripped: [] };
+  if (!ANY_DEPRECATED.test(html)) return { html, stripped: [], nodes: 0 };
   const stripped: string[] = [];
+  let nodes = 0;
   const out = html.replace(START_TAG, (tag, name: string, attrs: string) => {
     const m = ROLE_ATTR.exec(attrs);
     if (!m) return tag;
@@ -82,6 +98,7 @@ export function stripDeprecatedRoles(html: string): RoleStrip {
       return false;
     });
     if (kept.length === tokens.length) return tag;
+    nodes++;
     // The quoting style the page used is kept for the tokens that survive; a value that
     // loses every token loses the attribute and the whitespace that introduced it.
     const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : "";
@@ -91,5 +108,5 @@ export function stripDeprecatedRoles(html: string): RoleStrip {
     // whitespace and `<name` has none, so the first hit is the attribute just matched.
     return tag.replace(whole, () => replacement);
   });
-  return { html: out, stripped };
+  return { html: out, stripped, nodes };
 }

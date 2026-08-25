@@ -15,6 +15,7 @@ import { RunLog } from "../store/runlog.ts";
 import type { InputImage, PipelineContext } from "./context.ts";
 import { runExtraction, reExtractPages } from "./extraction.ts";
 import { runAssembly, assembleBody, wrapDocument } from "./assembly.ts";
+import { stripDeprecatedRoles } from "./roles.ts";
 import { runReview, type ReviewResult } from "./review.ts";
 import { runAxe, lintErrorFields } from "./lint.ts";
 import { learnFromFeedback, proposeAgentUpdatesFromFeedback, scopeFeedback } from "./feedback.ts";
@@ -160,6 +161,22 @@ export async function runPipeline(args: {
       // missing" — the same answer that state implied when it was written.
       failedPages = saved.failedPages ?? [];
       beforeBody = (saved.body ?? assembleBody(priorFragments)).trim();
+      // A deprecated role in a body this run did not produce (roles.ts, #187). Neither branch of
+      // that `??` covers the other: the join strips, a body stored before this existed does not,
+      // and this path runs no assembly at all — so a re-run whose Reader is satisfied, or that
+      // converges on the first round, would deliver a role the pipeline no longer emits with no
+      // correction round in it to catch one. Stripped before the re-lint below, so the gate is not
+      // shown a violation that is about to be removed, and before the diff baseline, so a role
+      // this pass took does not read as a change the loop made.
+      const priorRoles = stripDeprecatedRoles(beforeBody);
+      if (priorRoles.nodes > 0) {
+        beforeBody = priorRoles.html;
+        log.event("deprecated_roles_stripped", {
+          stage: "feedback_prior_body",
+          roles: [...new Set(priorRoles.stripped)].sort(),
+          nodes: priorRoles.nodes,
+        });
+      }
 
       // Route the feedback: content-level complaints ("you misread the table on
       // page 3") are unfixable by the review loop, which only ever sees the

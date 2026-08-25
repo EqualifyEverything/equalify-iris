@@ -1,6 +1,6 @@
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { namespaceAnchors, type AnchorReport } from "./anchors.ts";
-import { stripDeprecatedRoles } from "./roles.ts";
+import { stripDeprecatedRoles, type RoleStrip } from "./roles.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PipelineContext } from "./context.ts";
 
@@ -37,12 +37,12 @@ export function assembleBody(fragments: Fragment[]): string {
 export function assembleBodyWithReport(fragments: Fragment[]): {
   body: string;
   anchors: AnchorReport;
-  deprecatedRoles: string[];
+  deprecatedRoles: RoleStrip;
 } {
   const ordered = [...fragments].sort((a, b) => a.order - b.order);
   const { pages, report } = namespaceAnchors(ordered.map((f) => ({ order: f.order, innerHtml: f.innerHtml.trim() })));
   const joined = stripDeprecatedRoles(pages.filter((h) => h.length > 0).join("\n\n"));
-  return { body: joined.html, anchors: report, deprecatedRoles: joined.stripped };
+  return { body: joined.html, anchors: report, deprecatedRoles: joined };
 }
 
 // Wrap body content in a minimal accessible document shell. If issues remain when the
@@ -205,11 +205,11 @@ export async function runAssembly(
   // the log is the only place that fact survives — the delivered document is clean and the
   // lint that would have named the role now finds nothing. `roles` is the set and `nodes`
   // the count, which is what `aria-deprecated-role` would have reported.
-  if (deprecatedRoles.length > 0) {
+  if (deprecatedRoles.nodes > 0) {
     ctx.log.event("deprecated_roles_stripped", {
       stage: "assembly",
-      roles: [...new Set(deprecatedRoles)].sort(),
-      nodes: deprecatedRoles.length,
+      roles: [...new Set(deprecatedRoles.stripped)].sort(),
+      nodes: deprecatedRoles.nodes,
     });
   }
   if (anchors.collisions.length > 0 || anchors.ambiguous.length > 0) {

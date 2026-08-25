@@ -1037,13 +1037,13 @@ export async function runReview(
     // effect was a role this strips is not credited as a change. A round that introduced none
     // leaves the string untouched.
     const roles = stripDeprecatedRoles(body);
-    if (roles.stripped.length > 0) {
+    if (roles.nodes > 0) {
       body = roles.html;
       ctx.log.event("deprecated_roles_stripped", {
         stage: "correction_round",
         iteration: iterations,
         roles: [...new Set(roles.stripped)].sort(),
-        nodes: roles.stripped.length,
+        nodes: roles.nodes,
       });
     }
     // `sections` on this line is how a run log tells a round that was answered whole from one
