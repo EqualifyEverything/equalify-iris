@@ -48,10 +48,16 @@ export function assembleBodyWithReport(fragments: Fragment[]): { body: string; a
 // document admits there is one.
 // `editorTruncated` is the third statement of the same kind, and it is about the loop
 // rather than about the content: a correction round's response hit the model's output
-// ceiling, so that round was abandoned and this document is the one that entered it
-// (issue #143). Without it, a document delivered this way is indistinguishable from one
-// whose issues the editor tried and failed to fix — and the difference is what a reader
-// of `@unresolved` needs, since these issues were never worked on at all.
+// ceiling (issue #143). Without it, a document delivered this way is indistinguishable from
+// one whose issues the editor tried and failed to fix — and the difference is what a reader
+// of `@unresolved` needs.
+// `editorSections` says how that round then ended, and there are two ways (issue #165). With
+// it, the round was re-made a section at a time and this document carries whatever those
+// sections fixed — so the `@unresolved` list is the reading that PRECEDED them and was never
+// taken again. Without it, nothing was rescued: the round was abandoned and this document is
+// the one that entered it, with those issues never worked on at all. Two different documents,
+// and a reader who is told "a round was abandoned" about the first would go looking for
+// corrections that are in fact there.
 // `lintUnavailable` is the fourth statement of the same kind, and the one that is about
 // the CHECKING rather than about the content: axe-core could not run on this document, so
 // nothing here has been through the accessibility gate at all. It belongs in the document
@@ -65,6 +71,7 @@ export function wrapDocument(
     unresolved?: string[];
     failedPages?: number[];
     editorTruncated?: boolean;
+    editorSections?: { of: number; corrected: number };
     lintUnavailable?: string;
   } = {},
 ): string {
@@ -77,14 +84,25 @@ export function wrapDocument(
       `  none of their content is here. See the run log (page_extraction_failed) or the\n` +
       `  session's diagnostics (pages_failed) for why.\n-->`
     : "";
-  const truncated = opts.editorTruncated
-    ? `\n<!-- @editor-truncated\n` +
-      `  A correction round could not be completed: the copy editor is asked for the whole\n` +
-      `  document, and its response hit the model's output ceiling, so that round was\n` +
-      `  discarded and the review loop stopped. The content below is what entered that\n` +
-      `  round; any issues listed below were not corrected. See the run log\n` +
-      `  (editor_truncated) for the ceiling and the size of the response.\n-->`
-    : "";
+  const truncated = !opts.editorTruncated
+    ? ""
+    : opts.editorSections
+      ? `\n<!-- @editor-truncated sections ${opts.editorSections.corrected} of ${opts.editorSections.of}\n` +
+        `  A correction round could not be completed in one response: the copy editor is asked\n` +
+        `  for the whole document, and the answer hit the model's output ceiling. It was made\n` +
+        `  again a section at a time, and the corrections above are what came back — from\n` +
+        `  requests that each saw one section of the document and not the rest of it, so a\n` +
+        `  problem spanning two of them may be untouched. The review loop then stopped, so any\n` +
+        `  issues listed below are the ones found BEFORE those corrections and were not looked\n` +
+        `  for again; some may already be fixed. See the run log (editor_truncated,\n` +
+        `  editor_sections) for the ceiling, the size of the response and the sections.\n-->`
+      : `\n<!-- @editor-truncated\n` +
+        `  A correction round could not be completed: the copy editor is asked for the whole\n` +
+        `  document, and its response hit the model's output ceiling, so that round was\n` +
+        `  discarded and the review loop stopped. The content below is what entered that\n` +
+        `  round; any issues listed below were not corrected. See the run log\n` +
+        `  (editor_truncated, editor_sections_declined) for the ceiling, the size of the\n` +
+        `  response and why it could not be corrected a section at a time.\n-->`;
   // The message is axe's own, and it is the only text here that comes from outside this
   // function — `runAxe` builds it from an Error's `message`, so it can be long, can carry a
   // newline, and would otherwise be able to close this comment early. Bounded like the

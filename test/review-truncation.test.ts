@@ -15,6 +15,14 @@
 // one layer up. The loop stops, because the next round would send the same body and get the
 // same ceiling, and what is delivered is the body that entered the round with that round's
 // issues recorded as unresolved — a state the loop already supports and reports.
+//
+// This file is that containment, and its fixture body is 67 characters long: a document with no
+// top-level boundary worth cutting at, so the round is discarded exactly as it was when #143 was
+// fixed. The other half — a body long enough to be re-made a section at a time, which is what a
+// 25-page document actually gets (issue #165) — is `editor-sections.test.ts`. Read together they
+// are the two ways a truncated round can end, and the tests here are the ones that must keep
+// passing unchanged: salvage that changed the no-salvage path would be a regression, not a
+// feature.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";

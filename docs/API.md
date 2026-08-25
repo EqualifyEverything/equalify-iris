@@ -178,8 +178,9 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   deletion — is the one outcome a reader cannot detect. A `[page not fully transcribed]` marker
   always ends this way, by design: no pass in the review loop can resolve it, because finishing a
   page means returning the rest of it on top of the whole corrected body, and a response that hits
-  its ceiling costs the whole round — every other correction that round made included
-  (`editor_truncated_rate` below). So it is reported and left standing, and it
+  its ceiling ends that round's reading of the document — what the round still corrects is
+  whatever the section-at-a-time retry rescues (`editor_truncated_rate` below). So it is reported
+  and left standing, and it
   raises this rate for a document that is otherwise sound — but only for as many rounds as it takes
   the editor to leave the document alone once, which is what now ends the loop. Read it as what it is — one page
   arrived short, and the document says where.
@@ -206,11 +207,16 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   model's output-token ceiling. The editor is asked for the whole document, so its output length
   follows the length of the document rather than the number of issues in it: at a large
   `max_pages` an ordinary document doing exactly what it was told can exceed a fixed
-  `max_tokens`. Such a round is discarded and the loop stops — the document is delivered as it
-  entered that round, with those issues unresolved and an `@editor-truncated` comment saying so
-  — so this rate is also counted in `unresolved_rate`, and it is what tells the two apart: issues
-  the editor tried and could not fix, versus issues no editor pass ever worked on. A non-zero
-  value is a statement about the **deployment**, not about the documents: either
+  `max_tokens`. Such a round is re-made **a section at a time** — the body is cut at top-level
+  boundaries into pieces sized from what the truncated response actually returned, and each is
+  corrected on its own — and the loop then stops either way. So the document may carry that
+  round's corrections (from requests that each saw one section, so a problem spanning two of
+  them may be untouched) or none of them, if the body could not be divided or no section came
+  back; the delivered `@editor-truncated` comment says which, and `editor_sections` in the run
+  log says how many. This rate counts the ceiling being hit, whatever was rescued afterwards,
+  and those documents are also counted in `unresolved_rate` — the issues in the `@unresolved`
+  block are the reading that preceded the truncated round and were never looked for again.
+  A non-zero value is a statement about the **deployment**, not about the documents: either
   `providers.<name>.max_tokens` is too low for the pages allowed per session, or `max_pages` is
   too high for it.
 * `rules[]` — axe-core rule ids, **per document**: `documents` is how many documents violated the
@@ -536,9 +542,15 @@ run log instead (step 7). An `<!-- @unresolved -->` comment listing outstanding 
 appended if the review loop stopped with any still open — at its iteration cap, or on a round that
 changed nothing, which is how a document whose remaining issues the loop is designed not to fix
 ordinarily ends. A third stop reason adds a second comment: `<!-- @editor-truncated -->` says a
-correction round's response hit the model's output ceiling, so the round was discarded and **none**
-of the issues below it were worked on — read together with `@unresolved`, which on its own would
-say the editor tried and could not fix them (§0c `editor_truncated_rate`). A third comment,
+correction round's response hit the model's output ceiling — read together with `@unresolved`,
+which on its own would say the editor tried and could not fix them (§0c
+`editor_truncated_rate`). It comes in two forms, and the difference is what corrections the
+document in your hand contains. `@editor-truncated sections C of N` means the round was re-made a
+section at a time and `C` of `N` sections came back corrected, so those corrections **are** here
+but each was made by a request that saw one section and not the rest of the document; the
+`@unresolved` list is the reading that preceded them and was never taken again, so some of it may
+already be fixed. The bare `@editor-truncated` means nothing was rescued — the round was
+discarded and **none** of the issues below it were worked on. A third comment,
 `<!-- @lint-unavailable -->`, says axe-core could not run on this document at all, so **nothing**
 in it was checked for accessibility violations and an empty `@unresolved` is not a clean bill of
 health (§0c `lint_error_rate`). Returns `409` while the session is still running.
@@ -611,8 +623,11 @@ Useful events to grep for:
 | `editor_images_refused` | The provider refused the round's payload as too large, so the same prompt was re-sent **without** images. The correction still had the whole body and every issue; only a fidelity problem that must be checked against the source can go unfixed. |
 | `editor_links_dropped` | An `href` present before that round's correction was missing after it (`iteration`, `hrefs`). A link's target came from the source **file**, not from a page image, so a dropped one cannot be recovered by looking again — logged rather than repaired, and counted into `links_dropped_rate`. |
 | `editor_markers_changed` | The count of a `[not legible]` or `[page not fully transcribed]` marker changed across one correction round (`iteration`, `before`, `after`, plus `fewer` and/or `more`). `fewer` is expected where the editor read that region off the attached page image, and is a loss anywhere else — nothing downstream can tell those apart, and no other signal sees it at all, since the flattened view strips bracketed tokens before comparing words. `more` is a placeholder written over words the extractor did read, which no instruction in the loop allows. |
-| `editor_truncated` | A correction round's response hit the model's output ceiling (`max_tokens`, `chars` returned, plus `attached`/`of` images and `after: "images_refused"` when it was the retry that truncated). The round is discarded, the review loop stops, and the document that entered the round is delivered with that round's issues unresolved — a round may fail without the document. There is no `editor` line for such a round, which is how it is told apart from a round that ran and changed nothing (`review_converged`). The whole ceiling of output was billed, so this is the log's most expensive line. |
-| `reader` / `editor` | Per-iteration review-loop progress: the Reader's `issues` count, and whether that round's correction `changed` the document. |
+| `editor_truncated` | A correction round's response hit the model's output ceiling (`max_tokens`, `chars` returned, plus `attached`/`of` images and `after: "images_refused"` when it was the retry that truncated). The review loop stops after this round either way, but the round itself is not given up on: it is re-made a section at a time (`editor_sections` below). The whole ceiling of output was billed, so this is the log's most expensive line. |
+| `editor_sections` | The truncated round is being re-made a piece at a time: the body was cut into `sections` pieces of at most `budget` characters, sized from the `chars` that response actually returned, and they are corrected `concurrency` at a time. The budget is measured rather than estimated — nothing here is computed until the ceiling has actually been hit — and it is deliberately well under what came back, because a correction adds characters. |
+| `editor_section_failed` | One section could not be corrected (`section` of `of`, and `reason`: `truncated` or `too_large` for a section whose own response or request did not fit, `no_output` for a reply with no usable HTML in it). That section's **original text** goes back into the document, so the cost is that section and not the round. Anything that is not a size failure — a stall, a stream error, a bad key — is not logged here and still ends the run. |
+| `editor_sections_declined` | The truncated round could not be re-made a section at a time, and why (`reason`): `unmeasured` (no character count to size a budget from), `budget_too_small` (the response was cut so early that the sections would be too small to be worth asking about), `indivisible` (the body has no top-level boundary to cut at — one enormous table, say), `too_many_sections` (more requests than one round may spend, with `sections`, `max` and `budget`). The round is then discarded as it was before this existed: the document that entered it is delivered with that round's issues unresolved. |
+| `reader` / `editor` | Per-iteration review-loop progress: the Reader's `issues` count, and whether that round's correction `changed` the document. A round answered piece by piece carries `sections` and `corrected` as well, which is how a log tells one from a round answered whole — and how much of the document the corrections actually reached. A truncated round that rescued nothing has **no** `editor` line, which is how it is told apart from a round that ran and changed nothing (`review_converged`). |
 | `lint_unavailable` | axe-core could not run on a body no `assembly` line covers, with the same `lint_error` / `lint_error_where` / `lint_error_name` / `lint_error_stack` fields that line carries. `stage: "correction_round"` is the review loop's re-lint of a body an editor round changed, with the `iteration` that produced it; `stage: "feedback_relint"` is a feedback re-run that skipped extraction, where there is no assembly to report one. The document ships with **no accessibility verdict** either way: the loop had no violations to work from, and the delivered HTML says so in an `@lint-unavailable` comment. |
 | `editor_no_output` | The Copy Editor's reply carried no usable body (`chars` of text came back), so the round kept the document it was given. A call paid for and nothing said — which is why it does not end the loop: the next round is a retry, not a repeat. |
 | `review_converged` | The loop stopped early because a round changed nothing (`iteration`, the `issues` that round was given, and the `rounds_left` it did not spend). The editor answered and handed back the document it was given, so the same request next round would be answered the same way; what ships is that document with those issues written to `@unresolved`. Expect this on a document whose remaining issues are the ones the loop is designed not to resolve — an undecidable pair of same-worded headings, a `[page not fully transcribed]` marker. Frequent lines here with `issues` the editor *should* be able to fix are the signal worth chasing: that is the editor declining work, not the loop saving a wasted round. |
@@ -965,10 +980,16 @@ openrouter: response hit the 32000-token output ceiling and was truncated
 ```
 
 The model stopped at the output ceiling rather than at the end of its answer, so the HTML it
-returned is cut mid-tag. Iris **fails the run** instead of assembling the fragment — a truncated
-page still parses, so it would otherwise be delivered as though the missing content were never in
-the source. Raise `max_tokens` on that provider block and re-run. Dense full-page tables and
-forms are the usual trigger.
+returned is cut mid-tag. Iris never assembles such a fragment — a truncated page still parses, so
+it would otherwise be delivered as though the missing content were never in the source. Which
+page it costs and whether it costs the run is §7c: one page's failure costs that page, and the
+run only ends `failed` (with this as its `error`) when every page failed. Raise `max_tokens` on
+that provider block and re-run. Dense full-page tables and forms are the usual trigger.
+
+The same ceiling reached by a **correction** round is contained differently, because there the
+whole document is what did not fit: that round is re-made a section at a time, the loop then
+stops, and the delivered document says so in an `@editor-truncated` comment (§5, and
+`editor_truncated` / `editor_sections` in §7a). The remedy is the same knob.
 
 ## Prove it works
 
