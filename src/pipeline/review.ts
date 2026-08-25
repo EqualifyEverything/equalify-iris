@@ -134,9 +134,13 @@ lost: the document already records it, both in that entry and in a @page-failed 
 content would have been, and no edit to the HTML can bring the page back — so reporting it spends a
 correction round on the one defect this loop cannot fix, and reports it again on every round after.
 A page that is BLANK in the source contributed nothing because there was nothing on it to
-transcribe, which makes the document correct as it stands. Say nothing about either. And never
-report a page as missing because you cannot find its content in the HTML you were given: you are
-reading one window of the document, and the rest of it is another call's to read.
+transcribe, which makes the document correct as it stands. Say nothing about either.
+
+Be careful in the other direction too, about content you cannot find. Where the HTML section is
+labelled as one window of several, the rest of the document is another call's to read, so a page
+whose content is not in your window is not a missing page and is not yours to report. Where it
+carries no such label you have the whole body, and content genuinely absent from it — a page the
+index shows as extracted with nothing of it in the document — is a real finding and yours to make.
 
 Respond with ONLY JSON:
 { "issues": [ { "issue": "...", "pages": [3], "severity": "low|medium|high", "suggested_action": "..." } ] }
@@ -372,8 +376,14 @@ export function readerIndexPages(pages: IndexedPage[], noContent: Map<number, "f
 // The prompt above is the primary fix and this is the backstop, in the order the pipeline
 // prefers everywhere else: say it where it can be understood, then make the thing that cannot
 // be understood impossible. The Reader is a sampled model told not to raise these, and on the
-// round that filed #188 every chunk raised them anyway — six calls, six reports of one page,
-// in six different wordings, six of that document's 26 unresolved issues.
+// round that filed #188 every chunk raised them anyway — six reports of one page in six
+// different wordings, six of that document's 26 unresolved issues.
+//
+// Per CHUNK, and only the final round's chunks: `@unresolved` is written from `lastIssues`,
+// which every round overwrites, so the delivered list is one read of the document and the
+// number of copies in it is that read's chunk count. What the ROUNDS multiplied is the spend —
+// every round's editor was handed the same reports about a page it cannot repair, and paid a
+// whole-body correction to say nothing about them.
 //
 // Which is why the key is `(no content, page)` rather than the issue text. The reports come
 // from independent calls that never see each other, so no two are worded alike and exact-string
@@ -387,9 +397,9 @@ export function readerIndexPages(pages: IndexedPage[], noContent: Map<number, "f
 // attribution is the Reader's, and a misattributed real issue — structure the Reader could not
 // place, pinned on a failed page — would vanish with no trace anywhere. Keeping one costs a
 // reader of `@unresolved` a line they can act on (it names the page, and the document's
-// `@page-failed` comment says the rest) and leaves the inflation this fixes at 1 instead of
-// chunks × iterations. It does mean a document with a failed page still cannot end the loop
-// clean, which is the behaviour it has today and a separate question from counting it once.
+// `@page-failed` comment says the rest) and leaves one copy where there was one per chunk. It
+// does mean a document with a failed page still cannot end the loop clean, which is the
+// behaviour it has today and a separate question from counting it once.
 //
 // Unattributed reports are not caught and cannot be: "the document is missing a page" with an
 // empty `pages` list is indistinguishable here from any other issue the Reader could not place.
@@ -537,9 +547,18 @@ async function runReader(
   let failure: unknown = null;
   const perChunk = await mapWithConcurrency(chunks, limit, async (c, i) => {
     if (failed) throw failure;
+    // Whether this call has the whole body or a window of it, said where the body is handed
+    // over. The Reader is told not to report a page as missing on the strength of content it
+    // cannot find (READER_SYSTEM, issue #188) — which is right for a window and wrong for the
+    // whole document, where a page whose content an editor round dropped is a finding nothing
+    // else in this loop can make. `contentCoverage` and `destroyedPage` guard extraction, not
+    // this loop, so on a single-chunk document the Reader is the only check there is. Absent
+    // rather than "window 1 of 1", because a label that has to be read as "you have all of it"
+    // is one more thing to get wrong.
+    const window = chunks.length > 1 ? ` (window ${i + 1} of ${chunks.length} of the document)` : "";
     const user =
       head +
-      `## HTML\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint)}` +
+      `## HTML${window}\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint)}` +
       (i === 0 && duplicateHeadings
         ? `\n\n## Headings with the same words at the same level, nothing but their own content between them (whole document)\n${duplicateHeadings}`
         : "") +
@@ -586,15 +605,20 @@ async function runReader(
   // chunk reports a page twice on its own — and applied to whichever call finished first it
   // would keep a different one each run.
   const { issues, dropped } = dedupeNoContentIssues(perChunk.flat(), noContent);
-  // Logged only when something was dropped, and with the pages rather than a count alone: the
-  // count says how much of `@unresolved` this round would have spent on repeats, and the pages
-  // say which entries the kept report stands for. Without this line the reports vanish with no
-  // trace at all — the delivered document is one line shorter and nothing says why.
+  // Logged only when something was dropped, and with the reports themselves rather than a count
+  // alone. The count says how much of `@unresolved` this round would have spent on repeats and
+  // the pages say which entries the kept report stands for, but neither would let anyone read
+  // what went: keeping the first is defended above on the grounds that a misattributed real
+  // issue must not vanish without a trace, and WHICH report is first is an accident of chunk
+  // order — the chunk that pinned a real defect on a lost page may not be chunk 0. So the text
+  // and severity of each dropped report are here, whitespace-folded and bounded the way every
+  // other model-written string this pipeline logs is bounded.
   if (dropped.length > 0) {
     ctx.log.event("reader_page_reports_deduped", {
       iteration,
       dropped: dropped.length,
       pages: [...new Set(dropped.flatMap((i) => i.pages ?? []))].sort((a, b) => a - b),
+      reports: dropped.map((i) => `${i.severity}: ${i.issue.replace(/\s+/g, " ").trim().slice(0, 300)}`),
     });
   }
   return issues;

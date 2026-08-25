@@ -1,10 +1,13 @@
 // A source page the document has no content for is not something the review loop can act
 // on, and until issue #188 it was asked about anyway — once per Reader chunk, per round.
 // On the round that filed the issue that was 6 of one document's 26 unresolved issues: one
-// lost page, six `reader.md` calls, six differently worded reports of it. The multiplier is
-// chunks × iterations, so a longer document inflates it further, and `unresolved` is not a
-// private number — it is the `iris:unresolved` signal behind `/v1/stats`'s `clean_rate` and
-// `/v1/quality`'s `unresolved_rate`, and what the bench reports per document.
+// lost page, six differently worded reports of it, and no two of them alike enough for an
+// exact-string dedupe to catch. Per CHUNK of the final round — `@unresolved` is written from
+// `lastIssues`, which every round overwrites, so the delivered list is one read of the
+// document — while what the ROUNDS multiplied was the spend, every one of them handing the
+// editor the same unrepairable reports. `unresolved` is not a private number either way: it
+// is the `iris:unresolved` signal, it is what `unresolved.md` and the session summary count,
+// and it is what the bench reports per document.
 //
 // Two pages have no content, for opposite reasons, and both arrived by the same route: the
 // page index, which `runReader` gives to every chunk by design (it leads the prompt so the
@@ -63,8 +66,15 @@ test("the Reader is told what a no-content entry is, and that neither kind is it
     // The Reader reads one CHUNK_BUDGET window. Absence of a page's content from that
     // window is not evidence of anything, and this is the inference behind the reports
     // that carried no page attribution at all — which the code half cannot reach.
-    ["inferring a missing page from the window in front of it is forbidden",
-      /never report a page as missing because you cannot find its content in the HTML you were given: you are reading one window of the document/],
+    ["inferring a missing page from a labelled window is forbidden",
+      /Where the HTML section is labelled as one window of several, the rest of the document is another call's to read, so a page whose content is not in your window is not a missing page and is not yours to report/],
+    // And only there. Most documents Iris converts are one chunk, and on those the premise
+    // is false: there is no other call, `contentCoverage` and `destroyedPage` guard
+    // extraction rather than this loop, so a correction round that dropped a page's content
+    // has the Reader as its only check — and an attributed report is what would attach that
+    // page's image to the round that could restore it.
+    ["an unlabelled section means the whole body, and genuinely absent content is a real finding",
+      /Where it carries no such label you have the whole body, and content genuinely absent from it — a page the index shows as extracted with nothing of it in the document — is a real finding and yours to make/],
   ] as [string, RegExp][]) {
     assert.match(reader, re, `READER_SYSTEM no longer says: ${what}`);
   }
@@ -340,6 +350,44 @@ test("one lost page reported by three chunks reaches @unresolved once", async ()
   assert.equal(deduped[0].data.dropped, 2);
   assert.deepEqual(deduped[0].data.pages, [2]);
   assert.equal(deduped[0].data.iteration, 0);
+  // The text as well as the count, because which report is FIRST is an accident of chunk
+  // order: keeping the first is defended on the grounds that a misattributed real issue must
+  // not vanish without a trace, and a count is not a trace of one.
+  assert.deepEqual(deduped[0].data.reports, [`high: ${wordings[1]}`, `high: ${wordings[2]}`]);
+});
+
+test("the dropped report's text is folded and bounded, like every other model-written string", async () => {
+  const long = `Page 2 failed\n\n  to extract. ${"x".repeat(400)}`;
+  const round = await readerRound({
+    chunks: 2,
+    pages: THREE_PAGES,
+    failedPages: [2],
+    issuesFor: () => [issue(long, [2])],
+  });
+  const [logged] = round.events.filter((e) => e.name === "reader_page_reports_deduped");
+  const reports = logged.data.reports as string[];
+  assert.equal(reports.length, 1);
+  assert.match(reports[0], /^high: Page 2 failed to extract\. x+$/, "a newline in a log line hides the rest of it");
+  assert.equal(reports[0].length, "high: ".length + 300);
+});
+
+test("a body that fits in one chunk carries no window label; a split one labels every chunk", async () => {
+  // The label is what conditions the missing-page rule above, so its absence on a
+  // single-chunk document is the whole of what gives the Reader that finding back.
+  const whole = await readerRound({ chunks: 1, pages: THREE_PAGES, failedPages: [2], issuesFor: () => [] });
+  assert.equal(whole.prompts.length, 1);
+  assert.match(whole.prompts[0], /## HTML\n```html/);
+  assert.doesNotMatch(whole.prompts[0], /window \d+ of/);
+
+  const split = await readerRound({ chunks: 3, pages: THREE_PAGES, failedPages: [2], issuesFor: () => [] });
+  assert.deepEqual(
+    split.prompts.map((p) => p.match(/## HTML \(window (\d+) of (\d+) of the document\)/)?.slice(1, 3)),
+    [
+      ["1", "3"],
+      ["2", "3"],
+      ["3", "3"],
+    ],
+  );
 });
 
 test("a round that dropped nothing logs nothing", async () => {
