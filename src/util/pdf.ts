@@ -252,7 +252,10 @@ export function pageRanges(pages: number, shards: number): [number, number][] {
 //
 // `pages` null means pdfinfo could not say how long the document is, and then this is
 // the single capped call it always was: a range needs a last page to stay inside, and
-// guessing one is how a shard lands past the end.
+// guessing one is how a shard lands past the end. It still reserves its one process,
+// because `shardsRunning` is a count of pdftoppms this host is running and a document
+// whose page count could not be read is running one of them — a budget blind to it
+// would hand its core to someone else.
 //
 // allSettled rather than all, so cleanup cannot race a process that is still writing.
 // The caller deletes the temp directory in a `finally`, and a rejection from `all`
@@ -263,26 +266,31 @@ export function pageRanges(pages: number, shards: number): [number, number][] {
 async function rasterizePages(pdfPath: string, dir: string, pages: number | null): Promise<void> {
   const out = join(dir, "pg");
   const opts = ["-png", "-r", String(DPI)];
-  if (pages === null) {
-    await execFileP("pdftoppm", [...opts, "-l", String(MAX_PDF_PAGES), pdfPath, out]);
-    return;
-  }
-  // Reserved before anything is spawned and released once every shard has settled, so
+  // The argument lists to spawn, one per process. Computed before anything runs so the
+  // reservation below can be exact.
+  const calls =
+    pages === null
+      ? [[...opts, "-l", String(MAX_PDF_PAGES), pdfPath, out]]
+      : pageRanges(pages, rasterShards(pages)).map(([first, last]) => [
+          ...opts,
+          "-f",
+          String(first),
+          "-l",
+          String(last),
+          pdfPath,
+          out,
+        ]);
+  // Reserved before anything is spawned and released once every process has settled, so
   // the count reflects processes that exist rather than ones this intends to start.
   // Nothing awaits between the two statements, which is what makes the reservation
   // atomic (see `shardsRunning`).
-  const ranges = pageRanges(pages, rasterShards(pages));
-  shardsRunning += ranges.length;
+  shardsRunning += calls.length;
   try {
-    const settled = await Promise.allSettled(
-      ranges.map(([first, last]) =>
-        execFileP("pdftoppm", [...opts, "-f", String(first), "-l", String(last), pdfPath, out]),
-      ),
-    );
+    const settled = await Promise.allSettled(calls.map((args) => execFileP("pdftoppm", args)));
     const failed = settled.find((s) => s.status === "rejected");
     if (failed) throw (failed as PromiseRejectedResult).reason;
   } finally {
-    shardsRunning -= ranges.length;
+    shardsRunning -= calls.length;
   }
 }
 

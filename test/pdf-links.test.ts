@@ -403,6 +403,47 @@ test(
 );
 
 test(
+  "a document whose page count cannot be read still renders, still capped, and is still counted",
+  { skip: hasPoppler() ? false : "poppler-utils not installed" },
+  async () => {
+    // pdfinfo missing or answering nonsense is the one path with no page count, and it
+    // is the fallback everything else here is defined against: no shards, no size
+    // rejection, just the single `-l MAX_PDF_PAGES` call this code made before any of
+    // it. Both halves of that matter and neither was covered — the cap is what keeps an
+    // unbounded document from being rasterized when pdfinfo cannot refuse it, and the
+    // reservation is what keeps a render nobody counted from handing its core away.
+    const bin = mkdtempSync(join(tmpdir(), "iris-pdf-nopdfinfo-"));
+    const prevPath = process.env.PATH;
+    try {
+      writeFileSync(join(bin, "pdfinfo"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      process.env.PATH = `${bin}:${prevPath}`;
+
+      const idle = rasterShards(MAX_PDF_PAGES);
+      let done = false;
+      // One page OVER the cap: without pdfinfo there is nothing to reject it, so what
+      // holds the line is pdftoppm's own `-l`.
+      const inFlight = rasterizePdf(plainPdf(MAX_PDF_PAGES + 1), "unknown.pdf").finally(() => {
+        done = true;
+      });
+      let seen = idle;
+      while (!done && seen === idle) {
+        await new Promise((r) => setTimeout(r, 2));
+        seen = rasterShards(MAX_PDF_PAGES);
+      }
+      const pages = await inFlight;
+      assert.equal(pages.length, MAX_PDF_PAGES, "the page cap still holds with no page count to read");
+      if (idle > 1) {
+        assert.ok(seen < idle, "the unsharded render is counted against the host budget too");
+      }
+      assert.equal(rasterShards(MAX_PDF_PAGES), idle, "and released when it ends");
+    } finally {
+      process.env.PATH = prevPath;
+      rmSync(bin, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "a document rendered in shards is the same document rendered in one process",
   {
     skip: !hasPoppler()

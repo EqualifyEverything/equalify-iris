@@ -352,9 +352,30 @@ jobs:
       #
       # Guarded like the step it exists for: `npm test` runs inside "Build review
       # context", so on a commit already reviewed there is nothing here to install for.
+      #
+      # And failure-tolerant, like every other pre-model step in this job — `Lint the
+      # workflow scripts` resolves a missing shellcheck to `RESULT=skip`, and `Build
+      # review context` captures an `npm ci` or `npm test` failure into the context
+      # rather than exiting non-zero. A step's `if:` carries an implicit `success()`
+      # unless it names a status function, and neither `Fallback review` nor `Verify a
+      # review was posted` does — so a step that merely exits non-zero here would skip
+      # every remaining step in the job, and the PR would get no verdict AND no loud
+      # failure saying so. That is the PR #38 outcome the fallback exists to prevent,
+      # arriving via an apt mirror 503.
+      #
+      # Tolerating it costs only what the step buys: `hasPoppler()` in
+      # test/pdf-links.test.ts skips the PDF tests when the tools are absent, exactly as
+      # it did before this step existed. The warning is what stops that from being
+      # silent. Not `-qq`, so a failure leaves behind the output that explains it.
       - name: Install poppler-utils (PDF rasterization tests)
         if: steps.guard.outputs.already_reviewed != 'true'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+        continue-on-error: true
+        run: |
+          if sudo apt-get update && sudo apt-get install -y poppler-utils; then
+            echo "poppler-utils installed"
+          else
+            echo "::warning::poppler-utils failed to install; the PDF rasterization tests will skip themselves (hasPoppler). The review still runs."
+          fi
 
       - name: Build review context
         if: steps.guard.outputs.already_reviewed != 'true'
@@ -823,9 +844,12 @@ jobs:
         # so it eats into the 22 minutes, not into the job's remaining 8. At its
         # worst observed 3 min that leaves the model ~19 min, which is what the
         # prompt below promises. The job's 8-minute remainder covers everything
-        # outside this step: checkout, `Build review context` (npm ci + tsc +
-        # npm test + e2e, ~2 min), OIDC, fallback and verify.
-        # If you change 22 or 30, re-check both halves of that split.
+        # outside this step: checkout, setup-node, the script lint, the poppler
+        # install (~12 s), `Build review context` (npm ci + tsc + npm test + e2e,
+        # 2 min 26 s), OIDC, fallback and verify — 2 min 55 s end to end, measured
+        # on run 32890923233. `npm test` is 2.1 min of that on its own and is the
+        # term that grows, so re-measure the step rather than this total when tests
+        # are added. If you change 22 or 30, re-check both halves of the split.
         timeout-minutes: 22
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
