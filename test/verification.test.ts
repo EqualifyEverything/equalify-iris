@@ -15,6 +15,7 @@ import { runExtraction } from "../src/pipeline/extraction.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 import type { PdfLink } from "../src/util/pdf.ts";
+import { TruncatedResponseError } from "../src/providers/types.ts";
 
 // --- what a correction changed, read off the two fragments --------------------
 
@@ -219,6 +220,11 @@ interface Behaviour {
   recheck?: (order: number) => string[];
   // A provider error on the re-verification, the way ProviderRouter.complete raises one.
   recheckThrows?: boolean;
+  // A provider error on the CORRECTION call itself: the output ceiling, a stall, a throttle.
+  // Not per page, unlike the rest of these — the correction prompt does not carry the page's
+  // filename (it carries the page's own previous output), so `orderOf` cannot see which page
+  // is being corrected. Tests that want one page to fail give only that page a problem.
+  correctionThrows?: () => Error;
   links?: PdfLink[];
 }
 
@@ -270,6 +276,7 @@ function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 2): Pipelin
           };
         }
         if (user.includes("had fidelity/accessibility problems")) {
+          if (b.correctionThrows) throw b.correctionThrows();
           return { text: JSON.stringify({ html: b.corrected(order) }) };
         }
         return { text: JSON.stringify({ html: b.html(order), log: "" }) };
@@ -501,6 +508,113 @@ test("a correction that tightens a page without gutting it is still delivered", 
     assert.equal(of(events, "page_correction_rejected").length, 0);
     assert.equal(of(events, "page_corrected")[0].result, "kept");
     assert.equal(result.fragments[0].innerHtml, tighter);
+  });
+});
+
+test("a correction that hit the output ceiling costs the correction, not the page", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // Issue #171, as it happened: a page rendered fine, the Feedback Agent named two cosmetic
+    // problems, and the correction call ran for 522 seconds and hit the 32,000-token ceiling.
+    // The error propagated out of `extractPage` into `failedPage`, so the run logged
+    // `page_extraction_failed` and shipped a `@page-failed` marker for a page whose valid
+    // 17,721-character extraction was sitting in a local variable.
+    const page = `<hr aria-label="Page 36"><h2>Regional detail</h2><p>Southeast through Rocky Mountain.</p>`;
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => page,
+        problems: (o) => (o === 1 ? ["the printed folio is transcribed as visible content", "an unwarranted <section> wrapper"] : []),
+        corrected: () => "<p>never reached</p>",
+        correctionThrows: () => new TruncatedResponseError("bedrock", "some-model", 32000, 93039),
+      }),
+    );
+    // The page is delivered, whole, as the extraction that succeeded left it.
+    assert.equal(result.failedPages.length, 0);
+    assert.equal(result.fragments[0].innerHtml, page);
+    assert.doesNotMatch(result.fragments.map((f) => f.innerHtml).join(""), /@page-failed/);
+    // And the stage that failed is the stage that is named. `page_extraction_failed` would
+    // send anyone reading the log — `pages_failed`, the markers, any triage of why pages
+    // fail — to a vision call that worked.
+    assert.equal(of(events, "page_extraction_failed").length, 0);
+    const failed = of(events, "page_correction_failed");
+    assert.equal(failed.length, 1);
+    assert.deepEqual(
+      { ...failed[0], error: "…" },
+      {
+        type: "page_correction_failed",
+        image: "page-001.png",
+        page: 1,
+        trigger: "verify",
+        problems: 2,
+        error: "…",
+        truncated: true,
+        chars_kept: page.length,
+      },
+    );
+    assert.match(String(failed[0].error), /32000-token output ceiling/);
+    // Counted as a correction that bought nothing, in its own bucket: this one paid for a
+    // full ceiling of output, where `empty` answered briefly and said nothing.
+    const corrected = of(events, "page_corrected");
+    assert.equal(corrected.length, 1);
+    assert.equal(corrected[0].result, "failed");
+    // The fidelity problems are still on record as unfixed — refusing to lose the page does
+    // not claim the page was correct.
+    assert.equal(of(events, "page_verify_failed").length, 1);
+  });
+});
+
+test("any provider error on a correction is survivable, not only a ceiling", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // A throttle, a stall and a ceiling all leave the same thing behind: a page good enough
+    // to have been worth correcting. So the catch is not a list of survivable error classes —
+    // a list would go stale in the direction that loses pages.
+    const page = `<h2>Findings</h2><p>Two of the three measures improved.</p>`;
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => page,
+        problems: (o) => (o === 1 ? ["the heading level skips one"] : []),
+        corrected: () => "<p>never reached</p>",
+        correctionThrows: () => new Error("ThrottlingException: Too many requests"),
+      }),
+    );
+    assert.equal(result.failedPages.length, 0);
+    assert.equal(result.fragments[0].innerHtml, page);
+    const failed = of(events, "page_correction_failed");
+    assert.equal(failed.length, 1);
+    assert.match(String(failed[0].error), /ThrottlingException/);
+    // Not a truncation, and the log says which it was: only one of the two has a
+    // `providers.*.max_tokens` to raise.
+    assert.equal(failed[0].truncated, false);
+    assert.equal(of(events, "page_corrected")[0].result, "failed");
+  });
+});
+
+test("a links-triggered correction that throws keeps the page that had passed", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const link = { text: "the full report", href: "https://example.org/report" };
+    // The worse version of the same defect: this page PASSED its fidelity check and is being
+    // re-rendered only to attach a link. A throw here used to delete a page that nothing had
+    // found any fault with, for a link that is additive.
+    const page = `<h2>Progress</h2><p>Read the full report for the 2026 figures.</p>`;
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => page,
+        problems: () => [],
+        corrected: () => "<p>never reached</p>",
+        correctionThrows: () => new TruncatedResponseError("bedrock", "some-model", 32000, 93039),
+        links: [link],
+      }),
+    );
+    assert.equal(result.failedPages.length, 0);
+    for (const f of result.fragments) assert.equal(f.innerHtml, page);
+    assert.deepEqual(of(events, "page_correction_failed").map((e) => e.trigger), ["links", "links"]);
+    // No verdict was bought on a correction that never came back, on either path.
+    assert.equal(of(events, "page_correction_recheck").length, 0);
+    assert.equal(of(events, "page_links_correction_rejected").length, 0);
+    // The link is still missing, and the log still says so.
+    assert.equal(of(events, "page_links_missing").length, 2);
   });
 });
 
