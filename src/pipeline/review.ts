@@ -405,6 +405,22 @@ export function capEditorImages(
   return preferred.slice(0, Math.max(1, max)).sort((a, b) => a.order - b.order);
 }
 
+// What one editor round produced, and whether the editor actually answered.
+//
+// The two are separate because they are separate questions and the loop acts on both.
+// `body` unchanged can mean the editor read every issue and decided the document was
+// better left alone — a decision, and one it would make again on the same input — or it
+// can mean the reply could not be used at all, which is a call paid for and nothing
+// learned. Folding them together (which returning a bare string did) makes the second
+// look like the first.
+interface EditorRound {
+  body: string;
+  // False when the model returned nothing usable — an unparseable reply, or an empty
+  // `html` — in which case `body` is what went in. Not evidence about what the editor
+  // would do next time, because it never said.
+  usable: boolean;
+}
+
 // Document-level correction: the editor sees the whole body + all issues + the
 // source images and returns a corrected document, so it can fix structural
 // problems (dedup, reorder, heading hierarchy) that per-block editing cannot.
@@ -421,7 +437,7 @@ export function capEditorImages(
 // Neither alone is sufficient: without the cap the refusal is the common case on a
 // long document, and without the retry the cap has to be right about a limit it can
 // only estimate.
-async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue[]): Promise<string> {
+async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue[]): Promise<EditorRound> {
   const wanted = imagesForIssues(ctx.images, issues);
   const selected = capEditorImages(wanted, issues);
   // Logged only when the cap actually dropped something, so an ordinary round's line
@@ -466,7 +482,7 @@ async function editorCall(
   body: string,
   issues: ReviewIssue[],
   selected: InputImage[],
-): Promise<string> {
+): Promise<EditorRound> {
   const images = selected.map(loadImage);
   const pageList = selected.map((i) => i.order).join(", ");
   const user =
@@ -497,8 +513,15 @@ async function editorCall(
     output: res.text,
   });
   const parsed = extractJson<{ html?: string }>(res.text);
-  // If the editor returns nothing usable, keep the current body unchanged.
-  return parsed?.html?.trim() || body;
+  // If the editor returns nothing usable, keep the current body unchanged — and say
+  // that is what happened, so the loop does not read a reply it could not use as the
+  // editor having decided the document was fine.
+  const corrected = parsed?.html?.trim();
+  if (!corrected) {
+    ctx.log.event("editor_no_output", { chars: res.text.length });
+    return { body, usable: false };
+  }
+  return { body: corrected, usable: true };
 }
 
 // Reader -> Editor -> re-verify, looping until the Reader reports zero issues or
@@ -541,9 +564,49 @@ export async function runReview(
 
     iterations++;
     const before = body;
-    body = await runEditor(ctx, body, issues);
+    const round = await runEditor(ctx, body, issues);
+    body = round.body;
+    ctx.log.event("editor", { iteration: iterations, changed: body !== before });
+
+    // A round that changed nothing has said what the next one would say.
+    //
+    // The Reader is about to be handed the same body, the same lint and the same page
+    // index, and — if it raises the same issues, which is what an unchanged document
+    // invites — the editor would be handed the same request it has just answered with
+    // "no change". So the remaining rounds are the most expensive call in the run (whole
+    // body in, a whole body out at max_tokens) plus a full re-read of the document,
+    // spent to deliver the document already in hand. That is not hypothetical: a
+    // [page not fully transcribed] marker is reported by the Reader every round BY
+    // DESIGN and can only be settled by re-extracting the page, which is nobody's job in
+    // this loop — so a document with one spends its whole budget rewriting itself into
+    // itself.
+    //
+    // What is delivered is unchanged: this body, with the issues just raised written to
+    // @unresolved — which is what the cap would have produced, since neither the body nor
+    // the issues about it were going to move.
+    //
+    // Only when the editor ANSWERED. A reply that could not be parsed leaves the body
+    // untouched for a different reason — the editor never said anything — and the next
+    // round is a real retry rather than a repeat, so it is allowed to run.
+    //
+    // The honest caveat: the editor is sampled, so a second identical request could
+    // decide differently. `review_converged` is logged for exactly that reason — how
+    // often this fires, and on which issues, is measurable from a run log, so the policy
+    // can be revisited from evidence rather than from either of our guesses.
+    if (round.usable && body === before) {
+      ctx.log.event("review_converged", {
+        iteration: iterations,
+        issues: issues.length,
+        rounds_left: ctx.maxReviewIterations - iterations,
+      });
+      break;
+    }
+    // Skipped when nothing changed, because every one of these answers a question about
+    // a difference: the lint of an unedited body is the lint already in hand, and a link
+    // or marker diff against an identical string is empty by construction.
+    if (body === before) continue;
+
     lint = await runAxe(wrapDocument(body));
-    ctx.log.event("editor", { iteration: iterations });
     // A link the editor dropped is unrecoverable and invisible to every later check
     // in the loop — see droppedHrefs for why this is checked here and in code.
     const dropped = droppedHrefs(before, body);

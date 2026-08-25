@@ -26,7 +26,8 @@ The pipeline as **implemented today** runs in three phases:
    screen-reader view) and flags reading-order / semantic / accessibility issues, attributing
    each to the source page(s) it appears on; the Copy Editor proposes fixes against **just those
    pages'** source images; fixes are applied and the document re-linted. Loops up to
-   `max_review_iterations` (default 3). A document that spans several chunks is read
+   `max_review_iterations` (default 3) — or until a round changes nothing, since an editor that
+   answers and hands back the document it was given would answer the same way next round. A document that spans several chunks is read
    **in parallel** — the chunks are independent calls over one unchanging body — up to the same
    `defaults.extraction_concurrency` at a time, and the issues they raise stay in chunk order.
 
