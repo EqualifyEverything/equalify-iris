@@ -67,19 +67,46 @@ export function claudeFamily(model: string): ClaudeFamily | null {
   return m ? (m[1].toLowerCase() as ClaudeFamily) : null;
 }
 
+// How long a cache entry survives without being read. Both are `ephemeral` — that is the
+// only cache type there is, and the name refers to the shorter of these two.
+//
+// The choice is about a deployment's CADENCE, not about Iris: a write costs 1.25x at five
+// minutes and 2x at an hour, while a read costs 0.1x either way, so five minutes pays for
+// itself on the second use of a prefix and an hour needs a third. Within one run the
+// question never arises — every page call reads the page agent's prefix and each read
+// refreshes the clock, so a run of any length stays warm on the default. What an hour buys
+// is the gap BETWEEN runs: a deployment converting a document every twenty minutes writes
+// each prefix once an hour instead of three times, and one converting a document a day
+// pays 2x for an entry nothing will ever read.
+//
+// So the default is the one that cannot lose, and the other is an operator's call about
+// their own traffic.
+export type CacheTtl = "5m" | "1h";
+
 // One text block with a cache breakpoint on it, in the shape both adapters need.
 //
-// `ephemeral` is the only cache type there is; the name refers to the ~5 minute TTL,
-// refreshed on each read. Shared so the two adapters cannot drift into asking for
-// caching in two different ways — the field is Anthropic's, and both of them speak the
-// Anthropic Messages format for it (Bedrock natively, OpenRouter by forwarding
-// OpenAI-style content parts to an Anthropic upstream).
-export function cachedTextBlock(text: string): {
+// Shared so the two adapters cannot drift into asking for caching in two different ways —
+// the field is Anthropic's, and both of them speak the Anthropic Messages format for it
+// (Bedrock natively, OpenRouter by forwarding OpenAI-style content parts to an Anthropic
+// upstream).
+//
+// The `ttl` field is omitted entirely at five minutes rather than sent as "5m", so the
+// default deployment's request is byte-identical to the one it sent before this option
+// existed. That matters more than the tidiness of always sending it: the field is one an
+// upstream can refuse, and a default nobody chose should not be the request that finds out.
+export function cachedTextBlock(
+  text: string,
+  ttl: CacheTtl = "5m",
+): {
   type: "text";
   text: string;
-  cache_control: { type: "ephemeral" };
+  cache_control: { type: "ephemeral"; ttl?: "1h" };
 } {
-  return { type: "text", text, cache_control: { type: "ephemeral" } };
+  return {
+    type: "text",
+    text,
+    cache_control: ttl === "1h" ? { type: "ephemeral", ttl: "1h" } : { type: "ephemeral" },
+  };
 }
 
 // Whether this provider block permits explicit caching at all. On by default; an
@@ -101,6 +128,25 @@ export function promptCacheEnabled(cfg: Pick<ProviderBlock, "prompt_cache">): bo
   if (v === false) return false;
   if (typeof v === "string" && v.trim().toLowerCase() === "false") return false;
   return true;
+}
+
+// How long this provider block asks its cache entries to live (see `CacheTtl`).
+//
+// Only an explicit, recognized `1h` moves it. Everything else — unset, a valueless YAML
+// key, a typo, a number, "1 hour" — is the five-minute default, because the two ways of
+// being wrong here are not equal: falling back to the default costs a deployment the
+// saving it hoped for on ONE prefix per run, while honouring something unrecognized would
+// send an upstream a `ttl` nobody wrote and could take out every call it serves. A typo is
+// visible either way in `GET /v1/sessions/:id/diagnostics`, where the writes stay 1.25x.
+//
+// Verified for the first-party Claude API and for Amazon Bedrock, which is what this
+// repo deploys on. A broker that forwards to an upstream of its own choosing may or may
+// not pass the field through, so a deployment behind one should turn this on and check
+// `tokens.cache_read` before believing it — and `prompt_cache: false` remains the way back
+// if an upstream refuses the field outright.
+export function promptCacheTtl(cfg: Pick<ProviderBlock, "prompt_cache_ttl">): CacheTtl {
+  const v = cfg.prompt_cache_ttl as unknown;
+  return typeof v === "string" && v.trim().toLowerCase() === "1h" ? "1h" : "5m";
 }
 
 // Whether a system prompt is worth a cache breakpoint on this model.

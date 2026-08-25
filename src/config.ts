@@ -39,6 +39,13 @@ export interface ProviderBlock {
   // upstream refuses is not a slow call, it is every call — which is a real risk only
   // behind a broker that chooses the upstream for us. Normalized where it is read.
   prompt_cache?: boolean;
+  // How long those cache entries should live: `5m` (the default) or `1h`. A question
+  // about this deployment's CADENCE and nothing else — see providers/promptCache.ts
+  // `CacheTtl` for the arithmetic. Within one run the default never expires, because
+  // every page call reads the same prefix and each read refreshes it; an hour is worth
+  // asking for only where runs arrive in bursts more than five minutes and less than an
+  // hour apart. Anything unrecognized reads as the default. Normalized where it is read.
+  prompt_cache_ttl?: string;
 }
 
 // How much one caller may ask of this deployment per minute, and how many uploads it

@@ -6,6 +6,8 @@ import {
   cacheableUserPrefix,
   cachedTextBlock,
   promptCacheEnabled,
+  promptCacheTtl,
+  type CacheTtl,
 } from "./promptCache.ts";
 
 // This adapter streams for the same reason the Bedrock one does: a single
@@ -116,6 +118,7 @@ export class OpenRouterProvider implements ModelProvider {
   private baseUrl: string;
   private maxTokens: number;
   private promptCache: boolean;
+  private cacheTtl: CacheTtl;
   private firstOutputTimeoutMs: number;
   private idleTimeoutMs: number;
   private maxTotalMs: number;
@@ -133,6 +136,7 @@ export class OpenRouterProvider implements ModelProvider {
     // embedders) may pass a raw block — so fall back rather than send undefined.
     this.maxTokens = cfg.max_tokens ?? DEFAULT_MAX_TOKENS;
     this.promptCache = promptCacheEnabled(cfg);
+    this.cacheTtl = promptCacheTtl(cfg);
     this.firstOutputTimeoutMs = timeouts.firstOutputTimeoutMs ?? FIRST_OUTPUT_TIMEOUT_MS;
     this.idleTimeoutMs = timeouts.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
     this.maxTotalMs = timeouts.maxTotalMs ?? MAX_TOTAL_MS;
@@ -147,7 +151,7 @@ export class OpenRouterProvider implements ModelProvider {
       // reasoning as the Bedrock adapter: the system prompt is the one part of the
       // request that repeats byte for byte across calls.
       if (m.role === "system" && this.promptCache && cacheableSystemPrompt(req.model, m.content)) {
-        return { role: m.role, content: [cachedTextBlock(m.content)] };
+        return { role: m.role, content: [cachedTextBlock(m.content, this.cacheTtl)] };
       }
       // The invariant head of a user message, split off into its own part with a cache
       // breakpoint on it (see Message.cachedPrefix). The parts concatenate to the string
@@ -166,7 +170,7 @@ export class OpenRouterProvider implements ModelProvider {
       // Attach images to the final user message as OpenAI-style content parts.
       if (m.role === "user" && (prefix || req.images?.length)) {
         const parts: unknown[] = [];
-        if (prefix) parts.push(cachedTextBlock(prefix));
+        if (prefix) parts.push(cachedTextBlock(prefix, this.cacheTtl));
         const tail = prefix ? m.content.slice(prefix.length) : m.content;
         // Only when there is one. A caller whose whole message is invariant leaves nothing
         // after the head, and an empty text block is rejected upstream — so the guarantee

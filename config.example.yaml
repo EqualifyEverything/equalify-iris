@@ -215,6 +215,24 @@ providers:
     # field. `GET /v1/sessions/:id/diagnostics` reports `tokens.cache_read` and
     # `tokens.cache_write`, which is where you can see it working.
     # prompt_cache: false
+    #
+    # How long a cache entry should live: `5m` (the default) or `1h`. This is a
+    # question about YOUR TRAFFIC, not about Iris, and the arithmetic decides it: a
+    # write costs 1.25x at five minutes and 2x at an hour, while a read costs 0.1x
+    # either way — so five minutes pays for itself on the second use of a prefix and
+    # an hour needs a third.
+    #
+    # Within one run the default never expires: every page reads the same page-agent
+    # prefix and each read restarts the clock, so a 25-page document stays warm on
+    # `5m` whatever it costs in wall time. What an hour buys is the gap BETWEEN runs.
+    # Convert a document every twenty minutes and each prefix is written once an hour
+    # instead of three times; convert one a day and every run pays 2x for an entry
+    # nothing will ever read again. Unset, or anything unrecognized, is `5m`.
+    #
+    # Verified on the first-party Claude API and on Bedrock. Behind a broker that
+    # picks the upstream for you, turn it on and check that `tokens.cache_read` in
+    # `GET /v1/sessions/:id/diagnostics` still climbs before believing it.
+    # prompt_cache_ttl: 1h
     per_capability:
       vision: anthropic/claude-opus-4.7
       structured_output: anthropic/claude-opus-4.7

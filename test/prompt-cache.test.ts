@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import {
   cacheableSystemPrompt,
   cachedTextBlock,
+  promptCacheTtl,
   claudeFamily,
   promptCacheEnabled,
 } from "../src/providers/promptCache.ts";
@@ -566,5 +567,80 @@ test("the head is the head, and the message is still whole", async () => {
       assert.match(c.user, /## The agent's output for source image "page-00[12]\.png"/);
       assert.match(c.user, /Compare the output against the attached source image\.$/);
     }
+  });
+});
+
+// --- how long an entry should live -------------------------------------------
+
+// A write costs 1.25x at five minutes and 2x at an hour; a read costs 0.1x either way.
+// So five minutes pays for itself on the second use of a prefix and an hour needs a
+// third — which makes this a question about a DEPLOYMENT's cadence, not about Iris.
+// Within one run it never arises: every page call reads the page agent's prefix and each
+// read refreshes the clock. What an hour buys is the gap between runs.
+test("the default deployment sends the request it always sent", () => {
+  // Byte-identical, not "5m" spelled out: `ttl` is a field an upstream can refuse, and a
+  // default nobody chose must not be the request that finds that out.
+  assert.deepEqual(cachedTextBlock("x"), { type: "text", text: "x", cache_control: { type: "ephemeral" } });
+  assert.deepEqual(cachedTextBlock("x", "5m"), { type: "text", text: "x", cache_control: { type: "ephemeral" } });
+  assert.equal("ttl" in cachedTextBlock("x").cache_control, false);
+});
+
+test("an hour is asked for explicitly, and only when it is recognized", () => {
+  assert.deepEqual(cachedTextBlock("x", "1h"), {
+    type: "text",
+    text: "x",
+    cache_control: { type: "ephemeral", ttl: "1h" },
+  });
+  assert.equal(promptCacheTtl({ prompt_cache_ttl: "1h" }), "1h");
+  assert.equal(promptCacheTtl({ prompt_cache_ttl: " 1H " }), "1h", "spacing and case are an operator's, not a directive");
+  // Everything else is the default, because the two ways of being wrong are not equal:
+  // falling back costs one prefix's saving per run, while forwarding something
+  // unrecognized could take out every call the upstream serves.
+  for (const v of [undefined, null, "", "   ", "5m", "1 hour", "60m", "3600", 1, true, {}]) {
+    assert.equal(promptCacheTtl({ prompt_cache_ttl: v as unknown as string }), "5m", `${JSON.stringify(v)}`);
+  }
+});
+
+test("a provider block's choice reaches the wire, on both adapters", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m", prompt_cache_ttl: "1h" });
+  const sent = captureBedrock(bedrock);
+  await bedrock.complete(bedrockReq(LONG));
+  assert.deepEqual(sent[0].system, [
+    { type: "text", text: LONG, cache_control: { type: "ephemeral", ttl: "1h" } },
+  ]);
+
+  await withStream(async (calls) => {
+    const or = new OpenRouterProvider({
+      api_key: "test-key",
+      base_url: "http://localhost:1/v1",
+      default_model: "m",
+      prompt_cache_ttl: "1h",
+    });
+    await or.complete(orReq(LONG));
+    const messages = calls[0].messages as { content: unknown }[];
+    assert.deepEqual(messages[0].content, [
+      { type: "text", text: LONG, cache_control: { type: "ephemeral", ttl: "1h" } },
+    ]);
+  });
+});
+
+test("an hour on the head of a user message too, since that is where the largest constant is", async () => {
+  // agents/page.md re-stated per page is the biggest prefix Iris sends (#152); a
+  // deployment that asked for an hour meant it for that one as well.
+  const bedrock = new BedrockProvider({ default_model: "m", prompt_cache_ttl: "1h" });
+  const sent = captureBedrock(bedrock);
+  await bedrock.complete(userReq(LONG + "page 1 of 25", LONG));
+  const parts = (sent[0].messages as { content: { cache_control?: unknown }[] }[])[0].content;
+  assert.deepEqual(parts[0].cache_control, { type: "ephemeral", ttl: "1h" });
+});
+
+test("turning caching off outranks any TTL", () => {
+  // The escape hatch is for an upstream that refuses `cache_control` at all, and a TTL
+  // is a field ON that object: honouring it here would send the very thing being
+  // escaped from.
+  const bedrock = new BedrockProvider({ default_model: "m", prompt_cache: false, prompt_cache_ttl: "1h" });
+  const sent = captureBedrock(bedrock);
+  return bedrock.complete(bedrockReq(LONG)).then(() => {
+    assert.equal(sent[0].system, LONG, "a disabled cache sends a plain string, TTL or no TTL");
   });
 });

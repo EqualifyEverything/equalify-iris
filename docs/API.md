@@ -665,6 +665,14 @@ model whose id Iris cannot recognize as a Claude model, a model generation older
 support (Iris asks from 3.7 on), an agent prompt too short to be cacheable (the platform minimum is
 ~1k tokens), and a deployment that set `prompt_cache: false` on the provider block.
 
+A cache entry lives five minutes by default, refreshed on every read — so within one run the
+prefixes stay warm on their own however long the document takes. A deployment whose runs arrive
+in bursts, more than five minutes and less than an hour apart, can hold them for an hour instead
+with `providers.<name>.prompt_cache_ttl: 1h`. It is a trade rather than a free upgrade: an
+hour-long entry is written at 2× instead of 1.25×, so it needs a third use to pay for itself
+where five minutes needs a second. A deployment converting a document a day should leave it
+alone.
+
 `cache_write` is the weaker signal of the two, and a zero there means less than a zero read. It is
 reported by the provider, and on an OpenAI-shaped upstream the field it would come from is
 undocumented, so a deployment can see reads climbing with writes sitting at 0 forever. That is a
