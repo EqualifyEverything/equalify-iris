@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { extractJson } from "../util/json.ts";
+import { mapWithConcurrency } from "../util/concurrency.ts";
 import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { loadImage, type InputImage, type PipelineContext } from "./context.ts";
@@ -447,32 +448,48 @@ export async function regressionGate(
     sessionBuilt: false,
   };
 
-  const failures: string[] = [];
-  const coverages: number[] = [];
-  // Keyed by fixture as well as averaged: the eval gate compares this prompt against
-  // the current one fixture-by-fixture (see pairedMeans), which a mean alone cannot
-  // support. `meanCoverage` stays for the log line and for callers that only want a
-  // single number.
-  const scores: FixtureScores = {};
-  for (const caseFile of caseFiles) {
+  // One fixture's verdict. Collected per fixture and folded in fixture order below,
+  // rather than pushed as each finishes, because these run CONCURRENTLY: `failures` is
+  // what a maintainer reads to find out what the candidate broke, and a list whose order
+  // depends on which provider call returned first is a different list every run.
+  interface FixtureVerdict {
+    image: string;
+    score: number | null;
+    failure: string | null;
+  }
+
+  // Fixtures are independent — a stored image, its accepted output, and a score computed
+  // from the two — so they are checked together instead of one after another. Serially
+  // this gate was up to MAX_GATE_FIXTURES x 2 vision calls end to end (a re-run and a
+  // verification each), and it runs while the session that triggered it is still not
+  // `ready_for_review`: the user waits for it, and so does every upload behind it in the
+  // run queue, since the run holds its `max_concurrent_runs` slot throughout.
+  //
+  // The two calls WITHIN a fixture stay sequential, because the second judges the output
+  // of the first.
+  //
+  // Bounded by the same knob as page extraction and the Reader's chunks
+  // (`defaults.extraction_concurrency`), so a run's in-flight calls stay where the
+  // operator set them here too. No first-failure guard like the Reader's: at
+  // MAX_GATE_FIXTURES = 3 every fixture is already in flight before any of them can
+  // reject, so there is nothing queued behind a failure to save.
+  const limit = Math.max(1, Math.floor(ctx.extractionConcurrency) || 1);
+  const verdicts = await mapWithConcurrency(caseFiles, limit, async (caseFile): Promise<FixtureVerdict | null> => {
     let c: FixtureCase;
     try {
       c = JSON.parse(readFileSync(join(dir, caseFile), "utf8")) as FixtureCase;
     } catch {
-      continue;
+      return null;
     }
     const imgPath = join(dir, c.image_file);
-    if (!existsSync(imgPath)) continue;
+    if (!existsSync(imgPath)) return null;
     const img: InputImage = { name: c.source_image, order: 0, path: imgPath };
     const blocks = await reRunAgentOnImage(ctx, updatedAgent, img);
     if (blocks.length === 0) {
-      failures.push(`${c.image_file}: updated agent produced no output`);
       // fixtureScore's no-output rule, which never abstains — see its comment for
       // why producing nothing scores 0 rather than dropping out of the mean.
       const zero = fixtureScore(null, 0) as number;
-      coverages.push(zero);
-      scores[c.image_file] = zero;
-      continue;
+      return { image: c.image_file, score: zero, failure: `${c.image_file}: updated agent produced no output` };
     }
     // Content-preservation check: the updated agent must still reproduce the
     // content it produced when this fixture was accepted (PRD §7.12). Compare the
@@ -481,14 +498,33 @@ export async function regressionGate(
     const candidateHtml = blocks.map((b) => b.html).join("\n\n");
     const coverage = contentCoverage(c.accepted_html, candidateHtml);
     const score = fixtureScore(coverage, blocks.length);
-    scores[c.image_file] = score;
-    if (score !== null) coverages.push(score);
     if (coverage !== null && coverage < MIN_CONTENT_COVERAGE) {
-      failures.push(`${c.image_file}: only ${(coverage * 100).toFixed(0)}% of the accepted content remained`);
-      continue;
+      return {
+        image: c.image_file,
+        score,
+        failure: `${c.image_file}: only ${(coverage * 100).toFixed(0)}% of the accepted content remained`,
+      };
     }
     const verdict = await verifyAgentOutput(ctx, updatedAgent, img, blocks);
-    if (!verdict.ok) failures.push(`${c.image_file}: ${verdict.problems.join("; ") || "failed verification"}`);
+    return {
+      image: c.image_file,
+      score,
+      failure: verdict.ok ? null : `${c.image_file}: ${verdict.problems.join("; ") || "failed verification"}`,
+    };
+  });
+
+  const failures: string[] = [];
+  const coverages: number[] = [];
+  // Keyed by fixture as well as averaged: the eval gate compares this prompt against
+  // the current one fixture-by-fixture (see pairedMeans), which a mean alone cannot
+  // support. `meanCoverage` stays for the log line and for callers that only want a
+  // single number.
+  const scores: FixtureScores = {};
+  for (const v of verdicts) {
+    if (!v) continue;
+    scores[v.image] = v.score;
+    if (v.score !== null) coverages.push(v.score);
+    if (v.failure) failures.push(v.failure);
   }
 
   const passed = failures.length === 0;
@@ -526,23 +562,35 @@ export async function evalAgentScores(
     sha: null,
     sessionBuilt: false,
   };
+  // Concurrent for the reason regressionGate's are, and it is the same fixtures: this is
+  // the other half of the same comparison, run right after that gate on the same feedback
+  // round. One vision call each, and they share nothing.
+  const limit = Math.max(1, Math.floor(ctx.extractionConcurrency) || 1);
+  const results = await mapWithConcurrency(
+    caseFiles,
+    limit,
+    async (caseFile): Promise<{ image: string; score: number | null } | null> => {
+      let c: FixtureCase;
+      try {
+        c = JSON.parse(readFileSync(join(dir, caseFile), "utf8")) as FixtureCase;
+      } catch {
+        return null;
+      }
+      const imgPath = join(dir, c.image_file);
+      if (!existsSync(imgPath)) return null;
+      const img: InputImage = { name: c.source_image, order: 0, path: imgPath };
+      const blocks = await reRunAgentOnImage(ctx, agent, img);
+      const cov = contentCoverage(c.accepted_html, blocks.map((b) => b.html).join("\n\n"));
+      return { image: c.image_file, score: fixtureScore(cov, blocks.length) };
+    },
+  );
+
   const measured: number[] = [];
   const scores: FixtureScores = {};
-  for (const caseFile of caseFiles) {
-    let c: FixtureCase;
-    try {
-      c = JSON.parse(readFileSync(join(dir, caseFile), "utf8")) as FixtureCase;
-    } catch {
-      continue;
-    }
-    const imgPath = join(dir, c.image_file);
-    if (!existsSync(imgPath)) continue;
-    const img: InputImage = { name: c.source_image, order: 0, path: imgPath };
-    const blocks = await reRunAgentOnImage(ctx, agent, img);
-    const cov = contentCoverage(c.accepted_html, blocks.map((b) => b.html).join("\n\n"));
-    const score = fixtureScore(cov, blocks.length);
-    scores[c.image_file] = score;
-    if (score !== null) measured.push(score);
+  for (const r of results) {
+    if (!r) continue;
+    scores[r.image] = r.score;
+    if (r.score !== null) measured.push(r.score);
   }
   return {
     mean: measured.length ? measured.reduce((a, b) => a + b, 0) / measured.length : null,
