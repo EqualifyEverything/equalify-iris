@@ -800,9 +800,11 @@ export async function runReview(
     }
   }
 
-  // Issues remain and the loop has stopped — at the cap, or on a round that changed
-  // nothing (§7.11). Either way they are recorded as a comment, with the source page
-  // reference the Reader attributed (§7.8) so a human can find them.
+  // Issues remain and the loop has stopped — at the cap, on a round that changed nothing,
+  // or on a round whose response hit the output ceiling (§7.11). All three record them as
+  // a comment, with the source page reference the Reader attributed (§7.8) so a human can
+  // find them; the third also states itself in the document, because "the editor tried and
+  // could not fix these" and "no editor pass ever worked on these" are different facts.
   const unresolvedLines = lastIssues.map(
     (i) => `${i.issue} (severity: ${i.severity}${i.pages?.length ? `, page ${i.pages.join(", ")}` : ""})`,
   );

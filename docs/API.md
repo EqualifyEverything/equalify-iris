@@ -523,8 +523,11 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/output" -o output.html
 run log instead (step 7). An `<!-- @unresolved -->` comment listing outstanding issues is
 appended if the review loop stopped with any still open — at its iteration cap, or on a round that
 changed nothing, which is how a document whose remaining issues the loop is designed not to fix
-ordinarily ends. Returns `409` while the session is still
-running.
+ordinarily ends. A third stop reason adds a second comment: `<!-- @editor-truncated -->` says a
+correction round's response hit the model's output ceiling, so the round was discarded and **none**
+of the issues below it were worked on — read together with `@unresolved`, which on its own would
+say the editor tried and could not fix them (§0c `editor_truncated_rate`). Returns `409` while the
+session is still running.
 
 **Image references do not resolve, by design.** A graphic on the page — a logo, a diagram, a
 photograph — is emitted as an `<img>` with a description and a placeholder `src` naming the page
