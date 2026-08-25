@@ -36,9 +36,22 @@ export interface LintResult {
 // degraded lint stays one log line rather than a page of it.
 const STACK_FRAMES = 6;
 
+// Frames arrive as absolute paths, and this stack is logged on the `assembly` event, which
+// `GET /v1/sessions/{id}/logs` serves to the session's owner — so the deployment's directory
+// layout would be disclosed to every uploader whose document degraded the gate. What the
+// frames are FOR is naming the library the throw came from and its caller, and that is
+// exactly what survives the trim: the install root goes, `node_modules/jsdom/lib/…` stays.
+const CWD = process.cwd();
+function trimPaths(stack: string): string {
+  return stack
+    .replaceAll(`${CWD}/`, "")
+    .replace(/(?:file:\/\/)?\/\S*?node_modules\//g, "node_modules/");
+}
+
 function failure(where: "parse" | "inject" | "run", message: string, e: unknown): LintResult {
   const err = e instanceof Error ? e : undefined;
-  const stack = err?.stack?.split("\n").slice(0, STACK_FRAMES + 1).join("\n");
+  const raw = err?.stack?.split("\n").slice(0, STACK_FRAMES + 1).join("\n");
+  const stack = raw === undefined ? undefined : trimPaths(raw);
   return {
     // A document that would not parse is a failure; axe not running in this
     // environment is a degradation. Unchanged by this: only the reporting is new.

@@ -94,16 +94,21 @@ test("the unfinished-page marker is nobody's to resolve in this loop, and the ed
   // The asymmetry is the whole point of splitting the two paragraphs. Reading a smudge off an
   // attached image costs a phrase; finishing a page costs the rest of that page ON TOP of the
   // complete corrected body, and the editor has one response for both. A TruncatedResponseError
-  // is not a size refusal, so review.ts's retry does not catch it: the run ends with nothing
-  // delivered. An editor told only "resolve markers where the image is attached" would read
-  // this marker as its job.
+  // is not a size refusal, so review.ts's retry does not catch it — since #143 the round is
+  // discarded and the entering body delivered, which takes every other correction that round
+  // made with it (test/review-truncation.test.ts). An editor told only "resolve markers where
+  // the image is attached" would read this marker as its job.
   for (const [what, re] of [
     ["it is not the editor's to resolve even with the image in hand",
       /A \[page not fully transcribed\] marker is not yours to resolve at all, even with that page's image in front of you/],
     ["the cost is named: the rest of the page on top of the whole body",
       /filling it in means returning the rest of that page on top of the complete corrected body — the one request in this pipeline that can exceed what a response can hold/],
-    ["and the consequence of hitting that ceiling is the run, not a smaller retry",
-      /hitting that ceiling does not degrade to a smaller retry: it ends the run, and the document nobody has been given yet is the document nobody gets/],
+    // The cost of hitting it, stated as it now stands: since #143 a truncated response
+    // costs the round rather than the run, and the prompt has to say the true thing —
+    // every OTHER correction made in that round goes with it, which is a reason to leave
+    // this marker alone that does not depend on the old failure mode.
+    ["and the consequence of hitting that ceiling is the whole round, not a smaller retry",
+      /hitting that ceiling does not degrade to a smaller retry: the whole round is discarded, so every other correction you made in it is thrown away with it and the document is delivered exactly as it reached you/],
     ["what would resolve it is named, so leaving it is not read as giving up",
       /Re-extracting that page is what has a whole response to itself/],
     ["so it is left standing, and never deleted",

@@ -162,7 +162,8 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   deletion — is the one outcome a reader cannot detect. A `[page not fully transcribed]` marker
   always ends this way, by design: no pass in the review loop can resolve it, because finishing a
   page means returning the rest of it on top of the whole corrected body, and a response that hits
-  its ceiling ends the run with nothing delivered. So it is reported every round and left standing,
+  its ceiling costs the whole round — every other correction that round made included
+  (`editor_truncated_rate` below). So it is reported every round and left standing,
   and it raises this rate for a document that is otherwise sound. Read it as what it is — one page
   arrived short, and the document says where.
 * `links_dropped_rate` — share of documents where an `href` present before the copy editor was

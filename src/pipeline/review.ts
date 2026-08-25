@@ -172,8 +172,9 @@ A [page not fully transcribed] marker is not yours to resolve at all, even with 
 front of you. It stands where an extraction could not return the whole of one page, so filling it in
 means returning the rest of that page on top of the complete corrected body — the one request in this
 pipeline that can exceed what a response can hold, and hitting that ceiling does not degrade to a
-smaller retry: it ends the run, and the document nobody has been given yet is the document nobody
-gets. Re-extracting that page is what has a whole response to itself. So leave the marker exactly
+smaller retry: the whole round is discarded, so every other correction you made in it is thrown away
+with it and the document is delivered exactly as it reached you. Re-extracting that page is what has
+a whole response to itself. So leave the marker exactly
 where it stands, resolve the other issues around it, and never delete it — an unfinished page that
 says so can be finished, and one that does not looks complete to everyone downstream.
 
@@ -528,7 +529,13 @@ export async function runReview(
     ctx.log.event("reader", { iteration: iterations, issues: issues.length });
     if (issues.length === 0) {
       return {
-        html: wrapDocument(body, { failedPages }),
+        // `editorTruncated` is false on this path today, because a truncated round breaks
+        // out of the loop instead of reaching another Reader pass. It is passed anyway:
+        // the one thing this feature must not do is report a truncation to the store while
+        // handing the user a document that does not say so, and a later change that lets
+        // the loop continue past a truncation would otherwise create exactly that
+        // disagreement here, in the return that looks like the clean one.
+        html: wrapDocument(body, { failedPages, editorTruncated }),
         body,
         iterationsCompleted: iterations,
         unresolved: [],

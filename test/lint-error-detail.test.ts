@@ -56,6 +56,12 @@ test("a lint that could not run says which step threw, and what threw", async ()
   // library and its caller, not a page of jsdom internals in a session record.
   const lines = lint.errorStack!.split("\n").length;
   assert.ok(lines <= 7, `the whole stack was logged (${lines} lines)`);
+  // And no absolute paths, because this log is served to the session's owner
+  // (`GET /v1/sessions/{id}/logs`) and where the app is installed is not theirs to read.
+  // The part that answers the question — which library threw — is what has to survive.
+  assert.doesNotMatch(lint.errorStack!, /\s\/[A-Za-z]|\(\/|file:\/\//, `an absolute path was logged: ${lint.errorStack}`);
+  assert.ok(!lint.errorStack!.includes(process.cwd()), "the frames name the install directory");
+  assert.match(lint.errorStack!, /node_modules\/(jsdom|axe-core)\//, "the trim took the library name with it");
 });
 
 test("the three fields reach the log line an operator reads", async () => {
