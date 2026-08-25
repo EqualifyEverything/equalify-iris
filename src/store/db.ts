@@ -169,8 +169,10 @@ export function pageSessions(
 // the problem documents alone and reported every rate as ~100%.
 export const SIGNAL_ROUNDS = "iris:rounds";
 // How many issues the review loop still had open when it stopped — at its iteration
-// cap, or on a round that changed nothing (pipeline/review.ts). Recorded only when
-// non-zero. Needed as its own signal because the round count cannot answer this:
+// cap, on a round that changed nothing, or on a round whose response hit the output
+// ceiling (pipeline/review.ts). That last one is recorded here AS WELL AS under
+// SIGNAL_EDITOR_TRUNCATED, from independent spreads: the two are not alternatives, so
+// a truncated document is in this numerator too. Recorded only when non-zero. Needed as its own signal because the round count cannot answer this:
 // `iterations_completed = iterations_max` is equally what a document that came back
 // clean on the very last permitted round looks like, and since the loop can also stop
 // early, a LOW round count no longer implies a document that needed little fixing.
@@ -224,7 +226,9 @@ export interface QualityStats {
   // low count too. `null` only when there is nothing to average.
   mean_rounds: number | null;
   // Share of documents (0–1) whose review loop stopped with issues still open — at its
-  // iteration cap, or on a round that changed nothing.
+  // iteration cap, on a round that changed nothing, or on a round whose response hit the
+  // output ceiling. That last case is counted here too, so this is not disjoint from
+  // `editor_truncated_rate` below; it is the superset.
   unresolved_rate: number;
   // Share of documents where the Copy Editor dropped at least one link.
   links_dropped_rate: number;

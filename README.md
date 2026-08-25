@@ -405,8 +405,10 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
   instead: the comments leak pipeline internals into a document meant to be handed to end users,
   and every consumer would have to strip them. Provenance is recorded in the run log
   (`GET /v1/sessions/{id}/logs`) rather than in the deliverable. `@unresolved` **is** emitted
-  when the review loop stops with issues outstanding — at its iteration cap, or on a round that
-  changed nothing (§7.11).
+  when the review loop stops with issues outstanding — at its iteration cap, on a round that
+  changed nothing, or on a round whose response hit the model's output ceiling (§7.11). That
+  last exit adds a second comment, `@editor-truncated`: the round was discarded, so unlike the
+  other two, no editor pass ever worked on the issues `@unresolved` lists.
 - **Contributions are issues, not PRs (§7.13/§9.2).** Instead of fork+PR-on-close, when the
   extractor flags content a specialist would handle better, Iris drafts that agent and files a
   `New agent suggestion: <type>` GitHub issue with the agent code + context; feedback that
