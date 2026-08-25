@@ -468,11 +468,27 @@ export async function regressionGate(
   // The two calls WITHIN a fixture stay sequential, because the second judges the output
   // of the first.
   //
+  // It costs tokens, and this is where the trade is stated rather than left in the diff's
+  // shadow. Both of a fixture's calls carry a cached head built from the CANDIDATE prompt
+  // — the agent's system prompt on the re-run, the same content again as the verify task's
+  // contract — and a candidate is new every round, so that entry is always cold. Serially,
+  // the first fixture wrote it at 1.25x and the other two read it at 0.1x; together, all
+  // three miss and all three write. That is roughly +2.3 full-price copies of a ~4k-token
+  // head, on each of two heads, per gate round. It is the same trade already taken for
+  // page extraction (providers/promptCache.ts), for the same reason: the concurrency is
+  // worth more than the writes, and here it is worth more still, because what it buys back
+  // is a user waiting on training work that is not about their document.
+  //
   // Bounded by the same knob as page extraction and the Reader's chunks
   // (`defaults.extraction_concurrency`), so a run's in-flight calls stay where the
-  // operator set them here too. No first-failure guard like the Reader's: at
-  // MAX_GATE_FIXTURES = 3 every fixture is already in flight before any of them can
-  // reject, so there is nothing queued behind a failure to save.
+  // operator set them here too. No first-failure guard like the Reader's: at a limit of
+  // MAX_GATE_FIXTURES or more every fixture is in flight before any of them can reject, so
+  // there is nothing queued behind a failure to save. Below that limit — an operator who
+  // lowered it for a rate-limited provider — one fixture can still be issued after another
+  // has thrown, which is a single vision call on a round that is already failing. The
+  // Reader guards this because a long document is many more chunks than three, so the
+  // waste there is unbounded; here it is one call, and a guard would cost more to read
+  // than it saves.
   const limit = Math.max(1, Math.floor(ctx.extractionConcurrency) || 1);
   const verdicts = await mapWithConcurrency(caseFiles, limit, async (caseFile): Promise<FixtureVerdict | null> => {
     let c: FixtureCase;
