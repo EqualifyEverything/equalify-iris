@@ -1,6 +1,6 @@
 import { extractJson } from "../util/json.ts";
 import { MAX_EDITOR_IMAGES } from "../providers/imageLimits.ts";
-import { isRequestTooLargeError } from "../providers/types.ts";
+import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseError } from "../providers/types.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
 import { runAxe, type LintResult } from "./lint.ts";
@@ -38,6 +38,15 @@ export interface ReviewResult {
   // what leaves this function: the URLs themselves are content from a user's
   // document and must not reach the quality tally (see Store.recordRunSignals).
   droppedLinks: number;
+  // True when a correction round's response hit the model's output ceiling, so the loop
+  // stopped early and the document is the one that entered that round (issue #143).
+  //
+  // Returned rather than left in the run log for the same reason `droppedLinks` is: it
+  // says something about the document the user received that the document itself cannot,
+  // and one line in one session's log is invisible in aggregate. It is also what
+  // distinguishes the two ways a document arrives with unresolved issues — the loop ran
+  // its rounds and some issues survived them, or a round could not be completed at all.
+  editorTruncated: boolean;
 }
 
 // Exported so a test can assert the marker vocabulary it advertises is the one
@@ -358,7 +367,26 @@ export function capEditorImages(
 // Neither alone is sufficient: without the cap the refusal is the common case on a
 // long document, and without the retry the cap has to be right about a limit it can
 // only estimate.
-async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue[]): Promise<string> {
+// What one round did, rather than only what it produced. `truncated` is not a variant of
+// "the body came back unchanged": it is the one outcome that also says the NEXT round
+// cannot succeed either, because the response length is a function of how long the
+// document is and the document has not got shorter (issue #143).
+interface EditorRound {
+  body: string;
+  truncated: boolean;
+}
+
+// What the log line about a truncation says. The ceiling and the size of the response are
+// the two numbers an operator needs — they are the difference between "raise max_tokens"
+// and "this document cannot fit under any ceiling" — and they are on the error when Iris
+// raised it, which is every case except one that lost its prototype on the way here.
+function truncation(e: unknown): Record<string, unknown> {
+  const message = e instanceof Error ? e.message : String(e);
+  if (!(e instanceof TruncatedResponseError)) return { error: message };
+  return { max_tokens: e.maxTokens, chars: e.chars, error: message };
+}
+
+async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue[]): Promise<EditorRound> {
   const wanted = imagesForIssues(ctx.images, issues);
   const selected = capEditorImages(wanted, issues);
   // Logged only when the cap actually dropped something, so an ordinary round's line
@@ -373,8 +401,28 @@ async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue
   });
 
   try {
-    return await editorCall(ctx, body, issues, selected);
+    return { body: await editorCall(ctx, body, issues, selected), truncated: false };
   } catch (e) {
+    // A response that hit the output ceiling is this round producing nothing usable,
+    // arriving as an exception instead of as an empty string — and `editorCall` already
+    // treats nothing usable as "keep the current body" two dozen lines down. Left to
+    // throw, it ends the run: extraction, assembly and a Reader pass have all been paid
+    // for, the assembled document is sitting in `body`, and the user is handed a failure
+    // instead of it. On the two documents that reported this (#143) that was $8.59 of a
+    // $13.19 round, every dollar spent before the call that failed.
+    //
+    // Delivering with the round's issues unfixed is a state the loop already supports
+    // and reports — @unresolved in the document, `unresolved` in the result,
+    // `unresolved_rate` deployment-wide — so this is #135's principle one layer up: a
+    // round may fail without the document. It is NOT the same case as the size refusal
+    // below and must not be retried, either: the refusal is about the request, which
+    // Iris can make smaller by dropping images, while a truncation is about the
+    // response, and "return the complete corrected body" is the same length however it
+    // is asked for. The caller stops the loop instead.
+    if (isTruncatedResponseError(e)) {
+      ctx.log.event("editor_truncated", { attached: selected.length, of: ctx.images.length, ...truncation(e) });
+      return { body, truncated: true };
+    }
     // The images are the only part of this request Iris can give up, and giving them
     // up is far better than what refusing to do so costs: the run ends here, after
     // extraction and assembly have been paid for in full, and the user gets nothing
@@ -391,7 +439,20 @@ async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue
       of: ctx.images.length,
       error: e instanceof Error ? e.message : String(e),
     });
-    return await editorCall(ctx, body, issues, []);
+    // A retry without images can truncate in its turn — same document, same
+    // instruction — so it is contained the same way rather than left to end the run.
+    try {
+      return { body: await editorCall(ctx, body, issues, []), truncated: false };
+    } catch (retryError) {
+      if (!isTruncatedResponseError(retryError)) throw retryError;
+      ctx.log.event("editor_truncated", {
+        attached: 0,
+        of: ctx.images.length,
+        ...truncation(retryError),
+        after: "images_refused",
+      });
+      return { body, truncated: true };
+    }
   }
 }
 
@@ -450,6 +511,7 @@ export async function runReview(
   let iterations = 0;
   let lastIssues: ReviewIssue[] = [];
   let droppedLinks = 0;
+  let editorTruncated = false;
   // The page index is built from the fragments as they entered review. Pages are
   // deliberately NOT re-indexed as the editor rewrites the body: the index exists
   // to attribute content to a SOURCE page, and the source doesn't change.
@@ -472,13 +534,29 @@ export async function runReview(
         unresolved: [],
         lint,
         droppedLinks,
+        editorTruncated,
       };
     }
     if (iterations === ctx.maxReviewIterations) break; // cap reached, issues remain
 
     iterations++;
     const before = body;
-    body = await runEditor(ctx, body, issues);
+    const round = await runEditor(ctx, body, issues);
+    // The round returned nothing this loop can use, and the next one would make the
+    // same request against the same body — the response length follows the length of
+    // the document, not the number of issues in it. So the loop ends here rather than
+    // spending another Reader pass and another ceiling of output to learn the same
+    // thing, and what is delivered is the body that entered the round, with the
+    // Reader's issues recorded as unresolved. See runEditor for why this is not
+    // retried and not fatal.
+    if (round.truncated) {
+      editorTruncated = true;
+      // The round still counts. It was made and paid for — a full ceiling of output at
+      // that — so `iterationsCompleted` reporting it is the honest arithmetic, and the
+      // `editor_truncated` line beside it is what says the round changed nothing.
+      break;
+    }
+    body = round.body;
     lint = await runAxe(wrapDocument(body));
     ctx.log.event("editor", { iteration: iterations });
     // A link the editor dropped is unrecoverable and invisible to every later check
@@ -510,11 +588,12 @@ export async function runReview(
     (i) => `${i.issue} (severity: ${i.severity}${i.pages?.length ? `, page ${i.pages.join(", ")}` : ""})`,
   );
   return {
-    html: wrapDocument(body, { unresolved: unresolvedLines, failedPages }),
+    html: wrapDocument(body, { unresolved: unresolvedLines, failedPages, editorTruncated }),
     body,
     iterationsCompleted: iterations,
     unresolved: lastIssues,
     lint,
     droppedLinks,
+    editorTruncated,
   };
 }

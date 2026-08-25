@@ -12,12 +12,60 @@ export interface LintResult {
   ok: boolean;
   violations: LintViolation[];
   error?: string;
+  // What failed, when something did. `error` is the sentence a human and the Reader
+  // Agent both read; these are for whoever has to fix it.
+  //
+  // A gate that degrades to "no violations" is only honest if its failure can be
+  // chased down, and the first report of this happening on a real document (#144)
+  // could not be: the message was "Octal escape sequences are not allowed in strict
+  // mode", a JavaScript SyntaxError, which is not the case the code documented as
+  // reachable (a stack overflow from a page too deeply nested) and which nobody could
+  // reproduce from the message alone. `where` is what the message could not say —
+  // whether the failure came out of parsing the document, out of evaluating axe's own
+  // source, or out of the run — and it is a fact about which call threw rather than a
+  // reading of the text, so splitting the steps below is what makes it exact.
+  errorWhere?: "parse" | "inject" | "run";
+  // The class of error and where it was raised. `stack` is trimmed to its first frames:
+  // the top of it says which library the throw came from, which is the question, and the
+  // whole thing would put a page of jsdom internals in every session's run log.
+  errorName?: string;
+  errorStack?: string;
+}
+
+// Enough frames to name the throwing library and its caller, and few enough that a
+// degraded lint stays one log line rather than a page of it.
+const STACK_FRAMES = 6;
+
+function failure(where: "parse" | "inject" | "run", message: string, e: unknown): LintResult {
+  const err = e instanceof Error ? e : undefined;
+  const stack = err?.stack?.split("\n").slice(0, STACK_FRAMES + 1).join("\n");
+  return {
+    // A document that would not parse is a failure; axe not running in this
+    // environment is a degradation. Unchanged by this: only the reporting is new.
+    ok: where !== "parse",
+    violations: [],
+    error: message,
+    errorWhere: where,
+    ...(err?.name ? { errorName: err.name } : {}),
+    ...(stack ? { errorStack: stack } : {}),
+  };
 }
 
 // PRD §7.7: validate the document parses and basic accessibility lint passes
 // (axe-core in headless mode). We run axe inside a jsdom realm. If axe cannot
 // run in this environment we degrade to a parse check rather than fail the run;
 // either way the result is surfaced to the Reader as input.
+//
+// `axe-core` and `jsdom` are pinned to exact versions in package.json rather than
+// carried on a caret range, and this function is the reason. It is a GATE: what it
+// reports decides whether a document ships with a violation, its rule set is tuned
+// against axe internals below (which rule claims which element, which findings land in
+// `incomplete`), and the same rule ids are what `GET /v1/quality` reports deployment-
+// wide. On a range, that behaviour can change on any redeploy with no commit to point
+// at — including a change that makes a failure like #144 appear or disappear — and an
+// operator investigating a checkout of the same sha could not be sure they had the same
+// linter. equalify-iris-bench ports this configuration deliberately so its accuracy
+// numbers mean the same thing as Iris's, which only holds if both can name one version.
 export async function runAxe(html: string): Promise<LintResult> {
   let dom: JSDOM;
   try {
@@ -26,17 +74,34 @@ export async function runAxe(html: string): Promise<LintResult> {
     const virtualConsole = new VirtualConsole();
     dom = new JSDOM(html, { runScripts: "outside-only", pretendToBeVisual: true, virtualConsole });
   } catch (e) {
-    return { ok: false, violations: [], error: `document failed to parse: ${(e as Error).message}` };
+    return failure("parse", `document failed to parse: ${(e as Error).message}`, e);
   }
+
+  type AxeIssue = { id: string; impact: string | null; description: string; nodes: unknown[] };
+  type AxeWindow = {
+    axe: { run: (ctx: unknown, opts: unknown) => Promise<{ violations: AxeIssue[]; incomplete: AxeIssue[] }> };
+  };
 
   try {
     const { window } = dom;
     // Inject the axe-core library source into the jsdom realm and run it there.
-    window.eval(axe.source);
-    type AxeIssue = { id: string; impact: string | null; description: string; nodes: unknown[] };
-    const w = window as unknown as {
-      axe: { run: (ctx: unknown, opts: unknown) => Promise<{ violations: AxeIssue[]; incomplete: AxeIssue[] }> };
-    };
+    //
+    // The injection is its own step, and its own catch, because it is a different
+    // diagnosis from the rule pass failing: evaluating axe's source is the pipeline
+    // compiling ITS dependency, which cannot depend on the document at all, while
+    // `axe.run` walks the document this run produced. #144 arrived as a JavaScript
+    // SyntaxError with nothing in it to say which of the two had happened — and those
+    // two answers point at a version bump and at a page of HTML respectively.
+    try {
+      window.eval(axe.source);
+    } catch (e) {
+      return failure(
+        "inject",
+        `axe-core could not run in this environment: ${(e as Error).message}`,
+        e,
+      );
+    }
+    const w = window as unknown as AxeWindow;
     const results = await w.axe.run(window.document, {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] },
       rules: {
@@ -132,7 +197,7 @@ export async function runAxe(html: string): Promise<LintResult> {
     }));
     return { ok: violations.length === 0, violations };
   } catch (e) {
-    return { ok: true, violations: [], error: `axe-core could not run in this environment: ${(e as Error).message}` };
+    return failure("run", `axe-core could not run in this environment: ${(e as Error).message}`, e);
   } finally {
     // `close()` walks the tree recursively, so a pathologically deep document overflows the
     // stack in here — and a throw from a `finally` replaces whatever the `try` returned,

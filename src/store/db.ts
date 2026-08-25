@@ -182,6 +182,15 @@ export const SIGNAL_LINKS_DROPPED = "iris:links-dropped";
 // on an environment error, so a broken linter would quietly drive every
 // accessibility rate in this table to zero and read as a fixed deployment.
 export const SIGNAL_LINT_ERROR = "iris:lint-error";
+// A correction round's response hit the model's output token ceiling, so the round was
+// abandoned and the document delivered as it entered it (issue #143). Recorded because
+// the cost of it is invisible in every other rate here: the document ships, its issues
+// go into `iris:unresolved` exactly like issues the editor tried and failed to fix, and
+// the one thing that distinguishes them — a whole document's worth of output paid for
+// and discarded — would be a line in one session's log. It is also the rate that says
+// whether a deployment's `max_tokens` fits the documents it is being given, which is a
+// question about the deployment rather than about any one run.
+export const SIGNAL_EDITOR_TRUNCATED = "iris:editor-truncated";
 
 // One measurement about one delivered document. `count` is a magnitude (nodes for a
 // rule, issues for `iris:unresolved`, rounds for `iris:rounds`) and is never a
@@ -215,6 +224,9 @@ export interface QualityStats {
   links_dropped_rate: number;
   // Share of documents where axe-core could not run.
   lint_error_rate: number;
+  // Share of documents where a correction round's response hit the output ceiling and
+  // was discarded. Those documents are delivered, with that round's issues unresolved.
+  editor_truncated_rate: number;
   rules: {
     id: string;
     impact: string | null;
@@ -961,6 +973,7 @@ export class Store {
       unresolved_rate: rate(SIGNAL_UNRESOLVED),
       links_dropped_rate: rate(SIGNAL_LINKS_DROPPED),
       lint_error_rate: rate(SIGNAL_LINT_ERROR),
+      editor_truncated_rate: rate(SIGNAL_EDITOR_TRUNCATED),
       rules,
     };
   }

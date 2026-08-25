@@ -87,6 +87,22 @@ export class TruncatedResponseError extends Error {
   }
 }
 
+// The same fact as a predicate, and the one the review loop acts on: a round whose
+// response hit the ceiling is a round that produced nothing, which costs the round rather
+// than the document (pipeline/review.ts, issue #143).
+//
+// `instanceof` is the check, because unlike `isRequestTooLargeError` below this error is
+// Iris's own — raised in two places, both in this repo, with a message written here. The
+// message fallback is for an error that reached the caller having lost its prototype: a
+// boundary that re-wraps what it caught, or a second copy of this module in one process.
+// It matches the fixed part of that one sentence rather than a phrasing some upstream
+// chose, so it cannot be tripped by a provider rewording anything.
+export function isTruncatedResponseError(e: unknown): boolean {
+  if (e instanceof TruncatedResponseError) return true;
+  const message = e instanceof Error ? e.message : String(e);
+  return message.includes("output ceiling and was truncated");
+}
+
 // A call the upstream REFUSED for size, before processing any of it: too much input
 // for the model's context window, or too many bytes for the endpoint to accept at all.
 // Both are the same fact to a caller — this request is too big — and the same remedy.
