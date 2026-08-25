@@ -184,24 +184,34 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
   const prompt = normalize(section("System prompt")!);
   for (const [what, re] of [
     ["there is one correct shape, and it is written out",
-      /exactly one correct shape: <p role="doc-pagebreak" id="page-5">5<\/p> — the number as printed, as the element's own text/],
+      /exactly one correct shape: <hr role="doc-pagebreak" aria-label="Page 5" id="page-5"> — the number the page prints, carried in the label/],
     // Why this role rather than the <section> wrapper the rule above forbids: it marks the
     // break instead of claiming a region, so it does not announce a section beginning where
     // only the paper ran out.
     ["the role marks the break rather than claiming a region",
       /That role marks the break itself rather than claiming a region, so it says where the printed page turned without announcing a section that begins there/],
-    // The reported violation, named exactly, so the rule cannot be read as being about
-    // something else — and named as prohibited rather than as discouraged.
-    ["naming attributes are prohibited on the role, and the reported element is quoted",
-      /Never name that marker with aria-label or aria-labelledby: naming attributes are PROHIBITED on this role, so <p role="doc-pagebreak" aria-label="Page 5"><\/p> is a serious violation/],
+    // Why the number goes in the label and not in the element's text, which is the half of
+    // this rule a page agent is likeliest to "improve": the role is a separator, and a
+    // separator's children are presentational, so a number written as text is pruned before
+    // a reader gets it. A marker naming no page is the barrier #145 was filed about, whether
+    // or not axe reports it — so the clause has to give the reason, not just the shape.
+    ["the number lives in the label because a separator's contents are presentational",
+      /separator's contents are presentational: text inside the marker is pruned before a reader is given it, so <p role="doc-pagebreak" id="page-5">5<\/p> announces a page break that cannot say which page/],
+    // And why <hr> rather than the <p> or <span> that reported the violation: the naming
+    // attribute is judged against the element's OWN role (`paragraph` and `generic` prohibit
+    // it, `separator` does not), which is the mechanism the first version of this rule got
+    // wrong by reading the report as "naming is prohibited on doc-pagebreak".
+    ["the element is an <hr> because the naming attribute is judged against its own role",
+      /A naming attribute is judged against the element's own role, which is why aria-label is permitted here and a serious violation on the <p> or <span>/],
     // The asymmetry is what made it intermittent, and stating it is what stops the rule
-    // being read as "only empty markers are a problem".
-    ["the violation is intermittent because only the empty marker reports it",
-      /shows itself only when the element is empty — which is how the same habit passes on six markers in a document and fails on the seventh/],
-    // And the independent reason: an empty marker has no permitted way to be named at all,
-    // which axe does not report. Both halves, so neither can be dropped as redundant.
-    ["an empty marker is forbidden for having no name, not for failing the gate",
-      /The text is the name, so a marker with no text has no name and nothing to tell the reader it was emitted for: where the page prints no number, emit no marker/],
+    // being read as "only empty markers are a problem" — with the warning that the gate is
+    // not the teacher here, since the shape it stays quiet about is also wrong.
+    ["the linter is not the teacher, because only the empty marker reports it",
+      /Do not look to the linter to teach you this one: it says nothing about <p role="doc-pagebreak" aria-label="Page 5">5<\/p> and speaks only when such a marker is empty, which is how one habit passes on six markers in a document and fails on the seventh/],
+    // A page with no printed number gets no marker: there would be nothing to name it with,
+    // and an unnamed break is the same dead end as a pruned one.
+    ["a page that prints no number gets no marker",
+      /Where the page prints no number, emit no marker: a break with nothing to name says only that something ended/],
     // The consistency half of the report: seven markers in a 25-page document is arbitrary,
     // and a page-local rule is what makes it not arbitrary.
     ["a marker is emitted wherever the page prints its number, first in the page's output",

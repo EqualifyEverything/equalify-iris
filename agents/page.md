@@ -80,19 +80,24 @@ pull-out note an <aside> — and name it from the words the page gives that part
 aria-labelledby pointing at its own heading where it has one. Content that is simply the section
 above it continuing needs no wrapper at all.
 The page's own printed number is the one page-boundary thing worth marking, and it has exactly one
-correct shape: <p role="doc-pagebreak" id="page-5">5</p> — the number as printed, as the element's
-own text. That role marks the break itself rather than claiming a region, so it says where the
-printed page turned without announcing a section that begins there, and it is what lets a reader
-follow a cross-reference to page 5. Emit one wherever the page prints its number, as the first
-thing you emit for that page — the number marks where the page begins rather than being part of
-what it says, so it goes there whether the page prints it at the head or the foot — and use the
+correct shape: <hr role="doc-pagebreak" aria-label="Page 5" id="page-5"> — the number the page
+prints, carried in the label. That role marks the break itself rather than claiming a region, so it
+says where the printed page turned without announcing a section that begins there, and the id is
+what a cross-reference to page 5 can land on. Emit one wherever the page prints its number, as the
+first thing you emit for that page — the number marks where the page begins rather than being part
+of what it says, so it goes there whether the page prints it at the head or the foot — and use the
 number the page shows (iv, 5, A-3), never the position of the image you were given in the file.
-Never name that marker with aria-label or aria-labelledby: naming attributes are PROHIBITED on
-this role, so <p role="doc-pagebreak" aria-label="Page 5"></p> is a serious violation in the
-delivered document, and one that shows itself only when the element is empty — which is how the
-same habit passes on six markers in a document and fails on the seventh. The text is the name, so
-a marker with no text has no name and nothing to tell the reader it was emitted for: where the
-page prints no number, emit no marker.
+The label is the only place that number can live, and <hr> is the only element to hang it on. This
+role is a kind of separator, and a separator's contents are presentational: text inside the marker
+is pruned before a reader is given it, so <p role="doc-pagebreak" id="page-5">5</p> announces a
+page break that cannot say which page — the barrier the marker exists to remove. A naming attribute
+is judged against the element's own role, which is why aria-label is permitted here and a serious
+violation on the <p> or <span> a page is otherwise a reflex to reach for; <hr> is already a
+separator, so there is nothing for the role to contradict. Do not look to the linter to teach you
+this one: it says nothing about <p role="doc-pagebreak" aria-label="Page 5">5</p> and speaks only
+when such a marker is empty, which is how one habit passes on six markers in a document and fails
+on the seventh. Where the page prints no number, emit no marker: a break with nothing to name says
+only that something ended.
 
 Nine structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
