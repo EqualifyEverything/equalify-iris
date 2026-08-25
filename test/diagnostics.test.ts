@@ -168,6 +168,27 @@ test("a run whose process died stops claiming to be stuck", () => {
   assert.ok(later.elapsed_ms < 60_000, `elapsed_ms=${later.elapsed_ms} is still counting`);
 });
 
+test("a round killed between calls does not count the clock up for ever", () => {
+  // The other shape of a dead process, and the one the open-call ceiling cannot bound:
+  // killed in the post-delivery window between model calls, so the round never
+  // terminates, nothing is open to age out, and no sweep rewrites a ready_for_review
+  // status. Measuring that to `now` reads an idle, delivered session as one that has
+  // been working since the day it died.
+  const killedBetweenCalls = log(
+    { ts: T(0), type: "run_start" },
+    start(T(1), "feedback"),
+    end(T(2), "feedback", 1000), // the call returned; the process died after it
+  );
+  const d = summarizeRun(killedBetweenCalls, {
+    sessionId: "ses_1",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse(T(3 * 24 * 60 * 60)), // three days later
+  });
+  assert.equal(d.in_flight, null, "nothing was open when it died");
+  assert.ok(d.elapsed_ms <= 2000, `elapsed_ms=${d.elapsed_ms} is measured to now, not to its last event`);
+});
+
 test("rounds are counted, so an interleaved second round is not read as finished", () => {
   // A client can POST /feedback during a round's post-delivery window, and with
   // max_concurrent_runs above 1 the second round's run_start is appended BEFORE the

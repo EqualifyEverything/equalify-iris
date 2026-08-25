@@ -281,7 +281,20 @@ export function summarizeRun(
   // run as over, which is what it is.
   const abandoned = oldestOpenAt !== null && ms(oldestOpenAt, nowIso) > MAX_PLAUSIBLE_CALL_MS;
   const active = running || (ctx.status === "ready_for_review" && unfinished && !abandoned);
-  const endRef = active ? nowIso : terminal?.ts ?? lastEventAt ?? nowIso;
+
+  // The clock runs to NOW only where something is actually pending. For a `running`
+  // session that is the whole of it — a run between two calls is still a run. In the
+  // post-delivery window it takes an open call as well, because that window is the one
+  // place a run can end without saying so: a process killed between calls (after the
+  // classify call returns, inside a fixture read, in the contribution step's own fs read)
+  // leaves a round that never terminated and a status no sweep rewrites, and the
+  // open-call ceiling above cannot bound what is not open. Measuring such a session to
+  // `now` would have `elapsed_ms` counting up for days, `concurrency_factor` decaying
+  // toward zero and the last phase's duration growing without end — an idle, delivered
+  // session reading as one that has been working since it was killed. Its last event is
+  // the last thing that is known to have happened, so that is what it is measured to.
+  const pending = running || (active && oldestOpenAt !== null);
+  const endRef = pending ? nowIso : terminal?.ts ?? lastEventAt ?? nowIso;
   // Longest-waiting first (oldest start timestamp).
   openCalls.sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? ""));
   const oldest = openCalls[0];
