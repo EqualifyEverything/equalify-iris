@@ -235,6 +235,37 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
   }
 });
 
+// Issue #187: a footnote list item shipped `role="doc-endnote"`, which axe deprecates, and the
+// FOOTNOTES rule had prescribed the markup in detail while saying nothing about roles at all —
+// so the model reached for the DPUB pair on its own and picked up the deprecated half. The
+// clauses below are the ones that make this a rule rather than a preference: which half of the
+// pair is allowed, that the gate fails the other, and why nothing is lost by leaving it off.
+// src/pipeline/roles.ts is the half that does not depend on the agent obeying this, and
+// test/deprecated-roles.test.ts pins what these clauses assert about axe.
+test("the page agent's footnote-role rule keeps the clauses that make it a rule", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    // The permission and the prohibition are one sentence apart on purpose: the list role is
+    // a legitimate landmark, and a rule read as "no doc-* roles on notes" would lose it.
+    ["the list may carry the landmark role",
+      /the LIST may carry role="doc-endnotes" \(or role="doc-bibliography" for a bibliography\) — a landmark, which is what those roles are for/],
+    ["the items may not, and it is the deprecated pair that is named",
+      /The ITEMS must not: role="doc-endnote" and role="doc-biblioentry" are two of the only three roles ARIA deprecates \(the third is directory\)/],
+    // Stated as a consequence, because "deprecated" alone reads as a style note: this is the
+    // accessibility gate failing the document, which is what happened.
+    ["using one fails the gate",
+      /a document that uses one fails the accessibility gate/],
+    // The reason nothing is lost, which is the clause that stops the rule being read as a
+    // trade of semantics for a clean lint — the `<li>` was already saying it.
+    ["nothing is lost, because the list item already says it",
+      /an <li> inside an <ol> is already a list item to a screen reader, and that is the whole of what doc-endnote was adding/],
+    ["both shapes are written out, right and wrong",
+      /So <ol role="doc-endnotes"><li id="fn-1">…<\/li><\/ol>, never <li id="fn-1" role="doc-endnote">/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
 // What the agent may say about what it could not read, and how much of the page has to
 // arrive at all (issues #112, #117, #133, and the legibility half of #116).
 //

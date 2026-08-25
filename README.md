@@ -562,6 +562,21 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   as a subsequence, since counts cannot see a move, equality would refuse every page where the
   parser legitimately adds a tag, and a tag-only sequence misses bare prose being hoisted out of a
   table with every tag left in place.
+- **A deprecated ARIA role redundant with its element is dropped, not reported.** ARIA deprecates
+  exactly three roles — `directory`, `doc-biblioentry`, `doc-endnote` — and all three were folded
+  into list semantics, so each has a host element whose implicit role already *is* the role: an
+  `<li role="doc-endnote">` inside an `<ol>` is announced identically without it. Removing the
+  attribute is therefore a rewrite with no judgement in it, and it happens where the pages are
+  joined and again after every correction round, logged as `deprecated_roles_stripped`. Both ends
+  are needed: extraction reached for the DPUB pair on its own and took the deprecated half (issue
+  #187), and the round that was told the rule had failed rewrote five sections and left it. The
+  prompt is still the primary fix — `agents/page.md`'s FOOTNOTES rule now names the role that is
+  allowed and the two that are not — and this is the part that does not depend on a model obeying
+  it. Only where the role is redundant: a `<div role="doc-endnote">` is left to fail the gate,
+  because deleting the attribute there loses the only thing marking the element as a note, and
+  DPUB's own remedy is to make it a list item — a restructure, not an attribute rewrite. A document
+  with no such role comes back byte-identical, which is what the loop's change detection and the
+  reserialization caution above both need.
 - **Copy Editor image payload (§7.9).** When every issue in a round is attributed to a page, the
   editor gets only those pages' images (logged per round as `editor_images`). Attaching every
   page's image on every round is the dominant per-round cost of the review loop — on a 25-page
