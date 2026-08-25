@@ -315,12 +315,25 @@ export async function runPipeline(args: {
     // and whose Reader had signed it off. Training is best-effort; the delivered document
     // is not its to revoke.
     //
-    // The one thing this ordering admits is a race with `POST /close`, which deletes the
-    // session's tmp tree: a caller who closes the instant it sees `ready_for_review` can
-    // pull `tmp/<id>/agents` out from under a session-built agent's in-place training.
-    // That costs the training round, is logged as one, and is the same exposure
-    // `runContribution` has always had below — the alternative is making every feedback
-    // round wait minutes for it, which is what this is fixing.
+    // What this ordering admits is a client acting on `ready_for_review` while the run is
+    // still here. `POST /close` deletes the session's tmp tree, and `POST /feedback`
+    // claims the session and starts a second run — neither waits for this one, because
+    // the run queue's cap is global rather than per session. Both windows existed already
+    // (`runContribution` below has always run past the status), and this widens them from
+    // a moment to a training round. What is in them:
+    //
+    //   - A close can pull `tmp/<id>/agents` out from under a session-built agent's
+    //     in-place training. Forward-looking rather than live: nothing seeds a
+    //     session-built `page.md` today, so the only writer of that path never runs for
+    //     the agent this trains.
+    //   - Two runs can touch the shared lesson bank at once. That is not new — the bank
+    //     is keyed by agent rather than by session, so any two concurrent runs already
+    //     could — and it is why writing it is atomic (pipeline/memory.ts).
+    //   - A throw after the status is set must not re-fail a delivered session, which is
+    //     what the containment here and around `runContribution` below is for.
+    //
+    // The alternative is making every feedback round wait minutes for work about a future
+    // document, which is what this is fixing.
     if (args.feedback) {
       const learnArgs = { agentFile: "page.md", before: beforeBody, after: review.body, feedback: args.feedback };
       try {
@@ -355,8 +368,18 @@ export async function runPipeline(args: {
     });
 
     // After the user has their output, auto-file agent-suggestion issues
-    // (no-op unless a token is available). Never blocks the result.
-    await runContribution(ctx, suggestions);
+    // (no-op unless a token is available). Never blocks the result — and now cannot fail
+    // it either. Both of its own failure paths are already contained (contribute.ts
+    // catches the draft call and the filing separately), but what is left outside them is
+    // still an fs read, and the outer catch below would answer it by writing `failed`
+    // over a session whose document was delivered — the same wrong answer the training
+    // above used to give. A second feedback round can even have started by then, since
+    // the status has been `ready_for_review` since well before this line.
+    try {
+      await runContribution(ctx, suggestions);
+    } catch (e) {
+      log.event("contribution_failed", { error: e instanceof Error ? e.message : String(e) });
+    }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     store.updateSession(sessionId, { status: "failed", error: message });

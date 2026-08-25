@@ -87,6 +87,30 @@ test("in_flight is null once the run is no longer running", () => {
   const d = summarizeRun(text, { sessionId: "ses_1", status: "failed", phase: "extraction", now: Date.parse(T(9)) });
   assert.equal(d.in_flight, null, "a finished run is not 'hung'");
   assert.equal(d.in_flight_count, 0);
+  // And specifically not when the log has an open call and no terminal line, which is
+  // what a run killed mid-flight leaves behind: `failStaleSessions` rewrites the status
+  // of a process that can no longer append to its own log, so "no run_failed" must not
+  // be read as "still working".
+});
+
+test("a call still open after the document was delivered is still in flight", () => {
+  // A feedback round trains the page agent AFTER marking the session ready_for_review
+  // (pipeline/orchestrator.ts): the document is delivered, but the run is not over and
+  // still holds its max_concurrent_runs slot. A provider hanging in there delays every
+  // upload behind it, and the status alone would report the run as finished — which is
+  // the one question this field exists to answer.
+  const text = log({ ts: T(0), type: "run_start" }, start(T(1), "feedback"));
+  const ready = { sessionId: "ses_1", status: "ready_for_review", phase: "done", now: Date.parse(T(300)) };
+  const d = summarizeRun(text, ready);
+  assert.ok(d.in_flight, "the training call never returned");
+  assert.equal(d.in_flight.agent, "feedback");
+  assert.equal(d.in_flight_count, 1);
+
+  // Once the round writes its terminal line the run really is over, open call or not.
+  const done = log({ ts: T(0), type: "run_start" }, start(T(1), "feedback"), { ts: T(2), type: "run_complete" });
+  const after = summarizeRun(done, ready);
+  assert.equal(after.in_flight, null, "run_complete ends the run whatever the log's last call did");
+  assert.equal(after.in_flight_count, 0);
 });
 
 test("token totals are summed per run and attributed per agent", () => {

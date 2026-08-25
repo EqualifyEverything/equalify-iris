@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Paths } from "../store/paths.ts";
 
@@ -106,10 +106,23 @@ export function loadExamples(paths: Paths, agentFile: string): CorrectionExample
   }
 }
 
+// Written to a temporary file and renamed into place, so a reader never sees half of
+// it. The bank is SHARED — it is keyed by agent file, not by session — and
+// `defaults.max_concurrent_runs` allows more than one run at a time, so a page being
+// extracted in one run can read this file while another run is recording a lesson to it.
+// A plain write is not atomic, and `loadExamples` answers a partial read by returning
+// `[]`: the page would be extracted with no lessons at all, including the
+// accessibility-policy ones, and nothing would say so. Rename within a directory is
+// atomic on POSIX and on Windows (ReplaceFile semantics), which makes that read either
+// the old bank or the new one.
 function saveExamples(paths: Paths, agentFile: string, examples: CorrectionExample[]): void {
   const path = paths.agentMemory(agentFile);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(examples, null, 2));
+  // Same directory as the target, because rename is only atomic within a filesystem, and
+  // named per process so two runs cannot collide on the temporary itself.
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(examples, null, 2));
+  renameSync(tmp, path);
 }
 
 export interface RecordInput {

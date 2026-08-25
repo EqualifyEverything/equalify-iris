@@ -227,8 +227,22 @@ export function summarizeRun(
   // Longest-waiting first (oldest start timestamp).
   openCalls.sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? ""));
   const oldest = openCalls[0];
+  // "Is this run stuck on something?" is a question about the RUN, and a run is not over
+  // when the session says `ready_for_review`: the document is delivered there, but a
+  // feedback round then trains the page agent from it (pipeline/orchestrator.ts), holding
+  // its `max_concurrent_runs` slot until that finishes. Gating this on the session status
+  // alone therefore blinded the one field that answers the question, in exactly the window
+  // where a hung provider call delays every upload behind it and nothing else reports it.
+  //
+  // So the window is named exactly: the session says its document is ready and the run
+  // has not yet written its terminal line. Not simply "no terminal line", because a
+  // session can be `failed` without one — `failStaleSessions` rewrites the status of a
+  // run whose process died and cannot append to its log — and that run's last open call
+  // would then be reported as hanging forever, which is the phantom this gate exists to
+  // prevent.
+  const active = running || (ctx.status === "ready_for_review" && !terminal);
   const inFlight =
-    running && oldest
+    active && oldest
       ? {
           agent: oldest.agent ?? "?",
           model: oldest.model ?? "?",
@@ -238,7 +252,7 @@ export function summarizeRun(
           waiting_ms: ms(oldest.ts, nowIso),
         }
       : null;
-  const inFlightCount = running ? openCalls.length : 0;
+  const inFlightCount = active ? openCalls.length : 0;
 
   // Completed model calls (the `model_call` end events carry duration_ms).
   const calls = events.filter((e) => e.type === "model_call");
