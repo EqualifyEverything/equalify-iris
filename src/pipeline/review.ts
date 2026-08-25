@@ -234,6 +234,27 @@ function lintSummary(lint: LintResult): string {
 // back to a page.
 const READER_INDEX_EXCERPT_CHARS = 200;
 
+// The index, as the head of a Reader prompt.
+//
+// It is the one part of that prompt which is about the DOCUMENT rather than about the
+// chunk in front of it, and it does not change while the loop runs: it is built from the
+// fragments as they entered review and deliberately not rebuilt as the editor rewrites
+// the body, because it exists to attribute content to a SOURCE page and the source does
+// not change (see runReview). So every chunk of every round sends these same bytes — on a
+// 25-page document ~1.5k tokens, over several chunks and up to `max_review_iterations + 1`
+// rounds, which is the same paragraph re-sent dozens of times at full price.
+//
+// Which is why it LEADS the message now, where it used to sit near the end: a cache
+// breakpoint marks a prefix, so what repeats has to come before what varies or it cannot
+// be cached at all. Nothing else moved, and the sections are self-labelled — the Reader
+// is told it is "given an index of the document's source pages", not told where to look
+// for it — so this is the same prompt with its stable half first. Below the minimum
+// length (a short document's index) the breakpoint is declined and the message is sent
+// as one piece, which is what it was.
+function readerIndexHead(index: string): string {
+  return index ? `## Source pages in this document (extracted HTML, truncated)\n${index}\n\n` : "";
+}
+
 async function runReader(
   ctx: PipelineContext,
   body: string,
@@ -251,9 +272,19 @@ async function runReader(
   // same defect would arrive two or three times and be carried to @unresolved that many
   // times if no editor round cleared it.
   const duplicateHeadings = sameWordedHeadingNote(sameWordedHeadingRuns(body));
+  // The invariant head of every chunk's prompt (see readerIndexHead).
+  const head = readerIndexHead(index);
   // The two per-run tails of the prompt, read once instead of once per chunk:
   // `examplesForPrompt` reads and parses the agent's example bank off disk, and it
   // cannot change while a round is in flight.
+  //
+  // These stay at the END, where they were, rather than joining the cached head. Both are
+  // instructions rather than reference material — the user's feedback for this run, and
+  // the lessons past corrections taught — and where an instruction sits in a prompt is a
+  // question about whether it is followed, not about what it costs. The index has no such
+  // claim on a position: the Reader is told it is "given an index of the document's source
+  // pages" and matches content against it wherever it appears. Between them they are a
+  // fraction of the index's size on any document with pages in it.
   const tail = feedbackPreamble(ctx) + examplesForPrompt(ctx.paths, "page.md", ["a11y_policy"]);
   const chunks = chunk(body);
   // Chunks are independent calls over disjoint windows of a body nothing mutates while
@@ -303,17 +334,22 @@ async function runReader(
   const perChunk = await mapWithConcurrency(chunks, limit, async (c, i) => {
     if (failed) throw failure;
     const user =
+      head +
       `## HTML\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint)}` +
       (i === 0 && duplicateHeadings
         ? `\n\n## Headings with the same words at the same level, nothing but their own content between them (whole document)\n${duplicateHeadings}`
         : "") +
-      (index ? `\n\n## Source pages in this document (extracted HTML, truncated)\n${index}` : "") +
       tail;
     let res;
     try {
       res = await ctx.router.complete("reader", "text", [
         { role: "system", content: READER_SYSTEM },
-        { role: "user", content: user },
+        // The head is this run's page index and nothing else, so it is the same bytes on
+        // every chunk of every round — declared so the adapter can cache it rather than
+        // charge for it dozens of times (providers/types.ts `cachedPrefix`). Undefined
+        // rather than "" when there is no index, which is a document with no pages to
+        // attribute to: an empty head is not a prefix worth naming.
+        { role: "user", content: user, cachedPrefix: head || undefined },
       ]);
     } catch (e) {
       // The first one wins, so the error the round rejects with is the one that
@@ -358,7 +394,11 @@ async function runReader(
 // grows every round, so a genuine content issue can go unattributed in exactly the
 // late rounds where the iteration budget is thinnest. Recovery costs a full
 // iteration (the leftover must become the ONLY issue before images come back), and
-// at the cap it never happens — the issue is written to @unresolved having never
+// the loop may not have one to spend: at the cap it never happens, and since the loop
+// also stops on a round that changes nothing, a round whose issues are all
+// unattributable can end it sooner than that — the editor answers with the body it was
+// handed and there is no later round to narrow in. That makes this the stronger reason
+// to broaden, not a weaker one: the issue is written to @unresolved having never
 // been shown its own page.
 //
 // The cost of being generous is bounded by `capEditorImages` below, which is what
