@@ -428,11 +428,163 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
   }
 });
 
+// Four sessions reported the same class of defect: content that is a set of items came
+// back as prose (#129, #130, #131), and a symbol that is not content came back as text
+// (#110). All four are structure a reader navigates by, and all four were invisible to
+// everything downstream — axe has no rule for "these six paragraphs are a list", the
+// Reader Agent gets no source image so it cannot tell parallel items from continuous
+// prose, and the flattened view it does get reads a <p> run and a <ul> almost alike.
+//
+// What is pinned is the resolution and its guards, in both directions, because the two
+// directions are each other's bug: "parallel items are a list" applied to continuous
+// prose invents a structure the page does not have, and #131's own report ("Nothing
+// changed! Bad Claude!") is what a rule that hedges produces.
+test("the page agent's list rule keeps the clauses that make it a rule", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    // #129: a cleaning-and-maintenance section came back as a run of <p> elements.
+    ["a set of discrete parallel items is a list however the page separates them",
+      /a group of discrete, parallel items is a list, whatever the page uses to separate them/],
+    ["what a run of paragraphs costs a reader is named, not asserted",
+      /leaves a screen-reader user no way to know how many items there are, which one they are on, or where it ends/],
+    // #129, #131: which list, and the item boundary — the reported cells had several steps
+    // run together as one string.
+    ["<ol> where order is part of the instruction, <ul> where it is not",
+      /Use <ol> where the order is part of the instruction \(do this, then that\) and <ul> where it is not/],
+    ["one item's worth of text per <li>, neither merged nor split",
+      /never merge two instructions into one item, and never split one instruction across two/],
+    // #129: the page presented the items as separated lines with no bullet glyphs, which is
+    // what the previous wording ("real lists") left open.
+    ["missing bullet glyphs are not evidence that something is not a list",
+      /the absence of bullet glyphs is not evidence that they are not/],
+    // #130, #131: the Ingredients and Directions columns of a recipe table. Reported twice
+    // from one session, the second time after a round that changed nothing.
+    ["a table cell holding several items or steps contains the list, not <br>-separated text",
+      /a Directions cell holding three steps is a cell containing an <ol>, an Ingredients cell holding four items is a cell containing a <ul>, and neither is <br>-separated text/],
+    // #131's second ask: a block of separate trademark and copyright notices. Named in the
+    // rule's own examples rather than given a bullet of its own — the reason it is a list is
+    // that it is a set of discrete items of one kind, which is this rule.
+    ["the reported blocks are named as examples: steps, cautions, ingredients, notices",
+      /Procedural steps, cleaning or maintenance tasks, a run of cautions, the ingredients of a recipe, a block of separate copyright and trademark notices/],
+    // The guard. Without it this rule turns every explanatory paragraph into a bulleted
+    // outline, which is the same defect with the structure invented instead of lost.
+    ["continuous prose stays a paragraph, and a single direction is not a one-item list",
+      /Continuous prose is not a list: a paragraph that explains one thing, or a single direction written as one sentence, stays a <p>, and a list of one item is a paragraph/],
+    // And the boundary with the rule below it, which owns the numbers the page prints.
+    ["a list is not a way to number things",
+      /a list is not a way to number things — an <ol> counts its own items/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// #110: a manual explained "see the pages indicated in •" and the extractor then appended
+// the bullet to every <li> in the list it annotated, so a screen reader said "bullet" at
+// the end of every item with nothing to say why.
+//
+// This is the one rule in the prompt that takes something OFF the page, so its guards carry
+// more weight than usual: the fidelity sentence above governs what may be added, and the
+// verify pass compares the output against the image but judges it by this file — which is
+// what makes a deliberate omission safe here and an undeclared one unfaithful.
+test("the page agent's rule for a symbol the page explains as a device keeps its guards", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["a symbol the page explains as navigational belongs to the apparatus, not the item",
+      /that symbol belongs to the page's apparatus and not to the item it is printed beside/],
+    ["the reported convention is quoted, so the rule cannot be read as being about bullets in general",
+      /"see the pages indicated by •", a ► that stands for "turn to"/],
+    ["what it costs a reader is named",
+      /hands a screen reader "bullet" at the end of every item, announced aloud, with nothing in the markup to say why/],
+    // The omission is recorded, because "log" is where anything not delivered as the
+    // document goes — the same discipline the legibility rules use.
+    ["the convention is recorded in the log rather than silently dropped",
+      /Record the convention in the "log" field instead/],
+    // Guard one: only the page's own explanation triggers it. Without this, every † and •
+    // on every page is a candidate for deletion.
+    ["an unexplained symbol is ordinary text, transcribed as printed",
+      /An unexplained symbol is ordinary text and is transcribed as printed — a bullet inside a sentence, a † beside a price/],
+    // Guard two: the neighbouring rule. A symbol the page explains LEXICALLY is an <abbr>,
+    // and deleting one would take the page's own key out of the document.
+    ["a symbol the page explains lexically is the abbreviation rule, not this one",
+      /a symbol the page explains LEXICALLY, by saying what it stands for, is the abbreviation rule below rather than this one/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// #130 and #121, both on multilingual pages, and they pull in opposite directions: one
+// user asked for the structure to be applied to every language variant, the other asked
+// for a Korean page to be translated into English.
+//
+// The parity half is a rule. The translation half is declined, and the reason is pinned as
+// a clause so a later reading of #121 does not re-add it: a translation is not a word on
+// the page (the fidelity sentence above), the original cannot be recovered from what this
+// agent emits, and a mistranslation is undetectable to precisely the reader who would be
+// relying on it. What that reader actually needs from the markup is `lang`, which is a
+// pronunciation fact a screen reader cannot get anywhere else.
+test("the page agent's multilingual rule keeps parity, lang, and the refusal to translate", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    // #130: the reporter's page repeated its recipes in several languages and only the first
+    // got the list markup they had asked for.
+    ["every rule applies to each language variant of the same content",
+      /A page that prints the same content in more than one language gets the same treatment in each/],
+    ["parity is stated on the structures it was reported on",
+      /where the English steps are an <ol> the French steps are an <ol>, where one recipe's ingredients are a <ul> so are the other's/],
+    ["structure that stops at the first language is worse than none, and why",
+      /the document then looks handled to everyone except the reader it failed/],
+    // #121: the language was never identified anywhere in the output. The shared
+    // accessibility requirements ask for language attributes in one line
+    // (src/pipeline/accessibility.ts); this says which element carries it and in what form.
+    ["lang goes on the element that holds the change, with a BCP 47 tag",
+      /Mark each change of language with lang on the element that holds it — <section lang="ko">, or lang="es" on the single <td> that switches — using the BCP 47 tag/],
+    // The declined ask, with all three reasons, since any one of them alone reads as a
+    // technicality.
+    ["translation is refused",
+      /And transcribe that language; do not translate it/],
+    ["and the refusal gives its reasons: not the page's words, unrecoverable, undetectable",
+      /those words are not words on the page, the original is not recoverable from what you emit, and a mistranslation is invisible to exactly the reader who would be relying on it/],
+    ["what the reader actually needs is the attribute",
+      /What a screen reader needs in order to pronounce the passage at all is the lang attribute/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// #130's other ask: a section that runs through two named sub-topics, each with its own
+// table, where the page marked the boundaries with bold type rather than with headings —
+// so neither sub-topic was in the outline and the second table was unreachable by heading.
+//
+// This is the mirror image of #128 (a bold line that says something is not a heading), and
+// the two are one page apart in the prompt, so the guard is what keeps them from cancelling
+// each other: what makes a bold line a heading is that something is under it, which is the
+// question the paragraph above already asks.
+//
+// #130 also asked for a parent <section> with an invented <h2> over two coordinate
+// sub-topics ("Grounding Instructions" and "Extension Cords" grouped under a cord/electrical
+// heading the page does not print). Declined: that heading is not a word on the page, and
+// the outline it produces is one no reader can check against the source. The "none is
+// invented" clause is pinned here for that reason.
+test("the page agent promotes a sub-topic the page names, and invents no outline", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["a named sub-topic with substantial content of its own is a heading under its section",
+      /the name of each is a heading one level under that section's, even where the page marks the boundary with nothing but bold type, a rule, or extra space/],
+    ["what it costs: moving by heading is how the second table is reached",
+      /moving by heading is how a screen-reader user reaches the second of those tables/],
+    ["the name is the page's own", /Use the name the page prints for each/],
+    ["and where the page names nothing, no outline is supplied",
+      /this promotes a label the page gives, it does not supply an outline the page does not have/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
 // The list of explicit structures is introduced by its own count, so adding a
 // fifth bullet and leaving "Four" in place would have the prompt miscount itself.
 test("the explicit-structures list agrees with the count that introduces it", () => {
   const prompt = section("System prompt")!;
-  const NUMBERS: Record<string, number> = { Two: 2, Three: 3, Four: 4, Five: 5, Six: 6, Seven: 7, Eight: 8 };
+  const NUMBERS: Record<string, number> = { Two: 2, Three: 3, Four: 4, Five: 5, Six: 6, Seven: 7, Eight: 8, Nine: 9, Ten: 10 };
   const intro = prompt.match(/(\w+) structures are easy to render/);
   assert.ok(intro, "page.md no longer introduces the list of explicit structures");
   const claimed = NUMBERS[intro![1]];
