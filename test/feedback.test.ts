@@ -91,7 +91,18 @@ function gateCtx(
   dir: string,
   agentFile: string,
   fixtures: Fixture[],
-  opts: { proposal?: string; githubToken?: string } = {},
+  opts: {
+    proposal?: string;
+    githubToken?: string;
+    // How many fixture checks this run may have in flight. 1 — the default — is the
+    // serial behaviour every test below was written against.
+    concurrency?: number;
+    // Milliseconds the re-run of a given fixture image takes, so a test can make the
+    // calls finish in a different order than they were issued.
+    delayFor?: (image: string) => number;
+    // Called with the number of re-runs in flight, on every one of them.
+    onInFlight?: (n: number) => void;
+  } = {},
 ): { ctx: PipelineContext; events: { type: string; data: Record<string, unknown> }[] } {
   const agentsDir = join(dir, "agents");
   mkdirSync(agentsDir, { recursive: true });
@@ -117,6 +128,7 @@ function gateCtx(
   });
 
   const events: { type: string; data: Record<string, unknown> }[] = [];
+  let inFlight = 0;
   const ctx = {
     sessionId: "ses_test",
     githubToken: opts.githubToken,
@@ -137,7 +149,7 @@ function gateCtx(
     } as unknown as Paths,
     images: [],
     maxReviewIterations: 1,
-    extractionConcurrency: 1,
+    extractionConcurrency: opts.concurrency ?? 1,
     router: {
       complete: async (agent: string, _cap: string, messages: { role: string; content: string }[]) => {
         const user = messages.map((m) => m.content).join("\n");
@@ -157,6 +169,12 @@ function gateCtx(
         }
         // The agent under test, re-run on a fixture image.
         const image = [...byImage.keys()].find((k) => user.includes(k));
+        if (image && (opts.delayFor || opts.onInFlight)) {
+          inFlight++;
+          opts.onInFlight?.(inFlight);
+          await new Promise((r) => setTimeout(r, opts.delayFor?.(image) ?? 0));
+          inFlight--;
+        }
         const fix = image ? byImage.get(image)! : null;
         if (!fix || fix.produces === null) return { text: JSON.stringify({ no_content: true }) };
         return { text: JSON.stringify({ html: fix.produces }) };
@@ -504,5 +522,96 @@ test("a 403 filing an agent-update issue carries the install hint", async () => 
     const hint = String(failed.data.hint ?? "");
     assert.match(hint, /install/i, "the update path logged no install hint");
     assert.match(hint, /settings\/installations/, "the hint did not say where to fix it");
+  });
+});
+
+// --- the gate's fixtures are checked together, not one after another ----------
+
+// Each fixture is a stored image, its accepted output, and a score computed from the
+// two — nothing shared, nothing ordered. Serially the gate was up to MAX_GATE_FIXTURES
+// re-runs plus a verification each, end to end, while the session that triggered it was
+// still not ready_for_review and still holding its run-queue slot. What must survive
+// running them together is the FAILURE LIST: a maintainer reads it to find out what the
+// candidate broke, and a list ordered by which provider call returned first is a
+// different list every run.
+
+test("the gate's fixtures are checked concurrently", async () => {
+  await withTemp(async (dir) => {
+    let peak = 0;
+    const { ctx } = gateCtx(
+      dir,
+      "table.md",
+      [
+        { accepted: JUDGEABLE, produces: JUDGEABLE },
+        { accepted: JUDGEABLE, produces: JUDGEABLE },
+        { accepted: JUDGEABLE, produces: JUDGEABLE },
+      ],
+      { concurrency: 3, delayFor: () => 5, onInFlight: (n) => (peak = Math.max(peak, n)) },
+    );
+    const gate = await regressionGate(ctx, "table.md", "# Target Agent\n\nUpdated prompt.\n");
+    assert.equal(gate.passed, true);
+    assert.equal(peak, 3, "all three fixtures should be open at once under a limit of 3");
+    assert.equal(Object.keys(gate.scores).length, 3, "and every one of them is still scored");
+  });
+});
+
+test("failures are reported in fixture order, not in the order the calls finished", async () => {
+  await withTemp(async (dir) => {
+    // Two fixtures the candidate breaks, and the FIRST one answers slowest — so a list
+    // built as each call returned would name them the other way round.
+    const short = "<p>alpha</p>";
+    const { ctx } = gateCtx(
+      dir,
+      "table.md",
+      [
+        { accepted: JUDGEABLE, produces: short },
+        { accepted: JUDGEABLE, produces: short },
+      ],
+      { concurrency: 2, delayFor: (image) => (image.endsWith("000.png") ? 1 : 40) },
+    );
+    const gate = await regressionGate(ctx, "table.md", "# Target Agent\n\nUpdated prompt.\n");
+    assert.equal(gate.passed, false);
+    assert.equal(gate.failures.length, 2);
+    // regressionGate reads its fixtures newest-first (sorted, reversed), so case001
+    // is checked before case000 — and that is the order the failures must be in,
+    // whichever call came back first.
+    assert.match(gate.failures[0], /^case001\.png/);
+    assert.match(gate.failures[1], /^case000\.png/);
+  });
+});
+
+test("the eval side scores its fixtures concurrently too", async () => {
+  await withTemp(async (dir) => {
+    let peak = 0;
+    const { ctx } = gateCtx(
+      dir,
+      "table.md",
+      [
+        { accepted: JUDGEABLE, produces: JUDGEABLE },
+        { accepted: JUDGEABLE, produces: JUDGEABLE },
+        { accepted: JUDGEABLE, produces: JUDGEABLE },
+      ],
+      { concurrency: 3, delayFor: () => 5, onInFlight: (n) => (peak = Math.max(peak, n)) },
+    );
+    const score = await evalAgent(ctx, "table.md", "# Target Agent\n\nCurrent prompt.\n");
+    assert.equal(score, 1);
+    assert.equal(peak, 3, "the other half of the same comparison, run the same way");
+  });
+});
+
+test("a deployment set to 1 still checks fixtures one at a time", async () => {
+  await withTemp(async (dir) => {
+    let peak = 0;
+    const { ctx } = gateCtx(
+      dir,
+      "table.md",
+      [
+        { accepted: JUDGEABLE, produces: JUDGEABLE },
+        { accepted: JUDGEABLE, produces: JUDGEABLE },
+      ],
+      { concurrency: 1, delayFor: () => 5, onInFlight: (n) => (peak = Math.max(peak, n)) },
+    );
+    await regressionGate(ctx, "table.md", "# Target Agent\n\nUpdated prompt.\n");
+    assert.equal(peak, 1, "the knob bounds this phase as it bounds the others");
   });
 });
