@@ -654,7 +654,7 @@ project/
         ├── new-agents.md    # summary of any session-built agents (whether PR'd or dismissed)
         ├── agent-updates.md # summary of any proposed updates to existing agents
         ├── prs.md           # links to any PRs opened from this session
-        └── unresolved.md    # issues remaining at iteration cap, if any
+        └── unresolved.md    # issues remaining when the review loop stopped, if any
 ```
 
 **Amended (v1.2): `new-agents.md` and `prs.md` are not written.** They are the last two entries of the fork-and-PR flow withdrawn in §7.13 v1.2, and this tree is the place that outlived the withdrawal — every other consequence got an amendment note, so the one that reads as a file layout got a stale line instead. `prs.md` cannot exist: nothing opens a PR. `new-agents.md` was a summary of session-built agents *"whether PR'd or dismissed"*, which is a distinction about PRs; the draft itself lives in `tmp/<session-id>/agents/` for the session and the proposal survives as a filed issue under the user's identity. `paths.ts` carried `sessionNewAgents()` and `sessionPrs()` with zero callers until they were deleted with the flow. The line in §7.6 about logging a session-built agent to `runs/<run-id>/new-agents.md` goes with them.

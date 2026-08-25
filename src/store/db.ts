@@ -209,9 +209,13 @@ export interface QualityStats {
   since: string | null;
   // Mean EDITOR passes per document — the loop returns as soon as the Reader finds
   // nothing, so a document that reads clean on the first look contributes 0, and 0 is
-  // the good value. `null` only when there is nothing to average.
+  // the good value. Low is not only that, and this number cannot tell the cases apart:
+  // the loop also stops as soon as a round changes nothing (pipeline/review.ts), so a
+  // document whose remaining issues are ones it is designed not to fix contributes a
+  // low count too. `null` only when there is nothing to average.
   mean_rounds: number | null;
-  // Share of documents (0–1) that hit the review cap with issues still open.
+  // Share of documents (0–1) whose review loop stopped with issues still open — at its
+  // iteration cap, or on a round that changed nothing.
   unresolved_rate: number;
   // Share of documents where the Copy Editor dropped at least one link.
   links_dropped_rate: number;

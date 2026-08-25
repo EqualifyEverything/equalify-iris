@@ -65,8 +65,11 @@ curl -s "$BASE/stats"
     as soon as the Reader finds nothing, so a document that reads clean immediately contributes 0.
     It is not *only* a good value, though, and this number cannot tell the two apart: the loop also
     stops as soon as a round changes nothing, so a document whose remaining issues are ones the
-    loop is designed not to fix contributes a low count too. Read it beside `clean_rate` — which
-    convergence does not move — rather than on its own.
+    loop is designed not to fix contributes a low count too. Read it beside `clean_rate`, which
+    convergence can only move DOWNWARD — it is the complement of `unresolved_rate`, and stopping
+    early can report issues a further Reader sample might have called clean, never the reverse. So
+    a falling `mean_rounds` beside a steady `clean_rate` is the loop wasting fewer rounds; a
+    falling `mean_rounds` is not by itself evidence of anything improving.
 
 `quality` is `null` until the window holds at least 20 documents (`PUBLIC_QUALITY_MIN_DOCUMENTS`),
 and that floor is a privacy control, not a presentation choice. A rate over three documents is not
@@ -501,7 +504,9 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/output" -o output.html
 `text/html` — clean, content-only accessible HTML. Provenance comments (`@source`, `@agent`,
 `@fragment`) are **not** included, a deliberate deviation from PRD §7.4; provenance lives in the
 run log instead (step 7). An `<!-- @unresolved -->` comment listing outstanding issues is
-appended if the review loop hit its iteration cap. Returns `409` while the session is still
+appended if the review loop stopped with any still open — at its iteration cap, or on a round that
+changed nothing, which is how a document whose remaining issues the loop is designed not to fix
+ordinarily ends. Returns `409` while the session is still
 running.
 
 **Image references do not resolve, by design.** A graphic on the page — a logo, a diagram, a
