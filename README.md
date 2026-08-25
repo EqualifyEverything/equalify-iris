@@ -581,6 +581,23 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   DPUB's own remedy is to make it a list item — a restructure, not an attribute rewrite. A document
   with no such role comes back byte-identical, which is what the loop's change detection and the
   reserialization caution above both need.
+- **A page the document has no content for is reported once, not once per chunk.** Two kinds of
+  source page contribute nothing: one extraction *lost* (`pages_failed`, and a `@page-failed`
+  comment where the content would have been) and one that is *blank in the source*, delivered as an
+  empty page because that is what the paper says (`page_blank`). No correction round can act on
+  either — a page that was never extracted is not something an editor can repair — but the Reader
+  was asked about both, once per chunk, per round: `runReader` gives every chunk the same page
+  index so the bytes can be cached, a lost page's entry there was the failure's own marker and a
+  blank page's was an empty line, and every call that saw one reported it in its own wording. On
+  the round that filed issue #188 that was 6 of one document's 26 unresolved issues for a single
+  page, and the multiplier is chunks × iterations, so a longer document inflated it further —
+  `unresolved` is the `iris:unresolved` signal behind `/v1/stats`'s `clean_rate` and
+  `/v1/quality`'s `unresolved_rate`. Both entries now say what the page is and that it is not an
+  issue to report, `READER_SYSTEM` says the same with the reasons, and a round's repeats are
+  reduced to one report per page (`reader_page_reports_deduped`). The FIRST report is kept rather
+  than all of them dropped: an issue attributed entirely to pages with no content can only be about
+  the absence, but that attribution is the Reader's, so a misattributed real issue must not vanish
+  without a trace. An issue naming any page that *does* have content is never touched.
 - **Copy Editor image payload (§7.9).** When every issue in a round is attributed to a page, the
   editor gets only those pages' images (logged per round as `editor_images`). Attaching every
   page's image on every round is the dominant per-round cost of the review loop — on a 25-page
