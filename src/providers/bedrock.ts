@@ -6,7 +6,14 @@ import {
 import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
 import { StalledStreamError, TruncatedResponseError, type StallKind } from "./types.ts";
 import type { CompletionRequest, CompletionResult, ModelProvider, Usage } from "./types.ts";
-import { cacheableSystemPrompt, cachedTextBlock, promptCacheEnabled } from "./promptCache.ts";
+import {
+  cacheableSystemPrompt,
+  cacheableUserPrefix,
+  cachedTextBlock,
+  promptCacheEnabled,
+  promptCacheTtl,
+  type CacheTtl,
+} from "./promptCache.ts";
 
 // How long a call may send NOTHING before we give up on it.
 //
@@ -129,6 +136,7 @@ export class BedrockProvider implements ModelProvider {
   private client: BedrockRuntimeClient;
   private maxTokens: number;
   private promptCache: boolean;
+  private cacheTtl: CacheTtl;
   private firstOutputTimeoutMs: number;
   private idleTimeoutMs: number;
   private maxTotalMs: number;
@@ -144,6 +152,7 @@ export class BedrockProvider implements ModelProvider {
     // embedders) may pass a raw block — so fall back rather than send undefined.
     this.maxTokens = cfg.max_tokens ?? DEFAULT_MAX_TOKENS;
     this.promptCache = promptCacheEnabled(cfg);
+    this.cacheTtl = promptCacheTtl(cfg);
     this.firstOutputTimeoutMs = timeouts.firstOutputTimeoutMs ?? FIRST_OUTPUT_TIMEOUT_MS;
     this.idleTimeoutMs = timeouts.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
     this.maxTotalMs = timeouts.maxTotalMs ?? MAX_TOTAL_MS;
@@ -158,9 +167,30 @@ export class BedrockProvider implements ModelProvider {
     const messages = req.messages
       .filter((m) => m.role !== "system")
       .map((m) => {
-        if (m.role === "user" && req.images?.length) {
-          const content: unknown[] = [{ type: "text", text: m.content }];
-          for (const img of req.images) {
+        // The invariant head of a user message, split off into its own block with a cache
+        // breakpoint on it (see Message.cachedPrefix). The two blocks concatenate to the
+        // string `content` already is, so this changes what is BILLED and not what is
+        // said. Declined for a model that cannot cache, for a head too short to be worth
+        // it, and for a `cachedPrefix` that is not actually a prefix of `content` — in
+        // every one of those cases the message is sent exactly as it was.
+        const prefix =
+          m.role === "user" &&
+          m.cachedPrefix &&
+          m.content.startsWith(m.cachedPrefix) &&
+          this.promptCache &&
+          cacheableUserPrefix(req.model, m.cachedPrefix)
+            ? m.cachedPrefix
+            : null;
+        if (m.role === "user" && (prefix || req.images?.length)) {
+          const content: unknown[] = [];
+          if (prefix) content.push(cachedTextBlock(prefix, this.cacheTtl));
+          const tail = prefix ? m.content.slice(prefix.length) : m.content;
+          // Only when there is one. A caller whose whole message is invariant leaves
+          // nothing after the head, and an empty text block is rejected by the API — so
+          // the guarantee that a declared head never breaks a call would fail on the one
+          // input that needs no tail at all.
+          if (tail) content.push({ type: "text", text: tail });
+          for (const img of req.images ?? []) {
             content.push({
               type: "image",
               source: {
@@ -189,7 +219,7 @@ export class BedrockProvider implements ModelProvider {
     if (system) {
       payload.system =
         this.promptCache && cacheableSystemPrompt(req.model, system)
-          ? [cachedTextBlock(system)]
+          ? [cachedTextBlock(system, this.cacheTtl)]
           : system;
     }
 

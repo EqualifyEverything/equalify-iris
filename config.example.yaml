@@ -215,6 +215,33 @@ providers:
     # field. `GET /v1/sessions/:id/diagnostics` reports `tokens.cache_read` and
     # `tokens.cache_write`, which is where you can see it working.
     # prompt_cache: false
+    #
+    # How long a cache entry should live: `5m` (the default) or `1h`. This is a
+    # question about YOUR TRAFFIC, not about Iris, and the arithmetic decides it: a
+    # write costs 1.25x at five minutes and 2x at an hour, while a read costs 0.1x
+    # either way — so five minutes pays for itself on the second use of a prefix and
+    # an hour needs a third.
+    #
+    # Within one run the default never expires: every page reads the same page-agent
+    # prefix and each read restarts the clock, so a 25-page document stays warm on
+    # `5m` whatever it costs in wall time. What an hour buys is the gap BETWEEN runs.
+    # Convert a document every twenty minutes and each prefix is written once an hour
+    # instead of three times; convert one a day and every run pays 2x for an entry
+    # nothing will ever read again. Unset, or anything unrecognized, is `5m`.
+    #
+    # Verified on the first-party Claude API and on Bedrock. Behind a broker that picks
+    # the upstream for you, whether the field survives the hop is between you and that
+    # broker: Iris cannot tell you. The two TTLs differ in what a write is BILLED at,
+    # not in the token counts `GET /v1/sessions/:id/diagnostics` reports, so a broker
+    # that quietly strips the field reads exactly like one that honours it — your
+    # provider's own billing is the only place the answer shows up. What Iris does
+    # catch is a value it cannot read (`60m`, `1 hour`): that warns at startup and
+    # falls back to 5m.
+    #
+    # If an upstream refuses the field outright the failure is loud rather than quiet —
+    # every call 400s, the same way it would for `cache_control` itself — and
+    # `prompt_cache: false` is the way back.
+    # prompt_cache_ttl: 1h
     per_capability:
       vision: anthropic/claude-opus-4.7
       structured_output: anthropic/claude-opus-4.7
@@ -233,10 +260,12 @@ providers:
     # SDK's own `standard` strategy (3 attempts, exponential backoff, throttling +
     # 5xx + network errors), so there is no retry knob here.
     max_tokens: 32000
-    # See the notes on openrouter.image_limits and openrouter.prompt_cache above; the
-    # same overrides exist here and are just as unnecessary in normal use. Bedrock
-    # serves the Anthropic Messages API directly, so it is the one provider where
-    # `cache_control` cannot arrive at an upstream that has never heard of it.
+    # See the notes on openrouter.image_limits, openrouter.prompt_cache and
+    # openrouter.prompt_cache_ttl above; the same overrides exist here and are just as
+    # unnecessary in normal use. Bedrock serves the Anthropic Messages API directly, so
+    # it is the one provider where `cache_control` cannot arrive at an upstream that has
+    # never heard of it — and the one where `prompt_cache_ttl: 1h` reaches the model that
+    # honours it rather than a broker that may not.
     per_capability:
       vision: us.anthropic.claude-opus-4-7
       structured_output: us.anthropic.claude-opus-4-7
@@ -253,6 +282,11 @@ defaults:
   # independent (one vision pass each), so this is a pure speed knob: a 25-page
   # document costs up to ~5 sequential model calls per page, and extracting
   # pages serially is the dominant source of end-to-end latency.
+  #
+  # It bounds the review phase the same way: the Reader reads the assembled
+  # document a window at a time, and those calls are independent too, so they go
+  # out together under this same cap. One run's in-flight model calls therefore
+  # never exceed this number, whichever phase it is in.
   #
   # Raise it if your provider's rate limits allow; lower it (or set 1 for fully
   # serial) if you hit 429s. Both adapters retry throttling responses (OpenRouter

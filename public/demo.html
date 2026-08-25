@@ -609,6 +609,13 @@
         // Small-but-nonzero gets hedged words rather than 'averaging 0.0 editor passes',
         // which reads like a number that failed to load. Same reason the exact-zero case
         // gets words: the point is a sentence a visitor can believe.
+        //
+        // What this sentence must NOT grow into is an inference about why the number is
+        // low. The loop also stops as soon as a round changes nothing, so a small mean
+        // can be documents the loop gave up on rather than documents that needed little
+        // — the clean rate beside it is the claim about quality, and this is a count of
+        // passes and nothing more. Exactly 0 is still safe to speak for: convergence
+        // costs a round, so it can never produce a 0.
         out += rounds === 0
           ? ', needing no editor passes at all'
           : rounds < 0.05

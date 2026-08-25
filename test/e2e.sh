@@ -600,6 +600,62 @@ echo "$misslog" | jq -e -s 'map(select(.type=="specialist_dispatched")) | length
   || fail "specialist dispatch" "miss logged specialist_dispatched"
 curl -s -X POST -H 'content-type: application/json' -d '{}' "http://localhost:$OR_PORT/__suggest" >/dev/null  # disarm
 
+echo "==> 9h. training that dies does not take a delivered document with it"
+# The training a feedback round triggers — classify the correction, propose a prompt
+# change, gate it against the agent's fixtures — runs AFTER the session is marked
+# ready_for_review, because none of it can change the document and all of it is slow
+# (a classify call, a train call, then the candidate run against the agent's fixtures
+# twice over). What that ordering has to guarantee is this: a provider error in there
+# is not the user's problem. It used to be — the same failure marked a session `failed`
+# whose output.html was on disk and whose Reader had signed it off.
+#
+# On a session of its own, and with feedback that actually CHANGES the document: both
+# training steps return early when a round leaves the body untouched, so a no-op round
+# would test nothing.
+tcreate=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
+  -F "images=@$png;filename=page-001.png" \
+  -F "images=@$png;filename=page-002.png")
+TSID=$(echo "$tcreate" | jq -r '.session_id')
+LSID=$TSID
+await_ready "session for the training-failure round"
+curl -s -X POST -H 'content-type: application/json' \
+  -d '{"fail":true}' "http://localhost:$OR_PORT/__fail-training" >/dev/null
+fb=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$TSID/feedback" -H 'content-type: application/json' \
+  -d '{"feedback":"The headings need a copy-edit pass."}')
+echo "$fb" | jq -e '.status=="running"' >/dev/null && pass "feedback re-run accepted (training armed to fail)" \
+  || fail "training failure" "$fb"
+await_ready "re-run whose training fails"
+pass "the session still reached ready_for_review"
+# The document is served, not withheld.
+outT=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/$TSID/output")
+[ "$outT" = "200" ] && pass "the document is still served (200)" \
+  || fail "training failure" "expected 200 from /output, got $outT"
+# The session is ready while the training is STILL RUNNING — that is the whole point of
+# the ordering — so the round's own terminal line is what says the training is over.
+# Reading the log the moment /sessions/{id} says ready catches it mid-flight.
+for i in $(seq 1 60); do
+  completes=$(curl -s "${AUTH[@]}" "$BASE/sessions/$TSID/logs" | jq -s 'map(select(.type=="run_complete")) | length')
+  [ "$completes" -ge 2 ] && break
+  sleep 0.5
+done
+[ "$completes" -ge 2 ] || fail "training failure" "the feedback round never logged run_complete ($completes seen)"
+pass "the round finished after the session was already ready"
+# The failure is recorded rather than swallowed: a training step that quietly stopped
+# running would look exactly like one that had nothing to propose.
+tlog=$(curl -s "${AUTH[@]}" "$BASE/sessions/$TSID/logs")
+echo "$tlog" | jq -e -s 'map(select(.type=="feedback_training_failed")) | length >= 1' >/dev/null \
+  && pass "the training failure is in the run log" \
+  || fail "training failure" "expected feedback_training_failed; saw: $(echo "$tlog" | jq -r .type | sort -u | tr '\n' ' ')"
+# The round's terminal line is written after its training, so a run's recorded duration
+# still covers the slot it held (diagnostics measures a finished run up to run_complete).
+echo "$tlog" \
+  | jq -e -s '(map(.type) | rindex("run_complete")) > (map(.type) | rindex("feedback_training_failed"))' >/dev/null \
+  && pass "run_complete is logged after the training, not before it" \
+  || fail "training failure" "run_complete precedes the training in the log"
+curl -s -X POST -H 'content-type: application/json' \
+  -d '{"fail":false}' "http://localhost:$OR_PORT/__fail-training" >/dev/null  # disarm
+LSID=$SID
+
 echo "==> 9e. a second upload WAITS in the run queue instead of starting a second pipeline"
 # max_concurrent_runs=1 in the config above. Uploads used to `void runPipeline(...)`
 # straight out of the handler, so two simultaneous uploads meant two unthrottled

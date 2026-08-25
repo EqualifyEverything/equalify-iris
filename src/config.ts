@@ -39,6 +39,13 @@ export interface ProviderBlock {
   // upstream refuses is not a slow call, it is every call — which is a real risk only
   // behind a broker that chooses the upstream for us. Normalized where it is read.
   prompt_cache?: boolean;
+  // How long those cache entries should live: `5m` (the default) or `1h`. A question
+  // about this deployment's CADENCE and nothing else — see providers/promptCache.ts
+  // `CacheTtl` for the arithmetic. Within one run the default never expires, because
+  // every page call reads the same prefix and each read refreshes it; an hour is worth
+  // asking for only where runs arrive in bursts more than five minutes and less than an
+  // hour apart. Anything unrecognized reads as the default. Normalized where it is read.
+  prompt_cache_ttl?: string;
 }
 
 // How much one caller may ask of this deployment per minute, and how many uploads it
@@ -419,6 +426,50 @@ export function clientIdWarning(clientId: string): string | undefined {
     `If it is an OAuth App, logins will work and issue filing will fail on every run: Iris requests no OAuth ` +
     `scope, because a GitHub App gets issues:write from its installation on upstream_repo. Ignore this if you ` +
     `are on GitHub Enterprise Server, where id formats differ.`
+  );
+}
+
+// A boot-time warning for a `prompt_cache_ttl` that is set to something this does not
+// recognize (providers/promptCache.ts `promptCacheTtl`).
+//
+// This one has to be said out loud because it is the only place it CAN be. An
+// unrecognized value is ignored, and the two TTLs differ in what they are billed at
+// rather than in what they report: the same prefix written either way produces the same
+// `cache_creation_input_tokens`, so no diagnostics field distinguishes them and an
+// operator who typed `60m` would go on believing they had bought the hour. Every other
+// unusable value in this config already says so at startup.
+//
+// It warns for a block with `prompt_cache: false` too, where no entry is written at all
+// and neither TTL is in play. That is deliberate — the value is still one nobody can
+// use, and it would become live the day caching is turned back on — so the wording says
+// the value is ignored rather than naming a TTL that block does not have.
+//
+// Returns one warning naming every provider block that has one, since a deployment
+// configures more than one and fixing the first would otherwise hide the second.
+export function promptCacheTtlWarning(providers: IrisConfig["providers"]): string | undefined {
+  const bad: string[] = [];
+  for (const [name, block] of Object.entries(providers)) {
+    // `default` is a string and `per_agent` is a map of agent overrides; neither is a
+    // provider block. Skipped BY NAME, the way loadConfig's own pass over this object
+    // does it, rather than by shape: `per_agent` is an object and would otherwise reach
+    // the lookup below and be searched for a key belonging to a provider.
+    if (name === "default" || name === "per_agent") continue;
+    if (!block || typeof block !== "object" || Array.isArray(block)) continue;
+    const v = (block as ProviderBlock).prompt_cache_ttl as unknown;
+    if (v === null || v === undefined) continue;
+    const text = String(v).trim();
+    // An empty value is an operator who set nothing, which is what the default is for.
+    if (text === "") continue;
+    const normalized = text.toLowerCase();
+    if (normalized !== "5m" && normalized !== "1h") bad.push(`${name}: "${text}"`);
+  }
+  if (bad.length === 0) return undefined;
+  return (
+    `providers.${bad.join(", providers.")} — prompt_cache_ttl must be "5m" or "1h". ` +
+    `This one is ignored. Nothing downstream will report that: the two TTLs differ in ` +
+    `what a cache write is BILLED at (1.25x against 2x), not in the token counts ` +
+    `diagnostics publishes, so a deployment that meant to hold its cache for an hour ` +
+    `would never find out from Iris.`
   );
 }
 

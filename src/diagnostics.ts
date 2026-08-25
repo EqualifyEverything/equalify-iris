@@ -187,6 +187,15 @@ const CORRECTION_RESULTS = ["kept", "rejected", "identical", "empty"] as const;
 // And why it ran. A closed list for the same reason, and read off the same event.
 const CORRECTION_TRIGGERS = ["verify", "links", "both"] as const;
 
+// The longest a model call can legitimately still be open, used to tell a run that is
+// working from one whose process is gone (see `abandoned`). Derived, not picked: each
+// adapter abandons a stream at an absolute 15-minute ceiling (providers/bedrock.ts,
+// providers/openrouter.ts `MAX_TOTAL_MS`) and OpenRouter retries at most three times, so
+// ~45 minutes is the worst case a caller can produce. An hour is that, rounded up — far
+// enough past it that this never cuts off a call still running, and short enough that a
+// killed run stops claiming to be stuck within one.
+const MAX_PLAUSIBLE_CALL_MS = 60 * 60_000;
+
 const ms = (a?: string, b?: string): number =>
   a && b ? Math.max(0, new Date(b).getTime() - new Date(a).getTime()) : 0;
 
@@ -200,8 +209,28 @@ export function summarizeRun(
 
   const startedAt = events[0]?.ts ?? null;
   const lastEventAt = events.length ? events[events.length - 1].ts ?? null : null;
-  const terminal = events.find((e) => e.type === "run_complete" || e.type === "run_failed");
-  const endRef = running ? nowIso : terminal?.ts ?? lastEventAt ?? nowIso;
+  // The terminal line of the CURRENT run, not the first one in the file.
+  //
+  // A session's log is one append-only file across every round it has (store/runlog.ts),
+  // so a session that has taken feedback holds several `run_start` … `run_complete`
+  // pairs. Reading the first terminal event therefore answered "did the FIRST run
+  // finish?" — which is always yes by the time a feedback round exists, since a round is
+  // only accepted on a session that already reached `ready_for_review`. Two things rested
+  // on that answer and got the wrong one: how long the session has been working, which
+  // stopped counting at the first round's completion however many rounds followed, and
+  // whether a call is still open, below.
+  const runStart = events.map((e) => e.type).lastIndexOf("run_start");
+  const currentRun = runStart === -1 ? events : events.slice(runStart);
+  const terminal = currentRun.find((e) => e.type === "run_complete" || e.type === "run_failed");
+  // Counted rather than read off the slice above, because a session's rounds are not
+  // always laid end to end: a client may POST /feedback during a round's post-delivery
+  // window (pipeline/orchestrator.ts), and with `max_concurrent_runs` above 1 the second
+  // round's `run_start` is then appended before the first round's `run_complete`. The
+  // slice would hold that trailing line and read as finished. A count cannot be fooled by
+  // the interleaving: as many terminal lines as starts means every round is done.
+  const roundsStarted = events.filter((e) => e.type === "run_start").length;
+  const roundsEnded = events.filter((e) => e.type === "run_complete" || e.type === "run_failed").length;
+  const unfinished = roundsStarted > roundsEnded;
 
   // In-flight detection. Extraction runs several pages concurrently, so more
   // than one call can be open at once and start/end events interleave. Match
@@ -210,10 +239,13 @@ export function summarizeRun(
   // FIFO queue would produce. `in_flight` reports the longest-waiting open call
   // — the best single answer to "what is this run stuck on?" — and
   // `in_flight_count` shows how many are outstanding.
+  // Over the current run only, for the same reason the terminal lookup is: an earlier
+  // round's call that never closed — a process killed mid-flight — is not what THIS run
+  // is stuck on, and reporting it as such is the phantom hang again by another route.
   const openCalls: LogEvent[] = [];
   const callKey = (e: LogEvent): string =>
     `${e.agent ?? "?"}|${e.model ?? "?"}|${e.capability ?? "?"}`;
-  for (const e of events) {
+  for (const e of currentRun) {
     if (e.type === "model_call_start") {
       openCalls.push(e);
     } else if (e.type === "model_call") {
@@ -224,11 +256,69 @@ export function summarizeRun(
       openCalls.splice(i === -1 ? 0 : i, 1);
     }
   }
+  const oldestOpenAt = openCalls.map((c) => c.ts ?? "").sort()[0] ?? null;
+
+  // Whether this run is still working, which is not the same as whether the session is
+  // still `running`. A feedback round marks the session `ready_for_review` as soon as the
+  // document is delivered and then trains the page agent from it
+  // (pipeline/orchestrator.ts), holding its `max_concurrent_runs` slot throughout. Both
+  // questions this drives — how long the run has been going, and whether a call is still
+  // open — answered "it is over" in exactly that window, which is where a hung provider
+  // call delays every upload behind it and nothing else reports it.
+  //
+  // A dead process is the hard case, because nothing it left behind says it died. For a
+  // run interrupted while the session still read `running` or `queued`, the next boot
+  // rewrites the status (store/db.ts `failStaleSessions`) and the first clause closes.
+  // That sweep does NOT touch `ready_for_review` rows — the document is delivered and the
+  // status is correct — so a process killed inside the post-delivery window leaves a row
+  // no one will ever correct, and "no terminal line" alone would report its abandoned
+  // call as hanging forever, with `waiting_ms` and `elapsed_ms` climbing off the clock.
+  //
+  // So the claim is bounded by what a call can actually do: each adapter abandons a
+  // stream at an absolute 15-minute ceiling and OpenRouter retries at most three times,
+  // which puts the longest a call can legitimately stay open at ~45 minutes. Past an hour
+  // an open call is not a slow call, it is a process that is gone — and this reports the
+  // run as over, which is what it is.
+  const abandoned = oldestOpenAt !== null && ms(oldestOpenAt, nowIso) > MAX_PLAUSIBLE_CALL_MS;
+  const active = running || (ctx.status === "ready_for_review" && unfinished && !abandoned);
+
+  // The clock runs to NOW only where something is plausibly still happening. For a
+  // `running` session that is the whole of it — a run between two calls is still a run.
+  // In the post-delivery window it also has to be RECENT, because that window is the one
+  // place a run can end without saying so: a process killed there leaves a round that
+  // never terminated and a status no sweep rewrites, so measuring it to `now` has
+  // `elapsed_ms` counting up for days, `concurrency_factor` decaying toward zero and the
+  // last phase's duration growing without end — an idle, delivered session reading as one
+  // that has been working since it was killed.
+  //
+  // Recency is measured from the last event rather than from an open CALL, because the
+  // longest step in this window may not be a model call at all: filing the agent-update
+  // issue is a GitHub request (github/issue.ts) with no timeout of its own, and a stalled
+  // one holds the run's `max_concurrent_runs` slot while `openCalls` is empty. Keying on
+  // an open call would freeze the clock on exactly that run, which is the one still
+  // occupying the machine.
+  //
+  // What it costs: a live run stalled for longer than the ceiling in a step that logs
+  // nothing is measured to its last event, so its `elapsed_ms` stops climbing. That is
+  // the right way round — past an hour of silence, "the process is gone" is the better
+  // guess, and it is the only one that terminates.
+  const pending = running || (active && ms(lastEventAt ?? undefined, nowIso) <= MAX_PLAUSIBLE_CALL_MS);
+  const endRef = pending ? nowIso : terminal?.ts ?? lastEventAt ?? nowIso;
   // Longest-waiting first (oldest start timestamp).
   openCalls.sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? ""));
   const oldest = openCalls[0];
+  // "Is this run stuck on something?" is a question about the RUN, and a run is not over
+  // when the session says `ready_for_review`: the document is delivered there, but a
+  // feedback round then trains the page agent from it (pipeline/orchestrator.ts), holding
+  // its `max_concurrent_runs` slot until that finishes. Gating this on the session status
+  // alone therefore blinded the one field that answers the question, in exactly the window
+  // where a hung provider call delays every upload behind it and nothing else reports it.
+  //
+  // Gated on `active` above: the run, not the session status. Reading the file's FIRST
+  // terminal event rather than this run's would make that gate dead code, since a
+  // feedback round only ever starts on a session whose earlier run already wrote one.
   const inFlight =
-    running && oldest
+    active && oldest
       ? {
           agent: oldest.agent ?? "?",
           model: oldest.model ?? "?",
@@ -238,7 +328,7 @@ export function summarizeRun(
           waiting_ms: ms(oldest.ts, nowIso),
         }
       : null;
-  const inFlightCount = running ? openCalls.length : 0;
+  const inFlightCount = active ? openCalls.length : 0;
 
   // Completed model calls (the `model_call` end events carry duration_ms).
   const calls = events.filter((e) => e.type === "model_call");
@@ -307,8 +397,20 @@ export function summarizeRun(
     phaseDurations[cur.phase as string] = ms(cur.ts, next ? next.ts : endRef);
   }
 
+  // The two post-delivery steps report their own failures rather than raising, because
+  // neither may revoke a document the user already has (pipeline/orchestrator.ts). That
+  // makes them invisible to the `ok === false` rule, which only sees model calls: the
+  // throw those catches exist for is an fs read, not a provider error, so a run whose
+  // training or contribution died would read as clean here and be findable only in the
+  // raw ndjson.
   const errors = events
-    .filter((e) => e.type === "run_failed" || e.ok === false)
+    .filter(
+      (e) =>
+        e.type === "run_failed" ||
+        e.type === "feedback_training_failed" ||
+        e.type === "contribution_failed" ||
+        e.ok === false,
+    )
     .map((e) => ({ ts: e.ts ?? null, type: e.type ?? "error", message: e.error ?? "unknown" }));
 
   // Which pages the document has no content for — a set, and a set that changes over

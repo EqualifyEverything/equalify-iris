@@ -155,6 +155,13 @@ let failPage = null;
 // service used to handle silently. Toggled via POST /__suggest.
 let suggestAgent = null;
 
+// When set, the Feedback Agent's TASK: classify call fails with a 500 — the first
+// model call of the post-delivery training step. Lets the e2e prove that training
+// which dies takes nothing with it: the document has already been delivered and the
+// session is already `ready_for_review` by the time this runs. Toggled via
+// POST /__fail-training.
+let failTraining = false;
+
 const or = createServer(async (req, res) => {
   if (req.method === "POST" && new URL(req.url, "http://x").pathname === "/__truncate") {
     truncateNext = !truncateNext;
@@ -170,6 +177,11 @@ const or = createServer(async (req, res) => {
     const raw = await readBody(req);
     suggestAgent = JSON.parse(raw || "{}").name ?? null;
     return json(res, 200, { suggest: suggestAgent });
+  }
+  if (req.method === "POST" && new URL(req.url, "http://x").pathname === "/__fail-training") {
+    const raw = await readBody(req);
+    failTraining = JSON.parse(raw || "{}").fail === true;
+    return json(res, 200, { fail_training: failTraining });
   }
   const body = await readBody(req);
   let sys = "";
@@ -193,6 +205,11 @@ const or = createServer(async (req, res) => {
   // Feedback Agent, TASK: scope — route feedback to extraction or the review loop.
   // Keyed off the feedback text so the e2e can drive either path: a message naming
   // a page and a misread is source-level, anything else is document-level.
+  if (failTraining && user.includes("TASK: classify")) {
+    // A provider error on the training step. Not a truncation and not a bad body: a
+    // plain 500, the way an overloaded upstream answers.
+    return json(res, 500, { error: { message: "e2e: training call refused" } });
+  }
   if (user.includes("TASK: scope")) {
     const m = user.match(/misread on page (\d+)/i);
     content = m

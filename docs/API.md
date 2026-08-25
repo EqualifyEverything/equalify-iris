@@ -63,6 +63,13 @@ curl -s "$BASE/stats"
     page's sentence credits the reviewer rather than saying the document came out clean.
   * `mean_rounds` — mean reader/editor passes per document. **0 is the good value:** the loop stops
     as soon as the Reader finds nothing, so a document that reads clean immediately contributes 0.
+    It is not *only* a good value, though, and this number cannot tell the two apart: the loop also
+    stops as soon as a round changes nothing, so a document whose remaining issues are ones the
+    loop is designed not to fix contributes a low count too. Read it beside `clean_rate`, which
+    convergence can only move DOWNWARD — it is the complement of `unresolved_rate`, and stopping
+    early can report issues a further Reader sample might have called clean, never the reverse. So
+    a falling `mean_rounds` beside a steady `clean_rate` is the loop wasting fewer rounds; a
+    falling `mean_rounds` is not by itself evidence of anything improving.
 
 `quality` is `null` until the window holds at least 20 documents (`PUBLIC_QUALITY_MIN_DOCUMENTS`),
 and that floor is a privacy control, not a presentation choice. A rate over three documents is not
@@ -146,13 +153,20 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   loop stops as soon as the Reader finds nothing, so a document that reads clean on the first look
   contributes `0`: low is good, and `0.0` across the window means nothing needed fixing. `null`,
   not `0`, when nothing has run — otherwise an empty deployment reports the best possible score.
+  It also stops as soon as a round changes nothing: an editor that answers and returns the document
+  it was given has said what it would say to the same request next round, so the remaining rounds
+  would rewrite the document into itself. That means a low `mean_rounds` beside a non-zero
+  `unresolved_rate` is now an ordinary reading rather than a contradiction — the document stopped
+  early *because* what was left could not be fixed here, not because it was fixed.
 * `unresolved_rate` — share of documents that finished with issues the review loop could not
   resolve. Only the **count** of those issues is used, never their text — see below. One class of
   issue is deliberately never resolved and so always lands here: two headings the document labels
   alike where nothing the copy editor was given says whether they are one section or two. It is
   reported and left standing rather than guessed at, because merging two real sections cannot be
-  undone — so a document with one spends the full `max_review_iterations` and raises this rate and
-  `mean_rounds` together, which is the honest reading: it shipped with an ambiguity a reader meets.
+  undone — so a document whose only remaining issue is one of these raises this rate while its
+  `mean_rounds` stays low: the first round that leaves it alone changes nothing and the loop stops
+  there. That is the honest reading — it shipped with an ambiguity a reader meets, and the rounds it
+  did not spend would each have rewritten the document into itself.
   A `[not legible]` marker can end the same way: the copy editor is usually given that page's image
   and may well read what the extractor could not — usually, because the per-round image budget
   (`capEditorImages`) and a provider that refuses a request for size both leave it with fewer images
@@ -163,8 +177,9 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   always ends this way, by design: no pass in the review loop can resolve it, because finishing a
   page means returning the rest of it on top of the whole corrected body, and a response that hits
   its ceiling costs the whole round — every other correction that round made included
-  (`editor_truncated_rate` below). So it is reported every round and left standing,
-  and it raises this rate for a document that is otherwise sound. Read it as what it is — one page
+  (`editor_truncated_rate` below). So it is reported and left standing, and it
+  raises this rate for a document that is otherwise sound — but only for as many rounds as it takes
+  the editor to leave the document alone once, which is what now ends the loop. Read it as what it is — one page
   arrived short, and the document says where.
 * `links_dropped_rate` — share of documents where an `href` present before the copy editor was
   missing after it.
@@ -506,7 +521,9 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/output" -o output.html
 `text/html` — clean, content-only accessible HTML. Provenance comments (`@source`, `@agent`,
 `@fragment`) are **not** included, a deliberate deviation from PRD §7.4; provenance lives in the
 run log instead (step 7). An `<!-- @unresolved -->` comment listing outstanding issues is
-appended if the review loop hit its iteration cap. Returns `409` while the session is still
+appended if the review loop stopped with any still open — at its iteration cap, or on a round that
+changed nothing, which is how a document whose remaining issues the loop is designed not to fix
+ordinarily ends. Returns `409` while the session is still
 running.
 
 **Image references do not resolve, by design.** A graphic on the page — a logo, a diagram, a
@@ -577,8 +594,10 @@ Useful events to grep for:
 | `editor_images_refused` | The provider refused the round's payload as too large, so the same prompt was re-sent **without** images. The correction still had the whole body and every issue; only a fidelity problem that must be checked against the source can go unfixed. |
 | `editor_links_dropped` | An `href` present before that round's correction was missing after it (`iteration`, `hrefs`). A link's target came from the source **file**, not from a page image, so a dropped one cannot be recovered by looking again — logged rather than repaired, and counted into `links_dropped_rate`. |
 | `editor_markers_changed` | The count of a `[not legible]` or `[page not fully transcribed]` marker changed across one correction round (`iteration`, `before`, `after`, plus `fewer` and/or `more`). `fewer` is expected where the editor read that region off the attached page image, and is a loss anywhere else — nothing downstream can tell those apart, and no other signal sees it at all, since the flattened view strips bracketed tokens before comparing words. `more` is a placeholder written over words the extractor did read, which no instruction in the loop allows. |
-| `editor_truncated` | A correction round's response hit the model's output ceiling (`max_tokens`, `chars` returned, plus `attached`/`of` images and `after: "images_refused"` when it was the retry that truncated). The round is discarded, the review loop stops, and the document that entered the round is delivered with that round's issues unresolved — a round may fail without the document. The whole ceiling of output was billed, so this is the log's most expensive line. |
-| `reader` / `editor` | Per-iteration review-loop progress (issue counts) |
+| `editor_truncated` | A correction round's response hit the model's output ceiling (`max_tokens`, `chars` returned, plus `attached`/`of` images and `after: "images_refused"` when it was the retry that truncated). The round is discarded, the review loop stops, and the document that entered the round is delivered with that round's issues unresolved — a round may fail without the document. There is no `editor` line for such a round, which is how it is told apart from a round that ran and changed nothing (`review_converged`). The whole ceiling of output was billed, so this is the log's most expensive line. |
+| `reader` / `editor` | Per-iteration review-loop progress: the Reader's `issues` count, and whether that round's correction `changed` the document. |
+| `editor_no_output` | The Copy Editor's reply carried no usable body (`chars` of text came back), so the round kept the document it was given. A call paid for and nothing said — which is why it does not end the loop: the next round is a retry, not a repeat. |
+| `review_converged` | The loop stopped early because a round changed nothing (`iteration`, the `issues` that round was given, and the `rounds_left` it did not spend). The editor answered and handed back the document it was given, so the same request next round would be answered the same way; what ships is that document with those issues written to `@unresolved`. Expect this on a document whose remaining issues are the ones the loop is designed not to resolve — an undecidable pair of same-worded headings, a `[page not fully transcribed]` marker. Frequent lines here with `issues` the editor *should* be able to fix are the signal worth chasing: that is the editor declining work, not the loop saving a wasted round. |
 
 ## 7b. Diagnostics (timing / hang detection)
 
@@ -628,7 +647,10 @@ extracted in parallel, several calls can be open at once — `in_flight` reports
 is total model-call time ÷ wall-clock elapsed: ~1 means calls ran serially, and roughly
 `extraction_concurrency` during a parallel extraction phase — a value near 1 on a multi-page run
 means parallelism isn't happening. `slowest_calls` and `phase_durations_ms` show where time goes;
-`errors` lists failed calls.
+`errors` lists failed calls, plus the two failures that are not calls — a feedback round's
+agent training (`feedback_training_failed`) and its agent-suggestion filing
+(`contribution_failed`). Both run after the document is delivered and report rather than raise,
+since neither may revoke a document the user already has, so this is where they surface.
 
 `tokens` is what the run **consumed**, and `by_agent` carries the same four counts per agent
 (under the names the run log uses: `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
@@ -640,14 +662,41 @@ rates and are never summed here; note that `input` **excludes** tokens read from
 whole prompt is `input + cache_read + cache_write`.
 
 The last two are non-zero because Iris asks the model to cache the part of each prompt that does
-not change: the agent's own system prompt, which is identical on every page of every document.
-Expect roughly one `cache_write` per agent per run and a `cache_read` on every call after that, so
-on a long document the same prefix is paid for once at 1.25× instead of 25 times at 1×, and a read
-bills at 0.1×. A run that shows `cache_read: 0` with several calls to the same agent is a run that
+not change. Three things qualify: the agent's own system prompt, which is identical on every page
+of every document; on the fidelity check, the contract of the agent it is judging, which that task
+re-states in full on every page and which is the largest single constant Iris sends; and on the
+Reader, the index of the document's source pages, which every chunk of every review round is given
+and which does not change while the loop runs. The last of those is per-document rather than
+per-deployment, so its entry is cold once per session by construction, and it is only asked for
+when the index is long enough to be worth a breakpoint — roughly ten pages.
+Expect a `cache_write` on the first calls of a run and a `cache_read` on every call after them —
+a handful of writes rather than exactly one, because pages are converted concurrently
+(`defaults.extraction_concurrency`), so the first few calls of a phase go out together before any
+of them has written the entry the others would have read. A request may carry more than one cached
+prefix — the fidelity check caches its system prompt and the contract it is judging, and a Reader
+call caches its system prompt and the page index — and they share one `cache_creation_input_tokens`
+figure on that call's `model_call` line rather than appearing as separate writes. So
+on a long document the same prefix is paid for a few times at 1.25× instead of 25 times at 1×, and
+every other call reads it at 0.1×. A run that shows `cache_read: 0` with several calls to the same agent is a run that
 is paying full price for the same instructions repeatedly — the cases where that is expected are a
 model whose id Iris cannot recognize as a Claude model, a model generation older than caching
 support (Iris asks from 3.7 on), an agent prompt too short to be cacheable (the platform minimum is
 ~1k tokens), and a deployment that set `prompt_cache: false` on the provider block.
+
+A cache entry lives five minutes by default, refreshed on every read — so within one run the
+prefixes stay warm on their own however long the document takes. A deployment whose runs arrive
+in bursts, more than five minutes and less than an hour apart, can hold them for an hour instead
+with `providers.<name>.prompt_cache_ttl: 1h`. It is a trade rather than a free upgrade: an
+hour-long entry is written at 2× instead of 1.25×, so it needs a third use to pay for itself
+where five minutes needs a second. A deployment converting a document a day should leave it
+alone.
+
+**These fields cannot tell you which TTL you got.** The difference between the two is a price
+multiplier on a write, not a token count — the same prefix written either way reports the same
+`cache_write` — so a broker that silently strips the field reads exactly like one that honours
+it, and your provider's own billing is where that question is answered. A value Iris cannot
+read (`60m`, `1 hour`) is caught at startup instead, with a warning, and falls back to five
+minutes.
 
 `cache_write` is the weaker signal of the two, and a zero there means less than a zero read. It is
 reported by the provider, and on an OpenAI-shaped upstream the field it would come from is

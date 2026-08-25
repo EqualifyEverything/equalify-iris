@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { extractJson } from "../util/json.ts";
+import { mapWithConcurrency } from "../util/concurrency.ts";
 import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { loadImage, type InputImage, type PipelineContext } from "./context.ts";
@@ -95,9 +96,36 @@ export async function verifyAgentOutput(
   if (!fb || blocks.length === 0) return { ok: true, problems: [] };
 
   const html = blocks.map((b) => b.html).join("\n\n");
-  const user =
+  // Everything this task says that is not about the page in front of it: the task marker
+  // and the whole contract of the agent being judged. It is the same bytes on every page
+  // of a document — `agents/page.md` is 16 KB of it, re-sent per page and per correction
+  // recheck — so it is declared as this message's invariant head and gets a cache
+  // breakpoint after it (providers/promptCache.ts). On a 25-page document that is a
+  // handful of writes at 1.25x and the rest reads at 0.1x, against 25 full-price copies.
+  //
+  // A handful rather than one, because pages are extracted concurrently: the first
+  // `extraction_concurrency` verify calls are in flight before any of them has written
+  // the head, so each of those misses. At the default of 5 that is ~5 writes and ~20
+  // reads, which is most of the saving and not all of it.
+  //
+  // The case that does not win is a ONE-PAGE run with no recheck: its single verify call
+  // pays 1.25x for a head nothing reads back, ~25% on ~4k tokens. That is the same trade
+  // `promptCache.ts` reasons through for a system prompt, and it is deliberate — a
+  // screenshot upload is exactly that case, and a quarter of one prompt on it is worth
+  // the four fifths saved on every document with pages in it.
+  //
+  // It stays in the USER message, in the position it was already in, rather than moving
+  // into the system prompt to ride the breakpoint already there. The system prompt is
+  // where the Feedback Agent's OWN instructions live, and an agent's contract is
+  // quoted material to be judged against — `page.md` ends "Respond with ONLY this JSON:
+  // { "html": ... }", which is the wrong answer to this task and is exactly what putting
+  // it in the verifier's own role invites. `user` below is still the complete message and
+  // still starts with this text; the split changes what is billed, not what is said.
+  const contract =
     `TASK: verify\n\n` +
-    `## Agent under test: ${agent.file}\n\`\`\`markdown\n${agent.content}\n\`\`\`\n\n` +
+    `## Agent under test: ${agent.file}\n\`\`\`markdown\n${agent.content}\n\`\`\`\n\n`;
+  const user =
+    contract +
     `## The agent's output for source image "${img.name}"\n\`\`\`html\n${html}\n\`\`\`\n\n` +
     `Compare the output against the attached source image.`;
 
@@ -106,7 +134,7 @@ export async function verifyAgentOutput(
     "vision",
     [
       { role: "system", content: fb.content },
-      { role: "user", content: user },
+      { role: "user", content: user, cachedPrefix: contract },
     ],
     { images: [loadImage(img)] },
   );
@@ -420,32 +448,64 @@ export async function regressionGate(
     sessionBuilt: false,
   };
 
-  const failures: string[] = [];
-  const coverages: number[] = [];
-  // Keyed by fixture as well as averaged: the eval gate compares this prompt against
-  // the current one fixture-by-fixture (see pairedMeans), which a mean alone cannot
-  // support. `meanCoverage` stays for the log line and for callers that only want a
-  // single number.
-  const scores: FixtureScores = {};
-  for (const caseFile of caseFiles) {
+  // One fixture's verdict. Collected per fixture and folded in fixture order below,
+  // rather than pushed as each finishes, because these run CONCURRENTLY: `failures` is
+  // what a maintainer reads to find out what the candidate broke, and a list whose order
+  // depends on which provider call returned first is a different list every run.
+  interface FixtureVerdict {
+    image: string;
+    score: number | null;
+    failure: string | null;
+  }
+
+  // Fixtures are independent — a stored image, its accepted output, and a score computed
+  // from the two — so they are checked together instead of one after another. Serially
+  // this gate was up to MAX_GATE_FIXTURES x 2 vision calls end to end (a re-run and a
+  // verification each), and it runs while the session that triggered it is still not
+  // `ready_for_review`: the user waits for it, and so does every upload behind it in the
+  // run queue, since the run holds its `max_concurrent_runs` slot throughout.
+  //
+  // The two calls WITHIN a fixture stay sequential, because the second judges the output
+  // of the first.
+  //
+  // It costs tokens, and this is where the trade is stated rather than left in the diff's
+  // shadow. Both of a fixture's calls carry a cached head built from the CANDIDATE prompt
+  // — the agent's system prompt on the re-run, the same content again as the verify task's
+  // contract — and a candidate is new every round, so that entry is always cold. Serially,
+  // the first fixture wrote it at 1.25x and the other two read it at 0.1x; together, all
+  // three miss and all three write. That is roughly +2.3 full-price copies of a ~4k-token
+  // head, on each of two heads, per gate round. It is the same trade already taken for
+  // page extraction (providers/promptCache.ts), for the same reason: the concurrency is
+  // worth more than the writes, and here it is worth more still, because what it buys back
+  // is a user waiting on training work that is not about their document.
+  //
+  // Bounded by the same knob as page extraction and the Reader's chunks
+  // (`defaults.extraction_concurrency`), so a run's in-flight calls stay where the
+  // operator set them here too. No first-failure guard like the Reader's: at a limit of
+  // MAX_GATE_FIXTURES or more every fixture is in flight before any of them can reject, so
+  // there is nothing queued behind a failure to save. Below that limit — an operator who
+  // lowered it for a rate-limited provider — one fixture can still be issued after another
+  // has thrown, which is a single vision call on a round that is already failing. The
+  // Reader guards this because a long document is many more chunks than three, so the
+  // waste there is unbounded; here it is one call, and a guard would cost more to read
+  // than it saves.
+  const limit = Math.max(1, Math.floor(ctx.extractionConcurrency) || 1);
+  const verdicts = await mapWithConcurrency(caseFiles, limit, async (caseFile): Promise<FixtureVerdict | null> => {
     let c: FixtureCase;
     try {
       c = JSON.parse(readFileSync(join(dir, caseFile), "utf8")) as FixtureCase;
     } catch {
-      continue;
+      return null;
     }
     const imgPath = join(dir, c.image_file);
-    if (!existsSync(imgPath)) continue;
+    if (!existsSync(imgPath)) return null;
     const img: InputImage = { name: c.source_image, order: 0, path: imgPath };
     const blocks = await reRunAgentOnImage(ctx, updatedAgent, img);
     if (blocks.length === 0) {
-      failures.push(`${c.image_file}: updated agent produced no output`);
       // fixtureScore's no-output rule, which never abstains — see its comment for
       // why producing nothing scores 0 rather than dropping out of the mean.
       const zero = fixtureScore(null, 0) as number;
-      coverages.push(zero);
-      scores[c.image_file] = zero;
-      continue;
+      return { image: c.image_file, score: zero, failure: `${c.image_file}: updated agent produced no output` };
     }
     // Content-preservation check: the updated agent must still reproduce the
     // content it produced when this fixture was accepted (PRD §7.12). Compare the
@@ -454,14 +514,33 @@ export async function regressionGate(
     const candidateHtml = blocks.map((b) => b.html).join("\n\n");
     const coverage = contentCoverage(c.accepted_html, candidateHtml);
     const score = fixtureScore(coverage, blocks.length);
-    scores[c.image_file] = score;
-    if (score !== null) coverages.push(score);
     if (coverage !== null && coverage < MIN_CONTENT_COVERAGE) {
-      failures.push(`${c.image_file}: only ${(coverage * 100).toFixed(0)}% of the accepted content remained`);
-      continue;
+      return {
+        image: c.image_file,
+        score,
+        failure: `${c.image_file}: only ${(coverage * 100).toFixed(0)}% of the accepted content remained`,
+      };
     }
     const verdict = await verifyAgentOutput(ctx, updatedAgent, img, blocks);
-    if (!verdict.ok) failures.push(`${c.image_file}: ${verdict.problems.join("; ") || "failed verification"}`);
+    return {
+      image: c.image_file,
+      score,
+      failure: verdict.ok ? null : `${c.image_file}: ${verdict.problems.join("; ") || "failed verification"}`,
+    };
+  });
+
+  const failures: string[] = [];
+  const coverages: number[] = [];
+  // Keyed by fixture as well as averaged: the eval gate compares this prompt against
+  // the current one fixture-by-fixture (see pairedMeans), which a mean alone cannot
+  // support. `meanCoverage` stays for the log line and for callers that only want a
+  // single number.
+  const scores: FixtureScores = {};
+  for (const v of verdicts) {
+    if (!v) continue;
+    scores[v.image] = v.score;
+    if (v.score !== null) coverages.push(v.score);
+    if (v.failure) failures.push(v.failure);
   }
 
   const passed = failures.length === 0;
@@ -499,23 +578,35 @@ export async function evalAgentScores(
     sha: null,
     sessionBuilt: false,
   };
+  // Concurrent for the reason regressionGate's are, and it is the same fixtures: this is
+  // the other half of the same comparison, run right after that gate on the same feedback
+  // round. One vision call each, and they share nothing.
+  const limit = Math.max(1, Math.floor(ctx.extractionConcurrency) || 1);
+  const results = await mapWithConcurrency(
+    caseFiles,
+    limit,
+    async (caseFile): Promise<{ image: string; score: number | null } | null> => {
+      let c: FixtureCase;
+      try {
+        c = JSON.parse(readFileSync(join(dir, caseFile), "utf8")) as FixtureCase;
+      } catch {
+        return null;
+      }
+      const imgPath = join(dir, c.image_file);
+      if (!existsSync(imgPath)) return null;
+      const img: InputImage = { name: c.source_image, order: 0, path: imgPath };
+      const blocks = await reRunAgentOnImage(ctx, agent, img);
+      const cov = contentCoverage(c.accepted_html, blocks.map((b) => b.html).join("\n\n"));
+      return { image: c.image_file, score: fixtureScore(cov, blocks.length) };
+    },
+  );
+
   const measured: number[] = [];
   const scores: FixtureScores = {};
-  for (const caseFile of caseFiles) {
-    let c: FixtureCase;
-    try {
-      c = JSON.parse(readFileSync(join(dir, caseFile), "utf8")) as FixtureCase;
-    } catch {
-      continue;
-    }
-    const imgPath = join(dir, c.image_file);
-    if (!existsSync(imgPath)) continue;
-    const img: InputImage = { name: c.source_image, order: 0, path: imgPath };
-    const blocks = await reRunAgentOnImage(ctx, agent, img);
-    const cov = contentCoverage(c.accepted_html, blocks.map((b) => b.html).join("\n\n"));
-    const score = fixtureScore(cov, blocks.length);
-    scores[c.image_file] = score;
-    if (score !== null) measured.push(score);
+  for (const r of results) {
+    if (!r) continue;
+    scores[r.image] = r.score;
+    if (r.score !== null) measured.push(r.score);
   }
   return {
     mean: measured.length ? measured.reduce((a, b) => a + b, 0) / measured.length : null,

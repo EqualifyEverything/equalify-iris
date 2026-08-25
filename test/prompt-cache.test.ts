@@ -22,9 +22,11 @@ import { fileURLToPath } from "node:url";
 import {
   cacheableSystemPrompt,
   cachedTextBlock,
+  promptCacheTtl,
   claudeFamily,
   promptCacheEnabled,
 } from "../src/providers/promptCache.ts";
+import { promptCacheTtlWarning } from "../src/config.ts";
 import { BedrockProvider } from "../src/providers/bedrock.ts";
 import { OpenRouterProvider } from "../src/providers/openrouter.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
@@ -258,6 +260,140 @@ test("OpenRouter leaves a short system prompt, or a disabled one, alone", async 
   });
 });
 
+// --- the invariant head of a user message ------------------------------------
+
+// A message whose head repeats call to call: the verify task re-states the whole
+// contract of the agent it is judging on every page. `content` stays the complete
+// message, so the split is invisible to everything except the billing.
+const userReq = (content: string, cachedPrefix?: string) => ({
+  capability: "vision" as const,
+  model: "us.anthropic.claude-sonnet-4-6",
+  messages: [
+    { role: "system" as const, content: SHORT },
+    { role: "user" as const, content, cachedPrefix },
+  ],
+});
+
+// The text the parts of one message add up to, whatever shape they arrived in.
+function userText(message: { content: unknown }): string {
+  if (typeof message.content === "string") return message.content;
+  return (message.content as { type: string; text?: string }[])
+    .filter((p) => p.type === "text")
+    .map((p) => p.text ?? "")
+    .join("");
+}
+
+test("Bedrock splits a declared prefix into its own cached block", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  const sent = captureBedrock(bedrock);
+  await bedrock.complete(userReq(LONG + "page 1 of 25", LONG));
+  const messages = sent[0].messages as { role: string; content: unknown }[];
+  assert.deepEqual(messages[0].content, [
+    { type: "text", text: LONG, cache_control: { type: "ephemeral" } },
+    { type: "text", text: "page 1 of 25" },
+  ]);
+  // The whole point: the model is asked the same question, in the same words.
+  assert.equal(userText(messages[0]), LONG + "page 1 of 25");
+});
+
+test("Bedrock keeps the message whole when the head cannot carry a breakpoint", async () => {
+  // Four ways to decline, all of which must send the request that was sent before this
+  // field existed: no prefix declared, a head too short to be worth a breakpoint, a
+  // deployment that turned caching off, and — the one that is not about caching — a
+  // "prefix" that is not a prefix, which must never be trusted to slice the message.
+  for (const [what, provider, req] of [
+    ["nothing declared", new BedrockProvider({ default_model: "m" }), userReq(LONG + "tail")],
+    ["a short head", new BedrockProvider({ default_model: "m" }), userReq(SHORT + "tail", SHORT)],
+    ["caching off", new BedrockProvider({ default_model: "m", prompt_cache: false }), userReq(LONG + "tail", LONG)],
+    // Long enough to pass every caching test, so what declines it is the one check that
+    // is not about caching: this is not the start of the message. A short non-prefix
+    // would be declined for its length and prove nothing.
+    ["a head that is not the head", new BedrockProvider({ default_model: "m" }), userReq(LONG + "tail", "z" + LONG)],
+  ] as [string, BedrockProvider, ReturnType<typeof userReq>][]) {
+    const sent = captureBedrock(provider);
+    await provider.complete(req);
+    const messages = sent[0].messages as { role: string; content: unknown }[];
+    assert.equal(messages[0].content, req.messages[1].content, `${what}: the message should be untouched`);
+  }
+});
+
+test("a message that is all head sends no empty block after it", async () => {
+  // An empty text block is rejected by the API, so a caller whose whole message is
+  // invariant — nothing after the head — would have every one of its calls 400 inside
+  // the adapter. Nothing does that today; the field accepts it, so it has to hold.
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  const sentBedrock = captureBedrock(bedrock);
+  await bedrock.complete(userReq(LONG, LONG));
+  assert.deepEqual((sentBedrock[0].messages as { content: unknown }[])[0].content, [
+    { type: "text", text: LONG, cache_control: { type: "ephemeral" } },
+  ]);
+
+  await withStream(async (calls) => {
+    await openrouter().complete({
+      capability: "text" as const,
+      model: "anthropic/claude-sonnet-4.6",
+      messages: [{ role: "user" as const, content: LONG, cachedPrefix: LONG }],
+    });
+    const parts = (calls[0].messages as { content: { type: string }[] }[])[0].content;
+    assert.deepEqual(parts.map((p) => p.type), ["text"]);
+  });
+});
+
+test("Bedrock keeps the image after the breakpoint, and the text before it", async () => {
+  // A page image is what follows the head on every verify call, and it must stay on the
+  // variable side: an image inside the cached prefix would be a different prefix per page.
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  const sent = captureBedrock(bedrock);
+  await bedrock.complete({
+    ...userReq(LONG + "page 1 of 25", LONG),
+    images: [{ media_type: "image/png", data: Buffer.from("png") }],
+  });
+  const parts = (sent[0].messages as { content: { type: string }[] }[])[0].content;
+  assert.deepEqual(parts.map((p) => p.type), ["text", "text", "image"]);
+  assert.equal((parts[0] as { cache_control?: unknown }).cache_control !== undefined, true);
+  assert.equal((parts[1] as { cache_control?: unknown }).cache_control, undefined);
+});
+
+test("OpenRouter splits a declared prefix the same way", async () => {
+  await withStream(async (calls) => {
+    await openrouter().complete({
+      capability: "vision" as const,
+      model: "anthropic/claude-sonnet-4.6",
+      messages: [
+        { role: "system" as const, content: SHORT },
+        { role: "user" as const, content: LONG + "page 1 of 25", cachedPrefix: LONG },
+      ],
+      images: [{ media_type: "image/png", data: Buffer.from("png") }],
+    });
+    const messages = calls[0].messages as { role: string; content: unknown }[];
+    const parts = messages[1].content as { type: string; text?: string; cache_control?: unknown }[];
+    assert.deepEqual(parts.map((p) => p.type), ["text", "text", "image_url"]);
+    assert.deepEqual(parts[0].cache_control, { type: "ephemeral" });
+    assert.equal(parts[1].cache_control, undefined);
+    assert.equal(userText(messages[1]), LONG + "page 1 of 25");
+  });
+});
+
+test("OpenRouter keeps the message whole when the head cannot carry a breakpoint", async () => {
+  await withStream(async (calls) => {
+    const req = (content: string, cachedPrefix?: string) => ({
+      capability: "text" as const,
+      model: "anthropic/claude-sonnet-4.6",
+      messages: [{ role: "user" as const, content, cachedPrefix }],
+    });
+    await openrouter().complete(req(LONG + "tail"));
+    await openrouter().complete(req(SHORT + "tail", SHORT));
+    await openrouter(false).complete(req(LONG + "tail", LONG));
+    // Long enough to pass every caching test, so what declines it is the one check that
+    // is not about caching: this is not the start of the message.
+    await openrouter().complete(req(LONG + "tail", "z" + LONG));
+    for (const call of calls) {
+      const messages = call.messages as { content: unknown }[];
+      assert.equal(typeof messages[0].content, "string", "an image-less, uncacheable message stays a plain string");
+    }
+  });
+});
+
 // --- through the pipeline: what belongs in the cached prefix -----------------
 
 // The agent prompt as it ships, read from the repo root (this file's parent).
@@ -278,6 +414,8 @@ interface Call {
   agent: string;
   system: string;
   user: string;
+  // What the call declared as its user message's invariant head, if anything.
+  prefix?: string;
 }
 
 // Same shape as reextract.test.ts's context: only what extraction touches is real. A
@@ -305,10 +443,15 @@ function makeCtx(dir: string, calls: Call[]): PipelineContext {
       sessionFragments: () => fragDir,
     } as unknown as Paths,
     router: {
-      complete: async (agent: string, _cap: string, messages: { role: string; content: string }[]) => {
+      complete: async (
+        agent: string,
+        _cap: string,
+        messages: { role: string; content: string; cachedPrefix?: string }[],
+      ) => {
         const system = messages.find((m) => m.role === "system")?.content ?? "";
-        const user = messages.find((m) => m.role === "user")?.content ?? "";
-        calls.push({ agent, system, user });
+        const userMessage = messages.find((m) => m.role === "user");
+        const user = userMessage?.content ?? "";
+        calls.push({ agent, system, user, prefix: userMessage?.cachedPrefix });
         // Page 1 fails its fidelity check, which is what buys a correction call for it;
         // page 2 passes, so the two pages between them cover both paths.
         if (user.includes("TASK: verify")) {
@@ -384,4 +527,186 @@ test("nothing page-specific leaks into the prefix, and nothing invariant is re-s
       );
     }
   });
+});
+
+// The verify task's own prefix. The Feedback Agent's prompt is the system message and is
+// already cached; what was not was the contract of the agent under test, which the task
+// re-states in full on every page — `agents/page.md` is 16 KB of it, so on a 25-page
+// document that was 25 full-price copies of the single largest constant Iris sends.
+test("every verify call in a run declares one identical invariant head", async () => {
+  await withTemp(async (dir) => {
+    const calls: Call[] = [];
+    await runExtraction(makeCtx(dir, calls));
+    const verifies = calls.filter((c) => c.agent === "feedback");
+    assert.ok(verifies.length >= 2, `expected a verify per page, got ${verifies.length}`);
+
+    const prefixes = new Set(verifies.map((c) => c.prefix));
+    assert.equal(prefixes.size, 1, `expected one shared head, got ${prefixes.size}`);
+    const [prefix] = [...prefixes];
+    assert.ok(prefix, "the verify call declares no head at all, so nothing is cached");
+    // What is in it: the task marker the Feedback Agent switches on, and the whole
+    // contract it is judging against.
+    assert.match(prefix, /^TASK: verify/);
+    assert.match(prefix, /## Agent under test: page\.md/);
+    assert.match(prefix, /# Page Agent/);
+    // And what must never be: one page-specific word in here gives every page a head of
+    // its own, which is a cache write per page instead of one read.
+    assert.doesNotMatch(prefix, /page-00[12]\.png/, "an image filename reached the head");
+  });
+});
+
+test("the head is the head, and the message is still whole", async () => {
+  // The adapters slice `content` at this string, so a head that is not actually the
+  // start of the message would send a prompt nobody wrote. Both halves are asserted
+  // here rather than left to the adapter tests, because this is the caller that has to
+  // keep them in step: the message still reads exactly as it did before it was split.
+  await withTemp(async (dir) => {
+    const calls: Call[] = [];
+    await runExtraction(makeCtx(dir, calls));
+    for (const c of calls.filter((c) => c.agent === "feedback")) {
+      assert.ok(c.user.startsWith(c.prefix!), "the declared head is not the start of the message");
+      assert.match(c.user, /## The agent's output for source image "page-00[12]\.png"/);
+      assert.match(c.user, /Compare the output against the attached source image\.$/);
+    }
+  });
+});
+
+// --- how long an entry should live -------------------------------------------
+
+// A write costs 1.25x at five minutes and 2x at an hour; a read costs 0.1x either way.
+// So five minutes pays for itself on the second use of a prefix and an hour needs a
+// third — which makes this a question about a DEPLOYMENT's cadence, not about Iris.
+// Within one run it never arises: every page call reads the page agent's prefix and each
+// read refreshes the clock. What an hour buys is the gap between runs.
+test("the default deployment sends the request it always sent", () => {
+  // Byte-identical, not "5m" spelled out: `ttl` is a field an upstream can refuse, and a
+  // default nobody chose must not be the request that finds that out.
+  assert.deepEqual(cachedTextBlock("x"), { type: "text", text: "x", cache_control: { type: "ephemeral" } });
+  assert.deepEqual(cachedTextBlock("x", "5m"), { type: "text", text: "x", cache_control: { type: "ephemeral" } });
+  assert.equal("ttl" in cachedTextBlock("x").cache_control, false);
+});
+
+test("an hour is asked for explicitly, and only when it is recognized", () => {
+  assert.deepEqual(cachedTextBlock("x", "1h"), {
+    type: "text",
+    text: "x",
+    cache_control: { type: "ephemeral", ttl: "1h" },
+  });
+  assert.equal(promptCacheTtl({ prompt_cache_ttl: "1h" }), "1h");
+  assert.equal(promptCacheTtl({ prompt_cache_ttl: " 1H " }), "1h", "spacing and case are an operator's, not a directive");
+  // Everything else is the default, because the two ways of being wrong are not equal:
+  // falling back costs one prefix's saving per run, while forwarding something
+  // unrecognized could take out every call the upstream serves.
+  for (const v of [undefined, null, "", "   ", "5m", "1 hour", "60m", "3600", 1, true, {}]) {
+    assert.equal(promptCacheTtl({ prompt_cache_ttl: v as unknown as string }), "5m", `${JSON.stringify(v)}`);
+  }
+});
+
+test("a provider block's choice reaches the wire, on both adapters", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m", prompt_cache_ttl: "1h" });
+  const sent = captureBedrock(bedrock);
+  await bedrock.complete(bedrockReq(LONG));
+  assert.deepEqual(sent[0].system, [
+    { type: "text", text: LONG, cache_control: { type: "ephemeral", ttl: "1h" } },
+  ]);
+
+  await withStream(async (calls) => {
+    const or = new OpenRouterProvider({
+      api_key: "test-key",
+      base_url: "http://localhost:1/v1",
+      default_model: "m",
+      prompt_cache_ttl: "1h",
+    });
+    await or.complete(orReq(LONG));
+    const messages = calls[0].messages as { content: unknown }[];
+    assert.deepEqual(messages[0].content, [
+      { type: "text", text: LONG, cache_control: { type: "ephemeral", ttl: "1h" } },
+    ]);
+  });
+});
+
+test("an hour on the head of a user message too, since that is where the largest constant is", async () => {
+  // agents/page.md re-stated per page is the biggest prefix Iris sends (#152); a
+  // deployment that asked for an hour meant it for that one as well.
+  const bedrock = new BedrockProvider({ default_model: "m", prompt_cache_ttl: "1h" });
+  const sent = captureBedrock(bedrock);
+  await bedrock.complete(userReq(LONG + "page 1 of 25", LONG));
+  const parts = (sent[0].messages as { content: { cache_control?: unknown }[] }[])[0].content;
+  assert.deepEqual(parts[0].cache_control, { type: "ephemeral", ttl: "1h" });
+});
+
+test("turning caching off outranks any TTL", () => {
+  // The escape hatch is for an upstream that refuses `cache_control` at all, and a TTL
+  // is a field ON that object: honouring it here would send the very thing being
+  // escaped from.
+  const bedrock = new BedrockProvider({ default_model: "m", prompt_cache: false, prompt_cache_ttl: "1h" });
+  const sent = captureBedrock(bedrock);
+  return bedrock.complete(bedrockReq(LONG)).then(() => {
+    assert.equal(sent[0].system, LONG, "a disabled cache sends a plain string, TTL or no TTL");
+  });
+});
+
+test("a TTL nobody can spell is caught at boot, because nothing else can catch it", () => {
+  // The fallback is silent by design — an unrecognized value must not reach an upstream —
+  // and it is invisible afterwards: the two TTLs differ in what a write is BILLED at, not
+  // in the token counts diagnostics publishes, so `60m` would read exactly like `1h` in
+  // every field Iris reports. Boot is the only place an operator finds out.
+  const ok = { default: "bedrock", bedrock: { default_model: "m", prompt_cache_ttl: "1h" } };
+  assert.equal(promptCacheTtlWarning(ok as never), undefined);
+  assert.equal(promptCacheTtlWarning({ default: "b", b: { default_model: "m" } } as never), undefined);
+  assert.equal(
+    promptCacheTtlWarning({ default: "b", b: { default_model: "m", prompt_cache_ttl: "5M" } } as never),
+    undefined,
+    "case is an operator's, not a typo",
+  );
+  // A valueless YAML key is an operator who set nothing, which is what the default is for.
+  assert.equal(
+    promptCacheTtlWarning({ default: "b", b: { default_model: "m", prompt_cache_ttl: null } } as never),
+    undefined,
+  );
+
+  const warned = promptCacheTtlWarning({
+    default: "bedrock",
+    bedrock: { default_model: "m", prompt_cache_ttl: "60m" },
+  } as never);
+  assert.match(warned ?? "", /providers\.bedrock: "60m"/);
+  assert.match(warned ?? "", /is ignored/);
+  // And it says why no dashboard will show it, so the operator does not go looking.
+  assert.match(warned ?? "", /BILLED/);
+
+  // Every block that has one, not just the first: fixing one and rebooting must not
+  // reveal the next as a surprise.
+  const both = promptCacheTtlWarning({
+    default: "bedrock",
+    per_agent: { page: "bedrock" },
+    bedrock: { default_model: "m", prompt_cache_ttl: "1 hour" },
+    openrouter: { default_model: "m", prompt_cache_ttl: "3600" },
+  } as never);
+  assert.match(both ?? "", /providers\.bedrock: "1 hour"/);
+  assert.match(both ?? "", /providers\.openrouter: "3600"/);
+
+  // `default` is a string and `per_agent` is a map of agent overrides; neither is a
+  // provider block, and both are skipped by NAME rather than by shape — `per_agent` is
+  // an object, so a shape test would send it to the lookup and search it for a key that
+  // belongs to a provider.
+  assert.equal(
+    promptCacheTtlWarning({
+      default: "bedrock",
+      per_agent: { prompt_cache_ttl: "60m" },
+      bedrock: { default_model: "m" },
+    } as never),
+    undefined,
+    "an agent override is not a provider block, whatever it happens to be named",
+  );
+
+  // A block that caches nothing still gets its typo named — the value is unusable either
+  // way, and it goes live the day caching is turned back on — so the wording says the
+  // value is ignored rather than claiming a TTL that block does not have.
+  const off = promptCacheTtlWarning({
+    default: "b",
+    b: { default_model: "m", prompt_cache: false, prompt_cache_ttl: "60m" },
+  } as never);
+  assert.match(off ?? "", /providers\.b: "60m"/);
+  assert.doesNotMatch(off ?? "", /Using 5m/, "nothing is cached there, so no TTL is in play");
+  assert.match(off ?? "", /is ignored/);
 });

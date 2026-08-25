@@ -33,9 +33,10 @@ export function assembleBodyWithReport(fragments: Fragment[]): { body: string; a
   return { body: pages.filter((h) => h.length > 0).join("\n\n"), anchors: report };
 }
 
-// Wrap body content in a minimal accessible document shell. If issues remain at
-// the review cap they are recorded as an HTML comment (invisible to users, but
-// in the document for tooling); the full list also persists in unresolved.md.
+// Wrap body content in a minimal accessible document shell. If issues remain when the
+// review loop stops — at its cap, or on a round that changed nothing — they are recorded
+// as an HTML comment (invisible to users, but in the document for tooling); the full list
+// also persists in unresolved.md.
 //
 // `failedPages` is recorded the same way, and for a reason worth spelling out: the
 // per-page marker `failedPage` writes lives INSIDE a fragment, so it is part of the body

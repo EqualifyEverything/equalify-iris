@@ -1,4 +1,5 @@
 import { extractJson } from "../util/json.ts";
+import { mapWithConcurrency } from "../util/concurrency.ts";
 import { MAX_EDITOR_IMAGES } from "../providers/imageLimits.ts";
 import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseError } from "../providers/types.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
@@ -243,13 +244,56 @@ function lintSummary(lint: LintResult): string {
 // back to a page.
 const READER_INDEX_EXCERPT_CHARS = 200;
 
+// The index, as the head of a Reader prompt.
+//
+// It is the one part of that prompt which is about the DOCUMENT rather than about the
+// chunk in front of it, and it does not change while the loop runs: it is built from the
+// fragments as they entered review and deliberately not rebuilt as the editor rewrites
+// the body, because it exists to attribute content to a SOURCE page and the source does
+// not change (see runReview). So every chunk of every round sends these same bytes — on a
+// 25-page document ~1.5k tokens, over several chunks and up to `max_review_iterations + 1`
+// rounds, which is the same paragraph re-sent dozens of times at full price.
+//
+// Which is why it LEADS the message now, where it used to sit near the end: a cache
+// breakpoint marks a prefix, so what repeats has to come before what varies or it cannot
+// be cached at all. Nothing else moved, and the sections are self-labelled — the Reader
+// is told it is "given an index of the document's source pages", not told where to look
+// for it — so this is the same prompt with its stable half first. Below the minimum
+// length the breakpoint is declined and the message is sent as one piece, which is what
+// it was: at READER_INDEX_EXCERPT_CHARS that is a document of fewer than about ten pages,
+// which is also where there was least to save.
+//
+// This entry's economics are NOT the system prompt's, and the argument a few lines below
+// for why concurrent chunks may all pay a write does not transfer. READER_SYSTEM is static
+// across sessions, so a busy deployment finds it warm; an index is built from THIS
+// document, so it is cold once per session by construction and the chunks of the first
+// round — sent together — each pay 1.25x where they used to pay 1x. That is the whole
+// cost, and one further round clears it several times over: every later chunk reads the
+// index at 0.1x instead of paying for it again. Concretely, three chunks pay +0.75 of one
+// index on the first round and save 2.7 of it on each round after, so break-even is at
+// roughly a quarter of a second round — where "each round after" means each round that
+// arrives while the entry is still live. The TTL is ~5 minutes refreshed on read, and what
+// sits between two Reader rounds is an editor pass carrying page images, which is the
+// slowest call in the loop: a round that arrives after it expires writes again instead of
+// reading, saving nothing and costing the same +0.25x it cost on the first. That is the
+// floor of this trade rather than a regression — the bytes are the bytes either way. The document that does not win is the one that
+// reads clean on the first look and has no second round — it pays about a quarter of its
+// index, ~300 tokens per chunk on a 25-page document — and that is the trade: a small
+// certain cost on the documents that need no fixing, against a large one on every
+// document that iterates, which is the expensive case.
+function readerIndexHead(index: string): string {
+  return index ? `## Source pages in this document (extracted HTML, truncated)\n${index}\n\n` : "";
+}
+
 async function runReader(
   ctx: PipelineContext,
   body: string,
   lint: LintResult,
   pages: IndexedPage[],
+  // Only so the line this logs can say which round it belongs to, the way `reader` and
+  // `editor` already do. Nothing here reads it.
+  iteration: number,
 ): Promise<ReviewIssue[]> {
-  const issues: ReviewIssue[] = [];
   const index = pages.length ? pageIndex(pages, READER_INDEX_EXCERPT_CHARS) : "";
   // Computed over the whole body, once, and given to the FIRST chunk only. Both halves
   // of that matter. Whole-body, because a chunk is a character window and the pair this
@@ -258,35 +302,110 @@ async function runReader(
   // same defect would arrive two or three times and be carried to @unresolved that many
   // times if no editor round cleared it.
   const duplicateHeadings = sameWordedHeadingNote(sameWordedHeadingRuns(body));
-  let first = true;
-  for (const c of chunk(body)) {
+  // The invariant head of every chunk's prompt (see readerIndexHead).
+  const head = readerIndexHead(index);
+  // The two per-run tails of the prompt, read once instead of once per chunk:
+  // `examplesForPrompt` reads and parses the agent's example bank off disk, and it
+  // cannot change while a round is in flight.
+  //
+  // These stay at the END, where they were, rather than joining the cached head. Both are
+  // instructions rather than reference material — the user's feedback for this run, and
+  // the lessons past corrections taught — and where an instruction sits in a prompt is a
+  // question about whether it is followed, not about what it costs. The index has no such
+  // claim on a position: the Reader is told it is "given an index of the document's source
+  // pages" and matches content against it wherever it appears. Between them they are a
+  // fraction of the index's size on any document with pages in it.
+  const tail = feedbackPreamble(ctx) + examplesForPrompt(ctx.paths, "page.md", ["a11y_policy"]);
+  const chunks = chunk(body);
+  // Chunks are independent calls over disjoint windows of a body nothing mutates while
+  // they run, so they are sent CONCURRENTLY rather than one after another. On a long
+  // document this is the review loop's dominant latency term and it was strictly serial:
+  // a 25-page body is several CHUNK_BUDGET windows, each a full text call, and the whole
+  // ladder is re-climbed on every round of the loop (up to max_review_iterations + 1
+  // times) because the Reader has to re-read what the editor changed.
+  //
+  // Nothing about what is SENT changes — same prompts, same chunk order — so no verdict
+  // can move and no extra token goes over the wire.
+  //
+  // What a COLD round is billed does change, on one term. READER_SYSTEM clears
+  // `cacheableSystemPrompt`, so it carries a cache breakpoint: serially, chunk 0 paid the
+  // 1.25x write and the rest read it at 0.1x, while chunks sent together all miss an entry
+  // that does not exist yet and each pay a write. That is ~1.15x of one system prompt per
+  // extra chunk (~1.4k tokens), once, and only on a round whose cache entry has expired —
+  // the prompt is static across sessions and every read refreshes the five-minute TTL, so
+  // a deployment doing any work at all is warm and pays none of it. Priming the entry with
+  // a serial first chunk would buy that back by putting a whole call's latency into every
+  // round, warm ones included, to save a fraction of one prompt on the rare cold one.
+  //
+  // Bounded by the same knob as page extraction: it is the deployment's answer to how
+  // many model calls one run may have in flight (`defaults.extraction_concurrency`), and
+  // a Reader chunk is that same kind of call. So a run's peak stays where the operator
+  // set it, in this phase as in the other, and an operator who lowered it for a
+  // rate-limited provider gets the review bounded too. Defensive `|| 1` for a
+  // directly-constructed context (tests, embedders) that never set it: serial is what
+  // this function did before, so an unset knob degrades to exactly the old behaviour.
+  const limit = Math.max(1, Math.floor(ctx.extractionConcurrency) || 1);
+  ctx.log.event("reader_start", { iteration, chunks: chunks.length, concurrency: limit });
+  // The first error any chunk threw. `mapWithConcurrency` rejects with it — matching the
+  // serial loop, and the round is discarded either way — but its workers go on pulling
+  // items until the list is exhausted, so a chunk that fails early would otherwise be
+  // followed by a full-price call for every chunk still queued behind it. Whoever fails
+  // first records it here and the rest decline to send. This is the first caller that can
+  // reject at all: extraction contains each page in a `.catch`, so nothing before it ever
+  // reached this path.
+  //
+  // Whether one failed is its own flag rather than a test on the error, because the value
+  // thrown is not ours: a `throw undefined` from an adapter or a mock is still a chunk
+  // that failed, and reading the guard off the error itself would leave it disarmed on
+  // exactly that call — every queued chunk then paying in full, which is the case the
+  // guard exists for.
+  let failed = false;
+  let failure: unknown = null;
+  const perChunk = await mapWithConcurrency(chunks, limit, async (c, i) => {
+    if (failed) throw failure;
     const user =
+      head +
       `## HTML\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint)}` +
-      (first && duplicateHeadings
+      (i === 0 && duplicateHeadings
         ? `\n\n## Headings with the same words at the same level, nothing but their own content between them (whole document)\n${duplicateHeadings}`
         : "") +
-      (index ? `\n\n## Source pages in this document (extracted HTML, truncated)\n${index}` : "") +
-      feedbackPreamble(ctx) +
-      examplesForPrompt(ctx.paths, "page.md", ["a11y_policy"]);
-    const res = await ctx.router.complete("reader", "text", [
-      { role: "system", content: READER_SYSTEM },
-      { role: "user", content: user },
-    ]);
-    first = false;
+      tail;
+    let res;
+    try {
+      res = await ctx.router.complete("reader", "text", [
+        { role: "system", content: READER_SYSTEM },
+        // The head is this run's page index and nothing else, so it is the same bytes on
+        // every chunk of every round — declared so the adapter can cache it rather than
+        // charge for it dozens of times (providers/types.ts `cachedPrefix`). Undefined
+        // rather than "" when there is no index, which is a document with no pages to
+        // attribute to: an empty head is not a prefix worth naming.
+        { role: "user", content: user, cachedPrefix: head || undefined },
+      ]);
+    } catch (e) {
+      // The first one wins, so the error the round rejects with is the one that
+      // actually happened rather than whichever chunk noticed the flag.
+      if (!failed) {
+        failed = true;
+        failure = e;
+      }
+      throw e;
+    }
     ctx.log.agentCall({
       agent: { name: "reader", file: "reader.md", content: READER_SYSTEM, capabilities: ["text"], sha: null, sessionBuilt: false },
       phase: "review",
       output: res.text,
     });
     const parsed = extractJson<{ issues?: (ReviewIssue & { pages?: unknown })[] }>(res.text);
-    for (const i of parsed?.issues ?? []) {
-      // Drop hallucinated page numbers here rather than downstream, so a bad
-      // attribution degrades to "no attribution" (all images) instead of
-      // silently sending the editor the wrong page.
-      issues.push({ ...i, pages: knownPages(i.pages, pages) });
-    }
-  }
-  return issues;
+    // Drop hallucinated page numbers here rather than downstream, so a bad
+    // attribution degrades to "no attribution" (all images) instead of
+    // silently sending the editor the wrong page.
+    return (parsed?.issues ?? []).map((issue) => ({ ...issue, pages: knownPages(issue.pages, pages) }));
+  });
+  // mapWithConcurrency returns results in INPUT order, so the issue list is the one a
+  // serial loop produced — which matters downstream: `imagesForIssues` unions the pages
+  // and `unresolved` is written in this order, so a document's unresolved list must not
+  // depend on which chunk's call happened to finish first.
+  return perChunk.flat();
 }
 
 // Which source images the Copy Editor needs this round: the union of the pages the
@@ -305,7 +424,11 @@ async function runReader(
 // grows every round, so a genuine content issue can go unattributed in exactly the
 // late rounds where the iteration budget is thinnest. Recovery costs a full
 // iteration (the leftover must become the ONLY issue before images come back), and
-// at the cap it never happens — the issue is written to @unresolved having never
+// the loop may not have one to spend: at the cap it never happens, and since the loop
+// also stops on a round that changes nothing, a round whose issues are all
+// unattributable can end it sooner than that — the editor answers with the body it was
+// handed and there is no later round to narrow in. That makes this the stronger reason
+// to broaden, not a weaker one: the issue is written to @unresolved having never
 // been shown its own page.
 //
 // The cost of being generous is bounded by `capEditorImages` below, which is what
@@ -352,6 +475,38 @@ export function capEditorImages(
   return preferred.slice(0, Math.max(1, max)).sort((a, b) => a.order - b.order);
 }
 
+// What one editor round produced, and whether the editor actually answered.
+//
+// The two are separate because they are separate questions and the loop acts on both.
+// `body` unchanged can mean the editor read every issue and decided the document was
+// better left alone — a decision, and one it would make again on the same input — or it
+// can mean the reply could not be used at all, which is a call paid for and nothing
+// learned. Folding them together (which returning a bare string did) makes the second
+// look like the first.
+interface EditorRound {
+  body: string;
+  // False when the model returned nothing usable — an unparseable reply, or an empty
+  // `html` — in which case `body` is what went in. Not evidence about what the editor
+  // would do next time, because it never said.
+  usable: boolean;
+  // True when the response hit the model's output ceiling (issue #143). A third answer to
+  // the same question, and the only one that also says the NEXT round cannot succeed: the
+  // response length is a function of how long the document is, and the document has not
+  // got shorter. `usable` is false here too — nothing came back to use — but the loop
+  // must not treat this as the retryable case that `usable: false` otherwise means.
+  truncated: boolean;
+}
+
+// What the log line about a truncation says. The ceiling and the size of the response are
+// the two numbers an operator needs — they are the difference between "raise max_tokens"
+// and "this document cannot fit under any ceiling" — and they are on the error when Iris
+// raised it, which is every case except one that lost its prototype on the way here.
+function truncation(e: unknown): Record<string, unknown> {
+  const message = e instanceof Error ? e.message : String(e);
+  if (!(e instanceof TruncatedResponseError)) return { error: message };
+  return { max_tokens: e.maxTokens, chars: e.chars, error: message };
+}
+
 // Document-level correction: the editor sees the whole body + all issues + the
 // source images and returns a corrected document, so it can fix structural
 // problems (dedup, reorder, heading hierarchy) that per-block editing cannot.
@@ -368,25 +523,6 @@ export function capEditorImages(
 // Neither alone is sufficient: without the cap the refusal is the common case on a
 // long document, and without the retry the cap has to be right about a limit it can
 // only estimate.
-// What one round did, rather than only what it produced. `truncated` is not a variant of
-// "the body came back unchanged": it is the one outcome that also says the NEXT round
-// cannot succeed either, because the response length is a function of how long the
-// document is and the document has not got shorter (issue #143).
-interface EditorRound {
-  body: string;
-  truncated: boolean;
-}
-
-// What the log line about a truncation says. The ceiling and the size of the response are
-// the two numbers an operator needs — they are the difference between "raise max_tokens"
-// and "this document cannot fit under any ceiling" — and they are on the error when Iris
-// raised it, which is every case except one that lost its prototype on the way here.
-function truncation(e: unknown): Record<string, unknown> {
-  const message = e instanceof Error ? e.message : String(e);
-  if (!(e instanceof TruncatedResponseError)) return { error: message };
-  return { max_tokens: e.maxTokens, chars: e.chars, error: message };
-}
-
 async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue[]): Promise<EditorRound> {
   const wanted = imagesForIssues(ctx.images, issues);
   const selected = capEditorImages(wanted, issues);
@@ -402,7 +538,7 @@ async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue
   });
 
   try {
-    return { body: await editorCall(ctx, body, issues, selected), truncated: false };
+    return { ...(await editorCall(ctx, body, issues, selected)), truncated: false };
   } catch (e) {
     // A response that hit the output ceiling is this round producing nothing usable,
     // arriving as an exception instead of as an empty string — and `editorCall` already
@@ -422,7 +558,11 @@ async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue
     // is asked for. The caller stops the loop instead.
     if (isTruncatedResponseError(e)) {
       ctx.log.event("editor_truncated", { attached: selected.length, of: ctx.images.length, ...truncation(e) });
-      return { body, truncated: true };
+      // `usable: false` for the same reason an unparseable reply is — nothing came back to
+      // use — but the caller must branch on `truncated` FIRST. An unusable round is
+      // allowed to run again, because the editor never said anything; this one has said
+      // all it can say about a document of this length.
+      return { body, usable: false, truncated: true };
     }
     // The images are the only part of this request Iris can give up, and giving them
     // up is far better than what refusing to do so costs: the run ends here, after
@@ -443,7 +583,7 @@ async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue
     // A retry without images can truncate in its turn — same document, same
     // instruction — so it is contained the same way rather than left to end the run.
     try {
-      return { body: await editorCall(ctx, body, issues, []), truncated: false };
+      return { ...(await editorCall(ctx, body, issues, [])), truncated: false };
     } catch (retryError) {
       if (!isTruncatedResponseError(retryError)) throw retryError;
       ctx.log.event("editor_truncated", {
@@ -452,7 +592,7 @@ async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue
         ...truncation(retryError),
         after: "images_refused",
       });
-      return { body, truncated: true };
+      return { body, usable: false, truncated: true };
     }
   }
 }
@@ -460,12 +600,16 @@ async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue
 // One Copy Editor call, with whichever images it was given. Split out so the same
 // prompt can be re-sent without them; `selected` empty is a normal shape here, and the
 // prompt says so rather than promising attachments that are not there.
+//
+// It answers about the reply it got, and a truncation is not one: the provider raises it
+// instead of returning a reply, so `truncated` is `runEditor`'s to fill in from the catch
+// and this function cannot state it either way.
 async function editorCall(
   ctx: PipelineContext,
   body: string,
   issues: ReviewIssue[],
   selected: InputImage[],
-): Promise<string> {
+): Promise<Omit<EditorRound, "truncated">> {
   const images = selected.map(loadImage);
   const pageList = selected.map((i) => i.order).join(", ");
   const user =
@@ -496,13 +640,22 @@ async function editorCall(
     output: res.text,
   });
   const parsed = extractJson<{ html?: string }>(res.text);
-  // If the editor returns nothing usable, keep the current body unchanged.
-  return parsed?.html?.trim() || body;
+  // If the editor returns nothing usable, keep the current body unchanged — and say
+  // that is what happened, so the loop does not read a reply it could not use as the
+  // editor having decided the document was fine.
+  const corrected = parsed?.html?.trim();
+  if (!corrected) {
+    ctx.log.event("editor_no_output", { chars: res.text.length });
+    return { body, usable: false };
+  }
+  return { body: corrected, usable: true };
 }
 
-// Reader -> Editor -> re-verify, looping until the Reader reports zero issues or
-// the iteration cap is reached. The loop only stops clean when the Reader has
-// actually re-confirmed it, so reported issues are verified-fixed, not assumed.
+// Reader -> Editor -> re-verify, with three ways out: the Reader reports zero issues,
+// a round changes nothing (see `review_converged` below), or the iteration cap is
+// reached. The loop only stops CLEAN on the first of those — the Reader has actually
+// re-confirmed it — so reported issues are verified-fixed, not assumed; the other two
+// deliver the body with what is left written to @unresolved.
 export async function runReview(
   ctx: PipelineContext,
   initial: { body: string; lint: LintResult; pages?: IndexedPage[]; failedPages?: number[] },
@@ -524,7 +677,7 @@ export async function runReview(
   const failedPages = initial.failedPages ?? [];
 
   while (iterations <= ctx.maxReviewIterations) {
-    const issues = await runReader(ctx, body, lint, pages);
+    const issues = await runReader(ctx, body, lint, pages, iterations);
     lastIssues = issues;
     ctx.log.event("reader", { iteration: iterations, issues: issues.length });
     if (issues.length === 0) {
@@ -556,6 +709,14 @@ export async function runReview(
     // thing, and what is delivered is the body that entered the round, with the
     // Reader's issues recorded as unresolved. See runEditor for why this is not
     // retried and not fatal.
+    //
+    // Before `body` is taken from the round, and before the two exits below, because both
+    // of those would read this round as something it is not. `body === before` holds here,
+    // as it does for a converged round — but a converged round is one the editor ANSWERED
+    // and would answer the same way again, which is why it stops the loop with rounds
+    // to spare and nothing to disclose; and `usable` is false here, which is the state the
+    // loop otherwise treats as a retryable non-answer. A truncation is neither: it is the
+    // one outcome that says this document cannot be corrected at this length at all.
     if (round.truncated) {
       editorTruncated = true;
       // The round still counts. It was made and paid for — a full ceiling of output at
@@ -564,8 +725,58 @@ export async function runReview(
       break;
     }
     body = round.body;
+    ctx.log.event("editor", { iteration: iterations, changed: body !== before });
+
+    // A round that changed nothing has said what the next one would say.
+    //
+    // The Reader is about to be handed the same body, the same lint and the same page
+    // index, and — if it raises the same issues, which is what an unchanged document
+    // invites — the editor would be handed the same request it has just answered with
+    // "no change". So the remaining rounds are the most expensive call in the run (whole
+    // body in, a whole body out at max_tokens) plus a full re-read of the document,
+    // spent to deliver the document already in hand. That is not hypothetical: a
+    // [page not fully transcribed] marker is reported by the Reader every round BY
+    // DESIGN and can only be settled by re-extracting the page, which is nobody's job in
+    // this loop — so a document with one spends its whole budget rewriting itself into
+    // itself.
+    //
+    // What is delivered is unchanged: this body, with the issues just raised written to
+    // @unresolved — which is what the cap would have produced, since neither the body nor
+    // the issues about it were going to move.
+    //
+    // Exactly so for the BODY. The @unresolved list is one Reader sample short of it: the
+    // cap path takes a final read of the finished body, and that read can come back with
+    // nothing — the same body, the same prompt, a different sample — which returns early
+    // and credits the document clean. Breaking here stops at the read that preceded this
+    // round, so a document that would have won that coin toss is now reported with the
+    // issues it actually has. The direction is the conservative one (this rate goes up,
+    // never down, and the delivered HTML is the same either way), and the reading it
+    // costs is the less trustworthy of the two: a Reader that says "issues" and then
+    // "clean" about one unchanged document has not found the document clean, it has
+    // disagreed with itself.
+    //
+    // Only when the editor ANSWERED. A reply that could not be parsed leaves the body
+    // untouched for a different reason — the editor never said anything — and the next
+    // round is a real retry rather than a repeat, so it is allowed to run.
+    //
+    // The honest caveat: the editor is sampled, so a second identical request could
+    // decide differently. `review_converged` is logged for exactly that reason — how
+    // often this fires, and on which issues, is measurable from a run log, so the policy
+    // can be revisited from evidence rather than from either of our guesses.
+    if (round.usable && body === before) {
+      ctx.log.event("review_converged", {
+        iteration: iterations,
+        issues: issues.length,
+        rounds_left: ctx.maxReviewIterations - iterations,
+      });
+      break;
+    }
+    // Skipped when nothing changed, because every one of these answers a question about
+    // a difference: the lint of an unedited body is the lint already in hand, and a link
+    // or marker diff against an identical string is empty by construction.
+    if (body === before) continue;
+
     lint = await runAxe(wrapDocument(body));
-    ctx.log.event("editor", { iteration: iterations });
     // A link the editor dropped is unrecoverable and invisible to every later check
     // in the loop — see droppedHrefs for why this is checked here and in code.
     const dropped = droppedHrefs(before, body);
@@ -589,8 +800,9 @@ export async function runReview(
     }
   }
 
-  // Cap reached with issues remaining (§7.11): record them as a comment, with the
-  // source page reference the Reader attributed (§7.8) so a human can find them.
+  // Issues remain and the loop has stopped — at the cap, or on a round that changed
+  // nothing (§7.11). Either way they are recorded as a comment, with the source page
+  // reference the Reader attributed (§7.8) so a human can find them.
   const unresolvedLines = lastIssues.map(
     (i) => `${i.issue} (severity: ${i.severity}${i.pages?.length ? `, page ${i.pages.join(", ")}` : ""})`,
   );
