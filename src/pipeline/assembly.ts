@@ -46,7 +46,16 @@ export function assembleBodyWithReport(fragments: Fragment[]): { body: string; a
 // the loop, it is out of the editor's reach for the same reason @unresolved is. The
 // in-body marker stays because it says WHERE the hole is; this one guarantees the
 // document admits there is one.
-export function wrapDocument(body: string, opts: { unresolved?: string[]; failedPages?: number[] } = {}): string {
+// `editorTruncated` is the third statement of the same kind, and it is about the loop
+// rather than about the content: a correction round's response hit the model's output
+// ceiling, so that round was abandoned and this document is the one that entered it
+// (issue #143). Without it, a document delivered this way is indistinguishable from one
+// whose issues the editor tried and failed to fix — and the difference is what a reader
+// of `@unresolved` needs, since these issues were never worked on at all.
+export function wrapDocument(
+  body: string,
+  opts: { unresolved?: string[]; failedPages?: number[]; editorTruncated?: boolean } = {},
+): string {
   const unresolved = opts.unresolved?.length
     ? `\n<!-- @unresolved\n${opts.unresolved.map((u) => `  - ${u.replace(/--+/g, "—")}`).join("\n")}\n-->`
     : "";
@@ -55,6 +64,14 @@ export function wrapDocument(body: string, opts: { unresolved?: string[]; failed
       `  This document is incomplete: the source pages above could not be extracted and\n` +
       `  none of their content is here. See the run log (page_extraction_failed) or the\n` +
       `  session's diagnostics (pages_failed) for why.\n-->`
+    : "";
+  const truncated = opts.editorTruncated
+    ? `\n<!-- @editor-truncated\n` +
+      `  A correction round could not be completed: the copy editor is asked for the whole\n` +
+      `  document, and its response hit the model's output ceiling, so that round was\n` +
+      `  discarded and the review loop stopped. The content below is what entered that\n` +
+      `  round; any issues listed below were not corrected. See the run log\n` +
+      `  (editor_truncated) for the ceiling and the size of the response.\n-->`
     : "";
   return `<!DOCTYPE html>
 <html lang="en">
@@ -65,7 +82,7 @@ export function wrapDocument(body: string, opts: { unresolved?: string[]; failed
 <body>
 <main>
 ${body}
-</main>${failed}${unresolved}
+</main>${failed}${truncated}${unresolved}
 </body>
 </html>
 `;
@@ -88,7 +105,24 @@ export async function runAssembly(
   // written page may still carry the duplicate ids the join could not fix, recorded as clean.
   // Same disclosure argument as `pinned_ids` below: the reason a gate passed has to be
   // distinguishable from the gate having found nothing.
-  const lintError = lint.error === undefined ? {} : { lint_error: lint.error };
+  //
+  // The message alone turned out not to be enough. The first real occurrence (#144) read
+  // "Octal escape sequences are not allowed in strict mode" — a JavaScript SyntaxError,
+  // which is neither the overflow above nor anything anyone could reproduce from that
+  // sentence — so `runAxe` now also reports which step threw, its error class and the
+  // first frames of its stack, and all three are logged here. The document that provoked
+  // it is recoverable too, without keeping a second copy of it: this lints
+  // `wrapDocument(assembleBody(fragments))`, both of which are pure, and
+  // `fragments.json` is written before this phase runs.
+  const lintError =
+    lint.error === undefined
+      ? {}
+      : {
+          lint_error: lint.error,
+          ...(lint.errorWhere ? { lint_error_where: lint.errorWhere } : {}),
+          ...(lint.errorName ? { lint_error_name: lint.errorName } : {}),
+          ...(lint.errorStack ? { lint_error_stack: lint.errorStack } : {}),
+        };
   ctx.log.event("assembly", {
     pages: fragments.length,
     lint_ok: lint.ok,

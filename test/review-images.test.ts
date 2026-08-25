@@ -427,7 +427,13 @@ test("a truncated editor response is not mistaken for a payload that was too big
   await withTemp(async (dir) => {
     // A TruncatedResponseError's message carries a character count and the model's
     // max_tokens, either of which can contain "413". Retrying it with fewer images fixes
-    // nothing and hides the one diagnosis that names the knob to raise.
+    // nothing and hides the one diagnosis that names the knob to raise: the request was
+    // accepted and read: it is the ANSWER that did not fit, and asking again for the
+    // complete corrected body asks for the same length.
+    //
+    // What it does instead is deliver the body that entered the round — see
+    // test/review-truncation.test.ts for that half (issue #143). Here the property is
+    // only that it is not the images that get blamed.
     const { ctx, rec } = ctxWith(
       dir,
       3,
@@ -438,11 +444,15 @@ test("a truncated editor response is not mistaken for a payload that was too big
           "Raise providers.bedrock.max_tokens.",
       },
     );
-    await assert.rejects(
-      runReview(ctx, { body: "<h1>Report</h1>", lint: { ok: true, violations: [] }, pages: PAGES }),
-      /output ceiling/,
-    );
-    assert.equal(rec.calls.filter((c) => c.agent === "copy_editor").length, 1);
+    const result = await runReview(ctx, {
+      body: "<h1>Report</h1>",
+      lint: { ok: true, violations: [] },
+      pages: PAGES,
+    });
+    assert.equal(rec.calls.filter((c) => c.agent === "copy_editor").length, 1, "the round was retried");
+    assert.equal(rec.events.find((e) => e.type === "editor_images_refused"), undefined);
+    assert.equal(result.body, "<h1>Report</h1>", "the body that entered the round is what is delivered");
+    assert.equal(result.editorTruncated, true);
   });
 });
 

@@ -248,6 +248,7 @@ test("nothing per-session, per-user or per-document is exposed", () => {
       Object.keys(store.qualityStats()).sort(),
       [
         "documents",
+        "editor_truncated_rate",
         "links_dropped_rate",
         "lint_error_rate",
         "mean_rounds",

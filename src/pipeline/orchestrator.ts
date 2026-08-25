@@ -5,6 +5,7 @@ import { ProviderRouter } from "../providers/index.ts";
 import {
   SIGNAL_LINKS_DROPPED,
   SIGNAL_LINT_ERROR,
+  SIGNAL_EDITOR_TRUNCATED,
   SIGNAL_ROUNDS,
   SIGNAL_UNRESOLVED,
   type Store,
@@ -233,8 +234,11 @@ export async function runPipeline(args: {
         paths.sessionUnresolved(sessionId),
         // Not "at the iteration cap": the loop also stops on a round that changed
         // nothing, which is precisely how a document whose remaining issues cannot be
-        // fixed here ends up with a list (pipeline/review.ts `review_converged`). This
-        // file is what a human reads on close (§7.13), so it says what is true of both.
+        // fixed here ends up with a list (pipeline/review.ts `review_converged`), and on
+        // a round whose response hit the output ceiling, where no editor pass worked on
+        // this list at all (`editor_truncated`). This file is what a human reads on close
+        // (§7.13), so it says what is true of all three; which one it was is in the
+        // delivered document and in the run log.
         `# Unresolved issues when the review loop stopped\n\n` +
           review.unresolved
             .map(
@@ -271,6 +275,10 @@ export async function runPipeline(args: {
         // A linter that could not run reports zero violations, which is why its
         // failure is recorded as a signal rather than inferred from an empty list.
         ...(review.lint.error ? [{ code: SIGNAL_LINT_ERROR, count: 1 }] : []),
+        // A round that was paid for in full and delivered nothing. Counted per document,
+        // not per round: the loop stops at the first one, because the next request would
+        // be the same length as the one that did not fit.
+        ...(review.editorTruncated ? [{ code: SIGNAL_EDITOR_TRUNCATED, count: 1 }] : []),
         // The final lint, i.e. what survived the whole review loop. `nodes` is the
         // offending-element count, kept apart from the per-document tally.
         ...review.lint.violations.map((v) => ({ code: v.id, impact: v.impact, count: v.nodes })),

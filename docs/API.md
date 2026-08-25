@@ -138,6 +138,7 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   "unresolved_rate": 0.07,
   "links_dropped_rate": 0.02,
   "lint_error_rate": 0,
+  "editor_truncated_rate": 0.01,
   "rules": [
     { "id": "heading-order", "impact": "moderate", "documents": 81, "share": 0.382, "nodes": 240 }
   ]
@@ -175,7 +176,8 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   deletion — is the one outcome a reader cannot detect. A `[page not fully transcribed]` marker
   always ends this way, by design: no pass in the review loop can resolve it, because finishing a
   page means returning the rest of it on top of the whole corrected body, and a response that hits
-  its ceiling ends the run with nothing delivered. So it is reported and left standing, and it
+  its ceiling costs the whole round — every other correction that round made included
+  (`editor_truncated_rate` below). So it is reported and left standing, and it
   raises this rate for a document that is otherwise sound — but only for as many rounds as it takes
   the editor to leave the document alone once, which is what now ends the loop. Read it as what it is — one page
   arrived short, and the document says where.
@@ -183,7 +185,22 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   missing after it.
 * `lint_error_rate` — share of documents whose lint pass **errored** instead of running. Recorded
   explicitly rather than inferred, because `runAxe` degrades to "no violations" when axe cannot run
-  at all, so a broken linter would otherwise read as a deployment that got better.
+  at all, so a broken linter would otherwise read as a deployment that got better. The `assembly`
+  line in that run's log carries `lint_error` with `lint_error_where` (`parse`, `inject` or `run`),
+  `lint_error_name` and the first frames of `lint_error_stack`, which is what makes one occurrence
+  chaseable; `axe-core` and `jsdom` are pinned to exact versions so the linter's behaviour changes
+  only when someone changes it.
+* `editor_truncated_rate` — share of documents where a correction round's **response** hit the
+  model's output-token ceiling. The editor is asked for the whole document, so its output length
+  follows the length of the document rather than the number of issues in it: at a large
+  `max_pages` an ordinary document doing exactly what it was told can exceed a fixed
+  `max_tokens`. Such a round is discarded and the loop stops — the document is delivered as it
+  entered that round, with those issues unresolved and an `@editor-truncated` comment saying so
+  — so this rate is also counted in `unresolved_rate`, and it is what tells the two apart: issues
+  the editor tried and could not fix, versus issues no editor pass ever worked on. A non-zero
+  value is a statement about the **deployment**, not about the documents: either
+  `providers.<name>.max_tokens` is too low for the pages allowed per session, or `max_pages` is
+  too high for it.
 * `rules[]` — axe-core rule ids, **per document**: `documents` is how many documents violated the
   rule and `share` is that over `documents` above, with `nodes` (total offending elements) alongside
   rather than folded in. One pathological scan with 400 bad headings is a worse `nodes` and the same
@@ -506,8 +523,11 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/output" -o output.html
 run log instead (step 7). An `<!-- @unresolved -->` comment listing outstanding issues is
 appended if the review loop stopped with any still open — at its iteration cap, or on a round that
 changed nothing, which is how a document whose remaining issues the loop is designed not to fix
-ordinarily ends. Returns `409` while the session is still
-running.
+ordinarily ends. A third stop reason adds a second comment: `<!-- @editor-truncated -->` says a
+correction round's response hit the model's output ceiling, so the round was discarded and **none**
+of the issues below it were worked on — read together with `@unresolved`, which on its own would
+say the editor tried and could not fix them (§0c `editor_truncated_rate`). Returns `409` while the
+session is still running.
 
 **Image references do not resolve, by design.** A graphic on the page — a logo, a diagram, a
 photograph — is emitted as an `<img>` with a description and a placeholder `src` naming the page
@@ -577,6 +597,7 @@ Useful events to grep for:
 | `editor_images_refused` | The provider refused the round's payload as too large, so the same prompt was re-sent **without** images. The correction still had the whole body and every issue; only a fidelity problem that must be checked against the source can go unfixed. |
 | `editor_links_dropped` | An `href` present before that round's correction was missing after it (`iteration`, `hrefs`). A link's target came from the source **file**, not from a page image, so a dropped one cannot be recovered by looking again — logged rather than repaired, and counted into `links_dropped_rate`. |
 | `editor_markers_changed` | The count of a `[not legible]` or `[page not fully transcribed]` marker changed across one correction round (`iteration`, `before`, `after`, plus `fewer` and/or `more`). `fewer` is expected where the editor read that region off the attached page image, and is a loss anywhere else — nothing downstream can tell those apart, and no other signal sees it at all, since the flattened view strips bracketed tokens before comparing words. `more` is a placeholder written over words the extractor did read, which no instruction in the loop allows. |
+| `editor_truncated` | A correction round's response hit the model's output ceiling (`max_tokens`, `chars` returned, plus `attached`/`of` images and `after: "images_refused"` when it was the retry that truncated). The round is discarded, the review loop stops, and the document that entered the round is delivered with that round's issues unresolved — a round may fail without the document. There is no `editor` line for such a round, which is how it is told apart from a round that ran and changed nothing (`review_converged`). The whole ceiling of output was billed, so this is the log's most expensive line. |
 | `reader` / `editor` | Per-iteration review-loop progress: the Reader's `issues` count, and whether that round's correction `changed` the document. |
 | `editor_no_output` | The Copy Editor's reply carried no usable body (`chars` of text came back), so the round kept the document it was given. A call paid for and nothing said — which is why it does not end the loop: the next round is a retry, not a repeat. |
 | `review_converged` | The loop stopped early because a round changed nothing (`iteration`, the `issues` that round was given, and the `rounds_left` it did not spend). The editor answered and handed back the document it was given, so the same request next round would be answered the same way; what ships is that document with those issues written to `@unresolved`. Expect this on a document whose remaining issues are the ones the loop is designed not to resolve — an undecidable pair of same-worded headings, a `[page not fully transcribed]` marker. Frequent lines here with `issues` the editor *should* be able to fix are the signal worth chasing: that is the editor declining work, not the loop saving a wasted round. |

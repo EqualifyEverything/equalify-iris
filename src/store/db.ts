@@ -169,8 +169,10 @@ export function pageSessions(
 // the problem documents alone and reported every rate as ~100%.
 export const SIGNAL_ROUNDS = "iris:rounds";
 // How many issues the review loop still had open when it stopped — at its iteration
-// cap, or on a round that changed nothing (pipeline/review.ts). Recorded only when
-// non-zero. Needed as its own signal because the round count cannot answer this:
+// cap, on a round that changed nothing, or on a round whose response hit the output
+// ceiling (pipeline/review.ts). That last one is recorded here AS WELL AS under
+// SIGNAL_EDITOR_TRUNCATED, from independent spreads: the two are not alternatives, so
+// a truncated document is in this numerator too. Recorded only when non-zero. Needed as its own signal because the round count cannot answer this:
 // `iterations_completed = iterations_max` is equally what a document that came back
 // clean on the very last permitted round looks like, and since the loop can also stop
 // early, a LOW round count no longer implies a document that needed little fixing.
@@ -184,6 +186,15 @@ export const SIGNAL_LINKS_DROPPED = "iris:links-dropped";
 // on an environment error, so a broken linter would quietly drive every
 // accessibility rate in this table to zero and read as a fixed deployment.
 export const SIGNAL_LINT_ERROR = "iris:lint-error";
+// A correction round's response hit the model's output token ceiling, so the round was
+// abandoned and the document delivered as it entered it (issue #143). Recorded because
+// the cost of it is invisible in every other rate here: the document ships, its issues
+// go into `iris:unresolved` exactly like issues the editor tried and failed to fix, and
+// the one thing that distinguishes them — a whole document's worth of output paid for
+// and discarded — would be a line in one session's log. It is also the rate that says
+// whether a deployment's `max_tokens` fits the documents it is being given, which is a
+// question about the deployment rather than about any one run.
+export const SIGNAL_EDITOR_TRUNCATED = "iris:editor-truncated";
 
 // One measurement about one delivered document. `count` is a magnitude (nodes for a
 // rule, issues for `iris:unresolved`, rounds for `iris:rounds`) and is never a
@@ -215,12 +226,17 @@ export interface QualityStats {
   // low count too. `null` only when there is nothing to average.
   mean_rounds: number | null;
   // Share of documents (0–1) whose review loop stopped with issues still open — at its
-  // iteration cap, or on a round that changed nothing.
+  // iteration cap, on a round that changed nothing, or on a round whose response hit the
+  // output ceiling. That last case is counted here too, so this is not disjoint from
+  // `editor_truncated_rate` below; it is the superset.
   unresolved_rate: number;
   // Share of documents where the Copy Editor dropped at least one link.
   links_dropped_rate: number;
   // Share of documents where axe-core could not run.
   lint_error_rate: number;
+  // Share of documents where a correction round's response hit the output ceiling and
+  // was discarded. Those documents are delivered, with that round's issues unresolved.
+  editor_truncated_rate: number;
   rules: {
     id: string;
     impact: string | null;
@@ -967,6 +983,7 @@ export class Store {
       unresolved_rate: rate(SIGNAL_UNRESOLVED),
       links_dropped_rate: rate(SIGNAL_LINKS_DROPPED),
       lint_error_rate: rate(SIGNAL_LINT_ERROR),
+      editor_truncated_rate: rate(SIGNAL_EDITOR_TRUNCATED),
       rules,
     };
   }
