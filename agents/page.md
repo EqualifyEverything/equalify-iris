@@ -38,9 +38,11 @@ edge, note it in the "log" field.
 
 Everything the page shows reaches your output. A long page, a table of forty rows, a page carrying
 three tables and a sidebar — all of it is emitted, and none of it is summarised, abbreviated, or
-handed back in part because the rest is more of the same. One thing does leave the page, by rule and
+handed back in part because the rest is more of the same. Two things leave the page, by rule and
 not by judgement: a symbol the page itself explains as a navigational device is kept out of the text
-and recorded in the "log" field (the rule is below, and it is narrow). Nothing else leaves.
+and recorded in the "log" field, and the number the page prints on itself is carried by the name of
+the page-break marker rather than transcribed beside it. Both rules are below, and both are narrow.
+Nothing else leaves.
 Nothing downstream marks what is missing: the document is assembled from what you return, so a row, an item or a section you leave
 out is simply not in the document any reader gets, and no later pass can tell it was ever there.
 Length is not a reason to stop. If the page truly holds more than you can return, emit it in

@@ -263,14 +263,19 @@ test("the page agent says what to do with what it cannot read, and emits the who
       /Everything the page shows reaches your output/],
     ["nothing is summarised or handed back in part",
       /none of it is summarised, abbreviated, or handed back in part because the rest is more of the same/],
-    // The one subtraction any rule below asks for (#110's explained symbol) is named HERE, in
-    // the absolute clause, because this paragraph is what would otherwise contradict it — and
-    // because `verifyAgentOutput` quotes this whole file into the verify prompt
-    // (src/pipeline/feedback.ts), so the verifier reads both and would score a rule-compliant
-    // omission as a fidelity problem, spending a correction round on re-adding the symbol the
-    // rule just removed.
-    ["the one thing that leaves the page by rule is named where the absolute rule is stated",
-      /One thing does leave the page, by rule and not by judgement: a symbol the page itself explains as a navigational device is kept out of the text and recorded in the "log" field .* Nothing else leaves/],
+    // Every subtraction a rule below asks for is enumerated HERE, in the absolute clause,
+    // because this paragraph is what would otherwise contradict them — #110's explained symbol
+    // and #145's printed folio, which the page-break marker carries as a name instead. Both
+    // halves have to stay in step: a rule elsewhere that removes something the page shows,
+    // with this paragraph still calling the list closed, leaves a model reconciling two
+    // unconditional sentences page by page, which is the per-page variation #145 was.
+    //
+    // It also has to be stated here for a second reader: `verifyAgentOutput` quotes this whole
+    // file into the verify prompt (src/pipeline/feedback.ts), so the verifier reads the
+    // absolute rule too and would score a rule-compliant omission as a fidelity problem,
+    // spending a correction round on re-adding what the rule removed.
+    ["the things that leave the page by rule are enumerated where the absolute rule is stated",
+      /Two things leave the page, by rule and not by judgement: a symbol the page itself explains as a navigational device is kept out of the text and recorded in the "log" field, and the number the page prints on itself is carried by the name of the page-break marker rather than transcribed beside it\. Both rules are below, and both are narrow\. Nothing else leaves/],
     ["the reason it matters: no later pass can tell a dropped row was ever there",
       /the document is assembled from what you return, so a row, an item or a section you leave out is simply not in the document any reader gets/],
     // A page that stops early is recorded only in `fragment.log` otherwise, and "log" is not
