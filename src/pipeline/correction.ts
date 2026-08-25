@@ -132,6 +132,25 @@ function attrText(html: string): string {
 export interface CorrectionEffect {
   chars_before: number;
   chars_after: number;
+  // The same two sizes with the markup taken out: how many characters a READER receives.
+  //
+  // `chars_*` cannot answer the question the correction accounting is actually asked, which
+  // is whether a page that failed its fidelity check had arrived WRONG or merely arrived
+  // unpolished (issue #166: "some way to tell a cosmetic discrepancy from a lost-content
+  // one, so a 71% fail rate can be read as 71% of pages had something to fix"). A correction
+  // that adds `<th scope="col">` to eight cells and one that brings back a lost table row
+  // both grow the fragment by a few hundred characters, and `text_changed` says only that
+  // some word somewhere moved.
+  //
+  // These two separate them without a threshold and without a model call: markup-only work
+  // leaves them equal, restored content raises `after`, and dropped content lowers it. The
+  // difference between this delta and the `chars_*` delta is the markup the pass added. Left
+  // as sizes rather than folded into a verdict because "how much prose may a legitimate
+  // correction move" is exactly the kind of number `CORRECTION_SHRINK_FLOOR` needed 265
+  // samples to place, and there is no corpus for this one yet — the diagnostics fold counts
+  // the direction only (grew, shrank, or the same length), which needs no band.
+  text_chars_before: number;
+  text_chars_after: number;
   text_changed: boolean;
   alt_changed: boolean;
   attrs_changed: boolean;
@@ -139,10 +158,17 @@ export interface CorrectionEffect {
 }
 
 export function correctionEffect(before: string, after: string): CorrectionEffect {
+  // Held rather than recomputed inside the comparison: the same two strings answer both
+  // `text_changed` and the sizes, and a second pass over a 20 kB fragment to ask a second
+  // question about it is work for nothing.
+  const textBefore = visibleText(before);
+  const textAfter = visibleText(after);
   return {
     chars_before: before.length,
     chars_after: after.length,
-    text_changed: visibleText(before) !== visibleText(after),
+    text_chars_before: textBefore.length,
+    text_chars_after: textAfter.length,
+    text_changed: textBefore !== textAfter,
     alt_changed: altText(before) !== altText(after),
     attrs_changed: attrText(before) !== attrText(after),
     structure_changed: tagShape(before) !== tagShape(after),

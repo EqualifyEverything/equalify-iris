@@ -622,11 +622,11 @@ Useful events to grep for:
 | `page_recovered` | A feedback re-extraction succeeded on a page an earlier run had lost, so the document is whole again for those `pages`. Logged late in the run, once that document has been persisted: a round that re-extracts the page and then throws in review leaves the earlier document — hole and all — as the one the session holds. |
 | `extraction_failed` | **Every** page failed, so the run is ending rather than delivering a document with no content in it. The `run_failed` line that follows carries the first page's provider error. |
 | `page_verify_ok` / `page_verify_failed` | The Feedback Agent's fidelity verdict on one page, checked against its source image. A failure names its `problems` and buys that page one self-correction pass. A page that passes can still be re-rendered (a dropped link), so a run's `page` call count is `pages + corrections`, not `pages + failures`. |
-| `page_corrected` | What a self-correction pass did (`trigger`: `verify`, `links` or `both`; `problems`: how many it was given). `result` is `kept` (it changed the delivered document), `rejected` (thrown away in favour of the page it was meant to improve — see `page_correction_rejected` and `page_links_correction_rejected` for the two reasons), `identical` (it changed nothing about the page), `empty` (nothing usable came back) or `failed` (the model call threw, so nothing came back at all — see `page_correction_failed`); the last three are calls paid for that bought nothing, and `failed` is the expensive one, since a truncation has already paid for a full ceiling of output. `identical` is decided on the **effect**, not on string identity, so a model that returns its own page re-indented or with `&` for `&amp;` is counted here rather than as `kept`. Note that such a fragment is still **adopted** — what ships is decided on string identity, deliberately, so that a change no signal here observes cannot be silently reverted; `identical` means the page call bought nothing, not that its output was discarded (that is `rejected`). Two shapes of `identical` are worth telling apart, and field presence is what tells them apart: with `chars_before` / `chars_after` and all four flags `false`, the model re-typed the page to no effect; with no sizes and no flags at all, it handed back the exact string it was given. Same bill, different behaviour. When it changed something, `text_changed` / `alt_changed` / `attrs_changed` / `structure_changed` and `chars_before` / `chars_after` say **what** changed — observed on the two fragments, not claimed by the verdict, so an alt-text refinement, a re-typed `href` and a restored table row are distinguishable. |
+| `page_corrected` | What a self-correction pass did (`trigger`: `verify`, `links` or `both`; `problems`: how many it was given). `result` is `kept` (it changed the delivered document), `rejected` (thrown away in favour of the page it was meant to improve — see `page_correction_rejected` and `page_links_correction_rejected` for the two reasons), `identical` (it changed nothing about the page), `empty` (nothing usable came back) or `failed` (the model call threw, so nothing came back at all — see `page_correction_failed`); the last three are calls paid for that bought nothing, and `failed` is the expensive one, since a truncation has already paid for a full ceiling of output. `identical` is decided on the **effect**, not on string identity, so a model that returns its own page re-indented or with `&` for `&amp;` is counted here rather than as `kept`. Note that such a fragment is still **adopted** — what ships is decided on string identity, deliberately, so that a change no signal here observes cannot be silently reverted; `identical` means the page call bought nothing, not that its output was discarded (that is `rejected`). Two shapes of `identical` are worth telling apart, and field presence is what tells them apart: with `chars_before` / `chars_after` and all four flags `false`, the model re-typed the page to no effect; with no sizes and no flags at all, it handed back the exact string it was given. Same bill, different behaviour. When it changed something, `text_changed` / `alt_changed` / `attrs_changed` / `structure_changed` and `chars_before` / `chars_after` say **what** changed — observed on the two fragments, not claimed by the verdict, so an alt-text refinement, a re-typed `href` and a restored table row are distinguishable. `text_chars_before` / `text_chars_after` are the same two sizes with the markup taken out — how much prose a *reader* receives — which is what separates a correction that added markup to a page that was already complete from one that brought back content the vision pass had dropped. |
 | `page_correction_rejected` | A correction came back at less than a quarter of the size of the page it was given (`page`, `image`, `trigger`, `reason: "shrank"`, `chars_before`, `chars_after`), so it was refused and the page it was asked to correct is what ships — paired with `page_corrected` `result: "rejected"`. A correction is single-shot, so what it returns is what the document would keep; a reply this much smaller did not correct that page. Applies on **every** trigger, unlike the links path's own check, and it is decided before either re-verification, so no Feedback Agent call is spent judging a fragment nothing will deliver. In the bench logs the two replies that would have hit this were an agent's scratch template and an abandoned draft, both bound by a parser that took the first `{…}` in a reasoning model's reply rather than the last (issue #170); the parser now reads the right one, and this is the floor under that judgement. |
 | `page_correction_failed` | A self-correction's model call threw (`page`, `image`, `trigger`, `problems`, `error`, `truncated`, `chars_kept`), so the page keeps the version it already had — the extraction that succeeded, verified minutes earlier. It costs the **correction**, not the page: before this, the error propagated out of the page's own task and the run logged `page_extraction_failed` and shipped a `@page-failed` marker for a page it still had, which also named a stage that had worked (issue #171). Paired with `page_corrected` `result: "failed"`. Every error class is survivable here, not only a ceiling — a throttle, a stall and a truncation all leave behind a page good enough to have been worth correcting — and nothing is retried, because a correction truncating because the *page* is large will truncate again for a second full ceiling of output. `truncated: true` is the one shape with a configuration remedy (`providers.*.max_tokens`); it also says the model wrote an essay where a page was asked for, which is worth reading beside `page_verify_failed`'s problem list. `chars_kept` is the size of the fragment that ships. The fidelity problems the correction was asked to fix are still unfixed and still on record — keeping the page is not a claim that it was right. |
 | `page_correction_no_output` | A self-correction's reply carried no readable HTML (`page`, `image`, `chars`, `shape` — the same shapes as `page_no_output`), so the page keeps the version it had. That version had already passed everything except the fidelity problem the correction was asked to fix, which makes it strictly better than the reply. Paired with `page_corrected` `result: "empty"`, which is the existing record of a correction call that bought nothing; this line says what came back instead. |
-| `page_correction_recheck` | A second verdict on a corrected page (`ok`, `problems`). `binding: true` is the links path re-verifying a rewrite it may discard; `binding: false` is a measurement-only sample, one page per batch, which changes nothing about what is delivered. The two are counted apart in `verification.rechecks`; `sampled_ok / sampled` across many runs is whether correction converges. |
+| `page_correction_recheck` | A second verdict on a corrected page (`ok`, `problems`), with `problems_before` / `problems_after` — how many the page was sent to be corrected with, and how many this verdict names. `binding: true` is the links path re-verifying a rewrite it may discard; `binding: false` is a measurement-only sample, one page per batch, which changes nothing about what is delivered. The two are counted apart in `verification.rechecks`; `sampled_ok / sampled` across many runs is whether correction converges. Read the two counts beside it: a correction pass is single-shot and was never expected to reach zero problems, so five-in-one-out and five-in-five-out are both `ok: false` and only these say which happened. They are counts, not a diff — deciding whether two of the Feedback Agent's prose descriptions are the same problem is fuzzy matching on model output, so both lists are on the line in full instead. |
 | `page_correction_recheck_failed` | The measurement-only sample could not be taken — the extra Feedback Agent call hit a provider error (`error`). Logged rather than raised: the page ships as it would have with no measurement at all, and the batch's one sample slot stays spent, so a throttled provider is not retried once per corrected page. A `binding` recheck has no such line, because there the verdict decides whether the rewrite is kept. |
 | `editor_images` | How many source images the Copy Editor received this round (`attached` of `of`, plus `pages`). A `dropped` count means the selection did not fit in one request and was trimmed to the pages issues actually named. `attached == of` on a multi-page document means at least one issue in that round carried no page attribution, so the round asked for everything. |
 | `editor_images_refused` | The provider refused the round's payload as too large, so the same prompt was re-sent **without** images. The correction still had the whole body and every issue; only a fidelity problem that must be checked against the source can go unfixed. |
@@ -675,8 +675,11 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
     "pages_verified": 25, "verify_failed": 13, "corrections": 14,
     "results": { "kept": 12, "rejected": 0, "identical": 2, "empty": 0, "failed": 0 },
     "triggers": { "verify": 13, "links": 1, "both": 0 },
-    "effects": { "alt_only": 4, "text": 8, "attrs": 3, "structure": 6 },
-    "rechecks": { "sampled": 1, "sampled_ok": 1, "binding": 1, "binding_ok": 1 }
+    "effects": { "alt_only": 4, "text": 8, "attrs": 3, "structure": 6, "text_grew": 5, "text_shrank": 1 },
+    "rechecks": {
+      "sampled": 1, "sampled_ok": 1, "sampled_problems_before": 3, "sampled_problems_after": 0,
+      "binding": 1, "binding_ok": 1
+    }
   },
   "pages_failed": []
 }
@@ -785,19 +788,52 @@ stands alone, and a run where it dominates is spending a page call per page on i
 `attrs` is every attribute but `alt`, which is where the cheapest real fixes live — an `href` the
 model re-typed, a missing `<th scope>`, an `aria-describedby` — a correction that moves no word and
 still matters.
+`text_grew` and `text_shrank` split `text` by direction, measured on the prose a reader receives:
+how many corrections added words, how many removed them, and by subtraction how many rewrote the
+same quantity in place. That is what makes a high `verify_failed` rate readable in either direction.
+Two bench rounds put it at 71% and 74% of pages, with `attrs` and `structure` touched on nearly
+every correction — which reads either as most pages arriving with content missing, or as most pages
+arriving fine and being polished, and no count could tell the two apart. A round clustered in
+`text_grew` is recovering content the vision pass dropped; one that barely leaves `attrs` and
+`structure` is buying markup on pages that were already readable, and the cheaper fix for that is
+the page prompt rather than a call per page. There is no threshold — a correction that adds one
+character counts as `text_grew`, because any band calling that "cosmetic" would be picked rather
+than measured, and the magnitudes are on each `page_corrected` line for anyone with a corpus to
+calibrate one on.
 `rechecks` is whether correction **converges**: `sampled_ok / sampled` is a corrected page that had
 FAILED its check, verified a second time to see whether the re-render fixed it. One sample per batch
 is deliberate — re-verifying every corrected page would roughly double the share of the bill the
 question is about — so it is a fleet number that accrues over runs, not a verdict on any single
-document. `binding` is counted apart from it and not added to it: those are the links path's own
-re-verifications of pages that had already **passed**, kept or discarded on the verdict, so their
-ok-rate answers "did a rewrite of a good page stay good" — a different question, and on a link-heavy
-PDF there is one per page, enough to swamp the sample if the two were summed.
+document. `sampled_problems_before / sampled_problems_after` is how far the kept corrections got:
+`sampled_ok` alone read as pass/fail on a single-shot pass that was never expected to reach zero, so
+11 problems in and 3 out looked exactly like 11 and 11. Both are sums over the sampled pages, so
+read them as a ratio rather than a per-page average, and note that `sampled_problems_after: 0` does
+not mean the sample passed — a verdict's `ok` is its `faithful` / `accessible` flags, which an agent
+can set false while naming nothing. `binding` is counted apart from the sample and not added to it:
+those are the links path's own re-verifications of pages that had already **passed**, kept or
+discarded on the verdict, so their ok-rate answers "did a rewrite of a good page stay good" — a
+different question, and on a link-heavy PDF there is one per page, enough to swamp the sample if the
+two were summed. They have no `problems_*` pair for the same reason: their before-count is mostly
+links the code found missing, and their verdict decides whether the rewrite ships at all rather than
+measuring how far a kept one got.
 
-Nothing in here gates anything. A verify-driven correction is accepted exactly as it was before
-these fields existed; whether to re-render until a page passes, or to run a cheaper verifier, is a
-policy question that needs the rate first. Like `model_calls`, the counts sum over every run a
-session has had, so a feedback round that re-extracts three pages adds three more verifications.
+`rejected: 0` over a whole round is the expected reading of a healthy one, not a gate that accepts
+everything. The only rejection that applies on every trigger is the shrink floor — a correction that
+came back at less than a quarter of the page it was given — which catches a parser or ceiling
+failure, not a bad rewrite. (Before it existed, `rejected` was reachable on the `links` trigger
+alone, so a round whose corrections were all verify-driven could not produce one at any rate of
+badness; two bench rounds of 145 corrections read `rejected: 0` for that reason.) A correction that
+is merely **wrong** is kept, and `rechecks.sampled_problems_*` is where that shows up.
+
+Nothing else in here gates anything, deliberately. A verify-driven correction is accepted exactly as
+it was before these fields existed, including one whose sampled recheck failed. Discarding it would
+not restore a good page — it would ship the fragment that had already failed the same verifier, so
+the choice is between a page with fewer named problems and a page with more. The sample is also one
+page per batch, so binding it would put a gate on page 4 that page 5 never sees; binding it for
+every page means a Feedback Agent call per correction, which is the cost under investigation.
+Whether to re-render until a page passes, or to run a cheaper verifier, is a policy question that
+needs the rate first. Like `model_calls`, the counts sum over every run a session has had, so a
+feedback round that re-extracts three pages adds three more verifications.
 
 `pages_failed` is the set of source pages the delivered document has no content for, because their
 own extraction threw (§7c). It has its own field

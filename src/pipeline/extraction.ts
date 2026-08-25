@@ -1062,6 +1062,30 @@ async function extractPage(
         // answer to it needs the rate this event exists to produce (issue #137). See
         // `RECHECKS_PER_BATCH` for why it is one page and not all of them.
         //
+        // Two bench rounds later that is the thing being asked about: 200 pages, 8 samples,
+        // 2 of them ok, every correction kept regardless, and the note is that a check with no
+        // consequence is decorative (issue #166). Three reasons it stays as it is, in the
+        // order they bind.
+        //
+        // What discarding buys. A rejected correction does not restore a good page — it ships
+        // the fragment that FAILED this same verifier minutes earlier. On those rounds the
+        // verifier rejected 71% and 74% of first renders, so the choice is not a good page
+        // against a bad one, it is a page with fewer named problems against a page with more,
+        // and `problems_before`/`problems_after` on the line below is the number that says
+        // which. The links path is the case where discarding does make sense and it is
+        // binding there: those pages had PASSED, so the original has standing to protect.
+        //
+        // Whose page it would apply to. This is one page per batch. Binding it would put a
+        // gate on page 4 that page 5 never sees, and the delivered document would differ by
+        // which page happened to win the sample slot. Binding it for everyone means a Feedback
+        // Agent call per corrected page — 71 of them on a 100-page round, roughly doubling the
+        // 24% verification share that is under investigation in the first place.
+        //
+        // And how much the sample says. Eight verdicts, of which round 3 supplied 0 ok and
+        // round 4 supplied 2, is not a rate yet. This is a measurement whose whole purpose is
+        // to be accumulated across runs before anything is decided on it, and binding it now
+        // would spend the pages it was collected to protect.
+        //
         // And nothing here can cost a page either. `verifyAgentOutput` is non-blocking
         // for an absent Feedback Agent and an unparseable reply, but a PROVIDER error is
         // rethrown (providers/index.ts logs `model_call ok:false` and throws), so an
@@ -1094,6 +1118,20 @@ async function extractPage(
           page: img.order,
           ok: !failedCheck(recheck),
           problems: recheck.problems,
+          // How many problems the page went in with and came out with. `ok` alone made this
+          // event unreadable in exactly the way issue #166 reports: four sampled rechecks,
+          // four not-ok, and no way to tell a correction that fixed nothing from one that
+          // fixed four of five problems and left the fifth. The pass is single-shot, so
+          // "fewer" is the outcome it can realistically produce and "none" is not the bar it
+          // was built to clear.
+          //
+          // Counts and not a comparison of the two lists: the problems are the Feedback
+          // Agent's prose, and deciding whether "the table's third column is misaligned" and
+          // "column 3 of the table does not line up" are the same problem is fuzzy matching
+          // on model output with a threshold nothing here can calibrate. Both lists are on
+          // the line in full for a reader who wants to make that judgement themselves.
+          problems_before: problems.length,
+          problems_after: recheck.problems.length,
           // Whether this verdict was allowed to change what is delivered. False for the
           // sample, so a consumer cannot read it as the loop having gained a gate.
           binding: !verifyFailed,

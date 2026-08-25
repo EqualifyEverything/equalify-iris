@@ -397,16 +397,20 @@ test("the verification tally counts what was checked, corrected and re-checked",
     { ts: T(3), type: "page_corrected", image: "page-001.png", page: 1, trigger: "verify", problems: 1,
       result: "kept", chars_before: 900, chars_after: 940,
       text_changed: false, alt_changed: true, attrs_changed: false, structure_changed: false },
-    // Content coming back: text and structure both, and both counted.
+    // Content coming back: text and structure both, and both counted. The reader's share of
+    // it grew too, which is what says the correction restored content rather than adding
+    // markup to a page that already had it (issue #166).
     { ts: T(3), type: "page_corrected", image: "page-003.png", page: 3, trigger: "verify", problems: 1,
       result: "kept", chars_before: 1200, chars_after: 1600,
+      text_chars_before: 800, text_chars_after: 1010,
       text_changed: true, alt_changed: false, attrs_changed: false, structure_changed: true },
     // And the cheap real fix: a page that passed its check, lost a link, and came back with
     // the URL re-typed. No word on it moves, and it is not a correction that bought nothing.
     { ts: T(3), type: "page_corrected", image: "page-002.png", page: 2, trigger: "links", problems: 1,
       result: "kept", chars_before: 700, chars_after: 702,
       text_changed: false, alt_changed: false, attrs_changed: true, structure_changed: false },
-    { ts: T(4), type: "page_correction_recheck", image: "page-001.png", page: 1, ok: true, problems: [], binding: false },
+    { ts: T(4), type: "page_correction_recheck", image: "page-001.png", page: 1, ok: true, problems: [],
+      problems_before: 1, problems_after: 0, binding: false },
     { ts: T(5), type: "run_complete" },
   );
   const d = summarizeRun(text, done(Date.parse(T(5))));
@@ -415,10 +419,17 @@ test("the verification tally counts what was checked, corrected and re-checked",
   assert.equal(d.verification.corrections, 3);
   assert.deepEqual(d.verification.results, { kept: 3, rejected: 0, identical: 0, empty: 0, failed: 0 });
   // `text` and `structure` are not exclusive — one re-render is both — while `alt_only`
-  // is the count of corrections that moved nothing but a description.
-  assert.deepEqual(d.verification.effects, { alt_only: 1, text: 1, attrs: 1, structure: 1 });
+  // is the count of corrections that moved nothing but a description. `text_grew` is the
+  // subset of `text` that added prose: the alt-only and attribute-only passes moved no
+  // words, so neither is in either direction.
+  assert.deepEqual(d.verification.effects, {
+    alt_only: 1, text: 1, attrs: 1, structure: 1, text_grew: 1, text_shrank: 0,
+  });
   assert.deepEqual(d.verification.triggers, { verify: 2, links: 1, both: 0 });
-  assert.deepEqual(d.verification.rechecks, { sampled: 1, sampled_ok: 1, binding: 0, binding_ok: 0 });
+  assert.deepEqual(d.verification.rechecks, {
+    sampled: 1, sampled_ok: 1, sampled_problems_before: 1, sampled_problems_after: 0,
+    binding: 0, binding_ok: 0,
+  });
 });
 
 test("a correction that bought nothing is counted apart from one that was kept", () => {
@@ -436,7 +447,8 @@ test("a correction that bought nothing is counted apart from one that was kept",
       truncated: true, chars_kept: 17721 },
     { ts: T(1), type: "page_corrected", image: "e.png", page: 5, trigger: "verify", problems: 2, result: "failed" },
     { ts: T(2), type: "page_corrected", image: "c.png", page: 3, trigger: "links", problems: 1, result: "rejected",
-      chars_before: 500, chars_after: 480, text_changed: true, alt_changed: false,
+      chars_before: 500, chars_after: 480, text_chars_before: 300, text_chars_after: 240,
+      text_changed: true, alt_changed: false,
       attrs_changed: false, structure_changed: true },
     // A rewrite that refined a description AND re-typed an attribute is not `alt_only`:
     // that bucket exists to name the run that pays a page call per page for image
@@ -445,20 +457,29 @@ test("a correction that bought nothing is counted apart from one that was kept",
       chars_before: 500, chars_after: 530, text_changed: false, alt_changed: true,
       attrs_changed: true, structure_changed: false },
     { ts: T(3), type: "page_correction_recheck", image: "c.png", page: 3, ok: false,
-      problems: ["a heading level was lost"], binding: true },
+      problems: ["a heading level was lost"], problems_before: 1, problems_after: 1, binding: true },
     { ts: T(4), type: "run_complete" },
   );
   const d = summarizeRun(text, done(Date.parse(T(4))));
   assert.equal(d.verification.corrections, 5);
   assert.deepEqual(d.verification.results, { kept: 1, rejected: 1, identical: 1, empty: 1, failed: 1 });
   // A rejected correction's effect is still what it changed — it says what the rewrite
-  // would have done to a page that had passed.
-  assert.deepEqual(d.verification.effects, { alt_only: 0, text: 1, attrs: 1, structure: 1 });
+  // would have done to a page that had passed. Which here is drop prose, so it is the
+  // `text_shrank` case: the direction is worth recording on a rewrite that was refused
+  // precisely because the links path checked it.
+  assert.deepEqual(d.verification.effects, {
+    alt_only: 0, text: 1, attrs: 1, structure: 1, text_grew: 0, text_shrank: 1,
+  });
   assert.deepEqual(d.verification.triggers, { verify: 3, links: 1, both: 1 });
   // The links path's re-verification is `binding`, and stays out of the sample it would
   // otherwise outnumber: this page had PASSED its check and was rewritten for a link, so
-  // its failure says nothing about whether correcting a FAILED page converges.
-  assert.deepEqual(d.verification.rechecks, { sampled: 0, sampled_ok: 0, binding: 1, binding_ok: 0 });
+  // its failure says nothing about whether correcting a FAILED page converges. Its problem
+  // counts stay out too — a binding verdict decides whether the rewrite ships rather than
+  // measuring how far a kept one got, and its before-count is mostly missing links.
+  assert.deepEqual(d.verification.rechecks, {
+    sampled: 0, sampled_ok: 0, sampled_problems_before: 0, sampled_problems_after: 0,
+    binding: 1, binding_ok: 0,
+  });
 });
 
 test("a log from before these events reports zeros, not absences", () => {
@@ -485,9 +506,44 @@ test("a log from before these events reports zeros, not absences", () => {
   }
   assert.deepEqual(d.verification.results, { kept: 0, rejected: 0, identical: 0, empty: 0, failed: 0 });
   assert.deepEqual(d.verification.triggers, { verify: 0, links: 0, both: 0 });
-  assert.deepEqual(d.verification.effects, { alt_only: 0, text: 0, attrs: 0, structure: 0 });
-  assert.deepEqual(d.verification.rechecks, { sampled: 0, sampled_ok: 0, binding: 0, binding_ok: 0 });
+  assert.deepEqual(d.verification.effects, {
+    alt_only: 0, text: 0, attrs: 0, structure: 0, text_grew: 0, text_shrank: 0,
+  });
+  assert.deepEqual(d.verification.rechecks, {
+    sampled: 0, sampled_ok: 0, sampled_problems_before: 0, sampled_problems_after: 0,
+    binding: 0, binding_ok: 0,
+  });
   assert.deepEqual(summarizeRun("", done(Date.parse(T(0)))).verification.rechecks, {
-    sampled: 0, sampled_ok: 0, binding: 0, binding_ok: 0,
+    sampled: 0, sampled_ok: 0, sampled_problems_before: 0, sampled_problems_after: 0,
+    binding: 0, binding_ok: 0,
+  });
+});
+
+test("a log from before the prose sizes and the problem counts leaves both sums alone", () => {
+  // The narrower version of the test above, for the two fields added for issue #166. Both
+  // are read as absent rather than as zero, and the difference matters in opposite
+  // directions: a missing `text_chars_after` read as 0 puts a productive correction in
+  // `text_shrank`, reporting a page that lost every word it had, and a missing
+  // `problems_before` read as 0 makes the recheck pair say the loop was correcting pages
+  // that had nothing wrong with them.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_corrected", image: "a.png", page: 1, result: "kept", trigger: "verify",
+      problems: 2, chars_before: 400, chars_after: 900, text_changed: true, alt_changed: false,
+      attrs_changed: false, structure_changed: true },
+    { ts: T(2), type: "page_correction_recheck", image: "a.png", page: 1, ok: false,
+      problems: ["a table row is still missing"], binding: false },
+    { ts: T(3), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(3))));
+  // Counted everywhere it always was.
+  assert.deepEqual(d.verification.results, { kept: 1, rejected: 0, identical: 0, empty: 0, failed: 0 });
+  assert.deepEqual(d.verification.effects, {
+    alt_only: 0, text: 1, attrs: 0, structure: 1, text_grew: 0, text_shrank: 0,
+  });
+  // A sample was taken and it failed; how far it got is not in this log and is not invented.
+  assert.deepEqual(d.verification.rechecks, {
+    sampled: 1, sampled_ok: 0, sampled_problems_before: 0, sampled_problems_after: 0,
+    binding: 0, binding_ok: 0,
   });
 });
