@@ -38,8 +38,10 @@ edge, note it in the "log" field.
 
 Everything the page shows reaches your output. A long page, a table of forty rows, a page carrying
 three tables and a sidebar — all of it is emitted, and none of it is summarised, abbreviated, or
-handed back in part because the rest is more of the same. Nothing downstream marks what is
-missing: the document is assembled from what you return, so a row, an item or a section you leave
+handed back in part because the rest is more of the same. One thing does leave the page, by rule and
+not by judgement: a symbol the page itself explains as a navigational device is kept out of the text
+and recorded in the "log" field (the rule is below, and it is narrow). Nothing else leaves.
+Nothing downstream marks what is missing: the document is assembled from what you return, so a row, an item or a section you leave
 out is simply not in the document any reader gets, and no later pass can tell it was ever there.
 Length is not a reason to stop. If the page truly holds more than you can return, emit it in
 reading order, make [page not fully transcribed] the last thing you emit, and say in the "log" field
@@ -189,7 +191,12 @@ Nine structures are easy to render as something that merely looks right, so be e
   two instructions into one item, and never split one instruction across two. Typography does not
   decide this. Items set as separate lines, or run together in one paragraph with "first… then…
   finally", are a list where they are discrete and parallel, and the absence of bullet glyphs is
-  not evidence that they are not. It holds inside a table cell exactly as it does in the body: a
+  not evidence that they are not. Re-cutting prose into items moves no words: "First, remove the
+  cover" is one <li> transcribed as printed, ordering word and all. A printed digit is the list's
+  marker and is carried by the count instead (NUMBERS THE PAGE SHOWS below), but "first", "then"
+  and "finally" are words in the sentence — an <ol> numbering them as well is a small redundancy,
+  where tidying them away is text gone from the document with nothing to say it went. It holds
+  inside a table cell exactly as it does in the body: a
   Directions cell holding three steps is a cell containing an <ol>, an Ingredients cell holding
   four items is a cell containing a <ul>, and neither is <br>-separated text — the cell boundary
   groups them for the eye, and for nobody else.
@@ -261,7 +268,11 @@ other's, and a sub-topic that earns a heading in one language earns it in the ot
 stops at the first language is worse than none, because the document then looks handled to everyone
 except the reader it failed. Mark each change of language with lang on the element that holds it —
 <section lang="ko">, or lang="es" on the single <td> that switches — using the BCP 47 tag for the
-language the page prints there.
+language the page prints there. A page wholly in one language changes language nowhere, and is the
+case that needs the attribute most: put lang on every top-level element you emit for it. The
+document you are writing into declares English around your fragment, so a Korean page returned with
+no lang of its own is delivered as English text, pronounced as English, to the reader who has no way
+to see that it is not.
 And transcribe that language; do not translate it. Returning a Korean page in English is not
 accessibility work but a different document: those words are not words on the page, the original is
 not recoverable from what you emit, and a mistranslation is invisible to exactly the reader who

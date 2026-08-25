@@ -187,6 +187,14 @@ test("the page agent says what to do with what it cannot read, and emits the who
       /Everything the page shows reaches your output/],
     ["nothing is summarised or handed back in part",
       /none of it is summarised, abbreviated, or handed back in part because the rest is more of the same/],
+    // The one subtraction any rule below asks for (#110's explained symbol) is named HERE, in
+    // the absolute clause, because this paragraph is what would otherwise contradict it — and
+    // because `verifyAgentOutput` quotes this whole file into the verify prompt
+    // (src/pipeline/feedback.ts), so the verifier reads both and would score a rule-compliant
+    // omission as a fidelity problem, spending a correction round on re-adding the symbol the
+    // rule just removed.
+    ["the one thing that leaves the page by rule is named where the absolute rule is stated",
+      /One thing does leave the page, by rule and not by judgement: a symbol the page itself explains as a navigational device is kept out of the text and recorded in the "log" field .* Nothing else leaves/],
     ["the reason it matters: no later pass can tell a dropped row was ever there",
       /the document is assembled from what you return, so a row, an item or a section you leave out is simply not in the document any reader gets/],
     // A page that stops early is recorded only in `fragment.log` otherwise, and "log" is not
@@ -457,6 +465,13 @@ test("the page agent's list rule keeps the clauses that make it a rule", () => {
     // what the previous wording ("real lists") left open.
     ["missing bullet glyphs are not evidence that something is not a list",
       /the absence of bullet glyphs is not evidence that they are not/],
+    // Re-cutting a "first… then… finally" paragraph into <li>s is the one clause here that
+    // asks for prose to be broken up, and every neighbouring rule says words leave the page
+    // only under a named exception — so it has to say what happens to the connectives, or a
+    // model tidies them away as an unlogged omission. They stay; the printed DIGIT does not,
+    // and the difference is stated because the rule directly below says digits are not text.
+    ["the ordering words stay in the item, unlike a printed digit",
+      /Re-cutting prose into items moves no words: "First, remove the cover" is one <li> transcribed as printed, ordering word and all\. A printed digit is the list's marker and is carried by the count instead/],
     // #130, #131: the Ingredients and Directions columns of a recipe table. Reported twice
     // from one session, the second time after a round that changed nothing.
     ["a table cell holding several items or steps contains the list, not <br>-separated text",
@@ -538,6 +553,15 @@ test("the page agent's multilingual rule keeps parity, lang, and the refusal to 
     // (src/pipeline/accessibility.ts); this says which element carries it and in what form.
     ["lang goes on the element that holds the change, with a BCP 47 tag",
       /Mark each change of language with lang on the element that holds it — <section lang="ko">, or lang="es" on the single <td> that switches — using the BCP 47 tag/],
+    // And the case #121 actually reported: a page wholly in one language, which contains no
+    // CHANGE of language, so a rule keyed on changes never fires for it. `wrapDocument`
+    // (src/pipeline/assembly.ts) declares lang="en" on the shell and nothing derives it from
+    // the content, so without this clause that page ships as English text — the one output
+    // where the attribute is the whole of what the reader needed.
+    ["a page wholly in another language carries lang on what it emits, change or no change",
+      /A page wholly in one language changes language nowhere, and is the case that needs the attribute most: put lang on every top-level element you emit for it/],
+    ["and the reason: the document declares English around the fragment",
+      /The document you are writing into declares English around your fragment, so a Korean page returned with no lang of its own is delivered as English text, pronounced as English/],
     // The declined ask, with all three reasons, since any one of them alone reads as a
     // technicality.
     ["translation is refused",
