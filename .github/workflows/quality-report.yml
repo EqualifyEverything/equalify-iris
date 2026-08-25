@@ -183,12 +183,19 @@ jobs:
               ;;
           esac
 
-          if ! jq -e '.documents? != null and .rules? != null' /tmp/quality.json >/dev/null 2>&1; then
+          if ! jq -e '.documents? != null and .documents_linted? != null and .rules? != null' /tmp/quality.json >/dev/null 2>&1; then
             # A 200 that is not the tally: a login page, a proxy error page, an older
             # deployment. Treated like an unreachable endpoint rather than parsed
             # optimistically, because every threshold below reads a missing field as
             # `null`, and `null > 0.15` is false — a garbled response would file
             # nothing and look exactly like a clean week.
+            #
+            # `documents_linted` is checked by name for the second reason: it is
+            # interpolated into the issue bodies below, and a deployment older than #164
+            # answers this endpoint without it. That case is not a silent miss but a
+            # public issue reading "1 of null documents that were linted at all", so a
+            # field an issue body quotes has to be a field this gate demands. Whoever
+            # adds the next such field should add it here too.
             echo "should_run=false" >> "$GITHUB_OUTPUT"
             echo "::error::$BASE/v1/quality returned 200 but not a quality tally. Nothing was measured this week."
             exit 1
@@ -313,7 +320,7 @@ jobs:
           #   4 a rule        — a specific recurring barrier: the most actionable of
           #                    these, but narrower than the three above it.
           #   5 rounds        — a cost and quality proxy, and the weakest signal here.
-          jq -r --argjson t "$THRESHOLDS" '
+          jq -r --argjson t "$THRESHOLDS" --argjson min "$MIN_DOCUMENTS" '
             . as $q
             | ( if ($q.lint_error_rate // 0) > $t.lint then
                   [ { key: "lint-error", sev: 1,
@@ -330,7 +337,16 @@ jobs:
                       title: "Quality regression: too many documents ship with unresolved issues",
                       metric: "unresolved_rate", value: $q.unresolved_rate, threshold: $t.unresolved } ]
                 else [] end )
-              + ( [ $q.rules[]? | select(.share > $t.rule)
+              # `MIN_DOCUMENTS` is checked twice: once above on `documents`, and again
+              # here on `documents_linted`, because a rule share divides by the second
+              # and nothing else floors it. Twenty delivered documents of which
+              # nineteen could not be linted leaves every rule share measured over ONE
+              # document, where one violation is 100% and crosses this threshold — an
+              # issue filed about a prompt on the strength of a single page, and a
+              # 30-day cooldown started on a rule that was never really measured. The
+              # lint-error finding above fires in that window too and outranks this,
+              # but it does not crowd it out: both fit under MAX_ISSUES_PER_RUN.
+              + ( [ $q.rules[]? | select($q.documents_linted >= $min) | select(.share > $t.rule)
                     | { key: ("rule-" + .id), sev: 4,
                         title: ("Quality regression: axe rule `" + .id + "` fails on a large share of documents"),
                         metric: ("rules[\"" + .id + "\"].share"), value: .share, threshold: $t.rule,
@@ -342,6 +358,18 @@ jobs:
                 else [] end )
             | sort_by(.sev, (0 - .value))
             | .[] | @json' /tmp/quality.json > /tmp/findings.jsonl
+
+          # Say so when the rule table was skipped for want of a denominator, rather than
+          # letting "no rule crossed its threshold" stand for "no rule was measured".
+          LINTED=$(jq -r '.documents_linted' /tmp/quality.json)
+          if [ "$LINTED" -lt "$MIN_DOCUMENTS" ]; then
+            {
+              echo
+              printf 'Rule shares were not evaluated: only %s of %s document(s) in the window were linted at all (minimum %s). See the lint-error finding.\n' \
+                "$LINTED" "$DOCS" "$MIN_DOCUMENTS"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Rule shares not evaluated: only $LINTED of $DOCS documents were linted."
+          fi
 
           FOUND=$(wc -l < /tmp/findings.jsonl | tr -d ' ')
           echo "found=$FOUND" >> "$GITHUB_OUTPUT"

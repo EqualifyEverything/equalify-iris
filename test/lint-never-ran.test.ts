@@ -20,7 +20,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM, VirtualConsole } from "jsdom";
-import { runAxe } from "../src/pipeline/lint.ts";
+import { runAxe, lintErrorFields } from "../src/pipeline/lint.ts";
 import { runAssembly, wrapDocument } from "../src/pipeline/assembly.ts";
 import { runReview } from "../src/pipeline/review.ts";
 import type { Fragment } from "../src/pipeline/fragment.ts";
@@ -128,6 +128,29 @@ test("the assembly log line says the gate did not run instead of reporting zero 
   const ok = events2.find((e) => e.type === "assembly")!;
   assert.equal(ok.data.lint_ok, true);
   assert.equal(ok.data.violations, 0);
+});
+
+test("every place that lints reports the failure with the same fields", async () => {
+  // Three modules lint a body — `runAssembly`, the review loop's re-lint of a corrected
+  // body, and the feedback re-run that skips extraction and re-lints the body it saved —
+  // and a failure that reads differently depending on which one reported it is a failure
+  // nobody greps for. They share these fields; this is the shape all three emit.
+  const lint = await runAxe(wrapDocument(UNCOMPILABLE));
+  assert.deepEqual(Object.keys(lintErrorFields(lint)).sort(), [
+    "lint_error",
+    "lint_error_name",
+    "lint_error_stack",
+    "lint_error_where",
+  ]);
+  // Empty rather than a set of nulls when the lint ran, so it can be spread into any log
+  // line unconditionally and a present field always means something (the same convention
+  // the `assembly` line's omitted `violations` follows).
+  assert.deepEqual(lintErrorFields(await runAxe(wrapDocument(COMPILABLE))), {});
+
+  // The third caller — `orchestrator.ts`'s `stage: "feedback_relint"` — has no unit test of
+  // its own: reaching it means a whole `runPipeline` with a store, a config and saved
+  // fragments, which is `test/e2e.sh`'s job. What is asserted here is the part that could
+  // silently differ between the three, which is the fields.
 });
 
 test("the delivered document says it was never checked", () => {
