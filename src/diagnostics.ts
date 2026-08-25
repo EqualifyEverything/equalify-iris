@@ -200,8 +200,34 @@ export function summarizeRun(
 
   const startedAt = events[0]?.ts ?? null;
   const lastEventAt = events.length ? events[events.length - 1].ts ?? null : null;
-  const terminal = events.find((e) => e.type === "run_complete" || e.type === "run_failed");
-  const endRef = running ? nowIso : terminal?.ts ?? lastEventAt ?? nowIso;
+  // The terminal line of the CURRENT run, not the first one in the file.
+  //
+  // A session's log is one append-only file across every round it has (store/runlog.ts),
+  // so a session that has taken feedback holds several `run_start` … `run_complete`
+  // pairs. Reading the first terminal event therefore answered "did the FIRST run
+  // finish?" — which is always yes by the time a feedback round exists, since a round is
+  // only accepted on a session that already reached `ready_for_review`. Two things rested
+  // on that answer and got the wrong one: how long the session has been working, which
+  // stopped counting at the first round's completion however many rounds followed, and
+  // whether a call is still open, below.
+  const runStart = events.map((e) => e.type).lastIndexOf("run_start");
+  const currentRun = runStart === -1 ? events : events.slice(runStart);
+  const terminal = currentRun.find((e) => e.type === "run_complete" || e.type === "run_failed");
+
+  // Whether this run is still working, which is not the same as whether the session is
+  // still `running`. A feedback round marks the session `ready_for_review` as soon as the
+  // document is delivered and then trains the page agent from it
+  // (pipeline/orchestrator.ts), holding its `max_concurrent_runs` slot throughout. Both
+  // questions this drives — how long the run has been going, and whether a call is still
+  // open — were answered "it is over" in exactly that window, which is where a hung
+  // provider call delays every upload behind it and nothing else reports it.
+  //
+  // The status is still half of it, because a run can also stop without writing anything:
+  // `failStaleSessions` rewrites the status of a process that died and cannot append to
+  // its own log, and treating that log's absent terminal line as "still working" would
+  // report its last open call as hanging forever.
+  const active = running || (ctx.status === "ready_for_review" && !terminal);
+  const endRef = active ? nowIso : terminal?.ts ?? lastEventAt ?? nowIso;
 
   // In-flight detection. Extraction runs several pages concurrently, so more
   // than one call can be open at once and start/end events interleave. Match
@@ -210,10 +236,13 @@ export function summarizeRun(
   // FIFO queue would produce. `in_flight` reports the longest-waiting open call
   // — the best single answer to "what is this run stuck on?" — and
   // `in_flight_count` shows how many are outstanding.
+  // Over the current run only, for the same reason the terminal lookup is: an earlier
+  // round's call that never closed — a process killed mid-flight — is not what THIS run
+  // is stuck on, and reporting it as such is the phantom hang again by another route.
   const openCalls: LogEvent[] = [];
   const callKey = (e: LogEvent): string =>
     `${e.agent ?? "?"}|${e.model ?? "?"}|${e.capability ?? "?"}`;
-  for (const e of events) {
+  for (const e of currentRun) {
     if (e.type === "model_call_start") {
       openCalls.push(e);
     } else if (e.type === "model_call") {
@@ -234,13 +263,9 @@ export function summarizeRun(
   // alone therefore blinded the one field that answers the question, in exactly the window
   // where a hung provider call delays every upload behind it and nothing else reports it.
   //
-  // So the window is named exactly: the session says its document is ready and the run
-  // has not yet written its terminal line. Not simply "no terminal line", because a
-  // session can be `failed` without one — `failStaleSessions` rewrites the status of a
-  // run whose process died and cannot append to its log — and that run's last open call
-  // would then be reported as hanging forever, which is the phantom this gate exists to
-  // prevent.
-  const active = running || (ctx.status === "ready_for_review" && !terminal);
+  // Gated on `active` above: the run, not the session status. Reading the file's FIRST
+  // terminal event rather than this run's would make that gate dead code, since a
+  // feedback round only ever starts on a session whose earlier run already wrote one.
   const inFlight =
     active && oldest
       ? {
@@ -321,8 +346,20 @@ export function summarizeRun(
     phaseDurations[cur.phase as string] = ms(cur.ts, next ? next.ts : endRef);
   }
 
+  // The two post-delivery steps report their own failures rather than raising, because
+  // neither may revoke a document the user already has (pipeline/orchestrator.ts). That
+  // makes them invisible to the `ok === false` rule, which only sees model calls: the
+  // throw those catches exist for is an fs read, not a provider error, so a run whose
+  // training or contribution died would read as clean here and be findable only in the
+  // raw ndjson.
   const errors = events
-    .filter((e) => e.type === "run_failed" || e.ok === false)
+    .filter(
+      (e) =>
+        e.type === "run_failed" ||
+        e.type === "feedback_training_failed" ||
+        e.type === "contribution_failed" ||
+        e.ok === false,
+    )
     .map((e) => ({ ts: e.ts ?? null, type: e.type ?? "error", message: e.error ?? "unknown" }));
 
   // Which pages the document has no content for — a set, and a set that changes over

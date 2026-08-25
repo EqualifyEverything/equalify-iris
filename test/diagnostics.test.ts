@@ -113,6 +113,55 @@ test("a call still open after the document was delivered is still in flight", ()
   assert.equal(after.in_flight_count, 0);
 });
 
+test("a feedback round is read against its OWN terminal line, not the first run's", () => {
+  // The shape this actually happens in, and the one a single-run fixture cannot produce:
+  // a session's log is one append-only file across every round, and a feedback round is
+  // only accepted on a session that already reached ready_for_review — so run 1's
+  // `run_complete` is always in the file by the time run 2 exists. Reading the file's
+  // FIRST terminal event answers "did run 1 finish?", which is always yes, and every
+  // question asked of it is then about the wrong run.
+  const twoRounds = log(
+    { ts: T(0), type: "run_start" },
+    start(T(1), "page"),
+    end(T(2), "page", 1000),
+    { ts: T(3), type: "run_complete" },
+    { ts: T(100), type: "run_start" },
+    start(T(101), "feedback"), // the training call, still open
+  );
+  const d = summarizeRun(twoRounds, {
+    sessionId: "ses_1",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse(T(400)),
+  });
+  assert.ok(d.in_flight, "the second round's open call is what this session is stuck on");
+  assert.equal(d.in_flight.agent, "feedback");
+  assert.equal(d.in_flight_count, 1);
+  // And the round's own elapsed time keeps running, rather than having stopped at the
+  // first round's completion.
+  assert.ok(d.elapsed_ms > 300_000, `elapsed_ms=${d.elapsed_ms} stopped at the first run`);
+});
+
+test("an earlier round's abandoned call is not what this run is stuck on", () => {
+  // A process killed mid-round leaves a start with no end. That call belongs to a run
+  // that is over; attributing it to the current one is the phantom hang by another route.
+  const orphaned = log(
+    { ts: T(0), type: "run_start" },
+    start(T(1), "page"), // never closed — the process died here
+    { ts: T(100), type: "run_start" },
+    start(T(101), "feedback"),
+    end(T(102), "feedback", 1000),
+  );
+  const d = summarizeRun(orphaned, {
+    sessionId: "ses_1",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse(T(400)),
+  });
+  assert.equal(d.in_flight, null, "the current round has no open call");
+  assert.equal(d.in_flight_count, 0);
+});
+
 test("token totals are summed per run and attributed per agent", () => {
   // The two attributions answer different questions and pick different culprits:
   // by_agent.total_ms says which agent is slow, by_agent.input_tokens says which is

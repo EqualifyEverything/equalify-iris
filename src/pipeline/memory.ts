@@ -106,15 +106,28 @@ export function loadExamples(paths: Paths, agentFile: string): CorrectionExample
   }
 }
 
-// Written to a temporary file and renamed into place, so a reader never sees half of
-// it. The bank is SHARED — it is keyed by agent file, not by session — and
-// `defaults.max_concurrent_runs` allows more than one run at a time, so a page being
-// extracted in one run can read this file while another run is recording a lesson to it.
-// A plain write is not atomic, and `loadExamples` answers a partial read by returning
-// `[]`: the page would be extracted with no lessons at all, including the
-// accessibility-policy ones, and nothing would say so. Rename within a directory is
-// atomic on POSIX and on Windows (ReplaceFile semantics), which makes that read either
-// the old bank or the new one.
+// Written to a temporary file and renamed into place, so a reader never sees half of it.
+//
+// Not for concurrency WITHIN a process: both halves of this file are synchronous fs
+// calls on one thread, so two runs in one Iris cannot interleave a read with a write
+// however many of them `defaults.max_concurrent_runs` allows. The exposure is a second
+// process over the same `data_dir` — a redeploy overlapping the old instance, a second
+// container on a shared volume, an operator's script — because the bank is keyed by
+// AGENT FILE rather than by session and is therefore shared by all of them. There, a
+// plain write is not atomic and `loadExamples` answers a partial read with `[]`: a page
+// would be extracted with no lessons at all, accessibility-policy ones included, and
+// nothing would say so.
+//
+// What this does NOT fix is the lost update: the sequence is still read, modify, write,
+// so a second process that writes between another's read and write replaces its lesson
+// rather than merging with it. That is a smaller and louder failure than a torn read —
+// one lesson missing from a bank that parses, against a page extracted with none — and
+// fixing it needs a lock this deployment model does not have (§10.2 is one SQLite file
+// and a filesystem, single-instance by design).
+//
+// Rename is atomic on POSIX. On Windows it is `MoveFileEx`, which can fail with EPERM
+// against a destination another process holds open — a throw rather than a torn file,
+// and one the caller's own containment reports.
 function saveExamples(paths: Paths, agentFile: string, examples: CorrectionExample[]): void {
   const path = paths.agentMemory(agentFile);
   mkdirSync(dirname(path), { recursive: true });
