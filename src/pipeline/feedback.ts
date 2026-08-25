@@ -95,9 +95,25 @@ export async function verifyAgentOutput(
   if (!fb || blocks.length === 0) return { ok: true, problems: [] };
 
   const html = blocks.map((b) => b.html).join("\n\n");
-  const user =
+  // Everything this task says that is not about the page in front of it: the task marker
+  // and the whole contract of the agent being judged. It is the same bytes on every page
+  // of a document — `agents/page.md` is 16 KB of it, re-sent per page and per correction
+  // recheck — so it is declared as this message's invariant head and gets a cache
+  // breakpoint after it (providers/promptCache.ts). On a 25-page document that is one
+  // write and two dozen reads at a tenth of the price, against 25 full-price copies.
+  //
+  // It stays in the USER message, in the position it was already in, rather than moving
+  // into the system prompt to ride the breakpoint already there. The system prompt is
+  // where the Feedback Agent's OWN instructions live, and an agent's contract is
+  // quoted material to be judged against — `page.md` ends "Respond with ONLY this JSON:
+  // { "html": ... }", which is the wrong answer to this task and is exactly what putting
+  // it in the verifier's own role invites. `user` below is still the complete message and
+  // still starts with this text; the split changes what is billed, not what is said.
+  const contract =
     `TASK: verify\n\n` +
-    `## Agent under test: ${agent.file}\n\`\`\`markdown\n${agent.content}\n\`\`\`\n\n` +
+    `## Agent under test: ${agent.file}\n\`\`\`markdown\n${agent.content}\n\`\`\`\n\n`;
+  const user =
+    contract +
     `## The agent's output for source image "${img.name}"\n\`\`\`html\n${html}\n\`\`\`\n\n` +
     `Compare the output against the attached source image.`;
 
@@ -106,7 +122,7 @@ export async function verifyAgentOutput(
     "vision",
     [
       { role: "system", content: fb.content },
-      { role: "user", content: user },
+      { role: "user", content: user, cachedPrefix: contract },
     ],
     { images: [loadImage(img)] },
   );

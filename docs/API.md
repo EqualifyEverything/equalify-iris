@@ -622,8 +622,12 @@ rates and are never summed here; note that `input` **excludes** tokens read from
 whole prompt is `input + cache_read + cache_write`.
 
 The last two are non-zero because Iris asks the model to cache the part of each prompt that does
-not change: the agent's own system prompt, which is identical on every page of every document.
-Expect roughly one `cache_write` per agent per run and a `cache_read` on every call after that, so
+not change: the agent's own system prompt, which is identical on every page of every document, and
+— on the fidelity check — the contract of the agent it is judging, which that task re-states in
+full on every page and which is the largest single constant Iris sends.
+Expect roughly one `cache_write` per cached prefix per run (so two for the Feedback Agent, whose
+verify task has a cached head of its own on top of its system prompt) and a `cache_read` on every
+call after that, so
 on a long document the same prefix is paid for once at 1.25× instead of 25 times at 1×, and a read
 bills at 0.1×. A run that shows `cache_read: 0` with several calls to the same agent is a run that
 is paying full price for the same instructions repeatedly — the cases where that is expected are a

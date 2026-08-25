@@ -258,6 +258,113 @@ test("OpenRouter leaves a short system prompt, or a disabled one, alone", async 
   });
 });
 
+// --- the invariant head of a user message ------------------------------------
+
+// A message whose head repeats call to call: the verify task re-states the whole
+// contract of the agent it is judging on every page. `content` stays the complete
+// message, so the split is invisible to everything except the billing.
+const userReq = (content: string, cachedPrefix?: string) => ({
+  capability: "vision" as const,
+  model: "us.anthropic.claude-sonnet-4-6",
+  messages: [
+    { role: "system" as const, content: SHORT },
+    { role: "user" as const, content, cachedPrefix },
+  ],
+});
+
+// The text the parts of one message add up to, whatever shape they arrived in.
+function userText(message: { content: unknown }): string {
+  if (typeof message.content === "string") return message.content;
+  return (message.content as { type: string; text?: string }[])
+    .filter((p) => p.type === "text")
+    .map((p) => p.text ?? "")
+    .join("");
+}
+
+test("Bedrock splits a declared prefix into its own cached block", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  const sent = captureBedrock(bedrock);
+  await bedrock.complete(userReq(LONG + "page 1 of 25", LONG));
+  const messages = sent[0].messages as { role: string; content: unknown }[];
+  assert.deepEqual(messages[0].content, [
+    { type: "text", text: LONG, cache_control: { type: "ephemeral" } },
+    { type: "text", text: "page 1 of 25" },
+  ]);
+  // The whole point: the model is asked the same question, in the same words.
+  assert.equal(userText(messages[0]), LONG + "page 1 of 25");
+});
+
+test("Bedrock keeps the message whole when the head cannot carry a breakpoint", async () => {
+  // Four ways to decline, all of which must send the request that was sent before this
+  // field existed: no prefix declared, a head too short to be worth a breakpoint, a
+  // deployment that turned caching off, and — the one that is not about caching — a
+  // "prefix" that is not a prefix, which must never be trusted to slice the message.
+  for (const [what, provider, req] of [
+    ["nothing declared", new BedrockProvider({ default_model: "m" }), userReq(LONG + "tail")],
+    ["a short head", new BedrockProvider({ default_model: "m" }), userReq(SHORT + "tail", SHORT)],
+    ["caching off", new BedrockProvider({ default_model: "m", prompt_cache: false }), userReq(LONG + "tail", LONG)],
+    ["a head that is not the head", new BedrockProvider({ default_model: "m" }), userReq(LONG + "tail", "elsewhere")],
+  ] as [string, BedrockProvider, ReturnType<typeof userReq>][]) {
+    const sent = captureBedrock(provider);
+    await provider.complete(req);
+    const messages = sent[0].messages as { role: string; content: unknown }[];
+    assert.equal(messages[0].content, req.messages[1].content, `${what}: the message should be untouched`);
+  }
+});
+
+test("Bedrock keeps the image after the breakpoint, and the text before it", async () => {
+  // A page image is what follows the head on every verify call, and it must stay on the
+  // variable side: an image inside the cached prefix would be a different prefix per page.
+  const bedrock = new BedrockProvider({ default_model: "m" });
+  const sent = captureBedrock(bedrock);
+  await bedrock.complete({
+    ...userReq(LONG + "page 1 of 25", LONG),
+    images: [{ media_type: "image/png", data: Buffer.from("png") }],
+  });
+  const parts = (sent[0].messages as { content: { type: string }[] }[])[0].content;
+  assert.deepEqual(parts.map((p) => p.type), ["text", "text", "image"]);
+  assert.equal((parts[0] as { cache_control?: unknown }).cache_control !== undefined, true);
+  assert.equal((parts[1] as { cache_control?: unknown }).cache_control, undefined);
+});
+
+test("OpenRouter splits a declared prefix the same way", async () => {
+  await withStream(async (calls) => {
+    await openrouter().complete({
+      capability: "vision" as const,
+      model: "anthropic/claude-sonnet-4.6",
+      messages: [
+        { role: "system" as const, content: SHORT },
+        { role: "user" as const, content: LONG + "page 1 of 25", cachedPrefix: LONG },
+      ],
+      images: [{ media_type: "image/png", data: Buffer.from("png") }],
+    });
+    const messages = calls[0].messages as { role: string; content: unknown }[];
+    const parts = messages[1].content as { type: string; text?: string; cache_control?: unknown }[];
+    assert.deepEqual(parts.map((p) => p.type), ["text", "text", "image_url"]);
+    assert.deepEqual(parts[0].cache_control, { type: "ephemeral" });
+    assert.equal(parts[1].cache_control, undefined);
+    assert.equal(userText(messages[1]), LONG + "page 1 of 25");
+  });
+});
+
+test("OpenRouter keeps the message whole when the head cannot carry a breakpoint", async () => {
+  await withStream(async (calls) => {
+    const req = (content: string, cachedPrefix?: string) => ({
+      capability: "text" as const,
+      model: "anthropic/claude-sonnet-4.6",
+      messages: [{ role: "user" as const, content, cachedPrefix }],
+    });
+    await openrouter().complete(req(LONG + "tail"));
+    await openrouter().complete(req(SHORT + "tail", SHORT));
+    await openrouter(false).complete(req(LONG + "tail", LONG));
+    await openrouter().complete(req(LONG + "tail", "elsewhere"));
+    for (const call of calls) {
+      const messages = call.messages as { content: unknown }[];
+      assert.equal(typeof messages[0].content, "string", "an image-less, uncacheable message stays a plain string");
+    }
+  });
+});
+
 // --- through the pipeline: what belongs in the cached prefix -----------------
 
 // The agent prompt as it ships, read from the repo root (this file's parent).
@@ -278,6 +385,8 @@ interface Call {
   agent: string;
   system: string;
   user: string;
+  // What the call declared as its user message's invariant head, if anything.
+  prefix?: string;
 }
 
 // Same shape as reextract.test.ts's context: only what extraction touches is real. A
@@ -305,10 +414,15 @@ function makeCtx(dir: string, calls: Call[]): PipelineContext {
       sessionFragments: () => fragDir,
     } as unknown as Paths,
     router: {
-      complete: async (agent: string, _cap: string, messages: { role: string; content: string }[]) => {
+      complete: async (
+        agent: string,
+        _cap: string,
+        messages: { role: string; content: string; cachedPrefix?: string }[],
+      ) => {
         const system = messages.find((m) => m.role === "system")?.content ?? "";
-        const user = messages.find((m) => m.role === "user")?.content ?? "";
-        calls.push({ agent, system, user });
+        const userMessage = messages.find((m) => m.role === "user");
+        const user = userMessage?.content ?? "";
+        calls.push({ agent, system, user, prefix: userMessage?.cachedPrefix });
         // Page 1 fails its fidelity check, which is what buys a correction call for it;
         // page 2 passes, so the two pages between them cover both paths.
         if (user.includes("TASK: verify")) {
@@ -382,6 +496,48 @@ test("nothing page-specific leaks into the prefix, and nothing invariant is re-s
         false,
         "the requirements are still being re-sent per page",
       );
+    }
+  });
+});
+
+// The verify task's own prefix. The Feedback Agent's prompt is the system message and is
+// already cached; what was not was the contract of the agent under test, which the task
+// re-states in full on every page — `agents/page.md` is 16 KB of it, so on a 25-page
+// document that was 25 full-price copies of the single largest constant Iris sends.
+test("every verify call in a run declares one identical invariant head", async () => {
+  await withTemp(async (dir) => {
+    const calls: Call[] = [];
+    await runExtraction(makeCtx(dir, calls));
+    const verifies = calls.filter((c) => c.agent === "feedback");
+    assert.ok(verifies.length >= 2, `expected a verify per page, got ${verifies.length}`);
+
+    const prefixes = new Set(verifies.map((c) => c.prefix));
+    assert.equal(prefixes.size, 1, `expected one shared head, got ${prefixes.size}`);
+    const [prefix] = [...prefixes];
+    assert.ok(prefix, "the verify call declares no head at all, so nothing is cached");
+    // What is in it: the task marker the Feedback Agent switches on, and the whole
+    // contract it is judging against.
+    assert.match(prefix, /^TASK: verify/);
+    assert.match(prefix, /## Agent under test: page\.md/);
+    assert.match(prefix, /# Page Agent/);
+    // And what must never be: one page-specific word in here gives every page a head of
+    // its own, which is a cache write per page instead of one read.
+    assert.doesNotMatch(prefix, /page-00[12]\.png/, "an image filename reached the head");
+  });
+});
+
+test("the head is the head, and the message is still whole", async () => {
+  // The adapters slice `content` at this string, so a head that is not actually the
+  // start of the message would send a prompt nobody wrote. Both halves are asserted
+  // here rather than left to the adapter tests, because this is the caller that has to
+  // keep them in step: the message still reads exactly as it did before it was split.
+  await withTemp(async (dir) => {
+    const calls: Call[] = [];
+    await runExtraction(makeCtx(dir, calls));
+    for (const c of calls.filter((c) => c.agent === "feedback")) {
+      assert.ok(c.user.startsWith(c.prefix!), "the declared head is not the start of the message");
+      assert.match(c.user, /## The agent's output for source image "page-00[12]\.png"/);
+      assert.match(c.user, /Compare the output against the attached source image\.$/);
     }
   });
 });
