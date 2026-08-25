@@ -109,6 +109,22 @@ function failure(where: "parse" | "inject" | "run", message: string, e: unknown)
   };
 }
 
+// The `lint_error*` half of a log line, shared by all three places a document is linted:
+// `assembly`, the review loop's re-lint of a body a correction round produced, and the
+// feedback path's re-lint of a body it did not extract. A gate that could not run reads the
+// same way whichever module reported it, so one grep finds every occurrence — and a fourth
+// caller added later gets the fields rather than a subset of them. Empty when the lint ran,
+// so it can be spread unconditionally.
+export function lintErrorFields(lint: LintResult): Record<string, string> {
+  if (lint.error === undefined) return {};
+  return {
+    lint_error: lint.error,
+    ...(lint.errorWhere ? { lint_error_where: lint.errorWhere } : {}),
+    ...(lint.errorName ? { lint_error_name: lint.errorName } : {}),
+    ...(lint.errorStack ? { lint_error_stack: lint.errorStack } : {}),
+  };
+}
+
 // PRD §7.7: validate the document parses and basic accessibility lint passes
 // (axe-core in headless mode). We run axe inside a jsdom realm. If axe cannot run in this
 // environment the session continues rather than failing — but with no verdict rather than

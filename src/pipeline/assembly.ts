@@ -1,4 +1,4 @@
-import { runAxe, type LintResult } from "./lint.ts";
+import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { namespaceAnchors, type AnchorReport } from "./anchors.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PipelineContext } from "./context.ts";
@@ -146,15 +146,6 @@ export async function runAssembly(
   // it is recoverable too, without keeping a second copy of it: this lints
   // `wrapDocument(assembleBody(fragments))`, both of which are pure, and
   // `fragments.json` is written before this phase runs.
-  const lintError =
-    lint.error === undefined
-      ? {}
-      : {
-          lint_error: lint.error,
-          ...(lint.errorWhere ? { lint_error_where: lint.errorWhere } : {}),
-          ...(lint.errorName ? { lint_error_name: lint.errorName } : {}),
-          ...(lint.errorStack ? { lint_error_stack: lint.errorStack } : {}),
-        };
   ctx.log.event("assembly", {
     pages: fragments.length,
     lint_ok: lint.ok,
@@ -165,7 +156,7 @@ export async function runAssembly(
     // Omission follows the convention the `lint_error*` fields above already use: a field
     // that has nothing to say is absent, so a field that is present means something.
     ...(lint.violations ? { violations: lint.violations.length } : {}),
-    ...lintError,
+    ...lintErrorFields(lint),
   });
   // Logged only when the join actually had to do something, so the ordinary run adds
   // no line. `ambiguous` is the one that matters to a human: a reference naming an id

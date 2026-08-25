@@ -16,7 +16,7 @@ import type { InputImage, PipelineContext } from "./context.ts";
 import { runExtraction, reExtractPages } from "./extraction.ts";
 import { runAssembly, assembleBody, wrapDocument } from "./assembly.ts";
 import { runReview, type ReviewResult } from "./review.ts";
-import { runAxe } from "./lint.ts";
+import { runAxe, lintErrorFields } from "./lint.ts";
 import { learnFromFeedback, proposeAgentUpdatesFromFeedback, scopeFeedback } from "./feedback.ts";
 import { runContribution } from "./contribute.ts";
 import type { Fragment } from "./fragment.ts";
@@ -202,6 +202,13 @@ export async function runPipeline(args: {
         // Re-lint the existing reviewed body (no model call), then let the
         // feedback-aware review loop refine it in place.
         const lint = await runAxe(wrapDocument(beforeBody));
+        // This path runs no assembly, so there is no `assembly` line to carry a failure here,
+        // and the loop's own re-lint only happens on a round that CHANGED something — a
+        // feedback re-run whose Reader is satisfied, or that converges, would otherwise
+        // record `iris:lint-error` and deliver `@lint-unavailable` with no error, stack or
+        // step anywhere in the log to chase it by. Reachable on exactly #164's document: its
+        // own feedback re-run.
+        if (lint.error) log.event("lint_unavailable", { stage: "feedback_relint", ...lintErrorFields(lint) });
         review = await runReview(ctx, { body: beforeBody, lint, pages: fragments, failedPages });
       }
     } else {

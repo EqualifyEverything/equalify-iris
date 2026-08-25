@@ -4,7 +4,7 @@ import { MAX_EDITOR_IMAGES } from "../providers/imageLimits.ts";
 import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseError } from "../providers/types.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
-import { runAxe, type LintResult } from "./lint.ts";
+import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { flatten } from "./flatten.ts";
 import { examplesForPrompt } from "./memory.ts";
 import { knownPages, pageIndex, type IndexedPage } from "./pageindex.ts";
@@ -803,13 +803,7 @@ export async function runReview(
     // the same way in a run log, and per iteration, because which round broke it is the
     // question a person reading this asks next.
     if (lint.error) {
-      ctx.log.event("lint_unavailable", {
-        iteration: iterations,
-        lint_error: lint.error,
-        ...(lint.errorWhere ? { lint_error_where: lint.errorWhere } : {}),
-        ...(lint.errorName ? { lint_error_name: lint.errorName } : {}),
-        ...(lint.errorStack ? { lint_error_stack: lint.errorStack } : {}),
-      });
+      ctx.log.event("lint_unavailable", { stage: "correction_round", iteration: iterations, ...lintErrorFields(lint) });
     }
     // A link the editor dropped is unrecoverable and invisible to every later check
     // in the loop — see droppedHrefs for why this is checked here and in code.

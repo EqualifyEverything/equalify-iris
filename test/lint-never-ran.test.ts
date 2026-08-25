@@ -172,10 +172,20 @@ test("an axe message cannot close the comment that reports it", () => {
 
 const PAGES = [{ order: 1, innerHtml: "<h1>Report</h1>" }];
 
-// A Reader that finds nothing, so the loop takes the clean return — the path where the
-// absence of a verdict matters most, because that return means "looked again, nothing left".
-function reviewCtx(): { ctx: PipelineContext; prompts: string[] } {
+// By default a Reader that finds nothing, so the loop takes the clean return — the path where
+// the absence of a verdict matters most, because that return means "looked again, nothing
+// left". `editorReturns` opts into one correction round instead: the Reader reports an issue
+// and the editor answers with that body.
+function reviewCtx(editorReturns?: string): {
+  ctx: PipelineContext;
+  prompts: string[];
+  events: { type: string; data: Record<string, unknown> }[];
+} {
   const prompts: string[] = [];
+  const events: { type: string; data: Record<string, unknown> }[] = [];
+  const issues = editorReturns
+    ? [{ issue: "a table has no headers", severity: "high", suggested_action: "add <th>", pages: [1] }]
+    : [];
   const ctx = {
     sessionId: "ses_test",
     images: [],
@@ -183,14 +193,18 @@ function reviewCtx(): { ctx: PipelineContext; prompts: string[] } {
     extractionConcurrency: 4,
     paths: { agentsDir: "agents", tmpAgentsDir: () => "tmp", agentMemory: () => "memory.json" } as unknown as Paths,
     router: {
-      complete: async (_agent: string, _cap: string, messages: { content?: unknown }[]) => {
+      complete: async (agent: string, _cap: string, messages: { content?: unknown }[]) => {
         prompts.push(JSON.stringify(messages));
-        return { text: JSON.stringify({ issues: [] }) };
+        if (agent === "copy_editor") return { text: JSON.stringify({ html: editorReturns }) };
+        return { text: JSON.stringify({ issues }) };
       },
     },
-    log: { event: () => {}, agentCall: () => {} },
+    log: {
+      event: (type: string, data: Record<string, unknown> = {}) => events.push({ type, data }),
+      agentCall: () => {},
+    },
   } as unknown as PipelineContext;
-  return { ctx, prompts };
+  return { ctx, prompts, events };
 }
 
 test("the Reader is told the document was not checked, not handed an empty result", async () => {
@@ -218,4 +232,30 @@ test("a document whose lint ran carries no such statement", async () => {
   const result = await runReview(ctx, { body: `<h1>Report</h1>`, lint, pages: PAGES });
   assert.match(prompts.join("\n"), /axe-core: no violations/);
   assert.doesNotMatch(result.html, /@lint-unavailable/);
+});
+
+test("a lint the correction round broke is logged, where nothing used to be", async () => {
+  // The re-lint inside the loop is the gate on the body that actually SHIPS — `assembly`
+  // reports the lint of the body before any correction — and its failure was logged nowhere
+  // at all. An editor can introduce the breaking attribute itself, which is what this stands
+  // in for: it is handed a clean body and answers with the one axe cannot examine.
+  const { ctx, events } = reviewCtx(UNCOMPILABLE);
+  const clean = await runAxe(wrapDocument(COMPILABLE));
+  assert.equal(clean.error, undefined, "the body entering the round lints fine");
+
+  const result = await runReview(ctx, { body: COMPILABLE, lint: clean, pages: PAGES });
+
+  const logged = events.filter((e) => e.type === "lint_unavailable");
+  assert.equal(logged.length, 1, `expected one lint_unavailable, got ${events.map((e) => e.type).join(", ")}`);
+  // Per iteration, because which round broke it is the next question a person asks — and with
+  // the same fields as the `assembly` line, so both failures read the same way in a run log.
+  assert.equal(logged[0].data.stage, "correction_round", "which lint failed is what a reader needs first");
+  assert.equal(logged[0].data.iteration, 1);
+  assert.match(String(logged[0].data.lint_error), /Octal escape sequences/);
+  assert.equal(logged[0].data.lint_error_where, "run");
+  assert.equal(logged[0].data.lint_error_name, "SyntaxError");
+  assert.ok(String(logged[0].data.lint_error_stack ?? "").length > 0, "no stack to locate it by");
+
+  // And the document goes out saying so, though the failure arrived after assembly.
+  assert.match(result.html, /@lint-unavailable/);
 });
