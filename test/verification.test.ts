@@ -43,6 +43,35 @@ test("content coming back is a change to both the text and the structure", () =>
   assert.equal(e.alt_changed, false);
 });
 
+test("markup added to a complete page leaves the reader's share of it the same size", () => {
+  // The distinction issue #166 asks for: a 71% fidelity-failure rate reads very differently
+  // depending on whether the corrections that followed brought content back or added markup
+  // to pages that already had it all. `chars_*` cannot say — both grow the fragment — so the
+  // prose is measured on its own, and here it does not move by a character.
+  const before = `<table><tr><th>Year</th><th>Total</th></tr><tr><td>2026</td><td>41</td></tr></table>`;
+  const after = `<table><tr><th scope="col">Year</th><th scope="col">Total</th></tr><tr><td>2026</td><td>41</td></tr></table>`;
+  const e = correctionEffect(before, after);
+  assert.equal(e.attrs_changed, true);
+  assert.equal(e.text_changed, false);
+  assert.equal(e.text_chars_before, e.text_chars_after);
+  // And the fragment did grow, which is the pair of numbers that would have been read as
+  // content arriving.
+  assert.ok(e.chars_after > e.chars_before);
+});
+
+test("content coming back raises the reader's share and content lost lowers it", () => {
+  const short = `<p>Fees apply. See schedule B for the amounts.</p>`;
+  const long = `<p>Fees apply. See schedule B for the amounts, and the appeal window is thirty days.</p>`;
+  const restored = correctionEffect(short, long);
+  assert.equal(restored.text_changed, true);
+  assert.ok(restored.text_chars_after > restored.text_chars_before);
+  // The same measure, the other way round: a correction that drops a sentence. It is kept —
+  // the shrink floor is a quarter, not a sentence — and this is what makes it visible.
+  const dropped = correctionEffect(long, short);
+  assert.ok(dropped.text_chars_after < dropped.text_chars_before);
+  assert.equal(destroyedPage(long, short), false);
+});
+
 test("a heading level correction is structural with the same words", () => {
   // The correction that matters most and shows up least: `<h2>` to `<h3>` moves no text
   // at all, so a measure built on text alone would call this pass a no-op.
@@ -325,6 +354,10 @@ test("a correction that changed the page says what it changed", async () => {
         result: "kept",
         chars_before: rendered.length,
         chars_after: fixed.length,
+        // "Findings", both times: the fragment grew by 25 characters and the reader receives
+        // exactly what they did before, which is the alt-only correction stated in sizes.
+        text_chars_before: 8,
+        text_chars_after: 8,
         text_changed: false,
         alt_changed: true,
         attrs_changed: false,
@@ -663,11 +696,85 @@ test("a corrected page that still fails is reported as still failing, and still 
     assert.equal(rechecks.length, 1);
     assert.equal(rechecks[0].ok, false);
     assert.deepEqual(rechecks[0].problems, ["the second column of the table is still missing"]);
+    // One problem in, one problem out: a correction that fixed nothing it was asked to.
+    // Indistinguishable from the test below on `ok` alone, which is the reading issue #166
+    // reports — four failed samples that could have been four wasted calls or four near
+    // misses.
+    assert.equal(rechecks[0].problems_before, 1);
+    assert.equal(rechecks[0].problems_after, 1);
     // The measurement is measurement only. A verify-driven correction is accepted
     // exactly as it was before this event existed — whether to re-render until a page
     // passes is a policy question the rate has to answer first.
     assert.match(result.fragments[0].innerHtml, /second pass/);
     assert.equal(of(events, "page_corrected")[0].result, "kept");
+  });
+});
+
+test("a correction that fixed three of four problems is not the same not-ok as one that fixed none", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<p>first pass</p>`,
+        problems: (o) =>
+          o === 1
+            ? [
+                "the second column of the table was dropped",
+                "the figure has no caption",
+                "the heading is a level too deep",
+                "the footnote marker has no accessible name",
+              ]
+            : [],
+        corrected: () => `<p>second pass</p>`,
+        recheck: () => ["the heading is still a level too deep"],
+      }),
+    );
+    const rechecks = of(events, "page_correction_recheck");
+    assert.equal(rechecks.length, 1);
+    // Still not ok, and still kept — nothing about the decision changed. What changed is
+    // that the log now says the pass got most of the way there, which is the difference
+    // between a loop worth its 24% of the bill and one that is not.
+    assert.equal(rechecks[0].ok, false);
+    assert.equal(rechecks[0].problems_before, 4);
+    assert.equal(rechecks[0].problems_after, 1);
+    assert.equal(of(events, "page_corrected")[0].result, "kept");
+  });
+});
+
+test("a missing link is not counted as a problem the second verdict could have cleared", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const link = { text: "the full report", href: "https://example.org/report" };
+    await runExtraction(
+      makeCtx(dir, events, {
+        // Page 1 fails its fidelity check AND lost the link, which is `trigger: "both"` — and
+        // it can win the batch's one sample slot, because that branch is guarded on the verify
+        // failure alone. Page 2 passed and only lost the link.
+        html: () => `<p>Read the full report</p>`,
+        problems: (o) => (o === 1 ? ["the figure has no caption"] : []),
+        corrected: () => `<p>Read <a href="https://example.org/report">the full report</a></p>`,
+        recheck: (o) => (o === 1 ? ["the figure still has no caption"] : []),
+        links: [link],
+      }),
+    );
+    const rechecks = of(events, "page_correction_recheck");
+    const sampled = rechecks.find((r) => r.binding === false);
+    assert.ok(sampled, "the page that failed its check took the sample slot");
+    // One fidelity problem in, one out: the correction re-attached the link and fixed nothing
+    // the verifier named. Counting the link would have made this two-in-one-out — a loop
+    // converging, on a page where it converged on nothing. The second verdict judges the
+    // fragment against the image, where a link target does not appear, so it could never have
+    // named the link either way.
+    assert.equal(sampled.problems_before, 1);
+    assert.equal(sampled.problems_after, 1);
+    assert.equal(sampled.links_before, 1, "the link share is carried, not folded in");
+    // And the links path's own verdict, on a page that had PASSED: nothing was named going in,
+    // so a problem named here would be a rewrite that lost something rather than a correction
+    // that fell short.
+    const binding = rechecks.find((r) => r.binding === true);
+    assert.ok(binding);
+    assert.equal(binding.problems_before, 0);
+    assert.equal(binding.links_before, 1);
   });
 });
 

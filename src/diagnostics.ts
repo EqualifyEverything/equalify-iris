@@ -135,6 +135,20 @@ export interface Diagnostics {
     // `empty` one usually answered briefly and said nothing. A run whose `failed` count is
     // not zero has a `providers.*.max_tokens` to raise or a page too large to correct in one
     // reply, and neither is visible if the two are summed (issue #171).
+    //
+    // How to read `rejected: 0`, since two bench rounds produced it over 145 corrections and
+    // it was reported as a gate that accepts everything (issue #166). It was not a gate. Until
+    // the shrink floor landed, `rejected` was reachable on the LINKS trigger alone — a page
+    // that had passed its check, was re-rendered for a link, and lost something — so a round
+    // whose corrections were all verify-driven could not produce a rejection at any rate of
+    // badness, and the zero measured the absence of a rejection path rather than the absence
+    // of bad corrections. `CORRECTION_SHRINK_FLOOR` (pipeline/correction.ts) is the first one
+    // that applies on every trigger. It is deliberately a floor and not a judgement, so
+    // `rejected: 0` is still the expected reading of a healthy round: it counts corrections
+    // that came back at a fraction of the page they were given, which is a parser or ceiling
+    // failure and not a bad rewrite. A correction that is merely WRONG is kept, and
+    // `rechecks.sampled_problems_*` is where that shows up — see extraction.ts on why
+    // discarding it would ship the fragment that already failed the same verifier.
     results: { kept: number; rejected: number; identical: number; empty: number; failed: number };
     // Why each correction ran: `verify` is a page the Feedback Agent rejected, `links` is a
     // page that passed and lost a link the code found in the PDF, `both` is one that did
@@ -150,7 +164,36 @@ export interface Diagnostics {
     // for image descriptions. `attrs` is every attribute but alt, which is where the
     // cheapest real fixes live: an `href` the model re-typed, a `<th scope>`, an
     // `aria-describedby` — a correction that moves no word and matters.
-    effects: { alt_only: number; text: number; attrs: number; structure: number };
+    //
+    // `text_grew` and `text_shrank` split `text` by DIRECTION, on the size of the prose a
+    // reader receives rather than of the fragment: how many corrections added words, how
+    // many removed them, and — on a log where every line carries the sizes — by subtraction
+    // how many rewrote the same quantity of prose in place. A line from before the sizes
+    // existed still counts under `text` and lands in neither direction, so that subtraction
+    // absorbs it as an equal-length rewrite; a session's log is append-only across rounds and
+    // this sums all of them, so a session that takes a feedback round across the upgrade has
+    // exactly that mixed log. `text_grew + text_shrank` against `text` is the honest reading
+    // there. That is what makes a high `verify_failed` rate readable. Two bench rounds put
+    // it at 71% and 74% of pages, with `attrs` and `structure` touched on nearly every
+    // correction and `text` on fewer — which reads either as most pages arriving with
+    // content missing, or as most pages arriving fine and being polished, and the counts
+    // could not tell the two apart (issue #166). A round whose corrections cluster in
+    // `text_grew` is recovering content the vision pass dropped; one that barely leaves
+    // `attrs` and `structure` is buying markup on pages that were already readable, and the
+    // cheaper remedy for that is the page prompt, not a call per page.
+    //
+    // No threshold: a correction that adds one character counts as `text_grew`, because any
+    // band that called that "cosmetic" would be a number picked rather than measured. The
+    // magnitudes are on each `page_corrected` line (`text_chars_before`, `text_chars_after`)
+    // for a consumer with a corpus to calibrate one on.
+    effects: {
+      alt_only: number;
+      text: number;
+      attrs: number;
+      structure: number;
+      text_grew: number;
+      text_shrank: number;
+    };
     // Second verdicts on a corrected page, kept apart by whether the verdict was allowed to
     // decide anything, because the two answer different questions and a single ok-rate over
     // both answers neither.
@@ -166,7 +209,40 @@ export interface Diagnostics {
     // recover a link, so their ok-rate is "did a rewrite of a good page stay good" — a
     // different question, and on a link-heavy PDF there is one per page, which would swamp
     // the sample if the two were summed.
-    rechecks: { sampled: number; sampled_ok: number; binding: number; binding_ok: number };
+    //
+    // `sampled_problems_before` and `sampled_problems_after` are how many FIDELITY problems
+    // those sampled pages were sent to be corrected with, and how many the second verdict
+    // named, summed over the sample. `sampled_ok` on its own read as a pass/fail on a
+    // single-shot pass that was never expected to reach zero — four samples, four not-ok, and
+    // no way to see whether the corrections had fixed most of what was flagged or none of it
+    // (issue #166). 11 problems in and 3 out is a loop that mostly works; 11 and 11 is one
+    // that does not, and both are `sampled_ok: 0`.
+    //
+    // Fidelity problems and not the correction's whole bill, because the two sides have to be
+    // comparable: a correction is also given the links the code found missing, and the second
+    // verdict judges the fragment against the IMAGE, where a link target does not appear — so
+    // a link counted going in could never be counted coming out, and a page with one verdict
+    // problem and three missing links would report four-in-one-out for a correction that fixed
+    // nothing the verifier named. The event carries the link share as `links_before`, and
+    // `page_corrected`'s `problems` is the whole bill.
+    //
+    // Sums over pages, so a single page with many problems moves them more than several with
+    // one each — read them as a ratio and not as a per-page average, and against `sampled`.
+    // And `sampled_problems_after: 0` does not mean the sample passed: the verdict's `ok` is
+    // its `faithful`/`accessible` flags (pipeline/feedback.ts), which an agent can set false
+    // while naming nothing, so `sampled_ok` remains the answer to whether it passed.
+    //
+    // The binding population has no such pair, for the reason it is counted apart: those pages
+    // had PASSED their check, so their `problems_before` is 0 by construction and the question
+    // their verdict answers is whether the rewrite lost something, not how far it got.
+    rechecks: {
+      sampled: number;
+      sampled_ok: number;
+      sampled_problems_before: number;
+      sampled_problems_after: number;
+      binding: number;
+      binding_ok: number;
+    };
   };
   // Source pages whose own extraction threw, so the delivered document carries a
   // failure marker instead of that page's content (pipeline/extraction.ts
@@ -447,8 +523,15 @@ export function summarizeRun(
     corrections: 0,
     results: { kept: 0, rejected: 0, identical: 0, empty: 0, failed: 0 },
     triggers: { verify: 0, links: 0, both: 0 },
-    effects: { alt_only: 0, text: 0, attrs: 0, structure: 0 },
-    rechecks: { sampled: 0, sampled_ok: 0, binding: 0, binding_ok: 0 },
+    effects: { alt_only: 0, text: 0, attrs: 0, structure: 0, text_grew: 0, text_shrank: 0 },
+    rechecks: {
+      sampled: 0,
+      sampled_ok: 0,
+      sampled_problems_before: 0,
+      sampled_problems_after: 0,
+      binding: 0,
+      binding_ok: 0,
+    },
   };
   for (const e of events) {
     if (e.type === "page_verify_ok") {
@@ -467,6 +550,20 @@ export function summarizeRun(
       const trigger = CORRECTION_TRIGGERS.find((t) => t === e.trigger);
       if (trigger) verification.triggers[trigger] += 1;
       if (e.text_changed === true) verification.effects.text += 1;
+      // The direction, gated on `text_changed` rather than on the two sizes alone: a
+      // correction that swaps one word for a longer one changes the prose and its length, and
+      // a correction that reorders a sentence changes the prose and not its length, and only
+      // the flag knows which happened. Both numbers must be present — an old log carries
+      // neither, and `undefined > undefined` is false, so such a line lands in `text` and in
+      // neither direction, which is the same reading an unknown `result` gets.
+      if (
+        e.text_changed === true &&
+        typeof e.text_chars_before === "number" &&
+        typeof e.text_chars_after === "number"
+      ) {
+        if (e.text_chars_after > e.text_chars_before) verification.effects.text_grew += 1;
+        else if (e.text_chars_after < e.text_chars_before) verification.effects.text_shrank += 1;
+      }
       if (e.attrs_changed === true) verification.effects.attrs += 1;
       if (e.structure_changed === true) verification.effects.structure += 1;
       if (
@@ -488,6 +585,17 @@ export function summarizeRun(
       } else if (e.binding === false) {
         verification.rechecks.sampled += 1;
         if (e.ok === true) verification.rechecks.sampled_ok += 1;
+        // Only when the line carries both, so a log from before these existed leaves the two
+        // sums alone rather than adding a zero to each. A missing `problems_before` counted as
+        // 0 would read as a page corrected for no reason, which is the opposite of what
+        // happened, and it would make the pair say the corrections had nothing to fix.
+        if (
+          typeof e.problems_before === "number" &&
+          typeof e.problems_after === "number"
+        ) {
+          verification.rechecks.sampled_problems_before += e.problems_before;
+          verification.rechecks.sampled_problems_after += e.problems_after;
+        }
       }
     }
   }
