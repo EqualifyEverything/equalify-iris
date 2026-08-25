@@ -261,7 +261,12 @@ const READER_INDEX_EXCERPT_CHARS = 200;
 // cost, and one further round clears it several times over: every later chunk reads the
 // index at 0.1x instead of paying for it again. Concretely, three chunks pay +0.75 of one
 // index on the first round and save 2.7 of it on each round after, so break-even is at
-// roughly a quarter of a second round. The document that does not win is the one that
+// roughly a quarter of a second round — where "each round after" means each round that
+// arrives while the entry is still live. The TTL is ~5 minutes refreshed on read, and what
+// sits between two Reader rounds is an editor pass carrying page images, which is the
+// slowest call in the loop: a round that arrives after it expires writes again instead of
+// reading, saving nothing and costing the same +0.25x it cost on the first. That is the
+// floor of this trade rather than a regression — the bytes are the bytes either way. The document that does not win is the one that
 // reads clean on the first look and has no second round — it pays about a quarter of its
 // index, ~300 tokens per chunk on a 25-page document — and that is the trade: a small
 // certain cost on the documents that need no fixing, against a large one on every
