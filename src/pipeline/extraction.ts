@@ -10,6 +10,7 @@ import {
   changedAnything,
   claimRecheck,
   correctionEffect,
+  destroyedPage,
   recheckSampler,
   type RecheckSampler,
 } from "./correction.ts";
@@ -368,18 +369,26 @@ export interface ExtractionResult {
   recovered?: number[];
 }
 
-// The content of the first fenced block, or the text as it stands.
+// The content of the LAST fenced block, or the text as it stands.
 //
 // Any info string, not only `html`: a ```json fence is what a page agent writes when it
 // wraps the envelope, and a regex that knew only `html` left the word "json" INSIDE the
 // content it returned — which is why every leaked envelope in issue #168 begins with the
 // literal line `json`. `extractJson` has always known both spellings; this now does too.
 //
+// The last rather than the first, for the reason `extractJson` prefers the last object
+// (util/json.ts): a model that drafts and then corrects itself sends both, and the bench logs
+// have a page correction with FOUR fenced envelopes whose first three logs say they were
+// abandoned ("RESTART", "Intermediate attempt abandoned"). Binding the first delivered a draft
+// the model had already rejected (issue #170). This is the bare-HTML half of that fix — the
+// same reply shape, answered in markup instead of an envelope, reaches the page through here.
+//
 // Exported for test/envelope-as-content.test.ts: the four reply shapes this and `bareHtml`
 // have to agree about were all read off real bench logs, and a unit test names them.
 export function stripFences(t: string): string {
-  const m = t.match(/```[a-z]*[ \t]*\r?\n?([\s\S]*?)```/i);
-  return (m ? m[1] : t).trim();
+  const blocks = [...t.matchAll(/```[a-z]*[ \t]*\r?\n?([\s\S]*?)```/gi)];
+  const last = blocks[blocks.length - 1];
+  return (last ? last[1] : t).trim();
 }
 
 // A reply that is not the JSON envelope, but IS plainly the page's HTML.
@@ -954,9 +963,27 @@ async function extractPage(
       // heading level, a `<th scope>` — would make the document worse than it was
       // before this feature. When the check had already failed, the original has no
       // standing to protect and the correction is accepted as it always was.
-      let keep = true;
+      //
+      // Before either of those: a correction may change a page and may not delete one. A reply
+      // that comes back at a fraction of the size it was given has not corrected the page, and
+      // no verdict on it is worth buying — so this is decided first, and it short-circuits both
+      // rechecks below (the links one would ask the Feedback Agent to judge a fragment nothing
+      // will deliver; the sampled one would spend the batch's single measurement slot on it).
+      // See `CORRECTION_SHRINK_FLOOR` for where a quarter comes from and why the guard is worth
+      // having even now that util/json.ts reads the right envelope out of the replies that
+      // prompted it.
+      let keep = !destroyedPage(before, corrected);
       let recheck: VerifyVerdict | null = null;
-      if (!verifyFailed) {
+      if (!keep) {
+        ctx.log.event("page_correction_rejected", {
+          image: img.name,
+          page: img.order,
+          trigger,
+          reason: "shrank",
+          chars_before: before.length,
+          chars_after: corrected.length,
+        });
+      } else if (!verifyFailed) {
         recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }]);
         keep = !failedCheck(recheck);
         if (!keep) {

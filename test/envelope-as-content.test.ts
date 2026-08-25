@@ -59,6 +59,18 @@ test("a fence's info string is not part of the page", () => {
   assert.equal(stripFences("Here is the page:\n\n```html\n<p>Hi</p>\n```"), "<p>Hi</p>");
   // No fence at all is the commonest good reply, and passes through untouched.
   assert.equal(stripFences("<p>Hi</p>"), "<p>Hi</p>");
+  // And when a model fences more than once, the page is the LAST block — the same rule
+  // util/json.ts takes for the envelope, and for the same reason: a model that drafts,
+  // reconsiders and answers puts its answer last. A non-greedy match on the first fence
+  // returns the draft it abandoned, which is the bare-HTML half of issue #170.
+  assert.equal(
+    stripFences("```html\n<p>draft</p>\n```\n\nOn reflection:\n\n```html\n<p>the page</p>\n```"),
+    "<p>the page</p>",
+  );
+  // A fence the model opened and never closed is not a block: what follows it is the reply,
+  // not a page inside it, so this falls through to the whole text rather than returning the
+  // draft above it.
+  assert.equal(stripFences("```html\n<p>Hi</p>"), "```html\n<p>Hi</p>");
 });
 
 test("extractJson reads every envelope shape a model actually sends", () => {
@@ -94,16 +106,70 @@ test("a backslash the page prints is a character, not a broken escape", () => {
 test("an envelope nothing can read stays unread, rather than being guessed at", () => {
   // Truncation is the case no repair can help: the rest of the page is not in the reply.
   assert.equal(extractJson(TRUNCATED), null);
+  assert.equal(extractJson("I could not read this page."), null);
   // Nor is structure repaired. This is a real Feedback Agent verdict with a `}` where a `]`
   // belongs, and inferring which bracket the model meant is inventing structure — on a path
-  // whose output is delivered to a reader as the document.
-  assert.equal(extractJson('{"issues": [{"issue": "a column was dropped"}}]}'), null);
-  assert.equal(extractJson("I could not read this page."), null);
-  // And a brace quoted in an agent's own prose is not searched past. Reading on to the next
-  // `{` would rescue seven Feedback Agent verdicts in the bench logs — and which candidate to
-  // bind is issue #170, where a reasoning model's scratch template parsed cleanly and replaced
-  // an 8,334-character page with three characters. That decision is its own change.
-  assert.equal(extractJson('The contract is {html, log}. My answer: {"html": "<p>Hi</p>"}'), null);
+  // whose output is delivered to a reader as the document. Since #170 the search reads on
+  // past a span it could not parse, so what comes back is the one sub-object that IS valid
+  // JSON — but the outer braces are still not mended, and the verdict is what the caller
+  // reads (`parsed?.issues ?? []` in review.ts, `parsed.faithful` in feedback.ts). So the
+  // reply still says nothing, which is the outcome that matters here.
+  assert.equal(extractJson<{ issues?: unknown[] }>('{"issues": [{"issue": "a column was dropped"}}]}')?.issues, undefined);
+});
+
+test("the answer is the model's last one, not the first thing shaped like one", () => {
+  const html = (t: string): string | undefined => extractJson<{ html?: string }>(t)?.html;
+
+  // A brace the agent quoted in its own prose. Before #170 the search stopped at the first
+  // `{` in the text, which cost six Feedback Agent verdicts in the bench logs outright.
+  assert.equal(html('The contract is {html, log}. My answer: {"html": "<p>Hi</p>"}'), "<p>Hi</p>");
+  // And the harder version of the same thing: the quoted fragment PARSES. This is a real
+  // Reader reply, whose prose quotes the JSON wrapper it is complaining about — and it
+  // quotes it in the shape of an envelope, so binding it would answer with the decoy.
+  const quoted =
+    'The wrapper text (`{"html":"`, `\\n`, `","log":"..."}`) is read aloud.\n\n' +
+    '{"issues": [{"issue": "raw JSON in the reading order", "pages": [9]}]}';
+  assert.deepEqual(extractJson<{ issues?: { pages?: number[] }[] }>(quoted)?.issues?.[0]?.pages, [9]);
+
+  // The reply this issue was filed for, in miniature: a reasoning model writes a scratch
+  // template while thinking and its real answer at the end. The template parses cleanly, so
+  // nothing downstream could tell — an 8,334-character page was delivered as three characters
+  // and logged as a kept correction.
+  const scratch =
+    `I'll re-read the image.\n\n{ "html": "...", "log": "...", "suggested_agent": null }\n\n` +
+    `Here is the corrected output:\n\n{"html": "<h2>Table 3</h2>", "log": "Page 17."}`;
+  assert.equal(html(scratch), "<h2>Table 3</h2>");
+
+  // Four fenced envelopes, three of them abandoned drafts that say so in their own `log`.
+  // Also real, and the reason the fenced block is no longer a pre-step: the first fence is
+  // the first draft, and `stripFences`'s non-greedy match ends at the first closing fence.
+  const drafts = [
+    ["RESTART — re-reading the image.", "<p>draft one</p>"],
+    ["Intermediate attempt abandoned — the column count does not match.", "<p>draft two</p>"],
+    ["Page 36. Southeast through Rocky Mountain rows, all values checked.", "<p>the page</p>"],
+  ]
+    .map(([log, body]) => "```json\n" + JSON.stringify({ html: body, log }) + "\n```")
+    .join("\n\nLet me try again:\n\n");
+  assert.equal(html(drafts), "<p>the page</p>");
+
+  // A shorter last answer still wins, which is what separates "the last one" from "the
+  // biggest one". Real reply: the model noticed it had used a forbidden inline event handler,
+  // said so, and sent a corrected envelope 548 characters shorter than the one above it.
+  const fixed =
+    `{"html": "<img src=\\"x\\" onerror=\\"this.remove()\\"><p>Path to net zero</p>"}\n\n` +
+    `**Correction pass** — the inline event handler is forbidden per contract:\n\n` +
+    `{"html": "<img src=\\"x\\"><p>Path to net zero</p>"}`;
+  assert.equal(html(fixed), '<img src="x"><p>Path to net zero</p>');
+
+  // What "last" does not mean: the innermost. Everything inside an object that parsed belongs
+  // to it, so a nested object is never read as a later answer.
+  assert.equal(html('{"html": "<p>Hi</p>", "suggested_agent": {"name": "table-agent"}}'), "<p>Hi</p>");
+
+  // The cost of the rule, stated so it is a decision and not a surprise: a decoy AFTER the
+  // answer wins. Nothing in five bench rounds does this — every decoy in the logs is a draft
+  // or a quotation, and both come before the answer a model settles on — and on the page path
+  // a correction that comes back a fraction of the size it replaces is refused anyway.
+  assert.equal(html('{"html": "<p>the page</p>"}\n\nThe contract was {"html": "..."}.'), "...");
 });
 
 test("bareHtml accepts an HTML answer and refuses an envelope", () => {

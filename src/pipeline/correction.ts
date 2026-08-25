@@ -156,6 +156,31 @@ export function changedAnything(e: CorrectionEffect): boolean {
   return e.text_changed || e.alt_changed || e.attrs_changed || e.structure_changed;
 }
 
+// How much of a page a correction may lose before it is refused outright, as a divisor: a
+// reply shorter than a quarter of what it was asked to correct did not correct that page.
+//
+// Read off the 265 corrections in the bench logs that record both sizes. Every legitimate one
+// lands between 0.62 and 2.32 times the page it replaced (median 0.995 — corrections mostly
+// re-render a page at about its own size, and the ones that grow are restoring something).
+// Below that, two: a 3-character reply against an 8,334-character page, and a 2,253-character
+// reply against a 13,695-character one. Both are issue #170 — a reasoning model's scratch
+// template and the first of four drafts — and both were logged `result: "kept"`, so both pages
+// left in the delivered document as a sentence's worth of markup. A quarter sits an order of
+// magnitude clear of the first and a factor of 2.5 clear of the smallest real correction, which
+// is as much room as a threshold read off 265 samples deserves.
+//
+// util/json.ts now reads the right envelope out of both of those replies, so this catches
+// nothing in the corpus it was drawn from. That is the point of having it: choosing the best
+// candidate is a guess about what the model meant, and this is the floor under the guess —
+// whatever the parser picked, a pass that returns a fraction of the page does not get to
+// replace it. A correction is single-shot, so what it returns is what the document keeps.
+export const CORRECTION_SHRINK_FLOOR = 4;
+
+// Did the correction lose the page rather than correct it?
+export function destroyedPage(before: string, after: string): boolean {
+  return after.length * CORRECTION_SHRINK_FLOOR < before.length;
+}
+
 // How many measurement-only re-verifications a batch of pages may buy.
 //
 // One, because the point is a rate across runs rather than a verdict on any one page,
