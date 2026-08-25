@@ -282,18 +282,27 @@ export function summarizeRun(
   const abandoned = oldestOpenAt !== null && ms(oldestOpenAt, nowIso) > MAX_PLAUSIBLE_CALL_MS;
   const active = running || (ctx.status === "ready_for_review" && unfinished && !abandoned);
 
-  // The clock runs to NOW only where something is actually pending. For a `running`
-  // session that is the whole of it — a run between two calls is still a run. In the
-  // post-delivery window it takes an open call as well, because that window is the one
-  // place a run can end without saying so: a process killed between calls (after the
-  // classify call returns, inside a fixture read, in the contribution step's own fs read)
-  // leaves a round that never terminated and a status no sweep rewrites, and the
-  // open-call ceiling above cannot bound what is not open. Measuring such a session to
-  // `now` would have `elapsed_ms` counting up for days, `concurrency_factor` decaying
-  // toward zero and the last phase's duration growing without end — an idle, delivered
-  // session reading as one that has been working since it was killed. Its last event is
-  // the last thing that is known to have happened, so that is what it is measured to.
-  const pending = running || (active && oldestOpenAt !== null);
+  // The clock runs to NOW only where something is plausibly still happening. For a
+  // `running` session that is the whole of it — a run between two calls is still a run.
+  // In the post-delivery window it also has to be RECENT, because that window is the one
+  // place a run can end without saying so: a process killed there leaves a round that
+  // never terminated and a status no sweep rewrites, so measuring it to `now` has
+  // `elapsed_ms` counting up for days, `concurrency_factor` decaying toward zero and the
+  // last phase's duration growing without end — an idle, delivered session reading as one
+  // that has been working since it was killed.
+  //
+  // Recency is measured from the last event rather than from an open CALL, because the
+  // longest step in this window may not be a model call at all: filing the agent-update
+  // issue is a GitHub request (github/issue.ts) with no timeout of its own, and a stalled
+  // one holds the run's `max_concurrent_runs` slot while `openCalls` is empty. Keying on
+  // an open call would freeze the clock on exactly that run, which is the one still
+  // occupying the machine.
+  //
+  // What it costs: a live run stalled for longer than the ceiling in a step that logs
+  // nothing is measured to its last event, so its `elapsed_ms` stops climbing. That is
+  // the right way round — past an hour of silence, "the process is gone" is the better
+  // guess, and it is the only one that terminates.
+  const pending = running || (active && ms(lastEventAt ?? undefined, nowIso) <= MAX_PLAUSIBLE_CALL_MS);
   const endRef = pending ? nowIso : terminal?.ts ?? lastEventAt ?? nowIso;
   // Longest-waiting first (oldest start timestamp).
   openCalls.sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? ""));

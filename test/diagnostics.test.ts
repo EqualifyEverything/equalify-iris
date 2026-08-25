@@ -187,6 +187,18 @@ test("a round killed between calls does not count the clock up for ever", () => 
   });
   assert.equal(d.in_flight, null, "nothing was open when it died");
   assert.ok(d.elapsed_ms <= 2000, `elapsed_ms=${d.elapsed_ms} is measured to now, not to its last event`);
+
+  // But a run that is merely BETWEEN calls is still working, and it is the one holding a
+  // slot: the longest step in this window can be the GitHub filing, which logs nothing
+  // while it runs. Keying this on an open model call would freeze the clock on exactly
+  // that run.
+  const live = summarizeRun(killedBetweenCalls, {
+    sessionId: "ses_1",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse(T(600)), // ten minutes after its last event
+  });
+  assert.ok(live.elapsed_ms > 500_000, `elapsed_ms=${live.elapsed_ms} stopped while the run was still going`);
 });
 
 test("rounds are counted, so an interleaved second round is not read as finished", () => {
