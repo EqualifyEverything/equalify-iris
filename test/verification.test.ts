@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { changedAnything, correctionEffect } from "../src/pipeline/correction.ts";
+import { changedAnything, correctionEffect, destroyedPage } from "../src/pipeline/correction.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
@@ -182,6 +182,23 @@ test("a page rewritten to nothing reports what it lost", () => {
   assert.equal(e.text_changed, true);
   assert.equal(e.structure_changed, true);
   assert.equal(e.chars_after, 0);
+});
+
+test("the floor under a correction is a quarter of the page, and it is a floor and not a rule", () => {
+  // Where the quarter comes from is in `CORRECTION_SHRINK_FLOOR`: over 265 corrections in the
+  // bench logs, every legitimate one lands between 0.62 and 2.32 times the page it replaced,
+  // and the two below that are both issue #170 — a scratch template and an abandoned draft.
+  // So the guard has to refuse those two shapes while leaving a correction that genuinely
+  // tightens a page alone.
+  const page = "x".repeat(400);
+  assert.equal(destroyedPage(page, "x".repeat(3)), true, "the reply that replaced a page with `...`");
+  assert.equal(destroyedPage(page, "x".repeat(66)), true, "0.165 of the page: the abandoned draft");
+  assert.equal(destroyedPage(page, "x".repeat(99)), true);
+  assert.equal(destroyedPage(page, "x".repeat(100)), false, "exactly a quarter is not past the floor");
+  assert.equal(destroyedPage(page, "x".repeat(248)), false, "0.62: the smallest real correction on record");
+  assert.equal(destroyedPage(page, "x".repeat(928)), false, "and a correction may grow a page freely");
+  // A page that was empty to begin with cannot be shrunk, and must not divide by it.
+  assert.equal(destroyedPage("", ""), false);
 });
 
 // --- through the pipeline -----------------------------------------------------
@@ -384,6 +401,106 @@ test("a correction that came back empty is recorded, and the page keeps its cont
     assert.equal(corrected.length, 1);
     assert.equal(corrected[0].result, "empty");
     assert.match(result.fragments[0].innerHtml, /What the page says/);
+  });
+});
+
+test("a correction that came back as a fragment of the page is refused, and the page kept", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The reply from issue #170, in the shape the pipeline sees it: the correction pass
+    // returns a few characters where a page was. It happened because `extractJson` bound a
+    // reasoning model's scratch template instead of its answer — but nothing here asked what
+    // the reply looked like, so the fragment was adopted, logged `result: "kept"`, and page 17
+    // left the delivered document while the run reported every page delivered.
+    const page = `<h2>Table 3</h2><table><tr><th>State</th><th>Total</th></tr><tr><td>Alabama</td><td>4,132</td></tr></table>`;
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => page,
+        problems: (o) => (o === 1 ? ["the Alabama row's total is wrong"] : []),
+        corrected: () => "...",
+      }),
+    );
+    const rejected = of(events, "page_correction_rejected");
+    assert.equal(rejected.length, 1);
+    assert.deepEqual(
+      { ...rejected[0] },
+      {
+        type: "page_correction_rejected",
+        image: "page-001.png",
+        page: 1,
+        trigger: "verify",
+        reason: "shrank",
+        chars_before: page.length,
+        chars_after: 3,
+      },
+    );
+    // The page that was corrected is the page that ships — the same outcome as a correction
+    // that came back empty, and for the same reason.
+    assert.equal(result.fragments[0].innerHtml, page);
+    // On the record as a correction that was thrown away, which is what `results.rejected`
+    // in diagnostics counts.
+    assert.equal(of(events, "page_corrected")[0].result, "rejected");
+    // And no verdict was bought on a fragment nothing will deliver: the batch's one
+    // measurement slot is still there for a page whose correction is real.
+    assert.equal(of(events, "page_correction_recheck").length, 0);
+  });
+});
+
+test("a links-triggered correction is refused for shrinking before the Feedback Agent is asked", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const link = { text: "the full report", href: "https://example.org/report" };
+    // Same guard, other trigger. This page PASSED its fidelity check and is being re-rendered
+    // only to recover a link, so the links path was already going to re-verify and discard a
+    // rewrite that lost something. The size check gets there first, which saves the call: a
+    // fragment this much smaller than the page is not a rewrite to be judged.
+    const page =
+      `<h2>Progress</h2><p>Read the full report for the 2026 figures, which cover every region.</p>` +
+      `<p>The regional tables that follow restate the same figures by county, and the notes at the ` +
+      `foot of the page record which of them were revised after publication.</p>`;
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => page,
+        problems: () => [],
+        corrected: () => `<p><a href="https://example.org/report">the full report</a></p>`,
+        links: [link],
+      }),
+    );
+    assert.deepEqual(of(events, "page_correction_rejected").map((e) => [e.trigger, e.reason]), [
+      ["links", "shrank"],
+      ["links", "shrank"],
+    ]);
+    assert.equal(result.fragments[0].innerHtml, page, "the page that had passed is the one delivered");
+    // The links path's own rejection event did not fire, because its re-verification never
+    // ran — the two are not two rejections of the same fragment.
+    assert.equal(of(events, "page_links_correction_rejected").length, 0);
+    assert.equal(of(events, "page_correction_recheck").length, 0);
+    // The link is still missing from the delivered page, and the log still says so: refusing
+    // the correction does not quietly close the failure it was asked to fix.
+    assert.deepEqual(of(events, "page_links_unrecovered").length, 0, "not this event — the page was never replaced");
+    assert.equal(of(events, "page_links_missing").length, 2);
+  });
+});
+
+test("a correction that tightens a page without gutting it is still delivered", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The guard has to be a floor and not a policy about size. This is the smallest real
+    // correction in the bench logs, roughly to scale: a page re-rendered at 0.62 of its
+    // length because the model collapsed a table it had first written as nested divs.
+    const page = `<div><div>State</div><div>Total</div></div>`.repeat(6);
+    const tighter = `<table><tr><th>State</th><th>Total</th></tr></table>`.repeat(3);
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => page,
+        problems: (o) => (o === 1 ? ["the table is marked up as divs"] : []),
+        corrected: () => tighter,
+      }),
+    );
+    assert.ok(tighter.length / page.length < 0.7, "the fixture is a real shrink, not a rounding one");
+    assert.equal(of(events, "page_correction_rejected").length, 0);
+    assert.equal(of(events, "page_corrected")[0].result, "kept");
+    assert.equal(result.fragments[0].innerHtml, tighter);
   });
 });
 
