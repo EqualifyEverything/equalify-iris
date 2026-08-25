@@ -629,7 +629,10 @@ extracted in parallel, several calls can be open at once — `in_flight` reports
 is total model-call time ÷ wall-clock elapsed: ~1 means calls ran serially, and roughly
 `extraction_concurrency` during a parallel extraction phase — a value near 1 on a multi-page run
 means parallelism isn't happening. `slowest_calls` and `phase_durations_ms` show where time goes;
-`errors` lists failed calls.
+`errors` lists failed calls, plus the two failures that are not calls — a feedback round's
+agent training (`feedback_training_failed`) and its agent-suggestion filing
+(`contribution_failed`). Both run after the document is delivered and report rather than raise,
+since neither may revoke a document the user already has, so this is where they surface.
 
 `tokens` is what the run **consumed**, and `by_agent` carries the same four counts per agent
 (under the names the run log uses: `input_tokens`, `output_tokens`, `cache_read_input_tokens`,

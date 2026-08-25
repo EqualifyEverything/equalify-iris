@@ -187,6 +187,15 @@ const CORRECTION_RESULTS = ["kept", "rejected", "identical", "empty"] as const;
 // And why it ran. A closed list for the same reason, and read off the same event.
 const CORRECTION_TRIGGERS = ["verify", "links", "both"] as const;
 
+// The longest a model call can legitimately still be open, used to tell a run that is
+// working from one whose process is gone (see `abandoned`). Derived, not picked: each
+// adapter abandons a stream at an absolute 15-minute ceiling (providers/bedrock.ts,
+// providers/openrouter.ts `MAX_TOTAL_MS`) and OpenRouter retries at most three times, so
+// ~45 minutes is the worst case a caller can produce. An hour is that, rounded up — far
+// enough past it that this never cuts off a call still running, and short enough that a
+// killed run stops claiming to be stuck within one.
+const MAX_PLAUSIBLE_CALL_MS = 60 * 60_000;
+
 const ms = (a?: string, b?: string): number =>
   a && b ? Math.max(0, new Date(b).getTime() - new Date(a).getTime()) : 0;
 
@@ -213,21 +222,15 @@ export function summarizeRun(
   const runStart = events.map((e) => e.type).lastIndexOf("run_start");
   const currentRun = runStart === -1 ? events : events.slice(runStart);
   const terminal = currentRun.find((e) => e.type === "run_complete" || e.type === "run_failed");
-
-  // Whether this run is still working, which is not the same as whether the session is
-  // still `running`. A feedback round marks the session `ready_for_review` as soon as the
-  // document is delivered and then trains the page agent from it
-  // (pipeline/orchestrator.ts), holding its `max_concurrent_runs` slot throughout. Both
-  // questions this drives — how long the run has been going, and whether a call is still
-  // open — were answered "it is over" in exactly that window, which is where a hung
-  // provider call delays every upload behind it and nothing else reports it.
-  //
-  // The status is still half of it, because a run can also stop without writing anything:
-  // `failStaleSessions` rewrites the status of a process that died and cannot append to
-  // its own log, and treating that log's absent terminal line as "still working" would
-  // report its last open call as hanging forever.
-  const active = running || (ctx.status === "ready_for_review" && !terminal);
-  const endRef = active ? nowIso : terminal?.ts ?? lastEventAt ?? nowIso;
+  // Counted rather than read off the slice above, because a session's rounds are not
+  // always laid end to end: a client may POST /feedback during a round's post-delivery
+  // window (pipeline/orchestrator.ts), and with `max_concurrent_runs` above 1 the second
+  // round's `run_start` is then appended before the first round's `run_complete`. The
+  // slice would hold that trailing line and read as finished. A count cannot be fooled by
+  // the interleaving: as many terminal lines as starts means every round is done.
+  const roundsStarted = events.filter((e) => e.type === "run_start").length;
+  const roundsEnded = events.filter((e) => e.type === "run_complete" || e.type === "run_failed").length;
+  const unfinished = roundsStarted > roundsEnded;
 
   // In-flight detection. Extraction runs several pages concurrently, so more
   // than one call can be open at once and start/end events interleave. Match
@@ -253,6 +256,32 @@ export function summarizeRun(
       openCalls.splice(i === -1 ? 0 : i, 1);
     }
   }
+  const oldestOpenAt = openCalls.map((c) => c.ts ?? "").sort()[0] ?? null;
+
+  // Whether this run is still working, which is not the same as whether the session is
+  // still `running`. A feedback round marks the session `ready_for_review` as soon as the
+  // document is delivered and then trains the page agent from it
+  // (pipeline/orchestrator.ts), holding its `max_concurrent_runs` slot throughout. Both
+  // questions this drives — how long the run has been going, and whether a call is still
+  // open — answered "it is over" in exactly that window, which is where a hung provider
+  // call delays every upload behind it and nothing else reports it.
+  //
+  // A dead process is the hard case, because nothing it left behind says it died. For a
+  // run interrupted while the session still read `running` or `queued`, the next boot
+  // rewrites the status (store/db.ts `failStaleSessions`) and the first clause closes.
+  // That sweep does NOT touch `ready_for_review` rows — the document is delivered and the
+  // status is correct — so a process killed inside the post-delivery window leaves a row
+  // no one will ever correct, and "no terminal line" alone would report its abandoned
+  // call as hanging forever, with `waiting_ms` and `elapsed_ms` climbing off the clock.
+  //
+  // So the claim is bounded by what a call can actually do: each adapter abandons a
+  // stream at an absolute 15-minute ceiling and OpenRouter retries at most three times,
+  // which puts the longest a call can legitimately stay open at ~45 minutes. Past an hour
+  // an open call is not a slow call, it is a process that is gone — and this reports the
+  // run as over, which is what it is.
+  const abandoned = oldestOpenAt !== null && ms(oldestOpenAt, nowIso) > MAX_PLAUSIBLE_CALL_MS;
+  const active = running || (ctx.status === "ready_for_review" && unfinished && !abandoned);
+  const endRef = active ? nowIso : terminal?.ts ?? lastEventAt ?? nowIso;
   // Longest-waiting first (oldest start timestamp).
   openCalls.sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? ""));
   const oldest = openCalls[0];

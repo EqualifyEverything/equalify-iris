@@ -142,6 +142,53 @@ test("a feedback round is read against its OWN terminal line, not the first run'
   assert.ok(d.elapsed_ms > 300_000, `elapsed_ms=${d.elapsed_ms} stopped at the first run`);
 });
 
+test("a run whose process died stops claiming to be stuck", () => {
+  // The status sweep at boot rewrites `running` and `queued` rows, and deliberately not
+  // `ready_for_review` ones — the document is delivered and that status is right. So a
+  // process killed inside the post-delivery window leaves a row nobody will correct, and
+  // "no terminal line" alone would report its abandoned call as hanging for ever. What
+  // bounds the claim is what a call can actually do: past an hour open it is not a slow
+  // call, it is a process that is gone.
+  const killed = log({ ts: T(0), type: "run_start" }, start(T(1), "feedback"));
+  const ready = (nowSeconds: number) => ({
+    sessionId: "ses_1",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse(T(nowSeconds)),
+  });
+
+  const soon = summarizeRun(killed, ready(600)); // ten minutes in — a slow call
+  assert.ok(soon.in_flight, "a call open for ten minutes is still a call");
+
+  const later = summarizeRun(killed, ready(2 * 60 * 60)); // two hours in — a dead process
+  assert.equal(later.in_flight, null, "an hour past the adapters' own ceiling, nothing is running");
+  assert.equal(later.in_flight_count, 0);
+  // And the clock stops with it, rather than counting up from a run that ended when its
+  // process did.
+  assert.ok(later.elapsed_ms < 60_000, `elapsed_ms=${later.elapsed_ms} is still counting`);
+});
+
+test("rounds are counted, so an interleaved second round is not read as finished", () => {
+  // A client can POST /feedback during a round's post-delivery window, and with
+  // max_concurrent_runs above 1 the second round's run_start is appended BEFORE the
+  // first round's run_complete. Slicing from the last run_start then hands the slice a
+  // trailing terminal line that belongs to the other round.
+  const interleaved = log(
+    { ts: T(0), type: "run_start" }, // round 1
+    { ts: T(100), type: "run_start" }, // round 2 claims the session mid-window
+    start(T(101), "feedback"), // round 2's training call, still open
+    { ts: T(102), type: "run_complete" }, // round 1 finishing, after round 2 began
+  );
+  const d = summarizeRun(interleaved, {
+    sessionId: "ses_1",
+    status: "ready_for_review",
+    phase: "done",
+    now: Date.parse(T(300)),
+  });
+  assert.ok(d.in_flight, "two rounds started and one finished, so one is still working");
+  assert.equal(d.in_flight.agent, "feedback");
+});
+
 test("an earlier round's abandoned call is not what this run is stuck on", () => {
   // A process killed mid-round leaves a start with no end. That call belongs to a run
   // that is over; attributing it to the current one is the phantom hang by another route.
