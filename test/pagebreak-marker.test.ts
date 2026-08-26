@@ -25,8 +25,10 @@
 // src/pipeline/lint.ts).
 //
 // A clean verdict from that gate is a narrower fact than a clean verdict from axe, and the last
-// test in this file is about the difference: the six markers that passed in #145's document were
-// findings axe DEMOTED to `incomplete`, not findings it never made.
+// test in this file is about the difference: on a marker carrying BOTH a label and its number as
+// text, axe makes a finding and `runAxe` drops it, so a `[]` from the gate is not the claim that
+// axe found nothing. #145's own six passing markers are a third case — no naming attribute at all,
+// so this rule has nothing to judge and their silence really is silence.
 //
 // The third — that the pruned number never reaches a reader — no axe API can settle, and
 // this file does not pretend otherwise. axe's own `accessibleText` returns "5" for the
@@ -166,8 +168,9 @@ test("the gate's silence on a <p> marker is not evidence the number reaches a re
     assert.deepEqual(
       found,
       [],
-      `${marker} still passes the gate — if this starts failing, the gate has caught up with the ` +
-        `prompt and this test's argument needs rewriting, not deleting`,
+      `${marker} still passes the gate — if this starts failing, either axe has caught up with the ` +
+        `prompt or runAxe's promotion list now covers aria-prohibited-attr (src/pipeline/lint.ts). ` +
+        `This is the test that sees that change; the argument here needs rewriting, not deleting`,
     );
   }
 });
@@ -187,16 +190,23 @@ test("the gate's silence on a <p> marker is not evidence the number reaches a re
 // `incomplete`, and `runAxe` promotes only `duplicate-id-aria` out of `incomplete`
 // (src/pipeline/lint.ts, pinned in test/assembly-anchors.test.ts).
 //
-// Which is a sharper answer to why #145 was intermittent than "six markers were clean": six
-// markers were DEMOTED, and the seventh had no text to demote it. So the number in the middle
-// row is the one to read if this file ever seems to disagree with axe — and if the promotion
-// list grows to include this rule, this test fails and says so, instead of the failure reading
-// as an axe regression somewhere else in the suite.
+// So "axe has nothing to say about a texted marker" is true of one shape and false of the other,
+// and which one it is depends on whether the marker is also labelled. #145's six passing markers
+// are the middle row — no naming attribute, nothing for this rule to judge — so their clean verdict
+// was not a demoted finding; what the demotion explains is the labelled-and-texted shape, which is
+// the trap the test above this one is about and the shape a model reaches for when told to keep the
+// label and show the number.
+//
+// This test measures axe DIRECTLY, so it is not the tripwire on `runAxe`'s promotion list: adding
+// this rule to that list would leave every row here unchanged. The test that fails on that change
+// is the gate test above, whose `[]` would become a reported violation — its message names both
+// reasons for exactly that reason.
 test("the labelled marker with text is a finding the gate demotes, not one axe missed", async () => {
   assert.deepEqual(
     await prohibitedAttr('<p role="doc-pagebreak" aria-label="Page 5" id="page-5">5</p>'),
     { violations: 0, incomplete: 1 },
-    "axe now reports the texted <p> marker as a violation: lint.ts's promotion list, or this test's argument, is out of date",
+    "axe itself now reports the texted <p> marker as a violation rather than leaving it incomplete, " +
+      "so this file's account of why the gate is silent about it is out of date",
   );
   // The withdrawn shape has no naming attribute at all, so there is nothing for this rule to
   // judge and the silence really is silence. That is the row that makes the contrast a contrast.
