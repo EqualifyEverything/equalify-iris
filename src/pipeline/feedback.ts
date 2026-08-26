@@ -33,7 +33,10 @@ interface TrainOutput {
 interface VerifyOutput {
   faithful?: boolean;
   accessible?: boolean;
-  problems?: string[];
+  // Read as `unknown` and narrowed in `readProblems`: this is model output, and the two
+  // shapes it arrives in (a list of strings, a list of `{kind, problem}` objects) are both
+  // valid replies to a contract that has said both things — see `readProblems`.
+  problems?: unknown;
 }
 
 interface ClassifyOutput {
@@ -43,9 +46,80 @@ interface ClassifyOutput {
   after?: string;
 }
 
+// What kind of problem VERIFY named, in the order a reader loses by (agents/feedback.md
+// defines each one and tells the agent that the earliest applicable kind wins). A closed
+// list: `verify_failed` was a count of pages the verifier had an opinion about, in which a
+// page that lost three table rows and a page whose alt text was refined from "orange kayak"
+// to "orange-yellow kayak" were the same line (issue #182). `correctionEffect` recovers half
+// of that after the fact, but it can only classify corrections that HAPPENED — so a page
+// flagged and left materially unchanged reads like a page that never needed anything. This
+// is the other half: what was wrong going in.
+export const VERIFY_KINDS = [
+  "content_missing",
+  "content_wrong",
+  "structure_wrong",
+  "a11y_only",
+  "alt_quality",
+] as const;
+export type VerifyKind = (typeof VERIFY_KINDS)[number];
+
 export interface VerifyVerdict {
   ok: boolean;
+  // The problems as prose, unchanged: this is what the correction pass is given and what
+  // the regression gate reports, and both want the sentence and not the label.
   problems: string[];
+  // The DISTINCT kinds named, in `VERIFY_KINDS` order. A set and not a per-problem list,
+  // because that is what a tally over a fleet of runs can be read from — three missing rows
+  // and one thin alt is a page that lost content, whether the verifier wrote it as two
+  // problems or five.
+  kinds: VerifyKind[];
+  // How many of `problems` carried no kind this code recognizes. The auditability field: a
+  // split computed over problems where half arrived untagged is a split that lies about
+  // which half it measured, and nothing else on the line would say so.
+  untagged: number;
+}
+
+// Read VERIFY's `problems` out of a reply that may predate the kinds, may be a session-built
+// or trained agent file whose contract still says `["..."]`, or may simply have answered in
+// strings anyway. A string entry is a problem with no kind — never a dropped problem, since
+// dropping it would turn a page the verifier rejected into a page that passed (`failedCheck`
+// needs a non-empty list) and ship the fragment unquestioned. Same rule for an object whose
+// text this cannot find: it is stringified rather than lost, which is what the prose list did
+// with it before, minus the "[object Object]" a correction prompt used to be handed.
+//
+// A kind outside `VERIFY_KINDS` is `untagged`, not a sixth bucket. The five are the contract;
+// counting invented ones would make the tally a list of the words a model chose.
+function readProblems(raw: unknown): Pick<VerifyVerdict, "problems" | "kinds" | "untagged"> {
+  if (!Array.isArray(raw)) return { problems: [], kinds: [], untagged: 0 };
+  const problems: string[] = [];
+  const seen = new Set<VerifyKind>();
+  let untagged = 0;
+  for (const entry of raw) {
+    let text: string;
+    let kind: VerifyKind | undefined;
+    // A null entry is not a problem the verifier named, so it is not one here either. That
+    // can leave a `faithful: false` verdict with an empty list, which `failedCheck` already
+    // reads as "not actionable" — the rule this code has always applied to an agent that set
+    // the flag and named nothing.
+    if (entry === null || entry === undefined) {
+      continue;
+    } else if (typeof entry === "string") {
+      text = entry;
+    } else if (typeof entry === "object") {
+      const rec = entry as Record<string, unknown>;
+      const prose = [rec.problem, rec.text, rec.description].find((v) => typeof v === "string" && v.trim());
+      text = typeof prose === "string" ? prose : JSON.stringify(entry);
+      const named = typeof rec.kind === "string" ? rec.kind.trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
+      kind = VERIFY_KINDS.find((k) => k === named);
+    } else {
+      text = String(entry);
+    }
+    if (!text.trim()) continue;
+    problems.push(text.trim());
+    if (kind) seen.add(kind);
+    else untagged += 1;
+  }
+  return { problems, kinds: VERIFY_KINDS.filter((k) => seen.has(k)), untagged };
 }
 
 function loadFeedbackAgent(ctx: PipelineContext): AgentSpec | null {
@@ -93,7 +167,7 @@ export async function verifyAgentOutput(
   blocks: { html: string }[],
 ): Promise<VerifyVerdict> {
   const fb = loadFeedbackAgent(ctx);
-  if (!fb || blocks.length === 0) return { ok: true, problems: [] };
+  if (!fb || blocks.length === 0) return { ok: true, problems: [], kinds: [], untagged: 0 };
 
   const html = blocks.map((b) => b.html).join("\n\n");
   // Everything this task says that is not about the page in front of it: the task marker
@@ -141,9 +215,9 @@ export async function verifyAgentOutput(
   ctx.log.agentCall({ agent: fb, phase: "extraction", image: img.name, output: res.text });
 
   const parsed = extractJson<VerifyOutput>(res.text);
-  if (!parsed) return { ok: true, problems: [] };
+  if (!parsed) return { ok: true, problems: [], kinds: [], untagged: 0 };
   const ok = parsed.faithful !== false && parsed.accessible !== false;
-  return { ok, problems: parsed.problems ?? [] };
+  return { ok, ...readProblems(parsed.problems) };
 }
 
 // ---------------------------------------------------------------------------

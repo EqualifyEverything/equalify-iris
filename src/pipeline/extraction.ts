@@ -1425,7 +1425,20 @@ async function extractPage(
   // correction driven by a link.
   const verifyFailed = failedCheck(verdict);
   if (verifyFailed) {
-    ctx.log.event("page_verify_failed", { image: img.name, problems: verdict.problems });
+    // `kinds` is what a reader of this log can subtract from `verify_failed`: the SET of
+    // problem kinds the verdict named (feedback.ts `VERIFY_KINDS`), so a page that lost
+    // three table rows and a page whose alt text was polished stop being the same line
+    // (issue #182). A set rather than one label per problem, because the question it answers
+    // is what was wrong with the PAGE, and a page with two missing rows lost content once.
+    // `untagged` is how many problems arrived with no kind this code knows — a split
+    // computed while most of a round was untagged would be a split of the tagged half
+    // reported as the whole, and this is the only field that would say so.
+    ctx.log.event("page_verify_failed", {
+      image: img.name,
+      problems: verdict.problems,
+      kinds: verdict.kinds,
+      untagged: verdict.untagged,
+    });
   } else {
     ctx.log.event("page_verify_ok", { image: img.name });
   }
@@ -1524,6 +1537,14 @@ async function extractPage(
         page: img.order,
         trigger,
         problems: problems.length,
+        // What the verifier said was wrong going in, so this line pairs with the effect
+        // fields on the other `page_corrected` below without a join back to
+        // `page_verify_failed` (issue #182). `identical` on a page flagged
+        // `content_missing` is the sharpest case there is of a page call that bought
+        // nothing that mattered. Empty on the links trigger: a dropped link is found by
+        // code against the file's own annotations, not named by the verdict, and giving it
+        // a kind would put a count in this field the verifier never made.
+        kinds: verifyFailed ? verdict.kinds : [],
         result: corrected ? "identical" : attempt.error !== null ? "failed" : "empty",
       });
     }
@@ -1659,6 +1680,15 @@ async function extractPage(
           problems_before: verifyFailed ? verdict.problems.length : 0,
           links_before: missing.length,
           problems_after: recheck.problems.length,
+          // The same two sides as kinds (issue #182), which is what turns "the recheck did
+          // not pass" into an answer about the CORRECTION: `content_missing` going in and
+          // `alt_quality` coming out is a page whose content came back and whose description
+          // is now the complaint, and `content_missing` on both sides is a correction that
+          // did not do the one thing it was asked to. Both are `ok: false` and five-in-one-out
+          // says nothing about which. Empty before on the links path, for the same reason
+          // `problems_before` is 0 there — the page had passed, so nothing was named.
+          kinds_before: verifyFailed ? verdict.kinds : [],
+          kinds_after: recheck.kinds,
           // Whether this verdict was allowed to change what is delivered. False for the
           // sample, so a consumer cannot read it as the loop having gained a gate.
           binding: !verifyFailed,
@@ -1678,6 +1708,11 @@ async function extractPage(
         page: img.order,
         trigger,
         problems: problems.length,
+        // The verdict's side of the same line: what was wrong going in, beside what the
+        // correction changed. That pair is the reading issue #182 asks for — a page flagged
+        // `content_missing` whose only effect is `alt_changed` did not get fixed, and until
+        // both were on one line neither field could say it alone.
+        kinds: verifyFailed ? verdict.kinds : [],
         result: keep ? (moved ? "kept" : "identical") : "rejected",
         ...effect,
       });

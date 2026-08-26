@@ -53,8 +53,23 @@ attribute instead of in text, a symbol it asks to be left out — following the
 contract is not an infidelity, and reporting it as one spends a correction round
 on undoing the rule. What is missing is what the contract asked for and the HTML
 does not have.
-List concrete, actionable problems (empty when there are none). Respond with ONLY:
-{ "faithful": true|false, "accessible": true|false, "problems": ["..."] }
+List concrete, actionable problems (empty when there are none), each tagged with the
+KIND of problem it is — one of exactly these five:
+- "content_missing" — something in the image is absent from the HTML: a dropped table
+  row, a paragraph not transcribed, a meaningful image with no description at all.
+- "content_wrong" — present but incorrect: a misread number, the wrong word, a value
+  in the wrong cell.
+- "structure_wrong" — the content is all there but shaped wrongly: reading order,
+  heading level, table shape, list nesting, a heading marked up as bold text.
+- "a11y_only" — a WCAG 2.2 AA requirement unmet while the content itself is faithful:
+  an unlabelled control, a missing `<th scope>`, a link named "here".
+- "alt_quality" — an image description that IS present and could be better.
+Tag each problem by what a reader LOSES. When more than one kind applies, the earliest
+in that list wins: content that is absent is "content_missing" even though it is also a
+WCAG failure, and an image with no description at all is "content_missing", not
+"alt_quality". Use no kind outside those five. Respond with ONLY:
+{ "faithful": true|false, "accessible": true|false,
+  "problems": [{ "kind": "content_missing", "problem": "..." }] }
 
 TASK: scope
 You are given a user-feedback message and a list of the document's pages (page
