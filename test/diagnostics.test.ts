@@ -613,8 +613,10 @@ test("a recheck nothing judged is counted apart from a rewrite that was checked"
       problems: [], binding: true },
     { ts: T(2), type: "page_correction_recheck", image: "b.png", page: 2, ok: true,
       problems: [], binding: true, unjudged: true },
-    // A sampled recheck can go unjudged too — a reply that would not parse — and it is the
-    // convergence ratio's caveat when it does.
+    // A sampled recheck can go unjudged too — the first verdict was real and failed, the
+    // second reply would not parse — and its problem pair stays out of the convergence sums:
+    // `problems_after: 0` here is "nothing was named", and summed in it would report this
+    // page as a correction that fixed all two of the problems it was handed.
     { ts: T(3), type: "page_correction_recheck", image: "c.png", page: 3, ok: true,
       problems: [], problems_before: 2, problems_after: 0, binding: false, unjudged: true },
     // Same trust as everywhere else here: a flag that is not the boolean is not a flag.
@@ -623,11 +625,18 @@ test("a recheck nothing judged is counted apart from a rewrite that was checked"
     { ts: T(5), type: "run_complete" },
   );
   const d = summarizeRun(text, done(Date.parse(T(5))));
-  // Subsets, as above: 1 of 2 binding rechecks was actually judged, and the sums the sampled
-  // pair feeds keep counting what the log says regardless of who judged it.
+  // Subsets, as above: 2 of the 3 binding rechecks were judged, and both of them passed —
+  // which is what makes the rate `(binding_ok - binding_unjudged) / (binding -
+  // binding_unjudged)` and not `binding_ok / (binding - binding_unjudged)`. An unjudged
+  // recheck logs `ok: true`, so it is inside `binding_ok` already and the second form reads
+  // 3 of 2. The problem pair is the exception: it counts judged samples only.
   assert.deepEqual(d.verification.rechecks, {
     sampled: 1, sampled_ok: 1, sampled_unjudged: 1,
-    sampled_problems_before: 2, sampled_problems_after: 0,
+    sampled_problems_before: 0, sampled_problems_after: 0,
     binding: 3, binding_ok: 3, binding_unjudged: 1,
   });
+  assert.equal(
+    d.verification.rechecks.binding_ok - d.verification.rechecks.binding_unjudged, 2,
+    "two binding rechecks were judged and both passed",
+  );
 });

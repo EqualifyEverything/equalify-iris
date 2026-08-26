@@ -293,12 +293,27 @@ export interface Diagnostics {
     // with none loaded every page passes its first check, so every corrected page's recheck is
     // the BINDING one and every one of them is a "the rewrite was checked and stayed good"
     // line for a page nobody looked at. Subsets of the counts above rather than deductions
-    // from them, for the same reason: `binding_ok / (binding - binding_unjudged)` is the rate
-    // over the rechecks that were actually judged. Zero on every log written before the flag.
+    // from them, so those totals keep counting what they always counted. Zero on every log
+    // written before the flag.
+    //
+    // The judged-only rate is `(binding_ok - binding_unjudged) / (binding - binding_unjudged)`,
+    // and the same shape for sampled — BOTH sides, which is where this differs from the fold
+    // two levels up. There, subtracting from the denominator alone is exact, because
+    // `verify_failed` can only come from `page_verify_failed` and an unjudged verdict cannot
+    // produce one, so the numerator and `pages_unjudged` are disjoint. Here the numerator is a
+    // PASS count and an unjudged recheck is a pass by construction — every one of them is
+    // inside `binding_ok` — so denominator-only subtraction reports a rate above 100%.
     rechecks: {
       sampled: number;
       sampled_ok: number;
       sampled_unjudged: number;
+      // Summed over the JUDGED samples only — an unjudged recheck contributes neither, even
+      // though its line carries a real `problems_before`. Its `problems_after` is 0 because
+      // nothing was named, not because nothing was left, and pairing a true before-count with
+      // a non-verdict after-count would report that page as a correction that fixed
+      // everything it was given. Unlike `*_ok` there is no field to back that out of, and no
+      // published number moves by leaving it out: only a log carrying the flag can be
+      // affected, and the flag is newer than every round measured so far.
       sampled_problems_before: number;
       sampled_problems_after: number;
       binding: number;
@@ -770,7 +785,14 @@ export function summarizeRun(
         // sums alone rather than adding a zero to each. A missing `problems_before` counted as
         // 0 would read as a page corrected for no reason, which is the opposite of what
         // happened, and it would make the pair say the corrections had nothing to fix.
+        //
+        // And only when something judged it, for the mirror-image reason: an unjudged sample
+        // (the first verdict was real and failed, the second reply would not parse) carries a
+        // true before-count and an `problems_after` of 0 that means "nothing was named", not
+        // "nothing was left" — a page nobody looked at, summed in as a correction that fixed
+        // everything it was handed.
         if (
+          !unjudged &&
           typeof e.problems_before === "number" &&
           typeof e.problems_after === "number"
         ) {

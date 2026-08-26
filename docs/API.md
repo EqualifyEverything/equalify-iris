@@ -895,8 +895,14 @@ by construction, and their verdict decides whether the rewrite ships at all rath
 far a kept one got. `sampled_unjudged` and `binding_unjudged` are `pages_unjudged`'s caveat one level
 down, and subsets in the same way: a recheck's `ok` is also what an unavailable Feedback Agent looks
 like, and with none loaded every page passes its first check, so every corrected page's recheck is the
-binding one and every one of them reads as a rewrite checked and found good. Divide by
-`binding - binding_unjudged`.
+binding one and every one of them reads as a rewrite checked and found good. Subtract from BOTH sides
+— `(binding_ok - binding_unjudged) / (binding - binding_unjudged)`, same shape for sampled — because
+an unjudged recheck logs `ok: true` and so is already inside `binding_ok`. That is where these differ
+from `pages_unjudged`, which comes off the denominator alone: `verify_failed` can only come from a
+`page_verify_failed` line, which an unjudged verdict never writes. The `sampled_problems_*` pair needs
+no such correction, because an unjudged sample is left out of it: its `problems_after` is 0 for want
+of a verdict rather than for want of remaining problems, and summed in it would report a page nobody
+judged as a correction that fixed everything it was given.
 
 `rejected: 0` over a whole round is the expected reading of a healthy one, not a gate that accepts
 everything. The only rejection that applies on every trigger is the shrink floor — a correction that
