@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { bodyLang, wrapDocument } from "../src/pipeline/assembly.ts";
+import { titledAs } from "../src/util/outputNames.ts";
+import { runAxe } from "../src/pipeline/lint.ts";
 
 // Issue #163: a document assembled from Korean pages was delivered as `<html lang="en">`.
 //
@@ -77,6 +79,8 @@ test("the shell's language is derived from the body only where every top-level e
       `<section lang="Korean"><p>가</p></section>`, null],
     ["an underscore is not a subtag separator",
       `<section lang="ko_KR"><p>가</p></section>`, null],
+    ["a tag the canonicalizer refuses outright",
+      `<section lang="ko-x"><p>가</p></section>`, null],
     ["an empty attribute",
       `<section lang=""><p>가</p></section>`, null],
     ["whitespace is not a language",
@@ -99,9 +103,110 @@ test("the shell's language is derived from the body only where every top-level e
     // the rest of the element with it. It is not a language either way.
     ["a value that tries to close the tag",
       `<section lang="ko><p>hidden</p>"><p>가</p></section>`, null],
+    // The attributes are read one at a time rather than searched for ` lang=`, because a search
+    // finds the string inside another attribute's value — and `title`/`alt`/`aria-label` text
+    // comes from the page, so a page whose caption mentions a language tag would set the
+    // document's language.
+    ["a language tag inside another attribute's value is not this element's language",
+      `<section title="see lang=fr note"><p>English.</p></section>`, null],
+    ["nor does it override a real one",
+      `<section title="the lang=fr column" lang="ko"><p>가</p></section>`, "ko"],
+    ["an attribute whose name merely starts with lang",
+      `<section langue="ko"><p>가</p></section>`, null],
+    // A page that omitted an end tag is not a page that said nothing: an unclosed element
+    // swallows every page after it, so the one tag a top-level scan reads for that whole run is
+    // the FIRST page's — which is one page's answer promoted to the root of a document mostly not
+    // in it. Nothing here can tell a run holding one element from a run holding five, so the
+    // derivation is refused. Omitted end tags are ordinary model output (`sections.ts` handles
+    // implied ends for exactly that reason) and nothing rejects an unbalanced fragment, so this
+    // is reachable input rather than a hypothetical.
+    ["an unclosed element that swallows the English pages after it",
+      `<section lang="ko"><p>가</p>\n\n<section><h1>English report</h1></section>\n<p>More English.</p>`, null],
+    ["an unclosed div with English content after it",
+      `<div lang="ko"><p>나</p>\n\n<h1>Hello</h1>\n<p>English body text.</p>`, null],
+    ["and the same shape with nothing after it, since the two cannot be told apart",
+      `<section lang="ko"><p>가</p>`, null],
+    // Top-level text belongs to no element, so no `lang` covers it. The scan therefore reads a
+    // segment only when it BEGINS with a start tag, which is also what refuses a stray end tag.
+    ["stray prose before a labelled fragment",
+      `Preamble text.\n<section lang="ko"><p>가</p></section>`, null],
+    ["stray prose between two labelled fragments",
+      `<section lang="ko"><p>가</p></section>\nContinued overleaf.\n<section lang="ko"><p>나</p></section>`, null],
+    ["stray prose after a labelled fragment",
+      `<section lang="ko"><p>가</p></section>\nEnd of document.`, null],
+    ["a stray end tag at top level",
+      `<section lang="ko"><p>가</p></section>\n</div>\n<section lang="ko"><p>나</p></section>`, null],
+    // Whitespace between fragments is what `assembleBody` joins with, so it must not count as
+    // text that nothing claims.
+    ["the blank line assembly joins fragments with",
+      `<section lang="ko"><p>가</p></section>\n\n<section lang="ko"><p>나</p></section>\n`, "ko"],
+    // A tag with a preferred form is delivered IN that form. `kor` is what a page writes when
+    // told to "use the BCP 47 tag", and measured against this repo's axe it fails
+    // `html-lang-valid` — so refusing it (fall back to `en`) and promoting it as written (ship a
+    // violation on the root) are both worse than answering with the tag it means.
+    ["a deprecated three-letter code becomes the two-letter one it means",
+      `<section lang="kor"><p>가</p></section>`, "ko"],
+    ["and so does a deprecated two-letter one",
+      `<section lang="iw"><p>טקסט</p></section>`, "he"],
+    ["a three-letter code with no two-letter equivalent is a language and is kept",
+      `<section lang="haw"><p>ʻōlelo</p></section>`, "haw"],
+    ["ditto Cherokee, Filipino, Cantonese",
+      `<section lang="chr"><p>ᏣᎳᎩ</p></section>`, "chr"],
+    // Which makes two spellings of one language an agreement rather than a conflict — they are
+    // the same language, and a document is not multilingual because two pages chose differently.
+    ["two pages naming the same language two ways agree",
+      `<section lang="ko"><p>가</p></section>\n\n<section lang="kor"><p>나</p></section>`, "ko"],
   ] as [string, string, string | null][]) {
     assert.equal(bodyLang(body), expected, what);
   }
+});
+
+// The measurement the strictness above rests on, run rather than asserted from memory: axe
+// validates a `lang` against the registry's PREFERRED values, so the three-letter codes that have
+// a two-letter equivalent are the ones it refuses. If that ever stops being true, the rule in
+// `preferredTag` is either too strict or not strict enough and this is the test that says so.
+// `html-lang-valid` is the rule that judges the root and only the root; `valid-lang` judges every
+// other element. So the third column is the fragment's own answer being reported where it was
+// written — a body issue the review loop can correct, which is not something the root should paper
+// over — while the first two say the root itself is never the violation.
+test("every language the shell will declare is one the linter accepts", async () => {
+  for (const [written, root, fragmentFlagged] of [
+    ["ko", "ko", false], ["zh-Hans", "zh-Hans", false], ["pt-BR", "pt-BR", false],
+    ["haw", "haw", false], ["chr", "chr", false],
+    // The interesting rows: written by the page in a form axe refuses, delivered in one it accepts.
+    ["kor", "ko", true], ["spa", "es", true], ["eng", "en", true],
+    // A deprecated two-letter code axe happens to accept is still delivered in its preferred form.
+    ["iw", "he", false],
+    // And the ones that derive nothing, where the root has to be a clean `en` all the same.
+    ["Korean", "en", true], ["ko_KR", "en", true],
+  ] as [string, string, boolean][]) {
+    const html = wrapDocument(`<section lang="${written}"><h1>제목</h1><p>본문 텍스트</p></section>`);
+    assert.match(html, new RegExp(`<html lang="${root}">`), `lang="${written}" should derive ${root}`);
+    const lint = await runAxe(html);
+    const ids = (lint.violations ?? []).map((v) => v.id);
+    assert.ok(!ids.includes("html-lang-valid"), `lang="${written}" delivered a root axe rejects`);
+    assert.ok(!ids.includes("html-has-lang"), `lang="${written}" delivered a root with no language`);
+    assert.equal(ids.includes("valid-lang"), fragmentFlagged,
+      `lang="${written}": the fragment's own attribute should ${fragmentFlagged ? "" : "not "}be reported`);
+  }
+});
+
+// #163's fix labelled the shell's `<title lang="en">` on a non-English document, and the served
+// title is patched by a regex one module away (`titledAs`, used by GET /output). The two met badly:
+// a pattern matching only a bare `<title>` no-opped on precisely the documents that had just been
+// given a truthful root language, so a Korean document was delivered with the placeholder name
+// while its download filename still mirrored the upload — WCAG 2.4.2 lost where 3.1.1 was won.
+test("the served title mirrors the upload whatever attributes the shell put on it", () => {
+  const korean = titledAs(wrapDocument(`<section lang="ko"><h1>보고서</h1></section>`), "보고서-2026");
+  assert.match(korean, /<title lang="en">보고서-2026<\/title>/);
+  const english = titledAs(wrapDocument(`<h1>Report</h1>`), "quarterly");
+  assert.match(english, /<title>quarterly<\/title>/);
+  // The name is user input on its way into markup, and into a replacement string.
+  assert.match(titledAs(wrapDocument(`<h1>x</h1>`), `a&b<script>`), /<title>a&amp;b&lt;script><\/title>/);
+  assert.match(titledAs(wrapDocument(`<h1>x</h1>`), `$&$1`), /<title>\$&amp;\$1<\/title>/);
+  // One title, and only the title: the shell's is the first `<title>` in the document, and a body
+  // that contains the string must not be rewritten by it.
+  assert.equal((titledAs(wrapDocument(`<h1>x</h1>`), "y").match(/<title/g) ?? []).length, 1);
 });
 
 // What the derivation is for. `wrapDocument` is the only place the root attribute is written,

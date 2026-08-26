@@ -13,7 +13,7 @@ import type { AuthedRequest } from "../auth/middleware.ts";
 import { sendError } from "./errors.ts";
 import { summarizeRun } from "../diagnostics.ts";
 import { rasterizePdf, PdfTooLargeError, MAX_PDF_PAGES, type PageImage, type PdfLink } from "../util/pdf.ts";
-import { outputBasenameFromUploads, convertedHtmlFilename } from "../util/outputNames.ts";
+import { outputBasenameFromUploads, convertedHtmlFilename, titledAs } from "../util/outputNames.ts";
 import { captureFixtures } from "../pipeline/regression.ts";
 import type { Fragment } from "../pipeline/fragment.ts";
 import { RunQueue } from "../util/queue.ts";
@@ -424,10 +424,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     const base = existsSync(paths.sessionSourceName(s.session_id))
       ? readFileSync(paths.sessionSourceName(s.session_id), "utf8").trim() || "document"
       : "document";
-    const html = readFileSync(outPath, "utf8").replace(
-      /<title>[^<]*<\/title>/,
-      `<title>${base.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</title>`,
-    );
+    const html = titledAs(readFileSync(outPath, "utf8"), base);
     res.setHeader("Content-Disposition", `inline; filename="${convertedHtmlFilename(base)}"`);
     res.type("text/html").send(html);
   });
