@@ -33,7 +33,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runExtraction, stripFences, bareHtml, declaredBlank } from "../src/pipeline/extraction.ts";
+import { runExtraction, stripFences, bareHtml, declaredBlank, blankDeclaration } from "../src/pipeline/extraction.ts";
 import { extractJson } from "../src/util/json.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
@@ -255,6 +255,375 @@ test("only a reply that says the page is blank is read as a blank page", () => {
   assert.equal(declaredBlank(null), false);
   // A page with content in it is a page, whatever its log says.
   assert.equal(declaredBlank({ html: "<p>Hi</p>", log: "This page is blank." }), false);
+});
+
+test("a log describing the specks on an empty sheet is not a log doubting the scan", () => {
+  // Round 9 of the bench delivered five blank pages and lost four, and all four were lost to one
+  // word inside the agent's own explanation of WHY the page is blank (issue #190). The same
+  // vocabulary means opposite things depending on what it is about: `faint specks` is what is on
+  // the paper, `the scan is faint` is what is wrong with the image. Two pages of one document
+  // opened with a verbatim identical sentence and only the one that went on to explain itself was
+  // refused, which is the proof the wording was being measured and not the page.
+  //
+  // These four are the real logs, at the length the round produced them.
+  assert.equal(
+    declaredBlank({
+      html: "",
+      log: "Page is blank. Specks/dots are visible on the page but do not resolve into any characters or content.",
+    }),
+    true,
+    "`do not resolve into characters` IS the blank declaration, stated about the marks",
+  );
+  assert.equal(
+    declaredBlank({
+      html: "",
+      log:
+        "Page is blank. The visible marks are artifacts of the scan (dust/noise) and do not resolve " +
+        "into any characters or content.",
+    }),
+    true,
+  );
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. A few faint specks/artifacts are visible but no legible text or content." }),
+    true,
+  );
+  assert.equal(
+    declaredBlank({
+      html: "",
+      log:
+        "Page is blank. No printed page number is visible, so no page-break marker is emitted. The page " +
+        "contains only a few scattered specks/dots that appear to be scanning artifacts, not legible text " +
+        "or meaningful content.",
+    }),
+    true,
+    "the page whose only difference from a delivered one was the sentence explaining itself",
+  );
+
+  // The prompt asks for both halves of the observation in one breath — name the marks, deny the
+  // text — so a name for text only affirms text where it is not negated. Otherwise the MORE explicit
+  // answer is the one that loses its page: the first two here are #190's own logs with a plain "no
+  // text" added, and most of what a blank page's log names is a thing it is denying.
+  for (const log of [
+    "Page is blank. Specks/dots are visible on the page but no text and they do not resolve into any characters or content.",
+    "Page is blank. The visible marks are artifacts of the scan with no text and do not resolve into any characters or content.",
+    "Page is blank. Specks and dots are visible, no legible text, and they do not resolve into characters.",
+    "Page is blank. Only scanner dust is present, no printed text, nothing that would resolve into words.",
+    "Page is blank. Faint specks with no legible text do not resolve into characters.",
+    "Page is blank. Specks are visible, no content, and they do not resolve into characters.",
+    "Page is blank. Dust only, no figures or images, nothing that would resolve into characters.",
+    "Page is blank. Scanner artifacts with no legible content do not resolve into characters.",
+    // `marks` counts as a name for the marks only where something says they are not content, because
+    // the page prompt uses the bare noun for the opposite case.
+    "Page is blank. Stray marks do not resolve into characters.",
+    "Page is blank. Stray markings are visible but they are not legible text.",
+    // And the same observation, re-punctuated. The gap crosses one sentence or semicolon boundary, so
+    // a full stop instead of a `but` is not what decides whether the page survives — which was
+    // #190's finding about per-call wording, one level down. What may follow the boundary is a
+    // CONTINUATION of the observation: the marks referred back to, no subject at all, or a denial.
+    "Page is blank. Specks/dots are visible on the page. They do not resolve into any characters.",
+    "Page is blank. A few specks are visible; they do not resolve into any characters.",
+    "Page is blank. A few scattered specks/dots. Not legible text or meaningful content.",
+    "Page is blank. A few specks are visible. Does not resolve into printed words.",
+    "Page is blank. Some dust is present. The specks do not resolve into characters.",
+    "Page is blank. A few specks. It does not resolve into words.",
+    "Page is blank. A few specks. It is not legible text.",
+    "Page is blank. A few specks. There is nothing that resolves into words.",
+    "Page is blank. Some dust. But nothing resolves into words.",
+    // What may follow the denial is the clause ending, more of the same denial, or the substrate —
+    // naming the whole sheet is another way of saying it is empty.
+    "Page is blank. A few specks. Not legible text on the page.",
+    "Page is blank. A few specks. Not legible text at all.",
+    "Page is blank. A few specks. Not legible text visible.",
+    "Page is blank. A few specks. Not legible text present.",
+    "Page is blank. Only scanner dust; not legible text of any sort.",
+    "Page is blank. A few specks. Not legible text anywhere on the page.",
+    "Page is blank. A few specks. Not legible print and no writing.",
+    "Page is blank. A few specks. Not legible text or content of any kind.",
+    // A comma, a semicolon or a line break ends a clause where what follows continues the denial:
+    // these logs are written as loose notes.
+    "Page is blank. A few specks.\nNot legible text\nNo page-break marker is emitted.",
+    "Page is blank. A few specks, not legible characters, nothing else.",
+    "Page is blank. A few specks. Not legible text\n- no page number\n- no content",
+    // The marks named again are a continuation with or without a determiner, and `any` denies as
+    // plainly as `no` where what follows it is a name for text.
+    "Page is blank. A few specks. Not legible text, only dust.",
+    "Page is blank. A few specks. Not legible text; only scanner dust.",
+    "Page is blank. A few specks. Not legible text, nor any figures.",
+    "Page is blank. A few specks. Not legible text or anything at all.",
+    // What follows the denial is judged word by word rather than branch by branch, so wordings nobody
+    // wrote a branch for pass on the same rule as the ones that were: every word in them is part of
+    // the denial, and none of them names a thing the page bears.
+    "Page is blank. A few specks. Not legible text anywhere.",
+    "Page is blank. A few specks. Not legible text detected.",
+    "Page is blank. A few specks. Not legible text whatsoever.",
+    "Page is blank. A few specks. Not legible text seen anywhere on the sheet.",
+    "Page is blank. A few specks. Not legible text across the page.",
+    "Page is blank. A few specks. Not legible text, no numerals, nothing at all.",
+    "Page is blank. Only dust. Not legible markings of any kind on this sheet.",
+    // A name for text is read back over qualifiers, so a denial may go on qualifying what it denies.
+    "Page is blank. A few specks. Not legible text or any other printed words.",
+    // `image` is the substrate where a locative preposition introduces it, and these are the wordings
+    // that spell the empty scan that way. The other reading of the same word is refused below.
+    "Page is blank. A few specks. Not legible text in this image.",
+    "Page is blank. A few specks. Not legible text anywhere in the image.",
+    // And the object of `resolve into` is exempt from the tail read, because the `do not` ahead of the
+    // construction is what governs it — these are the plainest wordings there are.
+    "Page is blank. A few specks. They do not resolve into words.",
+    "Page is blank. Only dust, nothing that would resolve into any legible characters.",
+    // `detected` affirms in "and printing detected" and denies here, under the `not` that governs the
+    // whole tail — so it is not read as a verb, and this wording is the reason why.
+    "Page is blank. A few specks. Not legible text or content detected.",
+    // A denial tail carries its own verbs, so the search for an affirming one stops at the negator that
+    // opens the next denied clause. The last of these is #190's own log with the page-number clause the
+    // page prompt asks for joined by a comma instead of a full stop — the same wording accident the
+    // issue is about, one punctuation mark down.
+    "Page is blank. A few specks. Not legible text or content, and no writing is visible.",
+    "Page is blank. A few specks. Not legible text or content; no words are present.",
+    "Page is blank. A few specks. Not legible text or content of any kind, nothing is printed on the sheet.",
+    "Page is blank. A few specks. Not legible text or figures, none are visible.",
+    "Page is blank. Specks/dots are visible on the page but do not resolve into any characters or content, and no page number is printed.",
+    "Page is blank. Specks/dots are visible but do not resolve into any characters or content; no page-break marker is emitted.",
+    "Page is blank. A few scattered specks/dots that appear to be scanning artifacts, not legible text or meaningful content, and no printed page number is visible.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+
+  // What is exempt is the PHRASE and not the sentence, which is the difference between narrowing
+  // the veto and disabling it. Every one of these names the marks and denies text in the same
+  // breath as describing the scan — the shape the real logs are written in — and the description of
+  // the scan is still doubt: delivered blank, each would be an empty fragment with no
+  // `@page-failed` marker and nothing in `pages_failed`, on a page that may well have text on it.
+  for (const log of [
+    "Page is blank. The scan is blurry, showing only faint specks and no legible text.",
+    "Page is blank. The page is a low resolution scan with dust specks and no text.",
+    "The page is blank: a grainy, washed-out scan with a few specks and no legible content.",
+    "Page appears blank. Out of focus scan, only dust and no text visible.",
+    "The page is blank. The scan is very dark and only specks/dots are visible, no legible text.",
+    "Page is blank. Poor quality scan showing dust and no printed text.",
+    "Page is blank. Only a partial scan is visible, with specks and no legible text.",
+    // The same word as the marks phrase, about the image instead: `noise` is exempt only in a
+    // joined tail (`dust/noise`), never on its own, because alone it is the scan being described.
+    "Page is blank. The scan has noise, and no text.",
+    "The page is blank; there is faint text on it.",
+    // `resolve into` and `not legible <noun>` are exempt only where the marks are named ahead of
+    // them in the same clause, which is the subject the exemption claims they are about. Each of
+    // these says the opposite — there IS something printed, and it could not be read.
+    "Page is blank. The text does not resolve into legible words.",
+    "Page appears blank. Any printing that may exist does not resolve into readable text.",
+    "Page is blank. Some ink is present on the page but it does not resolve into words.",
+    "Page appears blank. There is printing in the margin, not legible text.",
+    "Page is blank. The typed lines are not legible characters.",
+    // And the anchor is a clause, not a log: marks in one sentence do not exempt the next.
+    "Page is blank. A few specks are on the sheet. The printed lines do not resolve into words.",
+    // Nor does naming the marks first exempt an affirmation of text later in the same sentence. The
+    // anchor's gap cannot cross a name for text, which is what makes the marks what is being denied.
+    "Page is blank. A few specks are visible, but the printed text does not resolve into words.",
+    "Page is blank. Apart from dust, the typed lines are not legible text.",
+    "Page is blank. Dust is present, and the handwriting does not resolve into words.",
+    // What the gap must not cross is an affirmation that the page has something on it, and a page
+    // bears more than text. `content` above all: the other half of this rule already counts it as a
+    // name for text, and the two cannot disagree about the same word.
+    "Page is blank. Apart from dust, the content is not legible text.",
+    "Page is blank. A few specks are visible, but the figures do not resolve into words.",
+    "Page is blank. Dust is present, and the stamp does not resolve into words.",
+    "Page is blank. A few specks, and the signature does not resolve into words.",
+    // The veto list has to match the inflections its own exemption matches. `resolve` was bare
+    // between word boundaries, so the third person slipped past the veto entirely — and each of
+    // these says printing exists and did not come out as characters.
+    "Page is blank. The text resolves into no legible words.",
+    "Page appears blank. The handwriting resolves into no characters.",
+    "Page is blank. Whatever is printed here resolves into nothing legible.",
+    // `marks` bare is the page prompt's own phrase for the case where the page HAS content that could
+    // not be read ("where marks do not resolve into characters even then, write `[not legible]`"), so
+    // it is a name for the marks only when something else says they are not content — `stray marks`
+    // above. Otherwise the instruction for reporting unreadable content would be read as a blank page.
+    "Page is blank. Handwritten marks do not resolve into characters.",
+    "Page is blank. Pen marks do not resolve into characters.",
+    "Page is blank. Tick marks and check marks do not resolve into characters.",
+    "Page is blank. Blurry marks are visible, no text.",
+    "Page is blank. The markings are not legible text.",
+    // A dark streak or a dark spot is a condition of the capture and can cover content, which is why
+    // `dark` is a veto word at all — the same reason `shadows` is not a name for the marks either.
+    "Page is blank. The scan shows dark streaks.",
+    "Page is blank. The scan shows dark spots.",
+    "Page is blank. The scan shows dark blotches.",
+    "Page is blank. The scan shows dark shadows.",
+    "Page is blank. Only faint stains from the scanner are visible.",
+    // A boundary may be crossed by a continuation of the observation, not by a second, different one.
+    // Marks named in one sentence do not exempt a denial about another page object in the next, and
+    // this is the one place the veto lists cannot catch it afterwards: the veto word IS the phrase
+    // being stripped.
+    "Page is blank. A few specks of dust are visible. The handwritten note in the corner does not resolve into words.",
+    "Page is blank. Dust and specks. The photograph does not resolve into detail.",
+    "Page is blank. Some smudges appear at the edge; the ink does not resolve into words.",
+    "Page is blank. A few specks are visible. The graphic does not resolve into words.",
+    // A pronoun or a conjunction is the other way a new subject gets across a boundary, so `it` and
+    // `there` have to carry their verb with them and a conjunction is only a prefix to one of the
+    // other openers. Each of these names a page object behind a word that looks like a back-reference.
+    "Page is blank. A few specks. It is a photograph that does not resolve into detail.",
+    "Page is blank. A few specks are visible. There is a handwritten note that does not resolve into words.",
+    "Page is blank. Some dust. But the graphic does not resolve into words.",
+    "Page is blank. Some dust. And the barcode does not resolve into words.",
+    // Inversion is the third form of that door, so `nor`/`neither` are prefixes and a bare `does` has
+    // to carry its `not`.
+    "Page is blank. Some dust. Nor does the barcode resolve into words.",
+    "Page is blank. Some dust. Nor the handwriting resolves into words.",
+    // Where a name for text sits on the far side of `not legible`, the gap cannot see it. Being told
+    // WHERE it is is what separates it from a denial: text in the margin is something the page bears.
+    // What may follow is a whitelist and not a list of the prepositions that refuse, so the
+    // preposition nobody thought of costs a glance rather than the page.
+    "Page is blank. Some dust. Not legible printing in the margin.",
+    "Page is blank. A few specks are visible. Not legible text in the header.",
+    "Page is blank. Scanner dust only; not legible writing along the edge.",
+    "Page is blank. A few specks. Not legible writing over the seal.",
+    "Page is blank. A few specks. Not legible print between the lines.",
+    // And a whitelisted tail may not carry a placement in behind it: `visible` is a denial where the
+    // clause ends there and a hole where it goes on to say where.
+    "Page is blank. A few specks. Not legible text visible in the margin.",
+    "Page is blank. A few specks. Not legible text anywhere in the margin.",
+    "Page is blank. A few specks. Not legible text on the page in the margin.",
+    // Nor may a separator: a note breaks a line, or drops a comma, exactly where it would otherwise
+    // place the text — which is the same hole one character further along.
+    "Page is blank. A few specks. Not legible printing\nin the margin.",
+    "Page is blank. A few specks. Not legible writing seen\nover the seal.",
+    "Page is blank. A few specks. Not legible text, in the header.",
+    "Page is blank. A few specks. Not legible text detected, in the header.",
+    // Going on to deny something else is a denial; going on to place it is not.
+    "Page is blank. A few specks. Not legible text or the printing in the margin.",
+    "Page is blank. A few specks. Not legible text either in the margin.",
+    "Page is blank. A few specks. Not legible text\n- the note in the margin",
+    // A denial word and a name for the marks are both ways of continuing the denial, and both were
+    // ways of introducing a placement while the tail was a list of what may follow rather than a
+    // rule about all of it. What decides these is the noun: `margin`, `seal`, `spine`, `binding`,
+    // `edge`, `note`, `signature`, `stamp` are things the page bears, wherever they sit in the clause
+    // and whatever leads into them.
+    "Page is blank. A few specks. Not legible text, any writing in the margin.",
+    "Page is blank. A few specks. Not legible content, any figures on the seal.",
+    "Page is blank. A few specks. Not legible markings, any letters along the spine.",
+    "Page is blank. Some scanner dust. Not legible text, any content is cut off at the binding.",
+    "Page appears blank. A few specks/dots, not legible text, any markings are along the left edge.",
+    "Page is blank. A few specks. Not legible text: any writing sits in the margin.",
+    "Page is blank. A few specks. Not legible text\nany writing in the margin.",
+    "Page is blank. A few specks. Not legible text, smudges over the handwritten note.",
+    "Page is blank. A few specks. Not legible text, artifacts across the signature.",
+    "Page is blank. A few specks, not legible text, dust across the stamp in the corner.",
+    "Page is blank. A few specks. Not legible text\n- dust in the margin",
+    "Page is blank. A few specks. Not legible text; only dust in the header.",
+    "Page is blank. A few specks. Not legible text, nor any figures in the footer.",
+    "Page is blank. A few specks. Not legible text or anything beneath the stamp.",
+    "Page is blank. A few specks. Not legible text, the note is in the corner.",
+    // The words a denial is built from build the opposite claim too, so the vocabulary alone cannot
+    // decide it: each of these is made entirely of listed words and each says the page HAS something
+    // on it — which is the case the bare-`marks` exclusion exists for, at its most explicit. What
+    // separates them is that a name for what the page bears is introduced here by a determiner and
+    // not by a denial. Naming the substrate stays exempt: "not legible text on the page" denies.
+    "Page is blank apart from a few specks. Not legible text, only a heading is visible.",
+    "Page appears blank. A few specks. Not legible text, only a line of handwriting is visible.",
+    "Page is blank. A few specks. Not legible text, some printing appears on the page.",
+    "Page is blank. A few specks. Not legible text, the page contains figures.",
+    "Page is blank. A few specks. Not legible text; the handwriting is present.",
+    "Page is blank. A few specks. Not legible text, some words remain visible.",
+    "Page is blank. A few specks. Not legible text, the numerals are printed on the page.",
+    "Page is blank. A few specks. Not legible printing, characters are present.",
+    "Page is blank. A few specks. Not legible text, a caption is visible.",
+    "Page is blank. A few specks. Not legible text, these words appear on the sheet.",
+    "Page is blank. A few specks. Not legible text, some marks are visible.",
+    // A conjunction introduces an affirmed noun as readily as a denied one, and only what comes after
+    // the noun tells them apart: `or content of any kind` denies, `and printing is present` does not.
+    "Page is blank. A few specks. Not legible text, and printing is present.",
+    "Page is blank. A few specks. Not legible text, and figures are visible.",
+    "Page is blank. A few specks. Not legible text, and words remain visible.",
+    "Page is blank. A few specks. Not legible text, or headings appear on the page.",
+    // The verb may sit anywhere before the end of the statement, since everything that can come between
+    // is a substrate word: this is the same claim with a locative dropped into the middle of it.
+    "Page is blank. A few specks. Not legible text, and printing on the page is visible.",
+    "Page is blank. A few specks. Not legible text, and writing across the sheet is visible.",
+    "Page is blank. Specks/dots do not resolve into any characters, and printing on the page is visible.",
+    // The other reading of `image`: introduced by anything but a locative, it is an object on the paper
+    // and a page whose one object is a photograph is where the cost of guessing is the page.
+    "Page is blank. A few specks. Not legible text, an image is visible.",
+    "Page is blank. A few specks. Not legible text, the page contains an image.",
+    "Page is blank. A few specks. Not legible text, images remain visible.",
+    // `resolve into` is the commoner of the two constructions on these pages — three of #190's four
+    // logs use it — and `resolve` is the veto word in the clause, so stripping it takes the doubt off
+    // the whole rest of the statement. The rest of the statement therefore has to deny too: the first
+    // three here are #190's own logs with one more clause on the end.
+    "Page is blank. Specks/dots are visible on the page but do not resolve into any characters, only a heading in the margin.",
+    "Page is blank. Specks/dots are visible on the page but do not resolve into any characters or content, and a heading is visible in the header.",
+    "Page appears blank. The visible marks are artifacts of the scan (dust/noise) and do not resolve into characters, only a caption at the foot of the page.",
+    "Page is blank. A few specks/dots that appear to be scanning artifacts, they do not resolve into characters over the handwritten note.",
+    "Page is blank. A few specks. They do not resolve into words, only a heading is visible.",
+    "Page is blank. A few specks. They do not resolve into words, the caption is in the margin.",
+    // A question mark is a hedge and not a full stop, and a bare one is the shape `HARD_DOUBT` cannot
+    // see: the model asking itself whether the page is empty is not the model saying that it is.
+    "Page is blank. A few specks. Not legible text?",
+    // `any` is allowed ahead of a name for text, and the name is left where the gap can still see it.
+    "Page is blank. A few specks. Any printing that may exist does not resolve into readable text.",
+    // `nothing but the text` affirms the text. A negative word ahead of a name for text does not make
+    // it a denial when the negative is spent on the exception.
+    "Page is blank. Dust and specks, nothing but the handwriting, which does not resolve into words.",
+    "Page is blank. Dust and specks, nothing except the text, which does not resolve into words.",
+    "Page is blank. Dust, no matter the text, it does not resolve into words.",
+    // `printing|prints` without bare `print` was the same two-lists-disagree-about-one-word shape as
+    // `content`: `NOT_LEGIBLE_TEXT`'s own lookahead has counted `print` as a name for text all along.
+    "Page is blank. A few specks are visible, but the print does not resolve into words.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
+
+  // And no exemption reaches a word that says the reading failed or that hedges the answer,
+  // wherever in the log that word sits.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Dust and noise obscure the text." }), false);
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. A few specks are visible and no text is legible, the scan is too dark." }),
+    false,
+  );
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. Only faint specks, though the scan may not be reliable." }),
+    false,
+    "a concession is a concession even where the only doubt word modifies the marks",
+  );
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. Faint specks and dust, no characters — I could not read this page." }),
+    false,
+  );
+  // Two the exemption must not reach through a nearby noun: `noisy` is about the scan and `faint`
+  // is about text that the log says IS there. Each is refused on its own, in one sentence, so
+  // neither depends on a word elsewhere in the log to fail.
+  assert.equal(declaredBlank({ html: "", log: "The page is blank; the scan is noisy with artifacts, no text." }), false);
+  assert.equal(
+    declaredBlank({
+      html: "",
+      log: "Page is blank. No printed page number is visible, but a few specks and faint printed text appear in the margin.",
+    }),
+    false,
+    "a denial of a page NUMBER is not a denial of text, and the log affirms text",
+  );
+});
+
+test("a refused blank declaration says which word refused it", () => {
+  // What the log line owed whoever reads it. Every one of #190's four pages had to be traced from
+  // `shape: "empty_html"` — which reads as "the model answered with no page", the opposite of what
+  // happened — back to a word, by rerunning the regexes on the reply by hand.
+  const vetoed = blankDeclaration({ html: "", log: "The page is blank; the scan is too dark to resolve any text." });
+  assert.equal(vetoed.asserted, true, "the log did claim the page was blank");
+  assert.equal(vetoed.blank, false);
+  assert.deepEqual(vetoed.vetoes, ["too dark to", "resolve", "dark"], "in the order the lists are checked");
+
+  // Nothing to say where nothing was refused, and nothing to say where no claim was made.
+  const clean = blankDeclaration({ html: "", log: "Page is blank." });
+  assert.deepEqual(clean, { asserted: true, blank: true, vetoes: [] });
+  assert.deepEqual(blankDeclaration({ html: "", log: "Converted the page." }), {
+    asserted: false,
+    blank: false,
+    vetoes: [],
+  });
+  assert.deepEqual(blankDeclaration({ log: "no content" }), { asserted: false, blank: false, vetoes: [] });
+  // A word inside an exempt clause is not a veto and is not reported as one.
+  assert.deepEqual(
+    blankDeclaration({ html: "", log: "Page is blank. A few faint specks are visible but no legible text." }),
+    { asserted: true, blank: true, vetoes: [] },
+  );
 });
 
 // --- through the pipeline ------------------------------------------------------
@@ -481,6 +850,48 @@ test("a page the agent could not read is still a lost page, not a blank one", as
     assert.equal(of(events, "page_blank").length, 0);
     assert.equal(of(events, "page_no_output")[0].shape, "empty_html");
     assert.match(fragments.find((f) => f.order === 2)!.innerHtml, /@page-failed 2:/);
+  });
+});
+
+test("a blank page that explains itself is delivered, and a refusal names the word", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // Page 2 is #190's `p1-25` page 4, verbatim: a blank leaf whose log describes the specks that
+    // establish it is blank. It was reported lost. Page 3 is the reply the veto is FOR, and its
+    // failure line now carries the words that refused it, so the next round of this can be read
+    // out of the log instead of reconstructed from the regexes.
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) =>
+          o === 2
+            ? '{"html": "", "log": "Page is blank. Specks/dots are visible on the page but do not resolve into any characters or content."}'
+            : o === 3
+              ? '{"html": "", "log": "Page is blank, but the scan is too dark to be sure."}'
+              : good(o),
+      }),
+    );
+    assert.deepEqual(failedPages, [3], "the described blank page is not a loss; the doubtful one is");
+    assert.deepEqual(of(events, "page_blank").map((e) => e.page), [2]);
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "");
+    assert.match(fragments.find((f) => f.order === 3)!.innerHtml, /@page-failed 3:/);
+    const refused = of(events, "page_no_output");
+    assert.equal(refused.length, 1);
+    assert.equal(refused[0].shape, "empty_html");
+    assert.deepEqual(refused[0].blank_vetoed, ["too dark to", "dark"]);
+    assert.equal(refused[0].log, "Page is blank, but the scan is too dark to be sure.");
+  });
+});
+
+test("a reply that made no blank claim says nothing about a veto", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The `empty_html` line's original meaning — an envelope that carried no page and did not say
+    // why — is unchanged, and it must not grow a field implying a declaration was refused.
+    await runExtraction(makeCtx(dir, events, { render: (o) => (o === 2 ? '{"html": ""}' : good(o)) }));
+    const no = of(events, "page_no_output");
+    assert.equal(no.length, 1);
+    assert.equal("blank_vetoed" in no[0], false);
+    assert.equal("log" in no[0], false);
   });
 });
 

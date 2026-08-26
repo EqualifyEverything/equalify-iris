@@ -496,6 +496,19 @@ function replyShape(text: string, parsed: unknown): string {
 // direction to be wrong in: a page wrongly reported as failed costs a glance, a page wrongly
 // dropped costs the page.
 //
+// The one place the doubt is not fatal is a veto word MODIFYING the marks on the paper
+// (`MARKS_PHRASE` below): "a few faint specks, no legible text" describes an empty sheet, and
+// reading `faint` there as doubt about the scan cost the bench four pages. Only the phrase is
+// exempt, so the same word about the scan itself in the same sentence still refuses, and a log
+// that anywhere says the reading failed is not exempt at all — the exemption narrows what the
+// veto words are ABOUT without moving where a real doubt lands. Not done here is the
+// issue's preferred fix, sending a vetoed declaration to the fidelity check instead of reporting
+// the page failed: the paragraph above is why — the check is the same model on the same image, so
+// on the unreadable page it agrees there is nothing there, and a page delivered blank on that
+// agreement has no marker, no notice and no entry in `pages_failed` to look at. The failure path
+// is the disclosure. What a refusal now leaves behind is the `blank_vetoed` field on
+// `page_no_output`, so which word refused which page is a log read rather than an investigation.
+//
 // What is NOT done here is the issue's preferred fix — a page-break marker labelled with the
 // page's position in the file. The prompt forbids exactly that ("use the number the page shows
 // (iv, 5, A-3), never the position of the image you were given in the file"), and it is the
@@ -523,17 +536,377 @@ const BLANK_LOG =
 // (it matches "high quality" as readily as the other), and geometry is not legibility, so a
 // rotated or skewed page says nothing about whether its words could be read.
 const UNREADABLE_LOG =
-  /\b(illegible|unreadable|not legible|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry)|blurr\w*|obscur\w*|resolve|corrupt\w*|partial\w*|error)\b/i;
+  /\b(illegible|unreadable|not legible|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry)|blurr\w*|obscur\w*|resolves?|corrupt\w*|partial\w*|error)\b/i;
 const DEGRADED_IMAGE_LOG =
   /\b(dark|faint|washed|blurry|blurred|noisy|noise|grainy|pixelat\w*|low[- ]?res\w*|resolution|(poor|low|bad|degraded)( \w+)? quality|quality (is|was|of)|(out of|not in|soft) focus|did ?n[o']?t load|not load\w*)\b/i;
 
+// The marks a scanner leaves on an empty sheet, and the exemption for describing them. The words
+// for the marks and the words for a bad image overlap almost completely (`faint`, `noise`, `dark`),
+// and round 9 of the bench lost four blank pages of 100 to that overlap: an agent that answered the
+// prompt's request for a description ("Specks/dots are visible on the page but do not resolve into
+// any characters or content") was punished for it, while an agent that said only "Page is blank."
+// was believed (issue #190). Two pages of one document opened with a verbatim identical sentence
+// and only the one that went on to explain itself was refused, so what was being measured was the
+// wording.
+//
+// What is exempt is a PHRASE, not a sentence, and that distinction is the whole safety of this: the
+// veto words come out where they modify the marks and stay in everywhere else, so a log that
+// mentions the marks AND the state of the scan in one breath — "the scan is blurry, showing only
+// faint specks and no legible text", which is how these logs are actually written — still refuses
+// the declaration on `blurry`. Dropping the sentence instead would deliver that page blank with no
+// marker and nothing in `pages_failed`, which is the failure mode the whole file is built against.
+// None of these nouns is a veto word, which is what makes the exemption below narrow: the only
+// words it can ever remove are the veto words used AS MODIFIERS of one of them. Two exclusions are
+// deliberate, and both were tried the other way and reverted:
+//
+// `marks` and `markings` are here only as `stray marks`, never bare, because `agents/page.md` uses
+// the bare noun for the OPPOSITE case: "where marks do not resolve into characters even then, write
+// `[not legible]`" is the instruction for a page that HAS content the agent could not read, where
+// empty `html` is the wrong answer. `handwritten marks`, `pen marks` and `blurry marks` therefore go
+// on refusing, and `NOT_LEGIBLE_TEXT` below can go on counting `markings` as a name for something
+// worth reporting — both as the noun it strips and in `PAGE_BEARS`, where it needs a denial in front
+// of it — which bare `marks?` here contradicted.
+//
+// `spots`, `streaks`, `blotches`, `smears` and `stains` are not here, for the same reason `shadows`
+// is not: a dark streak or a dark spot is a condition of the capture rather than something on the
+// sheet, and either can cover content — which is why `dark` is a veto word at all. Adding them made
+// "the scan shows dark streaks" a blank page. `smudges` stays, as a mark left on the paper.
+const MARK = String.raw`specks?|speckles?|speckling|flecks?|dots?|dust|debris|smudges?|blemishes?|artifacts?|stray marks?|stray markings?`;
+// What may stand between a quantifier and that noun. The veto words are here on purpose — `faint
+// specks` is the paper and `faint scan` is the image — alongside the words that are not veto words
+// at all, because the run has to reach the noun in one piece to match ("a few scattered
+// specks/dots", "scanning artifacts").
+const MARK_MODIFIER = String.raw`faint|light|pale|grey|gray|dark|darker|noisy|grainy|blurry|blurred|washed(?:-out)?|pixelated|tiny|small|minor|stray|scattered|random|isolated|residual|scan|scanner|scanning|dust|paper|toner|ink`;
+// A phrase whose head is one of those nouns, with its quantifiers and modifiers. Replaced with a
+// space before the veto lists run, so a doubt word inside it is not read as doubt about the scan —
+// and a doubt word anywhere ELSE in the same sentence still is, which is the whole difference
+// between this and dropping the sentence: "The scan is blurry, showing only faint specks and no
+// legible text" loses `faint` and keeps `blurry`.
+//
+// `noise` is only in the joined tail (`dust/noise`, `specks, noise`) and never a head, because it
+// is a veto word itself and standing alone it is a claim about the image: "the scan has noise"
+// must go on refusing the declaration.
+const MARKS_PHRASE = new RegExp(
+  String.raw`\b(?:(?:a|an|the|only|just|some|few|several|couple|of)\s+){0,4}` +
+    String.raw`(?:(?:${MARK_MODIFIER})[\s/-]+){0,3}` +
+    `(?:${MARK})(?:\\s*[/,&]\\s*(?:${MARK}|noise))*`,
+  "gi",
+);
+// Two constructions that say the marks are not text, and so are the declaration rather than a
+// failure to read. Both are anchored to a marks noun earlier in the sentence with NO NAME FOR TEXT
+// in between, which is what makes the marks the thing being denied. Without the anchor they read as
+// exempt wherever they sit, including in a log that affirms the text is there ("the text does not
+// resolve into legible words"); with a plain same-sentence anchor, a marks noun anywhere ahead of
+// the affirmation exempts it ("a few specks are visible, but the printed text does not resolve into
+// words") — and either way a page that has text on it is delivered as an empty fragment with no
+// marker and nothing in `pages_failed`.
+//
+// It has to be a gap and not adjacency: the real logs put the whole predicate between them ("Specks
+// /dots are visible on the page but do not resolve into any characters", "artifacts of the scan
+// (dust/noise) and do not resolve into…", "specks/dots that appear to be scanning artifacts, not
+// legible text"), so requiring the noun immediately before the verb, or refusing to cross a comma,
+// `but` or `and`, would cost three of the four pages this exists for.
+// Every name for something printed on a page, not only for text: what the gap must not cross is an
+// affirmation that the page HAS something on it, and `the content is not legible text` affirms as
+// plainly as `the lines` do. `content` matters most because `NOT_LEGIBLE_TEXT` counts it as a name
+// for text on both sides — as the noun it strips and in `PAGE_BEARS` — and no two of the three may
+// disagree about the same word. None of this
+// costs the four round-9 logs: they all put `content` after the veto word ("do not resolve into any
+// characters or content"), never in the gap ahead of it, which is the only region examined.
+//
+// This list is where the exemption stops being provably safe, and that is a decision rather than an
+// oversight. A hand-written list of nouns is as complete as someone's memory: "the graphic does not
+// resolve into words" gets through, and so does the next noun after that. The structural version
+// would invert it — forbid ANY subject in the gap except the words for the paper itself (`page`,
+// `sheet`, `scan`, `margin`), so an unknown noun refuses the declaration instead of exempting it.
+// It is not taken because the risk lands on the pages this exists for: the real logs put a subject
+// in the gap ("Specks/dots are visible on the page but…", "artifacts of the scan (dust/noise) and…"),
+// so the safe direction there is a whitelist of substrate words, which is the same completeness
+// problem pointed the other way, and getting it wrong reports a blank page as lost — the #190 defect
+// again. The wording needed to reach what this list misses asserts blankness, names the marks, and
+// AFFIRMS an unlisted page object between them — denying it is what a blank page's log does, and
+// `NEGATED` reads that correctly — with no doubt word anywhere in the log, which nothing in nine
+// bench rounds has produced. If a round ever produces one, the noun goes in the list.
+const TEXT_NOUN = String.raw`text|texts|content|print(?:s|ing|ed)?|lines?|words?|characters?|letters?|glyphs?|digits?|numerals?|handwriting|writing|typing|paragraphs?|sentences?|headings?|captions?|figures?|images?|illustrations?|diagrams?|tables?|stamps?|signatures?|labels?|logos?|seals?`;
+// A name for text only affirms it where it is not NEGATED, which is the difference between "the
+// printed text does not resolve" and "no printed text". The prompt asks the agent for both halves of
+// the observation in one breath — name the marks, deny the text — so without this the more explicit
+// answer is the one that loses its page: adding `no text` to one of #190's own logs took it from
+// delivered to lost, and most of what `TEXT_NOUN` lists is a noun a blank page's log DENIES (no
+// signature, no stamp, no figures). The one shape where a negative word does not negate the noun
+// after it is `nothing but the text` / `nothing except the text` / `no matter the text`, which affirm
+// it, so those three are excluded — otherwise which member of the pair got caught also depended on
+// how long the phrase was, the 2-word window reaching `handwriting` but falling short of
+// `printed text`.
+const NEGATED = String.raw`(?<!\b(?:no|not|without|nor|none|nothing|neither)\s(?!(?:but|except|matter)\b)(?:[\w'-]+\s){0,2})`;
+// The gap between the marks and the construction: anything that does not affirm text. It may cross
+// ONE sentence or semicolon boundary, so the same observation split into two clauses is read the same
+// way — "Specks/dots are visible on the page. They do not resolve into any characters." is the same
+// answer as the version with a `but` in it, and #190's whole finding was that which pages get lost
+// was being decided by wording the agent picks per call.
+const MARKS_GAP = String.raw`(?:(?!${NEGATED}\b(?:${TEXT_NOUN})\b)[^.;])*`;
+// What the clause after a crossed boundary must open with: a back-reference to the marks just named,
+// no subject at all, or a denial. Crossing a boundary is only safe for a CONTINUATION of the
+// observation, which is all the comment above claims; without this the marks in one sentence exempt a
+// denial about a different page object in the next, and "A few specks of dust are visible. The
+// handwritten note in the corner does not resolve into words." reported the page as blank. That is
+// the one place where "the veto lists run over the whole log anyway" does not save it, because the
+// veto word IS the construction being stripped. Unknown openers refuse, so the list being incomplete
+// costs a glance rather than a page.
+//
+// `it` and `there` carry a verb with them, and a conjunction is only a prefix to one of the others,
+// because those three are how a new subject gets across a boundary that a determiner cannot: "It is a
+// photograph that does not resolve into detail", "There is a handwritten note that does not resolve
+// into words", "But the graphic does not resolve into words" — all three name a page object, and all
+// three opened with a word that looked like a back-reference. Bare `does|do|did` has to stay, for the
+// subject-less "Does not resolve into printed words.", so it carries its `not` too — otherwise the
+// inverted form is the same door again ("Nor does the barcode resolve into words"). `nor` and
+// `neither` are prefixes only for the same reason: inversion is what they are for, and a bare one
+// swallowed the subject that followed it.
+// Names for what a page bears, and what may qualify one, for the `any` branch below.
+const TAIL_NOUN = String.raw`(?:text|texts|content|words?|characters?|print(?:s|ed|ing)?|writing|markings?|lines?|letters?|glyphs?|digits?|numerals?|figures?|images?|handwriting|anything|something)`;
+const TAIL_QUALIFIER = String.raw`(?:a|an|any|no|the|some|other|more|meaningful|legible|readable|printed|typed|visible|discernible|recognizable|clear)`;
+const CONT_CORE =
+  String.raw`(?:(?:they|these|those)\b` +
+  String.raw`|(?:it|this)\s+(?:doesn'?t|isn'?t|wasn'?t)\b` +
+  String.raw`|(?:it|this)\s+(?:does|do|did|is|was)\s+(?=not\b)` +
+  String.raw`|there\s+(?:is|are|was|were)\s+(?:no|none|nothing)\b` +
+  String.raw`|(?:does|do|did)\s+(?=not\b)` +
+  String.raw`|(?:no|none|nothing|not)\b` +
+  // `any` names what is denied without being a denial itself, so it is allowed only ahead of a name
+  // for text and only as a lookahead — "Not legible text, nor any figures" continues the denial, while
+  // "Any printing that may exist does not resolve into readable text" leaves `printing` in the gap,
+  // where it still refuses.
+  String.raw`|any\s+(?=(?:${TAIL_QUALIFIER}\s+){0,2}${TAIL_NOUN}\b)` +
+  // The marks themselves, named again with or without a determiner: `only dust` is as much a
+  // continuation as `only the dust`, and requiring the determiner cost the commoner wording.
+  String.raw`|(?:(?:a|an|any|some|few|several|more|the|these|those|their)\s+){0,3}(?:(?:${MARK_MODIFIER})[\s/-]+)*(?:${MARK})\b)`;
+const CONTINUATION = String.raw`(?:(?:and|but|or|only|just|also|so|then|nor|neither)\s+)?${CONT_CORE}`;
+const MARKS_ANCHOR = String.raw`(?<=\b(?:${MARK})\b${MARKS_GAP}(?:[.;]\s*(?:${CONTINUATION}${MARKS_GAP})?)?)`;
+// "…specks/dots … do not resolve into any characters": `resolve` is in `UNREADABLE_LOG` for "could
+// not resolve", and a destination after it turns the sentence into a denial that the marks are
+// characters.
+const MARKS_NOT_TEXT = new RegExp(`${MARKS_ANCHOR}\\bresolves?\\s+(?:in)?to\\b`, "gi");
+// "specks/dots … not legible text" denies the marks are text; "the text is not legible" is a claim
+// about text that exists. Both the word order and the anchor are needed: `the typed lines are not
+// legible characters` has the noun after it too, and names no marks.
+//
+// The trailing guard is for the noun on the FAR side of the construction, which the gap cannot see
+// and `TEXT_NOUN` therefore cannot help with: "Some dust. Not legible printing in the margin." names
+// marks, then names something the page bears, and being told WHERE it is is what distinguishes it
+// from "not legible text or meaningful content", which denies.
+//
+// So the REST OF THE STATEMENT has to be made of nothing but denial. Not a list of the prepositions
+// that refuse — the preposition nobody thought of ("not legible writing over the seal") would cost the
+// page — and not a list of the words that may follow either, because each such branch was a door a
+// placement walked through one word further along: first `visible in the margin`, then `or the printing
+// in the margin`, then a line break before `in the margin`, then `any writing in the margin`. Every one
+// of those was the same shape, and each fix bought exactly the wording it named.
+//
+// A word-by-word whitelist is the version with no next door. What a denial is made of is a small closed
+// vocabulary — denials, names for text, names for the marks, names for the whole substrate — and a page
+// object is named with a word that is not in it: `margin`, `header`, `corner`, `seal`, `spine`, `note`,
+// `signature`. So `not legible text on the page` denies (every word listed) and `not legible text in the
+// margin` does not (`margin` is not), whatever punctuation or preposition connects them. A word nobody
+// thought of costs a glance, which is the way round this file chooses everywhere else.
+//
+// The statement ends at a full stop, a `!`, or the end of the log; a comma, a semicolon, a colon or a
+// line break does not end it, because these logs are written as loose notes ("Not legible text\nNo
+// page-break marker is emitted", sometimes as a `-` list) and a note breaks its line exactly where it
+// would otherwise place the text. A `?` anywhere in the statement refuses: "Not legible text?" is the
+// model asking whether the page is empty rather than saying it is, and a bare one is the one hedge
+// `HARD_DOUBT` cannot see.
+const NOT_LEGIBLE_TEXT = new RegExp(
+  `${MARKS_ANCHOR}\\bnot legible\\s+(?:text|content|words?|characters?|print(?:ed|ing)?|writing|markings?)\\b`,
+  "gi",
+);
+// Nothing here is a veto word except by describing the marks, so a doubt word smuggled into the tail is
+// still refused by the two lists afterwards — this decides only whether `not legible` is the denial.
+const DENIAL_WORD = new Set(
+  (
+    "or and nor either neither no not none nothing anything something else any only just more other " +
+    "meaningful legible readable printed typed visible present discernible apparent detected seen found " +
+    "recognizable clear at all whatsoever anywhere of kind sort type a an the this that these those some " +
+    "few several couple is are was were be been being isn't aren't wasn't weren't there it they " +
+    "do does did don't doesn't didn't resolve resolves resolving " +
+    "resolved remain remains remaining appear appears appearing emitted emit written contain contains " +
+    "holds hold marker markers number numbers break page pages sheet sheets scan scans paper image images " +
+    "document documents leaf leaves on in across throughout within text texts content contents word words " +
+    "character characters letter letters glyph glyphs digit digits numeral numerals figure figures line " +
+    "lines print prints printing writing handwriting typing marking markings mark marks paragraph " +
+    "paragraphs sentence sentences heading headings caption captions label labels legend legends " +
+    "dust speck specks speckle speckles speckling fleck flecks dot dots debris smudge smudges blemish " +
+    "blemishes artifact artifacts scanner scanning stray scattered faint tiny small minor isolated random " +
+    "residual noise grain"
+  ).split(" "),
+);
+// The vocabulary above is what a denial is BUILT from, and the same bricks build the opposite claim:
+// `only a heading is visible`, `the page contains figures`, `some words remain visible` are made
+// entirely of listed words and each says the page has something on it. So a name for what a page
+// bears has to be introduced by a denial where it appears — `or content`, `nor any figures`, `no
+// writing` — and not by a determiner that affirms it. Naming the substrate is exempt, because `on the
+// page` is another way of saying the sheet is empty; that asymmetry is the whole difference between
+// the two, and it is the same rule `NEGATED` applies to the gap on the near side of the construction.
+//
+// Reading back over qualifiers (`or any other printed words`) but never over a determiner is what
+// separates `nor the words` — a glance — from `only a heading is visible` — a page.
+const PAGE_BEARS = new Set(
+  (
+    "text texts content contents word words character characters letter letters glyph glyphs digit " +
+    "digits numeral numerals figure figures line lines print prints printing writing handwriting " +
+    "typing mark marks marking markings paragraph paragraphs sentence sentences heading headings " +
+    "caption captions label labels legend legends"
+  ).split(" "),
+);
+const DENIAL_CONNECTOR = new Set("no not nor neither none nothing or and any".split(" "));
+// Two of those connectors are conjunctions, which introduce an affirmed noun as readily as a denied
+// one: `or content of any kind` denies and `and printing is present` affirms, and only what comes
+// AFTER the noun tells them apart. So a conjunction may not hand a name for text to a verb that says
+// it is there. Nothing else needs this — a determiner is refused already, and a real negator (`no
+// writing`, `nor any figures`) has spent itself on the noun.
+//
+// The verb is looked for past the noun rather than only next to it, because a locative may sit in
+// between: `and printing on the page is visible` is `and printing is present` with three words in the
+// middle. But the search stops at the first real negator, because that is where the NEXT denied clause
+// begins and its verb has nothing to do with this noun. A blank page's log goes on denying in exactly
+// that shape — "not legible text or content, and no writing is visible", "…or content; nothing is
+// printed", and above all the page-number clause the page prompt asks for ("…not legible text or
+// meaningful content, and no printed page number is visible"), which is #190's own log with a comma
+// where it happened to have a full stop. Scanning past the negator refused all of those.
+const CONJUNCTION = new Set("or and".split(" "));
+const NEGATOR = new Set("no not nor neither none nothing".split(" "));
+// `detected`, `seen`, `found` and `present` are deliberately NOT here, though they affirm as plainly:
+// the tail is governed by the `not` in front of the construction, so they are the denial's own words
+// there ("not legible text or content detected" is the commoner wording, and "not legible text
+// present" is in the corpus). That leaves `and printing detected` exempt, which is a stilted way to
+// say a page has printing on it — and the trade is the same one the file makes everywhere: the
+// alternative refuses a wording blank pages are actually written in.
+const AFFIRMING_VERB = new Set("is are was were appear appears remain remains contain contains hold holds".split(" "));
+const QUALIFIER = new Set(
+  "meaningful legible readable printed typed visible discernible apparent recognizable clear other more".split(" "),
+);
+// `image` is the one word the lists genuinely disagree about: it is the substrate in "not legible text
+// in this image" and a thing the page bears in "an image is visible", and both wordings are ones these
+// logs use. So it is read by what introduces it — a locative preposition makes it the scan, anything
+// else makes it an object on the paper — rather than being assigned to one list and losing either a
+// blank page or a photograph. Only `image` gets this; every other name for a page object is refused by
+// `DENIAL_WORD` not listing it at all.
+const LOCATIVE_SUBSTRATE = new Set("image images".split(" "));
+const LOCATIVE = new Set("in on across throughout within".split(" "));
+const DETERMINER = new Set("a an the this that these those".split(" "));
+// A denial made of nothing but these words is a short one, so a statement that runs past this refuses
+// rather than being read further. That keeps the work per match bounded — a log with a thousand
+// `not legible text`s in it and no full stop anywhere would otherwise re-read its own tail a thousand
+// times — and it keeps the direction right: the cap costs a glance, never a page.
+const DENIAL_STATEMENT_MAX = 300;
+// The statement after `not legible <noun>`: is every word in it part of the denial?
+function deniesToStatementEnd(log: string, start: number): boolean {
+  let end = start;
+  while (end < log.length && end - start < DENIAL_STATEMENT_MAX) {
+    const char = log[end];
+    if (char === "." || char === "!") break;
+    if (char === "?") return false;
+    end++;
+  }
+  if (end - start >= DENIAL_STATEMENT_MAX) return false;
+  const words = log
+    .slice(start, end)
+    .replace(/[’‘]/g, "'")
+    .split(/[^A-Za-z']+/)
+    .filter(Boolean)
+    .map((word) => word.toLowerCase());
+  if (!words.every((word) => DENIAL_WORD.has(word))) return false;
+  return words.every((word, i) => {
+    if (!PAGE_BEARS.has(word) && !LOCATIVE_SUBSTRATE.has(word)) return true;
+    let before = i - 1;
+    while (before >= 0 && QUALIFIER.has(words[before]!)) before--;
+    if (before >= 0 && DENIAL_CONNECTOR.has(words[before]!)) {
+      if (!CONJUNCTION.has(words[before]!)) return true;
+      const tail = words.slice(i + 1);
+      const nextDenial = tail.findIndex((later) => NEGATOR.has(later));
+      const governed = nextDenial === -1 ? tail : tail.slice(0, nextDenial);
+      return !governed.some((later) => AFFIRMING_VERB.has(later));
+    }
+    if (!LOCATIVE_SUBSTRATE.has(word)) return false;
+    while (before >= 0 && DETERMINER.has(words[before]!)) before--;
+    return before >= 0 && LOCATIVE.has(words[before]!);
+  });
+}
+// `resolve into` needs the same tail read, one noun further on. `resolve` is the veto word in that
+// clause, so stripping it takes the doubt off the whole rest of the statement with nothing looking at
+// what the rest says — and it is the commoner of the two constructions on the pages this exists for
+// (three of #190's four logs are written with it), so every placement and every affirmation the
+// `not legible` branch refuses was reaching the document through this one.
+//
+// The object of `into` is exempt from the read, because the `do not` ahead of the construction is what
+// governs it: "do not resolve into any characters" denies the characters, and starting the read at
+// `characters` would refuse the plainest wording there is ("nothing that would resolve into words").
+// Everything after that object is read exactly as the other branch's tail is — so "…into any
+// characters or content" still declares the page blank and "…into any characters, only a heading in
+// the margin" does not.
+const RESOLVE_OBJECT = new RegExp(
+  String.raw`^\s*(?:(?:a|an|any|the|some|few|several|more|other|meaningful|legible|readable|printed|typed|visible|discernible|apparent|recognizable|clear)\s+)*[A-Za-z][A-Za-z'-]*`,
+);
+function deniesAfterResolveObject(log: string, start: number): boolean {
+  // Bounded so the scan stays O(1) per match, the same reason `DENIAL_STATEMENT_MAX` exists.
+  const object = RESOLVE_OBJECT.exec(log.slice(start, start + DENIAL_STATEMENT_MAX));
+  return deniesToStatementEnd(log, start + (object ? object[0].length : 0));
+}
+// Terms no exemption reaches, checked over the WHOLE log rather than a phrase: a failure to read
+// ("the scan is too dark"), something hidden ("dust and noise obscure the text" — which names
+// marks and denies nothing), or a concession ("a few specks, though the scan is very faint"). A
+// concession word is free to include here, because every exemption above needs a marks noun to
+// reach anything, so blocking them on `though` costs nothing in a log that names none. This list
+// only disables the exemptions — the verdict is still the two veto lists', and six of these words
+// are in neither, so "Page is blank. Only a few specks, though." is a blank page today and was one
+// before any of this.
+const HARD_DOUBT =
+  /\b(illegible|unreadable|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry|grainy)|obscur\w*|hidden|corrupt\w*|error|did ?n[o']?t load|not load\w*|though|although|however|uncertain|not (entirely |fully )?(sure|certain))\b/i;
+
+// The text the veto lists are run over: the log with the marks phrases in it removed, or the log
+// untouched where anything in it says the reading failed.
+// The two anchored strips run FIRST: `MARKS_PHRASE` removes the very nouns they are anchored to.
+function vetoScope(log: string): string {
+  if (HARD_DOUBT.test(log)) return log;
+  return log
+    .replace(MARKS_NOT_TEXT, (match, offset: number, whole: string) =>
+      deniesAfterResolveObject(whole, offset + match.length) ? " " : match,
+    )
+    .replace(NOT_LEGIBLE_TEXT, (match, offset: number, whole: string) =>
+      deniesToStatementEnd(whole, offset + match.length) ? " " : match,
+    )
+    .replace(MARKS_PHRASE, " ");
+}
+
+function matches(re: RegExp, text: string): string[] {
+  return [...text.matchAll(new RegExp(re.source, "gi"))].map((m) => m[0].toLowerCase());
+}
+
+export interface BlankDeclaration {
+  // The log says the page has nothing on it, in some words.
+  asserted: boolean;
+  // ...and nothing in it casts doubt on that, so the page is delivered empty.
+  blank: boolean;
+  // The doubt words that refused an assertion, for the log line. Without this the only record of
+  // a refusal was the reply itself, and working out WHICH word did it is a regex read per page —
+  // which is what issue #190 had to do by hand for four pages.
+  vetoes: string[];
+}
+
 // Exported for the unit test: this predicate is the whole distinction between a page delivered
 // empty and a page reported lost, and it is worth pinning on the reply shapes directly.
-export function declaredBlank(parsed: { html?: string; log?: string } | null): boolean {
-  if (typeof parsed?.html !== "string" || parsed.html.trim()) return false;
+export function blankDeclaration(parsed: { html?: string; log?: string } | null): BlankDeclaration {
+  const none = { asserted: false, blank: false, vetoes: [] };
+  if (typeof parsed?.html !== "string" || parsed.html.trim()) return none;
   const log = parsed.log?.trim();
-  if (!log) return false;
-  return BLANK_LOG.test(log) && !UNREADABLE_LOG.test(log) && !DEGRADED_IMAGE_LOG.test(log);
+  if (!log || !BLANK_LOG.test(log)) return none;
+  const scope = vetoScope(log);
+  const vetoes = [...new Set([...matches(UNREADABLE_LOG, scope), ...matches(DEGRADED_IMAGE_LOG, scope)])];
+  return { asserted: true, blank: vetoes.length === 0, vetoes };
+}
+
+export function declaredBlank(parsed: { html?: string; log?: string } | null): boolean {
+  return blankDeclaration(parsed).blank;
 }
 
 // Load the page agent, preferring a session-built/trained copy (tmp/), then the
@@ -646,7 +1019,8 @@ async function renderPage(
     // deleting it (`page_extraction_failed` with `kept: "prior"`). Nothing else on the
     // re-extraction path would catch it: `destroyedPage` guards the correction pass, where
     // `before` is this round's own render, so prior → empty never reaches a size comparison.
-    if (declaredBlank(parsed) && previous?.trim()) {
+    const declaration = blankDeclaration(parsed);
+    if (declaration.blank && previous?.trim()) {
       ctx.log.event("page_blank_refused", {
         image: img.name,
         page: img.order,
@@ -657,12 +1031,21 @@ async function renderPage(
         `page agent declared a blank page that already had ${previous.trim().length} chars of content`,
       );
     }
-    if (declaredBlank(parsed)) {
+    if (declaration.blank) {
       ctx.log.event("page_blank", { image: img.name, page: img.order, log: parsed?.log ?? "" });
       return { html: "", log: parsed?.log ?? "" };
     }
     const shape = replyShape(res.text, parsed);
-    ctx.log.event("page_no_output", { image: img.name, page: img.order, chars: res.text.length, shape });
+    // A declaration the veto refused is recorded as the refusal it is, with the words that did it:
+    // the failure line alone reads as "the model answered with no page", which is the opposite of
+    // what happened, and every page issue #190 recovered had to be traced back to a word by hand.
+    ctx.log.event("page_no_output", {
+      image: img.name,
+      page: img.order,
+      chars: res.text.length,
+      shape,
+      ...(declaration.asserted ? { blank_vetoed: declaration.vetoes, log: parsed?.log ?? "" } : {}),
+    });
     throw new Error(`page agent returned no HTML (${shape}, ${res.text.length} chars)`);
   }
   const sa = parsed?.suggested_agent;
