@@ -496,11 +496,12 @@ function replyShape(text: string, parsed: unknown): string {
 // direction to be wrong in: a page wrongly reported as failed costs a glance, a page wrongly
 // dropped costs the page.
 //
-// The one place the doubt is not fatal is a clause about the marks on the paper (`SCAN_MARKS`
-// below): "a few faint specks, no legible text" describes an empty sheet, and reading `faint` there
-// as doubt about the scan cost the bench four pages. Such a clause has to deny that the marks are
-// text, and it still cannot carry a word that says the reading failed, so the exemption narrows
-// what the veto words are ABOUT without moving where a real doubt lands. Not done here is the
+// The one place the doubt is not fatal is a veto word MODIFYING the marks on the paper
+// (`MARKS_PHRASE` below): "a few faint specks, no legible text" describes an empty sheet, and
+// reading `faint` there as doubt about the scan cost the bench four pages. Only the phrase is
+// exempt, so the same word about the scan itself in the same sentence still refuses, and a log
+// that anywhere says the reading failed is not exempt at all — the exemption narrows what the
+// veto words are ABOUT without moving where a real doubt lands. Not done here is the
 // issue's preferred fix, sending a vetoed declaration to the fidelity check instead of reporting
 // the page failed: the paragraph above is why — the check is the same model on the same image, so
 // on the unreadable page it agrees there is nothing there, and a page delivered blank on that
@@ -539,41 +540,67 @@ const UNREADABLE_LOG =
 const DEGRADED_IMAGE_LOG =
   /\b(dark|faint|washed|blurry|blurred|noisy|noise|grainy|pixelat\w*|low[- ]?res\w*|resolution|(poor|low|bad|degraded)( \w+)? quality|quality (is|was|of)|(out of|not in|soft) focus|did ?n[o']?t load|not load\w*)\b/i;
 
-// The marks a scanner leaves on an empty sheet. A log that names these is describing what is
-// physically on the paper, not the condition of the image — which matters because the words for
-// the two overlap almost completely (`faint`, `noise`, `dark`), and round 9 of the bench lost
-// four blank pages of 100 to that overlap: an agent that answered the prompt's request for a
-// description ("Specks/dots are visible on the page but do not resolve into any characters or
-// content") was punished for it, while an agent that said only "Page is blank." was believed
-// (issue #190). Two pages of one document opened with a verbatim identical sentence and only the
-// one that went on to explain itself was refused, so what was being measured was the wording.
-const SCAN_MARKS =
-  /\b(specks?|speckles?|flecks?|dots?|dust|debris|smudges?|blemishes?|artifacts?|noise|stray marks?)\b/i;
-// The clause says there is no text in those marks. This is the blank declaration itself, stated
-// about the marks rather than about the page, and it is what makes the exemption below safe:
-// without it, any mention of dust would disarm the veto.
-const NOT_TEXT =
-  /\b(no|not|none|nothing|never|n[o']t)\b[^.;]*\b(legible|text|characters?|content|words?|letters?|writing|print(ed|ing)?|typograph\w*)\b/i;
-// Terms the exemption never reaches, because they are claims about the page rather than about the
-// marks and stay claims about the page whatever clause they sit in: a failure to read ("a few
-// specks and no text, the scan is too dark"), something hidden ("dust and noise obscure the text"
-// — which names marks and denies nothing), or a concession ("a few specks and no text, though the
-// scan is very faint"). A concession word is free to include here: the exemption only ever matters
-// in a clause that has a doubt word in it, so blocking it on `though` costs nothing anywhere else.
-// A blank declaration carrying one of these is a failed page, exemption or not.
+// The marks a scanner leaves on an empty sheet, and the exemption for describing them. The words
+// for the marks and the words for a bad image overlap almost completely (`faint`, `noise`, `dark`),
+// and round 9 of the bench lost four blank pages of 100 to that overlap: an agent that answered the
+// prompt's request for a description ("Specks/dots are visible on the page but do not resolve into
+// any characters or content") was punished for it, while an agent that said only "Page is blank."
+// was believed (issue #190). Two pages of one document opened with a verbatim identical sentence
+// and only the one that went on to explain itself was refused, so what was being measured was the
+// wording.
+//
+// What is exempt is a PHRASE, not a sentence, and that distinction is the whole safety of this: the
+// veto words come out where they modify the marks and stay in everywhere else, so a log that
+// mentions the marks AND the state of the scan in one breath — "the scan is blurry, showing only
+// faint specks and no legible text", which is how these logs are actually written — still refuses
+// the declaration on `blurry`. Dropping the sentence instead would deliver that page blank with no
+// marker and nothing in `pages_failed`, which is the failure mode the whole file is built against.
+// None of these nouns is a veto word, which is what makes the exemption below narrow: the only
+// words it can ever remove are the veto words used AS MODIFIERS of one of them.
+const MARK = String.raw`specks?|speckles?|flecks?|dots?|dust|debris|smudges?|blemishes?|artifacts?|stray marks?`;
+// What may stand between a quantifier and that noun. The veto words are here on purpose — `faint
+// specks` is the paper and `faint scan` is the image — alongside the words that are not veto words
+// at all, because the run has to reach the noun in one piece to match ("a few scattered
+// specks/dots", "scanning artifacts").
+const MARK_MODIFIER = String.raw`faint|light|pale|grey|gray|dark|darker|noisy|grainy|blurry|blurred|washed(?:-out)?|pixelated|tiny|small|minor|stray|scattered|random|isolated|residual|scan|scanner|scanning|dust|paper|toner|ink`;
+// A phrase whose head is one of those nouns, with its quantifiers and modifiers. Replaced with a
+// space before the veto lists run, so a doubt word inside it is not read as doubt about the scan —
+// and a doubt word anywhere ELSE in the same sentence still is, which is the whole difference
+// between this and dropping the sentence: "The scan is blurry, showing only faint specks and no
+// legible text" loses `faint` and keeps `blurry`.
+//
+// `noise` is only in the joined tail (`dust/noise`, `specks, noise`) and never a head, because it
+// is a veto word itself and standing alone it is a claim about the image: "the scan has noise"
+// must go on refusing the declaration.
+const MARKS_PHRASE = new RegExp(
+  String.raw`\b(?:(?:a|an|the|only|just|some|few|several|couple|of)\s+){0,4}` +
+    String.raw`(?:(?:${MARK_MODIFIER})[\s/-]+){0,3}` +
+    `(?:${MARK})(?:\\s*[/,&]\\s*(?:${MARK}|noise))*`,
+  "gi",
+);
+// "…do not resolve into any characters" — `resolve` is in `UNREADABLE_LOG` for "could not resolve",
+// and with a destination after it the sentence says the marks are not characters, which is the
+// declaration and not a failure to read.
+const MARKS_NOT_TEXT = /\bresolves?\s+(?:in)?to\b/gi;
+// "specks/dots … not legible text" is a denial that the marks are text; "the text is not legible"
+// is a claim about text that exists. Word order is the whole difference, so only the form with the
+// noun after it is exempt.
+const NOT_LEGIBLE_TEXT =
+  /\bnot legible(?=\s+(?:text|content|words?|characters?|print(?:ed|ing)?|writing|markings?))/gi;
+// Terms no exemption reaches, checked over the WHOLE log rather than a phrase: a failure to read
+// ("the scan is too dark"), something hidden ("dust and noise obscure the text" — which names
+// marks and denies nothing), or a concession ("a few specks, though the scan is very faint"). A
+// concession word is free to include here, because the exemption only ever matters where a doubt
+// word sits inside a marks phrase, so blocking it on `though` costs nothing anywhere else. A log
+// carrying one of these is a failed page whatever else it says.
 const HARD_DOUBT =
   /\b(illegible|unreadable|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry|grainy)|obscur\w*|hidden|corrupt\w*|error|did ?n[o']?t load|not load\w*|though|although|however|uncertain|not (entirely |fully )?(sure|certain))\b/i;
 
-// The text the veto lists are run over: the log, minus any clause whose subject is the marks on
-// the paper and which asserts they are not text. Clauses are split on sentence and semicolon
-// boundaries only, NOT on `but`/`and` — "Specks are visible on the page but do not resolve into
-// any characters" is one statement, and splitting it would strand the denial from its subject and
-// veto on `resolve` again.
+// The text the veto lists are run over: the log with the marks phrases in it removed, or the log
+// untouched where anything in it says the reading failed.
 function vetoScope(log: string): string {
-  return log
-    .split(/[.;]+/)
-    .filter((clause) => !(SCAN_MARKS.test(clause) && NOT_TEXT.test(clause) && !HARD_DOUBT.test(clause)))
-    .join(". ");
+  if (HARD_DOUBT.test(log)) return log;
+  return log.replace(MARKS_PHRASE, " ").replace(MARKS_NOT_TEXT, " ").replace(NOT_LEGIBLE_TEXT, " ");
 }
 
 function matches(re: RegExp, text: string): string[] {

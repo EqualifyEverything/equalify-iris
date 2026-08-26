@@ -299,32 +299,55 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "the page whose only difference from a delivered one was the sentence explaining itself",
   );
 
-  // The exemption is a clause about the MARKS that denies they are text. Naming dust is not
-  // enough on its own, and neither is denying text on its own.
-  assert.equal(declaredBlank({ html: "", log: "Page is blank. Dust and noise cover the sheet." }), false);
-  assert.equal(declaredBlank({ html: "", log: "The page is blank; there is faint text on it." }), false);
-  // And it never reaches a word that says the reading failed or that hedges the answer, wherever
-  // that word sits. Each of these is the reply that most needs a human to look at the page.
+  // What is exempt is the PHRASE and not the sentence, which is the difference between narrowing
+  // the veto and disabling it. Every one of these names the marks and denies text in the same
+  // breath as describing the scan — the shape the real logs are written in — and the description of
+  // the scan is still doubt: delivered blank, each would be an empty fragment with no
+  // `@page-failed` marker and nothing in `pages_failed`, on a page that may well have text on it.
+  for (const log of [
+    "Page is blank. The scan is blurry, showing only faint specks and no legible text.",
+    "Page is blank. The page is a low resolution scan with dust specks and no text.",
+    "The page is blank: a grainy, washed-out scan with a few specks and no legible content.",
+    "Page appears blank. Out of focus scan, only dust and no text visible.",
+    "The page is blank. The scan is very dark and only specks/dots are visible, no legible text.",
+    "Page is blank. Poor quality scan showing dust and no printed text.",
+    "Page is blank. Only a partial scan is visible, with specks and no legible text.",
+    // The same word as the marks phrase, about the image instead: `noise` is exempt only in a
+    // joined tail (`dust/noise`), never on its own, because alone it is the scan being described.
+    "Page is blank. The scan has noise, and no text.",
+    "The page is blank; there is faint text on it.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
+
+  // And no exemption reaches a word that says the reading failed or that hedges the answer,
+  // wherever in the log that word sits.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Dust and noise obscure the text." }), false);
   assert.equal(
     declaredBlank({ html: "", log: "Page is blank. A few specks are visible and no text is legible, the scan is too dark." }),
     false,
   );
   assert.equal(
-    declaredBlank({ html: "", log: "Page is blank. Only specks and no text, though the scan is very faint." }),
+    declaredBlank({ html: "", log: "Page is blank. Only faint specks, though the scan may not be reliable." }),
     false,
-    "a concession inside the clause is still a concession",
+    "a concession is a concession even where the only doubt word modifies the marks",
   );
   assert.equal(
-    declaredBlank({ html: "", log: "Page is blank. Specks and dust, no characters — I could not read this page at all." }),
+    declaredBlank({ html: "", log: "Page is blank. Faint specks and dust, no characters — I could not read this page." }),
     false,
   );
-  // Clauses are split on sentences, so doubt in ONE clause is not disarmed by marks in another.
+  // Two the exemption must not reach through a nearby noun: `noisy` is about the scan and `faint`
+  // is about text that the log says IS there. Each is refused on its own, in one sentence, so
+  // neither depends on a word elsewhere in the log to fail.
+  assert.equal(declaredBlank({ html: "", log: "The page is blank; the scan is noisy with artifacts, no text." }), false);
   assert.equal(
-    declaredBlank({ html: "", log: "The scan is noisy with artifacts, no text; the words are illegible." }),
+    declaredBlank({
+      html: "",
+      log: "Page is blank. No printed page number is visible, but a few specks and faint printed text appear in the margin.",
+    }),
     false,
+    "a denial of a page NUMBER is not a denial of text, and the log affirms text",
   );
-  assert.equal(declaredBlank({ html: "", log: "Low resolution scan. A few specks/dots, no legible text." }), false);
 });
 
 test("a refused blank declaration says which word refused it", () => {
