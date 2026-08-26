@@ -50,6 +50,17 @@ export interface ReviewResult {
   // distinguishes the two ways a document arrives with unresolved issues — the loop ran
   // its rounds and some issues survived them, or a round could not be completed at all.
   editorTruncated: boolean;
+  // How many windows of the document the LAST read of it came back with no usable answer
+  // for — an unparseable reply, or one carrying no issue list this code can read (issue
+  // #186). 0 on a document that was reviewed in full, which is almost all of them.
+  //
+  // Returned for the same reason `droppedLinks` and `editorTruncated` are, and with a
+  // sharper edge than either: it is what distinguishes a document the reviewer found
+  // nothing wrong with from one the reviewer did not answer about. Those two are the same
+  // shape here — an empty issue list, no correction rounds — so without this the second
+  // arrives as the first, is delivered as clean, and is counted as clean deployment-wide.
+  // An empty `unresolved` is only good news when this is 0.
+  unreviewedWindows: number;
 }
 
 // Exported so a test can assert the marker vocabulary it advertises is the one
@@ -544,6 +555,30 @@ function readerIndexHead(index: string): string {
   return index ? `## Source pages in this document (extracted HTML, truncated)\n${index}\n\n` : "";
 }
 
+// One window's worth of review: what the Reader said about it, and whether it said
+// anything this code can read.
+//
+// The two are separate for the same reason `EditorRound.usable` is separate from its body:
+// an empty issue list can mean the Reader read the window and found nothing — a verdict —
+// or that the reply could not be used at all, which is a call paid for and no verdict
+// obtained. Folding them together (which returning a bare `ReviewIssue[]` did) makes the
+// second look like the first, and the first is the one thing that ends the loop clean.
+interface ReaderWindow {
+  issues: ReviewIssue[];
+  // False when the reply carried no readable issue list: unparseable, `issues` missing or
+  // not an array, or every entry in it too malformed to be an issue. NOT false for a reply
+  // that legitimately said `{"issues": []}` — that is the verdict this whole loop is for.
+  usable: boolean;
+}
+
+// What one read of the whole document came to: the issues, and how much of the document
+// nobody got an answer about (see ReaderWindow).
+interface ReaderRead {
+  issues: ReviewIssue[];
+  unread: number;
+  windows: number;
+}
+
 async function runReader(
   ctx: PipelineContext,
   body: string,
@@ -555,7 +590,7 @@ async function runReader(
   // The pages extraction lost, so this call can say so in the index instead of showing an
   // empty entry and being asked about it once per chunk (see noContentPages).
   failedPages: number[],
-): Promise<ReviewIssue[]> {
+): Promise<ReaderRead> {
   const noContent = noContentPages(pages, failedPages);
   const index = pages.length ? pageIndex(readerIndexPages(pages, noContent), READER_INDEX_EXCERPT_CHARS) : "";
   // Computed over the whole body, once, and given to the FIRST chunk only. Both halves
@@ -671,11 +706,54 @@ async function runReader(
       phase: "review",
       output: res.text,
     });
-    const parsed = extractJson<{ issues?: (ReviewIssue & { pages?: unknown })[] }>(res.text);
+    // Nothing about the reply's SHAPE is ours, so none of it is assumed. `issues` arrives
+    // as `unknown` and is narrowed here, which is two fixes in one place: a reply whose
+    // `issues` is a string used to throw a TypeError out of the loop — a failed session,
+    // extraction and assembly discarded, for a badly shaped answer — and a reply with no
+    // issue list at all used to read as `{"issues": []}`, i.e. as a clean document (#186).
+    const parsed = extractJson<{ issues?: unknown }>(res.text);
+    const raw = Array.isArray(parsed?.issues) ? parsed.issues : null;
+    // An entry that is not an object cannot be an issue, and reading `.pages` off one
+    // throws — `null` in the list is the same crash as a string `issues`, one level in.
+    // Dropped rather than fatal, for the reason the whole file is built on: a reply that is
+    // partly usable is worth its usable part.
+    const shaped = (raw ?? []).filter(
+      (issue): issue is ReviewIssue & { pages?: unknown } => typeof issue === "object" && issue !== null,
+    );
+    if (raw !== null && shaped.length < raw.length) {
+      ctx.log.event("reader_issues_dropped", {
+        iteration,
+        window: i + 1,
+        of: chunks.length,
+        dropped: raw.length - shaped.length,
+        of_entries: raw.length,
+      });
+    }
+    // A reply that listed issues and had none of them survive the shape check said nothing
+    // readable either, so it is not a verdict — while `{"issues": []}` IS one, which is why
+    // this is not simply `shaped.length > 0`. That empty list is what the whole loop is for.
+    if (raw === null || (raw.length > 0 && shaped.length === 0)) {
+      // Said the way `editor_no_output` is said, because it is the same event about the other
+      // agent: a call that was paid for and produced nothing to act on. One line per window
+      // that has no verdict, whichever way it failed — `window` and `of` because a document
+      // is read in windows and only one of them may have failed, and `reason` because "there
+      // was no list" and "there was a list of nothing usable" are different replies.
+      ctx.log.event("reader_no_output", {
+        iteration,
+        window: i + 1,
+        of: chunks.length,
+        reason: raw === null ? "no_issue_list" : "no_readable_issue",
+        chars: res.text.length,
+      });
+      return { issues: [], usable: false };
+    }
     // Drop hallucinated page numbers here rather than downstream, so a bad
     // attribution degrades to "no attribution" (all images) instead of
     // silently sending the editor the wrong page.
-    return (parsed?.issues ?? []).map((issue) => ({ ...issue, pages: knownPages(issue.pages, pages) }));
+    return {
+      issues: shaped.map((issue) => ({ ...issue, pages: knownPages(issue.pages, pages) })),
+      usable: true,
+    };
   });
   // mapWithConcurrency returns results in INPUT order, so the issue list is the one a
   // serial loop produced — which matters downstream: `imagesForIssues` unions the pages
@@ -687,7 +765,10 @@ async function runReader(
   // second is a fact about the assembled list. Applied per chunk it would be a no-op — no
   // chunk reports a page twice on its own — and applied to whichever call finished first it
   // would keep a different one each run.
-  const { issues, dropped } = dedupeNoContentIssues(perChunk.flat(), noContent);
+  const { issues, dropped } = dedupeNoContentIssues(
+    perChunk.flatMap((w) => w.issues),
+    noContent,
+  );
   // Logged only when something was dropped, and with the reports themselves rather than a count
   // alone. The count says how much of `@unresolved` this round would have spent on repeats and
   // the pages say which entries the kept report stands for, but neither would let anyone read
@@ -712,7 +793,7 @@ async function runReader(
       ),
     });
   }
-  return issues;
+  return { issues, unread: perChunk.filter((w) => !w.usable).length, windows: chunks.length };
 }
 
 // Which source images the Copy Editor needs this round: the union of the pages the
@@ -1207,6 +1288,12 @@ export async function runReview(
   let lint = initial.lint;
   let iterations = 0;
   let lastIssues: ReviewIssue[] = [];
+  // The last read's answer about how much of the document it did not answer about, and out
+  // of how many windows (see ReaderRead). The LAST read, like `lastIssues`, because what
+  // ships is one reading of the document: an earlier round's unreadable window says nothing
+  // about the body that is being delivered, which a later round re-read in full.
+  let lastUnread = 0;
+  let lastWindows = 0;
   let droppedLinks = 0;
   let editorTruncated = false;
   // What the truncated round's section calls rescued, when there was one. Only the document
@@ -1232,10 +1319,22 @@ export async function runReview(
   const failedPages = initial.failedPages ?? [];
 
   while (iterations <= ctx.maxReviewIterations) {
-    const issues = await runReader(ctx, body, lint, pages, iterations, failedPages);
+    const read = await runReader(ctx, body, lint, pages, iterations, failedPages);
+    const issues = read.issues;
     lastIssues = issues;
-    ctx.log.event("reader", { iteration: iterations, issues: issues.length });
-    if (issues.length === 0) {
+    lastUnread = read.unread;
+    lastWindows = read.windows;
+    // `unread` only when there is any, so an ordinary round's line is the one it always was.
+    ctx.log.event("reader", {
+      iteration: iterations,
+      issues: issues.length,
+      ...(read.unread ? { unread: read.unread, windows: read.windows } : {}),
+    });
+    // Clean, and only on a read that was clean AND answered. A read with an unreadable
+    // window has no verdict on that window — see ReviewResult.unreviewedWindows — and this
+    // is the return that says the document was reviewed and found to need nothing, which is
+    // the claim the deployment's public clean rate is made of (#186).
+    if (issues.length === 0 && read.unread === 0) {
       return {
         // `editorTruncated` is false on this path today, because a truncated round breaks
         // out of the loop instead of reaching another Reader pass. It is passed anyway:
@@ -1255,8 +1354,18 @@ export async function runReview(
         lint,
         droppedLinks,
         editorTruncated,
+        // 0 by the guard above. Passed rather than written as a literal for the same reason
+        // `editorTruncated` is: the field's value is the loop's, and a return that states it
+        // itself is a place where the two can come apart.
+        unreviewedWindows: lastUnread,
       };
     }
+    // Nothing to correct and no verdict either — the read came back empty because part of it
+    // could not be read, not because the document is right. There is nothing to hand an
+    // editor (inventing an issue to fix would be worse than the silence), so the loop ends
+    // here and the document is delivered saying what happened, with `unresolved` empty
+    // because nothing was found rather than because nothing is there.
+    if (issues.length === 0) break;
     if (iterations === ctx.maxReviewIterations) break; // cap reached, issues remain
 
     iterations++;
@@ -1444,6 +1553,10 @@ export async function runReview(
       editorTruncated,
       editorSections,
       lintUnavailable: lint.error,
+      // Said in the document whether or not `unresolved` is empty, because it changes how
+      // that list is to be read either way: an empty one is not a clean bill of health, and
+      // a non-empty one may be missing whatever the unread windows held.
+      ...(lastUnread ? { reviewUnread: { windows: lastUnread, of: lastWindows } } : {}),
     }),
     body,
     iterationsCompleted: iterations,
@@ -1451,5 +1564,6 @@ export async function runReview(
     lint,
     droppedLinks,
     editorTruncated,
+    unreviewedWindows: lastUnread,
   };
 }

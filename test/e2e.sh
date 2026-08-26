@@ -933,7 +933,7 @@ done
 # `inside` compares strings with `contains`, i.e. substring containment, so
 # `["doc"] | inside(["documents"])` is true and any new leaf whose name happens to be a
 # substring of an allowed one would slip through the one check that enforces this.
-allowed='["window_days","documents","since","mean_rounds","unresolved_rate","links_dropped_rate","lint_error_rate","documents_linted","editor_truncated_rate","id","impact","share","nodes"]'
+allowed='["window_days","documents","since","mean_rounds","unresolved_rate","review_unread_rate","links_dropped_rate","lint_error_rate","documents_linted","editor_truncated_rate","id","impact","share","nodes"]'
 extra=$(echo "$q" | jq -c --argjson allowed "$allowed" '([paths(scalars) | last] | unique) - $allowed')
 [ "$extra" = "[]" ] \
   && pass "the payload's key set is exactly the documented one (no session id, login or document content)" \

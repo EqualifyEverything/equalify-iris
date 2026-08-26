@@ -8,6 +8,7 @@ import {
   PUBLIC_QUALITY_MIN_DOCUMENTS,
   SIGNAL_LINKS_DROPPED,
   SIGNAL_LINT_ERROR,
+  SIGNAL_REVIEW_UNREAD,
   SIGNAL_ROUNDS,
   SIGNAL_UNRESOLVED,
   Store,
@@ -291,6 +292,7 @@ test("nothing per-session, per-user or per-document is exposed", () => {
         "links_dropped_rate",
         "lint_error_rate",
         "mean_rounds",
+        "review_unread_rate",
         "rules",
         "since",
         "unresolved_rate",
@@ -342,7 +344,44 @@ test("the clean rate is the share of documents that finished with nothing open",
     assert.equal(q.clean_rate, 16 / 20);
     // Per document, not per open issue: the four documents left 8 issues between them,
     // and a per-issue rate would report 12/20 for the same pipeline.
+    //
+    // The two halves add to 1 HERE, where every not-clean document is not clean for the one
+    // reason. That is not the general invariant and the test below is why: a document whose
+    // review could not be read has nothing open and is not clean either.
     assert.equal(q.clean_rate + store.qualityStats().unresolved_rate, 1, "the two must agree");
+  });
+});
+
+// Issue #186. The demo page published 8% clean beside a mean of 0.9 editor passes, and the
+// arithmetic was consistent — which is what made the number worth doubting rather than
+// recomputing: both halves are one population, so what was in question was what "clean" was
+// counting. `iris:unresolved` is written only when non-zero, so ABSENCE of it was the whole
+// evidence of cleanliness, and a document whose reviewer answered nothing has none of it for
+// the worst possible reason.
+test("a document whose review could not be read is not a clean document", () => {
+  withStore((store) => {
+    // Four of twenty, none of them with an unresolved row — which is the point: nothing was
+    // found in them because nothing was answered about them.
+    atFloor(store, (i) => (i < 4 ? [{ code: SIGNAL_REVIEW_UNREAD, count: 1 }] : []));
+    assert.equal(store.publicQuality()!.clean_rate, 16 / 20, "silence is not a clean bill of health");
+    assert.equal(store.qualityStats().unresolved_rate, 0, "and it is not reported as issues left open");
+    assert.equal(store.qualityStats().review_unread_rate, 4 / 20);
+  });
+});
+
+test("a document that is not clean for both reasons is subtracted once", () => {
+  withStore((store) => {
+    // The windows that DID answer found issues, and another window said nothing. Two rows,
+    // one document — so a clean count that summed rows would report 90% for a deployment
+    // that is at 95%, and the clamp in `publicQuality` would hide it at the extreme instead
+    // of failing here.
+    atFloor(store, (i) =>
+      i === 0 ? [{ code: SIGNAL_UNRESOLVED, count: 3 }, { code: SIGNAL_REVIEW_UNREAD, count: 1 }] : [],
+    );
+    assert.equal(store.publicQuality()!.clean_rate, 19 / 20);
+    const q = store.qualityStats();
+    assert.equal(q.unresolved_rate, 1 / 20, "the two rates are not disjoint and neither claims to be");
+    assert.equal(q.review_unread_rate, 1 / 20);
   });
 });
 

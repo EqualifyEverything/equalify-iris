@@ -54,20 +54,23 @@ curl -s "$BASE/stats"
     `?days=` would let anyone narrow the window until the denominator was one document.
   * `documents` — the denominator: documents delivered inside the window, flawless ones included.
     Distinct from `documents_processed`, which is all-time.
-  * `clean_rate` — share (0–1) of those documents whose review loop ended with the **reviewer**
-    reporting nothing left open. The complement of §0c's `unresolved_rate`, stated the positive way
-    round because this one is read by someone deciding whether to trust Iris with a file. Note what
-    it is *not*: it is the Reader Agent's remaining-issue list, not the final axe result, so a
-    document carrying a violation the reviewer never raised still counts here. §0c can see that gap
-    (its `rules` come from the final lint of the same run); this field cannot, which is why the demo
-    page's sentence credits the reviewer rather than saying the document came out clean.
+  * `clean_rate` — share (0–1) of those documents the **reviewer** read in full and reported nothing
+    left open on. Stated the positive way round because this one is read by someone deciding whether
+    to trust Iris with a file. It is 1 − (§0c's `unresolved_rate` ∪ `review_unread_rate`), not the
+    complement of the first alone: a document part of which the reviewer never answered about has
+    nothing open because nothing was looked for, and counting that as clean is what made this field
+    worth doubting (#186). Note also what it is *not*: it is the Reader Agent's remaining-issue list,
+    not the final axe result, so a document carrying a violation the reviewer never raised still
+    counts here. §0c can see that gap (its `rules` come from the final lint of the same run); this
+    field cannot, which is why the demo page's sentence credits the reviewer rather than saying the
+    document came out clean.
   * `mean_rounds` — mean reader/editor passes per document. **0 is the good value:** the loop stops
     as soon as the Reader finds nothing, so a document that reads clean immediately contributes 0.
     It is not *only* a good value, though, and this number cannot tell the two apart: the loop also
     stops as soon as a round changes nothing, so a document whose remaining issues are ones the
     loop is designed not to fix contributes a low count too. Read it beside `clean_rate`, which
-    convergence can only move DOWNWARD — it is the complement of `unresolved_rate`, and stopping
-    early can report issues a further Reader sample might have called clean, never the reverse. So
+    convergence can only move DOWNWARD — stopping early can report issues a further Reader sample
+    might have called clean, never the reverse. So
     a falling `mean_rounds` beside a steady `clean_rate` is the loop wasting fewer rounds; a
     falling `mean_rounds` is not by itself evidence of anything improving.
 
@@ -81,9 +84,9 @@ cannot walk around it. Below the floor the answer is `null` rather than zeros, b
 no way to tell a real 0% from an absent one and "0% clean" is the worst claim the field can make.
 
 **The floor bounds a snapshot, not a series of them.** `documents` and `clean_rate` together give an
-exact integer count of unresolved documents, and `documents_processed` deltas were already
+exact integer count of not-clean documents, and `documents_processed` deltas were already
 inferrable before `quality` existed — so an observer polling this endpoint on a deployment near the
-floor can difference the readings over days and attribute unresolved status to a single document,
+floor can difference the readings over days and attribute not-clean status to a single document,
 which is the inference the floor exists to prevent. Nothing identifying is exposed (no login, no
 filename, no per-document timestamp), so out-of-band knowledge of who uploaded when is needed for it
 to mean anything, and it is inherent to publishing any windowed rate rather than specific to these
@@ -140,6 +143,7 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   "lint_error_rate": 0.01,
   "documents_linted": 210,
   "editor_truncated_rate": 0.01,
+  "review_unread_rate": 0.01,
   "rules": [
     { "id": "heading-order", "impact": "moderate", "documents": 81, "share": 0.382, "nodes": 240 }
   ]
@@ -219,6 +223,18 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   A non-zero value is a statement about the **deployment**, not about the documents: either
   `providers.<name>.max_tokens` is too low for the pages allowed per session, or `max_pages` is
   too high for it.
+* `review_unread_rate` — share of documents where part of the reviewer's last read of them came back
+  **unusable**, so some of the document has no review verdict at all. The document is read in windows
+  (long ones in several), and a reply that carries no issue list this code can read — prose, an
+  apology, `{"issues": "none"}` — is a window nobody got an answer about. It is recorded because
+  without it that outcome is invisible in every other number here *and reads as the best one*: no
+  issues were found, so there is no `iris:unresolved` row, so the document was being counted clean.
+  This is the same principle as `lint_error_rate` above — an absent verdict must not count as a good
+  one — and it is why `clean_rate` in §0b subtracts both. Not disjoint from `unresolved_rate`: the
+  windows that *did* answer may have found issues. The delivered document carries a `@review-unread`
+  comment saying how many windows of how many, and `reader_no_output` in the run log carries the
+  reply's size and which of the two ways it failed. A non-zero value is a statement about the reader
+  model or its prompt, and the run log's `agentCall` output for that call is where to start.
 * `rules[]` — axe-core rule ids, **per document**: `documents` is how many documents violated the
   rule and `share` is that over `documents_linted`, with `nodes` (total offending elements) alongside
   rather than folded in. One pathological scan with 400 bad headings is a worse `nodes` and the same
