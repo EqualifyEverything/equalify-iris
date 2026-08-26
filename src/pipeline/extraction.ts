@@ -690,16 +690,29 @@ const MARKS_NOT_TEXT = new RegExp(`${MARKS_ANCHOR}\\bresolves?\\s+(?:in)?to\\b`,
 // which is the way round that costs a glance — a list of the prepositions that refuse would let the
 // preposition nobody thought of ("not legible writing over the seal") cost the page instead.
 //
-// A line break ends a clause here as a full stop does, because these logs are written as loose notes
-// ("Not legible text\nNo page-break marker is emitted"). And every branch but `or`/`and`/`nor` has to
-// reach a clause end itself, or the whitelisted word would carry a placement in behind it: `visible`
-// is a denial in "not legible text visible." and a hole in "not legible text visible in the margin".
+// EVERY branch has to reach that end, including the one that goes on denying: `visible` is a denial in
+// "not legible text visible." and a placement in "not legible text visible in the margin", and `or`
+// the same in "not legible text or the printing in the margin". So `or`/`and`/`nor`/`either` may add
+// another thing denied — an adjective or two and a name for text — and then the tail has to end again.
+//
+// A full stop, a `!`, a `?` or the end of the log ends it outright. A comma, a semicolon, a colon or a
+// line break ends it only when what follows CONTINUES the denial, by the same test a crossed sentence
+// boundary uses — because these logs are written as loose notes ("Not legible text\nNo page-break
+// marker is emitted"), and a note breaks a line exactly where it would otherwise place the text
+// ("Not legible printing\nin the margin"). A separator that lets anything follow it is the hole this
+// guard exists to close, reached one character further along.
 const SUBSTRATE = String.raw`(?:page|sheet|scan|paper|image|document|leaf)s?`;
-const CLAUSE_END = String.raw`(?=[ \t]*(?:[.,;:)!\n]|$))`;
+const CLAUSE_END =
+  String.raw`(?=[ \t]*(?:[.!?]|$)` +
+  String.raw`|[ \t]*[,;:)][ \t]*(?:${CONTINUATION}|$)` +
+  String.raw`|[ \t]*\n[ \t]*(?:${CONTINUATION}|$))`;
 const ON_SUBSTRATE = String.raw`(?:\s+(?:in|on|across)\s+(?:the\s+|this\s+)?${SUBSTRATE}\b)`;
+// One more thing denied: "not legible text or meaningful content", "no legible print and no writing".
+const TAIL_NOUN = String.raw`(?:text|texts|content|words?|characters?|print(?:s|ed|ing)?|writing|markings?|lines?|letters?|glyphs?|digits?|numerals?|figures?|images?|handwriting)`;
+const TAIL_QUALIFIER = String.raw`(?:a|an|any|no|the|some|other|more|meaningful|legible|readable|printed|typed|visible|discernible|recognizable|clear)`;
+const MORE_DENIED = String.raw`(?:\s+(?:or|and|nor|either)(?:\s+${TAIL_QUALIFIER}){0,2}\s+${TAIL_NOUN}\b){0,2}`;
 const DENIAL_TAIL =
-  String.raw`(?:${CLAUSE_END}` +
-  String.raw`|\s+(?:or|and|nor|either)\b` +
+  `${MORE_DENIED}(?:${CLAUSE_END}` +
   String.raw`|\s+(?:at all|whatsoever|of any (?:kind|sort|type))${CLAUSE_END}` +
   String.raw`|\s+(?:visible|present|discernible|apparent|detected|seen|found)${CLAUSE_END}` +
   String.raw`|\s+anywhere(?:${ON_SUBSTRATE})?${CLAUSE_END}` +

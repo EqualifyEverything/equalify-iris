@@ -334,10 +334,15 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. A few specks. Not legible text on the page.",
     "Page is blank. A few specks. Not legible text at all.",
     "Page is blank. A few specks. Not legible text visible.",
+    "Page is blank. A few specks. Not legible text present.",
     "Page is blank. Only scanner dust; not legible text of any sort.",
     "Page is blank. A few specks. Not legible text anywhere on the page.",
-    // A line break ends a clause as a full stop does: these logs are written as loose notes.
+    "Page is blank. A few specks. Not legible print and no writing.",
+    "Page is blank. A few specks. Not legible text or content of any kind.",
+    // A comma, a semicolon or a line break ends a clause where what follows continues the denial:
+    // these logs are written as loose notes.
     "Page is blank. A few specks.\nNot legible text\nNo page-break marker is emitted.",
+    "Page is blank. A few specks, not legible characters, nothing else.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -436,6 +441,15 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. A few specks. Not legible text visible in the margin.",
     "Page is blank. A few specks. Not legible text anywhere in the margin.",
     "Page is blank. A few specks. Not legible text on the page in the margin.",
+    // Nor may a separator: a note breaks a line, or drops a comma, exactly where it would otherwise
+    // place the text — which is the same hole one character further along.
+    "Page is blank. A few specks. Not legible printing\nin the margin.",
+    "Page is blank. A few specks. Not legible writing seen\nover the seal.",
+    "Page is blank. A few specks. Not legible text, in the header.",
+    "Page is blank. A few specks. Not legible text detected, in the header.",
+    // Going on to deny something else is a denial; going on to place it is not.
+    "Page is blank. A few specks. Not legible text or the printing in the margin.",
+    "Page is blank. A few specks. Not legible text either in the margin.",
     // `nothing but the text` affirms the text. A negative word ahead of a name for text does not make
     // it a denial when the negative is spent on the exception.
     "Page is blank. Dust and specks, nothing but the handwriting, which does not resolve into words.",
