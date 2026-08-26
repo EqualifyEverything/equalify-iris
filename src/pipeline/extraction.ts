@@ -145,6 +145,15 @@ answers: where there are marks on the paper you could not resolve, that is [not 
 element it belongs to, and where you returned only part of a page, that is [page not fully
 transcribed]. An empty "html" says the paper is empty, and it is read that way.
 
+Say that and nothing else in the same breath. A log that reports the page blank and then names
+something on it — a heading, a caption, a signature, handwriting, an image — contradicts the answer
+it is attached to, and the contradiction is what gets believed: the reply is refused and the page is
+reported as one nobody transcribed, which is a worse outcome for it than either half of the log
+alone. Anything on the paper worth naming in the log is worth putting in "html", and anything you
+could see but not read is worth [not legible] inside the element it belongs to. Describing the
+specks and dust that establish a page IS empty is not naming content and is welcome; naming
+something you read is the answer to a different question than the one you just gave.
+
 Nine structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
@@ -795,6 +804,16 @@ const QUALIFIER = new Set(
 const LOCATIVE_SUBSTRATE = new Set("image images".split(" "));
 const LOCATIVE = new Set("in on across throughout within".split(" "));
 const DETERMINER = new Set("a an the this that these those".split(" "));
+// What may stand between a verb and its object besides a determiner or a qualifier: a count. "There is
+// some handwriting", "it shows two headings" are the wordings a page with something on it is described
+// in, and without these the gap ended at the count and the affirmation was missed. Safe to allow
+// because the negator check runs first, so `no`, `nothing` and `none` still end the object — and
+// because a count in front of a marks noun ("a few specks", "several stray marks") is not an
+// affirmation subject at all: `TEXT_NOUN` does not list those. Digits need no entry: the tokenizer
+// reads letters, so "shows 2 headings" already puts the noun next to the verb.
+const QUANTIFIER = new Set(
+  "some any both few several many numerous multiple one two three four five six seven eight nine ten".split(" "),
+);
 // A denial made of nothing but these words is a short one, so a statement that runs past this refuses
 // rather than being read further. That keeps the work per match bounded — a log with a thousand
 // `not legible text`s in it and no full stop anywhere would otherwise re-read its own tail a thousand
@@ -879,6 +898,189 @@ function vetoScope(log: string): string {
     .replace(MARKS_PHRASE, " ");
 }
 
+// The other question, and the one nothing above asks: does the log CONTRADICT its own declaration?
+// Everything before this decides whether a log casts DOUBT on the blankness it asserts — a failure to
+// read, a bad image, a hedge — and a log that says the page is empty and then says, in plain
+// affirmative words, that something is on it casts no doubt at all. It states both. So
+// `declaredBlank({ html: "", log: "Page is blank. There is handwriting on the page." })` was `true`
+// (#194), and the page shipped as an empty fragment with no `@page-failed` marker, nothing in
+// `pages_failed` and no incompleteness notice: the run reported a complete document and the reader
+// simply did not get that page.
+//
+// An affirmation refuses the declaration; it does not decide which half of the log is true. There is
+// no way to tell from the text, and the two answers cost differently — a page reported lost is a
+// glance at a re-extraction, a page dropped in silence is a page nobody knows to look for. Which is
+// the direction every rule in this section is chosen for.
+//
+// Read over the SAME text the veto lists see — the log with the marks phrases removed — because that
+// is what makes the check affordable at all. The logs a genuinely blank page is written in affirm
+// things constantly, and every one of those affirmations is about the marks: "Some dust is present",
+// "Stray markings are visible", "Only scanner dust is present", "The specks are scanner dust". With
+// the marks phrase gone, those sentences have no subject left to affirm anything about, so they need
+// no exception here — the exemption that already exists for describing the paper does the work.
+//
+// The subject list is `TEXT_NOUN`, which is where the marks vocabulary is deliberately absent: `mark`
+// and `markings` are things a blank page's log identifies ("The visible marks are artifacts of the
+// scan") as readily as things a page bears, and #193 settled that ambiguity by keeping bare `marks`
+// out of the exemption rather than out of the noun lists. Reusing `TEXT_NOUN` inherits that decision
+// instead of taking it again in the other direction — which is what an affirmation check written
+// around `PAGE_BEARS` would have done, since `PAGE_BEARS` has `marks` in it and "The marks are
+// artifacts." would then have reported a blank page as lost. That is the #190 defect, and the issue
+// named it as the thing a fix must not buy.
+const AFFIRMED_NOUN = new RegExp(`^(?:${TEXT_NOUN})$`, "i");
+// `there is/are` puts the noun after the verb, so the subject-verb order below never sees it, and
+// "There is handwriting on the page." is the plainest of the five wordings #194 measured.
+const EXISTENTIAL = new Set("is are was were".split(" "));
+// The transitive shape puts the noun after the verb too, for a different reason: the subject is the
+// PAPER and the text is the object. "The page contains handwriting", "the sheet still bears a
+// heading", "it shows two headings" are each an affirmation the subject-verb scan below cannot see,
+// because the word in front of the verb is not a name for text. Measured: without this branch, "Page
+// is blank. The page contains handwriting." declared the page blank.
+//
+// The object is read with the same rules `there is` uses — a gap of determiners and qualifiers, a
+// negator ends it — since the two constructions differ only in what stands in front of the verb. And
+// no particular subject is required: whatever the log says bears the text, the object is what it says
+// is on the page, and the wordings a blank page uses are denials of that object ("the page contains
+// no legible text", "the specks show nothing", "the marks do not resolve into characters"), which the
+// negator rules refuse either side of the verb. A list of allowed bearer nouns would only add a way
+// to miss one.
+const TRANSITIVE_AFFIRM = new Set(
+  "contain contains contained hold holds held bear bears show shows has have had carries carry".split(" "),
+);
+// How far back a negator reaches. Three words covers a determiner and two qualifiers (`no other
+// printed words`), which is what the denials in these logs are built from, and stopping there is what
+// keeps `and printing` — three words past a `not` that governs a different noun — an affirmation.
+const AFFIRM_LOOKBACK = 3;
+// Words that may stand between a verb and the noun it introduces (`there is`, `contains`).
+const OBJECT_GAP = 3;
+
+interface Word {
+  word: string;
+  // Whether a comma closes this word. The one piece of punctuation the scan needs: see the
+  // parenthetical rule in `affirmingVerbAfter`.
+  comma: boolean;
+}
+
+function words(statement: string): Word[] {
+  const out: Word[] = [];
+  for (const m of statement.matchAll(/([A-Za-z][A-Za-z'’-]*)(\s*,)?/g)) {
+    out.push({ word: m[1]!.toLowerCase().replace(/[’]/g, "'"), comma: Boolean(m[2]) });
+  }
+  return out;
+}
+
+// `image` is the word the lists genuinely disagree about, and it disagrees here too: "the image is
+// slightly rotated" is the scan and "an image is visible" is something on the paper, and both are
+// wordings these logs use — the first is in the corpus as a page that must still be delivered
+// (geometry is not legibility, so `DEGRADED_IMAGE_LOG` lets it through on purpose). `LOCATIVE`
+// settles the same ambiguity for the denial tails, but it cannot settle this one: there is no
+// preposition in front of either.
+//
+// What separates them is the article. The scan is referred to definitely, because the log has been
+// talking about it all along — `the` image, `this` image — and a thing on the page is introduced
+// indefinitely, because it is being mentioned for the first time. So a definite `image` is not an
+// affirmation subject, and every other name for a page object is one however it is introduced.
+// The cost is "The image in the corner is a photograph", which is missed; the alternative was
+// refusing a measured blank page, which is the defect (#179) this file exists downstream of.
+const DEFINITE = new Set("the this that these those its their".split(" "));
+function definiteBefore(tokens: Word[], i: number): boolean {
+  let k = i - 1;
+  while (k >= 0 && QUALIFIER.has(tokens[k]!.word)) k--;
+  return k >= 0 && DEFINITE.has(tokens[k]!.word);
+}
+
+function negatedBefore(tokens: Word[], i: number): boolean {
+  for (let k = Math.max(0, i - AFFIRM_LOOKBACK); k < i; k++) {
+    if (NEGATOR.has(tokens[k]!.word) || tokens[k]!.word === "without") return true;
+  }
+  return false;
+}
+
+// Where the verb that affirms this noun is, if there is one. The scan STOPS at a negator, because a
+// negator is where the next denied clause begins and its verb has nothing to do with this noun —
+// which is the rule `deniesToStatementEnd` already applies for the same reason, and the reason a
+// blank page's own log survives this: "not legible text or content, and no writing is visible" has an
+// `is` in it, three words past a `no` that owns it.
+//
+// The exception is a denial set off by COMMAS. "…and printing, no page number, is visible" is a
+// parenthetical with `printing` as the subject of `is visible`, and it was the one of #194's five
+// shapes that the stop rule alone would have let through. So a negator whose phrase both opens after
+// a comma and closes on one is stepped over rather than stopped at. Nothing a blank page is written in
+// has that shape: the negators in those logs open on `and`, on `or` or on a fresh clause ("…or
+// content, and no printed page number is visible"), where the closing comma never comes.
+function affirmingVerbAfter(tokens: Word[], i: number): number {
+  let k = i + 1;
+  while (k < tokens.length) {
+    const token = tokens[k]!;
+    if (AFFIRMING_VERB.has(token.word)) return k;
+    if (NEGATOR.has(token.word)) {
+      if (!tokens[k - 1]!.comma) return -1;
+      let close = k;
+      while (close < tokens.length && !tokens[close]!.comma) close++;
+      if (close >= tokens.length) return -1;
+      k = close + 1;
+      continue;
+    }
+    k++;
+  }
+  return -1;
+}
+
+// The noun a post-verb construction affirms — the object of `there is` or of a transitive verb — or
+// -1. Shared by both because both ask the same question of the same words.
+function affirmedObjectAfter(tokens: Word[], verb: number): number {
+  for (let k = verb + 1; k < tokens.length && k <= verb + OBJECT_GAP; k++) {
+    const { word } = tokens[k]!;
+    // A negator ends it: "there is nothing to transcribe", "there is no text", "the page contains no
+    // legible printing" are how a blank page says it, and they are the commonest of these in the
+    // corpus.
+    if (NEGATOR.has(word)) return -1;
+    if (AFFIRMED_NOUN.test(word)) {
+      // `image` is read by its article here as it is everywhere else in this file: "the frame
+      // contains the image" is the scan being described, not a photograph on the paper.
+      return LOCATIVE_SUBSTRATE.has(word) && definiteBefore(tokens, k) ? -1 : k;
+    }
+    if (!DETERMINER.has(word) && !QUALIFIER.has(word) && !QUANTIFIER.has(word)) return -1;
+  }
+  return -1;
+}
+
+// The affirmation, as the words that make it, or null. Returned rather than a boolean so the refusal
+// can say what it saw: `blank_vetoed` exists because #190 had to trace four pages back to a word by
+// hand, and a contradiction is harder to spot in a log than a doubt word is.
+export function contentAffirmed(scope: string): string | null {
+  // A statement is what a `.`, `!`, `?`, `;` or a line break ends. Looser than the denial reads
+  // above, which have to cross a line break because these logs put one where a comma belongs — here
+  // the boundaries only limit how far a subject may reach for its verb, so a boundary the denial
+  // scan crosses is one this one is free to stop at.
+  for (const statement of scope.split(/[.!?;\n]+/)) {
+    const tokens = words(statement);
+    for (let i = 0; i < tokens.length; i++) {
+      const { word } = tokens[i]!;
+      if (word === "there" && i + 1 < tokens.length && EXISTENTIAL.has(tokens[i + 1]!.word)) {
+        const noun = affirmedObjectAfter(tokens, i + 1);
+        if (noun >= 0) return tokens.slice(i, noun + 1).map((t) => t.word).join(" ");
+        continue;
+      }
+      if (TRANSITIVE_AFFIRM.has(word) && !negatedBefore(tokens, i)) {
+        const noun = affirmedObjectAfter(tokens, i);
+        if (noun >= 0) return tokens.slice(i, noun + 1).map((t) => t.word).join(" ");
+        continue;
+      }
+      if (!AFFIRMED_NOUN.test(word) || negatedBefore(tokens, i)) continue;
+      if (LOCATIVE_SUBSTRATE.has(word) && definiteBefore(tokens, i)) continue;
+      const verb = affirmingVerbAfter(tokens, i);
+      if (verb >= 0) {
+        return tokens
+          .slice(i, Math.min(verb + 2, tokens.length))
+          .map((t) => t.word)
+          .join(" ");
+      }
+    }
+  }
+  return null;
+}
+
 function matches(re: RegExp, text: string): string[] {
   return [...text.matchAll(new RegExp(re.source, "gi"))].map((m) => m[0].toLowerCase());
 }
@@ -892,6 +1094,12 @@ export interface BlankDeclaration {
   // a refusal was the reply itself, and working out WHICH word did it is a regex read per page —
   // which is what issue #190 had to do by hand for four pages.
   vetoes: string[];
+  // The self-contradiction that refused it, where there was one (#194): the log asserted the page is
+  // empty and then said something is on it. Kept apart from `vetoes` because it is a different
+  // finding with a different remedy — a doubt word means the page could not be read and wants a
+  // better image, an affirmation means the agent answered with no page for a page it says has
+  // content on it, and `agents/page.md` already tells it to write `[not legible]` instead.
+  affirmed?: string;
 }
 
 // Exported for the unit test: this predicate is the whole distinction between a page delivered
@@ -903,7 +1111,13 @@ export function blankDeclaration(parsed: { html?: string; log?: string } | null)
   if (!log || !BLANK_LOG.test(log)) return none;
   const scope = vetoScope(log);
   const vetoes = [...new Set([...matches(UNREADABLE_LOG, scope), ...matches(DEGRADED_IMAGE_LOG, scope)])];
-  return { asserted: true, blank: vetoes.length === 0, vetoes };
+  const affirmed = contentAffirmed(scope);
+  return {
+    asserted: true,
+    blank: vetoes.length === 0 && affirmed === null,
+    vetoes,
+    ...(affirmed === null ? {} : { affirmed }),
+  };
 }
 
 export function declaredBlank(parsed: { html?: string; log?: string } | null): boolean {
@@ -1046,6 +1260,7 @@ async function renderPage(
       chars: res.text.length,
       shape,
       ...(declaration.asserted ? { blank_vetoed: declaration.vetoes, log: parsed?.log ?? "" } : {}),
+      ...(declaration.affirmed ? { blank_contradicted: declaration.affirmed } : {}),
     });
     throw new Error(`page agent returned no HTML (${shape}, ${res.text.length} chars)`);
   }

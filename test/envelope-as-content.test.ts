@@ -626,6 +626,131 @@ test("a refused blank declaration says which word refused it", () => {
   );
 });
 
+// Issue #194. Everything above asks whether the log casts DOUBT on the blankness it claims; none of it
+// asks whether the log CONTRADICTS it. A log that says the page is empty and then says, in plain
+// affirmative words, that something is on it casts no doubt at all — it states both — so all five of
+// these declared the page blank on `main`, and the page shipped as an empty fragment with nothing in
+// `pages_failed` and no incompleteness notice: a complete-looking document missing a page.
+//
+// The refusal does not decide which half of the log is true, because the text cannot say. It picks the
+// direction whose cost is a glance: a page reported lost is a re-extraction, a page dropped in silence
+// is a page nobody knows to look for.
+test("a log that says something is on the page contradicts its own blank claim", () => {
+  for (const log of [
+    // #194's own three, verbatim.
+    "Page is blank. There is handwriting on the page.",
+    "Page is blank. A few specks; and handwriting is present.",
+    "Page is blank. A few specks. Handwriting is present.",
+    // ...and its two that sit just outside #193's tail read, which is scoped to the statement the
+    // construction it guards is in. These reach the document without either construction.
+    "Page is blank. A few specks. Not legible text. A heading is visible at the top.",
+    "Page is blank. A few specks. Not legible text or content, and printing, no page number, is visible.",
+    // The same claim in the wordings these logs are otherwise written in. Each is a name for text with
+    // an affirming verb after it, which is the whole rule.
+    "Page is blank. A signature is visible in the corner.",
+    "Page is blank. A table is present.",
+    "Page is blank. Headings are visible.",
+    "Page is blank. Some words remain visible.",
+    "Page is blank. A caption was visible at the foot.",
+    // The transitive shape, where the subject is the paper and the text is the object — invisible to a
+    // subject-verb scan, and measured as delivered-blank before the branch that reads it existed.
+    "Page is blank. The page contains handwriting.",
+    "Page is blank. The sheet still bears a heading.",
+    "Page is blank. It shows two headings.",
+    "Page is blank. The page has handwriting on it.",
+    // A count between the verb and its object is how a page with something on it is usually described,
+    // and the object is still the object.
+    "Page is blank. There is some handwriting on the page.",
+    "Page is blank. There are several figures.",
+    // An `image` introduced indefinitely is a thing on the paper — the same reading `LOCATIVE` gives
+    // the denial tails, settled here by the article instead, since neither wording has a preposition.
+    "Page is blank. An image is visible on the page.",
+    // Order does not matter: a log that affirms before it declares has still done both.
+    "There is handwriting on the page. Page is blank.",
+    // The declaration and the contradiction in one statement, which is where a comma-set-off denial
+    // could otherwise hide the affirmation ("…, no page number, is visible" above).
+    "Page is blank. A few specks. Not legible text, an illustration is visible.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
+});
+
+// The other direction, and the one this check was nearly not worth making: a genuinely blank page's log
+// affirms things constantly, and every one of those affirmations is about the marks. #194 named these
+// two as the pages a whole-log affirmation check would cost — they are #190's, the defect this area
+// exists downstream of — and the rest are the wordings the corpus and the veto lists' own tails put
+// around them. Refusing any of these is #190 again, from the other end.
+//
+// It costs nothing extra to keep them, because the affirmation is read over the text the marks phrases
+// have already been stripped from: with the marks phrase gone those sentences have no subject left to
+// affirm anything about. `TEXT_NOUN` is the subject list for the same reason — `marks` and `markings`
+// are deliberately absent from it, which is #193's decision about bare `marks` inherited rather than
+// taken again in the other direction.
+test("the affirmations a blank page's own log is made of are not contradictions", () => {
+  for (const log of [
+    // #194's two named casualties.
+    "Page is blank. Specks do not resolve into characters. The marks are artifacts.",
+    "Page is blank. A few specks. Not legible text. The specks are scanner dust.",
+    // The same shape in the other wordings the corpus uses for it.
+    "Page is blank. The visible marks are artifacts of the scan.",
+    "Page is blank. Some dust is present.",
+    "Page is blank. Stray markings are visible.",
+    "Page is blank. There are a few specks.",
+    "Page is blank. There are several stray marks.",
+    "Page is blank. The page contains only scanner dust.",
+    // A denial is not an affirmation, however many names for text it contains — the scan stops at the
+    // negator that owns them, which is what keeps the page-number clause the prompt asks for.
+    "Page is blank. Nothing is printed on the sheet.",
+    "Page is blank. No text is visible.",
+    "Page is blank. A few specks. Not legible text or content, and no writing is visible.",
+    "Page is blank. A few specks. Not legible text or meaningful content, and no printed page number is visible.",
+    "Page is blank. A few specks. Not legible text or figures; neither is visible.",
+    "Page is blank. A few specks. There is nothing that resolves into words.",
+    "Page is blank. The page does not contain any legible text.",
+    "Page is blank. A few specks. The specks have not resolved into characters.",
+    // A definite `image` is the scan being described, not a photograph on the paper. The cost of that
+    // reading is "The image in the corner is a photograph", which is missed; the alternative refused
+    // this line, which is in the corpus as a page that must still be delivered — geometry is not
+    // legibility.
+    "The page is blank; the image is slightly rotated, no content.",
+    "Page is blank. The frame contains the image, which is rotated.",
+    // The paper itself, and what it is not doing.
+    "The sheet is empty. No printing is present.",
+    "Page is blank. The page has been scanned at low contrast.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+});
+
+// What the refusal owes whoever reads the run. `blank_vetoed` exists because #190 had to be traced
+// back to a word by hand; a contradiction is harder to spot in a log than a doubt word is, and it is a
+// different finding with a different remedy — a doubt word means the page could not be read and wants
+// a better image, an affirmation means the agent answered with no page for a page it says has content
+// on it. So it is reported in its own field, in the words that made it.
+test("a contradicted blank declaration says what the log claimed was there", () => {
+  const contradicted = blankDeclaration({ html: "", log: "Page is blank. There is handwriting on the page." });
+  assert.equal(contradicted.asserted, true, "the log did claim the page was blank");
+  assert.equal(contradicted.blank, false);
+  assert.deepEqual(contradicted.vetoes, [], "nothing here casts doubt on the reading; the log contradicts itself");
+  assert.equal(contradicted.affirmed, "there is handwriting");
+  assert.equal(
+    blankDeclaration({ html: "", log: "Page is blank. A heading is visible at the top." }).affirmed,
+    "heading is visible",
+  );
+  assert.equal(
+    blankDeclaration({ html: "", log: "Page is blank. The page contains handwriting." }).affirmed,
+    "contains handwriting",
+  );
+  // And a declaration nothing contradicted carries no such field at all, so the log line of an
+  // ordinary blank page is unchanged and `"affirmed" in d` reads as the question it looks like.
+  assert.deepEqual(blankDeclaration({ html: "", log: "Page is blank." }), {
+    asserted: true,
+    blank: true,
+    vetoes: [],
+  });
+  assert.equal("affirmed" in blankDeclaration({ html: "", log: "Page is blank. Some dust is present." }), false);
+});
+
 // --- through the pipeline ------------------------------------------------------
 
 interface Event {
@@ -879,6 +1004,39 @@ test("a blank page that explains itself is delivered, and a refusal names the wo
     assert.equal(refused[0].shape, "empty_html");
     assert.deepEqual(refused[0].blank_vetoed, ["too dark to", "dark"]);
     assert.equal(refused[0].log, "Page is blank, but the scan is too dark to be sure.");
+  });
+});
+
+test("a page whose log contradicts its own blank claim is reported, not quietly dropped", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // #194 through the pipeline, which is where the cost was: page 2's reply declares the page blank
+    // and names handwriting on it, and it used to be delivered as an empty fragment — no marker in the
+    // document, nothing in `failedPages`, no incompleteness notice — so the run reported a whole
+    // document and the reader simply did not get that page. Page 3 is the blank page it must not cost.
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) =>
+          o === 2
+            ? '{"html": "", "log": "Page is blank. A few specks. Not legible text. A heading is visible at the top."}'
+            : o === 3
+              ? '{"html": "", "log": "Page is blank. A few specks. Not legible text. The specks are scanner dust."}'
+              : good(o),
+      }),
+    );
+    assert.deepEqual(failedPages, [2], "the page the log says has a heading on it is a page to look at");
+    assert.deepEqual(of(events, "page_blank").map((e) => e.page), [3], "and the described blank page is still blank");
+    assert.match(fragments.find((f) => f.order === 2)!.innerHtml, /@page-failed 2:/);
+    assert.equal(fragments.find((f) => f.order === 3)!.innerHtml, "");
+    const refused = of(events, "page_no_output");
+    assert.equal(refused.length, 1);
+    assert.equal(refused[0].shape, "empty_html");
+    // The words that refused it, in their own field. `blank_vetoed` is still there and still empty,
+    // which is the pair a reader needs: no doubt was cast on the reading, and the log contradicted
+    // itself — a page to re-extract, not a page to re-scan.
+    assert.equal(refused[0].blank_contradicted, "heading is visible");
+    assert.deepEqual(refused[0].blank_vetoed, []);
+    assert.equal(refused[0].log, "Page is blank. A few specks. Not legible text. A heading is visible at the top.");
   });
 });
 

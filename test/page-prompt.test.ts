@@ -372,6 +372,34 @@ test("the page agent says what to do with what it cannot read, and emits the who
   }
 });
 
+// The prompt half of #194. Downstream, `blankDeclaration` (src/pipeline/extraction.ts) now refuses an
+// empty `html` whose log says something is on the page, because believing such a reply ships a page
+// nobody is told about — and the refusal reports the page as lost, which is not a good outcome for it
+// either. Both halves of that trade are the agent's to avoid, and this is where it can: the reply that
+// names a heading and returns no page is a reply that had the heading.
+//
+// The rule has to say the cost, because the shape it forbids reads as diligence: a log describing what
+// is on the page is exactly what the "log" field is asked for elsewhere in this prompt. What separates
+// the welcome case from the refused one is the answer it accompanies, so the clause names the specks
+// and dust a blank page IS described by, and keeps them welcome. Without that half, the rule reads as
+// "say less in the log" — which would cost the described blank pages of #190 all over again, from the
+// other end.
+test("the page agent is told not to contradict its own blank answer, and why that costs the page", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["naming content in the log of a blank answer is the shape that is forbidden",
+      /A log that reports the page blank and then names something on it — a heading, a caption, a signature, handwriting, an image — contradicts the answer it is attached to/],
+    ["what it costs: the contradiction is believed, and the page is reported as untranscribed",
+      /the contradiction is what gets believed: the reply is refused and the page is reported as one nobody transcribed/],
+    ["the way out is the content, not a quieter log",
+      /Anything on the paper worth naming in the log is worth putting in "html", and anything you could see but not read is worth \[not legible\] inside the element it belongs to/],
+    ["describing the specks that establish a blank page stays welcome",
+      /Describing the specks and dust that establish a page IS empty is not naming content and is welcome/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
 // The numbering and abbreviation rules (issues #98, #100, #101) came from one
 // session's feedback on a parts manual: item numbers that skipped were annotated
 // under the last table and nowhere else, a repeat went unremarked, the "NS" key
