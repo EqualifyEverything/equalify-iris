@@ -1108,12 +1108,31 @@ function affirmingReach(tokens: Word[]): number[] {
 // page as empty in silence — the #194 defect this check exists to close. Same reason `but` is not
 // followed: "Handwriting is visible but no printed text is present." is a page with writing on it.
 //
-// `never` earns its place here rather than in `NEGATOR`, which five other functions read: "text was
-// never printed" is a denial, but widening the negator vocabulary would change how the denial tails,
-// the object gaps and the coordination walk all read, and each of those trades in the other direction.
+// `never` and the complements below earn their place here rather than in `NEGATOR`, which five other
+// functions read: "text was never printed" and "printed text is absent" are denials, but widening the
+// negator vocabulary would change how the denial tails, the object gaps and the coordination walk all
+// read at once, and each of those trades in the other direction.
+//
+// A negative complement is how the same denial is written without a negator at all — `is absent`,
+// `is missing`, `is nowhere on the sheet` — and #200's review measured eight such wordings reported
+// failed. The list is closed and short on purpose: each word means "not there" on its own, with no
+// reading where it says something IS on the paper, which is what separates it from an open-ended
+// widening. `devoid` and `lacks` are absent because they take a preposition or an object and the
+// subject-verb scan does not reach them anyway. A qualifier between the verb and the complement
+// ("Text is entirely absent.") is still refused, for the same reason no gap is allowed above: the gap
+// costs a page and the refusal costs a glance.
+const NEGATIVE_COMPLEMENT = new Set(["absent", "missing", "nowhere", "nonexistent", "lacking"]);
+
 function deniedAfterVerb(tokens: Word[], verb: number): boolean {
   const next = tokens[verb + 1];
-  return next !== undefined && (NEGATOR.has(next.word) || next.word === "never" || next.word === "without");
+  if (next === undefined) return false;
+  if (NEGATIVE_COMPLEMENT.has(next.word)) return true;
+  if (!NEGATOR.has(next.word) && next.word !== "never") return false;
+  // A negator in front of a negative complement is two denials making an affirmation: "Handwriting is
+  // not absent." is a page with writing on it, and reading it as a denial would ship that page empty
+  // in silence. Contrived beside `is not present`, and it costs one lookup to not get wrong.
+  const after = tokens[verb + 2];
+  return after === undefined || !NEGATIVE_COMPLEMENT.has(after.word);
 }
 
 // The noun a post-verb construction affirms — the object of `there is` or of a transitive verb — or

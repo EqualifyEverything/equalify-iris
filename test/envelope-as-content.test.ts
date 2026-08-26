@@ -697,6 +697,17 @@ test("a log that says something is on the page contradicts its own blank claim",
     // sentence. Reported, so someone looks; the alternative is a page with printing named in its own
     // log delivered as empty.
     "Page is blank. Printing from the reverse side is faintly visible; nothing is printed on this side.",
+    // Two denials make an affirmation, and a page with writing on it must not be delivered empty
+    // because its log said so twice. Contrived beside `is not present` — pinned because the post-verb
+    // read is what makes them reachable at all, and each costs one lookup to not get wrong.
+    "Page is blank. Handwriting is not absent.",
+    "Page is blank. Text is never absent from this sheet.",
+    // `without` is not a post-verb denial: `is without doubt visible` is an affirmation idiom, and the
+    // wording it would have bought — `The sheet is without printing.` — already delivers, because a
+    // definite substrate is the scan and not a thing on the paper. So it stays where the other
+    // functions need it, in front of a noun (#200's review measured this one as a page this check
+    // would otherwise have dropped in silence).
+    "Page is blank. A heading is without doubt visible at the top.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }
@@ -792,6 +803,20 @@ test("the affirmations a blank page's own log is made of are not contradictions"
     // handwriting is present.` (above) is refused, because there the walk stops at the first
     // clause's own verb; the comma is the whole difference, which is why both are pinned.
     "Page is blank. No printed text, and handwriting is present.",
+    // The same denial with no negator in it at all — a negative complement, which #200's review
+    // measured as eight more reported-failed blank pages. `absent` and `missing` are as ordinary in a
+    // page log as `not present`, and the boundary was again which word the model reached for:
+    // `A page number is absent.` and `The sheet is devoid of text.` (below, and delivered before this)
+    // already survived because the subject-verb scan never reached their subjects.
+    "Page is blank. Printed text is absent.",
+    "Page is blank. A few specks. Printed text is absent.",
+    "Page is blank. Handwriting is absent.",
+    "Page is blank. Printed content is absent from this side.",
+    "Page is blank. Text is missing.",
+    "Page is blank. Handwriting is nowhere on the sheet.",
+    "Page is blank. Text is nonexistent.",
+    "Page is blank. A page number is absent.",
+    "Page is blank. The sheet is devoid of text.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
