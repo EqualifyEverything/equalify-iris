@@ -121,6 +121,15 @@ test("a symbol named only by its title is named in the flattened view too", () =
   assert.match(announced("<p>The <abbr title=\"WCAG\">WCAG</abbr> rules.</p>"), /The WCAG rules\./);
   // A glyph with no name at all is what stays bare — the case the Reader should report.
   assert.match(announced("<p>Press &#x25A0; to stop.</p>"), /Press ■ to stop\./);
+  // And so is the shape the page rule forbids. `title` is read here rather than the
+  // `aria-label ?? title` an accessible name generally comes from, because a naming
+  // attribute on <abbr> is prohibited and a screen reader has to ignore it: announcing
+  // it would tell the Reader that the one shape `agents/page.md` rules out is a named
+  // control, and the gate (0 violations, 1 incomplete, below) says nothing either. The
+  // attribute is still in the HTML the Reader gets beside this view, so it stays
+  // reportable — and the fix, the same words under `title`, invents nothing.
+  assert.match(announced('<p>Press <abbr aria-label="Stop">&#x25A0;</abbr> to stop.</p>'), /Press ■ to stop\./);
+  assert.doesNotMatch(announced('<p>Press <abbr aria-label="Play" title="Stop">&#x25A0;</abbr>.</p>'), /Play/);
   assert.match(READER_SYSTEM, /\[Abbr title\] carries the name an abbreviation or a symbol holds in its title attribute/);
   assert.match(READER_SYSTEM, /\[Caption\], \[Term\], \[Definition\], \[Abbr title\]/);
 });

@@ -247,8 +247,18 @@ export function flatten(html: string): string {
     // the two are the same string (`<abbr title="WCAG">WCAG</abbr>` is not announced
     // twice). The name is content — a word the page printed, which is what the page
     // rule requires — so it sits outside the marker, as alt text does.
+    //
+    // `title` only, and NOT `ariaName`, which prefers `aria-label`. `<abbr>` carries no
+    // ARIA role of its own, so a naming attribute on it is prohibited and a screen
+    // reader has to ignore it — and the gate is silent about that (0 violations, 1
+    // incomplete: see test/page-definition-lists.test.ts). Announcing it would tell the
+    // Reader the one shape `agents/page.md` rules out is a named control, which is the
+    // phantom-CORRECTNESS direction and worse than the phantom defect above: the name
+    // the marker claims is there is one nobody hears. Flattened bare, the attribute is
+    // still in the HTML the Reader is given beside this view, so the mismatch is
+    // reportable and the fix — the same words under `title` — invents nothing.
     if (tag === "abbr") {
-      const name = ariaName(el);
+      const name = norm(el.getAttribute("title") ?? "");
       return norm(`${kids} ${name && name !== kids ? `[Abbr title] ${name}` : ""}`);
     }
     // A link's name can come from its text, its nested image's alt, an attribute, or
