@@ -350,6 +350,16 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. A few specks. Not legible text; only scanner dust.",
     "Page is blank. A few specks. Not legible text, nor any figures.",
     "Page is blank. A few specks. Not legible text or anything at all.",
+    // What follows the denial is judged word by word rather than branch by branch, so wordings nobody
+    // wrote a branch for pass on the same rule as the ones that were: every word in them is part of
+    // the denial, and none of them names a thing the page bears.
+    "Page is blank. A few specks. Not legible text anywhere.",
+    "Page is blank. A few specks. Not legible text detected.",
+    "Page is blank. A few specks. Not legible text whatsoever.",
+    "Page is blank. A few specks. Not legible text seen anywhere on the sheet.",
+    "Page is blank. A few specks. Not legible text across the page.",
+    "Page is blank. A few specks. Not legible text, no numerals, nothing at all.",
+    "Page is blank. Only dust. Not legible markings of any kind on this sheet.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -458,6 +468,26 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. A few specks. Not legible text or the printing in the margin.",
     "Page is blank. A few specks. Not legible text either in the margin.",
     "Page is blank. A few specks. Not legible text\n- the note in the margin",
+    // A denial word and a name for the marks are both ways of continuing the denial, and both were
+    // ways of introducing a placement while the tail was a list of what may follow rather than a
+    // rule about all of it. What decides these is the noun: `margin`, `seal`, `spine`, `binding`,
+    // `edge`, `note`, `signature`, `stamp` are things the page bears, wherever they sit in the clause
+    // and whatever leads into them.
+    "Page is blank. A few specks. Not legible text, any writing in the margin.",
+    "Page is blank. A few specks. Not legible content, any figures on the seal.",
+    "Page is blank. A few specks. Not legible markings, any letters along the spine.",
+    "Page is blank. Some scanner dust. Not legible text, any content is cut off at the binding.",
+    "Page appears blank. A few specks/dots, not legible text, any markings are along the left edge.",
+    "Page is blank. A few specks. Not legible text: any writing sits in the margin.",
+    "Page is blank. A few specks. Not legible text\nany writing in the margin.",
+    "Page is blank. A few specks. Not legible text, smudges over the handwritten note.",
+    "Page is blank. A few specks. Not legible text, artifacts across the signature.",
+    "Page is blank. A few specks, not legible text, dust across the stamp in the corner.",
+    "Page is blank. A few specks. Not legible text\n- dust in the margin",
+    "Page is blank. A few specks. Not legible text; only dust in the header.",
+    "Page is blank. A few specks. Not legible text, nor any figures in the footer.",
+    "Page is blank. A few specks. Not legible text or anything beneath the stamp.",
+    "Page is blank. A few specks. Not legible text, the note is in the corner.",
     // A question mark is a hedge and not a full stop, and a bare one is the shape `HARD_DOUBT` cannot
     // see: the model asking itself whether the page is empty is not the model saying that it is.
     "Page is blank. A few specks. Not legible text?",

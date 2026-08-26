@@ -661,7 +661,7 @@ const MARKS_GAP = String.raw`(?:(?!${NEGATED}\b(?:${TEXT_NOUN})\b)[^.;])*`;
 // inverted form is the same door again ("Nor does the barcode resolve into words"). `nor` and
 // `neither` are prefixes only for the same reason: inversion is what they are for, and a bare one
 // swallowed the subject that followed it.
-// Names for what a page bears, and what may qualify one, used both here and in the denial tail below.
+// Names for what a page bears, and what may qualify one, for the `any` branch below.
 const TAIL_NOUN = String.raw`(?:text|texts|content|words?|characters?|print(?:s|ed|ing)?|writing|markings?|lines?|letters?|glyphs?|digits?|numerals?|figures?|images?|handwriting|anything|something)`;
 const TAIL_QUALIFIER = String.raw`(?:a|an|any|no|the|some|other|more|meaningful|legible|readable|printed|typed|visible|discernible|recognizable|clear)`;
 const CONT_CORE =
@@ -694,44 +694,72 @@ const MARKS_NOT_TEXT = new RegExp(`${MARKS_ANCHOR}\\bresolves?\\s+(?:in)?to\\b`,
 // marks, then names something the page bears, and being told WHERE it is is what distinguishes it
 // from "not legible text or meaningful content", which denies.
 //
-// So what may FOLLOW the noun is a whitelist, not the places that refuse a blacklist: the clause ends,
-// or it goes on to deny more of the same (`or`, `and`, `at all`), or it points at the whole substrate
-// ("not legible text on the page" is another way of saying the sheet is empty). Anything else refuses,
-// which is the way round that costs a glance — a list of the prepositions that refuse would let the
-// preposition nobody thought of ("not legible writing over the seal") cost the page instead.
+// So the REST OF THE STATEMENT has to be made of nothing but denial. Not a list of the prepositions
+// that refuse — the preposition nobody thought of ("not legible writing over the seal") would cost the
+// page — and not a list of the words that may follow either, because each such branch was a door a
+// placement walked through one word further along: first `visible in the margin`, then `or the printing
+// in the margin`, then a line break before `in the margin`, then `any writing in the margin`. Every one
+// of those was the same shape, and each fix bought exactly the wording it named.
 //
-// EVERY branch has to reach that end, including the one that goes on denying: `visible` is a denial in
-// "not legible text visible." and a placement in "not legible text visible in the margin", and `or`
-// the same in "not legible text or the printing in the margin". So `or`/`and`/`nor`/`either` may add
-// another thing denied — an adjective or two and a name for text — and then the tail has to end again.
+// A word-by-word whitelist is the version with no next door. What a denial is made of is a small closed
+// vocabulary — denials, names for text, names for the marks, names for the whole substrate — and a page
+// object is named with a word that is not in it: `margin`, `header`, `corner`, `seal`, `spine`, `note`,
+// `signature`. So `not legible text on the page` denies (every word listed) and `not legible text in the
+// margin` does not (`margin` is not), whatever punctuation or preposition connects them. A word nobody
+// thought of costs a glance, which is the way round this file chooses everywhere else.
 //
-// A full stop, a `!` or the end of the log ends it outright. A comma, a semicolon, a colon or a line
-// break ends it only when what follows CONTINUES the denial, by the same test a crossed sentence
-// boundary uses — because these logs are written as loose notes ("Not legible text\nNo page-break
-// marker is emitted", sometimes as a `-` list), and a note breaks a line exactly where it would
-// otherwise place the text ("Not legible printing\nin the margin"). A separator that lets anything
-// follow it is the hole this guard exists to close, reached one character further along. A `?` is not
-// a terminator: "Not legible text?" is a hedge, and a bare one is the shape `HARD_DOUBT` cannot see.
-const SUBSTRATE = String.raw`(?:page|sheet|scan|paper|image|document|leaf)s?`;
-const CLAUSE_END =
-  String.raw`(?=[ \t]*(?:[.!]|$)` +
-  String.raw`|[ \t]*[,;:)][ \t]*(?:${CONTINUATION}|$)` +
-  String.raw`|[ \t]*\n[ \t]*(?:[-*•]\s*)?(?:${CONTINUATION}|$))`;
-const ON_SUBSTRATE = String.raw`(?:\s+(?:in|on|across)\s+(?:the\s+|this\s+)?${SUBSTRATE}\b)`;
-// One more thing denied: "not legible text or meaningful content", "no legible print and no writing",
-// "not legible text or anything at all".
-const MORE_DENIED = String.raw`(?:\s+(?:or|and|nor|either)(?:\s+${TAIL_QUALIFIER}){0,2}\s+${TAIL_NOUN}\b(?:\s+else)?){0,2}`;
-const DENIAL_TAIL =
-  `${MORE_DENIED}(?:${CLAUSE_END}` +
-  String.raw`|\s+(?:at all|whatsoever|of any (?:kind|sort|type))${CLAUSE_END}` +
-  String.raw`|\s+(?:visible|present|discernible|apparent|detected|seen|found)${CLAUSE_END}` +
-  String.raw`|\s+anywhere(?:${ON_SUBSTRATE})?${CLAUSE_END}` +
-  String.raw`|${ON_SUBSTRATE}${CLAUSE_END})`;
+// The statement ends at a full stop, a `!`, or the end of the log; a comma, a semicolon, a colon or a
+// line break does not end it, because these logs are written as loose notes ("Not legible text\nNo
+// page-break marker is emitted", sometimes as a `-` list) and a note breaks its line exactly where it
+// would otherwise place the text. A `?` anywhere in the statement refuses: "Not legible text?" is the
+// model asking whether the page is empty rather than saying it is, and a bare one is the one hedge
+// `HARD_DOUBT` cannot see.
 const NOT_LEGIBLE_TEXT = new RegExp(
-  `${MARKS_ANCHOR}\\bnot legible` +
-    `(?=\\s+(?:text|content|words?|characters?|print(?:ed|ing)?|writing|markings?)\\b${DENIAL_TAIL})`,
+  `${MARKS_ANCHOR}\\bnot legible\\s+(?:text|content|words?|characters?|print(?:ed|ing)?|writing|markings?)\\b`,
   "gi",
 );
+// Nothing here is a veto word except by describing the marks, so a doubt word smuggled into the tail is
+// still refused by the two lists afterwards — this decides only whether `not legible` is the denial.
+const DENIAL_WORD = new Set(
+  (
+    "or and nor either neither no not none nothing anything something else any only just more other " +
+    "meaningful legible readable printed typed visible present discernible apparent detected seen found " +
+    "recognizable clear at all whatsoever anywhere of kind sort type a an the this that these those some " +
+    "few several couple is are was were be been being isn't aren't wasn't weren't there it they " +
+    "do does did don't doesn't didn't resolve resolves resolving " +
+    "resolved remain remains remaining appear appears appearing emitted emit written contain contains " +
+    "holds hold marker markers number numbers break page pages sheet sheets scan scans paper image images " +
+    "document documents leaf leaves on in across throughout within text texts content contents word words " +
+    "character characters letter letters glyph glyphs digit digits numeral numerals figure figures line " +
+    "lines print prints printing writing handwriting typing marking markings mark marks paragraph " +
+    "paragraphs sentence sentences heading headings caption captions label labels legend legends " +
+    "dust speck specks speckle speckles speckling fleck flecks dot dots debris smudge smudges blemish " +
+    "blemishes artifact artifacts scanner scanning stray scattered faint tiny small minor isolated random " +
+    "residual noise grain"
+  ).split(" "),
+);
+// A denial made of nothing but these words is a short one, so a statement that runs past this refuses
+// rather than being read further. That keeps the work per match bounded — a log with a thousand
+// `not legible text`s in it and no full stop anywhere would otherwise re-read its own tail a thousand
+// times — and it keeps the direction right: the cap costs a glance, never a page.
+const DENIAL_STATEMENT_MAX = 300;
+// The statement after `not legible <noun>`: is every word in it part of the denial?
+function deniesToStatementEnd(log: string, start: number): boolean {
+  let end = start;
+  while (end < log.length && end - start < DENIAL_STATEMENT_MAX) {
+    const char = log[end];
+    if (char === "." || char === "!") break;
+    if (char === "?") return false;
+    end++;
+  }
+  if (end - start >= DENIAL_STATEMENT_MAX) return false;
+  return log
+    .slice(start, end)
+    .replace(/[’‘]/g, "'")
+    .split(/[^A-Za-z']+/)
+    .filter(Boolean)
+    .every((word) => DENIAL_WORD.has(word.toLowerCase()));
+}
 // Terms no exemption reaches, checked over the WHOLE log rather than a phrase: a failure to read
 // ("the scan is too dark"), something hidden ("dust and noise obscure the text" — which names
 // marks and denies nothing), or a concession ("a few specks, though the scan is very faint"). A
@@ -748,7 +776,12 @@ const HARD_DOUBT =
 // The two anchored strips run FIRST: `MARKS_PHRASE` removes the very nouns they are anchored to.
 function vetoScope(log: string): string {
   if (HARD_DOUBT.test(log)) return log;
-  return log.replace(MARKS_NOT_TEXT, " ").replace(NOT_LEGIBLE_TEXT, " ").replace(MARKS_PHRASE, " ");
+  return log
+    .replace(MARKS_NOT_TEXT, " ")
+    .replace(NOT_LEGIBLE_TEXT, (match, offset: number, whole: string) =>
+      deniesToStatementEnd(whole, offset + match.length) ? " " : match,
+    )
+    .replace(MARKS_PHRASE, " ");
 }
 
 function matches(re: RegExp, text: string): string[] {
