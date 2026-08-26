@@ -225,6 +225,11 @@ test("the served title mirrors the upload whatever attributes the shell put on i
   assert.match(wrapDocument(`<section lang="ko"><h1>보고서</h1></section>`), /<title lang="en">Accessible/);
   // Any other attribute the shell might carry is kept; only the invalidated claim is dropped.
   assert.match(titledAs(`<title id="t" lang='en' dir="ltr">x</title>`, "y"), /<title id="t" dir="ltr">y<\/title>/);
+  // And the drop reads attributes rather than searching for the string, so it cannot edit one
+  // attribute's value while leaving the claim it meant to drop in place.
+  assert.equal(titledAs(`<title data-note="a lang=fr b" lang="en">x</title>`, "y"),
+    `<title data-note="a lang=fr b">y</title>`);
+  assert.equal(titledAs(`<title langue="x">a</title>`, "y"), `<title langue="x">y</title>`);
   const english = titledAs(wrapDocument(`<h1>Report</h1>`), "quarterly");
   assert.match(english, /<title>quarterly<\/title>/);
   // The name is user input on its way into markup, and into a replacement string.

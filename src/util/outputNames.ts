@@ -36,13 +36,20 @@ export function convertedHtmlFilename(base: string): string {
 // the label would assert English over a Korean title in the one place a reader hears the document's
 // name. Dropping it leaves the title inheriting the root, which is the same policy the root itself
 // follows: fall back to the containing default rather than assert a language nobody can vouch for.
+// One attribute at a time, matched from its leading whitespace so that each match begins where the
+// last one ended and the scan can never land inside a value. Searching the attribute string for
+// ` lang=` instead would find the string in another attribute's value and edit that — dropping two
+// words out of a `data-note` while leaving the claim it meant to drop in place.
+const ATTRIBUTE = /\s+([^\s=/>]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*))?/g;
+function withoutLang(attrs: string): string {
+  return attrs.replace(ATTRIBUTE, (whole, name: string) => (name.toLowerCase() === "lang" ? "" : whole));
+}
 export function titledAs(html: string, base: string): string {
   return html.replace(
     /<title([^>]*)>[^<]*<\/title>/,
     // A function rather than a replacement string: `$&` in a filename is a filename, not a
     // backreference, and `base` is user input.
     (_m, attrs: string) =>
-      `<title${attrs.replace(/\slang\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/i, "")}>` +
-      `${base.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</title>`,
+      `<title${withoutLang(attrs)}>${base.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</title>`,
   );
 }
