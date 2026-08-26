@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { bodyLang, wrapDocument } from "../src/pipeline/assembly.ts";
 import { titledAs } from "../src/util/outputNames.ts";
-import { runAxe, isKnownLanguage, languageListSource } from "../src/pipeline/lint.ts";
+import { runAxe, isKnownLanguage, cldrKnowsLanguage, languageListSource } from "../src/pipeline/lint.ts";
 
 // Issue #163: a document assembled from Korean pages was delivered as `<html lang="en">`.
 //
@@ -282,6 +282,42 @@ test("the language list is the linter's own, not the fallback", () => {
   // Case-folded, because a canonical primary subtag is lowercase but the value a page wrote is not
   // necessarily (`KO`, which axe accepts and this derivation carries through as written).
   assert.ok(isKnownLanguage("KO"));
+});
+
+// And what the day of that downgrade actually looks like, measured rather than reasoned about. The
+// fallback is unreachable through `isKnownLanguage` in any environment this suite can build — the axe
+// list is read at import from a pinned dependency and there is no seam to remove it — so it is called
+// directly here. Otherwise the branch that answers on the day `axe.utils` disappears would be the one
+// branch never run, and "it degrades to CLDR" would be a claim about untested code.
+//
+// The divergence is the point: CLDR is display data, so it knows a language only if it can NAME one,
+// and the far end of ISO 639-3 has no English display name. Those documents keep a correct root today
+// and would lose it — which is a narrowing worth having written down, not a defect in either list.
+test("the CLDR fallback answers, and these are the languages a downgrade would cost", () => {
+  for (const yes of ["ko", "KO", "en", "haw", "chr", "fil", "qu", "he"]) {
+    assert.ok(cldrKnowsLanguage(yes), `CLDR should name ${yes}`);
+  }
+  for (const no of ["cn", "jp", "xxy", "zzz", "korean", ""]) {
+    assert.ok(!cldrKnowsLanguage(no), `CLDR should not name ${no}`);
+  }
+  // The measured cost, and the reason axe's list is the primary rather than the other way round:
+  // every one of these is in the registry `html-lang-valid` validates against, is accepted today,
+  // and would be refused a root label by the fallback.
+  for (const lost of ["aaa", "aab", "abt", "aby", "acd", "adz", "ahr", "ajz", "lns", "ttj"]) {
+    assert.ok(isKnownLanguage(lost), `${lost} should be accepted today`);
+    assert.ok(!cldrKnowsLanguage(lost), `${lost} is documented as a fallback casualty and no longer is`);
+  }
+  // It diverges in the other direction too — CLDR names `kor`, which axe refuses — and that costs
+  // nothing, because `preferredTag` canonicalizes BEFORE asking: `kor` becomes `ko` and the
+  // membership check only ever sees a canonical primary subtag. Pinned so the ordering stays.
+  assert.ok(cldrKnowsLanguage("kor"));
+  assert.ok(!isKnownLanguage("kor"));
+  assert.equal(bodyLang(`<section lang="kor"><p>가</p></section>`), "ko");
+  // `und`/`qaa` are refused by CLDR and accepted by axe, and both lists are overruled anyway:
+  // `NOT_AN_ANSWER` rejects them before either is consulted, so a downgrade cannot change them.
+  for (const nonAnswer of ["und", "qaa"]) {
+    assert.equal(bodyLang(`<section lang="${nonAnswer}"><p>text</p></section>`), null);
+  }
 });
 
 // #163's fix labelled the shell's `<title lang="en">` on a non-English document, and the served

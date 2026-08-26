@@ -246,18 +246,48 @@ const AXE_LANGUAGES: ReadonlySet<string> | null = (() => {
     return null;
   }
 })();
-const LANGUAGE_NAMES = new Intl.DisplayNames(["en"], { type: "language", fallback: "none" });
+// The fallback, built on first use and not at import. Two reasons, and the second is the
+// one that matters: `Intl.DisplayNames` is absent on a runtime built `--without-intl`, and
+// constructing it at module scope raises a TypeError while IMPORTING this file — so a
+// missing ICU would stop the pipeline module from loading at all, which is the opposite of
+// what guarding `AXE_LANGUAGES` buys. Lazily, the same runtime degrades instead. (The
+// cheaper reason: on the primary path nothing ever consults CLDR.)
+//
+// `null` means asked-and-unavailable, distinct from `undefined` for not-yet-asked, so the
+// constructor is attempted once either way.
+let languageNames: Intl.DisplayNames | null | undefined;
+
+// Exported as its own function so the fallback is reachable from a test. `isKnownLanguage`
+// takes the axe branch in every environment the suite can construct — the list is read at
+// import from a pinned dependency and there is no seam to remove it — so without this the
+// path that answers on the day an axe bump drops `utils` would be the one path never run.
+export function cldrKnowsLanguage(subtag: string): boolean {
+  if (languageNames === undefined) {
+    try {
+      languageNames = new Intl.DisplayNames(["en"], { type: "language", fallback: "none" });
+    } catch {
+      languageNames = null;
+    }
+  }
+  // No list and no CLDR: every value is refused, and a refused value costs the document its
+  // derived root language and nothing else (bodyLang falls back to `en`). That is the safe
+  // direction of the two — see the note above `preferredTag` in assembly.ts — so it is left
+  // to happen quietly rather than raised here, where it would fail runs over an attribute.
+  if (!languageNames) return false;
+  try {
+    return Boolean(languageNames.of(subtag));
+  } catch {
+    // `of` throws on anything that is not a well-formed language id.
+    return false;
+  }
+}
+
 // Exported for the test that pins WHICH of the two sources answered.
 export const languageListSource = AXE_LANGUAGES ? "axe" : "cldr";
 export function isKnownLanguage(subtag: string): boolean {
   if (!subtag) return false;
   if (AXE_LANGUAGES) return AXE_LANGUAGES.has(subtag.toLowerCase());
-  try {
-    return Boolean(LANGUAGE_NAMES.of(subtag));
-  } catch {
-    // `of` throws on anything that is not a well-formed language id.
-    return false;
-  }
+  return cldrKnowsLanguage(subtag);
 }
 
 // PRD §7.7: validate the document parses and basic accessibility lint passes
