@@ -325,9 +325,14 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. A few scattered specks/dots. Not legible text or meaningful content.",
     "Page is blank. A few specks are visible. Does not resolve into printed words.",
     "Page is blank. Some dust is present. The specks do not resolve into characters.",
-    // A place is only a veto where it is a place INSIDE the page: naming the substrate is another way
-    // of saying the sheet is empty.
+    "Page is blank. A few specks. It does not resolve into words.",
+    "Page is blank. A few specks. It is not legible text.",
+    "Page is blank. A few specks. There is nothing that resolves into words.",
+    "Page is blank. Some dust. But nothing resolves into words.",
+    // What may follow the denial is the clause ending, more of the same denial, or the substrate —
+    // naming the whole sheet is another way of saying it is empty.
     "Page is blank. A few specks. Not legible text on the page.",
+    "Page is blank. A few specks. Not legible text at all.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -401,11 +406,22 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. Dust and specks. The photograph does not resolve into detail.",
     "Page is blank. Some smudges appear at the edge; the ink does not resolve into words.",
     "Page is blank. A few specks are visible. The graphic does not resolve into words.",
+    // A pronoun or a conjunction is the other way a new subject gets across a boundary, so `it` and
+    // `there` have to carry their verb with them and a conjunction is only a prefix to one of the
+    // other openers. Each of these names a page object behind a word that looks like a back-reference.
+    "Page is blank. A few specks. It is a photograph that does not resolve into detail.",
+    "Page is blank. A few specks are visible. There is a handwritten note that does not resolve into words.",
+    "Page is blank. Some dust. But the graphic does not resolve into words.",
+    "Page is blank. Some dust. And the barcode does not resolve into words.",
     // Where a name for text sits on the far side of `not legible`, the gap cannot see it. Being told
     // WHERE it is is what separates it from a denial: text in the margin is something the page bears.
+    // What may follow is a whitelist and not a list of the prepositions that refuse, so the
+    // preposition nobody thought of costs a glance rather than the page.
     "Page is blank. Some dust. Not legible printing in the margin.",
     "Page is blank. A few specks are visible. Not legible text in the header.",
     "Page is blank. Scanner dust only; not legible writing along the edge.",
+    "Page is blank. A few specks. Not legible writing over the seal.",
+    "Page is blank. A few specks. Not legible print between the lines.",
     // `nothing but the text` affirms the text. A negative word ahead of a name for text does not make
     // it a denial when the negative is spent on the exception.
     "Page is blank. Dust and specks, nothing but the handwriting, which does not resolve into words.",

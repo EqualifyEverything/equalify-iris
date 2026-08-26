@@ -651,7 +651,20 @@ const MARKS_GAP = String.raw`(?:(?!${NEGATED}\b(?:${TEXT_NOUN})\b)[^.;])*`;
 // the one place where "the veto lists run over the whole log anyway" does not save it, because the
 // veto word IS the construction being stripped. Unknown openers refuse, so the list being incomplete
 // costs a glance rather than a page.
-const CONTINUATION = String.raw`(?:(?:they|it|these|those|there|does|do|did|no|none|nothing|not|nor|neither|only|just|and|but)\b|(?:the|these|those|their)\s+(?:(?:${MARK_MODIFIER})[\s/-]+)*(?:${MARK})\b)`;
+//
+// `it` and `there` carry a verb with them, and a conjunction is only a prefix to one of the others,
+// because those three are how a new subject gets across a boundary that a determiner cannot: "It is a
+// photograph that does not resolve into detail", "There is a handwritten note that does not resolve
+// into words", "But the graphic does not resolve into words" — all three name a page object, and all
+// three opened with a word that looked like a back-reference.
+const CONT_CORE =
+  String.raw`(?:(?:they|these|those)\b` +
+  String.raw`|(?:it|this)\s+(?:doesn'?t|isn'?t|wasn'?t)\b` +
+  String.raw`|(?:it|this)\s+(?:does|do|did|is|was)\s+(?=not\b)` +
+  String.raw`|there\s+(?:is|are|was|were)\s+(?:no|none|nothing)\b` +
+  String.raw`|(?:does|do|did|no|none|nothing|not|nor|neither)\b` +
+  String.raw`|(?:the|these|those|their)\s+(?:(?:${MARK_MODIFIER})[\s/-]+)*(?:${MARK})\b)`;
+const CONTINUATION = String.raw`(?:(?:and|but|only|just|also|so|then|nor)\s+)?${CONT_CORE}`;
 const MARKS_ANCHOR = String.raw`(?<=\b(?:${MARK})\b${MARKS_GAP}(?:[.;]\s*(?:${CONTINUATION}${MARKS_GAP})?)?)`;
 // "…specks/dots … do not resolve into any characters": `resolve` is in `UNREADABLE_LOG` for "could
 // not resolve", and a destination after it turns the sentence into a denial that the marks are
@@ -664,14 +677,21 @@ const MARKS_NOT_TEXT = new RegExp(`${MARKS_ANCHOR}\\bresolves?\\s+(?:in)?to\\b`,
 // The trailing guard is for the noun on the FAR side of the construction, which the gap cannot see
 // and `TEXT_NOUN` therefore cannot help with: "Some dust. Not legible printing in the margin." names
 // marks, then names something the page bears, and being told WHERE it is is what distinguishes it
-// from "not legible text or meaningful content", which denies. So a place inside the page refuses,
-// while the substrate itself ("not legible text on the page") is another way of saying the sheet is
-// empty and still declares blank. Any place not named here refuses, which is the direction that
-// costs a glance.
+// from "not legible text or meaningful content", which denies.
+//
+// So what may FOLLOW the noun is a whitelist, not the places that refuse a blacklist: the clause ends,
+// or it goes on to deny more of the same (`or`, `and`, `at all`), or it points at the whole substrate
+// ("not legible text on the page" is another way of saying the sheet is empty). Anything else refuses,
+// which is the way round that costs a glance — a list of the prepositions that refuse would let the
+// preposition nobody thought of ("not legible writing over the seal") cost the page instead.
+const SUBSTRATE = String.raw`(?:page|sheet|scan|paper|image|document|leaf)s?`;
+const DENIAL_TAIL =
+  String.raw`(?:\s*(?:[.,;:)!]|$)` +
+  String.raw`|\s+(?:or|and|nor|either|whatsoever|anywhere|at all|of any kind|either)\b` +
+  String.raw`|\s+(?:in|on|across|anywhere in|anywhere on)\s+(?:the\s+|this\s+)?${SUBSTRATE}\b)`;
 const NOT_LEGIBLE_TEXT = new RegExp(
-  `${MARKS_ANCHOR}\\bnot legible(?=\\s+(?:text|content|words?|characters?|print(?:ed|ing)?|writing|markings?)\\b` +
-    String.raw`(?!\s+(?:in|on|along|at|near|across|inside|within|throughout|beside|under)\b` +
-    String.raw`(?!\s+(?:the|this|a)?\s*(?:page|sheet|scan|paper|image|document)s?\b)))`,
+  `${MARKS_ANCHOR}\\bnot legible` +
+    `(?=\\s+(?:text|content|words?|characters?|print(?:ed|ing)?|writing|markings?)\\b${DENIAL_TAIL})`,
   "gi",
 );
 // Terms no exemption reaches, checked over the WHOLE log rather than a phrase: a failure to read
