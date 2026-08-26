@@ -370,6 +370,9 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // construction is what governs it — these are the plainest wordings there are.
     "Page is blank. A few specks. They do not resolve into words.",
     "Page is blank. Only dust, nothing that would resolve into any legible characters.",
+    // `detected` affirms in "and printing detected" and denies here, under the `not` that governs the
+    // whole tail — so it is not read as a verb, and this wording is the reason why.
+    "Page is blank. A few specks. Not legible text or content detected.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -520,6 +523,11 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. A few specks. Not legible text, and figures are visible.",
     "Page is blank. A few specks. Not legible text, and words remain visible.",
     "Page is blank. A few specks. Not legible text, or headings appear on the page.",
+    // The verb may sit anywhere before the end of the statement, since everything that can come between
+    // is a substrate word: this is the same claim with a locative dropped into the middle of it.
+    "Page is blank. A few specks. Not legible text, and printing on the page is visible.",
+    "Page is blank. A few specks. Not legible text, and writing across the sheet is visible.",
+    "Page is blank. Specks/dots do not resolve into any characters, and printing on the page is visible.",
     // The other reading of `image`: introduced by anything but a locative, it is an object on the paper
     // and a page whose one object is a photograph is where the cost of guessing is the page.
     "Page is blank. A few specks. Not legible text, an image is visible.",
