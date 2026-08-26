@@ -217,6 +217,79 @@ export function exampleNodes(nodes: { target?: unknown; html?: unknown }[]): Lin
   return out;
 }
 
+// Whether a language tag's primary subtag is a language, answered out of the SAME list the gate
+// validates against: `axe.utils.validLangs()` walks the IANA registry's language range, which axe
+// ships as a trie, and returns all 8,268 of them. So this is not a proxy for what `html-lang-valid`
+// accepts — it is that rule's own data, read from the same pinned dependency (see the note on
+// `runAxe` below for why the pin exists).
+//
+// It lives here rather than in assembly.ts, which asks the question, because this module already
+// owns the axe dependency and "what the linter counts as a language" is the linter's fact.
+//
+// Two things about how it is read. `axe.utils` is a runtime export that axe's own .d.ts does not
+// declare, hence the cast; and it is not covered by axe's semver, so it is read once behind a guard
+// instead of trusted. If a future axe drops it the fallback is `Intl.DisplayNames`, CLDR display
+// data, which agrees with axe on every tag either can name but has no name for part of the obscure
+// end of ISO 639-3 that axe accepts (measured: 10 of 66 — `aaa`, `aab`, `abt`, `lns`, `ttj` and
+// the like). That direction costs a document in a small language its root label rather than putting
+// a violation on it, which is the direction this guard has chosen at every step — and
+// test/document-lang.test.ts asserts the axe list is the one in use, so the downgrade fails the
+// suite rather than quietly costing those documents anything.
+const AXE_LANGUAGES: ReadonlySet<string> | null = (() => {
+  try {
+    const utils = (axe as unknown as { utils?: { validLangs?: () => string[] } }).utils;
+    const langs = utils?.validLangs?.();
+    // Length-checked, not just type-checked: an empty or truncated list would refuse every
+    // language on earth, and refusing everything is indistinguishable from the guard working.
+    return Array.isArray(langs) && langs.length > 1000 ? new Set(langs) : null;
+  } catch {
+    return null;
+  }
+})();
+// The fallback, built on first use and not at import. Two reasons, and the second is the
+// one that matters: `Intl.DisplayNames` is absent on a runtime built `--without-intl`, and
+// constructing it at module scope raises a TypeError while IMPORTING this file — so a
+// missing ICU would stop the pipeline module from loading at all, which is the opposite of
+// what guarding `AXE_LANGUAGES` buys. Lazily, the same runtime degrades instead. (The
+// cheaper reason: on the primary path nothing ever consults CLDR.)
+//
+// `null` means asked-and-unavailable, distinct from `undefined` for not-yet-asked, so the
+// constructor is attempted once either way.
+let languageNames: Intl.DisplayNames | null | undefined;
+
+// Exported as its own function so the fallback is reachable from a test. `isKnownLanguage`
+// takes the axe branch in every environment the suite can construct — the list is read at
+// import from a pinned dependency and there is no seam to remove it — so without this the
+// path that answers on the day an axe bump drops `utils` would be the one path never run.
+export function cldrKnowsLanguage(subtag: string): boolean {
+  if (languageNames === undefined) {
+    try {
+      languageNames = new Intl.DisplayNames(["en"], { type: "language", fallback: "none" });
+    } catch {
+      languageNames = null;
+    }
+  }
+  // No list and no CLDR: every value is refused, and a refused value costs the document its
+  // derived root language and nothing else (bodyLang falls back to `en`). That is the safe
+  // direction of the two — see the note above `preferredTag` in assembly.ts — so it is left
+  // to happen quietly rather than raised here, where it would fail runs over an attribute.
+  if (!languageNames) return false;
+  try {
+    return Boolean(languageNames.of(subtag));
+  } catch {
+    // `of` throws on anything that is not a well-formed language id.
+    return false;
+  }
+}
+
+// Exported for the test that pins WHICH of the two sources answered.
+export const languageListSource = AXE_LANGUAGES ? "axe" : "cldr";
+export function isKnownLanguage(subtag: string): boolean {
+  if (!subtag) return false;
+  if (AXE_LANGUAGES) return AXE_LANGUAGES.has(subtag.toLowerCase());
+  return cldrKnowsLanguage(subtag);
+}
+
 // PRD §7.7: validate the document parses and basic accessibility lint passes
 // (axe-core in headless mode). We run axe inside a jsdom realm. If axe cannot run in this
 // environment the session continues rather than failing — but with no verdict rather than

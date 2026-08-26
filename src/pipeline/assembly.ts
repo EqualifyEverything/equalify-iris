@@ -1,4 +1,4 @@
-import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
+import { runAxe, lintErrorFields, isKnownLanguage, type LintResult } from "./lint.ts";
 import { cutPoints } from "./sections.ts";
 import { namespaceAnchors, type AnchorReport } from "./anchors.ts";
 import { stripDeprecatedRoles, type RoleStrip } from "./roles.ts";
@@ -106,6 +106,27 @@ const LANG_TAG = /^[a-z]{2,3}(?:-[a-z0-9]{1,8})*$/i;
 // given one falls back to its own default anyway. `en` is at least a language a voice can be chosen
 // for, and `mul` is the case the unanimity rule already has an answer to.
 const NOT_AN_ANSWER = /^(?:und|zxx|mul|mis|q[a-t][a-z])(?:-|$)/i;
+// The third question, and the one neither of the two above can answer: is this a language AT ALL.
+// Canonicalization is a syntax check plus the registry's ALIAS table, so a subtag with a preferred
+// form gets repaired (`kor` → `ko`, which is what the alias table is here for) while one that is in
+// no table at all has nothing to look up and passes through untouched onto the root. That is the
+// gap #196 measured: `cn`, `jp`, `cz`, `dk`, `gr`, `ua`, `vn` — the country code written where the
+// language code belongs, the commonest wrong-but-well-formed `lang` in real HTML and a plausible
+// answer to "use the BCP 47 tag" from a model looking at a Chinese page — and `xxy`, `zzz`, shaped
+// like a tag and not a language. Each of them put a SERIOUS `html-lang-valid` on the one element
+// this file writes: the exact regression the shape check exists to prevent, arriving through the
+// part of the question shape cannot answer.
+//
+// So the question is put to the gate's own list (`isKnownLanguage`, lint.ts) rather than to another
+// approximation of it. Three named exceptions had each closed the instances that had been
+// demonstrated to them; this closes the class, because "is it a language" is now answered by the
+// thing that will be asked.
+//
+// It is asked about the primary subtag of the CANONICAL value, not the whole tag: `ko-KOREAN` is
+// axe-clean and is not a whole tag any list holds. And it does NOT replace NOT_AN_ANSWER — the
+// registry lists `und`, `zxx`, `mul`, `mis` and `qaa`–`qtz`, which is precisely why they are refused
+// here: they are well-formed, axe is right to accept them, and they are still not a language a
+// screen reader can choose a voice for.
 function preferredTag(value: string): string | null {
   if (!LANG_TAG.test(value) || NOT_AN_ANSWER.test(value)) return null;
   let canonical: string;
@@ -114,6 +135,7 @@ function preferredTag(value: string): string | null {
   } catch {
     return null;
   }
+  if (!isKnownLanguage(canonical.split("-")[0] ?? "")) return null;
   if (canonical.toLowerCase() === value.toLowerCase()) return value;
   return LANG_TAG.test(canonical) ? canonical : null;
 }
