@@ -454,6 +454,18 @@ Finally, a handful of tags are well formed, accepted by the linter, and still no
 
 The Reader is given an index of the document's pages (page number + an excerpt of the HTML extracted from each) and matches offending content against it. It is instructed to name only pages it has evidence for and to return an empty list rather than guess, so `pages` may be empty — see §7.9 for what that means downstream.
 
+#### Amended (v1.4): the lint the Reader is given names the elements each rule failed on
+
+"Lint failures are surfaced to the Reader as input" (§7.7) was implemented as a rule id, axe's generic one-sentence description of the rule, and a node count: `aria-deprecated-role (minor): Ensure elements do not use deprecated roles [1 nodes]`. axe reports every violation **per node** — a CSS selector for the element and the element's markup — and none of that reached the prompt, so the Reader was told that something in the document broke a rule and left to find it by reading for a defect it had been given no example of.
+
+For several rules that is not a search a model can win. `aria-prohibited-attr` fires on an attribute that is legal on most roles; `duplicate-id` on the second of two ids that are individually unremarkable; `aria-deprecated-role` on a role one character from a valid neighbour (`doc-endnote` beside `doc-endnotes`). The delivered document behind issue #161 is the case: one `aria-deprecated-role` on one node, in 140,003 characters carrying 26 elements with a `role`, of which exactly one was deprecated. The Reader named the rule, the Copy Editor ran and changed the document, and the role shipped.
+
+Each violation now carries a **bounded** sample of its nodes — the selector and the element's markup folded to one line and cut short (`MAX_EXAMPLE_NODES`, `NODE_HTML_CHARS` in `lint.ts`). Bounded because this text is in every Reader chunk of every round, so a rule with 400 nodes (`heading-order` on a badly levelled 25-page scan) would otherwise spend more of the window on selectors than on the document. The **count is unchanged and exact**: it is what `/v1/quality` records per rule (§7.16), and the prompt says how many of the nodes it is showing so that a sample cannot read as an enumeration.
+
+Two properties of the selectors, measured rather than assumed. They are computed against the document that was linted — `wrapDocument(body)`, re-linted each round — so they are valid for exactly the body that same round hands the Copy Editor, and nothing carries one across a rewrite. And axe generates the shortest selector unique in that document, which is `#id` where the element has one and positional (`section:nth-child(4) > p > img`) where nothing else distinguishes it; both resolve, and the id-based one is the kind that survives an edit around it. The examples are content from the user's document, so they are bounded where axe's results are read and go no further than the prompt and the session's own log — never into the deployment-wide tally, which takes the rule id, impact and count only.
+
+The Reader is also told to quote the selector or the markup in the issue it writes, because the Copy Editor is never shown the lint (§7.9 receives the body and the issue list). A selector that stops at the Reader has moved the search one agent down rather than ended it.
+
 ### 7.9 Copy Editor Agent
 
 **Purpose**: Given a flagged HTML block plus its source image, propose a corrected HTML block.

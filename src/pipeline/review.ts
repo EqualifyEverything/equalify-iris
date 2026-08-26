@@ -282,6 +282,27 @@ function chunk(s: string): string[] {
   return out;
 }
 
+// What the elements under each violation are, said once above the list.
+//
+// Here rather than in READER_SYSTEM for the same reason the no-verdict sentence is: the lines it
+// describes are two lines below it, and every clause of it is a thing a Reader would otherwise
+// have to infer from a selector it has never been told the provenance of.
+//
+// The last sentence is the half of #161 that is not about the Reader at all. The Copy Editor is
+// never shown the lint — `editorCall` sends the body and the Reader's issue list, nothing else —
+// so a selector that stops at the Reader has moved the search one agent down rather than ended
+// it. Round 8's `aria-deprecated-role` is the worked example: the Reader named the rule in its
+// analysis, the editor ran and changed the document, and the deprecated role shipped.
+const LINT_NODE_NOTE =
+  `Each violation lists the elements axe reported it on: a CSS selector, then that element's ` +
+  `markup folded to one line and cut short. The selectors are against the WHOLE assembled ` +
+  `document as it stands now, so one may point at markup outside the HTML window you were ` +
+  `given — report it anyway; a positional selector (\`section:nth-child(4) > p\`) counts ` +
+  `position in the whole document too. Only the first few elements of a rule are listed and the ` +
+  `node count is the whole of it, so a rule listing three elements out of forty is forty places ` +
+  `to fix. Quote the selector, or the markup, in the issue you write: the Copy Editor is not ` +
+  `shown these results, so what you write is all it has to find the element by.`;
+
 // What the Reader is told the linter found. The no-verdict case is spelled out rather than
 // stated as a failure, because this text sits under a "## axe-core lint" heading in a prompt
 // that also says the review is against "the axe-core lint results provided": a Reader given
@@ -298,7 +319,22 @@ function lintSummary(lint: LintResult): string {
     );
   }
   if (lint.ok) return "axe-core: no violations";
-  return lint.violations.map((v) => `- ${v.id} (${v.impact}): ${v.description} [${v.nodes} nodes]`).join("\n");
+  const lines = lint.violations.map((v) => {
+    const head = `- ${v.id} (${v.impact}): ${v.description} [${v.nodes} nodes]`;
+    const examples = v.examples ?? [];
+    if (examples.length === 0) return head;
+    // The list says how much of the rule it is showing, on the line the selectors hang off. A
+    // reader of three selectors under a `[40 nodes]` count has to be told that the three are a
+    // sample and not the forty, or the count reads as having been enumerated.
+    const shown = examples.length < v.nodes ? ` — showing ${examples.length} of ${v.nodes}:` : ":";
+    return (
+      head + shown + "\n" + examples.map((n) => `    - \`${n.target}\` — ${n.html}`).join("\n")
+    );
+  });
+  // Only where there is something for it to describe. A lint whose violations carry no examples
+  // (see LintViolation) would otherwise be introduced by a paragraph about lines that are not there.
+  const note = lint.violations.some((v) => (v.examples ?? []).length > 0) ? `${LINT_NODE_NOTE}\n\n` : "";
+  return note + lines.join("\n");
 }
 
 // The page index is repeated on every Reader call (once per chunk per round), so
