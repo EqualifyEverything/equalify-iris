@@ -626,6 +626,249 @@ test("a refused blank declaration says which word refused it", () => {
   );
 });
 
+// Issue #194. Everything above asks whether the log casts DOUBT on the blankness it claims; none of it
+// asks whether the log CONTRADICTS it. A log that says the page is empty and then says, in plain
+// affirmative words, that something is on it casts no doubt at all — it states both — so all five of
+// these declared the page blank on `main`, and the page shipped as an empty fragment with nothing in
+// `pages_failed` and no incompleteness notice: a complete-looking document missing a page.
+//
+// The refusal does not decide which half of the log is true, because the text cannot say. It picks the
+// direction whose cost is a glance: a page reported lost is a re-extraction, a page dropped in silence
+// is a page nobody knows to look for.
+test("a log that says something is on the page contradicts its own blank claim", () => {
+  for (const log of [
+    // #194's own three, verbatim.
+    "Page is blank. There is handwriting on the page.",
+    "Page is blank. A few specks; and handwriting is present.",
+    "Page is blank. A few specks. Handwriting is present.",
+    // ...and its two that sit just outside #193's tail read, which is scoped to the statement the
+    // construction it guards is in. These reach the document without either construction.
+    "Page is blank. A few specks. Not legible text. A heading is visible at the top.",
+    "Page is blank. A few specks. Not legible text or content, and printing, no page number, is visible.",
+    // The same claim in the wordings these logs are otherwise written in. Each is a name for text with
+    // an affirming verb after it, which is the whole rule.
+    "Page is blank. A signature is visible in the corner.",
+    "Page is blank. A table is present.",
+    "Page is blank. Headings are visible.",
+    "Page is blank. Some words remain visible.",
+    "Page is blank. A caption was visible at the foot.",
+    // The transitive shape, where the subject is the paper and the text is the object — invisible to a
+    // subject-verb scan, and measured as delivered-blank before the branch that reads it existed.
+    "Page is blank. The page contains handwriting.",
+    "Page is blank. The sheet still bears a heading.",
+    "Page is blank. It shows two headings.",
+    "Page is blank. The page has handwriting on it.",
+    // A count between the verb and its object is how a page with something on it is usually described,
+    // and the object is still the object.
+    "Page is blank. There is some handwriting on the page.",
+    "Page is blank. There are several figures.",
+    // An `image` introduced indefinitely is a thing on the paper — the same reading `LOCATIVE` gives
+    // the denial tails, settled here by the article instead, since neither wording has a preposition.
+    "Page is blank. An image is visible on the page.",
+    // Order does not matter: a log that affirms before it declares has still done both.
+    "There is handwriting on the page. Page is blank.",
+    // The declaration and the contradiction in one statement, which is where a comma-set-off denial
+    // could otherwise hide the affirmation ("…, no page number, is visible" above).
+    "Page is blank. A few specks. Not legible text, an illustration is visible.",
+    // A coordination of nouns nothing denies is an affirmation of every one of them, which is the
+    // other half of `negatedInList`: a negator reaching the whole list is only right where there IS
+    // a negator (#200's review).
+    "Page is blank. Handwriting and a signature are visible.",
+    "Page is blank. Text or handwriting is present.",
+    // And a second clause's subject is its own, however the first clause denied: the walk back from
+    // `handwriting` stops at the verb of `no text is visible`.
+    "Page is blank. No text is visible and handwriting is present.",
+    // The negator's own member was the MARKS phrase, which is stripped before any of this runs — so
+    // `no … and handwriting is visible` arrives with nothing in front of the conjunction, and a
+    // denial of the marks says nothing about text. Both would read as denied by a negator that never
+    // governed them.
+    "Page is blank. No stray marks, and handwriting is visible.",
+    "Page is blank. No specks or dust; and a heading is visible.",
+    // The other side of the post-verb denial: the negator has to be the word RIGHT AFTER the verb.
+    // Both of these have one further along, and reaching for it would refuse an affirmation of
+    // handwriting — a page with writing on it, shipped empty and in silence. That is #194's cost, and
+    // it is the reason the check does not follow a `but` clause or step over a qualifier, even though
+    // #200's review named these as the same axis: an extra affirmation costs a glance at a page that
+    // was fine, and a missed one costs the page.
+    "Page is blank. Handwriting is visible but no printed text is present.",
+    "Page is blank. Handwriting is clear, nothing else is on the sheet.",
+    // Show-through. The reading is deliberate: `Printing … is faintly visible` affirms printing, and
+    // whether the ink is on this side of the paper is a question about the page rather than about the
+    // sentence. Reported, so someone looks; the alternative is a page with printing named in its own
+    // log delivered as empty.
+    "Page is blank. Printing from the reverse side is faintly visible; nothing is printed on this side.",
+    // Two denials make an affirmation, and a page with writing on it must not be delivered empty
+    // because its log said so twice. Contrived beside `is not present` — pinned because the post-verb
+    // read is what makes them reachable at all, and each costs one lookup to not get wrong.
+    "Page is blank. Handwriting is not absent.",
+    "Page is blank. Text is never absent from this sheet.",
+    // `without` is not a post-verb denial: `is without doubt visible` is an affirmation idiom, and the
+    // wording it would have bought — `The sheet is without printing.` — already delivers, because a
+    // definite substrate is the scan and not a thing on the paper. So it stays where the other
+    // functions need it, in front of a noun (#200's review measured this one as a page this check
+    // would otherwise have dropped in silence). The mirror cost, taken knowingly: `Printed text is
+    // without exception absent.` is refused. The same two words cannot be an affirmation idiom in
+    // front of a complement and a denial behind a verb, and `without exception absent` is stilted
+    // where `is without doubt visible` is not.
+    "Page is blank. A heading is without doubt visible at the top.",
+    "Page is blank. Printed text is without exception absent.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
+});
+
+// The other direction, and the one this check was nearly not worth making: a genuinely blank page's log
+// affirms things constantly, and every one of those affirmations is about the marks. #194 named these
+// two as the pages a whole-log affirmation check would cost — they are #190's, the defect this area
+// exists downstream of — and the rest are the wordings the corpus and the veto lists' own tails put
+// around them. Refusing any of these is #190 again, from the other end.
+//
+// It costs nothing extra to keep them, because the affirmation is read over the text the marks phrases
+// have already been stripped from: with the marks phrase gone those sentences have no subject left to
+// affirm anything about. `TEXT_NOUN` is the subject list for the same reason — `marks` and `markings`
+// are deliberately absent from it, which is #193's decision about bare `marks` inherited rather than
+// taken again in the other direction.
+test("the affirmations a blank page's own log is made of are not contradictions", () => {
+  for (const log of [
+    // #194's two named casualties.
+    "Page is blank. Specks do not resolve into characters. The marks are artifacts.",
+    "Page is blank. A few specks. Not legible text. The specks are scanner dust.",
+    // The same shape in the other wordings the corpus uses for it.
+    "Page is blank. The visible marks are artifacts of the scan.",
+    "Page is blank. Some dust is present.",
+    "Page is blank. Stray markings are visible.",
+    "Page is blank. There are a few specks.",
+    "Page is blank. There are several stray marks.",
+    "Page is blank. The page contains only scanner dust.",
+    // A denial is not an affirmation, however many names for text it contains — the scan stops at the
+    // negator that owns them, which is what keeps the page-number clause the prompt asks for.
+    "Page is blank. Nothing is printed on the sheet.",
+    "Page is blank. No text is visible.",
+    "Page is blank. A few specks. Not legible text or content, and no writing is visible.",
+    "Page is blank. A few specks. Not legible text or meaningful content, and no printed page number is visible.",
+    "Page is blank. A few specks. Not legible text or figures; neither is visible.",
+    "Page is blank. A few specks. There is nothing that resolves into words.",
+    "Page is blank. The page does not contain any legible text.",
+    "Page is blank. A few specks. The specks have not resolved into characters.",
+    // A definite `image` is the scan being described, not a photograph on the paper. The cost of that
+    // reading is "The image in the corner is a photograph", which is missed; the alternative refused
+    // this line, which is in the corpus as a page that must still be delivered — geometry is not
+    // legibility.
+    "The page is blank; the image is slightly rotated, no content.",
+    "Page is blank. The frame contains the image, which is rotated.",
+    // The paper itself, and what it is not doing.
+    "The sheet is empty. No printing is present.",
+    "Page is blank. The page has been scanned at low contrast.",
+    // A denial with more than one noun in it, which is what the review of #200 measured: about eleven
+    // of thirty realistic blank-page wordings flipped to reported-failed on a fixed three-word
+    // lookback, because `no legible text or handwriting is present` puts the negator FOUR tokens
+    // behind the last noun of the list, which then reads as un-negated and finds the list's own
+    // shared verb. Every one of these was a delivered blank page before #194 and has to stay one:
+    // the twenty pinned above are all two nouns or shorter, which is why they did not catch it.
+    "Page is blank. No legible text or handwriting is present.",
+    "Page is blank. No legible text or printed characters are visible.",
+    "Page is blank. No printed or handwritten content is visible anywhere on the sheet.",
+    "Page is blank. A few specks of dust. No printed page number or heading is visible.",
+    "Page is blank. No printed words, lines, or characters are visible.",
+    "Page is blank. No text, printing, figures or writing is present.",
+    "Page is blank. A few specks. No writing, figures or stamps are present.",
+    "Page is blank. No headings, captions or labels are visible.",
+    "Page is blank. No visible text, images or diagrams are present.",
+    "Page is blank. Nothing but faint specks; no words, lines or numerals are visible.",
+    "Page is blank. No content of any kind, printed or handwritten, is present.",
+    // The same shape with the other joiners and the longer lists these logs use. The fourth is the
+    // page-number clause `agents/page.md` asks for with one more noun conjoined onto it, which is
+    // #190's own log — the defect this whole area exists downstream of.
+    "Page is blank. No text, no figures and no captions are present.",
+    "Page is blank. Neither text nor handwriting is visible.",
+    "Page is blank. No words, letters, digits, glyphs or numerals are visible.",
+    "The sheet is empty. No printed text or page number is visible.",
+    "Page is blank. Nothing printed or written is present on the page.",
+    "Page is blank. No heading, caption or label of any kind is present.",
+    // A denial written in the other order — subject, verb, then the negator — which #200's review
+    // measured as reported-failed, with the negator quoted inside the evidence against the page
+    // (`affirmed: "text is not"`). Nothing looked at the word after the verb: the words BEFORE the
+    // noun are what `negatedInList` reads. `agents/page.md` asks for a log saying the page is empty
+    // and does not dictate the wording, so this order is as ordinary an answer as `no text is
+    // present`, and #190 is the record of what happens when which pages survive is decided by the
+    // phrasing the model happened to choose.
+    "Page is blank. Text is not present anywhere on the sheet.",
+    "Page is blank. Handwriting is not present.",
+    "Page is blank. A heading is not visible.",
+    "Page is blank. Text was never printed on this sheet.",
+    "The sheet is empty. Printed text is not present.",
+    "Page is blank. Text and handwriting are not present.",
+    "Page is blank. No text is present. Handwriting is not present either.",
+    // A negator that opens a coordination and a clause of its own after it: the walk back from
+    // `handwriting` finds the conjunction and the list's negator, so the whole line reads as one
+    // denied list rather than a denial followed by an affirmation. Pinned as the reading chosen, not
+    // as the only defensible one — the alternative refuses it, and #200's review raised it as the
+    // cost of `negatedInList` reaching across a comma. The neighbouring `No text is visible and
+    // handwriting is present.` (above) is refused, because there the walk stops at the first
+    // clause's own verb; the comma is the whole difference, which is why both are pinned.
+    "Page is blank. No printed text, and handwriting is present.",
+    // The same denial with no negator in it at all — a negative complement, which #200's review
+    // measured as eight more reported-failed blank pages. `absent` and `missing` are as ordinary in a
+    // page log as `not present`, and the boundary was again which word the model reached for:
+    // `A page number is absent.` and `The sheet is devoid of text.` (below, and delivered before this)
+    // already survived because the subject-verb scan never reached their subjects.
+    "Page is blank. Printed text is absent.",
+    "Page is blank. A few specks. Printed text is absent.",
+    "Page is blank. Handwriting is absent.",
+    "Page is blank. Printed content is absent from this side.",
+    "Page is blank. Text is missing.",
+    "Page is blank. Handwriting is nowhere on the sheet.",
+    "Page is blank. Text is nonexistent.",
+    "Page is blank. A page number is absent.",
+    "Page is blank. The sheet is devoid of text.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+});
+
+// What the refusal owes whoever reads the run. `blank_vetoed` exists because #190 had to be traced
+// back to a word by hand; a contradiction is harder to spot in a log than a doubt word is, and it is a
+// different finding with a different remedy — a doubt word means the page could not be read and wants
+// a better image, an affirmation means the agent answered with no page for a page it says has content
+// on it. So it is reported in its own field, in the words that made it.
+test("a contradicted blank declaration says what the log claimed was there", () => {
+  const contradicted = blankDeclaration({ html: "", log: "Page is blank. There is handwriting on the page." });
+  assert.equal(contradicted.asserted, true, "the log did claim the page was blank");
+  assert.equal(contradicted.blank, false);
+  assert.deepEqual(contradicted.vetoes, [], "nothing here casts doubt on the reading; the log contradicts itself");
+  assert.equal(contradicted.affirmed, "there is handwriting");
+  assert.equal(
+    blankDeclaration({ html: "", log: "Page is blank. A heading is visible at the top." }).affirmed,
+    "heading is visible",
+  );
+  assert.equal(
+    blankDeclaration({ html: "", log: "Page is blank. The page contains handwriting." }).affirmed,
+    "contains handwriting",
+  );
+  // The two findings are read independently, so a log that does both fills both fields — which the
+  // run log's own documentation used to deny (`docs/API.md`, #200's review). Which to act on first is
+  // a judgement the line leaves to its reader, and the doubt is the one that decides whether the
+  // contradiction can be believed at all.
+  assert.deepEqual(
+    blankDeclaration({ html: "", log: "Page is blank. The scan is blurry. There is handwriting on the page." }),
+    { asserted: true, blank: false, vetoes: ["blurry"], affirmed: "there is handwriting" },
+  );
+  // And a declaration nothing contradicted carries no such field at all, so the log line of an
+  // ordinary blank page is unchanged and `"affirmed" in d` reads as the question it looks like.
+  assert.deepEqual(blankDeclaration({ html: "", log: "Page is blank." }), {
+    asserted: true,
+    blank: true,
+    vetoes: [],
+  });
+  assert.equal("affirmed" in blankDeclaration({ html: "", log: "Page is blank. Some dust is present." }), false);
+  // And the field never holds a negator, which is how #200's review spotted the post-verb order: an
+  // `affirmed` of `text is not` is a refusal quoting the word that refutes it.
+  assert.equal(
+    "affirmed" in blankDeclaration({ html: "", log: "Page is blank. Text is not present anywhere." }),
+    false,
+  );
+});
+
 // --- through the pipeline ------------------------------------------------------
 
 interface Event {
@@ -879,6 +1122,39 @@ test("a blank page that explains itself is delivered, and a refusal names the wo
     assert.equal(refused[0].shape, "empty_html");
     assert.deepEqual(refused[0].blank_vetoed, ["too dark to", "dark"]);
     assert.equal(refused[0].log, "Page is blank, but the scan is too dark to be sure.");
+  });
+});
+
+test("a page whose log contradicts its own blank claim is reported, not quietly dropped", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // #194 through the pipeline, which is where the cost was: page 2's reply declares the page blank
+    // and names handwriting on it, and it used to be delivered as an empty fragment — no marker in the
+    // document, nothing in `failedPages`, no incompleteness notice — so the run reported a whole
+    // document and the reader simply did not get that page. Page 3 is the blank page it must not cost.
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) =>
+          o === 2
+            ? '{"html": "", "log": "Page is blank. A few specks. Not legible text. A heading is visible at the top."}'
+            : o === 3
+              ? '{"html": "", "log": "Page is blank. A few specks. Not legible text. The specks are scanner dust."}'
+              : good(o),
+      }),
+    );
+    assert.deepEqual(failedPages, [2], "the page the log says has a heading on it is a page to look at");
+    assert.deepEqual(of(events, "page_blank").map((e) => e.page), [3], "and the described blank page is still blank");
+    assert.match(fragments.find((f) => f.order === 2)!.innerHtml, /@page-failed 2:/);
+    assert.equal(fragments.find((f) => f.order === 3)!.innerHtml, "");
+    const refused = of(events, "page_no_output");
+    assert.equal(refused.length, 1);
+    assert.equal(refused[0].shape, "empty_html");
+    // The words that refused it, in their own field. `blank_vetoed` is still there and still empty,
+    // which is the pair a reader needs: no doubt was cast on the reading, and the log contradicted
+    // itself — a page to re-extract, not a page to re-scan.
+    assert.equal(refused[0].blank_contradicted, "heading is visible");
+    assert.deepEqual(refused[0].blank_vetoed, []);
+    assert.equal(refused[0].log, "Page is blank. A few specks. Not legible text. A heading is visible at the top.");
   });
 });
 

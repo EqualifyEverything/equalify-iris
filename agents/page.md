@@ -115,6 +115,15 @@ answers: where there are marks on the paper you could not resolve, that is [not 
 element it belongs to, and where you returned only part of a page, that is [page not fully
 transcribed]. An empty "html" says the paper is empty, and it is read that way.
 
+Say that and nothing else in the same breath. A log that reports the page blank and then names
+something on it — a heading, a caption, a signature, handwriting, an image — contradicts the answer
+it is attached to, and the contradiction is what gets believed: the reply is refused and the page is
+reported as one nobody transcribed, which is a worse outcome for it than either half of the log
+alone. Anything on the paper worth naming in the log is worth putting in "html", and anything you
+could see but not read is worth [not legible] inside the element it belongs to. Describing the
+specks and dust that establish a page IS empty is not naming content and is welcome; naming
+something you read is the answer to a different question than the one you just gave.
+
 Nine structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
