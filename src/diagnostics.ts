@@ -119,6 +119,40 @@ export interface Diagnostics {
   verification: {
     pages_verified: number;
     verify_failed: number;
+    // `verify_failed` split by what the verifier said was WRONG, counted in pages
+    // (pipeline/feedback.ts `VERIFY_KINDS`). Two bench rounds rejected 74 of 94 and 76 of
+    // 100 pages, and no field here could say whether that was content arriving missing or
+    // descriptions being polished — a page that lost three table rows and a page whose alt
+    // text went from "orange kayak" to "orange-yellow kayak" were the same line (issue
+    // #182). `effects` answers the same question from the other end, and only about
+    // corrections that changed something; this one is about every page that failed.
+    //
+    // NOT a partition, for the same reason `effects` is not: a page with a missing row and a
+    // thin alt counts in `content_missing` and in `alt_quality`, so these sum to at least
+    // `verify_failed` and usually more. Read each against `verify_failed`, not against the
+    // total. Pages and not problems, so that one page naming six things cannot outweigh six
+    // pages naming one each — `verify_failed` is a page count and these have to divide into
+    // it.
+    //
+    // `untagged_pages` is what keeps the rest honest: a verdict from an agent file that
+    // predates the kinds, or a trained one whose contract was rewritten without them, names
+    // its problems in prose with no kind at all. Those pages are in `verify_failed` and in no
+    // kind bucket, so a split read without it beside them is a split of the tagged share
+    // reported as the whole run. A page can be here AND in a kind bucket, when some of its
+    // problems were tagged and some were not — which is why the name says `pages`: the count
+    // on the log line it is folded from is a count of PROBLEMS, and the two are different
+    // numbers on the same run. `verify_untagged_problems` below is that other unit, because a
+    // run that lost one tag per page and a run that lost every tag report the same
+    // `untagged_pages` and only the second makes the split unusable.
+    verify_kinds: {
+      content_missing: number;
+      content_wrong: number;
+      structure_wrong: number;
+      a11y_only: number;
+      alt_quality: number;
+      untagged_pages: number;
+    };
+    verify_untagged_problems: number;
     corrections: number;
     // How each correction pass ended: `kept` CHANGED the delivered document, `rejected` was
     // discarded in favour of the fragment it was meant to improve — either because it came
@@ -287,6 +321,23 @@ const CORRECTION_RESULTS = ["kept", "rejected", "identical", "empty", "failed"] 
 
 // And why it ran. A closed list for the same reason, and read off the same event.
 const CORRECTION_TRIGGERS = ["verify", "links", "both"] as const;
+
+// What the Feedback Agent said was wrong with a page (`page_verify_failed`'s `kinds`).
+// Declared here rather than imported from pipeline/feedback.ts, like the two lists above
+// mirror extraction.ts: this module reads a log file and nothing else, and a kind a future
+// version adds should be visible as ungraded on an old reader rather than change this file's
+// dependencies. The five are defined in agents/feedback.md and pinned in
+// pipeline/feedback.ts `VERIFY_KINDS`; test/verify-kinds.test.ts holds the two lists equal.
+//
+// That visibility is only complete where a line names NO kind this reader knows: then the page
+// is in `untagged_pages` and its problems are in `verify_untagged_problems`. A newer writer that
+// mixes a sixth kind with one of these five logs `untagged: 0` — it recognized its own tag — so
+// the old reader sees one known kind, no untagged count, and the sixth-kind problem is silently
+// absent from the split rather than visibly ungraded. It needs a sixth kind shipped AND an old
+// reader folding a newer log (a retained bench log, a diagnostics read mid-deploy), which is why
+// it is written down here rather than coded around: inside one deploy the two lists cannot
+// diverge, and the test above is what keeps that true.
+const VERIFY_KINDS = ["content_missing", "content_wrong", "structure_wrong", "a11y_only", "alt_quality"] as const;
 
 // The longest a model call can legitimately still be open, used to tell a run that is
 // working from one whose process is gone (see `abandoned`). Derived, not picked: each
@@ -533,6 +584,15 @@ export function summarizeRun(
   const verification: Diagnostics["verification"] = {
     pages_verified: 0,
     verify_failed: 0,
+    verify_kinds: {
+      content_missing: 0,
+      content_wrong: 0,
+      structure_wrong: 0,
+      a11y_only: 0,
+      alt_quality: 0,
+      untagged_pages: 0,
+    },
+    verify_untagged_problems: 0,
     corrections: 0,
     results: { kept: 0, rejected: 0, identical: 0, empty: 0, failed: 0 },
     triggers: { verify: 0, links: 0, both: 0 },
@@ -552,6 +612,34 @@ export function summarizeRun(
     } else if (e.type === "page_verify_failed") {
       verification.pages_verified += 1;
       verification.verify_failed += 1;
+      // One page, so each kind it named counts once however many problems carried that kind.
+      // Matched against the closed list rather than trusted, for the reason `result` is: a
+      // `kinds: ["constructor"]` line would otherwise be added to a function.
+      const named: unknown = e.kinds;
+      const kinds = Array.isArray(named) ? VERIFY_KINDS.filter((k) => named.includes(k)) : [];
+      for (const kind of kinds) verification.verify_kinds[kind] += 1;
+      // A page counts as `untagged_pages` when the line named no kind this reader knows — an
+      // old log, an agent file whose contract predates the kinds, a model that answered in
+      // plain strings — and ALSO when it named some and left others untagged, because then the
+      // kind buckets are missing part of that page's story. Unlike the recheck sums below, an
+      // absent field is not left alone here: a page in `verify_failed` and in no bucket is
+      // exactly what this count exists to make visible, and silence would read as a split
+      // that covered the whole run.
+      const untagged = typeof e.untagged === "number" && e.untagged > 0 ? e.untagged : 0;
+      if (kinds.length === 0 || untagged > 0) {
+        verification.verify_kinds.untagged_pages += 1;
+      }
+      // And the problem count beside it, because the page count alone cannot tell a run where
+      // one problem per page arrived untagged from one where every problem did — both report
+      // the same `untagged_pages`, and only the second means the split is uninformative. A log
+      // that predates the kinds carries no count, and on it every problem the line lists is
+      // untagged by definition, so the line's own `problems` supplies the number; a page with
+      // neither field readable counts as one, because it is in `verify_failed` and reporting
+      // zero would read as fully tagged.
+      if (untagged > 0) verification.verify_untagged_problems += untagged;
+      else if (kinds.length === 0) {
+        verification.verify_untagged_problems += Array.isArray(e.problems) ? Math.max(e.problems.length, 1) : 1;
+      }
     } else if (e.type === "page_corrected") {
       verification.corrections += 1;
       // Matched against a fixed list rather than tested with `in`, which answers true

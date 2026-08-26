@@ -238,15 +238,20 @@ interface Event {
   [k: string]: unknown;
 }
 
+type VerifyProblem = string | { kind: string; problem: string };
+
 interface Behaviour {
   // Initial render per page order.
   html: (order: number) => string;
-  // First verdict per page order: the problems it names, empty for a pass.
-  problems: (order: number) => string[];
+  // First verdict per page order: the problems it names, empty for a pass. A plain string
+  // is a problem with no kind, which is what an agent file predating the kinds returns and
+  // what most of the tests below use — the kinds are additive and nothing here depends on
+  // them (issue #182). A `{kind, problem}` entry is the current contract.
+  problems: (order: number) => VerifyProblem[];
   // What the correction pass returns, or "" for a call that produced nothing.
   corrected: (order: number) => string;
   // The re-verification's verdict, for pages that get one.
-  recheck?: (order: number) => string[];
+  recheck?: (order: number) => VerifyProblem[];
   // A provider error on the re-verification, the way ProviderRouter.complete raises one.
   recheckThrows?: boolean;
   // A provider error on the CORRECTION call itself: the output ceiling, a stall, a throttle.
@@ -336,7 +341,8 @@ test("a correction that changed the page says what it changed", async () => {
     const fixed = `<h2>Findings</h2><img src="a.png" alt="a kayak, the paddler facing away">`;
     const ctx = makeCtx(dir, events, {
       html: () => rendered,
-      problems: (o) => (o === 1 ? ["the alt text omits that the person faces away"] : []),
+      problems: (o) =>
+        o === 1 ? [{ kind: "alt_quality", problem: "the alt text omits that the person faces away" }] : [],
       corrected: () => fixed,
     });
     const result = await runExtraction(ctx);
@@ -351,6 +357,11 @@ test("a correction that changed the page says what it changed", async () => {
         page: 1,
         trigger: "verify",
         problems: 1,
+        // The issue #182 page, on one line: what the verifier said was wrong (`alt_quality`)
+        // beside what the correction did (`alt_changed` alone). A run whose corrections all
+        // look like this is spending a page call per page on image descriptions, which no
+        // pairing of `verify_failed` with `effects` could say before the kind was on the line.
+        kinds: ["alt_quality"],
         result: "kept",
         chars_before: rendered.length,
         chars_after: fixed.length,
@@ -707,6 +718,70 @@ test("a corrected page that still fails is reported as still failing, and still 
     // passes is a policy question the rate has to answer first.
     assert.match(result.fragments[0].innerHtml, /second pass/);
     assert.equal(of(events, "page_corrected")[0].result, "kept");
+  });
+});
+
+// Issue #182: the verdict's line says what KIND of problem it found, so `verify_failed` can be
+// read as something other than "pages the verifier had an opinion about". test/verify-kinds.test.ts
+// pins how a reply is read into that set and how a log of it folds; these two pin that the set
+// reaches the events, which is the only place a benchmark round can see it from.
+test("the verdict's line names the kinds it found, and how many problems carried none", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<p>first pass</p>`,
+        problems: (o) =>
+          o === 1
+            ? [
+                { kind: "content_missing", problem: "the totals row of the table is absent" },
+                { kind: "content_missing", problem: "the footnote under it is absent" },
+                "the heading is a level too deep",
+              ]
+            : [],
+        corrected: () => `<p>second pass</p>`,
+      }),
+    );
+    const failed = of(events, "page_verify_failed");
+    assert.equal(failed.length, 1);
+    // Two problems of one kind are one kind: the question is what the PAGE lost. The third
+    // problem came back untagged, and the line says so rather than letting the two kinds read
+    // as the whole verdict.
+    assert.deepEqual(failed[0].kinds, ["content_missing"]);
+    assert.equal(failed[0].untagged, 1);
+    assert.equal((failed[0].problems as string[]).length, 3, "the correction is still told all three");
+    // And the correction line carries the same set, so what was wrong going in sits beside what
+    // the pass changed without a join back to the verdict.
+    assert.deepEqual(of(events, "page_corrected")[0].kinds, ["content_missing"]);
+  });
+});
+
+test("a recheck says which kinds survived the correction, not just that it did not pass", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<p>first pass</p>`,
+        problems: (o) =>
+          o === 1
+            ? [
+                { kind: "content_missing", problem: "the second column of the table was dropped" },
+                { kind: "alt_quality", problem: "the figure's description is thin" },
+              ]
+            : [],
+        corrected: () => `<p>second pass</p>`,
+        recheck: () => [{ kind: "alt_quality", problem: "the figure's description is still thin" }],
+      }),
+    );
+    const rechecks = of(events, "page_correction_recheck");
+    assert.equal(rechecks.length, 1);
+    assert.equal(rechecks[0].ok, false);
+    // The reading the counts alone cannot give: the content came back and the description is
+    // now the whole complaint. Two-in-one-out says the pass got most of the way; these say the
+    // half it got was the half that mattered — and `content_missing` on both sides would have
+    // been the opposite verdict on the same numbers.
+    assert.deepEqual(rechecks[0].kinds_before, ["content_missing", "alt_quality"]);
+    assert.deepEqual(rechecks[0].kinds_after, ["alt_quality"]);
   });
 });
 
