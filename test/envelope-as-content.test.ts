@@ -316,6 +316,16 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // joined tail (`dust/noise`), never on its own, because alone it is the scan being described.
     "Page is blank. The scan has noise, and no text.",
     "The page is blank; there is faint text on it.",
+    // `resolve into` and `not legible <noun>` are exempt only where the marks are named ahead of
+    // them in the same clause, which is the subject the exemption claims they are about. Each of
+    // these says the opposite — there IS something printed, and it could not be read.
+    "Page is blank. The text does not resolve into legible words.",
+    "Page appears blank. Any printing that may exist does not resolve into readable text.",
+    "Page is blank. Some ink is present on the page but it does not resolve into words.",
+    "Page appears blank. There is printing in the margin, not legible text.",
+    "Page is blank. The typed lines are not legible characters.",
+    // And the anchor is a clause, not a log: marks in one sentence do not exempt the next.
+    "Page is blank. A few specks are on the sheet. The printed lines do not resolve into words.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }

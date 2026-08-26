@@ -578,29 +578,39 @@ const MARKS_PHRASE = new RegExp(
     `(?:${MARK})(?:\\s*[/,&]\\s*(?:${MARK}|noise))*`,
   "gi",
 );
-// "…do not resolve into any characters" — `resolve` is in `UNREADABLE_LOG` for "could not resolve",
-// and with a destination after it the sentence says the marks are not characters, which is the
-// declaration and not a failure to read.
-const MARKS_NOT_TEXT = /\bresolves?\s+(?:in)?to\b/gi;
-// "specks/dots … not legible text" is a denial that the marks are text; "the text is not legible"
-// is a claim about text that exists. Word order is the whole difference, so only the form with the
-// noun after it is exempt.
-const NOT_LEGIBLE_TEXT =
-  /\bnot legible(?=\s+(?:text|content|words?|characters?|print(?:ed|ing)?|writing|markings?))/gi;
+// Two constructions that say the marks are not text, and so are the declaration rather than a
+// failure to read. Both are anchored to a marks noun EARLIER IN THE SAME CLAUSE, which is the
+// subject the exemption is claiming they are about — without that anchor they read as exempt
+// wherever they sit, including in a log that affirms the text is there ("the text does not resolve
+// into legible words", "the typed lines are not legible characters"), and a page that has text on
+// it would be delivered as an empty fragment with no marker and nothing in `pages_failed`.
+//
+// "…specks/dots … do not resolve into any characters": `resolve` is in `UNREADABLE_LOG` for "could
+// not resolve", and a destination after it turns the sentence into a denial that the marks are
+// characters.
+const MARKS_NOT_TEXT = new RegExp(String.raw`(?<=\b(?:${MARK})\b[^.;]*)\bresolves?\s+(?:in)?to\b`, "gi");
+// "specks/dots … not legible text" denies the marks are text; "the text is not legible" is a claim
+// about text that exists. Both the word order and the anchor are needed: `the typed lines are not
+// legible characters` has the noun after it too, and names no marks.
+const NOT_LEGIBLE_TEXT = new RegExp(
+  String.raw`(?<=\b(?:${MARK})\b[^.;]*)\bnot legible(?=\s+(?:text|content|words?|characters?|print(?:ed|ing)?|writing|markings?))`,
+  "gi",
+);
 // Terms no exemption reaches, checked over the WHOLE log rather than a phrase: a failure to read
 // ("the scan is too dark"), something hidden ("dust and noise obscure the text" — which names
 // marks and denies nothing), or a concession ("a few specks, though the scan is very faint"). A
-// concession word is free to include here, because the exemption only ever matters where a doubt
-// word sits inside a marks phrase, so blocking it on `though` costs nothing anywhere else. A log
+// concession word is free to include here, because every exemption above needs a marks noun to
+// reach anything, so blocking them on `though` costs nothing in a log that names none. A log
 // carrying one of these is a failed page whatever else it says.
 const HARD_DOUBT =
   /\b(illegible|unreadable|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry|grainy)|obscur\w*|hidden|corrupt\w*|error|did ?n[o']?t load|not load\w*|though|although|however|uncertain|not (entirely |fully )?(sure|certain))\b/i;
 
 // The text the veto lists are run over: the log with the marks phrases in it removed, or the log
 // untouched where anything in it says the reading failed.
+// The two anchored strips run FIRST: `MARKS_PHRASE` removes the very nouns they are anchored to.
 function vetoScope(log: string): string {
   if (HARD_DOUBT.test(log)) return log;
-  return log.replace(MARKS_PHRASE, " ").replace(MARKS_NOT_TEXT, " ").replace(NOT_LEGIBLE_TEXT, " ");
+  return log.replace(MARKS_NOT_TEXT, " ").replace(NOT_LEGIBLE_TEXT, " ").replace(MARKS_PHRASE, " ");
 }
 
 function matches(re: RegExp, text: string): string[] {
