@@ -24,6 +24,12 @@
 // so its verdicts are a fact about a commit rather than about a redeploy (see
 // src/pipeline/lint.ts).
 //
+// A clean verdict from that gate is a narrower fact than a clean verdict from axe, and the last
+// test in this file is about the difference: on a marker carrying BOTH a label and its number as
+// text, axe makes a finding and `runAxe` drops it, so a `[]` from the gate is not the claim that
+// axe found nothing. #145's own six passing markers are a third case — no naming attribute at all,
+// so this rule has nothing to judge and their silence really is silence.
+//
 // The third — that the pruned number never reaches a reader — no axe API can settle, and
 // this file does not pretend otherwise. axe's own `accessibleText` returns "5" for the
 // pruned shape, because its name computation is `doc-*`-blind in the same way the rule is.
@@ -33,6 +39,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import axe from "axe-core";
+import { JSDOM, VirtualConsole } from "jsdom";
 import { runAxe } from "../src/pipeline/lint.ts";
 import { wrapDocument } from "../src/pipeline/assembly.ts";
 
@@ -45,6 +52,40 @@ async function rules(body: string): Promise<string[] | null> {
   if (!lint.violations) return null;
   assert.equal(lint.ok, lint.violations.length === 0, "lint.ok disagrees with its own violation list");
   return lint.violations.map((v) => `${v.id}[${v.impact}]`);
+}
+
+// The same document put to axe directly, for the ONE rule this file is about, so a shape the
+// gate is silent about can be asked why. `runAxe` returns violations and nothing else — the
+// promotion out of `incomplete` happens inside it and only for `duplicate-id-aria`
+// (src/pipeline/lint.ts) — so a `[]` from `rules()` above means "nothing the gate reports",
+// which is not the same claim as "nothing axe found".
+//
+// Deliberately not a copy of `runAxe`'s tag filter and rule tuning: `runOnly` by rule name
+// needs none of it, and a second copy of that configuration in a test would drift from the
+// gate it is supposed to be reasoning about. What this measures is one rule's own verdict.
+async function prohibitedAttr(body: string): Promise<{ violations: number; incomplete: number }> {
+  const virtualConsole = new VirtualConsole();
+  const dom = new JSDOM(
+    wrapDocument(`<h1 id="doc-title">Operator's manual</h1>\n<p>Before use.</p>\n${body}`),
+    { runScripts: "outside-only", pretendToBeVisual: true, virtualConsole },
+  );
+  try {
+    const { window } = dom;
+    window.eval(axe.source);
+    const w = window as unknown as {
+      axe: {
+        run: (
+          ctx: unknown,
+          opts: unknown,
+        ) => Promise<{ violations: { nodes: unknown[] }[]; incomplete: { nodes: unknown[] }[] }>;
+      };
+    };
+    const r = await w.axe.run(window.document, { runOnly: { type: "rule", values: ["aria-prohibited-attr"] } });
+    const nodes = (l: { nodes: unknown[] }[]): number => l.reduce((n, v) => n + v.nodes.length, 0);
+    return { violations: nodes(r.violations), incomplete: nodes(r.incomplete) };
+  } finally {
+    dom.window.close();
+  }
 }
 
 test("the reported marker — a labelled, empty <p> — is a serious violation of the shipped gate", async () => {
@@ -110,13 +151,13 @@ test("axe's own role table is why the marker is a named <hr> and not a <p> with 
   assert.equal(roles["doc-pagebreak"].childrenPresentational, true);
 });
 
-// A shape the gate does NOT catch, kept because it is the trap: a labelled marker WITH text
+// Shapes the gate does NOT catch, kept because they are the trap: a labelled marker WITH text
 // passes, which is what made #145 intermittent — the same instruction produced a passing
 // document and a failing one on the same input. The prescribed `<p>` shape of this rule's
-// first version passes too, and that silence is what this test exists to label. axe having
-// nothing to say about `<p role="doc-pagebreak">5</p>` is not evidence that the 5 reaches a
-// reader; it is the gate declining to resolve the role at all.
-test("axe's silence on a <p> marker is not evidence the number reaches a reader", async () => {
+// first version passes too, and that silence is what this test exists to label. A clean verdict
+// on `<p role="doc-pagebreak">5</p>` is not evidence that the 5 reaches a reader; it is the gate
+// declining to resolve the role at all.
+test("the gate's silence on a <p> marker is not evidence the number reaches a reader", async () => {
   for (const marker of [
     '<p role="doc-pagebreak" aria-label="Page 5" id="page-5">5</p>', // named AND texted: passes
     '<p role="doc-pagebreak" id="page-5">5</p>', // the withdrawn shape: passes, prunes the 5
@@ -127,8 +168,62 @@ test("axe's silence on a <p> marker is not evidence the number reaches a reader"
     assert.deepEqual(
       found,
       [],
-      `${marker} still passes axe — if this starts failing, the gate has caught up with the prompt ` +
-        `and this test's argument needs rewriting, not deleting`,
+      `${marker} still passes the gate — if this starts failing, either axe has caught up with the ` +
+        `prompt or runAxe's promotion list now covers aria-prohibited-attr (src/pipeline/lint.ts). ` +
+        `This is the test that sees that change; the argument here needs rewriting, not deleting`,
     );
   }
+});
+
+// ...and the two silences above are not the same silence, which is the correction this test
+// exists for. Reviewing the withdrawn version of this rule (PR #148) turned up the claim that
+// axe "has nothing to say" about a texted marker; measured, axe has plenty to say about one of
+// them and Iris's gate is what drops it:
+//
+//   <p role="doc-pagebreak" aria-label="Page 5">5</p>   1 incomplete, 0 violations
+//   <p role="doc-pagebreak" id="page-5">5</p>           0 incomplete, 0 violations
+//   <p role="doc-pagebreak" aria-label="Page 5"></p>    0 incomplete, 1 violation
+//
+// `aria-prohibited-attr` returns `undefined` rather than `false` when the element has text of
+// its own — the attribute is prohibited either way, but whether the reader loses anything
+// depends on what that text says, which axe will not decide — so the finding lands in
+// `incomplete`, and `runAxe` promotes only `duplicate-id-aria` out of `incomplete`
+// (src/pipeline/lint.ts, pinned in test/assembly-anchors.test.ts).
+//
+// So "axe has nothing to say about a texted marker" is true of one shape and false of the other,
+// and which one it is depends on whether the marker is also labelled. #145's six passing markers
+// are the middle row — no naming attribute, nothing for this rule to judge — so their clean verdict
+// was not a demoted finding; what the demotion explains is the labelled-and-texted shape, which is
+// the trap the test above this one is about and the shape a model reaches for when told to keep the
+// label and show the number.
+//
+// This test measures axe DIRECTLY, so it is not the tripwire on `runAxe`'s promotion list: adding
+// this rule to that list would leave every row here unchanged. The test that fails on that change
+// is the gate test above, whose `[]` would become a reported violation — its message names both
+// reasons for exactly that reason.
+test("the labelled marker with text is a finding the gate demotes, not one axe missed", async () => {
+  assert.deepEqual(
+    await prohibitedAttr('<p role="doc-pagebreak" aria-label="Page 5" id="page-5">5</p>'),
+    { violations: 0, incomplete: 1 },
+    "axe itself now reports the texted <p> marker as a violation rather than leaving it incomplete, " +
+      "so this file's account of why the gate is silent about it is out of date",
+  );
+  // The withdrawn shape has no naming attribute at all, so there is nothing for this rule to
+  // judge and the silence really is silence. That is the row that makes the contrast a contrast.
+  assert.deepEqual(await prohibitedAttr('<p role="doc-pagebreak" id="page-5">5</p>'), {
+    violations: 0,
+    incomplete: 0,
+  });
+  // And the reported element, through the same measurement: a violation because it has no text
+  // of its own to make the attribute's effect a judgement call.
+  assert.deepEqual(await prohibitedAttr('<p role="doc-pagebreak" aria-label="Page 5" id="page-5"></p>'), {
+    violations: 1,
+    incomplete: 0,
+  });
+  // The prescribed shape is clean by this rule's own reckoning too, not merely unreported by the
+  // gate — the distinction the rest of this test is about.
+  assert.deepEqual(await prohibitedAttr('<hr role="doc-pagebreak" aria-label="Page 5" id="page-5">'), {
+    violations: 0,
+    incomplete: 0,
+  });
 });
