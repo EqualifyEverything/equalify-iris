@@ -160,16 +160,19 @@ providers:
   # dispatched today are: page (extraction), reader + copy_editor (review),
   # feedback (verify/classify/train), builder (drafts suggested agents), plus any
   # specialist in agents/ that the page agent names.
+  # No overrides by default. To add some, uncomment the KEY BELOW TOO and delete this
+  # line — an entry indented under `per_agent: {}` is not an addition to an empty map,
+  # it is a parse error at startup.
   per_agent: {}
-    # page: bedrock                                  # one agent on the other provider, at ITS model
-    # table: { model: anthropic/claude-opus-4.7 }     # stronger model, same provider
-    # reader: { provider: bedrock, model: us.anthropic.claude-haiku-4-5-20251001-v1:0 }
-    # Run the Feedback Agent (VERIFY/CLASSIFY/TRAIN) on a DIFFERENT or stronger
-    # model than the page agent, so verification doesn't share the generator's
-    # blind spots (recommended). Which is why the `page:` line above routes rather
-    # than upgrades: an example that put the same model on both would illustrate the
-    # pairing away.
-    # feedback: { model: anthropic/claude-opus-4.7 }
+  # Run the Feedback Agent (VERIFY/CLASSIFY/TRAIN) on a DIFFERENT or stronger model
+  # than the page agent, so verification doesn't share the generator's blind spots
+  # (recommended) — which is why the `page:` line here routes rather than upgrades. An
+  # example naming one model on both would illustrate the pairing away.
+  # per_agent:
+  #   page: bedrock                                 # one agent on the other provider, at ITS model
+  #   table: { model: anthropic/claude-opus-4.7 }    # stronger model, same provider
+  #   reader: { provider: bedrock, model: us.anthropic.claude-haiku-4-5-20251001-v1:0 }
+  #   feedback: { model: anthropic/claude-opus-4.7 }
 
   # WHICH MODEL. Both provider blocks below name Sonnet 4.6, because it is the only
   # model any number this project publishes was measured on. The reference deployment

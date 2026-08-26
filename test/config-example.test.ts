@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { loadConfig, type Capability } from "../src/config.ts";
 import { resolveAgentModel } from "../src/providers/index.ts";
 import { modelGeneration, resolveImageLimits } from "../src/providers/imageLimits.ts";
@@ -124,4 +126,64 @@ test("the long edge the example publishes is the one the API sample prints", () 
   const printed = docs.match(/"max_long_edge_px":\s*(\d+)/g) ?? [];
   assert.equal(printed.length, 1, `docs/API.md prints max_long_edge_px ${printed.length} times`);
   assert.equal(Number(printed[0]!.match(/(\d+)/)![1]), resolved);
+
+  // The prose above the sample states the same number beside the model's name, and it is the
+  // copy a reader is more likely to act on than the JSON. Only the figure is asserted — the
+  // model NAME is deliberately not pinned anywhere in this file, since the name is allowed to
+  // change and this suite's whole approach to #176 is to assert agreement instead.
+  const sentence = docs.match(/long-edge limit \((\d+) px on /);
+  assert.ok(sentence, "docs/API.md no longer states the long edge in prose; drop this or repoint it");
+  assert.equal(Number(sentence[1]), resolved, "the prose long edge and the configured model disagree");
+});
+
+// The examples an operator uncomments, actually uncommented. They sit under `per_agent`, whose
+// active value is `{}`, and YAML will not accept a mapping entry indented beneath a flow map —
+// so a copied line that looks like an addition to an empty map is a startup parse error naming
+// a line number. It fails loudly, so nobody ships on it; it is a papercut on the one file whose
+// entire job is somebody's first run, which is why the block is commented out KEY AND ALL and
+// why this test does what the comment tells the operator to do.
+//
+// It also puts the override forms themselves under test. Three of them are exercised here —
+// the bare `<agent>: <provider>` string, a model pinned on the default provider, and both at
+// once — and the pairing the block recommends is the assertion at the end: verification must
+// not land on the model extraction used, or the example advises against itself.
+test("the commented per_agent examples load if an operator uncomments them", () => {
+  const text = readFileSync(EXAMPLE, "utf8");
+  const lines = text.split("\n");
+
+  const start = lines.indexOf("  # per_agent:");
+  assert.ok(start >= 0, "the commented per_agent block moved or was renamed");
+  let end = start + 1;
+  while (end < lines.length && /^ {2}# {3}\S/.test(lines[end]!)) end++;
+  assert.ok(end - start > 2, "the commented per_agent block has no entries under it");
+  const active = lines.findIndex((l) => /^ {2}per_agent: \{\}\s*$/.test(l));
+  assert.ok(active >= 0 && active < start, "the empty per_agent line moved");
+
+  lines.splice(start, end - start, ...lines.slice(start, end).map((l) => l.replace(/^( *)# ?/, "$1")));
+  lines.splice(active, 1);
+
+  process.env.OPENROUTER_API_KEY = "test-key";
+  const path = join(mkdtempSync(join(tmpdir(), "iris-config-example-")), "config.yaml");
+  writeFileSync(path, lines.join("\n"));
+  const { providers } = loadConfig(path);
+
+  // `page: bedrock` — routed, and at the provider's own model rather than a missing one.
+  const page = resolveAgentModel(providers, "page", "vision");
+  assert.equal(page.provider, "bedrock", "the bare-string override did not route the agent");
+  assert.ok(page.model.startsWith("us."), `page resolved to ${page.model}`);
+  // `table: { model: … }` — a model pinned without naming a provider stays on the default one.
+  const table = resolveAgentModel(providers, "table", "vision");
+  assert.equal(table.provider, "openrouter");
+  assert.match(table.model, /^[a-z0-9-]+\//);
+  // `reader: { provider, model }` — both at once.
+  const reader = resolveAgentModel(providers, "reader", "text");
+  assert.equal(reader.provider, "bedrock");
+  assert.match(reader.model, /^us\./);
+
+  const feedback = resolveAgentModel(providers, "feedback", "vision");
+  assert.notEqual(
+    claudeFamily(feedback.model),
+    claudeFamily(page.model),
+    "the example puts verification on the same model as extraction, which it also recommends against",
+  );
 });
