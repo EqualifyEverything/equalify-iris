@@ -1121,22 +1121,175 @@ function affirmingReach(tokens: Word[]): number[] {
 // subject-verb scan does not reach them anyway. A qualifier between the verb and the complement
 // ("Text is entirely absent.") is still refused, for the same reason no gap is allowed above: the gap
 // costs a page and the refusal costs a glance.
-// What this leaves open, measured rather than supposed (#200's review, third pass). A complement
-// that denies only PART of the sheet and then affirms the rest reads as a whole denial, because the
-// affirmation lands in a prepositional phrase and nothing in this section reads one:
-//
-//   Text is absent from the top half and present at the bottom.   -> delivered empty
-//   Printing is nowhere except a stamp at the top.                -> delivered empty
-//   A caption is missing from the figure on the page.             -> delivered empty
-//
-// Those were reported before this set existed, but only as a side effect of `is absent` being
-// misread as an affirmation, so the reporting was a wrong rule getting a right answer. Closing them
-// properly means reading a shared subject across `and`/`except` and treating a definite noun in a
-// prepositional object as present — the denial-then-affirmation half of #194, and a design rather
-// than a lookup. Filed as #204 rather than bodged: the cost on that side is a page, and a rule
-// guessed at here
-// would trade it against the eleven multi-noun denials above.
+// A denial does not have to cover the whole sheet, and #204 is the shape where it does not: the log
+// denies one part of the page and says in the same breath what is on the rest of it.
+// `denialAffirmations` below reads that, and the three constructions it reads are the three the corpus
+// and #200's review put on record.
 const NEGATIVE_COMPLEMENT = new Set(["absent", "missing", "nowhere", "nonexistent", "lacking"]);
+
+// The complements that say something IS there, for the coordination read: `absent from the top half
+// and PRESENT at the bottom`. Overlaps `QUALIFIER` on purpose rather than reusing it — a qualifier is
+// what may stand between a verb and its noun, and half of that list (`meaningful`, `other`, `more`)
+// says nothing about whether anything is on the paper, while `printed` and `written` belong here and
+// are the wording a partial denial reaches for ("absent from the top and printed at the bottom").
+// The overlap with `TEXT_NOUN` on `printed` is NOT deliberate in the same way: see the object walk.
+const AFFIRMING_COMPLEMENT = new Set(
+  "present visible legible readable discernible apparent recognizable shown printed typed written handwritten stamped".split(" "),
+);
+// What a predicate complement may tail into. A complement standing at the end of its clause, or
+// running on into a place, is the clause's own predicate — `and present at the bottom`, `and still
+// visible`. One with a noun after it is an adjective ON that noun, and the noun decides: `but visible
+// dust remains` is scanner dust on a page that is still blank. Closed and short, like every list
+// here; a wording that tails into something not on it costs a page that says so twice.
+const AFTER_COMPLEMENT = new Set(
+  "at in on within across throughout near under above below beneath over beside along to toward towards here there elsewhere everywhere only also too instead".split(
+    " ",
+  ),
+);
+// How many adverbs may stand between the joiner and the complement. `and still clearly visible` is
+// two, and no wording in the corpus has three; the bound is here rather than absent because the walk
+// runs at every position of the statement and an unbounded run of them is a second quadratic.
+const ADVERB_GAP = 3;
+// What may join the two halves. `or` is deliberately absent: `absent or present` is not a statement
+// about a page, and every `or` in these logs joins members of a denied list, which is the one thing
+// this section may not start reading as an affirmation (`negatedInList`'s eleven pinned wordings).
+const CONTRAST = new Set("and but yet while whilst though although".split(" "));
+// An adverb that may stand between the joiner and the complement: `and still present`, `but clearly
+// visible`. Kept apart from `QUALIFIER` for the reason above.
+const CONTRAST_ADVERB = new Set("still also clearly plainly instead however again nevertheless".split(" "));
+// The exceptive prepositions. What follows one of these after a denial is asserted to be on the page
+// — that is the whole job of the word — so no article is required, which is what separates this read
+// from the prepositional one below: `nowhere except a stamp at the top` introduces the stamp for the
+// first time. `but` is here as well as in `CONTRAST` (`nothing but a stamp`), and is safe in both
+// because the object walk refuses anything that is not a name for text.
+const EXCEPTIVE = new Set("except excepting besides but apart aside save excluding".split(" "));
+// `other` is exceptive in `nowhere other THAN a stamp` and is not exceptive in `no other text is
+// present`, where it is the qualifier five other functions in this file read it as — the second is a
+// wording a blank page uses and the first is a page with a stamp on it. So the pair is required, and
+// nothing else in this file has to change.
+const EXCEPTIVE_PAIR = new Map([["other", "than"]]);
+// What may stand between an exceptive and its object: `except for the heading`, `other than a stamp`,
+// `apart from the signature`.
+const EXCEPTIVE_GAP = new Set("for than from of".split(" "));
+// A locative preposition whose object is a thing the page bears — `missing from the figure on the
+// page`, `absent from the diagram shown here`. The object has to be DEFINITE here, and that is the
+// whole safety of this read: a denial names the substrate indefinitely as often as not (`absent from
+// a page this faint`), while a definite noun is one the log has been talking about, so it exists.
+// `into` is deliberately not a member: `do not resolve into characters` and `nothing that resolves
+// into words` are the commonest denials in the corpus, and their objects are exactly what is NOT
+// there.
+const DENIAL_PREPOSITION = new Set("from on in at within across beside under above near beneath over".split(" "));
+
+// The affirmation hiding behind a denial, as the index of the word that carries it, or -1. Reached
+// only once the clause has already been read as denied, so everything here is about what the log says
+// about the REST of the page.
+//
+// Three reads, and the direction of error is what picks each one. An affirmation this misses ships a
+// page with a stamp on it as blank paper, in silence and with no marker (#179/#190/#194); an
+// affirmation it invents reports a blank page as failed, which costs a glance. So each read is written
+// to fire on the shapes the corpus contains and to stay off the denials pinned in
+// `test/envelope-as-content.test.ts`, and where the two could not both be had, the glance wins.
+//
+//   1. A contrast whose complement affirms. `Text is absent from the top half and present at the
+//      bottom.` — one subject, two complements, and the second says the text is there. The joiner
+//      must come FIRST and the complement immediately after it, which is what keeps `Handwriting is
+//      not present either.` a denial: its `present` sits behind the negator with no joiner in front
+//      of it. Only reached with a subject in hand, since the affirmation is about that subject.
+//   2. An exception. `Printing is nowhere except a stamp at the top.` The exception is the content:
+//      a log that says what is NOT on the page and then names the one thing that is has described a
+//      page with something on it, whatever the proportions.
+//   3. A definite noun in a locative object. `A caption is missing from the figure on the page.`
+//      denies the caption and presupposes the figure. `the`/`this`/`its` is required, for the reason
+//      `LOCATIVE_SUBSTRATE` and `definiteBefore` exist: an indefinite noun there is as likely to be
+//      the scan or the paper as a thing on it, and `image` stays the scan however it is introduced.
+//
+// The walk stops at a negator, because a second denial in the same statement is a second denial and
+// not the affirmation this is looking for ("Text is absent and no handwriting is present." is a blank
+// page). It does not stop at a new subject: a clause of its own is found by the caller's own loop,
+// which reads every name for text in the statement, so anything this walk reaches past has already
+// been offered a verb of its own.
+//
+// Read 1, at one position. -1 for no affirmation here, which is not terminal: a joiner that leads
+// nowhere is just a joiner.
+function contrastAffirmed(tokens: Word[], k: number): number {
+  if (!CONTRAST.has(tokens[k]!.word)) return -1;
+  let j = k + 1;
+  while (j < tokens.length && j <= k + ADVERB_GAP && CONTRAST_ADVERB.has(tokens[j]!.word)) j++;
+  const complement = tokens[j];
+  if (complement === undefined || !AFFIRMING_COMPLEMENT.has(complement.word)) return -1;
+  // The complement has to be its clause's predicate and not an adjective on some other noun. Reads 2
+  // and 3 below ask their object to be a name for text and this read has no object to ask about, so
+  // the question it can ask is what the complement modifies: `and present at the bottom` predicates
+  // over the subject the caller is holding, while `but visible dust remains` says something about
+  // dust, and `dust` is outside `TEXT_NOUN` for the reason #193 put it there. Without this the one
+  // read that cannot see the noun class reported blank pages with scanner dust on them as failed.
+  // A name for text after the complement affirms whichever way it is read, so it passes too.
+  const next = tokens[j + 1];
+  if (next === undefined || complement.comma || AFTER_COMPLEMENT.has(next.word) || AFFIRMED_NOUN.test(next.word)) {
+    return j;
+  }
+  return -1;
+}
+
+// Reads 2 and 3, at one position: the object of an exceptive or of a locative preposition. `null` for
+// no affirmation here, -1 for a stop — a negator standing where the object goes denies the rest of
+// the statement as surely as one standing on its own.
+function exceptiveOrLocativeObject(tokens: Word[], k: number): number | null {
+  const { word } = tokens[k]!;
+  const paired = EXCEPTIVE_PAIR.get(word);
+  const exceptive = EXCEPTIVE.has(word) || (paired !== undefined && tokens[k + 1]?.word === paired);
+  if (!exceptive && !DENIAL_PREPOSITION.has(word)) return null;
+  const definiteOnly = !exceptive;
+  for (let m = k + 1; m < tokens.length && m <= k + 1 + OBJECT_GAP; m++) {
+    const object = tokens[m]!.word;
+    if (NEGATOR.has(object)) return -1;
+    // `printed` is in `TEXT_NOUN` and in `QUALIFIER` both, and here the qualifier reading is the only
+    // one that can be right: `in the printed area of the form`, `within the printed border`, `on the
+    // printed side` are how a blank pre-printed form and a blank verso are described, and taking the
+    // adjective for the object reported all of them failed — with the same truncated evidence #190
+    // left behind (`affirmed: "no content is present in the printed"`). Definiteness cannot help,
+    // since `the` is what makes the read fire at all. Skipping it loses nothing, because the real
+    // object is still ahead when there is one: `from the printed heading` affirms one word later.
+    // `affirmedObjectAfter` keeps reading the word as a noun, because a match there ADDS an
+    // affirmation and the error runs toward a glance; here it runs toward a false failure notice.
+    if (AFFIRMED_NOUN.test(object) && !QUALIFIER.has(object)) {
+      if (LOCATIVE_SUBSTRATE.has(object)) break;
+      if (definiteOnly && !definiteBefore(tokens, m)) break;
+      return m;
+    }
+    if (!DETERMINER.has(object) && !QUALIFIER.has(object) && !QUANTIFIER.has(object) && !EXCEPTIVE_GAP.has(object)) {
+      break;
+    }
+  }
+  return null;
+}
+
+// Both walks, for every position of the statement, in one backwards pass. Same answers as scanning
+// forward from each denial — the answer at a position is the answer at the position after it unless
+// the token there carries a hit or a stop — and computed this way for the reason `affirmingReach`
+// is: forward-per-denial was quadratic in the length of a statement with no terminator in it, which
+// is the one input shape that has no bound. #204's review measured it at 36k words: 9.8ms before the
+// walk existed, 7.8s after, on a server that runs one request at a time. A cap will not do here for
+// the reason given there — a statement too long to read is one whose contradiction goes unfound, and
+// that costs the page rather than a glance.
+//
+// `subject` is a yes/no rather than a position, so two arrays are enough: read 1 predicates over the
+// subject the caller has in hand, and is off in the scan that has none.
+function denialAffirmations(tokens: Word[]): { withSubject: number[]; plain: number[] } {
+  const withSubject = new Array<number>(tokens.length + 1).fill(-1);
+  const plain = new Array<number>(tokens.length + 1).fill(-1);
+  for (let k = tokens.length - 1; k >= 0; k--) {
+    const { word } = tokens[k]!;
+    if (NEGATOR.has(word) || word === "never") continue; // both stay -1: this is where the walk stops
+    const object = exceptiveOrLocativeObject(tokens, k);
+    plain[k] = object === null ? plain[k + 1]! : object;
+    // Read 1 first at the same position, which is what makes `nothing but a stamp` an exception and
+    // `absent but still visible` a contrast: `but` is in both lists and the complement decides.
+    const contrast = contrastAffirmed(tokens, k);
+    withSubject[k] = contrast >= 0 ? contrast : object === null ? withSubject[k + 1]! : object;
+  }
+  return { withSubject, plain };
+}
 
 function deniedAfterVerb(tokens: Word[], verb: number): boolean {
   const next = tokens[verb + 1];
@@ -1180,6 +1333,7 @@ export function contentAffirmed(scope: string): string | null {
   for (const statement of scope.split(/[.!?;\n]+/)) {
     const tokens = words(statement);
     const reach = affirmingReach(tokens);
+    const affirmed = denialAffirmations(tokens);
     for (let i = 0; i < tokens.length; i++) {
       const { word } = tokens[i]!;
       if (word === "there" && i + 1 < tokens.length && EXISTENTIAL.has(tokens[i + 1]!.word)) {
@@ -1195,9 +1349,39 @@ export function contentAffirmed(scope: string): string | null {
       if (!AFFIRMED_NOUN.test(word) || negatedInList(tokens, i)) continue;
       if (LOCATIVE_SUBSTRATE.has(word) && definiteBefore(tokens, i)) continue;
       const verb = reach[i + 1]!;
-      if (verb >= 0 && !deniedAfterVerb(tokens, verb)) {
+      if (verb < 0) continue;
+      if (!deniedAfterVerb(tokens, verb)) {
         return tokens
           .slice(i, Math.min(verb + 2, tokens.length))
+          .map((t) => t.word)
+          .join(" ");
+      }
+      // Denied — but a denial can cover part of the page and say what is on the rest of it, and the
+      // affirmation then sits past the complement that denied this clause (#204). The span quoted
+      // runs from the subject, so `blank_vetoed` shows the whole shape and not just the half that
+      // affirms: "text is absent from the top half and present" reads as the contradiction it is.
+      const rest = affirmed.withSubject[Math.min(verb + 2, tokens.length)]!;
+      if (rest >= 0) {
+        return tokens
+          .slice(i, rest + 1)
+          .map((t) => t.word)
+          .join(" ");
+      }
+    }
+    // The same shapes with the denial written in front of its noun, where the loop above never
+    // reaches a subject at all: `No printing except a stamp at the top.` is denied by
+    // `negatedInList`, and the stamp it names has no verb of its own for `affirmingReach` to find.
+    // Read from the denial rather than from a subject, so the contrast rule is off here — it needs a
+    // subject to be a contrast about, and `no printed text, and handwriting is present` is pinned as
+    // one denied list rather than as a denial and an affirmation.
+    const denial = tokens.findIndex(
+      (t) => NEGATOR.has(t.word) || t.word === "never" || NEGATIVE_COMPLEMENT.has(t.word),
+    );
+    if (denial >= 0) {
+      const named = affirmed.plain[denial + 1]!;
+      if (named >= 0) {
+        return tokens
+          .slice(denial, named + 1)
           .map((t) => t.word)
           .join(" ");
       }
