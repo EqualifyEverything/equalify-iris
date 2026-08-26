@@ -373,6 +373,17 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // `detected` affirms in "and printing detected" and denies here, under the `not` that governs the
     // whole tail — so it is not read as a verb, and this wording is the reason why.
     "Page is blank. A few specks. Not legible text or content detected.",
+    // A denial tail carries its own verbs, so the search for an affirming one stops at the negator that
+    // opens the next denied clause. The last of these is #190's own log with the page-number clause the
+    // page prompt asks for joined by a comma instead of a full stop — the same wording accident the
+    // issue is about, one punctuation mark down.
+    "Page is blank. A few specks. Not legible text or content, and no writing is visible.",
+    "Page is blank. A few specks. Not legible text or content; no words are present.",
+    "Page is blank. A few specks. Not legible text or content of any kind, nothing is printed on the sheet.",
+    "Page is blank. A few specks. Not legible text or figures, none are visible.",
+    "Page is blank. Specks/dots are visible on the page but do not resolve into any characters or content, and no page number is printed.",
+    "Page is blank. Specks/dots are visible but do not resolve into any characters or content; no page-break marker is emitted.",
+    "Page is blank. A few scattered specks/dots that appear to be scanning artifacts, not legible text or meaningful content, and no printed page number is visible.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }

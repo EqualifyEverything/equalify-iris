@@ -765,12 +765,16 @@ const DENIAL_CONNECTOR = new Set("no not nor neither none nothing or and any".sp
 // it is there. Nothing else needs this — a determiner is refused already, and a real negator (`no
 // writing`, `nor any figures`) has spent itself on the noun.
 //
-// The verb is looked for anywhere between the noun and the end of the statement, not just next to it:
-// every word that can come between them here is a substrate word, so `and printing on the page is
-// visible` is the same claim as `and printing is present` with a locative in the middle, and checking
-// only the next word left it in. Nothing a denial needs is lost, because a denial's tail has no verb
-// in it at all (`or content of any kind`, `nor any figures`, `or anything at all`).
+// The verb is looked for past the noun rather than only next to it, because a locative may sit in
+// between: `and printing on the page is visible` is `and printing is present` with three words in the
+// middle. But the search stops at the first real negator, because that is where the NEXT denied clause
+// begins and its verb has nothing to do with this noun. A blank page's log goes on denying in exactly
+// that shape — "not legible text or content, and no writing is visible", "…or content; nothing is
+// printed", and above all the page-number clause the page prompt asks for ("…not legible text or
+// meaningful content, and no printed page number is visible"), which is #190's own log with a comma
+// where it happened to have a full stop. Scanning past the negator refused all of those.
 const CONJUNCTION = new Set("or and".split(" "));
+const NEGATOR = new Set("no not nor neither none nothing".split(" "));
 // `detected`, `seen`, `found` and `present` are deliberately NOT here, though they affirm as plainly:
 // the tail is governed by the `not` in front of the construction, so they are the denial's own words
 // there ("not legible text or content detected" is the commoner wording, and "not legible text
@@ -818,7 +822,10 @@ function deniesToStatementEnd(log: string, start: number): boolean {
     while (before >= 0 && QUALIFIER.has(words[before]!)) before--;
     if (before >= 0 && DENIAL_CONNECTOR.has(words[before]!)) {
       if (!CONJUNCTION.has(words[before]!)) return true;
-      return !words.slice(i + 1).some((later) => AFFIRMING_VERB.has(later));
+      const tail = words.slice(i + 1);
+      const nextDenial = tail.findIndex((later) => NEGATOR.has(later));
+      const governed = nextDenial === -1 ? tail : tail.slice(0, nextDenial);
+      return !governed.some((later) => AFFIRMING_VERB.has(later));
     }
     if (!LOCATIVE_SUBSTRATE.has(word)) return false;
     while (before >= 0 && DETERMINER.has(words[before]!)) before--;
