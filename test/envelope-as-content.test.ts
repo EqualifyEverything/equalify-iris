@@ -670,6 +670,20 @@ test("a log that says something is on the page contradicts its own blank claim",
     // The declaration and the contradiction in one statement, which is where a comma-set-off denial
     // could otherwise hide the affirmation ("…, no page number, is visible" above).
     "Page is blank. A few specks. Not legible text, an illustration is visible.",
+    // A coordination of nouns nothing denies is an affirmation of every one of them, which is the
+    // other half of `negatedInList`: a negator reaching the whole list is only right where there IS
+    // a negator (#200's review).
+    "Page is blank. Handwriting and a signature are visible.",
+    "Page is blank. Text or handwriting is present.",
+    // And a second clause's subject is its own, however the first clause denied: the walk back from
+    // `handwriting` stops at the verb of `no text is visible`.
+    "Page is blank. No text is visible and handwriting is present.",
+    // The negator's own member was the MARKS phrase, which is stripped before any of this runs — so
+    // `no … and handwriting is visible` arrives with nothing in front of the conjunction, and a
+    // denial of the marks says nothing about text. Both would read as denied by a negator that never
+    // governed them.
+    "Page is blank. No stray marks, and handwriting is visible.",
+    "Page is blank. No specks or dust; and a heading is visible.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }
@@ -717,6 +731,32 @@ test("the affirmations a blank page's own log is made of are not contradictions"
     // The paper itself, and what it is not doing.
     "The sheet is empty. No printing is present.",
     "Page is blank. The page has been scanned at low contrast.",
+    // A denial with more than one noun in it, which is what the review of #200 measured: about eleven
+    // of thirty realistic blank-page wordings flipped to reported-failed on a fixed three-word
+    // lookback, because `no legible text or handwriting is present` puts the negator FOUR tokens
+    // behind the last noun of the list, which then reads as un-negated and finds the list's own
+    // shared verb. Every one of these was a delivered blank page before #194 and has to stay one:
+    // the twenty pinned above are all two nouns or shorter, which is why they did not catch it.
+    "Page is blank. No legible text or handwriting is present.",
+    "Page is blank. No legible text or printed characters are visible.",
+    "Page is blank. No printed or handwritten content is visible anywhere on the sheet.",
+    "Page is blank. A few specks of dust. No printed page number or heading is visible.",
+    "Page is blank. No printed words, lines, or characters are visible.",
+    "Page is blank. No text, printing, figures or writing is present.",
+    "Page is blank. A few specks. No writing, figures or stamps are present.",
+    "Page is blank. No headings, captions or labels are visible.",
+    "Page is blank. No visible text, images or diagrams are present.",
+    "Page is blank. Nothing but faint specks; no words, lines or numerals are visible.",
+    "Page is blank. No content of any kind, printed or handwritten, is present.",
+    // The same shape with the other joiners and the longer lists these logs use. The fourth is the
+    // page-number clause `agents/page.md` asks for with one more noun conjoined onto it, which is
+    // #190's own log — the defect this whole area exists downstream of.
+    "Page is blank. No text, no figures and no captions are present.",
+    "Page is blank. Neither text nor handwriting is visible.",
+    "Page is blank. No words, letters, digits, glyphs or numerals are visible.",
+    "The sheet is empty. No printed text or page number is visible.",
+    "Page is blank. Nothing printed or written is present on the page.",
+    "Page is blank. No heading, caption or label of any kind is present.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -740,6 +780,14 @@ test("a contradicted blank declaration says what the log claimed was there", () 
   assert.equal(
     blankDeclaration({ html: "", log: "Page is blank. The page contains handwriting." }).affirmed,
     "contains handwriting",
+  );
+  // The two findings are read independently, so a log that does both fills both fields — which the
+  // run log's own documentation used to deny (`docs/API.md`, #200's review). Which to act on first is
+  // a judgement the line leaves to its reader, and the doubt is the one that decides whether the
+  // contradiction can be believed at all.
+  assert.deepEqual(
+    blankDeclaration({ html: "", log: "Page is blank. The scan is blurry. There is handwriting on the page." }),
+    { asserted: true, blank: false, vetoes: ["blurry"], affirmed: "there is handwriting" },
   );
   // And a declaration nothing contradicted carries no such field at all, so the log line of an
   // ordinary blank page is unchanged and `"affirmed" in d` reads as the question it looks like.

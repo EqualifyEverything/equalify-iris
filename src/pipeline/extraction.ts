@@ -947,9 +947,11 @@ const EXISTENTIAL = new Set("is are was were".split(" "));
 const TRANSITIVE_AFFIRM = new Set(
   "contain contains contained hold holds held bear bears show shows has have had carries carry".split(" "),
 );
-// How far back a negator reaches. Three words covers a determiner and two qualifiers (`no other
-// printed words`), which is what the denials in these logs are built from, and stopping there is what
-// keeps `and printing` — three words past a `not` that governs a different noun — an affirmation.
+// How far back a negator reaches for a VERB it governs (`does not contain`, `the specks have not
+// resolved`). Three words covers a determiner and two qualifiers, which is what these logs put
+// between the two, and stopping there is what keeps `and printing` — three words past a `not` that
+// governs a different noun — an affirmation. A coordination is a list of NOUNS, so a verb is never a
+// member of one and this window is all the reach it needs; the noun's own reach is `negatedInList`.
 const AFFIRM_LOOKBACK = 3;
 // Words that may stand between a verb and the noun it introduces (`there is`, `contains`).
 const OBJECT_GAP = 3;
@@ -996,7 +998,62 @@ function negatedBefore(tokens: Word[], i: number): boolean {
   return false;
 }
 
-// Where the verb that affirms this noun is, if there is one. The scan STOPS at a negator, because a
+// The vocabulary a coordination of nouns is built from, beyond the names for text themselves and the
+// qualifiers that dress them: the conjunctions that join the members, the `of any kind` that trails
+// one, and the page's own furniture named inside such a list (`no printed page number or heading`).
+// Deliberately not a determiner, not a count, not a verb and not a pronoun — each of those ends the
+// walk below, which is what keeps `an illustration is visible`, `only a heading is visible`, `it
+// shows two headings` and `some words remain visible` the affirmations they are.
+//
+// `handwritten` and its spellings are here rather than in `QUALIFIER`, which four other functions
+// read: what they are needed for is reaching back over `no printed or handwritten content`, and
+// widening the qualifier list would change how the denial tails and the object gaps are read too.
+const CHAIN_LINK = new Set(
+  ("or and either handwritten hand-written typewritten of any all at whatsoever else kind sort type " +
+    "page pages number numbers").split(" "),
+);
+// A coordination has no length limit, so this walk needs one: a log with two hundred conjoined nouns
+// in it should not be re-read from every one of them. Sixteen tokens is longer than any denial the
+// corpus contains (the longest, `no content of any kind, printed or handwritten`, is seven), and
+// running past the cap stops the walk, which reports the page failed — a glance, not a lost page.
+const NEGATOR_CHAIN_MAX = 16;
+
+// Whether a negator governs this noun. A negator distributes over the whole coordination it opens —
+// `no legible text or handwriting`, `no printed words, lines, or characters`, `no text, printing,
+// figures or writing` — and how long that coordination is is a wording the model picks per call. A
+// fixed window therefore decided by LIST LENGTH whether the last noun in a denial read as denied:
+// with a three-word lookback `no legible text or handwriting is present` put `no` four tokens back,
+// so `handwriting` read as un-negated, found the list's own shared verb, and a page with nothing on
+// it was reported lost. Eleven of about thirty realistic blank-page wordings flipped that way, which
+// is #190's defect from the other end — the one thing #194 says a fix must not buy.
+//
+// So the walk is over the words a coordination is MADE of and stops at anything else, the same shape
+// `deniesToStatementEnd` uses for the far side of a denial. It cannot reach past a verb, which is
+// what keeps a second clause's subject its own (`no text is visible and handwriting is present`
+// affirms `handwriting`), and it cannot reach past a determiner or a count, which is what keeps the
+// affirmations #194 measured. `and printing, no page number, is visible` — the shape this must not
+// swallow — reaches the document with its `not legible text` already stripped from the veto scope, so
+// there is no negator left in front of `printing` to find.
+// A negator distributes over a coordination only if it has a member of its own to distribute FROM,
+// and one case in this file can take that member away: the marks phrase is stripped before any of
+// this runs, so "No stray marks, and handwriting is visible" arrives as `no … and handwriting` with
+// the noun the `no` denied gone from the text. Reading the conjunction as a coordination there would
+// hand `handwriting` a negator that never governed it, and denying the marks says nothing about text
+// — which is the same asymmetry `TEXT_NOUN` encodes everywhere else in this section. So a negator
+// whose own next word is a conjunction is not one this noun sits in a list with.
+function negatedInList(tokens: Word[], i: number): boolean {
+  for (let k = i - 1; k >= 0 && i - k <= NEGATOR_CHAIN_MAX; k--) {
+    const { word } = tokens[k]!;
+    if (NEGATOR.has(word) || word === "without") {
+      return !(k + 1 < tokens.length && CONJUNCTION.has(tokens[k + 1]!.word));
+    }
+    if (QUALIFIER.has(word) || CHAIN_LINK.has(word) || AFFIRMED_NOUN.test(word)) continue;
+    return false;
+  }
+  return false;
+}
+
+// Where the verb that affirms the noun at each position is, if there is one. The scan STOPS at a negator, because a
 // negator is where the next denied clause begins and its verb has nothing to do with this noun —
 // which is the rule `deniesToStatementEnd` already applies for the same reason, and the reason a
 // blank page's own log survives this: "not legible text or content, and no writing is visible" has an
@@ -1008,22 +1065,31 @@ function negatedBefore(tokens: Word[], i: number): boolean {
 // a comma and closes on one is stepped over rather than stopped at. Nothing a blank page is written in
 // has that shape: the negators in those logs open on `and`, on `or` or on a fresh clause ("…or
 // content, and no printed page number is visible"), where the closing comma never comes.
-function affirmingVerbAfter(tokens: Word[], i: number): number {
-  let k = i + 1;
-  while (k < tokens.length) {
+//
+// Computed for every position of the statement in one backwards pass rather than scanned forward per
+// noun. Same answers — each position is the answer for the position after it, unless the token is
+// itself a verb or a negator — and it is the one scan in this section that was quadratic in the
+// length of a statement with no full stop in it, which is the shape `DENIAL_STATEMENT_MAX` caps for
+// the same reason. A cap would not do here: a statement too long to read is one whose contradiction
+// goes unfound, and that costs the page rather than a glance.
+function affirmingReach(tokens: Word[]): number[] {
+  const reach = new Array<number>(tokens.length + 1).fill(-1);
+  for (let k = tokens.length - 1; k >= 0; k--) {
     const token = tokens[k]!;
-    if (AFFIRMING_VERB.has(token.word)) return k;
-    if (NEGATOR.has(token.word)) {
-      if (!tokens[k - 1]!.comma) return -1;
-      let close = k;
-      while (close < tokens.length && !tokens[close]!.comma) close++;
-      if (close >= tokens.length) return -1;
-      k = close + 1;
+    if (AFFIRMING_VERB.has(token.word)) {
+      reach[k] = k;
       continue;
     }
-    k++;
+    if (NEGATOR.has(token.word)) {
+      if (k === 0 || !tokens[k - 1]!.comma) continue; // stays -1: the clause here is denied
+      let close = k;
+      while (close < tokens.length && !tokens[close]!.comma) close++;
+      if (close < tokens.length) reach[k] = reach[close + 1]!;
+      continue;
+    }
+    reach[k] = reach[k + 1]!;
   }
-  return -1;
+  return reach;
 }
 
 // The noun a post-verb construction affirms — the object of `there is` or of a transitive verb — or
@@ -1055,6 +1121,7 @@ export function contentAffirmed(scope: string): string | null {
   // scan crosses is one this one is free to stop at.
   for (const statement of scope.split(/[.!?;\n]+/)) {
     const tokens = words(statement);
+    const reach = affirmingReach(tokens);
     for (let i = 0; i < tokens.length; i++) {
       const { word } = tokens[i]!;
       if (word === "there" && i + 1 < tokens.length && EXISTENTIAL.has(tokens[i + 1]!.word)) {
@@ -1067,9 +1134,9 @@ export function contentAffirmed(scope: string): string | null {
         if (noun >= 0) return tokens.slice(i, noun + 1).map((t) => t.word).join(" ");
         continue;
       }
-      if (!AFFIRMED_NOUN.test(word) || negatedBefore(tokens, i)) continue;
+      if (!AFFIRMED_NOUN.test(word) || negatedInList(tokens, i)) continue;
       if (LOCATIVE_SUBSTRATE.has(word) && definiteBefore(tokens, i)) continue;
-      const verb = affirmingVerbAfter(tokens, i);
+      const verb = reach[i + 1]!;
       if (verb >= 0) {
         return tokens
           .slice(i, Math.min(verb + 2, tokens.length))
