@@ -2268,11 +2268,19 @@ async function extractPage(
         // `ok` is "the verifier named no problem", which is also what an unavailable
         // Feedback Agent looks like (see `failedCheck`). On this branch the sampled
         // recheck can only follow a verdict it gave, so the ambiguity is confined to the
-        // links path, where it was already the standing behaviour.
+        // links path — where with no Feedback Agent every page passes its first check, so
+        // every corrected page's recheck is the binding one and every one of them is a
+        // "checked and passed" line for a page nobody looked at.
+        //
+        // `unjudged` is what tells those apart, on the same terms as `page_verify_ok`: the
+        // flag rather than a second event, omitted rather than false on a real verdict, and
+        // `ok` unchanged either way because the recheck is not allowed to cost the page
+        // anything it would not have cost with no measurement at all.
         ctx.log.event("page_correction_recheck", {
           image: img.name,
           page: img.order,
           ok: !failedCheck(recheck),
+          ...(recheck.unjudged ? { unjudged: true } : {}),
           problems: recheck.problems,
           // How many problems the page went in with and came out with. `ok` alone made this
           // event unreadable in exactly the way issue #166 reports: four sampled rechecks,

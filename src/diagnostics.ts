@@ -106,7 +106,8 @@ export interface Diagnostics {
   // visible here: the log recorded the verdicts and said nothing about the corrections,
   // so the loop's cost was inferable from arithmetic and its value not at all.
   //
-  // The counts, not the rates: `verify_failed / pages_verified` is the rejection rate and
+  // The counts, not the rates: `verify_failed / (pages_verified - pages_unjudged)` is the
+  // rejection rate — over the pages a verdict was actually read from, see below — and
   // `results.identical + results.empty + results.failed` is what was paid for and bought
   // nothing — bought, not discarded: an `identical` fragment is still what ships, since what
   // the page call failed to buy is a change and not a page. `rejected` is the one that was
@@ -286,13 +287,23 @@ export interface Diagnostics {
     // The binding population has no such pair, for the reason it is counted apart: those pages
     // had PASSED their check, so their `problems_before` is 0 by construction and the question
     // their verdict answers is whether the rewrite lost something, not how far it got.
+    //
+    // `*_unjudged` is `pages_unjudged`'s argument one fold down, and the binding one is where
+    // it bites: a recheck's `ok` is also what an unavailable Feedback Agent looks like, and
+    // with none loaded every page passes its first check, so every corrected page's recheck is
+    // the BINDING one and every one of them is a "the rewrite was checked and stayed good"
+    // line for a page nobody looked at. Subsets of the counts above rather than deductions
+    // from them, for the same reason: `binding_ok / (binding - binding_unjudged)` is the rate
+    // over the rechecks that were actually judged. Zero on every log written before the flag.
     rechecks: {
       sampled: number;
       sampled_ok: number;
+      sampled_unjudged: number;
       sampled_problems_before: number;
       sampled_problems_after: number;
       binding: number;
       binding_ok: number;
+      binding_unjudged: number;
     };
   };
   // Source pages whose own extraction threw, so the delivered document carries a
@@ -657,10 +668,12 @@ export function summarizeRun(
     rechecks: {
       sampled: 0,
       sampled_ok: 0,
+      sampled_unjudged: 0,
       sampled_problems_before: 0,
       sampled_problems_after: 0,
       binding: 0,
       binding_ok: 0,
+      binding_unjudged: 0,
     },
   };
   for (const e of events) {
@@ -742,12 +755,17 @@ export function summarizeRun(
       // boolean lands in neither bucket, for the same reason an unknown `result` does:
       // guessing which population a verdict belongs to is worse than a total that is
       // visibly short of the lines in the log.
+      // Strictly `true`, as on `page_verify_ok`: a recheck subtracted from the pass rate on
+      // the strength of a string would be the trap the closed lists here exist for.
+      const unjudged = e.unjudged === true;
       if (e.binding === true) {
         verification.rechecks.binding += 1;
         if (e.ok === true) verification.rechecks.binding_ok += 1;
+        if (unjudged) verification.rechecks.binding_unjudged += 1;
       } else if (e.binding === false) {
         verification.rechecks.sampled += 1;
         if (e.ok === true) verification.rechecks.sampled_ok += 1;
+        if (unjudged) verification.rechecks.sampled_unjudged += 1;
         // Only when the line carries both, so a log from before these existed leaves the two
         // sums alone rather than adding a zero to each. A missing `problems_before` counted as
         // 0 would read as a page corrected for no reason, which is the opposite of what
