@@ -229,8 +229,9 @@ test("the tally splits verify_failed by kind, in pages, and does not partition",
   assert.equal(d.verification.pages_verified, 3);
   assert.equal(d.verification.verify_failed, 2);
   assert.deepEqual(d.verification.verify_kinds, {
-    content_missing: 2, content_wrong: 0, structure_wrong: 0, a11y_only: 0, alt_quality: 1, untagged: 0,
+    content_missing: 2, content_wrong: 0, structure_wrong: 0, a11y_only: 0, alt_quality: 1, untagged_pages: 0,
   });
+  assert.equal(d.verification.verify_untagged_problems, 0, "every problem on both lines carried a kind");
 });
 
 test("a log that names no kind is untagged, not clean and not spread across the buckets", () => {
@@ -246,8 +247,12 @@ test("a log that names no kind is untagged, not clean and not spread across the 
   const d = summarizeRun(text, done(Date.parse(T(3))));
   assert.equal(d.verification.verify_failed, 2);
   assert.deepEqual(d.verification.verify_kinds, {
-    content_missing: 0, content_wrong: 0, structure_wrong: 0, a11y_only: 0, alt_quality: 0, untagged: 2,
+    content_missing: 0, content_wrong: 0, structure_wrong: 0, a11y_only: 0, alt_quality: 0, untagged_pages: 2,
   });
+  // No `untagged` field at all on either line, so the problems each one lists are the untagged
+  // ones: an old log's problems are untagged by definition, and counting zero would read as a
+  // fully tagged run.
+  assert.equal(d.verification.verify_untagged_problems, 2);
 });
 
 test("a page that tagged some of its problems is in its kind AND in untagged", () => {
@@ -263,8 +268,12 @@ test("a page that tagged some of its problems is in its kind AND in untagged", (
   );
   const d = summarizeRun(text, done(Date.parse(T(3))));
   assert.deepEqual(d.verification.verify_kinds, {
-    content_missing: 0, content_wrong: 0, structure_wrong: 1, a11y_only: 0, alt_quality: 0, untagged: 2,
+    content_missing: 0, content_wrong: 0, structure_wrong: 1, a11y_only: 0, alt_quality: 0, untagged_pages: 2,
   });
+  // Two pages, three untagged problems: the second line named a kind for none of its one
+  // problem and the first named one for one of its three. Both pages are in `untagged_pages`,
+  // and only this number says the first page's split is mostly there and the second's is not.
+  assert.equal(d.verification.verify_untagged_problems, 3);
 });
 
 test("the tally's buckets are the agent's five kinds, and nothing else", () => {
@@ -273,5 +282,5 @@ test("the tally's buckets are the agent's five kinds, and nothing else", () => {
   // holds the two copies equal: a kind added to the contract and not to the fold would show
   // up here as a bucket the tally has no key for.
   const d = summarizeRun(log({ ts: T(0), type: "run_start" }), done(Date.parse(T(0))));
-  assert.deepEqual(Object.keys(d.verification.verify_kinds), [...VERIFY_KINDS, "untagged"]);
+  assert.deepEqual(Object.keys(d.verification.verify_kinds), [...VERIFY_KINDS, "untagged_pages"]);
 });
