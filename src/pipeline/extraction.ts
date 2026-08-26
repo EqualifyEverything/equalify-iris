@@ -2053,7 +2053,15 @@ async function extractPage(
       untagged: verdict.untagged,
     });
   } else {
-    ctx.log.event("page_verify_ok", { image: img.name });
+    // `unjudged` where the verdict is the non-blocking default rather than a pass — no
+    // Feedback Agent, nothing to verify, or a reply that would not parse (feedback.ts).
+    // The event stays `page_verify_ok` because that is what the run did with it, and every
+    // reader of this log still counts it as one verified page. The field is for the reader
+    // that has to tell "the verifier looked and was satisfied" from "nobody looked": a
+    // measurement OF the verifier drawn from these lines would otherwise take pages nothing
+    // judged as its population (issue #180, src/pipeline/calibration.ts). Omitted, not
+    // false, on the ordinary pass — a log full of `unjudged: false` says nothing.
+    ctx.log.event("page_verify_ok", verdict.unjudged ? { image: img.name, unjudged: true } : { image: img.name });
   }
 
   const problems = [

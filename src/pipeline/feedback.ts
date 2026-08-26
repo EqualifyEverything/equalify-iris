@@ -77,6 +77,17 @@ export interface VerifyVerdict {
   // split computed over problems where half arrived untagged is a split that lies about
   // which half it measured, and nothing else on the line would say so.
   untagged: number;
+  // Nothing was judged: no Feedback Agent, nothing to verify, or a reply that would not
+  // parse. `ok` is true in all three because verification is non-blocking and must never
+  // cost a page (see `verifyAgentOutput`) — which means a page that passed and a page that
+  // could not be looked at arrive here identical, and any rate computed over `ok` counts
+  // the second as the first.
+  //
+  // Additive and optional: every existing reader tests `ok` and `problems`, and an absent
+  // field leaves all of them saying exactly what they said before. It is set so that a
+  // measurement OF the verifier can exclude the calls that were not verdicts — the
+  // difference matters to `src/pipeline/calibration.ts` and to nothing in the run itself.
+  unjudged?: true;
 }
 
 // Read VERIFY's `problems` out of a reply that may predate the kinds, may be a session-built
@@ -167,7 +178,7 @@ export async function verifyAgentOutput(
   blocks: { html: string }[],
 ): Promise<VerifyVerdict> {
   const fb = loadFeedbackAgent(ctx);
-  if (!fb || blocks.length === 0) return { ok: true, problems: [], kinds: [], untagged: 0 };
+  if (!fb || blocks.length === 0) return { ok: true, problems: [], kinds: [], untagged: 0, unjudged: true };
 
   const html = blocks.map((b) => b.html).join("\n\n");
   // Everything this task says that is not about the page in front of it: the task marker
@@ -215,7 +226,7 @@ export async function verifyAgentOutput(
   ctx.log.agentCall({ agent: fb, phase: "extraction", image: img.name, output: res.text });
 
   const parsed = extractJson<VerifyOutput>(res.text);
-  if (!parsed) return { ok: true, problems: [], kinds: [], untagged: 0 };
+  if (!parsed) return { ok: true, problems: [], kinds: [], untagged: 0, unjudged: true };
   const ok = parsed.faithful !== false && parsed.accessible !== false;
   return { ok, ...readProblems(parsed.problems) };
 }

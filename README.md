@@ -346,6 +346,8 @@ src/
     memory.ts            # per-agent example bank of learned corrections
     regression.ts        # fixture capture + pruning on close
     contribute.ts        # drafts suggested agents, files issues
+    calibration.ts       # does the fidelity verifier discriminate? (see "Calibrating…" below)
+  tools/calibrate.ts     # CLI for that measurement; nothing in a run imports it
   util/queue.ts          # bounded FIFO run queue (cross-session concurrency cap)
   auth/                  # GitHub OAuth + device flow + bearer middleware
   github/                # auto-files labeled agent-suggestion issues
@@ -809,6 +811,82 @@ PostgreSQL and S3 backends (§10.2 — "supported alternative," SQLite + local F
 reference), the per-user config endpoint (§9.1 — "not specified in v1"), and webhooks (§9.4 —
 out of scope). The endpoints beyond the PRD are `GET /v1/health`, a standard liveness probe, and
 `GET /v1/stats`, the public page tally described above.
+
+## Calibrating the fidelity verifier
+
+Every accuracy claim this pipeline makes rests on one call: the Feedback Agent's VERIFY task,
+which compares a page's HTML against the page image and says whether it is faithful. That
+verdict rejects roughly four pages in five — 58 of 75 across three 25-page runs (issue #137, cited
+in `correction.ts`), then 76 of 100 and 74 of 94 in two benchmark rounds (issue #182, cited in
+`test/verify-kinds.test.ts`) — and two explanations fit that
+number equally well: the extraction really does need correcting on most pages, or the verifier is
+calibrated to find something and finds something. The verdict cannot answer that about itself.
+
+`src/tools/calibrate.ts` asks from outside. It takes pages the verifier already passed, damages
+exactly one thing in a copy of each (`src/pipeline/calibration.ts` — a dropped table row, a whole
+table dropped, a changed number in a cell, a removed heading, a demoted heading, missing alt text,
+two paragraphs swapped, a truncated tail), and puts both copies back to the same verifier against the same
+image. Out come two rates that have to be read together: how often it **passes the clean copy**
+(its false-positive rate) and how often it **catches the injected defect and names the right
+kind**, per defect type. A judge that rejects everything scores a perfect true-positive rate and
+is useless, which is why neither number is reported without the other.
+
+```bash
+# free: selects the pages, applies every defect, prices the live run in calls
+node --use-system-ca --env-file-if-exists=.env src/tools/calibrate.ts \
+  --session ses_01K... --session ses_01K...
+
+# the measurement itself: one verify call per clean page + one per damaged copy
+node --use-system-ca --env-file-if-exists=.env src/tools/calibrate.ts \
+  --session ses_01K... --defects all --out calibration.txt --run
+```
+
+Without `--run` it makes no model calls at all, because the live run is the part that spends
+money. `--session` takes a session id or a path (a worktree can read the main checkout's
+sessions), and `--help` lists the rest. Pages are selected from `page_verify_ok` in each
+session's log, so a rejection of the clean copy really is a contradiction of an earlier verdict
+rather than a disagreement with a different judge; `--all-pages` drops that and measures against
+pages the verifier may well have been right to fail.
+
+Two things the report says out loud, because the counts alone would read as results: calls where
+nothing was judged (no Feedback Agent, an unparseable reply — `verifyAgentOutput` answers ok=true
+in those cases so verification can never cost a page — or a call that threw, which is listed with
+its error) are excluded from every rate, and defects that were never applied are named rather than
+left looking like zeroes.
+
+Each page is judged against the contract **it was written to**, recovered from git by the blob SHA
+its session's log recorded. The verifier is not rolled back — today's judge is the subject — but
+the contract must be, or a page rejected for breaking a rule added since it was extracted is
+counted as a false positive. That is not hypothetical: on the first run of this harness it was the
+difference between a 55% false-positive rate and a 0% one.
+
+**First measurement** (2026-08-26, 11 pages across 3 documents, every applicable defect, 41 calls,
+`sonnet-4-6`):
+
+| | rate |
+|---|---|
+| clean copies passed | 11 of 11 — **0% false positives** |
+| damaged copies flagged | 25 of 30 — **83%**, all 25 tagged with a predicted kind |
+| damaged copies the verifier *saw* | 28 of 30 — **93%** (see below) |
+| dropped row / dropped table / changed number / dropped heading / removed alt / truncated tail | 100% each |
+| heading demoted two levels | 4 of 7 flagged — **57%** |
+| two paragraphs swapped | 3 of 5 flagged — **60%** |
+
+So the ~80% rejection rate looks honest rather than reflexive: this verifier does not fail pages it
+has nothing to say about, and it flags every defect that removes or falsifies content.
+
+The gap is narrower and stranger than a blind spot. Of the five defects it did not flag, **three it
+described in full and then answered `faithful: true` anyway** — one quoting both paragraphs of a
+pair it had just found reversed. `failedCheck` requires `ok === false` *and* a non-empty problem
+list before the pipeline will correct a page, so those pages ship with the defect written down in
+the log and nothing done about it. That is a fixable contract problem, not a perception problem, and
+it is why the report scores "said but did not flag" in its own column instead of counting it as a
+miss: the two failures point at different repairs.
+
+Small corpus — 11 pages over 3 documents, and two of the defects were exercised on a single page
+each — so treat the per-defect rates as directional. Both runs of it produced identical totals, and
+the dry run over the same five sessions still reports the same 11 pages and 30 damaged copies after
+the injector guards were tightened, so these numbers are the current code's.
 
 ## Automated code review
 

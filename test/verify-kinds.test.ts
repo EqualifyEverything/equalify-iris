@@ -199,11 +199,16 @@ test("a null entry is not a problem, and a `problems` that is not a list is not 
 
 test("a passing page carries an empty set, and an unreadable reply is still non-blocking", async () => {
   const pass = await verdict(JSON.stringify({ faithful: true, accessible: true, problems: [] }));
+  assert.equal(pass.unjudged, undefined, "a real verdict carries no flag");
   assert.deepEqual(pass, { ok: true, problems: [], kinds: [], untagged: 0 });
 
-  // No JSON at all: verification is non-blocking, and that has not changed.
+  // No JSON at all: verification is non-blocking, and that has not changed. What the flag
+  // adds is that the two lines above and below now say different things — a page that
+  // passed, and a page nobody could read a verdict about. `ok` is true in both, because
+  // nothing in a run may be costed on a reply the model garbled; `unjudged` is how a
+  // measurement OF the verifier tells them apart (issue #180, src/pipeline/calibration.ts).
   const prose = await verdict("I was unable to compare the HTML with the image.");
-  assert.deepEqual(prose, { ok: true, problems: [], kinds: [], untagged: 0 });
+  assert.deepEqual(prose, { ok: true, problems: [], kinds: [], untagged: 0, unjudged: true });
 });
 
 // --- the fold (src/diagnostics.ts) ------------------------------------------
