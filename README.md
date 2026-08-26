@@ -865,17 +865,25 @@ difference between a 55% false-positive rate and a 0% one.
 | | rate |
 |---|---|
 | clean copies passed | 11 of 11 — **0% false positives** |
-| damaged copies caught | 25 of 30 — **83%**, all 25 tagged with a predicted kind |
+| damaged copies flagged | 25 of 30 — **83%**, all 25 tagged with a predicted kind |
+| damaged copies the verifier *saw* | 28 of 30 — **93%** (see below) |
 | dropped row / dropped table / changed number / dropped heading / removed alt / truncated tail | 100% each |
-| heading demoted two levels | 4 of 7 — **57%** |
-| two paragraphs swapped | 3 of 5 — **60%** |
+| heading demoted two levels | 4 of 7 flagged — **57%** |
+| two paragraphs swapped | 3 of 5 flagged — **60%** |
 
 So the ~80% rejection rate looks honest rather than reflexive: this verifier does not fail pages it
-has nothing to say about, and it catches every defect that removes or falsifies content. Its blind
-spot is the class where every word is still present and only the structure moved — heading level
-and reading order — which is a specific, actionable gap in `agents/feedback.md` rather than a
-verdict on the verifier. Small corpus (11 pages, one of the defects exercised on a single page), so
-treat the per-defect rates as directional.
+has nothing to say about, and it flags every defect that removes or falsifies content.
+
+The gap is narrower and stranger than a blind spot. Of the five defects it did not flag, **three it
+described in full and then answered `faithful: true` anyway** — one quoting both paragraphs of a
+pair it had just found reversed. `failedCheck` requires `ok === false` *and* a non-empty problem
+list before the pipeline will correct a page, so those pages ship with the defect written down in
+the log and nothing done about it. That is a fixable contract problem, not a perception problem, and
+it is why the report scores "said but did not flag" in its own column instead of counting it as a
+miss: the two failures point at different repairs.
+
+Small corpus — 11 pages over 3 documents, and two of the defects were exercised on a single page
+each — so treat the per-defect rates as directional. Both runs of it produced identical totals.
 
 ## Automated code review
 

@@ -408,6 +408,53 @@ test("a rejection with no problems in it is not a catch", async () => {
   assert.equal(Object.values(report.perDefect).reduce((n, t) => n + t.caught, 0), 0);
 });
 
+test("a defect described in full and flagged faithful is its own column, not a miss", async () => {
+  // The most actionable thing the first live run turned up: three of its five apparent
+  // misses were the verifier describing the defect exactly — one quoted both paragraphs of a
+  // reversed pair — and then answering faithful:true. `failedCheck` needs ok=false AND a
+  // problem, so the page ships unquestioned with the defect written down in the log.
+  //
+  // Scoring that as a miss would send someone to `agents/feedback.md` to teach the verifier
+  // to SEE reading order, which it already does. The fix is the two-boolean contract.
+  const sees: Stub = {
+    reply: (html) =>
+      html === RICH
+        ? JSON.stringify({ faithful: true, accessible: true, problems: [] })
+        : JSON.stringify({
+            faithful: true,
+            accessible: true,
+            problems: [{ kind: "structure_wrong", problem: "the two paragraphs are in the wrong order" }],
+          }),
+  };
+  const { report } = await run([{ name: "p1.png", html: RICH }], sees, { only: ["swap_paragraphs"] });
+  const tally = report.perDefect["swap_paragraphs"];
+  assert.equal(tally.applied, 1);
+  assert.equal(tally.caught, 0, "not caught: the pipeline would not correct this page");
+  assert.equal(tally.named, 0, "naming is only scored on a verdict that also flagged");
+  assert.equal(tally.describedOnly, 1);
+  const text = formatCalibration(report);
+  assert.match(text, /1 were DESCRIBED and flagged faithful anyway/);
+  assert.match(text, /saw 1 of 1 \(100%\) and only flagged 0/);
+  assert.match(text, /failedCheck needs both/);
+
+  // On a clean copy the same shape is still a pass — that is what the pipeline does with it
+  // — but it is counted, because a page the verifier complained about and passed is not the
+  // same event as one it had nothing to say about.
+  const chatty: Stub = {
+    reply: () =>
+      JSON.stringify({
+        faithful: true,
+        accessible: true,
+        problems: [{ kind: "alt_quality", problem: "the alt text could be richer" }],
+      }),
+  };
+  const second = await run([{ name: "p1.png", html: RICH }], chatty, { only: ["drop_table"] });
+  assert.equal(second.report.clean.passed, 1);
+  assert.equal(second.report.clean.failed, 0);
+  assert.equal(second.report.clean.describedOnly, 1);
+  assert.match(formatCalibration(second.report), /1 of the passes named a problem and answered faithful anyway/);
+});
+
 test("naming the kind is scored separately from catching the defect", async () => {
   // A verifier that spots every defect but calls all of them alt text problems has caught
   // them and named none, and the report has to be able to say so — that sentence is about

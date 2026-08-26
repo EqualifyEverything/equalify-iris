@@ -317,13 +317,23 @@ export interface DefectTally {
   caught: number;
   // Rejected AND tagged with one of the kinds this defect predicts.
   named: number;
+  // The verifier DESCRIBED a problem and still answered faithful/accessible true, so
+  // `failedCheck` reads the page as having nothing to correct and it ships unquestioned.
+  //
+  // Kept apart from both `caught` and the misses because it is neither, and because it is
+  // the most actionable number this harness produces: a verifier that cannot see a defect
+  // needs a better prompt about that defect, while one that sees it, writes it down, and
+  // then ticks "faithful" needs the two-boolean contract fixed. The first run of this found
+  // three of its five apparent misses were this — including a paragraph-order error the
+  // verifier described in full, quoting both paragraphs.
+  describedOnly: number;
   unjudged: number;
 }
 
 export interface CalibrationReport {
   pages: number;
   rows: CalibrationRow[];
-  clean: { passed: number; failed: number; unjudged: number };
+  clean: { passed: number; failed: number; unjudged: number; describedOnly: number };
   perDefect: Record<string, DefectTally>;
   // Pages no defect applied to, with the reason. Read with `pages`: a report over 20 pages
   // where 6 were skipped is a report over 14.
@@ -335,6 +345,11 @@ export interface CalibrationReport {
 // whatever the flag says.
 function rejected(j: Judgement): boolean {
   return !j.unjudged && !j.ok && j.problems.length > 0;
+}
+
+// The verifier wrote a problem down and passed the page anyway.
+function describedOnly(j: Judgement): boolean {
+  return !j.unjudged && j.ok && j.problems.length > 0;
 }
 
 function judge(v: VerifyVerdict): Judgement {
@@ -382,7 +397,7 @@ export async function calibrateVerifier(
   });
 
   const perDefect: Record<string, DefectTally> = {};
-  for (const d of list) perDefect[d.id] = { applied: 0, caught: 0, named: 0, unjudged: 0 };
+  for (const d of list) perDefect[d.id] = { applied: 0, caught: 0, named: 0, describedOnly: 0, unjudged: 0 };
 
   // One unit of work per verify call, so the whole run is bounded by `limit` rather than by
   // `limit` pages each issuing several calls at once.
@@ -402,7 +417,7 @@ export async function calibrateVerifier(
   });
 
   const rows: CalibrationRow[] = [];
-  const clean = { passed: 0, failed: 0, unjudged: 0 };
+  const clean = { passed: 0, failed: 0, unjudged: 0, describedOnly: 0 };
   const skipped: { image: string; reason: string }[] = [];
 
   plan.forEach((p, pageIndex) => {
@@ -411,7 +426,13 @@ export async function calibrateVerifier(
     const contract = (p.page.agent ?? agent).sha;
     if (cleanJudgement.unjudged) clean.unjudged += 1;
     else if (rejected(cleanJudgement)) clean.failed += 1;
-    else clean.passed += 1;
+    else {
+      clean.passed += 1;
+      // Still counted as passed, because that is what the pipeline does with it. Counted
+      // here as well, because a clean page the verifier wrote complaints about and then
+      // passed is not the same event as one it had nothing to say about.
+      if (describedOnly(cleanJudgement)) clean.describedOnly += 1;
+    }
 
     if (!p.applicable.length) {
       const reason = "no defect on the list applies to this page";
@@ -427,7 +448,7 @@ export async function calibrateVerifier(
       else if (rejected(j)) {
         tally.caught += 1;
         if (c.defect.expects.some((k) => j.kinds.includes(k))) tally.named += 1;
-      }
+      } else if (describedOnly(j)) tally.describedOnly += 1;
       rows.push({ image: p.page.image.name, contract, clean: cleanJudgement, defect: c.defect.id, damaged: j });
     }
   });
@@ -448,20 +469,27 @@ export function formatCalibration(r: CalibrationReport): string {
     `Clean copies: ${r.clean.passed} passed, ${r.clean.failed} rejected` +
       ` — false-positive rate ${pct(r.clean.failed, judged)}`,
   );
+  if (r.clean.describedOnly) {
+    out.push(
+      `  (${r.clean.describedOnly} of the passes named a problem and answered faithful anyway — see below)`,
+    );
+  }
   out.push("");
-  out.push("Defect                 applied  caught  named  unjudged");
-  const totals = { applied: 0, caught: 0, named: 0, unjudged: 0 };
+  out.push("Defect                 applied  caught  named  said-not-flagged  unjudged");
+  const totals = { applied: 0, caught: 0, named: 0, describedOnly: 0, unjudged: 0 };
   for (const d of DEFECTS) {
     const t = r.perDefect[d.id];
     if (!t) continue;
     totals.applied += t.applied;
     totals.caught += t.caught;
     totals.named += t.named;
+    totals.describedOnly += t.describedOnly;
     totals.unjudged += t.unjudged;
     const rate = t.applied - t.unjudged > 0 ? ` (${pct(t.caught, t.applied - t.unjudged)})` : "";
     out.push(
       `${d.id.padEnd(22)} ${String(t.applied).padStart(7)} ${String(t.caught).padStart(7)}` +
-        ` ${String(t.named).padStart(6)} ${String(t.unjudged).padStart(9)}${rate}`,
+        ` ${String(t.named).padStart(6)} ${String(t.describedOnly).padStart(17)}` +
+        ` ${String(t.unjudged).padStart(8)}${rate}`,
     );
   }
   const judgedDamaged = totals.applied - totals.unjudged;
@@ -470,6 +498,19 @@ export function formatCalibration(r: CalibrationReport): string {
     `Damaged copies: ${totals.caught} of ${judgedDamaged} caught (${pct(totals.caught, judgedDamaged)})` +
       `, ${totals.named} tagged with a kind the defect predicts`,
   );
+  // The distinction that decides what to do about a miss, so it is spelled out rather than
+  // left as a column heading. `failedCheck` (extraction.ts) needs ok=false AND a non-empty
+  // problem list, so a verdict in this column costs the page nothing: the defect was seen,
+  // written down, and shipped.
+  if (totals.describedOnly) {
+    const seen = totals.caught + totals.describedOnly;
+    out.push(
+      `Of the ${judgedDamaged - totals.caught} not caught, ${totals.describedOnly} were DESCRIBED and ` +
+        `flagged faithful anyway — the verifier saw ${seen} of ${judgedDamaged} ` +
+        `(${pct(seen, judgedDamaged)}) and only flagged ${totals.caught}. ` +
+        `failedCheck needs both, so those pages ship unquestioned.`,
+    );
+  }
   // Said out loud rather than left to be inferred from the counts: a defect that never got
   // applied has not been measured, and a corpus that skipped a third of its pages is a
   // smaller corpus than the page count above.
