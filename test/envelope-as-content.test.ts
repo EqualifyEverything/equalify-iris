@@ -312,17 +312,22 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. Specks are visible, no content, and they do not resolve into characters.",
     "Page is blank. Dust only, no figures or images, nothing that would resolve into characters.",
     "Page is blank. Scanner artifacts with no legible content do not resolve into characters.",
-    // `marks` is the word the page prompt itself uses ("where marks do not resolve into characters"),
-    // so the list of nouns for the marks cannot be the one list that omits it.
-    "Page is blank. The marks do not resolve into characters.",
-    "Page is blank. Marks are visible but they are not legible text.",
-    "Page is blank. Spots and blotches do not resolve into characters.",
+    // `marks` counts as a name for the marks only where something says they are not content, because
+    // the page prompt uses the bare noun for the opposite case.
+    "Page is blank. Stray marks do not resolve into characters.",
+    "Page is blank. Stray markings are visible but they are not legible text.",
     // And the same observation, re-punctuated. The gap crosses one sentence or semicolon boundary, so
     // a full stop instead of a `but` is not what decides whether the page survives — which was
-    // #190's finding about per-call wording, one level down.
+    // #190's finding about per-call wording, one level down. What may follow the boundary is a
+    // CONTINUATION of the observation: the marks referred back to, no subject at all, or a denial.
     "Page is blank. Specks/dots are visible on the page. They do not resolve into any characters.",
     "Page is blank. A few specks are visible; they do not resolve into any characters.",
     "Page is blank. A few scattered specks/dots. Not legible text or meaningful content.",
+    "Page is blank. A few specks are visible. Does not resolve into printed words.",
+    "Page is blank. Some dust is present. The specks do not resolve into characters.",
+    // A place is only a veto where it is a place INSIDE the page: naming the substrate is another way
+    // of saying the sheet is empty.
+    "Page is blank. A few specks. Not legible text on the page.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -372,6 +377,43 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. The text resolves into no legible words.",
     "Page appears blank. The handwriting resolves into no characters.",
     "Page is blank. Whatever is printed here resolves into nothing legible.",
+    // `marks` bare is the page prompt's own phrase for the case where the page HAS content that could
+    // not be read ("where marks do not resolve into characters even then, write `[not legible]`"), so
+    // it is a name for the marks only when something else says they are not content — `stray marks`
+    // above. Otherwise the instruction for reporting unreadable content would be read as a blank page.
+    "Page is blank. Handwritten marks do not resolve into characters.",
+    "Page is blank. Pen marks do not resolve into characters.",
+    "Page is blank. Tick marks and check marks do not resolve into characters.",
+    "Page is blank. Blurry marks are visible, no text.",
+    "Page is blank. The markings are not legible text.",
+    // A dark streak or a dark spot is a condition of the capture and can cover content, which is why
+    // `dark` is a veto word at all — the same reason `shadows` is not a name for the marks either.
+    "Page is blank. The scan shows dark streaks.",
+    "Page is blank. The scan shows dark spots.",
+    "Page is blank. The scan shows dark blotches.",
+    "Page is blank. The scan shows dark shadows.",
+    "Page is blank. Only faint stains from the scanner are visible.",
+    // A boundary may be crossed by a continuation of the observation, not by a second, different one.
+    // Marks named in one sentence do not exempt a denial about another page object in the next, and
+    // this is the one place the veto lists cannot catch it afterwards: the veto word IS the phrase
+    // being stripped.
+    "Page is blank. A few specks of dust are visible. The handwritten note in the corner does not resolve into words.",
+    "Page is blank. Dust and specks. The photograph does not resolve into detail.",
+    "Page is blank. Some smudges appear at the edge; the ink does not resolve into words.",
+    "Page is blank. A few specks are visible. The graphic does not resolve into words.",
+    // Where a name for text sits on the far side of `not legible`, the gap cannot see it. Being told
+    // WHERE it is is what separates it from a denial: text in the margin is something the page bears.
+    "Page is blank. Some dust. Not legible printing in the margin.",
+    "Page is blank. A few specks are visible. Not legible text in the header.",
+    "Page is blank. Scanner dust only; not legible writing along the edge.",
+    // `nothing but the text` affirms the text. A negative word ahead of a name for text does not make
+    // it a denial when the negative is spent on the exception.
+    "Page is blank. Dust and specks, nothing but the handwriting, which does not resolve into words.",
+    "Page is blank. Dust and specks, nothing except the text, which does not resolve into words.",
+    "Page is blank. Dust, no matter the text, it does not resolve into words.",
+    // `printing|prints` without bare `print` was the same two-lists-disagree-about-one-word shape as
+    // `content`: `NOT_LEGIBLE_TEXT`'s own lookahead has counted `print` as a name for text all along.
+    "Page is blank. A few specks are visible, but the print does not resolve into words.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }
