@@ -566,6 +566,60 @@ test('--defects all applies every applicable defect to every page', async () => 
   assert.equal(new Set(damaged).size, DEFECTS.length);
 });
 
+test("a page carrying its own contract is judged against that one, and the row says which", async () => {
+  // VERIFY quotes the agent's whole contract and judges the output against it, so a page
+  // extracted under an older `agents/page.md` and judged against today's can be rejected
+  // for breaking a rule that did not exist when it was written. That rejection is the
+  // verifier being right, and a measurement whose subject is false positives would count it
+  // as one — so the page's own contract travels with it.
+  const dir = mkdtempSync(join(tmpdir(), "iris-calibrate-contract-"));
+  try {
+    const agentsDir = join(dir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(agentsDir, "page.md"), "# Page Agent\n\nToday's rules.\n\n## Required capability\nvision\n");
+    writeFileSync(join(agentsDir, "feedback.md"), "# Feedback Agent\n\n## Required capability\nvision\n");
+    const imgPath = join(dir, "p.png");
+    writeFileSync(imgPath, "bytes");
+    const contracts: string[] = [];
+    const ctx = {
+      sessionId: "ses_test",
+      paths: { agentsDir, tmpAgentsDir: () => join(dir, "tmp-agents") } as unknown as Paths,
+      extractionConcurrency: 2,
+      router: {
+        complete: async (_a: string, _c: string, messages: { role: string; content: string }[]) => {
+          const user = messages.find((m) => m.role === "user")?.content ?? "";
+          contracts.push(/Yesterday's rules/.test(user) ? "old" : "current");
+          return { text: JSON.stringify({ faithful: true, accessible: true, problems: [] }) };
+        },
+      },
+      log: { event: () => {}, agentCall: () => {} },
+    } as unknown as PipelineContext;
+    const current = loadAgent("page", { agentsDir, tmpAgentsDir: join(dir, "tmp-agents") });
+    assert.ok(current);
+    const old = { ...current, content: "# Page Agent\n\nYesterday's rules.\n", sha: "0".repeat(40) };
+
+    const report = await calibrateVerifier(
+      ctx,
+      current,
+      [
+        { image: { name: "p.png", order: 1, path: imgPath, links: [] }, html: RICH, agent: old },
+        { image: { name: "p.png", order: 2, path: imgPath, links: [] }, html: RICH },
+      ],
+      { only: ["drop_table"] },
+    );
+    // Both of the first page's calls quoted the old contract; both of the second's quoted
+    // today's. The verifier itself is the current one either way — today's judge is what is
+    // being measured, and only the quoted contract goes back.
+    assert.deepEqual(contracts.sort(), ["current", "current", "old", "old"]);
+    // And the report can be read a year later: which contract each row was judged against
+    // is recorded, because a corpus pooled from several sessions is several contracts.
+    assert.deepEqual([...new Set(report.rows.map((r) => r.contract))].sort(), [current.sha, "0".repeat(40)].sort());
+    assert.match(formatCalibration(report), /Contract judged against: /);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("every verify call goes against the page's own image", async () => {
   // A damaged copy verified against another page's image would fail for the wrong reason,
   // and the report would read as a verifier that catches everything.

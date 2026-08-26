@@ -853,6 +853,30 @@ nothing was judged (no Feedback Agent, an unparseable reply — `verifyAgentOutp
 in those cases so verification can never cost a page) are excluded from every rate, and defects
 that were never applied are named rather than left looking like zeroes.
 
+Each page is judged against the contract **it was written to**, recovered from git by the blob SHA
+its session's log recorded. The verifier is not rolled back — today's judge is the subject — but
+the contract must be, or a page rejected for breaking a rule added since it was extracted is
+counted as a false positive. That is not hypothetical: on the first run of this harness it was the
+difference between a 55% false-positive rate and a 0% one.
+
+**First measurement** (2026-08-26, 11 pages across 3 documents, every applicable defect, 41 calls,
+`sonnet-4-6`):
+
+| | rate |
+|---|---|
+| clean copies passed | 11 of 11 — **0% false positives** |
+| damaged copies caught | 25 of 30 — **83%**, all 25 tagged with a predicted kind |
+| dropped row / dropped table / changed number / dropped heading / removed alt / truncated tail | 100% each |
+| heading demoted two levels | 4 of 7 — **57%** |
+| two paragraphs swapped | 3 of 5 — **60%** |
+
+So the ~80% rejection rate looks honest rather than reflexive: this verifier does not fail pages it
+has nothing to say about, and it catches every defect that removes or falsifies content. Its blind
+spot is the class where every word is still present and only the structure moved — heading level
+and reading order — which is a specific, actionable gap in `agents/feedback.md` rather than a
+verdict on the verifier. Small corpus (11 pages, one of the defects exercised on a single page), so
+treat the per-defect rates as directional.
+
 ## Automated code review
 
 Every PR is reviewed by Claude in CI before a human reads it

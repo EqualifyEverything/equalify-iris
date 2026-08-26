@@ -271,6 +271,14 @@ export const DEFECTS: DefectSpec[] = [
 export interface CalibrationPage {
   image: InputImage;
   html: string;
+  // The contract this page's HTML was actually written to, where it is not the current
+  // one. VERIFY is handed the agent's whole contract and judges the output against it, so
+  // a page extracted under an older `agents/page.md` and judged against today's can be
+  // rejected for breaking a rule that did not exist when it was written — which is the
+  // verifier being right, and would be counted here as a false positive. The verifier
+  // itself (`agents/feedback.md`) is always the current one: today's judge is what is
+  // being measured.
+  agent?: AgentSpec;
 }
 
 // What one VERIFY call said, flattened to what this measurement reads.
@@ -290,6 +298,10 @@ export interface Judgement {
 
 export interface CalibrationRow {
   image: string;
+  // The blob SHA of the contract this page was judged against, or null for one with no
+  // upstream object. Recorded per row because it can differ per page: a corpus pooled from
+  // several sessions is a corpus of several contracts.
+  contract: string | null;
   clean: Judgement;
   // Absent where no defect on the list applies to this page — a page of prose has no table
   // row to drop. Never a silent skip: `skipped` says which pages and why.
@@ -383,7 +395,9 @@ export async function calibrateVerifier(
 
   const verdicts = await mapWithConcurrency(calls, limit, async (call) => {
     const page = plan[call.pageIndex].page;
-    const verdict = await verifyAgentOutput(ctx, agent, page.image, [{ html: call.html }]);
+    // The page's own contract where it has one, so a clean copy is judged against the
+    // rules it was written to and not against rules added since.
+    const verdict = await verifyAgentOutput(ctx, page.agent ?? agent, page.image, [{ html: call.html }]);
     return judge(verdict);
   });
 
@@ -394,6 +408,7 @@ export async function calibrateVerifier(
   plan.forEach((p, pageIndex) => {
     const own = calls.map((c, i) => ({ c, j: verdicts[i] })).filter(({ c }) => c.pageIndex === pageIndex);
     const cleanJudgement = own.find(({ c }) => !c.defect)!.j;
+    const contract = (p.page.agent ?? agent).sha;
     if (cleanJudgement.unjudged) clean.unjudged += 1;
     else if (rejected(cleanJudgement)) clean.failed += 1;
     else clean.passed += 1;
@@ -401,7 +416,7 @@ export async function calibrateVerifier(
     if (!p.applicable.length) {
       const reason = "no defect on the list applies to this page";
       skipped.push({ image: p.page.image.name, reason });
-      rows.push({ image: p.page.image.name, clean: cleanJudgement, skipped: reason });
+      rows.push({ image: p.page.image.name, contract, clean: cleanJudgement, skipped: reason });
       return;
     }
     for (const { c, j } of own) {
@@ -413,7 +428,7 @@ export async function calibrateVerifier(
         tally.caught += 1;
         if (c.defect.expects.some((k) => j.kinds.includes(k))) tally.named += 1;
       }
-      rows.push({ image: p.page.image.name, clean: cleanJudgement, defect: c.defect.id, damaged: j });
+      rows.push({ image: p.page.image.name, contract, clean: cleanJudgement, defect: c.defect.id, damaged: j });
     }
   });
 
@@ -471,6 +486,12 @@ export function formatCalibration(r: CalibrationReport): string {
       `Unjudged calls are excluded from every rate above: ${r.clean.unjudged} clean, ${totals.unjudged} damaged.`,
     );
   }
+  // Which contract each page was judged against. Not decoration: the clean-copy rate is
+  // only a false-positive rate if the pages were judged against the rules they were
+  // written to, and a corpus pooled from several sessions can be a corpus of several
+  // contracts. A reader comparing two runs of this needs to know it.
+  const contracts = [...new Set(r.rows.map((row) => row.contract ?? "(no upstream object)"))];
+  out.push(`Contract judged against: ${contracts.map((c) => c.slice(0, 12)).join(", ")}`);
   return out.join("\n");
 }
 

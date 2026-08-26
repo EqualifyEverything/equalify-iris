@@ -12,12 +12,13 @@
 // no endpoint reaches it; it exists so that the number in #180 can be produced again after
 // `agents/feedback.md` changes.
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { basename, join, sep } from "node:path";
 import { loadConfig } from "../config.ts";
 import { Paths } from "../store/paths.ts";
 import { RunLog } from "../store/runlog.ts";
 import { ProviderRouter } from "../providers/index.ts";
-import { loadAgent } from "../agents/loader.ts";
+import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import type { InputImage, PipelineContext } from "../pipeline/context.ts";
 import type { Fragment } from "../pipeline/fragment.ts";
 import {
@@ -159,6 +160,60 @@ function passedImages(logPath: string): Set<string> {
   return passed;
 }
 
+// The agent versions a session actually ran, from its own log. `agent_call` records the
+// blob SHA of every library agent it invoked (loader.ts, PRD §7.3 version pinning), which
+// is what makes the drift below detectable at all.
+function agentShas(logPath: string): Map<string, string> {
+  const shas = new Map<string, string>();
+  if (!existsSync(logPath)) return shas;
+  for (const line of readFileSync(logPath, "utf8").split("\n")) {
+    if (!line.includes('"agent_call"')) continue;
+    try {
+      const e = JSON.parse(line) as { type?: string; agent?: string; agent_sha?: string | null };
+      if (e.type === "agent_call" && e.agent && e.agent_sha) shas.set(e.agent, e.agent_sha);
+    } catch {
+      // Same as above: a half-written last line is not an error here.
+    }
+  }
+  return shas;
+}
+
+// The contract a session's pages were written to, recovered from git by blob SHA.
+//
+// This is not a nicety. VERIFY is handed the agent's whole contract and judges the output
+// against it, so a page extracted months ago and judged against today's `agents/page.md`
+// can be rejected for breaking a rule that did not exist when it was written — and that
+// rejection would be counted as a false positive by a measurement whose whole subject is
+// false positives. The verifier stays current, because today's judge is what is being
+// measured; only the quoted contract goes back.
+//
+// Returns null when the session used the current version, when its log records no page
+// call, or when the blob is not in this checkout (a shallow clone, an agents/ directory
+// that is its own repo elsewhere). The caller says which.
+function historicalPageAgent(session: SessionDir, current: AgentSpec, paths: Paths): AgentSpec | null {
+  const sha = agentShas(join(session.dir, "log.jsonl")).get("page.md");
+  if (!sha || sha === current.sha) return null;
+  let content: string;
+  try {
+    content = execFileSync("git", ["-C", paths.agentsDir, "cat-file", "blob", sha], {
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 8 * 1024 * 1024,
+    }).toString();
+  } catch {
+    process.stderr.write(
+      `calibrate: ${session.id} ran page.md ${sha.slice(0, 12)}, which is not in this checkout — ` +
+        `its pages will be judged against the current contract, and a clean copy rejected for a ` +
+        `rule added since will look like a false positive\n`,
+    );
+    return null;
+  }
+  process.stdout.write(
+    `${session.id}: pages were written to page.md ${sha.slice(0, 12)} (current is ` +
+      `${current.sha?.slice(0, 12) ?? "unpinned"}) — judging them against that contract.\n`,
+  );
+  return { ...current, content, sha };
+}
+
 // A session directory, wherever it came from. Everything below reads files directly
 // rather than through `Paths`, because a session named by path may not live under the
 // configured data dir at all.
@@ -281,8 +336,12 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   const paths = new Paths(cfg);
 
-  const pages: CalibrationPage[] = [];
-  for (const spec of args.sessions) pages.push(...pagesFrom(resolveSession(spec, paths), args.allPages));
+  // Per session, because the contract attached below is per session.
+  const drawn = args.sessions.map((spec) => {
+    const session = resolveSession(spec, paths);
+    return { session, pages: pagesFrom(session, args.allPages) };
+  });
+  const pages: CalibrationPage[] = drawn.flatMap((d) => d.pages);
   if (!pages.length) {
     fail(
       args.allPages
@@ -302,18 +361,40 @@ async function main(): Promise<void> {
     return;
   }
 
-  const agent = loadAgent("page", { agentsDir: paths.agentsDir, tmpAgentsDir: paths.agentsDir });
+  // A session id of its own, so the calls this tool makes are in their own log rather than
+  // appended to the log of the run whose pages it borrowed.
+  const sessionId = `calibrate-${basename(args.sessions[0])}`;
+
+  // `tmpAgentsDir` is where a run keeps agents it built for itself, and `loadAgent` prefers
+  // it over the library. This tool has none, and pointing it at `agentsDir` would make every
+  // library agent load as session-built with a null SHA — which silently disables the drift
+  // check below, since a null SHA differs from every recorded one. So: a directory the
+  // calibration session does not have.
+  const library = { agentsDir: paths.agentsDir, tmpAgentsDir: paths.tmpAgentsDir(sessionId) };
+  const agent = loadAgent("page", library);
   if (!agent) fail(`no page agent in ${paths.agentsDir}`);
   // The Feedback Agent has to be there too, and its absence is the failure this tool must
   // not report as a result: `verifyAgentOutput` answers ok=true when it cannot load one,
   // which would come out as a verifier that passes everything.
-  if (!loadAgent("feedback", { agentsDir: paths.agentsDir, tmpAgentsDir: paths.agentsDir })) {
-    fail(`no feedback agent in ${paths.agentsDir} — every call would be unjudged`);
+  const feedback = loadAgent("feedback", library);
+  if (!feedback) fail(`no feedback agent in ${paths.agentsDir} — every call would be unjudged`);
+
+  // Each session's pages are judged against the contract they were written to, where this
+  // checkout still has it. The verifier is deliberately NOT rolled back — today's judge is
+  // the subject of the measurement — and a session that ran an older `feedback.md` is
+  // therefore expected, not corrected for.
+  for (const { session, pages: sessionPages } of drawn) {
+    const historical = historicalPageAgent(session, agent, paths);
+    if (historical) for (const page of sessionPages) page.agent = historical;
+    const ran = agentShas(join(session.dir, "log.jsonl")).get("feedback.md");
+    if (ran && ran !== feedback.sha) {
+      process.stdout.write(
+        `${session.id}: verified at the time by feedback.md ${ran.slice(0, 12)}; judging with the ` +
+          `current ${feedback.sha?.slice(0, 12) ?? "unpinned"}, which is the point of the measurement.\n`,
+      );
+    }
   }
 
-  // A session id of its own, so the calls this tool makes are in their own log rather than
-  // appended to the log of the run whose pages it borrowed.
-  const sessionId = `calibrate-${basename(args.sessions[0])}`;
   const sessionDir = join(cfg.storage.data_dir, "sessions", sessionId);
   // `RunLog` appends and does not create its directory — a real run's directory is made by
   // the upload. Nothing else here writes into the session, so this is the only mkdir.
@@ -331,7 +412,9 @@ async function main(): Promise<void> {
     extractionConcurrency: cfg.defaults.extraction_concurrency,
   };
 
-  process.stdout.write(`Verifying ${used.length} pages (clean + damaged). Log: ${logPath}\n`);
+  process.stdout.write(
+    `Verifying ${used.length} page${used.length === 1 ? "" : "s"} (clean + damaged). Log: ${logPath}\n`,
+  );
   const report = await calibrateVerifier(ctx, agent, used, {
     defects: args.defects,
     only: args.only,
