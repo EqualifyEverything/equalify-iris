@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { bodyLang, wrapDocument } from "../src/pipeline/assembly.ts";
 import { titledAs } from "../src/util/outputNames.ts";
-import { runAxe } from "../src/pipeline/lint.ts";
+import { runAxe, isKnownLanguage, languageListSource } from "../src/pipeline/lint.ts";
 
 // Issue #163: a document assembled from Korean pages was delivered as `<html lang="en">`.
 //
@@ -81,6 +81,39 @@ test("the shell's language is derived from the body only where every top-level e
       `<section lang="ko_KR"><p>가</p></section>`, null],
     ["a tag the canonicalizer refuses outright",
       `<section lang="ko-x"><p>가</p></section>`, null],
+    // #196: the country code written where the language code belongs. Well formed, in no alias
+    // table, and therefore repaired by nothing — so it reached the root untouched and put a
+    // SERIOUS `html-lang-valid` on the one element this project writes, which is the regression
+    // the shape check was added to prevent. It is the commonest wrong-but-well-formed `lang` in
+    // real HTML and a plausible answer to "use the BCP 47 tag" from a model reading a Chinese page.
+    ["a country code is not a language code",
+      `<section lang="cn"><p>报告</p></section>`, null],
+    ["nor is the one for Japan",
+      `<section lang="jp"><p>報告</p></section>`, null],
+    ["nor Czechia, Denmark, Greece, Ukraine, Vietnam or Israel",
+      `<section lang="cz"><p>zpráva</p></section>`, null],
+    // Shaped like a tag, in no registry: the same gap from the other end, and the reason the
+    // question is now put to a list rather than to a pattern.
+    ["three letters that are not a language",
+      `<section lang="xxy"><p>text</p></section>`, null],
+    ["nor are these",
+      `<section lang="zzz"><p>text</p></section>`, null],
+    // The trap this cannot close, recorded so nobody mistakes the guard for more than it is:
+    // `kr`, `se` and `no` ARE languages (Kanuri, Northern Sami, Norwegian) as well as being the
+    // country codes for Korea, Sweden and Norway. A Korean page that writes `lang="kr"` gets a
+    // Kanuri root, and nothing here can know that: the value is a language, the linter accepts
+    // it, and refusing it would refuse the derivation to every real Kanuri document. What catches
+    // it is the review loop rewriting the fragment's own `lang`, or nothing.
+    ["a code that is both a country code and a language is a language",
+      `<section lang="kr"><p>text</p></section>`, "kr"],
+    // The other direction, and the reason the list is axe's own rather than CLDR's display data:
+    // the obscure end of ISO 639-3 is in the registry the linter validates against but has no
+    // English name in CLDR. A proxy would refuse these, and refusing means the document is
+    // announced as English — a small language's document losing its voice to save a lookup.
+    ["a language with no English name is still a language",
+      `<section lang="aaa"><p>text</p></section>`, "aaa"],
+    ["ditto",
+      `<section lang="ttj"><p>text</p></section>`, "ttj"],
     // Well formed, accepted by axe, and not an answer to "what language is this document in". As a
     // default human language they are the same kind of non-answer as `lang="Korean"`; a screen
     // reader given one falls back to its own default, and `en` is at least a language a voice can
@@ -184,6 +217,11 @@ test("the shell's language is derived from the body only where every top-level e
 // written — a body issue the review loop can correct, which is not something the root should paper
 // over — while the first two say the root itself is never the violation.
 test("every language the shell will declare is one the linter accepts", async () => {
+  // #196 is why this list is long rather than illustrative. The guard had been widened three times
+  // — the shape check, then the alias table, then NOT_AN_ANSWER — and each pass closed the
+  // instances that had been demonstrated to it without asking the question the linter asks, so the
+  // next unexamined class shipped a serious violation on the root. Every row here is one runAxe
+  // call against the assembled shell, which is the only thing that can say the property holds.
   for (const [written, root, fragmentFlagged] of [
     ["ko", "ko", false], ["zh-Hans", "zh-Hans", false], ["pt-BR", "pt-BR", false],
     ["haw", "haw", false], ["chr", "chr", false],
@@ -191,6 +229,24 @@ test("every language the shell will declare is one the linter accepts", async ()
     ["kor", "ko", true], ["spa", "es", true], ["eng", "en", true],
     // A deprecated two-letter code axe happens to accept is still delivered in its preferred form.
     ["iw", "he", false],
+    // Repairs that change more than the spelling of the primary subtag, and are still repairs the
+    // linter accepts on the root.
+    ["sh", "sr-Latn", false], ["art-lojban", "jbo", false], ["tl", "fil", false], ["in", "id", false],
+    // The #196 class: refused here, so the root is a clean `en` while the fragment keeps the answer
+    // it wrote and is reported for it — a body issue the review loop can correct, which is where a
+    // wrong `lang` should be reported rather than on the element this project writes.
+    ["cn", "en", true], ["jp", "en", true], ["cz", "en", true], ["dk", "en", true],
+    ["gr", "en", true], ["ua", "en", true], ["vn", "en", true],
+    ["xxy", "en", true], ["zzz", "en", true],
+    // Accepted, and the rows that say the list is axe's own and not a proxy for it: no English name
+    // in CLDR, in the registry axe validates against, clean on the root.
+    ["aaa", "aaa", false], ["ttj", "ttj", false], ["lns", "lns", false],
+    // A language that is also a country code. Accepted, because it IS a language — see the note in
+    // the derivation test above for what that costs and why nothing here can do better.
+    ["kr", "kr", false], ["se", "se", false],
+    // Well formed, in the registry, and refused anyway: not an answer to "what language is this
+    // document in". The linter accepts all four, which is exactly why they are refused here.
+    ["und", "en", false], ["zxx", "en", false], ["mul", "en", false], ["qaa", "en", false],
     // And the ones that derive nothing, where the root has to be a clean `en` all the same.
     ["Korean", "en", true], ["ko_KR", "en", true],
   ] as [string, string, boolean][]) {
@@ -203,6 +259,29 @@ test("every language the shell will declare is one the linter accepts", async ()
     assert.equal(ids.includes("valid-lang"), fragmentFlagged,
       `lang="${written}": the fragment's own attribute should ${fragmentFlagged ? "" : "not "}be reported`);
   }
+});
+
+// Which of the two lists answered "is this a language". The primary one is axe's own — the list
+// `html-lang-valid` validates against, read out of the same pinned dependency the gate runs — and it
+// is reached through `axe.utils`, a runtime export axe's .d.ts does not declare and its semver does
+// not cover. So an axe bump that drops it downgrades the derivation to CLDR display data, which has
+// no name for part of the obscure end of ISO 639-3 and would therefore refuse those documents a root
+// language. That is a silent narrowing of who gets a correctly labelled document, and this is the
+// row that makes it loud instead.
+test("the language list is the linter's own, not the fallback", () => {
+  assert.equal(languageListSource, "axe", "axe.utils.validLangs() is unreachable; see the fallback note in lint.ts");
+  // Cheap sanity on the list itself, in the two directions that matter: a truncated list would
+  // refuse every language and read as the guard working, and a list of everything would accept the
+  // #196 class straight back onto the root.
+  for (const yes of ["ko", "en", "haw", "aaa", "ttj", "jbo", "sr"]) {
+    assert.ok(isKnownLanguage(yes), `${yes} should be a language the linter knows`);
+  }
+  for (const no of ["cn", "jp", "xxy", "zzz", "korean", ""]) {
+    assert.ok(!isKnownLanguage(no), `${no} should not be`);
+  }
+  // Case-folded, because a canonical primary subtag is lowercase but the value a page wrote is not
+  // necessarily (`KO`, which axe accepts and this derivation carries through as written).
+  assert.ok(isKnownLanguage("KO"));
 });
 
 // #163's fix labelled the shell's `<title lang="en">` on a non-English document, and the served
