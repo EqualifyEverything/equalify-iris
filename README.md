@@ -823,9 +823,9 @@ number equally well: the extraction really does need correcting on most pages, o
 calibrated to find something and finds something. The verdict cannot answer that about itself.
 
 `src/tools/calibrate.ts` asks from outside. It takes pages the verifier already passed, damages
-exactly one thing in a copy of each (`src/pipeline/calibration.ts` — a dropped table row, a
-changed number in a cell, a removed heading, a demoted heading, missing alt text, two paragraphs
-swapped, a truncated tail), and puts both copies back to the same verifier against the same
+exactly one thing in a copy of each (`src/pipeline/calibration.ts` — a dropped table row, a whole
+table dropped, a changed number in a cell, a removed heading, a demoted heading, missing alt text,
+two paragraphs swapped, a truncated tail), and puts both copies back to the same verifier against the same
 image. Out come two rates that have to be read together: how often it **passes the clean copy**
 (its false-positive rate) and how often it **catches the injected defect and names the right
 kind**, per defect type. A judge that rejects everything scores a perfect true-positive rate and
@@ -883,7 +883,9 @@ it is why the report scores "said but did not flag" in its own column instead of
 miss: the two failures point at different repairs.
 
 Small corpus — 11 pages over 3 documents, and two of the defects were exercised on a single page
-each — so treat the per-defect rates as directional. Both runs of it produced identical totals.
+each — so treat the per-defect rates as directional. Both runs of it produced identical totals, and
+the dry run over the same five sessions still reports the same 11 pages and 30 damaged copies after
+the injector guards were tightened, so these numbers are the current code's.
 
 ## Automated code review
 

@@ -51,9 +51,23 @@ export interface DefectSpec {
   damage(html: string): string | null;
 }
 
-function parse(html: string): Document | null {
+// A page opened for damage, with the string its own untouched parse serializes to.
+//
+// The baseline is the whole point of returning a pair. The comparison that decides whether
+// an injector did anything has to be like for like: jsdom re-serializes a fragment even
+// when nothing was mutated — a `<table>` without `<tbody>` gains one, `&mdash;` becomes an
+// em dash, attribute quoting and case are normalized — so comparing the output against the
+// RAW fragment passes any injector that merely parsed the page. Comparing against the
+// clean parse's own serialization measures the mutation and nothing else.
+interface Opened {
+  doc: Document;
+  baseline: string;
+}
+
+function parse(html: string): Opened | null {
   try {
-    return new JSDOM(`<body>${html}</body>`, { virtualConsole: new VirtualConsole() }).window.document;
+    const doc = new JSDOM(`<body>${html}</body>`, { virtualConsole: new VirtualConsole() }).window.document;
+    return { doc, baseline: doc.body.innerHTML };
   } catch {
     return null;
   }
@@ -63,9 +77,9 @@ function parse(html: string): Document | null {
 // nothing. An injector that silently returns its input would be counted as a defect the
 // verifier missed, which is the one direction of error this whole measurement cannot
 // afford — it would read as the verifier failing a test it was never given.
-function serialize(doc: Document, original: string): string | null {
-  const out = doc.body.innerHTML;
-  return out.trim() && out !== original ? out : null;
+function serialize(open: Opened): string | null {
+  const out = open.doc.body.innerHTML;
+  return out.trim() && out !== open.baseline ? out : null;
 }
 
 // Elements in document order, as a plain array (a NodeList is live for some queries and
@@ -75,6 +89,12 @@ function all<T extends Element>(doc: Document, selector: string): T[] {
 }
 
 const HEADINGS = "h1, h2, h3, h4, h5, h6";
+
+// An element's text with whitespace collapsed, for the one injector that has to ask whether
+// a reader could tell the difference.
+function text(el: Element): string {
+  return (el.textContent ?? "").replace(/\s+/g, " ").trim();
+}
 
 // Rows that carry data rather than headers. A row of nothing but `<th>` is the header row,
 // and dropping it is a different defect (structure, not content) that this list does not
@@ -106,8 +126,9 @@ export const DEFECTS: DefectSpec[] = [
     // The row's words are gone from the document; nothing about it is merely restructured.
     expects: ["content_missing"],
     damage(html) {
-      const doc = parse(html);
-      if (!doc) return null;
+      const open = parse(html);
+      if (!open) return null;
+      const { doc } = open;
       for (const table of all(doc, "table")) {
         const rows = bodyRows(table);
         // Two, so the table still reads as a table afterwards: removing the only data row
@@ -115,7 +136,7 @@ export const DEFECTS: DefectSpec[] = [
         // "drop the whole table" case below already covers better.
         if (rows.length < 2) continue;
         rows[rows.length - 1].remove();
-        return serialize(doc, html);
+        return serialize(open);
       }
       return null;
     },
@@ -125,12 +146,13 @@ export const DEFECTS: DefectSpec[] = [
     what: "the first table is removed entirely",
     expects: ["content_missing"],
     damage(html) {
-      const doc = parse(html);
-      if (!doc) return null;
+      const open = parse(html);
+      if (!open) return null;
+      const { doc } = open;
       const table = doc.querySelector("table");
       if (!table) return null;
       table.remove();
-      return serialize(doc, html);
+      return serialize(open);
     },
   },
   {
@@ -141,8 +163,9 @@ export const DEFECTS: DefectSpec[] = [
     // matters most in the documents Iris takes as input — a torque figure, a dose, a price.
     expects: ["content_wrong"],
     damage(html) {
-      const doc = parse(html);
-      if (!doc) return null;
+      const open = parse(html);
+      if (!open) return null;
+      const { doc } = open;
       for (const cell of all(doc, "td, th")) {
         const text = cell.textContent ?? "";
         const m = /\d+/.exec(text);
@@ -166,7 +189,7 @@ export const DEFECTS: DefectSpec[] = [
           for (const child of Array.from(node.childNodes)) if (walk(child)) return true;
           return false;
         };
-        if (walk(cell)) return serialize(doc, html);
+        if (walk(cell)) return serialize(open);
       }
       return null;
     },
@@ -178,15 +201,16 @@ export const DEFECTS: DefectSpec[] = [
     // verifier that saw the defect.
     expects: ["content_missing", "structure_wrong"],
     damage(html) {
-      const doc = parse(html);
-      if (!doc) return null;
+      const open = parse(html);
+      if (!open) return null;
+      const { doc } = open;
       const headings = all(doc, HEADINGS);
       if (!headings.length) return null;
       // The second where there is one: removing the only heading on a page is also the
       // hardest case to attribute, since a page whose title is its first line legitimately
       // renders without one.
       (headings[1] ?? headings[0]).remove();
-      return serialize(doc, html);
+      return serialize(open);
     },
   },
   {
@@ -197,13 +221,14 @@ export const DEFECTS: DefectSpec[] = [
     // that the gate can catch without the verifier — which is worth knowing separately.
     expects: ["structure_wrong"],
     damage(html) {
-      const doc = parse(html);
-      if (!doc) return null;
+      const open = parse(html);
+      if (!open) return null;
+      const { doc } = open;
       for (const h of all(doc, HEADINGS)) {
         const level = Number(h.tagName[1]);
         if (level > 4) continue; // no room to demote by two
         rename(doc, h, `h${level + 2}`);
-        return serialize(doc, html);
+        return serialize(open);
       }
       return null;
     },
@@ -215,14 +240,15 @@ export const DEFECTS: DefectSpec[] = [
     // attribute at all is the accessibility defect, and both are verdicts that saw it.
     expects: ["a11y_only", "alt_quality"],
     damage(html) {
-      const doc = parse(html);
-      if (!doc) return null;
+      const open = parse(html);
+      if (!open) return null;
+      const { doc } = open;
       // A non-empty alt: `alt=""` is correct markup for a decorative image, so removing
       // that one is a defect the verifier is right to weigh differently.
       const img = all(doc, "img").find((i) => (i.getAttribute("alt") ?? "").trim());
       if (!img) return null;
       img.removeAttribute("alt");
-      return serialize(doc, html);
+      return serialize(open);
     },
   },
   {
@@ -232,13 +258,20 @@ export const DEFECTS: DefectSpec[] = [
     // word-counting check cannot see: both paragraphs are present, in the wrong order.
     expects: ["structure_wrong", "content_wrong"],
     damage(html) {
-      const doc = parse(html);
-      if (!doc) return null;
+      const open = parse(html);
+      if (!open) return null;
+      const { doc } = open;
       for (const p of all(doc, "p")) {
         const next = p.nextElementSibling;
         if (!next || next.tagName.toLowerCase() !== "p") continue;
+        // Two paragraphs that read the same are the one pair whose order carries nothing:
+        // a page whose columns both end in "(continued)" would be swapped, serialize to a
+        // different string, and be scored as a reading-order defect the verifier missed —
+        // for a document that reads identically either way. The verifier would be right,
+        // and the measurement wrong, which is the error this file cannot afford.
+        if (!text(p) || !text(next) || text(p) === text(next)) continue;
         p.parentNode?.insertBefore(next, p);
-        return serialize(doc, html);
+        return serialize(open);
       }
       return null;
     },
@@ -251,8 +284,9 @@ export const DEFECTS: DefectSpec[] = [
     // [page not fully transcribed] marker about. Here it arrives with no marker.
     expects: ["content_missing"],
     damage(html) {
-      const doc = parse(html);
-      if (!doc) return null;
+      const open = parse(html);
+      if (!open) return null;
+      const { doc } = open;
       // Top level as the model wrote it, and one level in where the page is wrapped in a
       // single container (`<article>`, `<main>`, a `<div>`) — otherwise the whole page is
       // one child and the third to drop is either nothing or everything.
@@ -261,7 +295,7 @@ export const DEFECTS: DefectSpec[] = [
       if (blocks.length < 3) return null;
       const keep = Math.ceil((blocks.length * 2) / 3);
       for (const el of blocks.slice(keep)) el.remove();
-      return serialize(doc, html);
+      return serialize(open);
     },
   },
 ];
@@ -287,8 +321,9 @@ export interface Judgement {
   problems: string[];
   kinds: VerifyKind[];
   untagged: number;
-  // The call produced no judgement at all — no Feedback Agent, nothing to verify, or a
-  // reply that could not be parsed. `verifyAgentOutput` answers ok=true in those cases so
+  // The call produced no judgement at all — no Feedback Agent, nothing to verify, a reply
+  // that could not be parsed, or a call that threw (those are also listed in
+  // `CalibrationReport.errors`). `verifyAgentOutput` answers ok=true in the first three so
   // that verification never breaks a run, which means "passed" and "could not be judged"
   // are the same observation at that interface. Counting the second as a pass would
   // overstate exactly the number this file exists to measure, so it is carried separately
@@ -338,6 +373,10 @@ export interface CalibrationReport {
   // Pages no defect applied to, with the reason. Read with `pages`: a report over 20 pages
   // where 6 were skipped is a report over 14.
   skipped: { image: string; reason: string }[];
+  // Calls that threw — a throttled request, a timeout, a provider that refused. Each one is
+  // counted unjudged above and listed here, because a run whose numbers rest on 40 calls of
+  // which 12 never happened is a different run and only this says so.
+  errors: { image: string; defect: string | null; message: string }[];
 }
 
 // The same test the pipeline applies before it spends a correction call
@@ -408,12 +447,29 @@ export async function calibrateVerifier(
     for (const a of p.applicable) calls.push({ pageIndex, defect: a.defect, html: a.html });
   });
 
+  // A call that failed outright, kept so the report can say so. `mapWithConcurrency`
+  // rejects on the first failing call, and a run of this is paid for call by call: one
+  // throttled or timed-out request an hour in would otherwise throw away every verdict
+  // already bought. So each call catches its own error and comes back unjudged, which is
+  // the honest reading — nothing judged that copy — and is already excluded from both
+  // rates. Counted separately from an unparseable reply because the fix is different: one
+  // is a provider to retry, the other is a verifier to fix.
+  const errors: { image: string; defect: string | null; message: string }[] = [];
+
   const verdicts = await mapWithConcurrency(calls, limit, async (call) => {
     const page = plan[call.pageIndex].page;
-    // The page's own contract where it has one, so a clean copy is judged against the
-    // rules it was written to and not against rules added since.
-    const verdict = await verifyAgentOutput(ctx, page.agent ?? agent, page.image, [{ html: call.html }]);
-    return judge(verdict);
+    try {
+      // The page's own contract where it has one, so a clean copy is judged against the
+      // rules it was written to and not against rules added since.
+      const verdict = await verifyAgentOutput(ctx, page.agent ?? agent, page.image, [{ html: call.html }]);
+      return judge(verdict);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      const defect = call.defect?.id ?? null;
+      errors.push({ image: page.image.name, defect, message });
+      ctx.log.event("calibrate_call_failed", { image: page.image.name, defect, error: message });
+      return { ok: true, problems: [], kinds: [], untagged: 0, unjudged: true };
+    }
   });
 
   const rows: CalibrationRow[] = [];
@@ -453,7 +509,7 @@ export async function calibrateVerifier(
     }
   });
 
-  return { pages: pages.length, rows, clean, perDefect, skipped };
+  return { pages: pages.length, rows, clean, perDefect, skipped, errors };
 }
 
 const pct = (n: number, of: number): string => (of === 0 ? "n/a" : `${Math.round((n / of) * 100)}%`);
@@ -519,12 +575,26 @@ export function formatCalibration(r: CalibrationReport): string {
   // first defect that applies to it, so a zero here can mean the corpus had nowhere to put
   // this defect OR that the rotation never got to it. The tool's dry run separates those
   // two; a reader of the report only needs to know the row was not measured.
-  const never = DEFECTS.filter((d) => (r.perDefect[d.id]?.applied ?? 0) === 0).map((d) => d.id);
+  //
+  // Only over the defects this run considered, which is what `perDefect` has a key for: a
+  // `--only drop_table` run listing the other seven as "never applied" would be reporting
+  // its own argument back as a gap.
+  const never = DEFECTS.filter((d) => r.perDefect[d.id] && r.perDefect[d.id].applied === 0).map((d) => d.id);
   if (never.length) out.push(`Never applied in this run (not measured): ${never.join(", ")}`);
   if (r.skipped.length) out.push(`Pages with no applicable defect: ${r.skipped.length} of ${r.pages}`);
   if (totals.unjudged || r.clean.unjudged) {
     out.push(
       `Unjudged calls are excluded from every rate above: ${r.clean.unjudged} clean, ${totals.unjudged} damaged.`,
+    );
+  }
+  // First and worst: a run that lost calls to the provider has smaller denominators than
+  // its page count suggests, and the message is what says whether re-running would help.
+  if (r.errors.length) {
+    const shown = r.errors.slice(0, 3);
+    out.push(
+      `${r.errors.length} call${r.errors.length === 1 ? " failed and is" : "s failed and are"} counted unjudged: ` +
+        shown.map((e) => `${e.image}${e.defect ? `/${e.defect}` : " (clean)"}: ${e.message}`).join("; ") +
+        (r.errors.length > shown.length ? ` (and ${r.errors.length - shown.length} more)` : ""),
     );
   }
   // Which contract each page was judged against. Not decoration: the clean-copy rate is

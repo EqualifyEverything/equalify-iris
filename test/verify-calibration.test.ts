@@ -56,6 +56,15 @@ function words(html: string): string[] {
   return out;
 }
 
+// The fragment as jsdom re-serializes it, untouched. This and not the raw input is the
+// string an injector has to differ from: parsing alone rewrites a fragment — a `<table>`
+// without `<tbody>` gains one, `&mdash;` becomes an em dash, attribute quoting is
+// normalized — so an injector that mutated nothing still returns something unequal to its
+// input, and a test comparing against the input would pass it.
+function reserialize(html: string): string {
+  return new JSDOM(`<body>${html}</body>`, { virtualConsole: new VirtualConsole() }).window.document.body.innerHTML;
+}
+
 function count(html: string, selector: string): number {
   const doc = new JSDOM(`<body>${html}</body>`, { virtualConsole: new VirtualConsole() }).window.document;
   return doc.querySelectorAll(selector).length;
@@ -113,14 +122,36 @@ test("no injector ever returns its input unchanged", () => {
     "<div><p>wrapped alone</p></div>",
     "<p>2019 in prose, not a cell</p>",
     "<table><tr><td>no digits</td></tr><tr><td>none here</td></tr></table>",
+    // Two paragraphs that read the same, in a fragment jsdom rewrites on the way through
+    // (no `<tbody>`, an entity). Swapping them is a no-op a reader could never notice, and
+    // comparing the result against the raw input would call it a defect anyway.
+    "<p>(continued)</p><p>(continued)</p><table><tr><td>7 &mdash; 8</td></tr></table>",
+    "<p>same</p>\n<p>same</p>",
+    "<p></p><p>after an empty one</p>",
   ];
   for (const d of DEFECTS) {
     for (const html of shapes) {
       const out = d.damage(html);
       if (out === null) continue;
-      assert.notEqual(out, html, `${d.id} returned its input for: ${html.slice(0, 40)}`);
+      // Against the re-serialized clean parse, not `html`: the point is the mutation, and
+      // an injector that only parsed the page must come back null.
+      assert.notEqual(out, reserialize(html), `${d.id} changed nothing for: ${html.slice(0, 40)}`);
       assert.ok(out.trim().length > 0, `${d.id} returned blank for: ${html.slice(0, 40)}`);
     }
+  }
+});
+
+test("parsing alone is not damage: the injectors compare against their own clean parse", () => {
+  // The bug this pins: jsdom's serialization of an untouched fragment differs from the
+  // fragment, so `out !== original` is satisfied by doing nothing at all. Here every
+  // difference below is jsdom's, so every injector that finds nothing to change must return
+  // null — and one that returns a string must have changed something jsdom did not.
+  const rewritten = "<table><tr><td>7 &mdash; 8</td></tr><tr><td>9</td></tr></table>";
+  assert.notEqual(reserialize(rewritten), rewritten, "the fixture is one jsdom rewrites");
+  for (const d of DEFECTS) {
+    const out = d.damage(rewritten);
+    if (out === null) continue;
+    assert.notEqual(out, reserialize(rewritten), `${d.id} returned a parse rather than a mutation`);
   }
 });
 
@@ -250,6 +281,23 @@ test("swap_paragraphs reverses reading order and loses nothing", () => {
   // other blocks, is declined rather than reordered across a heading.
   assert.equal(defect("swap_paragraphs").damage("<p>one</p>"), null);
   assert.equal(defect("swap_paragraphs").damage("<p>one</p><h2>b</h2><p>two</p>"), null);
+
+  // Two paragraphs that read the same are declined too, and this is the case that would
+  // otherwise be scored as a miss: the document is unchanged for any reader, so a verifier
+  // answering "faithful" is right, and the report would call it wrong. Real pages have
+  // them — repeated "(continued)" markers, a column of blank-looking labels.
+  assert.equal(defect("swap_paragraphs").damage("<p>(continued)</p><p>(continued)</p>"), null);
+  assert.equal(defect("swap_paragraphs").damage("<p>same</p>\n<p>  same  </p>"), null, "whitespace is not text");
+  // Same text, different markup: still nothing a reader of the page could notice.
+  assert.equal(defect("swap_paragraphs").damage("<p><em>x</em></p><p>x</p>"), null);
+  // An empty paragraph beside a real one moves nothing a reader can see either.
+  assert.equal(defect("swap_paragraphs").damage("<p></p><p>after an empty one</p>"), null);
+  // But the next differing pair along is still fair game, so one repeated pair does not
+  // make the whole page undamageable. Here the second "same" and "one" are the first pair
+  // that reads differently, and they are the ones swapped.
+  const later = defect("swap_paragraphs").damage("<p>same</p><p>same</p><p>one</p>");
+  assert.ok(later);
+  assert.equal(later, "<p>same</p><p>one</p><p>same</p>");
 });
 
 test("truncate_tail drops the last third, and unwraps a single container first", () => {
@@ -517,6 +565,45 @@ test("calls that produced no judgement are excluded from every rate", async () =
   assert.match(text, /Unjudged calls are excluded from every rate above: 1 clean, 1 damaged/);
   // n/a rather than 0%: a rate over nothing is not zero.
   assert.match(text, /false-positive rate n\/a/);
+});
+
+test("one failed call is unjudged and named, not the end of a paid run", async () => {
+  // A run of this is bought call by call, and `mapWithConcurrency` rejects on the first
+  // failing one — so a single throttled request an hour in would throw away every verdict
+  // already paid for. Each call catches its own error instead, comes back unjudged (nothing
+  // judged that copy, which is the honest reading and is excluded from both rates), and is
+  // listed in the report, because numbers resting on calls that never happened are not the
+  // numbers the page count implies.
+  const flaky: Stub = {
+    reply: (html) => {
+      if (html !== RICH) throw new Error("ThrottlingException: rate exceeded");
+      return JSON.stringify({ faithful: true, accessible: true, problems: [] });
+    },
+  };
+  const { report } = await run([{ name: "p1.png", html: RICH }], flaky, { only: ["drop_table"] });
+  assert.equal(report.clean.passed, 1, "the clean copy was bought and still counts");
+  const tally = report.perDefect["drop_table"];
+  assert.equal(tally.applied, 1);
+  assert.equal(tally.unjudged, 1);
+  assert.equal(tally.caught, 0, "and not a miss: nobody looked");
+  assert.equal(report.errors.length, 1);
+  assert.equal(report.errors[0].defect, "drop_table");
+  assert.match(report.errors[0].message, /ThrottlingException/);
+  const text = formatCalibration(report);
+  assert.match(text, /1 call failed and is counted unjudged: p1\.png\/drop_table: ThrottlingException/);
+  assert.match(text, /Unjudged calls are excluded from every rate above: 0 clean, 1 damaged/);
+});
+
+test("--only reports the defects it ran, and does not call the rest unmeasured", async () => {
+  // A `--only drop_table` run listing the other seven under "never applied in this run"
+  // would be reporting its own argument back to the reader as a gap in the corpus.
+  const { report } = await run([{ name: "p1.png", html: RICH }], perfect([RICH]), { only: ["drop_table"] });
+  assert.deepEqual(Object.keys(report.perDefect), ["drop_table"]);
+  const text = formatCalibration(report);
+  assert.ok(!text.includes("Never applied in this run"), text);
+  for (const id of DEFECT_IDS.filter((i) => i !== "drop_table")) {
+    assert.ok(!text.includes(id), `${id} was not part of this run and is not in its report`);
+  }
 });
 
 test("a reply the verifier could not be read from is unjudged, not a pass", async () => {

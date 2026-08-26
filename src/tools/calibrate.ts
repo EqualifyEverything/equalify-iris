@@ -145,14 +145,22 @@ function fail(message: string): never {
 // The images a session's log says the verifier passed. `page_verify_ok` is written once
 // per page whose first verify came back with nothing to correct (extraction.ts), so this
 // is exactly the population #180 asks for, taken from the record rather than re-derived.
+//
+// Except for one case the event does not distinguish by itself: verification is
+// non-blocking, so a page nobody could judge — no Feedback Agent, a reply that would not
+// parse — also writes `page_verify_ok`. Those pages are not evidence that the verifier
+// passed anything, and selecting them would put pages the verifier never had an opinion
+// about into a false-positive rate. Runs from this version on mark them `unjudged: true`
+// and they are dropped here; older logs cannot say, and their unjudged pages come out as
+// unjudged clean copies in the report, excluded from the rates there instead.
 function passedImages(logPath: string): Set<string> {
   const passed = new Set<string>();
   if (!existsSync(logPath)) return passed;
   for (const line of readFileSync(logPath, "utf8").split("\n")) {
     if (!line.includes("page_verify_ok")) continue;
     try {
-      const entry = JSON.parse(line) as { type?: string; image?: string };
-      if (entry.type === "page_verify_ok" && entry.image) passed.add(entry.image);
+      const entry = JSON.parse(line) as { type?: string; image?: string; unjudged?: boolean };
+      if (entry.type === "page_verify_ok" && entry.image && !entry.unjudged) passed.add(entry.image);
     } catch {
       // A truncated last line in a log that was being written is not an error here.
     }
