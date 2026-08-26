@@ -333,6 +333,11 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // naming the whole sheet is another way of saying it is empty.
     "Page is blank. A few specks. Not legible text on the page.",
     "Page is blank. A few specks. Not legible text at all.",
+    "Page is blank. A few specks. Not legible text visible.",
+    "Page is blank. Only scanner dust; not legible text of any sort.",
+    "Page is blank. A few specks. Not legible text anywhere on the page.",
+    // A line break ends a clause as a full stop does: these logs are written as loose notes.
+    "Page is blank. A few specks.\nNot legible text\nNo page-break marker is emitted.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -413,6 +418,10 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. A few specks are visible. There is a handwritten note that does not resolve into words.",
     "Page is blank. Some dust. But the graphic does not resolve into words.",
     "Page is blank. Some dust. And the barcode does not resolve into words.",
+    // Inversion is the third form of that door, so `nor`/`neither` are prefixes and a bare `does` has
+    // to carry its `not`.
+    "Page is blank. Some dust. Nor does the barcode resolve into words.",
+    "Page is blank. Some dust. Nor the handwriting resolves into words.",
     // Where a name for text sits on the far side of `not legible`, the gap cannot see it. Being told
     // WHERE it is is what separates it from a denial: text in the margin is something the page bears.
     // What may follow is a whitelist and not a list of the prepositions that refuse, so the
@@ -422,6 +431,11 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. Scanner dust only; not legible writing along the edge.",
     "Page is blank. A few specks. Not legible writing over the seal.",
     "Page is blank. A few specks. Not legible print between the lines.",
+    // And a whitelisted tail may not carry a placement in behind it: `visible` is a denial where the
+    // clause ends there and a hole where it goes on to say where.
+    "Page is blank. A few specks. Not legible text visible in the margin.",
+    "Page is blank. A few specks. Not legible text anywhere in the margin.",
+    "Page is blank. A few specks. Not legible text on the page in the margin.",
     // `nothing but the text` affirms the text. A negative word ahead of a name for text does not make
     // it a denial when the negative is spent on the exception.
     "Page is blank. Dust and specks, nothing but the handwriting, which does not resolve into words.",

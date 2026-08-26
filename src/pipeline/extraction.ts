@@ -656,15 +656,20 @@ const MARKS_GAP = String.raw`(?:(?!${NEGATED}\b(?:${TEXT_NOUN})\b)[^.;])*`;
 // because those three are how a new subject gets across a boundary that a determiner cannot: "It is a
 // photograph that does not resolve into detail", "There is a handwritten note that does not resolve
 // into words", "But the graphic does not resolve into words" — all three name a page object, and all
-// three opened with a word that looked like a back-reference.
+// three opened with a word that looked like a back-reference. Bare `does|do|did` has to stay, for the
+// subject-less "Does not resolve into printed words.", so it carries its `not` too — otherwise the
+// inverted form is the same door again ("Nor does the barcode resolve into words"). `nor` and
+// `neither` are prefixes only for the same reason: inversion is what they are for, and a bare one
+// swallowed the subject that followed it.
 const CONT_CORE =
   String.raw`(?:(?:they|these|those)\b` +
   String.raw`|(?:it|this)\s+(?:doesn'?t|isn'?t|wasn'?t)\b` +
   String.raw`|(?:it|this)\s+(?:does|do|did|is|was)\s+(?=not\b)` +
   String.raw`|there\s+(?:is|are|was|were)\s+(?:no|none|nothing)\b` +
-  String.raw`|(?:does|do|did|no|none|nothing|not|nor|neither)\b` +
+  String.raw`|(?:does|do|did)\s+(?=not\b)` +
+  String.raw`|(?:no|none|nothing|not)\b` +
   String.raw`|(?:the|these|those|their)\s+(?:(?:${MARK_MODIFIER})[\s/-]+)*(?:${MARK})\b)`;
-const CONTINUATION = String.raw`(?:(?:and|but|only|just|also|so|then|nor)\s+)?${CONT_CORE}`;
+const CONTINUATION = String.raw`(?:(?:and|but|only|just|also|so|then|nor|neither)\s+)?${CONT_CORE}`;
 const MARKS_ANCHOR = String.raw`(?<=\b(?:${MARK})\b${MARKS_GAP}(?:[.;]\s*(?:${CONTINUATION}${MARKS_GAP})?)?)`;
 // "…specks/dots … do not resolve into any characters": `resolve` is in `UNREADABLE_LOG` for "could
 // not resolve", and a destination after it turns the sentence into a denial that the marks are
@@ -684,11 +689,21 @@ const MARKS_NOT_TEXT = new RegExp(`${MARKS_ANCHOR}\\bresolves?\\s+(?:in)?to\\b`,
 // ("not legible text on the page" is another way of saying the sheet is empty). Anything else refuses,
 // which is the way round that costs a glance — a list of the prepositions that refuse would let the
 // preposition nobody thought of ("not legible writing over the seal") cost the page instead.
+//
+// A line break ends a clause here as a full stop does, because these logs are written as loose notes
+// ("Not legible text\nNo page-break marker is emitted"). And every branch but `or`/`and`/`nor` has to
+// reach a clause end itself, or the whitelisted word would carry a placement in behind it: `visible`
+// is a denial in "not legible text visible." and a hole in "not legible text visible in the margin".
 const SUBSTRATE = String.raw`(?:page|sheet|scan|paper|image|document|leaf)s?`;
+const CLAUSE_END = String.raw`(?=[ \t]*(?:[.,;:)!\n]|$))`;
+const ON_SUBSTRATE = String.raw`(?:\s+(?:in|on|across)\s+(?:the\s+|this\s+)?${SUBSTRATE}\b)`;
 const DENIAL_TAIL =
-  String.raw`(?:\s*(?:[.,;:)!]|$)` +
-  String.raw`|\s+(?:or|and|nor|either|whatsoever|anywhere|at all|of any kind|either)\b` +
-  String.raw`|\s+(?:in|on|across|anywhere in|anywhere on)\s+(?:the\s+|this\s+)?${SUBSTRATE}\b)`;
+  String.raw`(?:${CLAUSE_END}` +
+  String.raw`|\s+(?:or|and|nor|either)\b` +
+  String.raw`|\s+(?:at all|whatsoever|of any (?:kind|sort|type))${CLAUSE_END}` +
+  String.raw`|\s+(?:visible|present|discernible|apparent|detected|seen|found)${CLAUSE_END}` +
+  String.raw`|\s+anywhere(?:${ON_SUBSTRATE})?${CLAUSE_END}` +
+  String.raw`|${ON_SUBSTRATE}${CLAUSE_END})`;
 const NOT_LEGIBLE_TEXT = new RegExp(
   `${MARKS_ANCHOR}\\bnot legible` +
     `(?=\\s+(?:text|content|words?|characters?|print(?:ed|ing)?|writing|markings?)\\b${DENIAL_TAIL})`,
