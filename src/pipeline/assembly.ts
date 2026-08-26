@@ -1,4 +1,5 @@
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
+import { cutPoints } from "./sections.ts";
 import { namespaceAnchors, type AnchorReport } from "./anchors.ts";
 import { stripDeprecatedRoles, type RoleStrip } from "./roles.ts";
 import type { Fragment } from "./fragment.ts";
@@ -43,6 +44,127 @@ export function assembleBodyWithReport(fragments: Fragment[]): {
   const { pages, report } = namespaceAnchors(ordered.map((f) => ({ order: f.order, innerHtml: f.innerHtml.trim() })));
   const joined = stripDeprecatedRoles(pages.filter((h) => h.length > 0).join("\n\n"));
   return { body: joined.html, anchors: report, deprecatedRoles: joined };
+}
+
+// The language the shell declares, read off the body instead of assumed. `lang="en"` on a document
+// assembled from Korean pages is not merely unhelpful: WCAG 3.1.1 is about the default human language
+// of the page, a screen reader picks its voice from this attribute, and axe cannot see the mistake
+// because `html-has-lang` and `html-lang-valid` are both satisfied by a confident wrong answer
+// (issue #163). The page agent is told to put `lang` on every top-level element it emits for a page
+// wholly in another language (see `agents/page.md`), so the value is here to be read.
+//
+// It is derived only where the whole body agrees: every top-level element carries a `lang` and they
+// all carry the same one. Anything else keeps `en` — a multilingual document has no single primary
+// language to declare, and a body whose pages said nothing gives nothing to derive from. The root
+// declaration follows the content and never guesses ahead of it, which is why the two halves of #163
+// were kept apart: this is only as good as the fragments.
+// The start tag opening a top-level segment, anchored: a segment that does not BEGIN with one is not
+// an element and is not asked (see below). Group 2 is the attribute list, read attribute by attribute
+// rather than searched for ` lang=`, because a search finds one inside another attribute's value —
+// `<section title="see lang=fr note">` is a French document by that reading.
+const START_TAG = /^\s*<([a-zA-Z][^\s/>]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/;
+const ATTRS = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*)))?/g;
+// A comment, a doctype or a processing instruction: `cutPoints` gives each its own segment, it bears
+// no text, and it is what a failed page is in the body as (`@page-failed`).
+const OPAQUE_SEGMENT = /^\s*<[!?]/;
+function attrValue(attrs: string, name: string): string | null {
+  ATTRS.lastIndex = 0;
+  for (let m = ATTRS.exec(attrs); m; m = ATTRS.exec(attrs)) {
+    // The first spelling wins, which is what a parser does with a repeated attribute.
+    if (m[1]!.toLowerCase() === name) return m[2] ?? m[3] ?? m[4] ?? "";
+  }
+  return null;
+}
+// The shape of a language tag, not a registry lookup: `lang="Korean"` and `lang="ko_KR"` are the two
+// things a model writes when it means `ko`, and either would be a well-formed nothing. The primary
+// subtag is held to the two and three letter ISO 639 forms rather than the grammar's 2-8, because that
+// is what closes the gap between "shaped like a tag" and "is a language" — `Korean` is a well-formed
+// 6-letter subtag and is not a language, while every code a page could honestly be in fits in three.
+const LANG_TAG = /^[a-z]{2,3}(?:-[a-z0-9]{1,8})*$/i;
+// Shape is not enough, because the value goes on the one element in the document that the linter
+// checks: an unrecognizable `lang` on the root trades a silent 3.1.1 failure for a loud
+// `html-lang-valid` one, which is a regression bought with a fix. Measured with this repo's `runAxe`,
+// axe validates against the registry's PREFERRED values, so it refuses exactly the tags that have a
+// preferred form — `kor`, `spa`, `fra`, `deu`, `eng`, `zho` and the rest of ISO 639-2/B all fail
+// `html-lang-valid`, while `haw`, `chr`, `fil`, `yue`, `ceb` and the other three-letter codes with no
+// two-letter equivalent are clean. So the primary subtag cannot simply be narrowed to two letters:
+// that would refuse the derivation for every language that only HAS a three-letter code, which is the
+// same 3.1.1 defect for a smaller set of readers.
+//
+// A tag with a preferred form is therefore delivered IN that form rather than refused. `Intl`'s
+// canonicalization is the registry's own alias data — `kor` → `ko`, `iw` → `he`, `art-lojban` → `jbo`,
+// and `ko` → `ko` untouched — so a page that answered "use the BCP 47 tag" with `kor` still gets a
+// Korean root, and it gets the spelling axe and a screen reader both accept. A value the
+// canonicalizer refuses outright (`ko_KR`, `ko-x`, `x-klingon`) is not a tag at all and keeps `en`.
+// Rewriting a page's answer is worth it only here, at the root: the fragment keeps whatever it wrote,
+// where `valid-lang` reports it as a body issue the review loop can correct.
+// Tags that are well formed and are not an answer to "what language is this document in": the
+// registry's own placeholders for undetermined (`und`), no linguistic content (`zxx`), multiple
+// languages (`mul`), uncoded (`mis`) and the private-use range `qaa`–`qtz`. axe accepts every one of
+// them, which is precisely why they are refused here rather than left to the gate: as a document's
+// DEFAULT HUMAN LANGUAGE they are the same kind of non-answer as `lang="Korean"`, and a screen reader
+// given one falls back to its own default anyway. `en` is at least a language a voice can be chosen
+// for, and `mul` is the case the unanimity rule already has an answer to.
+const NOT_AN_ANSWER = /^(?:und|zxx|mul|mis|q[a-t][a-z])(?:-|$)/i;
+function preferredTag(value: string): string | null {
+  if (!LANG_TAG.test(value) || NOT_AN_ANSWER.test(value)) return null;
+  let canonical: string;
+  try {
+    canonical = Intl.getCanonicalLocales(value)[0] ?? "";
+  } catch {
+    return null;
+  }
+  if (canonical.toLowerCase() === value.toLowerCase()) return value;
+  return LANG_TAG.test(canonical) ? canonical : null;
+}
+// Elements with no text of their own, which therefore have no language and are not asked for one.
+// The page-break separator the page prompt prescribes — `<hr role="doc-pagebreak" aria-label="Page
+// 5">` — sits at top level between every pair of pages in a multi-page document, so without this a
+// Korean document whose pages all declared `ko` would still be delivered as English: the marker
+// carries no `lang`, one disagreement is enough, and the commonest document in the system would
+// never derive anything. `aria-label` is not text in the element's language for this purpose
+// either; it is generated by the extractor and is English by construction.
+//
+// The set is these three and not "void elements": a top-level `<img alt="…">` or `<input>` label IS
+// text of the page, in the page's language, and a bare one with no `lang` is a page that did not
+// answer. That refuses the derivation, which is the safe direction and costs a glance.
+const NO_TEXT_OF_ITS_OWN = new Set(["hr", "br", "wbr"]);
+// `cutPoints` drops a boundary that lands on the last character, since a cut there would open an
+// empty section — so a body that ends properly and a body whose last element was never closed both
+// come back with no boundary at the end. The distinction is the whole of the guard below, so the scan
+// is run over the body with a comment appended: every real node end is then before the end of the
+// string and survives, and the appended comment's own boundary is the one dropped.
+const CLOSED = "<!---->";
+// Exported for the tests, which read the derivation directly: reaching an interesting case through
+// `wrapDocument` means asserting on a whole document shell to learn one attribute.
+export function bodyLang(body: string): string | null {
+  const boundaries = cutPoints(body + CLOSED).filter((p) => p <= body.length);
+  let start = 0;
+  let agreed: string | null = null;
+  // Anything after the last boundary is a top-level element that was never closed — and an unclosed
+  // element swallows everything after it, so the ONE tag this scan would read for that whole run is
+  // the first page's. `<section lang="ko"><p>가</p>` followed by three English pages would be read as
+  // a Korean document: one page's answer promoted to the root of a document mostly not in it, which
+  // is the failure this whole derivation is built to avoid. It is not decidable from here whether the
+  // run holds one element or five, so it is refused. The cost is a body whose last element omits its
+  // end tag losing the derivation — `en`, a glance, and the fragments keep their own `lang`.
+  if (body.slice(boundaries.at(-1) ?? 0).trim() !== "") return null;
+  for (const boundary of boundaries) {
+    const segment = body.slice(start, boundary);
+    start = boundary;
+    if (segment.trim() === "" || OPAQUE_SEGMENT.test(segment)) continue;
+    // A segment that does not begin with a start tag begins with something else at top level: stray
+    // prose between two fragments, or an end tag matching nothing. Both mean text that no element
+    // claims, so no `lang` covers it and nothing here can speak for the document.
+    const tag = START_TAG.exec(segment);
+    if (!tag) return null;
+    if (NO_TEXT_OF_ITS_OWN.has(tag[1]!.toLowerCase())) continue;
+    const lang = preferredTag((attrValue(tag[2]!, "lang") ?? "").trim());
+    if (!lang) return null;
+    if (agreed && agreed.toLowerCase() !== lang.toLowerCase()) return null;
+    agreed ??= lang;
+  }
+  return agreed;
 }
 
 // Wrap body content in a minimal accessible document shell. If issues remain when the
@@ -129,11 +251,19 @@ export function wrapDocument(
       `  usual. See the run log (assembly / lint_unavailable) for the failure.\n` +
       `  ${opts.lintUnavailable.slice(0, 300).replace(/\s+/g, " ").replace(/--+>?/g, "—")}\n-->`
     : "";
+  const lang = bodyLang(body) ?? "en";
+  // The one English string in the shell, labelled where the document around it is not English —
+  // otherwise the title inherits a root that is now telling the truth about the pages and lying
+  // about it (WCAG 3.1.2, and a screen reader reading the tab or the document title aloud).
+  // The label is about THIS string, and only survives as long as it does: `GET /output` replaces the
+  // title's text with the uploaded file's name, whose language nobody here can vouch for, and drops
+  // the attribute with it (`titledAs`, util/outputNames.ts).
+  const titleLang = /^en(?:-|$)/i.test(lang) ? "" : ` lang="en"`;
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${lang}">
 <head>
   <meta charset="utf-8">
-  <title>Accessible document</title>
+  <title${titleLang}>Accessible document</title>
 </head>
 <body>
 <main>
