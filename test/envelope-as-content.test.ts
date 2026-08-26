@@ -706,8 +706,12 @@ test("a log that says something is on the page contradicts its own blank claim",
     // wording it would have bought — `The sheet is without printing.` — already delivers, because a
     // definite substrate is the scan and not a thing on the paper. So it stays where the other
     // functions need it, in front of a noun (#200's review measured this one as a page this check
-    // would otherwise have dropped in silence).
+    // would otherwise have dropped in silence). The mirror cost, taken knowingly: `Printed text is
+    // without exception absent.` is refused. The same two words cannot be an affirmation idiom in
+    // front of a complement and a denial behind a verb, and `without exception absent` is stilted
+    // where `is without doubt visible` is not.
     "Page is blank. A heading is without doubt visible at the top.",
+    "Page is blank. Printed text is without exception absent.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }

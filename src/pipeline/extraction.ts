@@ -1121,6 +1121,21 @@ function affirmingReach(tokens: Word[]): number[] {
 // subject-verb scan does not reach them anyway. A qualifier between the verb and the complement
 // ("Text is entirely absent.") is still refused, for the same reason no gap is allowed above: the gap
 // costs a page and the refusal costs a glance.
+// What this leaves open, measured rather than supposed (#200's review, third pass). A complement
+// that denies only PART of the sheet and then affirms the rest reads as a whole denial, because the
+// affirmation lands in a prepositional phrase and nothing in this section reads one:
+//
+//   Text is absent from the top half and present at the bottom.   -> delivered empty
+//   Printing is nowhere except a stamp at the top.                -> delivered empty
+//   A caption is missing from the figure on the page.             -> delivered empty
+//
+// Those were reported before this set existed, but only as a side effect of `is absent` being
+// misread as an affirmation, so the reporting was a wrong rule getting a right answer. Closing them
+// properly means reading a shared subject across `and`/`except` and treating a definite noun in a
+// prepositional object as present — the denial-then-affirmation half of #194, and a design rather
+// than a lookup. Filed as #204 rather than bodged: the cost on that side is a page, and a rule
+// guessed at here
+// would trade it against the eleven multi-noun denials above.
 const NEGATIVE_COMPLEMENT = new Set(["absent", "missing", "nowhere", "nonexistent", "lacking"]);
 
 function deniedAfterVerb(tokens: Word[], verb: number): boolean {
