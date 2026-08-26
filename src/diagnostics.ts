@@ -325,9 +325,18 @@ const CORRECTION_TRIGGERS = ["verify", "links", "both"] as const;
 // What the Feedback Agent said was wrong with a page (`page_verify_failed`'s `kinds`).
 // Declared here rather than imported from pipeline/feedback.ts, like the two lists above
 // mirror extraction.ts: this module reads a log file and nothing else, and a kind a future
-// version adds should land in `untagged` on an old reader rather than change this file's
+// version adds should be visible as ungraded on an old reader rather than change this file's
 // dependencies. The five are defined in agents/feedback.md and pinned in
 // pipeline/feedback.ts `VERIFY_KINDS`; test/verify-kinds.test.ts holds the two lists equal.
+//
+// That visibility is only complete where a line names NO kind this reader knows: then the page
+// is in `untagged_pages` and its problems are in `verify_untagged_problems`. A newer writer that
+// mixes a sixth kind with one of these five logs `untagged: 0` — it recognized its own tag — so
+// the old reader sees one known kind, no untagged count, and the sixth-kind problem is silently
+// absent from the split rather than visibly ungraded. It needs a sixth kind shipped AND an old
+// reader folding a newer log (a retained bench log, a diagnostics read mid-deploy), which is why
+// it is written down here rather than coded around: inside one deploy the two lists cannot
+// diverge, and the test above is what keeps that true.
 const VERIFY_KINDS = ["content_missing", "content_wrong", "structure_wrong", "a11y_only", "alt_quality"] as const;
 
 // The longest a model call can legitimately still be open, used to tell a run that is
