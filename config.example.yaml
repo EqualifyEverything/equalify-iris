@@ -147,6 +147,10 @@ github:
 # LLM provider abstraction (PRD §10.3). Each agent declares a capability;
 # the deployment decides which provider serves it.
 providers:
+  # The provider serving anything with no override below. `openrouter` rather than
+  # the reference deployment's `bedrock` on purpose: it is one credential and no
+  # cloud account, which is the shorter path to a first working run. Switch to
+  # bedrock if you are already on AWS and want IAM-scoped access or its billing.
   default: openrouter
   # Per-agent overrides. Two forms:
   #   <agent>: <provider>                      # route this agent to a provider
@@ -156,21 +160,46 @@ providers:
   # dispatched today are: page (extraction), reader + copy_editor (review),
   # feedback (verify/classify/train), builder (drafts suggested agents), plus any
   # specialist in agents/ that the page agent names.
+  # No overrides by default. To add some, uncomment the KEY BELOW TOO and delete this
+  # line — an entry indented under `per_agent: {}` is not an addition to an empty map,
+  # it is a parse error at startup.
   per_agent: {}
-    # page: { model: anthropic/claude-sonnet-4.6 }   # cheaper/faster extraction
-    # table: { model: anthropic/claude-opus-4.7 }    # stronger model, same provider
-    # reader: { provider: bedrock, model: us.anthropic.claude-haiku-4-5-20251001-v1:0 }
-    # Run the Feedback Agent (VERIFY/CLASSIFY/TRAIN) on a DIFFERENT or stronger
-    # model than the page agent, so verification doesn't share the generator's
-    # blind spots (recommended):
-    # feedback: { model: anthropic/claude-opus-4.7 }
+  # Run the Feedback Agent (VERIFY/CLASSIFY/TRAIN) on a DIFFERENT or stronger model
+  # than the page agent, so verification doesn't share the generator's blind spots
+  # (recommended) — which is why the `page:` line here routes rather than upgrades. An
+  # example naming one model on both would illustrate the pairing away.
+  # per_agent:
+  #   page: bedrock                                 # one agent on the other provider, at ITS model
+  #   table: { model: anthropic/claude-opus-4.7 }    # stronger model, same provider
+  #   reader: { provider: bedrock, model: us.anthropic.claude-haiku-4-5-20251001-v1:0 }
+  #   feedback: { model: anthropic/claude-opus-4.7 }
+
+  # WHICH MODEL. Both provider blocks below name Sonnet 4.6, because it is the only
+  # model any number this project publishes was measured on. The reference deployment
+  # has served every capability with it for as long as there is a record — its own
+  # config notes the earlier move off Opus 4.7 as a latency change — so the benchmark
+  # rounds and the per-page cost figures are all Sonnet's.
+  #
+  # That matters past tidiness because `max_tokens` below is OUR setting and not the
+  # model's: how often a dense page overruns that ceiling, and the shrink floor and
+  # section headroom that decide what happens when one does, were all sized against
+  # how this model behaves at it. A stronger model is a supported choice costing no
+  # code change (see per_agent above) — it is just not one those thresholds were
+  # tuned for. It also moves the long edge `GET /v1/limits` and the upload hint
+  # PUBLISH, since that number follows the model generation (see image_limits below).
+  # Only what is published: the long edge is advice about downscaling and rejects
+  # nothing, and the two limits an upload is actually refused by do not follow the
+  # model at all.
+  #
+  # Checked against the deployment 2026-08-26. The block in prd.md §10.3 illustrates
+  # the SHAPE of this config and is not a second recommendation.
 
   # OpenRouter model IDs are `vendor/model` slugs (dot-versioned). Full list:
   # https://openrouter.ai/models
   openrouter:
     api_key: ${OPENROUTER_API_KEY}
     base_url: https://openrouter.ai/api/v1
-    default_model: anthropic/claude-opus-4.7
+    default_model: anthropic/claude-sonnet-4.6
     # Output-token ceiling per call. A dense page (a full-page table or form) is
     # the binding case; hit the ceiling and the model stops mid-tag. Iris now
     # FAILS such a call rather than passing the fragment downstream, so if you see
@@ -243,9 +272,9 @@ providers:
     # `prompt_cache: false` is the way back.
     # prompt_cache_ttl: 1h
     per_capability:
-      vision: anthropic/claude-opus-4.7
-      structured_output: anthropic/claude-opus-4.7
-      text: anthropic/claude-opus-4.7
+      vision: anthropic/claude-sonnet-4.6
+      structured_output: anthropic/claude-sonnet-4.6
+      text: anthropic/claude-sonnet-4.6
 
   # Bedrock model IDs are hyphen-versioned and need a region prefix: current
   # Claude models are cross-region-inference only, so the bare `anthropic.*` form
@@ -255,7 +284,8 @@ providers:
   #     --query 'inferenceProfileSummaries[].inferenceProfileId'
   bedrock:
     region: us-east-1
-    default_model: us.anthropic.claude-opus-4-7
+    # See the note on which model, above openrouter.
+    default_model: us.anthropic.claude-sonnet-4-6
     # See the note on openrouter.max_tokens above. Retries are handled by the AWS
     # SDK's own `standard` strategy (3 attempts, exponential backoff, throttling +
     # 5xx + network errors), so there is no retry knob here.
@@ -267,9 +297,9 @@ providers:
     # never heard of it — and the one where `prompt_cache_ttl: 1h` reaches the model that
     # honours it rather than a broker that may not.
     per_capability:
-      vision: us.anthropic.claude-opus-4-7
-      structured_output: us.anthropic.claude-opus-4-7
-      text: us.anthropic.claude-opus-4-7
+      vision: us.anthropic.claude-sonnet-4-6
+      structured_output: us.anthropic.claude-sonnet-4-6
+      text: us.anthropic.claude-sonnet-4-6
 
 defaults:
   # How many reader/editor rounds a document gets before the review loop stops and

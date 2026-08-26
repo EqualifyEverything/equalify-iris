@@ -1100,7 +1100,7 @@ interface ModelProvider {
 
 Each agent declares its required capability in its markdown file (see Appendix A). The deployment configures which provider serves each capability. Defaults can be set globally; per-agent overrides are supported.
 
-Example deployment config (`config.yaml`):
+Example deployment config (`config.yaml`) — this illustrates the *shape* of the block: which keys exist and how a per-agent or per-capability override is written. It is not the recommended set of values. `config.example.yaml` is the file to copy, and the one place that says which model is recommended and why; a model named here is naming one so the YAML is not empty.
 
 ```yaml
 providers:
@@ -1112,14 +1112,14 @@ providers:
 
 openrouter:
   api_key: ${OPENROUTER_API_KEY}
-  default_model: anthropic/claude-opus-4.7
+  default_model: anthropic/claude-sonnet-4.6
   per_capability:
-    vision: anthropic/claude-opus-4.7
+    vision: anthropic/claude-sonnet-4.6
     structured_output: openai/gpt-5
 
 bedrock:
   region: us-east-2
-  default_model: anthropic.claude-opus-4-7-v1
+  default_model: us.anthropic.claude-sonnet-4-6
 ```
 
 The system reads this config at startup; changes require a restart in v1. Hot-reload is out of scope.
