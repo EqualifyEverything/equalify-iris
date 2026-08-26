@@ -282,13 +282,57 @@ function chunk(s: string): string[] {
   return out;
 }
 
+// What the elements under each violation are, said once above the list.
+//
+// Here rather than in READER_SYSTEM for the same reason the no-verdict sentence is: the lines it
+// describes are two lines below it, and every clause of it is a thing a Reader would otherwise
+// have to infer from a selector it has never been told the provenance of.
+//
+// The last sentence is the half of #161 that is not about the Reader at all. The Copy Editor is
+// never shown the lint — `editorCall` sends the body and the Reader's issue list, nothing else —
+// so a selector that stops at the Reader has moved the search one agent down rather than ended
+// it. Round 8's `aria-deprecated-role` is the worked example: the Reader named the rule in its
+// analysis, the editor ran and changed the document, and the deprecated role shipped.
+const LINT_NODE_NOTE =
+  `Each violation lists the elements axe reported it on: a CSS selector, then that element's ` +
+  `markup folded to one line and cut short. The list is computed from the WHOLE document ` +
+  `rather than from the HTML you were given, and this call is the only one that has it, so an ` +
+  `element it names may sit outside your window — report it anyway. Only the first few elements ` +
+  `of a rule are listed and the node count is the whole of it, so a rule listing three elements ` +
+  `out of forty is forty places to fix. Quote BOTH the selector and the markup in the issue you ` +
+  `write: the Copy Editor is not shown these results, so what you write is all it has to find ` +
+  `the element by — and it is sometimes given one section of the document rather than all of it, ` +
+  `where a selector counting position (\`section:nth-child(4) > p\`) counts something else and ` +
+  `the markup is what still identifies the element.`;
+
+// The most elements the whole summary lists, across every rule.
+//
+// MAX_EXAMPLE_NODES bounds one rule; this bounds the section, which is the thing that competes
+// with the document for the window. The two arguments are different: three of a rule's forty
+// nodes is a sample, and there is no such thing as a sample of the rule LIST — ~60 rules are
+// enabled, so a badly extracted scan failing fifteen of them would add every one of their
+// examples to a prompt that also has to hold 24000 characters of document.
+//
+// Spent in the order the violations are listed, and what it cut is said in the prompt: a list
+// that stops without saying so reads as the rules after it having had nothing to point at.
+export const MAX_EXAMPLES_TOTAL = 24;
+
 // What the Reader is told the linter found. The no-verdict case is spelled out rather than
 // stated as a failure, because this text sits under a "## axe-core lint" heading in a prompt
 // that also says the review is against "the axe-core lint results provided": a Reader given
 // only an error message can read the section as an empty result and take the document to
 // have been checked (#164). It is told the opposite, in the sentence it would otherwise
 // have to infer.
-function lintSummary(lint: LintResult): string {
+//
+// `withExamples` is false for every chunk but the first, and the elements are the reason. The
+// lint is one verdict on the WHOLE document while the Reader is called per window, so a note
+// telling every call to report an element outside its own window tells N calls to report the
+// same one — the defect arrives N times and is carried to `@unresolved` N times if no editor
+// round clears it (#192, through the lint path this time). It is the same constraint the
+// duplicate-heading list is under and it takes the same answer: one call owns the
+// whole-document input. What the other chunks keep is exactly what they had before this
+// section listed elements at all — the rule, its impact, its description and its count.
+function lintSummary(lint: LintResult, withExamples: boolean): string {
   if (lint.violations === undefined) {
     return (
       `axe-core could not run, so NOTHING in this document has been checked for ` +
@@ -298,7 +342,42 @@ function lintSummary(lint: LintResult): string {
     );
   }
   if (lint.ok) return "axe-core: no violations";
-  return lint.violations.map((v) => `- ${v.id} (${v.impact}): ${v.description} [${v.nodes} nodes]`).join("\n");
+  let budget = withExamples ? MAX_EXAMPLES_TOTAL : 0;
+  let listed = 0;
+  let unlisted = 0;
+  const lines = lint.violations.map((v) => {
+    const head = `- ${v.id} (${v.impact}): ${v.description} [${v.nodes} nodes]`;
+    const examples = (v.examples ?? []).slice(0, budget);
+    if (examples.length === 0) {
+      // Counted once the budget is gone, whether or not this rule HAD examples to spend it
+      // on. The paragraph below points at "the last N rules", which is a claim about position
+      // and is only true if N is every unlisted rule: a violation carrying no examples at all
+      // (hand-built, or stored before #161) sitting between two that were cut would otherwise
+      // be skipped in the tally and read as one of the rules whose elements are listed.
+      if (withExamples && listed > 0 && budget === 0) unlisted++;
+      return head;
+    }
+    budget -= examples.length;
+    listed += examples.length;
+    // The list says how much of the rule it is showing, on the line the selectors hang off. A
+    // reader of three selectors under a `[40 nodes]` count has to be told that the three are a
+    // sample and not the forty, or the count reads as having been enumerated.
+    const shown = examples.length < v.nodes ? ` — showing ${examples.length} of ${v.nodes}:` : ":";
+    return (
+      head + shown + "\n" + examples.map((n) => `    - \`${n.target}\` — ${n.html}`).join("\n")
+    );
+  });
+  // Only where there is something for it to describe. A lint whose violations carry no examples
+  // — a chunk that is not the first, a violation built without them (see LintViolation) — would
+  // otherwise be introduced by a paragraph about lines that are not there.
+  const note = listed > 0 ? `${LINT_NODE_NOTE}\n\n` : "";
+  const cut =
+    unlisted > 0
+      ? `\n(No elements are listed for the last ${unlisted} ${unlisted === 1 ? "rule" : "rules"} ` +
+        `above: the list had already reached ${MAX_EXAMPLES_TOTAL}. Their counts are the whole of ` +
+        `them and they are no less real for having no example here.)`
+      : "";
+  return note + lines.join("\n") + cut;
 }
 
 // The page index is repeated on every Reader call (once per chunk per round), so
@@ -558,7 +637,11 @@ async function runReader(
     const window = chunks.length > 1 ? ` (window ${i + 1} of ${chunks.length} of the document)` : "";
     const user =
       head +
-      `## HTML${window}\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint)}` +
+      // `i === 0` for the offending elements, on the same argument as `duplicateHeadings` two
+      // lines down: the lint is one verdict on the whole document, and a whole-document input
+      // given to every independent chunk call comes back as the same finding once per chunk.
+      // See lintSummary.
+      `## HTML${window}\n\`\`\`html\n${c}\n\`\`\`\n\n## Flattened screen-reader view\n${flatten(c)}\n\n## axe-core lint\n${lintSummary(lint, i === 0)}` +
       (i === 0 && duplicateHeadings
         ? `\n\n## Headings with the same words at the same level, nothing but their own content between them (whole document)\n${duplicateHeadings}`
         : "") +
