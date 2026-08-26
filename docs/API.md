@@ -882,7 +882,8 @@ document. `sampled_problems_before / sampled_problems_after` is how far the kept
 — a correction is also handed the links the code found missing, and this verdict judges the fragment
 against the *image*, where a link target does not appear, so counting a link going in and never
 being able to count it coming out would bias the ratio toward "the loop converges" on exactly the
-pages that have the most to fix. Both are sums over the sampled pages, so
+pages that have the most to fix. Both are sums over the sampled pages that were actually judged —
+`sampled` less `sampled_unjudged`, and less any line too old to carry both counts — so
 read them as a ratio rather than a per-page average, and note that `sampled_problems_after: 0` does
 not mean the sample passed — a verdict's `ok` is its `faithful` / `accessible` flags, which an agent
 can set false while naming nothing. `binding` is counted apart from the sample and not added to it:

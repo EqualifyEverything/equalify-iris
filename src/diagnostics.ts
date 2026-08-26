@@ -279,7 +279,9 @@ export interface Diagnostics {
     // `page_corrected`'s `problems` is the whole bill.
     //
     // Sums over pages, so a single page with many problems moves them more than several with
-    // one each — read them as a ratio and not as a per-page average, and against `sampled`.
+    // one each — read them as a ratio and not as a per-page average, and against the samples
+    // they were summed over, which is `sampled` less the unjudged ones and less any line too
+    // old to carry both counts (see the field below).
     // And `sampled_problems_after: 0` does not mean the sample passed: the verdict's `ok` is
     // its `faithful`/`accessible` flags (pipeline/feedback.ts), which an agent can set false
     // while naming nothing, so `sampled_ok` remains the answer to whether it passed.

@@ -259,6 +259,10 @@ interface Behaviour {
   // verdict out of that and returns its non-blocking default, which is a page nothing
   // judged rather than a page that passed.
   verifyGarbles?: boolean;
+  // The same, on the RE-verification only: the first verdict is real and the second is prose.
+  // Separate from `verifyGarbles` because a garbled first verdict passes the page and so buys
+  // no correction and no recheck — the two flags cannot reach the same call.
+  recheckGarbles?: boolean;
   // A provider error on the CORRECTION call itself: the output ceiling, a stall, a throttle.
   // Not per page, unlike the rest of these — the correction prompt does not carry the page's
   // filename (it carries the page's own previous output), so `orderOf` cannot see which page
@@ -309,6 +313,7 @@ function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 2): Pipelin
           verifies.set(order, n);
           if (n > 1 && b.recheckThrows) throw new Error("ThrottlingException: Too many requests");
           if (n === 1 && b.verifyGarbles) return { text: "I was unable to compare the HTML with the image." };
+          if (n > 1 && b.recheckGarbles) return { text: "I was unable to compare the HTML with the image." };
           const problems = n === 1 ? b.problems(order) : (b.recheck ?? (() => []))(order);
           return {
             text: JSON.stringify({
@@ -1025,6 +1030,50 @@ test("a page nobody could judge says so on the line that says it passed", async 
     assert.equal(d.verification.pages_verified, 2);
     assert.equal(d.verification.pages_unjudged, 2);
     assert.equal(d.verification.verify_failed, 0);
+  });
+});
+
+test("a rewrite nobody could judge says so on the line that keeps it", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const link = { text: "the full report", href: "https://example.org/report" };
+    // The dangerous half of the same conflation, and the one that is reachable with no
+    // Feedback Agent at all: a page that PASSED its check and lost a link is corrected on the
+    // links trigger, and that path's recheck is BINDING — it decides whether the rewrite
+    // ships. `ok` there is "the verifier named no problem", which is also what a reply nothing
+    // could be read out of returns, so a whole run of kept rewrites read as rewrites that had
+    // been checked and found good (issue #211).
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<p>Read the full report</p>`,
+        problems: () => [],
+        corrected: () => `<p>Read <a href="https://example.org/report">the full report</a></p>`,
+        recheckGarbles: true,
+        links: [link],
+      }),
+    );
+    const rechecks = of(events, "page_correction_recheck");
+    assert.equal(rechecks.length, 2, "both pages lost the link, so both rewrites were rechecked");
+    for (const r of rechecks) {
+      assert.equal(r.binding, true);
+      // Non-blocking, exactly as before the flag: an unreadable verdict must not discard a
+      // rewrite that recovered a link, so `ok` stays true and the page keeps the correction.
+      assert.equal(r.ok, true);
+      assert.equal(r.unjudged, true);
+    }
+    assert.equal(of(events, "page_links_correction_rejected").length, 0);
+    for (const f of result.fragments) assert.match(f.innerHtml, /href="https:\/\/example\.org\/report"/);
+
+    // And the fold reads it back: two binding rechecks, both nominally ok, neither judged —
+    // so the judged pass rate is 0 of 0 rather than 2 of 2.
+    const d = summarizeRun(
+      events.map((e) => JSON.stringify({ ts: new Date(Date.UTC(2026, 0, 1)).toISOString(), ...e })).join("\n"),
+      { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.UTC(2026, 0, 1) },
+    );
+    assert.equal(d.verification.rechecks.binding, 2);
+    assert.equal(d.verification.rechecks.binding_ok, 2);
+    assert.equal(d.verification.rechecks.binding_unjudged, 2);
+    assert.equal(d.verification.rechecks.sampled, 0);
   });
 });
 
