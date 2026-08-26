@@ -648,6 +648,7 @@ Useful events to grep for:
 | `page_correction_recheck_failed` | The measurement-only sample could not be taken — the extra Feedback Agent call hit a provider error (`error`). Logged rather than raised: the page ships as it would have with no measurement at all, and the batch's one sample slot stays spent, so a throttled provider is not retried once per corrected page. A `binding` recheck has no such line, because there the verdict decides whether the rewrite is kept. |
 | `editor_images` | How many source images the Copy Editor received this round (`attached` of `of`, plus `pages`). A `dropped` count means the selection did not fit in one request and was trimmed to the pages issues actually named. `attached == of` on a multi-page document means at least one issue in that round carried no page attribution, so the round asked for everything. |
 | `editor_images_refused` | The provider refused the round's payload as too large, so the same prompt was re-sent **without** images. The correction still had the whole body and every issue; only a fidelity problem that must be checked against the source can go unfixed. |
+| `editor_fidelity_observed` | The Copy Editor, looking at a page image it was sent for some other reason, says the HTML and the page disagree about something **nobody asked it about**: `count` observations, the `attached` pages it actually had, and the `observations` themselves — each a `page`, a sentence, and one of `page_verify_failed`'s five `kind`s (the same taxonomy, so this can be read against `verify_kinds`; `null` where the reply named a kind this version does not recognize, and the sentence is kept either way). Reported and **not acted on**: acting would mean re-reading that page in full, which is a re-extraction and not this loop's job, and an edit made from one glance at an image reaches a reader as what the page says. So nothing about the delivered document changes because of this line — it is the only trace, and it is addressed to a person. Its value is that it is the **only** second opinion on fidelity in the run: VERIFY checks each page once, with the same model family on the same image as the transcriber, so its blind spots are the transcriber's by construction, and the Reader cannot see the source images at all (issue #183). `unattached` counts observations about a page whose image was **not** in `attached` — the prompt asks for attached pages only, so those are guesses about a page the model could not see, kept but counted apart so a mostly-guesswork set can be discounted whole. `unplaced` counts observations that named no page. Absent on the ordinary round, where the editor noticed nothing. |
 | `editor_links_dropped` | An `href` present before that round's correction was missing after it (`iteration`, `hrefs`). A link's target came from the source **file**, not from a page image, so a dropped one cannot be recovered by looking again — logged rather than repaired, and counted into `links_dropped_rate`. |
 | `editor_markers_changed` | The count of a `[not legible]` or `[page not fully transcribed]` marker changed across one correction round (`iteration`, `before`, `after`, plus `fewer` and/or `more`). `fewer` is expected where the editor read that region off the attached page image, and is a loss anywhere else — nothing downstream can tell those apart, and no other signal sees it at all, since the flattened view strips bracketed tokens before comparing words. `more` is a placeholder written over words the extractor did read, which no instruction in the loop allows. |
 | `editor_truncated` | A correction round's response hit the model's output ceiling (`max_tokens`, `chars` returned, plus `attached`/`of` images and `after: "images_refused"` when it was the retry that truncated). The review loop stops after this round either way, but the round itself is not given up on: it is re-made a section at a time (`editor_sections` below). The whole ceiling of output was billed, so this is the log's most expensive line. |
@@ -703,6 +704,12 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
       "sampled": 1, "sampled_ok": 1, "sampled_problems_before": 3, "sampled_problems_after": 0,
       "binding": 1, "binding_ok": 1
     }
+  },
+  "fidelity_observed": {
+    "observed": 3, "pages": [2, 5],
+    "kinds": { "content_missing": 2, "content_wrong": 0, "structure_wrong": 0,
+               "a11y_only": 0, "alt_quality": 1, "untagged": 0 },
+    "unattached": 0, "unplaced": 0
   },
   "pages_failed": [],
   "pages_blank": [17]
@@ -896,6 +903,29 @@ every page means a Feedback Agent call per correction, which is the cost under i
 Whether to re-render until a page passes, or to run a cheaper verifier, is a policy question that
 needs the rate first. Like `model_calls`, the counts sum over every run a session has had, so a
 feedback round that re-extracts three pages adds three more verifications.
+
+`fidelity_observed` sits outside `verification` because it is not part of that loop and does not
+gate anything: it is what the **Copy Editor** noticed about a page it happened to be looking at,
+folded from `editor_fidelity_observed` (§7a). Everything under `verification` is the one fidelity
+check each page gets, and that check's weakness is structural rather than a matter of rate — the
+verifier is the same model family looking at the same image as the transcriber, so a page whose text
+it misread once it can misread twice, and a page it declared blank it will declare blank again.
+Nothing else in the run had standing to disagree. The Reader never sees a source image; the editor
+does, for the pages the Reader's issues name, and now has a field to say so in (issue #183). So read
+this as **evidence, not a rate**: the denominator is "pages an unrelated issue happened to attach an
+image for", which is not a sample of anything, and `observed: 0` on a run means nobody noticed
+something in passing, not that the document is faithful. What it is good for is the direction of a
+disagreement between the two — `kinds` uses the same five as `verify_kinds` on purpose, so a run
+whose editor reports `content_missing` on pages whose VERIFY passed is saying the check missed
+content, which is the failure mode no count in `verification` can see. `pages` is the distinct pages
+observations were filed about, so one page reported in three rounds is one page and three
+observations; `observed` is the observations. `unattached` and `unplaced` are the ones to discount
+first — an observation about a page whose image was not attached is a guess about a page the model
+could not see, and one that named no page cannot be checked at all. `untagged` in `kinds` is the
+usual companion: an observation whose kind this version does not recognize is counted there and in no
+other bucket, and the kinds are not a partition, so read each against `observed`. None of this
+changes the delivered document — an observation is addressed to a person, and acting on one would
+mean re-extracting that page.
 
 `pages_failed` is the set of source pages the delivered document has no content for, because their
 own extraction threw (§7c). It has its own field

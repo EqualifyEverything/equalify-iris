@@ -299,6 +299,38 @@ export interface Diagnostics {
   // round 1 and came back blank in round 3 has been answered, so it leaves `pages_failed`
   // (as `page_recovered`) and arrives here.
   pages_blank: number[];
+  // Fidelity discrepancies the Copy Editor noticed on a page whose image it had and was not
+  // asked about (pipeline/review.ts `readFidelityObserved`, issue #183). The first fidelity
+  // signal in the pipeline that does not come from the check that produced the page: VERIFY
+  // runs once per page during extraction, and its blind spots are the transcriber's by
+  // construction — same model family, same image, same failure modes — so an observation here
+  // on a page VERIFY passed is a measured miss rather than an inferred one.
+  //
+  // Read as evidence, NOT as a rate. The editor only ever sees the images for pages the Reader
+  // attributed an issue to, which skews toward pages that already had something wrong with them
+  // and is no sample at all of a document the Reader read clean. `observed` over `pages` tells
+  // you how concentrated the observations were and nothing about the document's other pages.
+  //
+  // `unattached` and `unplaced` bound how much of it is checkable: an observation about a page
+  // whose image was not attached is a guess about a page the model could not see (the prompt
+  // asks for attached pages only), and one that named no page cannot be traced to a page at all.
+  // Both are counted rather than dropped, so subtracting them is the reader's choice; `kinds`
+  // uses the same five as `verification.verify_kinds` on purpose, so the two splits can be read
+  // against each other.
+  fidelity_observed: {
+    observed: number;
+    pages: number[];
+    kinds: {
+      content_missing: number;
+      content_wrong: number;
+      structure_wrong: number;
+      a11y_only: number;
+      alt_quality: number;
+      untagged: number;
+    };
+    unattached: number;
+    unplaced: number;
+  };
 }
 
 function parse(logText: string): LogEvent[] {
@@ -747,6 +779,39 @@ export function summarizeRun(
   const pagesFailed = [...failedSet].sort((a, b) => a - b);
   const pagesBlank = [...blankSet].sort((a, b) => a - b);
 
+  // The Copy Editor's fidelity observations, summed over every round it ran — one line per round
+  // that had any, so a document reviewed in three rounds can contribute three lines about the same
+  // page. `observed` counts observations and `pages` the distinct pages they name, which is what
+  // separates one page reported three times from three pages reported once; the same page in two
+  // rounds is one page here and two observations, and that is the honest reading of it (the round
+  // that produced each is in the log).
+  const observed: Diagnostics["fidelity_observed"] = {
+    observed: 0,
+    pages: [],
+    kinds: { content_missing: 0, content_wrong: 0, structure_wrong: 0, a11y_only: 0, alt_quality: 0, untagged: 0 },
+    unattached: 0,
+    unplaced: 0,
+  };
+  const observedPages = new Set<number>();
+  for (const e of events) {
+    if (e.type !== "editor_fidelity_observed" || !Array.isArray(e.observations)) continue;
+    observed.unattached += typeof e.unattached === "number" ? e.unattached : 0;
+    observed.unplaced += typeof e.unplaced === "number" ? e.unplaced : 0;
+    for (const entry of e.observations) {
+      if (entry === null || typeof entry !== "object") continue;
+      const rec = entry as Record<string, unknown>;
+      observed.observed += 1;
+      if (typeof rec.page === "number") observedPages.add(rec.page);
+      // The closed list again, for the reason `verify_kinds` uses it: a `kind` naming a
+      // function on Object.prototype would otherwise be incremented rather than counted as
+      // the unrecognized label it is.
+      const kind = VERIFY_KINDS.find((k) => k === rec.kind);
+      if (kind) observed.kinds[kind] += 1;
+      else observed.kinds.untagged += 1;
+    }
+  }
+  observed.pages = [...observedPages].sort((a, b) => a - b);
+
   const elapsed = ms(startedAt ?? undefined, endRef);
 
   return {
@@ -774,5 +839,6 @@ export function summarizeRun(
     verification,
     pages_failed: pagesFailed,
     pages_blank: pagesBlank,
+    fidelity_observed: observed,
   };
 }

@@ -1,4 +1,5 @@
 import { extractJson } from "../util/json.ts";
+import { VERIFY_KINDS, type VerifyKind } from "./feedback.ts";
 import { mapWithConcurrency } from "../util/concurrency.ts";
 import { MAX_EDITOR_IMAGES } from "../providers/imageLimits.ts";
 import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseError } from "../providers/types.ts";
@@ -213,7 +214,25 @@ restructure or move — and never add a link that is not already in the document
 the TEXT of a link when an issue calls for it (link text that does not describe its
 destination is a real 2.4.4 problem); keep its href.
 
-Respond with ONLY JSON: { "html": "<corrected body content>" }`;
+On a page whose image IS attached you may notice a fidelity problem nobody asked you about:
+content the page shows that the HTML does not have, a number or a name that disagrees with the
+page, a table the page prints as a table and the HTML renders as paragraphs. REPORT those and do
+NOT act on them. Fixing one means reading that page again in full, which is a re-extraction and not
+this loop's job, and rewriting content the reviewer did not raise is worse than saying it looks
+wrong: an observation costs someone a look at the page, and an edit made on one reading of an
+image reaches the reader as what the page says. Report only pages whose image is attached —
+anything else is a guess about a page you cannot see — and keep the list to what you would want a
+person to check, not everything you might improve. An empty list is the ordinary answer.
+
+Give each observation the page it is on, one sentence, and its kind: ${VERIFY_KINDS.join(", ")} —
+the same five the fidelity check uses, by what a reader LOSES, with the earliest of them that
+applies winning (content absent from the HTML is content_missing even though it is also a WCAG
+failure; a11y_only is a problem the page's own content does not lose, and alt_quality is a
+description that could be better rather than absent).
+
+Respond with ONLY JSON, with the corrected body first:
+{ "html": "<corrected body content>",
+  "fidelity_observed": [ { "page": 7, "observation": "the second table's third row is absent from the HTML", "kind": "content_missing" } ] }`;
 
 // The same editor, asked for one section of a document instead of the whole of it — because the
 // whole of it did not fit in one response (issue #165, and `correctBySection` below for when
@@ -1043,7 +1062,11 @@ async function editorCall(
     phase: "review",
     output: res.text,
   });
-  const parsed = extractJson<{ html?: string }>(res.text);
+  const parsed = extractJson<{ html?: string; fidelity_observed?: unknown }>(res.text);
+  // Read before the usable check, because an unusable BODY does not make the observations
+  // unusable: the editor was looking at the page either way, and a reply this code cannot use
+  // as a document is one of the cases where knowing what it saw is worth most.
+  logFidelityObserved(ctx, parsed?.fidelity_observed, selected);
   // If the editor returns nothing usable, keep the current body unchanged — and say
   // that is what happened, so the loop does not read a reply it could not use as the
   // editor having decided the document was fine.
@@ -1053,6 +1076,106 @@ async function editorCall(
     return { body, usable: false };
   }
   return { body: corrected, usable: true };
+}
+
+// One fidelity discrepancy the Copy Editor noticed on a page whose image it had, and was not
+// asked about (issue #183).
+export interface FidelityObservation {
+  // The source page it is on, or null when the reply named none — which is not the same
+  // thing as page 0, and is counted apart below for that reason.
+  page: number | null;
+  kind: VerifyKind | null;
+  observation: string;
+}
+
+// Fidelity — does the HTML say what the page says — was checked at exactly one point in the
+// pipeline, and that check's blind spots are correlated with the transcriber's by construction:
+// same model family, same image, same failure modes. Neither half of the review loop could
+// originate a second opinion. The Reader cannot see the source images at all and is told not to
+// speculate about what it cannot see, so a dropped table row is perfectly self-consistent to it
+// and a misread number contradicts nothing. The Copy Editor CAN — `imagesForIssues` hands it the
+// images for the pages the Reader's issues name, which is the one position in the pipeline where
+// an image and the HTML are side by side after extraction — but it was asked to fix what the
+// issues named and carry everything else over unchanged, so it could be looking straight at a
+// dropped row on a page it was sent to fix a heading level and have nowhere to say so (#183).
+//
+// So it reports them, as observations and not as edits. Reporting is the whole of the change: it
+// costs no model call (the images are attached and the model is already reading them), and the
+// marginal output is a sentence. Acting on one would mean re-reading that page in full, which is
+// a re-extraction, and an edit made from one reading of an image reaches a reader as what the
+// page says — where an observation costs a person a look.
+//
+// What it is NOT is a rate. The pages the editor sees are the pages the Reader flagged for some
+// other reason, which is not a sample of the document — it skews toward pages that already had
+// problems, and a document the Reader found nothing wrong with attaches no images at all. So it
+// is evidence that misses exist and roughly where, and the calibration issue (#180) and a
+// sampled second opinion (#183's second proposal, which does cost calls) are what could turn it
+// into a number.
+//
+// Nothing is dropped for being unreadable, the same rule `readProblems` follows one file over:
+// an entry with no recognizable prose key is stringified rather than discarded, because a lost
+// label costs a label and a lost observation costs whatever it was about. `unattached` and
+// `unplaced` are counted apart from each other and reported beside the total, because an
+// observation about a page whose image was not attached is a guess about a page the editor could
+// not see — the prompt says to report only attached pages — and one that names no page cannot be
+// checked at all. Both are still logged: a reader who wants only the checkable ones can subtract.
+export function readFidelityObserved(
+  raw: unknown,
+  attached: number[],
+): { observations: FidelityObservation[]; unattached: number; unplaced: number } {
+  if (!Array.isArray(raw)) return { observations: [], unattached: 0, unplaced: 0 };
+  const observations: FidelityObservation[] = [];
+  let unattached = 0;
+  let unplaced = 0;
+  for (const entry of raw) {
+    if (entry === null || entry === undefined) continue;
+    let text: string;
+    let page: number | null = null;
+    let kind: VerifyKind | null = null;
+    if (typeof entry === "string") {
+      text = entry;
+    } else if (typeof entry === "object") {
+      const rec = entry as Record<string, unknown>;
+      const prose = [rec.observation, rec.problem, rec.text, rec.description].find(
+        (v) => typeof v === "string" && v.trim(),
+      );
+      text = typeof prose === "string" ? prose : JSON.stringify(entry);
+      // A page number, however the reply wrote it: `page: 7`, `page: "7"`, or the `pages` list
+      // the Reader's own issues use — the editor is given those issues and echoing their shape
+      // is the likelier mistake than inventing a third one. Only a whole positive number is a
+      // page; anything else is left unplaced rather than rounded into a page that exists.
+      const named = rec.page ?? (Array.isArray(rec.pages) ? rec.pages[0] : undefined);
+      const n = typeof named === "number" ? named : typeof named === "string" ? Number(named.trim()) : NaN;
+      if (Number.isInteger(n) && n > 0) page = n;
+      const label = typeof rec.kind === "string" ? rec.kind.trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
+      kind = VERIFY_KINDS.find((k) => k === label) ?? null;
+    } else {
+      text = String(entry);
+    }
+    if (!text.trim()) continue;
+    observations.push({ page, kind, observation: text.trim() });
+    if (page === null) unplaced += 1;
+    else if (!attached.includes(page)) unattached += 1;
+  }
+  return { observations, unattached, unplaced };
+}
+
+// Logged only when there is something to say, so an ordinary round's log is unchanged — and the
+// pages the editor HAD are on the line too, because an observation is only as good as whether
+// its page was in front of the model, and `editor_images` is a separate line that a reader of
+// this one may not have. Section calls carry no images (see `editorSectionCall`), so there is
+// nothing for them to observe and they do not read this field.
+function logFidelityObserved(ctx: PipelineContext, raw: unknown, selected: InputImage[]): void {
+  const attached = selected.map((i) => i.order);
+  const { observations, unattached, unplaced } = readFidelityObserved(raw, attached);
+  if (!observations.length) return;
+  ctx.log.event("editor_fidelity_observed", {
+    count: observations.length,
+    attached,
+    ...(unattached > 0 ? { unattached } : {}),
+    ...(unplaced > 0 ? { unplaced } : {}),
+    observations,
+  });
 }
 
 // --- a round the editor could not answer in one response ---
