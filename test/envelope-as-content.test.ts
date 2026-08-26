@@ -712,6 +712,30 @@ test("a log that says something is on the page contradicts its own blank claim",
     // where `is without doubt visible` is not.
     "Page is blank. A heading is without doubt visible at the top.",
     "Page is blank. Printed text is without exception absent.",
+    // A denial that covers PART of the page and says what is on the rest of it (#204, filed off #200's
+    // third review pass and delivered empty until now). The denial is real, so nothing before this read
+    // it as anything else: `is absent` denies, and the affirmation lands in the words after it — a
+    // second complement sharing the subject, an exception, or a noun the denial presupposes.
+    //
+    // These four are the issue's own rows, measured. Each one names something a reader would have got
+    // nothing of: the bottom half of a page, a stamp, a figure, a diagram.
+    "Page is blank. Text is absent from the top half and present at the bottom.",
+    "Page is blank. Printing is nowhere except a stamp at the top.",
+    "Page is blank. A caption is missing from the figure on the page.",
+    "Page is blank. The label is absent from the diagram shown here.",
+    // The same three reads in the other wordings, including the shape with no subject for the scan to
+    // start from at all — `No printing except a stamp` has its denial in front of the noun, so the
+    // stamp it names has no verb of its own to be affirmed by.
+    "Page is blank. No printing except a stamp at the top.",
+    "Page is blank. No text besides the caption under the figure.",
+    "Page is blank. Content is nowhere other than a stamp in the corner.",
+    "Page is blank. Text is absent apart from the signature at the bottom.",
+    "Page is blank. Text is absent except for the heading.",
+    "Page is blank. Text is not present except a stamp at the top.",
+    "Page is blank. Printed text is missing but a heading is visible.",
+    "Page is blank. Text is absent from the upper half and printed at the foot.",
+    "Page is blank. Printing is absent from the top and still visible at the bottom.",
+    "Page is blank. Handwriting is missing from the label on the sheet.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }
@@ -821,6 +845,42 @@ test("the affirmations a blank page's own log is made of are not contradictions"
     "Page is blank. Text is nonexistent.",
     "Page is blank. A page number is absent.",
     "Page is blank. The sheet is devoid of text.",
+    // What the partial-denial reads (#204) must not swallow: the same prepositions, exceptives and
+    // conjunctions inside a denial that covers the WHOLE sheet. A blank page's log reaches for these
+    // constantly — it says where the text is not — so each read is bounded by what it needs to see
+    // and nothing more. The substrate: `the sheet`, `the page`, `this side`, `the margins`, `the
+    // scan` are not names for text, so a prepositional object that names one affirms nothing.
+    "Page is blank. No text is present on the page.",
+    "Page is blank. Printing is absent from the entire sheet.",
+    "Page is blank. Text is nowhere in the margins.",
+    "Page is blank. Text is absent from the scan.",
+    "Page is blank. Text is missing throughout the page.",
+    "Page is blank. No characters are discernible across the sheet.",
+    "Page is blank. No text of any kind on this side.",
+    // `image` stays the scan when the log refers to it definitely, here as everywhere else in this
+    // file — the reading `LOCATIVE_SUBSTRATE` and `definiteBefore` exist for.
+    "Page is blank. No text is present in this image.",
+    "Page is blank. Content is missing from the image on this scan.",
+    // An exception whose object is not a name for text is not an affirmation of text. `marks`,
+    // `markings`, `dust` and `specks` are outside `TEXT_NOUN` deliberately (#193), and this is where
+    // that decision pays: a blank page's log names them in exactly this shape.
+    "Page is blank. No writing except stray marks.",
+    "Page is blank. No printing on the page except faint specks.",
+    "Page is blank. Nothing except dust and speckling.",
+    "Page is blank. No content other than dust.",
+    // `other` is exceptive in `nowhere other THAN a stamp` and a qualifier in `no other text`, which
+    // is the wording a blank page uses. The pair is required, so this stays a denial.
+    "Page is blank. No other text is present.",
+    // A conjunction after a denial joins a second denial as readily as an affirmation, and the
+    // complement is what tells them apart: `and the page is clean`, `and nothing else is visible`,
+    // `and no marks are visible` all continue the denial. The affirming complement also has to come
+    // straight after the joiner — `Handwriting is not present either.` has `present` behind its
+    // negator with nothing joining it, and stays the denial it is.
+    "Page is blank. Text is absent from the page and the page is clean.",
+    "Page is blank. Text is absent and nothing else is visible.",
+    "Page is blank. Handwriting is missing and no marks are visible.",
+    "Page is blank. Printing is absent from the front and the back.",
+    "Page is blank. No legible text, and nothing else on the page.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
