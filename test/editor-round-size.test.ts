@@ -8,8 +8,10 @@
 // distribution of a LEGITIMATE round to place it against.
 //
 // Which was measurable only on rounds that failed, where the delivered body is still the body that
-// went in: three of them across four bench rounds, all three `editor_no_output`, all three removing
-// about 1.7% of the body. Three samples, one document. So these four numbers go on the `editor`
+// went in: three of them across four bench rounds, all three `editor_no_output`, all three with a
+// REPLY about 1.7% shorter than the body it was given — the reply, because the delivered body on
+// those three is the input untouched, which is a ratio of 1.000 and says nothing about a round that
+// worked. Three samples, one document, one quantity away. So these four numbers go on the `editor`
 // line, which turns that into one sample per round on the population that actually matters.
 //
 // Both pairs, because a length cannot say whether a round lost content or lost wrappers, which is
