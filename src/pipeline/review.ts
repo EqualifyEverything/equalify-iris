@@ -6,6 +6,7 @@ import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseErro
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
 import { stripDeprecatedRoles } from "./roles.ts";
+import { visibleText } from "./correction.ts";
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { joinSections, splitSections } from "./sections.ts";
 import { flatten } from "./flatten.ts";
@@ -1553,9 +1554,37 @@ export async function runReview(
     // answered piece by piece — and `corrected` from `of` says how much of the document the
     // second kind actually reached, since a section that truncated in its turn kept its
     // original text.
+    //
+    // The four sizes are what #174 asked for, and the reason is that a successful whole-body
+    // replacement used to destroy the only copy of its own input: `parsed.html` is adopted for the
+    // body verbatim, so once the round has run, the body that went in is gone and the ratio it
+    // moved by is unrecoverable from the log. That left the size distribution of a legitimate
+    // review round measurable only on the rounds that FAILED — where the delivered body is still
+    // the body that entered — which is n=3 across four bench rounds, all three of them
+    // `editor_no_output`. #174's whole point is that a floor on the whole-body path cannot be
+    // given a number off three samples, and this is what turns three into one per round.
+    //
+    // Both pairs, because the finding those three produced was that the two move independently: a
+    // round that un-wraps a mis-structured page changes structure counts hard and character count
+    // not at all, and one that deletes a duplicated heading does the reverse. `chars_*` is the
+    // whole fragment and `text_chars_*` is what a reader receives, the same two readings
+    // `page_corrected` carries, so a round and a page correction can be read against each other
+    // (0.62–2.32 on 265 page corrections, 0.982–0.984 on the three rounds).
+    //
+    // Measured on the body, which is the `<main>` content: the wrapper and the markers after
+    // `</main>` are added downstream and are not what any round returned. Taken AFTER the role
+    // strip above for the same reason `changed` is — this is the body that will ship. And a
+    // sectioned round's pair is the whole body either way, so `sections` on this line is what
+    // separates the two populations: a section reply is 0.016–0.379 of the body it belongs to,
+    // because it IS one section, and anything reading these numbers as one distribution would
+    // read every sectioned round as a catastrophe.
     ctx.log.event("editor", {
       iteration: iterations,
       changed: body !== before,
+      chars_before: before.length,
+      chars_after: body.length,
+      text_chars_before: visibleText(before).length,
+      text_chars_after: visibleText(body).length,
       ...(round.sections ? { sections: round.sections.of, corrected: round.sections.corrected } : {}),
     });
 

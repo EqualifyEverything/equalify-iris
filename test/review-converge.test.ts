@@ -132,9 +132,29 @@ test("a round that changes something keeps the loop going", async () => {
   assert.equal(round.result.iterationsCompleted, 3);
 });
 
-test("each round says whether it changed the document", async () => {
+test("each round says whether it changed the document, and by how much", async () => {
+  // The sizes are on the same line as `changed`, and they are the whole line: nothing else about a
+  // round answered whole. A round that replaced the body with something a fifth of its size is
+  // delivered — there is no floor on this path (issue #174) — and this is where a log says so.
   const changed = await loop(() => JSON.stringify({ html: "<p>edited</p>" }), 1);
-  assert.deepEqual(typed(changed, "editor")[0].data, { iteration: 1, changed: true });
+  assert.deepEqual(typed(changed, "editor")[0].data, {
+    iteration: 1,
+    changed: true,
+    chars_before: BODY.length,
+    chars_after: "<p>edited</p>".length,
+    text_chars_before: "Operation Fill the hopper. Operation Press start.".length,
+    text_chars_after: "edited".length,
+  });
+  // A converged round handed the document back, so all four are the sizes of the body it was
+  // given. Equal sizes do not say the round converged, though — a reply with nothing usable in it
+  // reports the same four numbers, and `editor_no_output` is what tells those apart.
   const unchanged = await loop((body) => JSON.stringify({ html: body }), 1);
-  assert.deepEqual(typed(unchanged, "editor")[0].data, { iteration: 1, changed: false });
+  assert.deepEqual(typed(unchanged, "editor")[0].data, {
+    iteration: 1,
+    changed: false,
+    chars_before: BODY.length,
+    chars_after: BODY.length,
+    text_chars_before: "Operation Fill the hopper. Operation Press start.".length,
+    text_chars_after: "Operation Fill the hopper. Operation Press start.".length,
+  });
 });
