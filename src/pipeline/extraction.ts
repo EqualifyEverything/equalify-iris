@@ -1092,6 +1092,30 @@ function affirmingReach(tokens: Word[]): number[] {
   return reach;
 }
 
+// A verb the negator FOLLOWS denies its clause, and the subject-verb scan is the one shape in this
+// section that could not see it: `negatedInList` reads the words in front of the noun and
+// `affirmingReach` marks a verb from its own position, so nothing looked one word to the right of the
+// verb and `Text is not present.` read as an affirmation of `text` — a blank page reported lost, with
+// the negator quoted inside the evidence for it (`affirmed: "text is not"`, which is the tell).
+// `agents/page.md` asks the agent to say in the log that the page is empty and does not fix the wording
+// of the denial, so subject-verb-`not` is as ordinary an answer as `no text is present`, and #190
+// recorded that which pages get lost was being decided by the wording the model happened to pick.
+//
+// The negator must be the word RIGHT AFTER the verb, with no gap allowed. Every wording on this axis
+// puts it there (`is not present`, `was never printed`, `are not present`), and a gap would cost a
+// page rather than a glance: "Handwriting is clear, nothing else is on the sheet." affirms
+// handwriting, and reaching past `clear` to that `nothing` would refuse the affirmation and ship the
+// page as empty in silence — the #194 defect this check exists to close. Same reason `but` is not
+// followed: "Handwriting is visible but no printed text is present." is a page with writing on it.
+//
+// `never` earns its place here rather than in `NEGATOR`, which five other functions read: "text was
+// never printed" is a denial, but widening the negator vocabulary would change how the denial tails,
+// the object gaps and the coordination walk all read, and each of those trades in the other direction.
+function deniedAfterVerb(tokens: Word[], verb: number): boolean {
+  const next = tokens[verb + 1];
+  return next !== undefined && (NEGATOR.has(next.word) || next.word === "never" || next.word === "without");
+}
+
 // The noun a post-verb construction affirms — the object of `there is` or of a transitive verb — or
 // -1. Shared by both because both ask the same question of the same words.
 function affirmedObjectAfter(tokens: Word[], verb: number): number {
@@ -1137,7 +1161,7 @@ export function contentAffirmed(scope: string): string | null {
       if (!AFFIRMED_NOUN.test(word) || negatedInList(tokens, i)) continue;
       if (LOCATIVE_SUBSTRATE.has(word) && definiteBefore(tokens, i)) continue;
       const verb = reach[i + 1]!;
-      if (verb >= 0) {
+      if (verb >= 0 && !deniedAfterVerb(tokens, verb)) {
         return tokens
           .slice(i, Math.min(verb + 2, tokens.length))
           .map((t) => t.word)

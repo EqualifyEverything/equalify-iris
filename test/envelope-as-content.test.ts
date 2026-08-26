@@ -684,6 +684,19 @@ test("a log that says something is on the page contradicts its own blank claim",
     // governed them.
     "Page is blank. No stray marks, and handwriting is visible.",
     "Page is blank. No specks or dust; and a heading is visible.",
+    // The other side of the post-verb denial: the negator has to be the word RIGHT AFTER the verb.
+    // Both of these have one further along, and reaching for it would refuse an affirmation of
+    // handwriting — a page with writing on it, shipped empty and in silence. That is #194's cost, and
+    // it is the reason the check does not follow a `but` clause or step over a qualifier, even though
+    // #200's review named these as the same axis: an extra affirmation costs a glance at a page that
+    // was fine, and a missed one costs the page.
+    "Page is blank. Handwriting is visible but no printed text is present.",
+    "Page is blank. Handwriting is clear, nothing else is on the sheet.",
+    // Show-through. The reading is deliberate: `Printing … is faintly visible` affirms printing, and
+    // whether the ink is on this side of the paper is a question about the page rather than about the
+    // sentence. Reported, so someone looks; the alternative is a page with printing named in its own
+    // log delivered as empty.
+    "Page is blank. Printing from the reverse side is faintly visible; nothing is printed on this side.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }
@@ -757,6 +770,28 @@ test("the affirmations a blank page's own log is made of are not contradictions"
     "The sheet is empty. No printed text or page number is visible.",
     "Page is blank. Nothing printed or written is present on the page.",
     "Page is blank. No heading, caption or label of any kind is present.",
+    // A denial written in the other order — subject, verb, then the negator — which #200's review
+    // measured as reported-failed, with the negator quoted inside the evidence against the page
+    // (`affirmed: "text is not"`). Nothing looked at the word after the verb: the words BEFORE the
+    // noun are what `negatedInList` reads. `agents/page.md` asks for a log saying the page is empty
+    // and does not dictate the wording, so this order is as ordinary an answer as `no text is
+    // present`, and #190 is the record of what happens when which pages survive is decided by the
+    // phrasing the model happened to choose.
+    "Page is blank. Text is not present anywhere on the sheet.",
+    "Page is blank. Handwriting is not present.",
+    "Page is blank. A heading is not visible.",
+    "Page is blank. Text was never printed on this sheet.",
+    "The sheet is empty. Printed text is not present.",
+    "Page is blank. Text and handwriting are not present.",
+    "Page is blank. No text is present. Handwriting is not present either.",
+    // A negator that opens a coordination and a clause of its own after it: the walk back from
+    // `handwriting` finds the conjunction and the list's negator, so the whole line reads as one
+    // denied list rather than a denial followed by an affirmation. Pinned as the reading chosen, not
+    // as the only defensible one — the alternative refuses it, and #200's review raised it as the
+    // cost of `negatedInList` reaching across a comma. The neighbouring `No text is visible and
+    // handwriting is present.` (above) is refused, because there the walk stops at the first
+    // clause's own verb; the comma is the whole difference, which is why both are pinned.
+    "Page is blank. No printed text, and handwriting is present.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -797,6 +832,12 @@ test("a contradicted blank declaration says what the log claimed was there", () 
     vetoes: [],
   });
   assert.equal("affirmed" in blankDeclaration({ html: "", log: "Page is blank. Some dust is present." }), false);
+  // And the field never holds a negator, which is how #200's review spotted the post-verb order: an
+  // `affirmed` of `text is not` is a refusal quoting the word that refutes it.
+  assert.equal(
+    "affirmed" in blankDeclaration({ html: "", log: "Page is blank. Text is not present anywhere." }),
+    false,
+  );
 });
 
 // --- through the pipeline ------------------------------------------------------
