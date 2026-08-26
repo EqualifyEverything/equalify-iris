@@ -192,6 +192,31 @@ function selector(target: unknown): string {
   return parts.filter((p): p is string => typeof p === "string" && p !== "").join(" >> ");
 }
 
+// The first MAX_EXAMPLE_NODES nodes that identify an element at all.
+//
+// A node that yields neither a selector nor any markup is skipped rather than kept as a pair of
+// empty strings, which would reach the prompt as a bullet with nothing on either side of it —
+// a line telling the Reader an element exists and refusing to say which. Unreachable through
+// axe in this environment (every measured node has both), so this is about what the prompt is
+// allowed to contain rather than about a case that happens: the fields are read as `unknown`
+// because they cross a realm boundary, and something narrowed out of a foreign value must not
+// leave a line behind. Taken in order, so a rule whose first node is unusable still contributes
+// its next one instead of listing one fewer.
+//
+// Exported for the same reason `trimStackPaths` is: the shapes it is written for cannot be
+// provoked through `runAxe` in this environment, so a test has to hand them over directly or
+// they are handled on faith.
+export function exampleNodes(nodes: { target?: unknown; html?: unknown }[]): LintNode[] {
+  const out: LintNode[] = [];
+  for (const n of nodes) {
+    if (out.length === MAX_EXAMPLE_NODES) break;
+    const target = selector(n.target);
+    const html = excerpt(typeof n.html === "string" ? n.html : "");
+    if (target || html) out.push({ target, html });
+  }
+  return out;
+}
+
 // PRD §7.7: validate the document parses and basic accessibility lint passes
 // (axe-core in headless mode). We run axe inside a jsdom realm. If axe cannot run in this
 // environment the session continues rather than failing — but with no verdict rather than
@@ -355,10 +380,7 @@ export async function runAxe(html: string): Promise<LintResult> {
       // unbounded slice of the document's markup — this result is logged, and the examples are
       // the one part of it that is content from a user's file. (`/v1/quality` takes the count
       // and nothing else; see orchestrator.ts.)
-      examples: v.nodes.slice(0, MAX_EXAMPLE_NODES).map((n) => ({
-        target: selector(n.target),
-        html: excerpt(typeof n.html === "string" ? n.html : ""),
-      })),
+      examples: exampleNodes(v.nodes),
     }));
     return { ok: violations.length === 0, violations };
   } catch (e) {

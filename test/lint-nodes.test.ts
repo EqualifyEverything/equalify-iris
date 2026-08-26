@@ -4,9 +4,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JSDOM } from "jsdom";
-import { runAxe, MAX_EXAMPLE_NODES, NODE_HTML_CHARS, type LintResult } from "../src/pipeline/lint.ts";
+import { runAxe, exampleNodes, MAX_EXAMPLE_NODES, NODE_HTML_CHARS, type LintResult } from "../src/pipeline/lint.ts";
 import { wrapDocument } from "../src/pipeline/assembly.ts";
-import { runReview } from "../src/pipeline/review.ts";
+import { runReview, MAX_EXAMPLES_TOTAL } from "../src/pipeline/review.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 
@@ -130,12 +130,36 @@ test("an element too long to send is cut, and one written over several lines is 
   assert.equal(wrapped.examples![0]!.html, `<a href="#q"> </a>`);
 });
 
+// The node fields cross a realm boundary out of jsdom, so they are read as `unknown` and
+// narrowed — and what narrowing throws away must not leave a line behind. None of these shapes
+// is reachable through `runAxe` here (the test above measures that every real node has both
+// halves), which is why they are handed over directly rather than provoked.
+test("a node that cannot say which element it is does not become an empty line", () => {
+  // Neither half: a bullet reading "    - `` — ``" would tell the Reader an element exists and
+  // refuse to name it, which is worse than the count it already had.
+  assert.deepEqual(exampleNodes([{ target: [], html: "" }, { target: undefined }]), []);
+  // One half is enough to be worth sending, and either half can be the one that is missing.
+  assert.deepEqual(exampleNodes([{ target: ["#a"], html: 42 }]), [{ target: "#a", html: "" }]);
+  assert.deepEqual(exampleNodes([{ html: "<p id=\"a\">" }]), [{ target: "", html: `<p id="a">` }]);
+  // Skipped in place rather than shortening the sample: three usable nodes are still three.
+  assert.equal(
+    exampleNodes([{}, { target: ["#a"] }, { target: null }, { target: ["#b"] }, { target: ["#c"] }, { target: ["#d"] }])
+      .length,
+    MAX_EXAMPLE_NODES,
+  );
+  // The frame path axe's type allows and this environment never produces: joined, so it reaches
+  // a prompt as a path a human can read rather than as `[object Array]`.
+  assert.deepEqual(exampleNodes([{ target: ["#frame", ["#inner", "#el"]], html: "<p>" }]), [
+    { target: "#frame >> #inner >> #el", html: "<p>" },
+  ]);
+});
+
 // --- the seam between the code and the prompt --------------------------------
 
 // What the Reader is actually sent. `lintSummary` is private to review.ts and the thing worth
 // asserting is not its return value but that the lint reaches the prompt, so this goes through
 // `runReview` the way the heading-list test does.
-async function readerPrompt(lint: LintResult): Promise<string> {
+async function readerPrompts(lint: LintResult, body = "<h1>Report</h1>"): Promise<string[]> {
   const dir = mkdtempSync(join(tmpdir(), "iris-lint-nodes-"));
   try {
     const prompts: string[] = [];
@@ -157,25 +181,32 @@ async function readerPrompt(lint: LintResult): Promise<string> {
       },
       log: { event: () => {}, agentCall: () => {} },
     } as unknown as PipelineContext;
-    await runReview(ctx, { body: "<h1>Report</h1>", lint });
-    assert.equal(prompts.length, 1);
-    return prompts[0]!;
+    await runReview(ctx, { body, lint });
+    return prompts;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
+async function readerPrompt(lint: LintResult): Promise<string> {
+  const prompts = await readerPrompts(lint);
+  assert.equal(prompts.length, 1, "this body should be one chunk");
+  return prompts[0]!;
+}
+
+const DEPRECATED_ROLE = {
+  id: "aria-deprecated-role",
+  impact: "minor",
+  description: "Ensure elements do not use deprecated roles",
+  nodes: 1,
+  examples: [{ target: "ol > li", html: `<li role="doc-endnote">` }],
+};
+
 test("the Reader is given the elements, told what they are, and told to pass them on", async () => {
   const prompt = await readerPrompt({
     ok: false,
     violations: [
-      {
-        id: "aria-deprecated-role",
-        impact: "minor",
-        description: "Ensure elements do not use deprecated roles",
-        nodes: 1,
-        examples: [{ target: "ol > li", html: `<li role="doc-endnote">` }],
-      },
+      DEPRECATED_ROLE,
       {
         id: "image-alt",
         impact: "critical",
@@ -206,8 +237,63 @@ test("the Reader is given the elements, told what they are, and told to pass the
   // they are against, that a listed element may be outside its own window, and that quoting one
   // is the only way it reaches the editor — which is never shown the lint at all.
   assert.match(prompt, /CSS selector/);
-  assert.match(prompt, /outside the HTML window you were given/);
+  assert.match(prompt, /may sit outside your window/);
   assert.match(prompt, /the Copy Editor is not shown these results/);
+});
+
+// The lint is one verdict on the whole document and the Reader is called per window, so the
+// elements are a whole-document input in a per-chunk prompt — the shape `duplicateHeadings` is
+// already handled for, and for the same reason: the chunk calls are independent, nothing
+// downstream dedupes their text (`dedupeNoContentIssues` keys on no-content pages, and reports
+// from calls that never saw each other are worded differently anyway), so a note telling every
+// call to report an element outside its own window puts N copies of one defect in the editor's
+// issue list and N entries in the delivered @unresolved comment (#192, by another path).
+test("the offending elements are given to one chunk, however many the body takes", async () => {
+  // Two same-worded <h2>s are not the point here, but the filler is: 40k of it puts the body
+  // over CHUNK_BUDGET (24000), which is roughly a five-page scan and the ordinary case.
+  const filler = "<p>Fill the hopper and press start.</p>".repeat(1100);
+  const prompts = await readerPrompts(
+    { ok: false, violations: [DEPRECATED_ROLE] },
+    `<h1>Report</h1>${filler}<p>end</p>`,
+  );
+  assert.ok(prompts.length > 1, "the body must actually span more than one chunk to prove anything");
+
+  const withElements = prompts.filter((p) => /`ol > li`/.test(p));
+  assert.equal(withElements.length, 1, "the elements reached more than one independent call");
+  assert.equal(withElements[0], prompts[0], "and it should be the first chunk, as the heading list is");
+  assert.equal(prompts.filter((p) => /CSS selector/.test(p)).length, 1, "as did the note about them");
+
+  // What the other chunks keep is what every chunk had before this section listed elements at
+  // all: the rule, its impact, its description, its count.
+  for (const p of prompts) {
+    assert.match(p, /- aria-deprecated-role \(minor\): Ensure elements do not use deprecated roles \[1 nodes\]/);
+  }
+});
+
+test("a document failing many rules does not fill the window with selectors", async () => {
+  // Twelve rules failing three nodes each is 36 elements; ~60 rules are enabled, so this is
+  // well inside what one badly extracted scan can produce.
+  const violations = Array.from({ length: 12 }, (_, r) => ({
+    id: `rule-${r}`,
+    impact: "serious",
+    description: `Ensure rule ${r}`,
+    nodes: 3,
+    examples: Array.from({ length: 3 }, (_, n) => ({ target: `#r${r}n${n}`, html: `<p id="r${r}n${n}">` })),
+  }));
+  const prompt = await readerPrompt({ ok: false, violations });
+
+  const listed = (prompt.match(/^    - `#r/gm) ?? []).length;
+  assert.equal(listed, MAX_EXAMPLES_TOTAL, "the whole section is bounded, not just each rule");
+  // Spent in the order the rules are listed, so the last rules are the ones without examples.
+  assert.match(prompt, /- rule-0 \(serious\): Ensure rule 0 \[3 nodes\]:/);
+  assert.doesNotMatch(prompt, /#r11n0/);
+  // And what was cut is said. A list that stops without saying so reads as the rules after it
+  // having had nothing to point at, which is the opposite of what is true of them.
+  assert.match(prompt, /No elements are listed for the last 4 rules above/);
+  assert.match(prompt, new RegExp(`had already reached ${MAX_EXAMPLES_TOTAL}`));
+
+  // Every rule still has its own line and its own count, listed or not.
+  for (let r = 0; r < 12; r++) assert.match(prompt, new RegExp(`- rule-${r} \\(serious\\)`));
 });
 
 test("a lint with nothing to point at reads exactly as it did before", async () => {
