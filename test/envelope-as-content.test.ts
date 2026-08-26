@@ -362,6 +362,14 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. Only dust. Not legible markings of any kind on this sheet.",
     // A name for text is read back over qualifiers, so a denial may go on qualifying what it denies.
     "Page is blank. A few specks. Not legible text or any other printed words.",
+    // `image` is the substrate where a locative preposition introduces it, and these are the wordings
+    // that spell the empty scan that way. The other reading of the same word is refused below.
+    "Page is blank. A few specks. Not legible text in this image.",
+    "Page is blank. A few specks. Not legible text anywhere in the image.",
+    // And the object of `resolve into` is exempt from the tail read, because the `do not` ahead of the
+    // construction is what governs it — these are the plainest wordings there are.
+    "Page is blank. A few specks. They do not resolve into words.",
+    "Page is blank. Only dust, nothing that would resolve into any legible characters.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -506,6 +514,27 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. A few specks. Not legible text, a caption is visible.",
     "Page is blank. A few specks. Not legible text, these words appear on the sheet.",
     "Page is blank. A few specks. Not legible text, some marks are visible.",
+    // A conjunction introduces an affirmed noun as readily as a denied one, and only what comes after
+    // the noun tells them apart: `or content of any kind` denies, `and printing is present` does not.
+    "Page is blank. A few specks. Not legible text, and printing is present.",
+    "Page is blank. A few specks. Not legible text, and figures are visible.",
+    "Page is blank. A few specks. Not legible text, and words remain visible.",
+    "Page is blank. A few specks. Not legible text, or headings appear on the page.",
+    // The other reading of `image`: introduced by anything but a locative, it is an object on the paper
+    // and a page whose one object is a photograph is where the cost of guessing is the page.
+    "Page is blank. A few specks. Not legible text, an image is visible.",
+    "Page is blank. A few specks. Not legible text, the page contains an image.",
+    "Page is blank. A few specks. Not legible text, images remain visible.",
+    // `resolve into` is the commoner of the two constructions on these pages — three of #190's four
+    // logs use it — and `resolve` is the veto word in the clause, so stripping it takes the doubt off
+    // the whole rest of the statement. The rest of the statement therefore has to deny too: the first
+    // three here are #190's own logs with one more clause on the end.
+    "Page is blank. Specks/dots are visible on the page but do not resolve into any characters, only a heading in the margin.",
+    "Page is blank. Specks/dots are visible on the page but do not resolve into any characters or content, and a heading is visible in the header.",
+    "Page appears blank. The visible marks are artifacts of the scan (dust/noise) and do not resolve into characters, only a caption at the foot of the page.",
+    "Page is blank. A few specks/dots that appear to be scanning artifacts, they do not resolve into characters over the handwritten note.",
+    "Page is blank. A few specks. They do not resolve into words, only a heading is visible.",
+    "Page is blank. A few specks. They do not resolve into words, the caption is in the margin.",
     // A question mark is a hedge and not a full stop, and a bare one is the shape `HARD_DOUBT` cannot
     // see: the model asking itself whether the page is empty is not the model saying that it is.
     "Page is blank. A few specks. Not legible text?",

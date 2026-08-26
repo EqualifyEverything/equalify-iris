@@ -759,9 +759,25 @@ const PAGE_BEARS = new Set(
   ).split(" "),
 );
 const DENIAL_CONNECTOR = new Set("no not nor neither none nothing or and any".split(" "));
+// Two of those connectors are conjunctions, which introduce an affirmed noun as readily as a denied
+// one: `or content of any kind` denies and `and printing is present` affirms, and only what comes
+// AFTER the noun tells them apart. So a conjunction may not hand a name for text to a verb that says
+// it is there. Nothing else needs this — a determiner is refused already, and a real negator (`no
+// writing`, `nor any figures`) has spent itself on the noun.
+const CONJUNCTION = new Set("or and".split(" "));
+const AFFIRMING_VERB = new Set("is are was were appear appears remain remains contain contains hold holds".split(" "));
 const QUALIFIER = new Set(
   "meaningful legible readable printed typed visible discernible apparent recognizable clear other more".split(" "),
 );
+// `image` is the one word the lists genuinely disagree about: it is the substrate in "not legible text
+// in this image" and a thing the page bears in "an image is visible", and both wordings are ones these
+// logs use. So it is read by what introduces it — a locative preposition makes it the scan, anything
+// else makes it an object on the paper — rather than being assigned to one list and losing either a
+// blank page or a photograph. Only `image` gets this; every other name for a page object is refused by
+// `DENIAL_WORD` not listing it at all.
+const LOCATIVE_SUBSTRATE = new Set("image images".split(" "));
+const LOCATIVE = new Set("in on across throughout within".split(" "));
+const DETERMINER = new Set("a an the this that these those".split(" "));
 // A denial made of nothing but these words is a short one, so a statement that runs past this refuses
 // rather than being read further. That keeps the work per match bounded — a log with a thousand
 // `not legible text`s in it and no full stop anywhere would otherwise re-read its own tail a thousand
@@ -785,11 +801,36 @@ function deniesToStatementEnd(log: string, start: number): boolean {
     .map((word) => word.toLowerCase());
   if (!words.every((word) => DENIAL_WORD.has(word))) return false;
   return words.every((word, i) => {
-    if (!PAGE_BEARS.has(word)) return true;
+    if (!PAGE_BEARS.has(word) && !LOCATIVE_SUBSTRATE.has(word)) return true;
     let before = i - 1;
     while (before >= 0 && QUALIFIER.has(words[before]!)) before--;
-    return before >= 0 && DENIAL_CONNECTOR.has(words[before]!);
+    if (before >= 0 && DENIAL_CONNECTOR.has(words[before]!)) {
+      return !(CONJUNCTION.has(words[before]!) && AFFIRMING_VERB.has(words[i + 1] ?? ""));
+    }
+    if (!LOCATIVE_SUBSTRATE.has(word)) return false;
+    while (before >= 0 && DETERMINER.has(words[before]!)) before--;
+    return before >= 0 && LOCATIVE.has(words[before]!);
   });
+}
+// `resolve into` needs the same tail read, one noun further on. `resolve` is the veto word in that
+// clause, so stripping it takes the doubt off the whole rest of the statement with nothing looking at
+// what the rest says — and it is the commoner of the two constructions on the pages this exists for
+// (three of #190's four logs are written with it), so every placement and every affirmation the
+// `not legible` branch refuses was reaching the document through this one.
+//
+// The object of `into` is exempt from the read, because the `do not` ahead of the construction is what
+// governs it: "do not resolve into any characters" denies the characters, and starting the read at
+// `characters` would refuse the plainest wording there is ("nothing that would resolve into words").
+// Everything after that object is read exactly as the other branch's tail is — so "…into any
+// characters or content" still declares the page blank and "…into any characters, only a heading in
+// the margin" does not.
+const RESOLVE_OBJECT = new RegExp(
+  String.raw`^\s*(?:(?:a|an|any|the|some|few|several|more|other|meaningful|legible|readable|printed|typed|visible|discernible|apparent|recognizable|clear)\s+)*[A-Za-z][A-Za-z'-]*`,
+);
+function deniesAfterResolveObject(log: string, start: number): boolean {
+  // Bounded so the scan stays O(1) per match, the same reason `DENIAL_STATEMENT_MAX` exists.
+  const object = RESOLVE_OBJECT.exec(log.slice(start, start + DENIAL_STATEMENT_MAX));
+  return deniesToStatementEnd(log, start + (object ? object[0].length : 0));
 }
 // Terms no exemption reaches, checked over the WHOLE log rather than a phrase: a failure to read
 // ("the scan is too dark"), something hidden ("dust and noise obscure the text" — which names
@@ -808,7 +849,9 @@ const HARD_DOUBT =
 function vetoScope(log: string): string {
   if (HARD_DOUBT.test(log)) return log;
   return log
-    .replace(MARKS_NOT_TEXT, " ")
+    .replace(MARKS_NOT_TEXT, (match, offset: number, whole: string) =>
+      deniesAfterResolveObject(whole, offset + match.length) ? " " : match,
+    )
     .replace(NOT_LEGIBLE_TEXT, (match, offset: number, whole: string) =>
       deniesToStatementEnd(whole, offset + match.length) ? " " : match,
     )
