@@ -598,6 +598,19 @@ const MARKS_PHRASE = new RegExp(
 // counts it as a name for text, and the two must not disagree about the same word. None of this
 // costs the four round-9 logs: they all put `content` after the veto word ("do not resolve into any
 // characters or content"), never in the gap ahead of it, which is the only region examined.
+//
+// This list is where the exemption stops being provably safe, and that is a decision rather than an
+// oversight. A hand-written list of nouns is as complete as someone's memory: "the graphic does not
+// resolve into words" gets through, and so does the next noun after that. The structural version
+// would invert it — forbid ANY subject in the gap except the words for the paper itself (`page`,
+// `sheet`, `scan`, `margin`), so an unknown noun refuses the declaration instead of exempting it.
+// It is not taken because the risk lands on the pages this exists for: the real logs put a subject
+// in the gap ("Specks/dots are visible on the page but…", "artifacts of the scan (dust/noise) and…"),
+// so the safe direction there is a whitelist of substrate words, which is the same completeness
+// problem pointed the other way, and getting it wrong reports a blank page as lost — the #190 defect
+// again. The wording needed to reach what this list misses asserts blankness, names the marks, and
+// affirms an unlisted page object in ONE sentence with no doubt word anywhere in it, which nothing
+// in nine bench rounds has produced. If a round ever produces one, the noun goes in the list.
 const TEXT_NOUN = String.raw`text|texts|content|printing|prints|lines?|words?|characters?|letters?|glyphs?|digits?|numerals?|handwriting|writing|typing|paragraphs?|sentences?|headings?|captions?|figures?|images?|illustrations?|diagrams?|tables?|stamps?|signatures?|labels?|logos?|seals?`;
 // The gap: anything up to the end of the sentence that does not name text.
 const MARKS_ANCHOR = String.raw`(?<=\b(?:${MARK})\b(?:(?!\b(?:${TEXT_NOUN})\b)[^.;])*)`;
