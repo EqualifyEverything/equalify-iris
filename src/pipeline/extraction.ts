@@ -661,6 +661,9 @@ const MARKS_GAP = String.raw`(?:(?!${NEGATED}\b(?:${TEXT_NOUN})\b)[^.;])*`;
 // inverted form is the same door again ("Nor does the barcode resolve into words"). `nor` and
 // `neither` are prefixes only for the same reason: inversion is what they are for, and a bare one
 // swallowed the subject that followed it.
+// Names for what a page bears, and what may qualify one, used both here and in the denial tail below.
+const TAIL_NOUN = String.raw`(?:text|texts|content|words?|characters?|print(?:s|ed|ing)?|writing|markings?|lines?|letters?|glyphs?|digits?|numerals?|figures?|images?|handwriting|anything|something)`;
+const TAIL_QUALIFIER = String.raw`(?:a|an|any|no|the|some|other|more|meaningful|legible|readable|printed|typed|visible|discernible|recognizable|clear)`;
 const CONT_CORE =
   String.raw`(?:(?:they|these|those)\b` +
   String.raw`|(?:it|this)\s+(?:doesn'?t|isn'?t|wasn'?t)\b` +
@@ -668,8 +671,15 @@ const CONT_CORE =
   String.raw`|there\s+(?:is|are|was|were)\s+(?:no|none|nothing)\b` +
   String.raw`|(?:does|do|did)\s+(?=not\b)` +
   String.raw`|(?:no|none|nothing|not)\b` +
-  String.raw`|(?:the|these|those|their)\s+(?:(?:${MARK_MODIFIER})[\s/-]+)*(?:${MARK})\b)`;
-const CONTINUATION = String.raw`(?:(?:and|but|only|just|also|so|then|nor|neither)\s+)?${CONT_CORE}`;
+  // `any` names what is denied without being a denial itself, so it is allowed only ahead of a name
+  // for text and only as a lookahead — "Not legible text, nor any figures" continues the denial, while
+  // "Any printing that may exist does not resolve into readable text" leaves `printing` in the gap,
+  // where it still refuses.
+  String.raw`|any\s+(?=(?:${TAIL_QUALIFIER}\s+){0,2}${TAIL_NOUN}\b)` +
+  // The marks themselves, named again with or without a determiner: `only dust` is as much a
+  // continuation as `only the dust`, and requiring the determiner cost the commoner wording.
+  String.raw`|(?:(?:a|an|any|some|few|several|more|the|these|those|their)\s+){0,3}(?:(?:${MARK_MODIFIER})[\s/-]+)*(?:${MARK})\b)`;
+const CONTINUATION = String.raw`(?:(?:and|but|or|only|just|also|so|then|nor|neither)\s+)?${CONT_CORE}`;
 const MARKS_ANCHOR = String.raw`(?<=\b(?:${MARK})\b${MARKS_GAP}(?:[.;]\s*(?:${CONTINUATION}${MARKS_GAP})?)?)`;
 // "…specks/dots … do not resolve into any characters": `resolve` is in `UNREADABLE_LOG` for "could
 // not resolve", and a destination after it turns the sentence into a denial that the marks are
@@ -695,22 +705,22 @@ const MARKS_NOT_TEXT = new RegExp(`${MARKS_ANCHOR}\\bresolves?\\s+(?:in)?to\\b`,
 // the same in "not legible text or the printing in the margin". So `or`/`and`/`nor`/`either` may add
 // another thing denied — an adjective or two and a name for text — and then the tail has to end again.
 //
-// A full stop, a `!`, a `?` or the end of the log ends it outright. A comma, a semicolon, a colon or a
-// line break ends it only when what follows CONTINUES the denial, by the same test a crossed sentence
+// A full stop, a `!` or the end of the log ends it outright. A comma, a semicolon, a colon or a line
+// break ends it only when what follows CONTINUES the denial, by the same test a crossed sentence
 // boundary uses — because these logs are written as loose notes ("Not legible text\nNo page-break
-// marker is emitted"), and a note breaks a line exactly where it would otherwise place the text
-// ("Not legible printing\nin the margin"). A separator that lets anything follow it is the hole this
-// guard exists to close, reached one character further along.
+// marker is emitted", sometimes as a `-` list), and a note breaks a line exactly where it would
+// otherwise place the text ("Not legible printing\nin the margin"). A separator that lets anything
+// follow it is the hole this guard exists to close, reached one character further along. A `?` is not
+// a terminator: "Not legible text?" is a hedge, and a bare one is the shape `HARD_DOUBT` cannot see.
 const SUBSTRATE = String.raw`(?:page|sheet|scan|paper|image|document|leaf)s?`;
 const CLAUSE_END =
-  String.raw`(?=[ \t]*(?:[.!?]|$)` +
+  String.raw`(?=[ \t]*(?:[.!]|$)` +
   String.raw`|[ \t]*[,;:)][ \t]*(?:${CONTINUATION}|$)` +
-  String.raw`|[ \t]*\n[ \t]*(?:${CONTINUATION}|$))`;
+  String.raw`|[ \t]*\n[ \t]*(?:[-*•]\s*)?(?:${CONTINUATION}|$))`;
 const ON_SUBSTRATE = String.raw`(?:\s+(?:in|on|across)\s+(?:the\s+|this\s+)?${SUBSTRATE}\b)`;
-// One more thing denied: "not legible text or meaningful content", "no legible print and no writing".
-const TAIL_NOUN = String.raw`(?:text|texts|content|words?|characters?|print(?:s|ed|ing)?|writing|markings?|lines?|letters?|glyphs?|digits?|numerals?|figures?|images?|handwriting)`;
-const TAIL_QUALIFIER = String.raw`(?:a|an|any|no|the|some|other|more|meaningful|legible|readable|printed|typed|visible|discernible|recognizable|clear)`;
-const MORE_DENIED = String.raw`(?:\s+(?:or|and|nor|either)(?:\s+${TAIL_QUALIFIER}){0,2}\s+${TAIL_NOUN}\b){0,2}`;
+// One more thing denied: "not legible text or meaningful content", "no legible print and no writing",
+// "not legible text or anything at all".
+const MORE_DENIED = String.raw`(?:\s+(?:or|and|nor|either)(?:\s+${TAIL_QUALIFIER}){0,2}\s+${TAIL_NOUN}\b(?:\s+else)?){0,2}`;
 const DENIAL_TAIL =
   `${MORE_DENIED}(?:${CLAUSE_END}` +
   String.raw`|\s+(?:at all|whatsoever|of any (?:kind|sort|type))${CLAUSE_END}` +

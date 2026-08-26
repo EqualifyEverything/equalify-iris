@@ -343,6 +343,13 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // these logs are written as loose notes.
     "Page is blank. A few specks.\nNot legible text\nNo page-break marker is emitted.",
     "Page is blank. A few specks, not legible characters, nothing else.",
+    "Page is blank. A few specks. Not legible text\n- no page number\n- no content",
+    // The marks named again are a continuation with or without a determiner, and `any` denies as
+    // plainly as `no` where what follows it is a name for text.
+    "Page is blank. A few specks. Not legible text, only dust.",
+    "Page is blank. A few specks. Not legible text; only scanner dust.",
+    "Page is blank. A few specks. Not legible text, nor any figures.",
+    "Page is blank. A few specks. Not legible text or anything at all.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -450,6 +457,12 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // Going on to deny something else is a denial; going on to place it is not.
     "Page is blank. A few specks. Not legible text or the printing in the margin.",
     "Page is blank. A few specks. Not legible text either in the margin.",
+    "Page is blank. A few specks. Not legible text\n- the note in the margin",
+    // A question mark is a hedge and not a full stop, and a bare one is the shape `HARD_DOUBT` cannot
+    // see: the model asking itself whether the page is empty is not the model saying that it is.
+    "Page is blank. A few specks. Not legible text?",
+    // `any` is allowed ahead of a name for text, and the name is left where the gap can still see it.
+    "Page is blank. A few specks. Any printing that may exist does not resolve into readable text.",
     // `nothing but the text` affirms the text. A negative word ahead of a name for text does not make
     // it a denial when the negative is spent on the exception.
     "Page is blank. Dust and specks, nothing but the handwriting, which does not resolve into words.",
