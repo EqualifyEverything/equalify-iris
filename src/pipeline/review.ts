@@ -118,6 +118,22 @@ and say which of the two cases it is; where the excerpts do not tell you, say th
 choosing. The list decides only that a pair EXISTS: no entry is a false positive to be argued
 with, and finding a pair the list missed is still worth reporting.
 
+One class of content marked up two ways is a defect of the same kind, and only the joined document
+shows it either. The pages were extracted one at a time by calls that could not see each other, so
+the line of website, e-mail and revision that every page prints may announce [Term]/[Definition]
+pairs on one page and a plain sentence on the next, and sections of one sort may open at
+[Heading 2] on four pages and [Heading 1] on the fifth. Report the group as ONE issue, naming the
+pages on both sides and which shape most of them use, so what follows is a page brought into line
+rather than a document rewritten — and where one side carries words the other does not print, a
+labelled footer against a line of bare values, say so, because the fix cannot supply words a page
+never had. Two things have to hold first. The content has to be the same KIND on both pages and the
+excerpts have to show you that — two footers with the same fields, two parts tables — since
+sections that merely differ are not an inconsistency: a table of contents and a parts list are not
+one class, and a page whose content has no counterpart is not either. And you can only judge what
+you were given: where your HTML is one window of several, a shape you meet once here may be the
+majority shape in the rest of the document, so report a difference between two pages you can both
+see, never a page that looks unlike the pages you cannot.
+
 A [not legible] marker is what the extractor wrote where the marks on its page did not resolve
 into characters, and a [page not fully transcribed] marker is what it wrote where it could not
 return the whole page. Report every one of them with the page it is on, and nothing more. The page
