@@ -79,13 +79,17 @@ the axe-core lint results provided.
 In the flattened view, anything in square brackets is a structural annotation, not content:
 [Heading 1-6], [List item], [List item N], [Link], [Image], [Image alt], [Table],
 [Header row], [Row], [Field input|textarea|select|button|summary], [Label], [Quote],
-[Caption], [Term], [Definition], plus [N rows, M columns], [empty], [no caption],
+[Caption], [Term], [Definition], [Abbr title], plus [N rows, M columns], [empty], [no caption],
 [spans N columns], [spans N rows], [alt missing] and [decorative, alt empty]. Two bracketed
 tokens are the exception, because the extractor wrote them into the document rather than the
 flattener adding them: [not legible] and [page not fully transcribed] are content — what a page
 said where the source could not be read, or could not be returned in full — and are dealt with
 below. A field's own announced name follows its marker, so [Field input text] with nothing after
 it is a control with no accessible name at all. Tables are expanded row by row with cells separated by " | ".
+[Abbr title] carries the name an abbreviation or a symbol holds in its title attribute: a glyph
+followed by "[Abbr title] Stop" is a named control and correct markup, and only a symbol with
+nothing after it is unnamed. Do not ask for that name to be moved into the text — the words
+belong to the page and the attribute is where they are announced from.
 
 An item of an ORDERED list carries the number it is announced with — [List item 5] — and an
 item of an unordered or definition list carries none, because there is no number there. Those
@@ -124,9 +128,12 @@ the line of website, e-mail and revision that every page prints may announce [Te
 pairs on one page and a plain sentence on the next, and sections of one sort may open at
 [Heading 2] on four pages and [Heading 1] on the fifth. Report the group as ONE issue, naming the
 pages on both sides and which shape most of them use, so what follows is a page brought into line
-rather than a document rewritten — and where one side carries words the other does not print, a
-labelled footer against a line of bare values, say so, because the fix cannot supply words a page
-never had. Two things have to hold first. The content has to be the same KIND on both pages and the
+rather than a document rewritten. The words the fix needs have to be on the page: a footer printing
+"Website: example.com" as a sentence carries its own labels, and those are what the [Term]s are
+built from. Where one side prints no labels at all, a labelled footer against a line of bare
+values, leave it alone — the difference is between the two pages and not in their markup, nobody
+downstream may supply words a page never printed, and an issue that cannot be closed is reported
+again every round. Two things have to hold first. The content has to be the same KIND on both pages and the
 excerpts have to show you that — two footers with the same fields, two parts tables — since
 sections that merely differ are not an inconsistency: a table of contents and a parts list are not
 one class, and a page whose content has no counterpart is not either. And you can only judge what

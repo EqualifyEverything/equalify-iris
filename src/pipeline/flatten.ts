@@ -234,6 +234,23 @@ export function flatten(html: string): string {
     if (tag === "br") return "";
     if (FIELD.has(tag)) return fieldText(el);
     const kids = Array.from(el.childNodes).map(inlineText).filter(Boolean).join(" ");
+    // An abbreviation is the one inline element whose own text is not meant to stand
+    // on its own: `agents/page.md` asks for `<abbr title="Stop">■</abbr>` where a page
+    // names a control symbol somewhere other than beside it, and the name is then in
+    // the attribute and nowhere else. The general rule below takes an attribute name
+    // only when the subtree gave nothing — right for a `<span>`, and here it would
+    // drop the whole point, leaving the Reader a bare glyph. The Reader is told to
+    // treat a symbol with no name as a defect, so it would report correct markup: the
+    // same phantom-issue direction `ariaName` was written for.
+    //
+    // After the glyph, since that is the order a reader meets them, and skipped when
+    // the two are the same string (`<abbr title="WCAG">WCAG</abbr>` is not announced
+    // twice). The name is content — a word the page printed, which is what the page
+    // rule requires — so it sits outside the marker, as alt text does.
+    if (tag === "abbr") {
+      const name = ariaName(el);
+      return norm(`${kids} ${name && name !== kids ? `[Abbr title] ${name}` : ""}`);
+    }
     // A link's name can come from its text, its nested image's alt, an attribute, or
     // several of those, so the marker precedes whatever the subtree produced instead
     // of replacing it. The attribute name is added only when the subtree yielded

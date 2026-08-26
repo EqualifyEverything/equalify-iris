@@ -25,6 +25,7 @@ import { JSDOM, VirtualConsole } from "jsdom";
 import { runAxe } from "../src/pipeline/lint.ts";
 import { wrapDocument } from "../src/pipeline/assembly.ts";
 import { flatten } from "../src/pipeline/flatten.ts";
+import { READER_SYSTEM } from "../src/pipeline/review.ts";
 
 const document = (body: string): string =>
   wrapDocument(`<h1 id="doc-title">Operator's manual</h1>\n<p>Before use.</p>\n${body}`);
@@ -84,7 +85,10 @@ test("every <dl> shape the page agent is now told to emit is clean", async () =>
       "<tr><td>1</td><td><ul><li>Flour</li><li>Salt</li></ul></td></tr></table>",
   ]) {
     const found = await rules(shape);
-    if (found === null) return;
+    // A lint that could not run says nothing about this shape — but it says nothing
+    // about the next one either, so skip the row rather than abandoning the four
+    // shapes after it: whichever way the run goes, the reason is the same.
+    if (found === null) continue;
     assert.deepEqual(found, [], `${shape} should lint clean, got: ${found.join(", ")}`);
   }
 });
@@ -96,9 +100,29 @@ test("the symbol's name goes in title, and the gate is not what says so", async 
   assert.deepEqual(found, [], `the prescribed shape should lint clean, got: ${found.join(", ")}`);
 
   // And the shape the proposal asked for. It passes the gate too — which is the point: the gate
-  // cannot be what a model learns this from.
+  // cannot be what a model learns this from. Guarded like the call above, or a lint that could not
+  // run at all reports the opposite of what happened: `deepEqual(null, [])` fails, and its message
+  // says axe started flagging `aria-label` on <abbr>.
   const labelled = await rules('<p>Press <abbr aria-label="Stop">&#x25A0;</abbr> to stop.</p>');
+  if (labelled === null) return;
   assert.deepEqual(labelled, [], "aria-label on <abbr> is reported by the gate now, so the rule can cite it");
+});
+
+// The prescribed shape has to survive into the one view the document is reviewed in, and it did
+// not: `abbr` is inline, so `flatten` announced the glyph and dropped the name, and the Reader —
+// which never sees the source image and is told a symbol with no name is a defect — would have
+// read correct markup as an unnamed control. Both halves are pinned here: the name is announced,
+// and the marker is one READER_SYSTEM tells the Reader to expect (a marker the flattener produces
+// and the prompt does not advertise is the same defect as the reverse, per flatten.ts's own note).
+test("a symbol named only by its title is named in the flattened view too", () => {
+  const named = announced('<p>Press <abbr title="Stop">&#x25A0;</abbr> to stop.</p>');
+  assert.match(named, /Press ■ \[Abbr title\] Stop to stop\./);
+  // The name is not doubled where the page prints the expansion as the element's own text.
+  assert.match(announced("<p>The <abbr title=\"WCAG\">WCAG</abbr> rules.</p>"), /The WCAG rules\./);
+  // A glyph with no name at all is what stays bare — the case the Reader should report.
+  assert.match(announced("<p>Press &#x25A0; to stop.</p>"), /Press ■ to stop\./);
+  assert.match(READER_SYSTEM, /\[Abbr title\] carries the name an abbreviation or a symbol holds in its title attribute/);
+  assert.match(READER_SYSTEM, /\[Caption\], \[Term\], \[Definition\], \[Abbr title\]/);
 });
 
 // Measured directly, so the silence above can be told apart from nothing being wrong. This is

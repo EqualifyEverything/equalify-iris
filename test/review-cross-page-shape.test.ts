@@ -65,9 +65,15 @@ test("the rule's guards keep it from reporting differences that are not the defe
       /report a difference between two pages you can both see, never a page that looks unlike the pages you cannot/],
     // Guard three, and the one that ties this to what the Copy Editor is allowed to do: a
     // footer of bare values cannot be brought into line with a labelled one without writing
-    // terms the page never printed.
-    ["a difference the document's own words cannot close is reported as that",
-      /where one side carries words the other does not print, a labelled footer against a line of bare values, say so, because the fix cannot supply words a page never had/],
+    // terms the page never printed. So that case is left alone rather than reported — an issue
+    // the editor is forbidden to close comes back every round and lands in @unresolved, which
+    // `unresolved_rate` in GET /v1/quality counts and the weekly report threshold-compares.
+    ["the fix has to be buildable from words the page prints",
+      /The words the fix needs have to be on the page: a footer printing "Website: example\.com" as a sentence carries its own labels, and those are what the \[Term\]s are built from/],
+    ["and where one side prints no labels at all, the difference is left alone",
+      /Where one side prints no labels at all, a labelled footer against a line of bare values, leave it alone/],
+    ["for the two reasons that make it unclosable",
+      /nobody downstream may supply words a page never printed, and an issue that cannot be closed is reported again every round/],
   ] as [string, RegExp][]) {
     assert.match(reader, re, `READER_SYSTEM no longer says: ${what}`);
   }
