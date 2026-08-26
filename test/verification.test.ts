@@ -260,6 +260,9 @@ interface Behaviour {
   // is being corrected. Tests that want one page to fail give only that page a problem.
   correctionThrows?: () => Error;
   links?: PdfLink[];
+  // The correction call's own user message, for a test whose subject is what that prompt says
+  // rather than what the page came back as.
+  onCorrection?: (user: string) => void;
 }
 
 function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 2): PipelineContext {
@@ -310,6 +313,7 @@ function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 2): Pipelin
           };
         }
         if (user.includes("had fidelity/accessibility problems")) {
+          b.onCorrection?.(user);
           if (b.correctionThrows) throw b.correctionThrows();
           return { text: JSON.stringify({ html: b.corrected(order) }) };
         }
@@ -377,6 +381,54 @@ test("a correction that changed the page says what it changed", async () => {
     );
     // And the document is the corrected page, unchanged by any of this.
     assert.match(result.fragments[0].innerHtml, /facing away/);
+  });
+});
+
+// Issue #132: a re-render came back with heading levels, table cells and semantic markup that a
+// previous, accepted iteration had right — reported by the user as "a clear regression". Both
+// paths that re-render a page show the model its own previous output, and until this change only
+// one of them said what to do with the parts nobody had complained about: `renderPage`'s
+// `priorSection` carries "Keep everything the feedback does NOT concern exactly as it was", and
+// this path carried nothing. "Resolve every problem" against a whole page and an image reads as a
+// licence to produce the page again.
+//
+// Which costs the page silently. The corrected fragment replaces the previous one wholesale, and
+// `correctionEffect` measures the change without judging it: a heading that moved a level and a
+// cell's list flattened arrive as `structure_changed: true`, which is also what the requested fix
+// looks like. `destroyedPage` refuses only a fragment that lost most of itself.
+//
+// So the scope is now in the prompt, and it is asserted here rather than in a wording test
+// because the sentence has to reach the model on this path specifically — that is the asymmetry
+// #132 was filed about. The page prompt carries the same rule for both paths
+// (test/page-prompt.test.ts).
+test("the correction prompt names the problems and bounds what else may change", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const prompts: string[] = [];
+    const rendered = `<h2>Controls</h2><dl><dt>Power</dt><dd>Turns the unit on.</dd></dl>`;
+    await runExtraction(
+      makeCtx(dir, events, {
+        html: () => rendered,
+        problems: (o) => (o === 1 ? ["the heading level is wrong"] : []),
+        corrected: () => `<h3>Controls</h3><dl><dt>Power</dt><dd>Turns the unit on.</dd></dl>`,
+        onCorrection: (user) => prompts.push(user),
+      }),
+    );
+
+    assert.equal(prompts.length, 1, "one page failed its check, so one correction prompt");
+    const user = prompts[0].replace(/\s+/g, " ");
+    // What it is asked to fix, and the page it is fixing — unchanged, and pinned here because
+    // the scope clause below is meaningless without them.
+    assert.match(user, /- the heading level is wrong/);
+    assert.match(user, /## Your previous output/);
+    assert.match(user, /return a corrected version that resolves every problem/);
+    // And the bound. Enumerated rather than left as "nothing else": #132's regression was four
+    // different kinds of element at once, and a model reading "resolve every problem" needs to
+    // be told that the <dl> it was not asked about is not its business either.
+    assert.match(
+      user,
+      /Change nothing the list above does not name: every heading, table, list, label and attribute that is not part of a problem is carried over exactly as it stands\./,
+    );
   });
 });
 

@@ -234,6 +234,33 @@ export function flatten(html: string): string {
     if (tag === "br") return "";
     if (FIELD.has(tag)) return fieldText(el);
     const kids = Array.from(el.childNodes).map(inlineText).filter(Boolean).join(" ");
+    // An abbreviation is the one inline element whose own text is not meant to stand
+    // on its own: `agents/page.md` asks for `<abbr title="Stop">■</abbr>` where a page
+    // names a control symbol somewhere other than beside it, and the name is then in
+    // the attribute and nowhere else. The general rule below takes an attribute name
+    // only when the subtree gave nothing — right for a `<span>`, and here it would
+    // drop the whole point, leaving the Reader a bare glyph. The Reader is told to
+    // treat a symbol with no name as a defect, so it would report correct markup: the
+    // same phantom-issue direction `ariaName` was written for.
+    //
+    // After the glyph, since that is the order a reader meets them, and skipped when
+    // the two are the same string (`<abbr title="WCAG">WCAG</abbr>` is not announced
+    // twice). The name is content — a word the page printed, which is what the page
+    // rule requires — so it sits outside the marker, as alt text does.
+    //
+    // `title` only, and NOT `ariaName`, which prefers `aria-label`. `<abbr>` carries no
+    // ARIA role of its own, so a naming attribute on it is prohibited and a screen
+    // reader has to ignore it — and the gate is silent about that (0 violations, 1
+    // incomplete: see test/page-definition-lists.test.ts). Announcing it would tell the
+    // Reader the one shape `agents/page.md` rules out is a named control, which is the
+    // phantom-CORRECTNESS direction and worse than the phantom defect above: the name
+    // the marker claims is there is one nobody hears. Flattened bare, the attribute is
+    // still in the HTML the Reader is given beside this view, so the mismatch is
+    // reportable and the fix — the same words under `title` — invents nothing.
+    if (tag === "abbr") {
+      const name = norm(el.getAttribute("title") ?? "");
+      return norm(`${kids} ${name && name !== kids ? `[Abbr title] ${name}` : ""}`);
+    }
     // A link's name can come from its text, its nested image's alt, an attribute, or
     // several of those, so the marker precedes whatever the subtree produced instead
     // of replacing it. The attribute name is added only when the subtree yielded

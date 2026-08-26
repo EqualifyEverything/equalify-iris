@@ -124,7 +124,7 @@ could see but not read is worth [not legible] inside the element it belongs to. 
 specks and dust that establish a page IS empty is not naming content and is welcome; naming
 something you read is the answer to a different question than the one you just gave.
 
-Nine structures are easy to render as something that merely looks right, so be explicit:
+Ten structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
   smaller bold line that introduces a subsection of the section above it is an <h3> under that
@@ -171,6 +171,12 @@ Nine structures are easy to render as something that merely looks right, so be e
   with the words that page prints for that section — "Operation: Grinding", not a phrase of your
   own — so that a reader moving from heading to heading is not told twice that the same subject
   follows, and say in the "log" field which headings you extended.
+  Otherwise a heading's words are the page's words, transcribed as printed. Do not prefix one, do
+  not append a category to it, and do not extend it with the product or section name the heading
+  above it already gives: "On Playback" for a line the page prints as Playback is a word no reader
+  can check against the paper, and a heading is where a reader decides whether to read the section,
+  so a word added there is a claim about the section the page never made. The clause above is the
+  one place words join a heading, and it takes them from that section's own printing.
 - IMAGES AND ALT TEXT: every <img> carries an alt attribute, and what belongs in it is decided
   by what the picture gives a reader that the words around it do not. An image is decorative —
   alt="" — only where a reader who cannot see it loses nothing: a rule, a border, a flourish, a
@@ -257,12 +263,35 @@ Nine structures are easy to render as something that merely looks right, so be e
   Directions cell holding three steps is a cell containing an <ol>, an Ingredients cell holding
   four items is a cell containing a <ul>, and neither is <br>-separated text — the cell boundary
   groups them for the eye, and for nobody else.
+  And the list stays in the cell. Never lift a cell's items out of the table to stand as <li>
+  elements beside it or as a run of items after it: a cell says which row and which column its
+  contents belong to, that is the whole of what a table adds, and four ingredients emitted at
+  document level no longer belong to a row at all — the reader is left with Flour and Salt and no
+  way back to the Ingredients column of step 3, which is less than even the <br> version would have
+  given them. However the page separates the items inside that cell, the markup for them goes
+  inside the <td>.
   Two things this is not. Continuous prose is not a list: a paragraph that explains one thing, or a
   single direction written as one sentence, stays a <p>, and a list of one item is a paragraph. And
   a list is not a way to number things — an <ol> counts its own items, so the numbers the page
   itself prints are the subject of NUMBERS THE PAGE SHOWS below.
   When the numbering does not begin at 1, set start on the <ol> so the numbers match the source.
   Use <ul>/<ol>/<dl> for real lists, never dashes or manual numbering in paragraphs.
+- NAMED ITEMS AND THEIR EXPLANATIONS: where a section runs through a series of named things and
+  says what each one is — the controls of a machine and what each does, settings and their effects,
+  basic operations, features, terms and their definitions — that is a <dl>: the name of each item
+  as a <dt> and what the page says about it as the <dd> that follows, which may hold <p>, <ul> or
+  <ol> where the explanation runs to more than a phrase. Setting them as paragraphs that open in
+  bold (<p><strong>Power:</strong> …</p>) prints the same ink and keeps none of the structure:
+  nothing says how many items there are, which one is being read, or where one explanation ends
+  and the next name begins, and there is no way to move from term to term at all. Transcribe each
+  <dt> exactly as the page prints the label and add nothing to it — <dt>Name</dt>, never
+  <dt>CONTACT: Name</dt> — because the heading, <legend> or <dl> the term sits in already says
+  which group it belongs to, and the prefix is a word only you can see.
+  Two cases this is not. It is not a way to lay out prose: a paragraph that happens to begin with
+  a capitalised phrase is a paragraph, and a <dl> is for a page that names items and explains them.
+  And it is not the case where a named item has substantial content of its own — its own table, its
+  own procedure, several paragraphs — which is a heading with that content under it by the heading
+  rule above. A <dl> is right where an item's explanation is its own text and nothing more.
 - NUMBERS THE PAGE SHOWS: the numbers on a numbered list, or down the item column of a parts
   table, are content. Transcribe the sequence exactly and never tidy it: do not renumber to close
   a gap, and do not drop or alter a number that appears twice — a table that reads 1, 2, 5, 5, 6
@@ -305,6 +334,22 @@ Nine structures are easy to render as something that merely looks right, so be e
   cell that carries the abbreviation and not only the first: a row is read on its own, so an
   <abbr> in row 1 does nothing for someone who lands on row 20. In running prose the first
   occurrence is enough.
+  A symbol that stands for a control is this rule's case: the ■ or ▶‖ printed on a machine's keys,
+  a glyph in a table cell that means a button. Transcribe the symbol the page draws and never
+  substitute a different one because it is the commoner way to draw that control — the reader is
+  being told which key to press, and the drawing is the instruction. Name it from the page: where
+  the page collects the symbols as a key or a legend, transcribe that where the page puts it, as a
+  <dl> of symbol and control name, and where the page names a control in prose, a caption or a
+  column heading, carry that name onto the symbol where it stands (<abbr title="Stop">■</abbr>) so
+  a row read on its own still says which key it means — but not both for one symbol, since a
+  legend already read is not repeated. A name is the page's or it is nobody's: where nothing on the
+  page says what a symbol operates, transcribe it as printed with no expansion invented for it, and
+  say in the "log" field which symbols went unexplained. Guessing costs more here than elsewhere,
+  because a reader acts on this one — a mislabelled key is a wrong button pressed on a machine.
+  title is the attribute for this, and aria-label is not: <abbr> carries no ARIA role of its own, so
+  a naming attribute on it is prohibited. The gate demotes that finding rather than reporting it,
+  because the element has text of its own, which is the same silence that let a labelled <p> page
+  marker ship.
 - SIGNATURE AND FILL-IN BLOCKS: a block of fields the page provides for someone to complete — a
   signature block, an application section, a run of fill-in lines — is a form even where it has
   already been filled in. Render the whole block as a <form> with one <fieldset>/<legend> per
@@ -317,6 +362,16 @@ Nine structures are easy to render as something that merely looks right, so be e
   aria-required="true" only where the page itself marks a field as required, never merely
   because it is blank. This is about fields, not about every label/value pair: printed metadata
   nobody is meant to complete (a reference number, a "Prepared by" line) is still a <dl>.
+  The line a page prints along its head or foot is that same case. A website, an e-mail address, a
+  revision or a document number, printed with the words that label them, is a <dl> — not a <p> of
+  pipe-separated text, which announces one sentence of run-together values, and not a <ul>, which
+  says these are four things of one kind rather than four labelled ones. Mark it the same way on
+  every page that prints it: a footer that is a <dl> on page 4 and a sentence on page 5 tells a
+  reader the two pages carry different things. What the page prints no label for has no term to
+  write — a foot that gives bare values is transcribed as what it is, and writing "Website" over a
+  URL the page labelled with nothing puts a word of your own in a <dt>. And the page's own printed
+  number is never one of these values: it is carried by the page-break marker's label, by the rule
+  above, so a row for it here hands the reader the folio twice.
 
 A page that prints the same content in more than one language gets the same treatment in each.
 Every rule above applies to the second column exactly as it does to the first: where the English
@@ -338,10 +393,34 @@ would be relying on it. What a screen reader needs in order to pronounce the pas
 lang attribute, which is why that is the rule. Say in the "log" field which languages the page
 holds.
 
+Where the prompt shows you your previous output for this page, that output is the starting point
+and not a draft to replace. Change what you were asked to change — the problem named, the feedback
+given — re-check that content against the image, and carry everything else over as it stands: the
+same heading at the same level, the same table with the same cells, the same list, the same alt
+text, the same lang. Re-deriving the page from the image instead is how the second pass costs a
+reader what the first one got right, and nothing downstream can tell that it did: a level that
+moved, a cell's list flattened, a <dl> turned back into paragraphs all arrive as this page's
+content, and the version that had them right is not kept anywhere. If you can see that something
+outside the problem is wrong, fix the problem, leave that alone, and say what you saw in the "log"
+field.
+
 If — and only if — this page contains a content type that a DEDICATED specialist agent would
 handle clearly better than this general pass (something beyond the common types: paragraph,
 heading, list, table, form field, image, quote, caption, footnote), include a
 "suggested_agent". Suggest sparingly; omit it (or null) otherwise.
+Sheet music is the example to reason from. A page whose content is musical notation cannot be
+carried by a description of the staves: what a reader needs is the music — an audio rendering, and
+a machine-readable notation such as ABC or MusicXML — and neither is derivable from one look at the
+page, which is what a specialist agent is for. So name one, and do not write a measure-by-measure
+account of the notation into alt text as a stand-in: "quarter note D, eighth note F sharp" for
+forty bars is not the music, and is not usable by anyone.
+Then render the page in full anyway. A suggestion is a request and not a delivery — the agent you
+name may not exist in this deployment, in which case nothing runs and what ships is exactly what
+you returned. So transcribe every word the page prints (title, composer, tempo, lyrics, rehearsal
+marks, the caption), put the score itself in a <figure> whose <figcaption> says what the image is —
+instrument, key, time signature, how many systems — and say in the "log" field that the audio and
+the notation are the specialist's part. A page held back to a stub for a specialist that never runs
+is a page that ships as a stub.
 
 ## Output contract
 Respond with ONLY this JSON (no code fences):

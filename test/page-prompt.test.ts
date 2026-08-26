@@ -142,6 +142,15 @@ test("the page agent's heading rules keep the clauses that place a section's par
       /keep the label and extend each with the words that page prints for that section — "Operation: Grinding", not a phrase of your own/],
     ["an extended heading is recorded, since the words came from elsewhere on the page",
       /say in the "log" field which headings you extended/],
+    // #107: <h3>s that had gained an "On" they were never printed with. The clause above is the
+    // only place a heading gains words, and it takes them from the page — so the general case
+    // has to say so, or "extend each with the words that page prints" reads as a licence to
+    // extend any heading. A heading is where a reader decides whether to read the section, which
+    // is what makes an added word there worse than an added word in a paragraph.
+    ["a heading is transcribed as printed, with no prefix or category added",
+      /Otherwise a heading's words are the page's words, transcribed as printed\. Do not prefix one, do not append a category to it/],
+    ["the reported prefix is named, and the extension clause is bounded to the one case",
+      /"On Playback" for a line the page prints as Playback.*The clause above is the one place words join a heading/],
     // #128's second half: a <section aria-label="Page 6"> wrapper around each page's
     // content. Nothing in the pipeline emits that — the shared accessibility requirements
     // ask for semantic elements over <div>s (src/pipeline/accessibility.ts) and the agent
@@ -480,6 +489,25 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     // within one, so that collision is not the kind assembly resolves.
     ["a symbol marker cannot reuse an id a numbered footnote on the page already has",
       /never hand one an id that a numbered footnote on this page already uses/],
+    // #107: a machine's button symbols. Routed here by the device rule's own last clause — a
+    // symbol the page explains lexically is this rule — so what is added is the control case
+    // and its two edges. The proposal asked for the control's plain-language name wherever a
+    // symbol appears; that is granted only where the PAGE names it, because "never supply an
+    // expansion the page does not state" is this rule's first clause and a guessed key is the
+    // one wrong word a reader acts on rather than reads past.
+    ["a symbol standing for a control is this rule's case, with the page's own drawing kept",
+      /A symbol that stands for a control is this rule's case.*never substitute a different one because it is the commoner way to draw that control/],
+    ["a collected key is transcribed as a <dl> of symbol and control name",
+      /where the page collects the symbols as a key or a legend, transcribe that where the page puts it, as a <dl> of symbol and control name/],
+    ["and the name reaches a symbol standing in a row on its own",
+      /carry that name onto the symbol where it stands \(<abbr title="Stop">■<\/abbr>\) so a row read on its own still says which key it means/],
+    ["a name the page does not give is not invented, and the omission is logged",
+      /A name is the page's or it is nobody's.*say in the "log" field which symbols went unexplained/],
+    // Pinned as an attribute rather than left open because the gate cannot teach it: axe demotes
+    // `aria-prohibited-attr` to `incomplete` on an element that has text, which is exactly the
+    // silence #145 shipped through. Measured in test/page-definition-lists.test.ts.
+    ["title is the attribute, and the reason the gate does not say so is stated",
+      /title is the attribute for this, and aria-label is not: <abbr> carries no ARIA role of its own.*The gate demotes that finding rather than reporting it/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
@@ -502,6 +530,20 @@ test("the page agent's signature-block rule keeps the clauses that make it a rul
     ["a filled-in field is a readonly input, not static text", /<input readonly value="\.\.\."> rather than as a <dd>/],
     ["required is read off the page, not inferred from a blank field", /aria-required="true" only where the page itself marks a field as required/],
     ["printed metadata is still a <dl>", /not about every label\/value pair.*is still a <dl>/],
+    // #99: the footer line of website, e-mail and revision, which the user asked to be a <dl>
+    // "just like the list in the main body". It is the printed-metadata case above, so it is
+    // stated here rather than given a bullet — with the two limits the issue as filed would have
+    // broken. A label the page does not print has no <dt> to go in (the same rule as #95's
+    // verbatim terms), and the folio is not one of these values at all: the page-break marker
+    // carries it, so a row for it would hand the reader the number twice.
+    ["the head-or-foot line is that same case, and not a <p> or a <ul>",
+      /The line a page prints along its head or foot is that same case.*is a <dl> — not a <p> of pipe-separated text.*and not a <ul>/],
+    ["the same shape on every page that prints it, since a reader reads the difference as content",
+      /a footer that is a <dl> on page 4 and a sentence on page 5 tells a reader the two pages carry different things/],
+    ["a value the page gives no label for has no term to write",
+      /What the page prints no label for has no term to write/],
+    ["and the page's own number stays with the page-break marker",
+      /the page's own printed number is never one of these values: it is carried by the page-break marker's label/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
@@ -644,6 +686,14 @@ test("the page agent's list rule keeps the clauses that make it a rule", () => {
     // And the boundary with the rule below it, which owns the numbers the page prints.
     ["a list is not a way to number things",
       /a list is not a way to number things — an <ol> counts its own items/],
+    // #132's second half: the same recipe table again, one iteration later. The items had
+    // stopped being <br>-separated text and had become <li>s at document level instead, which
+    // the clause above does not forbid — it says what goes IN the cell, not that the cell keeps
+    // it. What a table adds is the row and the column, and that is what leaving is what costs.
+    ["a cell's items are never lifted out of the table",
+      /Never lift a cell's items out of the table to stand as <li> elements beside it or as a run of items after it/],
+    ["what leaving the cell costs is the row and the column, named",
+      /the reader is left with Flour and Salt and no way back to the Ingredients column of step 3/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
@@ -757,6 +807,105 @@ test("the page agent promotes a sub-topic the page names, and invents no outline
     ["the name is the page's own", /Use the name the page prints for each/],
     ["and where the page names nothing, no outline is supplied",
       /this promotes a label the page gives, it does not supply an outline the page does not have/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// #113: the controls and basic operations of a machine, each with its explanation, came back as
+// a run of paragraphs — and #95 reported the other end of the same element, a <dt> that had
+// gained the group's name ("CONTACT: Name") from the fieldset around it. Both are the <dl>, so
+// they are one bullet.
+//
+// Nothing downstream reaches this either. axe has no rule for "these six paragraphs name items
+// and explain them", and the Reader Agent gets no source image, so it cannot tell a page that
+// named its items from one that wrote continuous prose. The flattened view it does get is where
+// the difference shows, and what it shows is measured in test/page-definition-lists.test.ts:
+// identical words, and every [Term]/[Definition] marker gone.
+//
+// The guards are the reason this is a rule and not a preference. Applied to prose it turns
+// paragraphs into terms; applied to a named sub-topic with a table under it, it buries a section
+// that the heading rule promotes — which is the rule directly above it in the file, pulling the
+// other way.
+test("the page agent's definition-list rule keeps the clauses that make it a rule", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["a series of named items with explanations is a <dl>, term and definition",
+      /that is a <dl>: the name of each item as a <dt> and what the page says about it as the <dd> that follows/],
+    // The reported case is exactly this shape, so it is quoted: a model that writes it has to be
+    // able to recognise its own output in the rule.
+    ["the bold-paragraph shape it replaces is named",
+      /Setting them as paragraphs that open in bold \(<p><strong>Power:<\/strong> …<\/p>\) prints the same ink and keeps none of the structure/],
+    ["what that costs a reader is named, not asserted",
+      /nothing says how many items there are, which one is being read, or where one explanation ends and the next name begins/],
+    // #113 asked for block content in the <dd> ("which may contain <p>, <ul>, or <ol>"), which
+    // is granted: an explanation that runs to a list is the case that makes a <dl> better than a
+    // table here. Pinned because it is the clause a model needs in order not to flatten one.
+    ["an explanation longer than a phrase keeps its own blocks",
+      /which may hold <p>, <ul> or <ol> where the explanation runs to more than a phrase/],
+    // #95: the term is the page's word and nothing else. Same claim as the heading rule's
+    // "transcribed as printed", on the other element.
+    ["a <dt> is transcribed as printed, with no group name prepended",
+      /Transcribe each <dt> exactly as the page prints the label and add nothing to it — <dt>Name<\/dt>, never <dt>CONTACT: Name<\/dt>/],
+    ["and the reason the prefix is redundant is stated",
+      /the heading, <legend> or <dl> the term sits in already says which group it belongs to/],
+    // Guard one, the same guard the list rule needs: prose is not a structure to be imposed.
+    ["a paragraph that merely opens with a capitalised phrase stays a paragraph",
+      /a paragraph that happens to begin with a capitalised phrase is a paragraph/],
+    // Guard two, and the boundary with the heading rule above. #113's own user wondered whether
+    // level-3 headings would be better; they are, for an item with substantial content, and the
+    // page agent has to be told which case it is looking at or the two rules contradict.
+    ["a named item with substantial content of its own is a heading, not a term",
+      /it is not the case where a named item has substantial content of its own — its own table, its own procedure, several paragraphs — which is a heading with that content under it/],
+    ["and the <dl> is bounded to the case where the explanation is the item's own text",
+      /A <dl> is right where an item's explanation is its own text and nothing more/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// Two rules about the second pass rather than about the page.
+//
+// #132: a re-render regressed heading levels, table cells and semantic markup that the previous
+// iteration had right — "a clear regression", reported by a user who had already accepted that
+// output. Both paths that re-render a page show the model its own previous output, and only one
+// of them said what to do with the parts nobody complained about (`priorSection` in
+// renderPage against `correctPage`'s user message, src/pipeline/extraction.ts). The prompt is
+// where the rule holds for both, and it has to name what "everything else" means, because a
+// second pass re-deriving the page from the image produces defensible-looking output with the
+// first pass's correct decisions quietly gone.
+//
+// #92: sheet music rendered as alt text. The suggestion half is straightforward; the half that
+// needed amending is the issue's own instruction to keep the HTML minimal and defer to the
+// specialist. A suggestion resolves to an agent FILE — `dispatchSpecialist` logs
+// `specialist_unresolved` and returns the page unchanged when there is none, and `agents/` ships
+// one specialist — so a page held back for a specialist that never runs is the page a reader gets.
+test("the page agent is told what a second pass keeps, and what a suggestion does not deliver", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["a previous output is the starting point, not a draft to replace",
+      /Where the prompt shows you your previous output for this page, that output is the starting point and not a draft to replace/],
+    ["what carries over is enumerated, so 'everything else' is not left to judgement",
+      /the same heading at the same level, the same table with the same cells, the same list, the same alt text, the same lang/],
+    ["what re-deriving costs is named, and that nothing downstream sees it",
+      /Re-deriving the page from the image instead is how the second pass costs a reader what the first one got right, and nothing downstream can tell that it did/],
+    // The escape valve, so the rule does not forbid mentioning a real defect it was not asked
+    // about: it goes in "log", which is where everything not delivered as the document goes.
+    ["a defect outside the problem is logged rather than fixed or ignored",
+      /If you can see that something outside the problem is wrong, fix the problem, leave that alone, and say what you saw in the "log" field/],
+    ["sheet music is the worked example of a page needing a specialist",
+      /Sheet music is the example to reason from/],
+    ["what a description of notation cannot be a substitute for is stated",
+      /what a reader needs is the music — an audio rendering, and a machine-readable notation such as ABC or MusicXML/],
+    ["and the alt-text transcription the issue reported is refused by name",
+      /do not write a measure-by-measure account of the notation into alt text as a stand-in/],
+    // The amendment. Without it this rule trades a bad page for an empty one.
+    ["a suggestion is a request, not a delivery, because the named agent may not exist",
+      /A suggestion is a request and not a delivery — the agent you name may not exist in this deployment, in which case nothing runs and what ships is exactly what you returned/],
+    ["so the page is rendered in full anyway, and what that means for a score is spelled out",
+      /transcribe every word the page prints \(title, composer, tempo, lyrics, rehearsal marks, the caption\), put the score itself in a <figure>/],
+    ["and the failure mode is named: a stub ships as a stub",
+      /A page held back to a stub for a specialist that never runs is a page that ships as a stub/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
