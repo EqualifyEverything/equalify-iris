@@ -161,12 +161,14 @@ providers:
   # feedback (verify/classify/train), builder (drafts suggested agents), plus any
   # specialist in agents/ that the page agent names.
   per_agent: {}
-    # page: { model: anthropic/claude-opus-4.7 }     # stronger model, same provider
-    # table: { provider: bedrock, model: us.anthropic.claude-opus-4-7 }
+    # page: bedrock                                  # one agent on the other provider, at ITS model
+    # table: { model: anthropic/claude-opus-4.7 }     # stronger model, same provider
     # reader: { provider: bedrock, model: us.anthropic.claude-haiku-4-5-20251001-v1:0 }
     # Run the Feedback Agent (VERIFY/CLASSIFY/TRAIN) on a DIFFERENT or stronger
     # model than the page agent, so verification doesn't share the generator's
-    # blind spots (recommended):
+    # blind spots (recommended). Which is why the `page:` line above routes rather
+    # than upgrades: an example that put the same model on both would illustrate the
+    # pairing away.
     # feedback: { model: anthropic/claude-opus-4.7 }
 
   # WHICH MODEL. Both provider blocks below name Sonnet 4.6, because it is the only

@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { loadConfig, type Capability } from "../src/config.ts";
 import { resolveAgentModel } from "../src/providers/index.ts";
-import { modelGeneration } from "../src/providers/imageLimits.ts";
+import { modelGeneration, resolveImageLimits } from "../src/providers/imageLimits.ts";
 import { claudeFamily, cacheableSystemPrompt } from "../src/providers/promptCache.ts";
 
 // `config.example.yaml` is the file README.md and CONTRIBUTING.md tell an operator to
@@ -19,8 +20,12 @@ import { claudeFamily, cacheableSystemPrompt } from "../src/providers/promptCach
 const EXAMPLE = fileURLToPath(new URL("../config.example.yaml", import.meta.url));
 
 // The agents the file's own per_agent comment says are dispatched today, times every
-// capability, so a resolution hole cannot hide behind an agent that happens not to ask
-// for vision. `builder` is included for the same reason: it is dispatched.
+// capability. With `per_agent: {}` these all walk the same fallback chain, so what this
+// pins is that the chain ANSWERS for each pair and that the default provider is where it
+// lands — not that each agent was configured separately. It is still the assertion that
+// would catch the file naming a provider it does not define, or an agent the comment lists
+// that resolution has no route for, and it is what an operator uncommenting a per_agent
+// line runs into. `builder` is in the list for the same reason as the rest: it is dispatched.
 const AGENTS = ["page", "reader", "copy_editor", "feedback", "builder"];
 const CAPABILITIES: Capability[] = ["text", "vision", "structured_output"];
 
@@ -100,4 +105,23 @@ test("both provider blocks in the example name the same model", () => {
   // into a full-price prefix, and nothing in a run says so — the bill says so.
   const long = "x ".repeat(8000);
   for (const id of ids) assert.ok(cacheableSystemPrompt(id, long), `${id} would silently disable prompt caching`);
+});
+
+// The one number the example's model choice PUBLISHES, checked against the place it is
+// published. `GET /v1/limits` derives `max_long_edge_px` from the configured model, and
+// docs/API.md prints a sample response with the value spelled out — so a model change in the
+// example config silently makes the documented sample wrong, and a client that hardcoded it
+// from the docs (which §3.1 exists to talk them out of) downscales to the wrong edge.
+//
+// Asserted against the docs rather than against 1568, so this is a drift check and not a
+// second copy of the number: whoever changes the model has one file left to update and this
+// says which. The prose above the sample quotes the same figure beside the model's name.
+test("the long edge the example publishes is the one the API sample prints", () => {
+  process.env.OPENROUTER_API_KEY = "test-key";
+  const resolved = resolveImageLimits(loadConfig(EXAMPLE)).max_long_edge_px;
+
+  const docs = readFileSync(fileURLToPath(new URL("../docs/API.md", import.meta.url)), "utf8");
+  const printed = docs.match(/"max_long_edge_px":\s*(\d+)/g) ?? [];
+  assert.equal(printed.length, 1, `docs/API.md prints max_long_edge_px ${printed.length} times`);
+  assert.equal(Number(printed[0]!.match(/(\d+)/)![1]), resolved);
 });
