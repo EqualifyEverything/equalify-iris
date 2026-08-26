@@ -6,6 +6,7 @@ import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseErro
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
 import { stripDeprecatedRoles } from "./roles.ts";
+import { visibleText } from "./correction.ts";
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { joinSections, splitSections } from "./sections.ts";
 import { flatten } from "./flatten.ts";
@@ -1553,9 +1554,50 @@ export async function runReview(
     // answered piece by piece — and `corrected` from `of` says how much of the document the
     // second kind actually reached, since a section that truncated in its turn kept its
     // original text.
+    //
+    // The four sizes are what #174 asked for, and the reason is that a successful whole-body
+    // replacement used to destroy the only copy of its own input: `parsed.html` is adopted for the
+    // body verbatim, so once the round has run, the body that went in is gone and the ratio it
+    // moved by is unrecoverable from the log. That left the size distribution of a legitimate
+    // review round measurable only on the rounds that FAILED — where the delivered body is still
+    // the body that entered — which is n=3 across four bench rounds, all three of them
+    // `editor_no_output`. #174's whole point is that a floor on the whole-body path cannot be
+    // given a number off three samples, and this is what turns three into one per round.
+    //
+    // Both pairs, because a length cannot answer the question a floor is asked, which is whether a
+    // round lost CONTENT or lost wrappers. `chars_*` is the whole fragment and `text_chars_*` is
+    // what a reader receives; markup-only work leaves the second pair equal and moves the first, and
+    // a round that deleted a paragraph moves both. That is the same argument, and the same two
+    // readings, that #166 needed on `page_corrected` — so a round and a page correction can be read
+    // against each other, which is why `visibleText` is shared rather than reimplemented.
+    //
+    // Note what the three measured rounds do NOT establish, and what quantity they are. Their
+    // 0.982–0.984 span is the REPLY against the body that went in, reconstructed off `agent_call`,
+    // and this line reports the DELIVERED body against it — which for those same three rounds is
+    // 1.000, because a reply with nothing usable in it is a body handed back untouched. Same
+    // caveat as the `sections` one below: read as one population, a fresh 1.000 here and a
+    // published 0.982 there are the same round measured two ways. What the three do show beyond
+    // length is their structure counts moving (0.714–1.333, one round dropping 5 of 7 lists and 13
+    // of 47 list items while its length moved 1.6%), so the evidence for a second signal is
+    // evidence for a STRUCTURE count, which this line does not carry and #174's open half may want.
+    // No `text_chars_*` ratio exists for a review round at all yet; that is what this produces. The
+    // 0.62–2.32 span on 265 page corrections is raw length too — delivered against given, the
+    // reading this line takes — so the second pair starts with no corpus, as it did on the page path.
+    //
+    // Measured on the body, which is the `<main>` content: the wrapper and the markers after
+    // `</main>` are added downstream and are not what any round returned. Taken AFTER the role
+    // strip above for the same reason `changed` is — this is the body that will ship. And a
+    // sectioned round's pair is the whole body either way, so `sections` on this line is what
+    // separates the two populations: a section reply is 0.016–0.379 of the body it belongs to,
+    // because it IS one section, and anything reading these numbers as one distribution would
+    // read every sectioned round as a catastrophe.
     ctx.log.event("editor", {
       iteration: iterations,
       changed: body !== before,
+      chars_before: before.length,
+      chars_after: body.length,
+      text_chars_before: visibleText(before).length,
+      text_chars_after: visibleText(body).length,
       ...(round.sections ? { sections: round.sections.of, corrected: round.sections.corrected } : {}),
     });
 

@@ -54,7 +54,11 @@ const TAG = /<[a-z!/?][^>"']*(?:(?:"[^"]*"|'[^']*')[^>"']*)*>?/gi;
 // names. Shared for that reason rather than repeated.
 const COMMENT = /<!--[\s\S]*?(?:-->|$)/g;
 
-function visibleText(html: string): string {
+// Exported for the review loop's round sizes, which need the same reading of "how much prose is
+// here" as `text_chars_before`/`text_chars_after` do — a round measured one way and a page
+// correction measured another could not be read against each other, and #174 asks for exactly that
+// comparison.
+export function visibleText(html: string): string {
   return decodeEntities(
     html
       .replace(COMMENT, " ")

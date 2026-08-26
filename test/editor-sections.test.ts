@@ -310,6 +310,16 @@ test("a round that did not fit is made again a section at a time, and the correc
     assert.equal(editor?.data.changed, true);
     assert.equal(editor?.data.sections, 3);
     assert.equal(editor?.data.corrected, 3);
+    // The round's sizes are the WHOLE body's, on a round answered piece by piece as on one
+    // answered whole (#174). A section reply is a fraction of the body it belongs to because it IS
+    // one section — 0.016 to 0.379 of it on the bench rounds — so anything reading these numbers as
+    // one distribution would read every sectioned round as a catastrophe. `sections` on this same
+    // line is what separates the two populations, and it is why these two assertions are here.
+    assert.equal(editor?.data.chars_before, LONG.length);
+    assert.ok(
+      (editor?.data.chars_after as number) > LONG.length,
+      "three sections each gained a paragraph, so the body grew",
+    );
   });
 });
 
