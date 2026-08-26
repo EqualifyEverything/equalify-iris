@@ -744,6 +744,15 @@ test("a log that says something is on the page contradicts its own blank claim",
     // A complement at the end of its statement is a predicate with no noun after it to be an
     // adjective on, and predicating is what makes it an affirmation.
     "Page is blank. Text is absent from the top and still visible.",
+    // The choice #204's review asked to be made deliberate: a blank pre-printed form whose locative
+    // object is a form-structure noun `TEXT_NOUN` lists. Reported, on purpose. It is the issue's own
+    // `missing from the figure` row with a different noun in it, and the presupposition is what the
+    // read is: a log that speaks definitely of `the table` has named a thing on the paper that a
+    // reader would have got nothing of, and the cost of being wrong is one glance at a form whose
+    // cells are empty. `the printed border` and `the printed area` are refused for the opposite
+    // reason — no noun there names anything a reader wanted.
+    "Page is blank. Text is absent from the table on this blank form.",
+    "Page is blank. No content is present in the label field of the form.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }
