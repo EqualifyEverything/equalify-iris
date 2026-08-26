@@ -221,6 +221,12 @@ export function bodyLang(body: string): string | null {
 // indistinguishable from one the linter cleared, and the person who receives it is the one
 // who most needs to know which they have. It is the delivered half of #164: the log line
 // says it to an operator, this says it to whoever opens the file.
+// `reviewUnread` is the fifth, and it is about the other half of the checking: the REVIEWER
+// did not answer about all of this document (issue #186). The document is read in windows and
+// one of them came back with nothing usable, so there is no verdict on that part — which
+// matters most where it is least visible, in a document whose `@unresolved` list is empty. An
+// empty list means "nothing was found", and only a fully read document makes that the same
+// claim as "there is nothing to find".
 export function wrapDocument(
   body: string,
   opts: {
@@ -229,6 +235,7 @@ export function wrapDocument(
     editorTruncated?: boolean;
     editorSections?: { of: number; corrected: number };
     lintUnavailable?: string;
+    reviewUnread?: { windows: number; of: number };
   } = {},
 ): string {
   const unresolved = opts.unresolved?.length
@@ -273,6 +280,16 @@ export function wrapDocument(
       `  usual. See the run log (assembly / lint_unavailable) for the failure.\n` +
       `  ${opts.lintUnavailable.slice(0, 300).replace(/\s+/g, " ").replace(/--+>?/g, "—")}\n-->`
     : "";
+  // Both numbers, because one of them alone is unreadable: "1 window" says nothing about how
+  // much of the document that is, and a document read in one window is the whole of it.
+  const unread = opts.reviewUnread?.windows
+    ? `\n<!-- @review-unread ${opts.reviewUnread.windows} of ${opts.reviewUnread.of}\n` +
+      `  Part of this document has NOT been reviewed. It is read in ${opts.reviewUnread.of} window(s) and\n` +
+      `  ${opts.reviewUnread.windows} of them came back with no usable answer, so nothing in those windows was\n` +
+      `  checked for reading order, semantics, duplication or missed WCAG requirements. An\n` +
+      `  empty or absent @unresolved list therefore means nothing was FOUND, not that\n` +
+      `  there is nothing to find. See the run log (reader_no_output) for the replies.\n-->`
+    : "";
   const lang = bodyLang(body) ?? "en";
   // The one English string in the shell, labelled where the document around it is not English —
   // otherwise the title inherits a root that is now telling the truth about the pages and lying
@@ -290,7 +307,7 @@ export function wrapDocument(
 <body>
 <main>
 ${body}
-</main>${failed}${truncated}${unlinted}${unresolved}
+</main>${failed}${truncated}${unlinted}${unread}${unresolved}
 </body>
 </html>
 `;

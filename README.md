@@ -1277,10 +1277,22 @@ visitor can interpret, and no rule ids: a standing list of what Iris still fails
 of the people who would fix it, not on a front page.
 
 The sentence is deliberately no stronger than the measurement. That rate counts documents the Reader
-Agent left nothing open on — not documents whose final axe pass came back empty — so it credits the
-reviewer instead of saying the output was clean, which is what a visitor would otherwise take away.
-The percentage is floored rather than rounded, too: 99.6% is excellent, and publishing it as 100%
-would be a claim of perfection about work Iris did not do perfectly.
+Agent read in full and left nothing open on — not documents whose final axe pass came back empty —
+so it credits the reviewer instead of saying the output was clean, which is what a visitor would
+otherwise take away. The percentage is floored rather than rounded, too: 99.6% is excellent, and
+publishing it as 100% would be a claim of perfection about work Iris did not do perfectly.
+
+**"Read in full" is load-bearing, and it was not there at first.** The rate is a subtraction —
+delivered documents minus the ones carrying a signal — so the *absence* of a signal was the whole
+evidence of cleanliness, and a document whose reviewer answered nothing has none for the worst
+possible reason: no issues were found because no issues were looked for. A long document is read in
+windows, and a reply carrying no issue list this code can read (prose, an apology, `{"issues":
+"none"}`) used to be indistinguishable from `{"issues": []}` — delivered as clean, with no
+correction rounds, counted clean deployment-wide. It is now recorded as `iris:review-unread`,
+subtracted from the clean count alongside the unresolved ones, published as `review_unread_rate` on
+the authenticated endpoint, and stated in the delivered document as a `@review-unread` comment —
+because an empty `@unresolved` list only means "nothing is wrong" if all of the document was read
+(issue #186).
 
 **Below 20 documents in the window the object is `null` and the line simply is not there.** Same
 floor as the weekly job, for a stronger reason — on a quiet deployment the aggregate is the

@@ -6,6 +6,7 @@ import {
   SIGNAL_LINKS_DROPPED,
   SIGNAL_LINT_ERROR,
   SIGNAL_EDITOR_TRUNCATED,
+  SIGNAL_REVIEW_UNREAD,
   SIGNAL_ROUNDS,
   SIGNAL_UNRESOLVED,
   type Store,
@@ -303,6 +304,11 @@ export async function runPipeline(args: {
         // not per round: the loop stops at the first one, because the next request would
         // be the same length as the one that did not fit.
         ...(review.editorTruncated ? [{ code: SIGNAL_EDITOR_TRUNCATED, count: 1 }] : []),
+        // How much of the document the reviewer's last read did not answer about. The one
+        // signal here that changes what `clean_rate` MEANS rather than adding a rate beside
+        // it: without it, a document whose review said nothing is indistinguishable from one
+        // whose review found nothing (see SIGNAL_REVIEW_UNREAD).
+        ...(review.unreviewedWindows ? [{ code: SIGNAL_REVIEW_UNREAD, count: review.unreviewedWindows }] : []),
         // The final lint, i.e. what survived the whole review loop. `nodes` is the
         // offending-element count, kept apart from the per-document tally. Empty when the
         // lint could not run — and that document is NOT in any rule's numerator, which is

@@ -196,6 +196,16 @@ export const SIGNAL_LINT_ERROR = "iris:lint-error";
 // whether a deployment's `max_tokens` fits the documents it is being given, which is a
 // question about the deployment rather than about any one run.
 export const SIGNAL_EDITOR_TRUNCATED = "iris:editor-truncated";
+// How many windows of the document the review's last read of it came back with no usable
+// answer for (issue #186). Recorded only when non-zero, like the three above.
+//
+// This one is not a cost, it is a hole in the measurement, which is why it changes
+// `publicQuality`'s clean count rather than only adding a rate. A document with an
+// unreadable read has no `iris:unresolved` row — the reviewer found nothing, because it
+// answered nothing — so absence of that row was being read as evidence of cleanliness on
+// exactly the documents where there is no evidence either way. It is the same principle as
+// SIGNAL_LINT_ERROR one signal up: an absent verdict must not count as a good one.
+export const SIGNAL_REVIEW_UNREAD = "iris:review-unread";
 
 // One measurement about one delivered document. `count` is a magnitude (nodes for a
 // rule, issues for `iris:unresolved`, rounds for `iris:rounds`) and is never a
@@ -245,6 +255,12 @@ export interface QualityStats {
   // Share of documents where a correction round's response hit the output ceiling and
   // was discarded. Those documents are delivered, with that round's issues unresolved.
   editor_truncated_rate: number;
+  // Share of documents where part of the reviewer's last read came back unusable, so some
+  // of the document has no review verdict at all (#186). Disjoint from nothing: a document
+  // here may also be in `unresolved_rate` (the windows that DID answer found issues) or in
+  // neither, which is the case this rate exists for — an empty issue list that is silence
+  // rather than a clean bill of health. Read it as the error bar on `unresolved_rate`.
+  review_unread_rate: number;
   rules: {
     id: string;
     impact: string | null;
@@ -286,9 +302,12 @@ export interface PublicQuality {
   window_days: number;
   // Denominator: delivered documents in the window, flawless ones included.
   documents: number;
-  // Share (0–1) of those documents the review loop finished with nothing left open.
-  // The complement of `QualityStats.unresolved_rate`, stated the positive way round
-  // because this one is read by someone deciding whether to trust Iris with a file.
+  // Share (0–1) of those documents the reviewer read in full and finished with nothing left
+  // open. Stated the positive way round because this one is read by someone deciding whether
+  // to trust Iris with a file — which is also why "read in full" is part of it: it is
+  // 1 − (`unresolved_rate` ∪ `review_unread_rate`), not the complement of the first alone.
+  // A document part of which the reviewer never answered about has nothing open because
+  // nothing was looked for, and that is not what a visitor reads this number as (#186).
   clean_rate: number;
   // Mean editor passes per document. 0 is the good value — the loop stops as soon as
   // the Reader finds nothing, so a document that reads clean immediately contributes
@@ -799,9 +818,12 @@ export class Store {
    * tell a real zero from an absent one. The demo page's line is already written to
    * disappear rather than say something hollow.
    *
-   * Reads the same `run_signals` rows as `qualityStats` and computes nothing new, so
-   * the two can only disagree by window. Two small aggregate queries behind the
-   * route's 60s cache, on a table with at most one row per (session, code).
+   * Reads the same `run_signals` rows as `qualityStats` and reports nothing that is not
+   * derivable from them, so the two can only disagree by window. `clean_rate` is the one
+   * field that is not a single one of those rates: it is the share of documents carrying
+   * NEITHER `iris:unresolved` nor `iris:review-unread`, which cannot be recovered from the
+   * two rates separately because a document may carry both. Two small aggregate queries
+   * behind the route's 60s cache, on a table with at most one row per (session, code).
    */
   publicQuality(): PublicQuality | null {
     const cutoff = new Date(Date.now() - DEFAULT_QUALITY_WINDOW_DAYS * 86_400_000).toISOString();
@@ -817,20 +839,28 @@ export class Store {
     const documents = Number(base.documents);
     if (documents < PUBLIC_QUALITY_MIN_DOCUMENTS) return null;
 
-    // COUNT(*) is a document count here too: (session_id, code) is the primary key, so
-    // one document contributes at most one `iris:unresolved` row however many issues
-    // it left open. Documents WITH the row are the ones that finished unresolved, so
-    // the clean count is the rest — and a signal recorded only when non-zero is why
-    // this is a subtraction rather than a `count = 0` filter.
-    const unresolved = Number(
+    // Documents that are NOT clean, which is two different things and both of them have to
+    // be here (#186). `iris:unresolved` is a document the reviewer left issues open on.
+    // `iris:review-unread` is a document part of which the reviewer never answered about —
+    // it has no unresolved row precisely BECAUSE nothing was found, so subtracting only the
+    // first counted silence as a clean bill of health, on the one kind of document where
+    // there is no verdict at all. Same principle as `documents_linted` in `qualityStats`:
+    // an absent measurement must not be published as a good one.
+    //
+    // COUNT(DISTINCT session_id) rather than COUNT(*): (session_id, code) is the primary
+    // key, so one document contributes at most one row PER CODE but can hold both, and
+    // counting rows would subtract that document twice — which is what the clamp below
+    // would then be hiding. A signal recorded only when non-zero is why this is a
+    // subtraction rather than a `count = 0` filter.
+    const notClean = Number(
       (
         this.db
           .prepare(
-            `SELECT COUNT(*) AS documents
+            `SELECT COUNT(DISTINCT session_id) AS documents
                FROM run_signals
-              WHERE code = ? AND recorded_at >= ?`,
+              WHERE code IN (?, ?) AND recorded_at >= ?`,
           )
-          .get(SIGNAL_UNRESOLVED, cutoff) as { documents: number }
+          .get(SIGNAL_UNRESOLVED, SIGNAL_REVIEW_UNREAD, cutoff) as { documents: number }
       ).documents,
     );
 
@@ -838,11 +868,11 @@ export class Store {
       window_days: DEFAULT_QUALITY_WINDOW_DAYS,
       documents,
       // Both divisions are safe: the floor above guarantees documents >= 20. The clamp
-      // covers the one way the subtraction could go negative — an `iris:unresolved` row
-      // whose `iris:rounds` partner is missing, which the recorder never writes but a
-      // half-applied migration or a hand-edited database could leave behind. A negative
-      // percentage on the front page is a worse outcome than a slightly optimistic one.
-      clean_rate: Math.min(1, Math.max(0, (documents - unresolved) / documents)),
+      // covers the one way the subtraction could go negative — a row whose `iris:rounds`
+      // partner is missing, which the recorder never writes but a half-applied migration or
+      // a hand-edited database could leave behind. A negative percentage on the front page
+      // is a worse outcome than a slightly optimistic one.
+      clean_rate: Math.min(1, Math.max(0, (documents - notClean) / documents)),
       mean_rounds: Number(base.rounds) / documents,
     };
   }
@@ -1003,6 +1033,7 @@ export class Store {
       lint_error_rate: rate(SIGNAL_LINT_ERROR),
       documents_linted: documentsLinted,
       editor_truncated_rate: rate(SIGNAL_EDITOR_TRUNCATED),
+      review_unread_rate: rate(SIGNAL_REVIEW_UNREAD),
       rules,
     };
   }
