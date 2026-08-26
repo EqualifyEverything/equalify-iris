@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { changedAnything, correctionEffect, destroyedPage } from "../src/pipeline/correction.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
+import { summarizeRun } from "../src/diagnostics.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 import type { PdfLink } from "../src/util/pdf.ts";
@@ -254,6 +255,10 @@ interface Behaviour {
   recheck?: (order: number) => VerifyProblem[];
   // A provider error on the re-verification, the way ProviderRouter.complete raises one.
   recheckThrows?: boolean;
+  // The first verify answers prose with no JSON in it. `verifyAgentOutput` cannot read a
+  // verdict out of that and returns its non-blocking default, which is a page nothing
+  // judged rather than a page that passed.
+  verifyGarbles?: boolean;
   // A provider error on the CORRECTION call itself: the output ceiling, a stall, a throttle.
   // Not per page, unlike the rest of these — the correction prompt does not carry the page's
   // filename (it carries the page's own previous output), so `orderOf` cannot see which page
@@ -303,6 +308,7 @@ function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 2): Pipelin
           const n = (verifies.get(order) ?? 0) + 1;
           verifies.set(order, n);
           if (n > 1 && b.recheckThrows) throw new Error("ThrottlingException: Too many requests");
+          if (n === 1 && b.verifyGarbles) return { text: "I was unable to compare the HTML with the image." };
           const problems = n === 1 ? b.problems(order) : (b.recheck ?? (() => []))(order);
           return {
             text: JSON.stringify({
@@ -979,6 +985,46 @@ test("a correction that only re-typed a URL is delivered, not read as buying not
     // Nor is the link reported as still lost, which is the other half of the same bug: that
     // event lives behind the same gate, so a reverted fix would also have gone unmentioned.
     assert.equal(of(events, "page_links_unrecovered").length, 0);
+  });
+});
+
+test("a page nobody could judge says so on the line that says it passed", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // Verification is non-blocking, and that is not in question here: a verdict the model
+    // garbled must never cost a page, so the page ships and the event is still
+    // `page_verify_ok` — every reader of this log still counts it as one verified page.
+    //
+    // What the flag adds is that the two cases stop being the same line. "The verifier looked
+    // and was satisfied" and "nobody looked" were indistinguishable in the record, so a run
+    // that lost its Feedback Agent halfway through read as a run with an unusually good pass
+    // rate, and `verify_failed / pages_verified` was a rate over pages that were never judged
+    // (issue #211; the harness in #180 needed the same distinction from outside).
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<h2>Findings</h2><p>A page that rendered fine.</p>`,
+        problems: () => [],
+        corrected: () => "",
+        verifyGarbles: true,
+      }),
+    );
+    const ok = of(events, "page_verify_ok");
+    assert.equal(ok.length, 2, "both pages still pass — verification never breaks a run");
+    for (const e of ok) assert.equal(e.unjudged, true);
+    assert.equal(of(events, "page_verify_failed").length, 0);
+    assert.equal(of(events, "page_corrected").length, 0, "and nothing was corrected, so nothing was paid");
+    for (const f of result.fragments) assert.match(f.innerHtml, /A page that rendered fine/);
+
+    // The fold reads it back: two verified pages, neither of them judged. The other half of
+    // this is pinned in test/diagnostics.test.ts, over a hand-written log; this is the half
+    // that says the pipeline actually writes what that fold reads.
+    const d = summarizeRun(
+      events.map((e) => JSON.stringify({ ts: new Date(Date.UTC(2026, 0, 1)).toISOString(), ...e })).join("\n"),
+      { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.UTC(2026, 0, 1) },
+    );
+    assert.equal(d.verification.pages_verified, 2);
+    assert.equal(d.verification.pages_unjudged, 2);
+    assert.equal(d.verification.verify_failed, 0);
   });
 });
 

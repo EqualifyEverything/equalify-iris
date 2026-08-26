@@ -430,6 +430,51 @@ test("the verification tally counts what was checked, corrected and re-checked",
     sampled: 1, sampled_ok: 1, sampled_problems_before: 1, sampled_problems_after: 0,
     binding: 0, binding_ok: 0,
   });
+  assert.equal(d.verification.pages_unjudged, 0, "every page here carried a real verdict");
+});
+
+test("a page nothing judged is counted apart from a page that passed", () => {
+  // Verification is non-blocking: with no Feedback Agent, nothing to verify, or a reply that
+  // will not parse, `verifyAgentOutput` answers ok=true and the page costs nothing — so "the
+  // verifier looked and was satisfied" and "nobody looked" both write `page_verify_ok`. A run
+  // that lost its Feedback Agent halfway through would read here as a run with an unusually
+  // good pass rate, and the rejection rate this tally exists to support would be computed over
+  // pages that were never judged (issue #211).
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_verify_ok", image: "page-001.png" },
+    { ts: T(2), type: "page_verify_ok", image: "page-002.png", unjudged: true },
+    { ts: T(3), type: "page_verify_ok", image: "page-003.png", unjudged: true },
+    { ts: T(4), type: "page_verify_failed", image: "page-004.png", problems: ["a table row is missing"] },
+    { ts: T(5), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(5))));
+  // A subset, not a deduction: `pages_verified` counts what it has always counted, because it
+  // is compared across runs and rounds and moving it silently would move every number already
+  // published against it. 1 of 2 is the rejection rate here, not 1 of 4.
+  assert.equal(d.verification.pages_verified, 4);
+  assert.equal(d.verification.pages_unjudged, 2);
+  assert.equal(d.verification.verify_failed, 1);
+
+  // An old log cannot say — before the flag existed, a run with no Feedback Agent wrote the
+  // same lines as a passing one — so silence is a judged page rather than a guess.
+  const old = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_verify_ok", image: "page-001.png" },
+    { ts: T(2), type: "run_complete" },
+  );
+  assert.equal(summarizeRun(old, done(Date.parse(T(2)))).verification.pages_unjudged, 0);
+
+  // And a flag that is not the boolean is not a flag. This reader trusts nothing on a log
+  // line: a page subtracted from the rejection rate on the strength of a string would be the
+  // same trap `result` and `kinds` are matched against closed lists for.
+  const sloppy = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_verify_ok", image: "page-001.png", unjudged: "true" },
+    { ts: T(2), type: "page_verify_ok", image: "page-002.png", unjudged: 1 },
+    { ts: T(3), type: "run_complete" },
+  );
+  assert.equal(summarizeRun(sloppy, done(Date.parse(T(3)))).verification.pages_unjudged, 0);
 });
 
 test("a correction that bought nothing is counted apart from one that was kept", () => {

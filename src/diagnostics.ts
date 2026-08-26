@@ -118,6 +118,23 @@ export interface Diagnostics {
   // feedback round verifies pages again, and both times count.
   verification: {
     pages_verified: number;
+    // Of those, the pages nothing actually judged: no Feedback Agent loaded, nothing to
+    // verify, a reply that would not parse. `verifyAgentOutput` answers ok=true in all three
+    // so that verification can never break a run (pipeline/feedback.ts), which means "the
+    // verifier looked and was satisfied" and "nobody looked" arrive at this fold as the same
+    // event — and a run that lost its Feedback Agent halfway through reads as a run with an
+    // unusually good pass rate.
+    //
+    // A SUBSET of `pages_verified` rather than a deduction from it, deliberately: that field
+    // is compared across runs and benchmark rounds, and quietly changing what it counts
+    // would move every published number without saying so. `verify_failed / (pages_verified
+    // - pages_unjudged)` is the rejection rate over the pages that were actually judged.
+    //
+    // Zero on every log written before the flag existed, which is the one thing it cannot
+    // distinguish: an old run with no Feedback Agent reported the same `page_verify_ok`
+    // lines as a passing one, and nothing recoverable from the file says which (issue #211,
+    // and #180 for the measurement that needed it).
+    pages_unjudged: number;
     verify_failed: number;
     // `verify_failed` split by what the verifier said was WRONG, counted in pages
     // (pipeline/feedback.ts `VERIFY_KINDS`). Two bench rounds rejected 74 of 94 and 76 of
@@ -622,6 +639,7 @@ export function summarizeRun(
   // silently attributing it to one.
   const verification: Diagnostics["verification"] = {
     pages_verified: 0,
+    pages_unjudged: 0,
     verify_failed: 0,
     verify_kinds: {
       content_missing: 0,
@@ -648,6 +666,11 @@ export function summarizeRun(
   for (const e of events) {
     if (e.type === "page_verify_ok") {
       verification.pages_verified += 1;
+      // Strictly `true`, not truthy: this reader trusts nothing on a log line, and a page
+      // whose flag arrived as a string would otherwise be subtracted from the rejection rate
+      // on the strength of a typo. A line without the field is a judged page, which is what
+      // every log written before it says (issue #211).
+      if (e.unjudged === true) verification.pages_unjudged += 1;
     } else if (e.type === "page_verify_failed") {
       verification.pages_verified += 1;
       verification.verify_failed += 1;

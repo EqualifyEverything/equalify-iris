@@ -693,7 +693,7 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
   "slowest_calls": [ { "agent": "table", "model": "...", "capability": "vision", "duration_ms": 14300, "ok": true } ],
   "errors": [],
   "verification": {
-    "pages_verified": 25, "verify_failed": 13, "corrections": 14,
+    "pages_verified": 25, "pages_unjudged": 0, "verify_failed": 13, "corrections": 14,
     "verify_kinds": { "content_missing": 5, "content_wrong": 2, "structure_wrong": 6,
                       "a11y_only": 3, "alt_quality": 4, "untagged_pages": 1 },
     "verify_untagged_problems": 2,
@@ -803,9 +803,16 @@ which makes the "correct if needed" pass mandatory in practice and put verificat
 one document's bill. `corrections` and **not** `verify_failed`: a page that passed its check is
 re-rendered too when the code finds a link the model dropped, and that costs the same page call, so
 `triggers` is the split — `verify` is a page the Feedback Agent rejected, `links` a page that passed
-and lost a link, `both` one that did each. `verify_failed / pages_verified` is the rejection rate; the
-raw counts are reported rather than the percentage, because a rate over three pages is not a
-measurement.
+and lost a link, `both` one that did each. `verify_failed / (pages_verified - pages_unjudged)` is the
+rejection rate; the raw counts are reported rather than the percentage, because a rate over three
+pages is not a measurement.
+
+`pages_unjudged` is a **subset** of `pages_verified`, not a deduction from it: the pages that reached
+verification and came back with no judgement — no Feedback Agent loaded, nothing to verify, a reply
+that would not parse. Verification is non-blocking, so all three answer "faithful" and cost the page
+nothing, which means a run that lost its Feedback Agent halfway through would otherwise read as a run
+with an unusually good pass rate. Zero on every log written before the flag existed, which is the one
+case it cannot distinguish rather than one it claims to.
 
 `verify_kinds` is that rejection rate split by what was **wrong**, in pages, out of the five kinds
 VERIFY tags each problem with (`agents/feedback.md`). Two benchmark rounds rejected 74 of 94 and 76
