@@ -98,8 +98,16 @@ const LANG_TAG = /^[a-z]{2,3}(?:-[a-z0-9]{1,8})*$/i;
 // canonicalizer refuses outright (`ko_KR`, `ko-x`, `x-klingon`) is not a tag at all and keeps `en`.
 // Rewriting a page's answer is worth it only here, at the root: the fragment keeps whatever it wrote,
 // where `valid-lang` reports it as a body issue the review loop can correct.
+// Tags that are well formed and are not an answer to "what language is this document in": the
+// registry's own placeholders for undetermined (`und`), no linguistic content (`zxx`), multiple
+// languages (`mul`), uncoded (`mis`) and the private-use range `qaa`–`qtz`. axe accepts every one of
+// them, which is precisely why they are refused here rather than left to the gate: as a document's
+// DEFAULT HUMAN LANGUAGE they are the same kind of non-answer as `lang="Korean"`, and a screen reader
+// given one falls back to its own default anyway. `en` is at least a language a voice can be chosen
+// for, and `mul` is the case the unanimity rule already has an answer to.
+const NOT_AN_ANSWER = /^(?:und|zxx|mul|mis|q[a-t][a-z])(?:-|$)/i;
 function preferredTag(value: string): string | null {
-  if (!LANG_TAG.test(value)) return null;
+  if (!LANG_TAG.test(value) || NOT_AN_ANSWER.test(value)) return null;
   let canonical: string;
   try {
     canonical = Intl.getCanonicalLocales(value)[0] ?? "";
@@ -247,6 +255,9 @@ export function wrapDocument(
   // The one English string in the shell, labelled where the document around it is not English —
   // otherwise the title inherits a root that is now telling the truth about the pages and lying
   // about it (WCAG 3.1.2, and a screen reader reading the tab or the document title aloud).
+  // The label is about THIS string, and only survives as long as it does: `GET /output` replaces the
+  // title's text with the uploaded file's name, whose language nobody here can vouch for, and drops
+  // the attribute with it (`titledAs`, util/outputNames.ts).
   const titleLang = /^en(?:-|$)/i.test(lang) ? "" : ` lang="en"`;
   return `<!DOCTYPE html>
 <html lang="${lang}">

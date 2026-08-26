@@ -81,6 +81,20 @@ test("the shell's language is derived from the body only where every top-level e
       `<section lang="ko_KR"><p>가</p></section>`, null],
     ["a tag the canonicalizer refuses outright",
       `<section lang="ko-x"><p>가</p></section>`, null],
+    // Well formed, accepted by axe, and not an answer to "what language is this document in". As a
+    // default human language they are the same kind of non-answer as `lang="Korean"`; a screen
+    // reader given one falls back to its own default, and `en` is at least a language a voice can
+    // be chosen for.
+    ["undetermined is not a language",
+      `<section lang="und"><p>text</p></section>`, null],
+    ["no linguistic content is not a language",
+      `<section lang="zxx"><p>■ ■ ■</p></section>`, null],
+    ["multiple languages is the case the unanimity rule already answers",
+      `<section lang="mul"><p>가 / a</p></section>`, null],
+    ["nor is the private-use range",
+      `<section lang="qaa"><p>text</p></section>`, null],
+    ["but a real language whose tag merely starts with q",
+      `<section lang="qu"><p>Runa simi</p></section>`, "qu"],
     ["an empty attribute",
       `<section lang=""><p>가</p></section>`, null],
     ["whitespace is not a language",
@@ -196,9 +210,21 @@ test("every language the shell will declare is one the linter accepts", async ()
 // a pattern matching only a bare `<title>` no-opped on precisely the documents that had just been
 // given a truthful root language, so a Korean document was delivered with the placeholder name
 // while its download filename still mirrored the upload — WCAG 2.4.2 lost where 3.1.1 was won.
+//
+// The `lang="en"` goes with the string it vouched for. The shell labels its own placeholder because
+// "Accessible document" is English; an uploaded file's name is in whatever language the person who
+// named it used, and on a Korean document it is usually Korean — so carrying the label over would
+// assert English over a Korean title in the one place a reader hears the document's name. Dropping it
+// leaves the title inheriting the root, which is the policy the root itself follows: fall back to the
+// containing default rather than assert a language nobody can vouch for.
 test("the served title mirrors the upload whatever attributes the shell put on it", () => {
   const korean = titledAs(wrapDocument(`<section lang="ko"><h1>보고서</h1></section>`), "보고서-2026");
-  assert.match(korean, /<title lang="en">보고서-2026<\/title>/);
+  assert.match(korean, /<title>보고서-2026<\/title>/);
+  assert.match(korean, /<html lang="ko">/);
+  // The shell's own placeholder keeps the label, since that is the string it is true of.
+  assert.match(wrapDocument(`<section lang="ko"><h1>보고서</h1></section>`), /<title lang="en">Accessible/);
+  // Any other attribute the shell might carry is kept; only the invalidated claim is dropped.
+  assert.match(titledAs(`<title id="t" lang='en' dir="ltr">x</title>`, "y"), /<title id="t" dir="ltr">y<\/title>/);
   const english = titledAs(wrapDocument(`<h1>Report</h1>`), "quarterly");
   assert.match(english, /<title>quarterly<\/title>/);
   // The name is user input on its way into markup, and into a replacement string.
