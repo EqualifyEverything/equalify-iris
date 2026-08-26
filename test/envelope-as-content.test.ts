@@ -299,6 +299,34 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "the page whose only difference from a delivered one was the sentence explaining itself",
   );
 
+  // The prompt asks for both halves of the observation in one breath — name the marks, deny the
+  // text — so a name for text only affirms text where it is not negated. Otherwise the MORE explicit
+  // answer is the one that loses its page: the first two here are #190's own logs with a plain "no
+  // text" added, and most of what a blank page's log names is a thing it is denying.
+  for (const log of [
+    "Page is blank. Specks/dots are visible on the page but no text and they do not resolve into any characters or content.",
+    "Page is blank. The visible marks are artifacts of the scan with no text and do not resolve into any characters or content.",
+    "Page is blank. Specks and dots are visible, no legible text, and they do not resolve into characters.",
+    "Page is blank. Only scanner dust is present, no printed text, nothing that would resolve into words.",
+    "Page is blank. Faint specks with no legible text do not resolve into characters.",
+    "Page is blank. Specks are visible, no content, and they do not resolve into characters.",
+    "Page is blank. Dust only, no figures or images, nothing that would resolve into characters.",
+    "Page is blank. Scanner artifacts with no legible content do not resolve into characters.",
+    // `marks` is the word the page prompt itself uses ("where marks do not resolve into characters"),
+    // so the list of nouns for the marks cannot be the one list that omits it.
+    "Page is blank. The marks do not resolve into characters.",
+    "Page is blank. Marks are visible but they are not legible text.",
+    "Page is blank. Spots and blotches do not resolve into characters.",
+    // And the same observation, re-punctuated. The gap crosses one sentence or semicolon boundary, so
+    // a full stop instead of a `but` is not what decides whether the page survives — which was
+    // #190's finding about per-call wording, one level down.
+    "Page is blank. Specks/dots are visible on the page. They do not resolve into any characters.",
+    "Page is blank. A few specks are visible; they do not resolve into any characters.",
+    "Page is blank. A few scattered specks/dots. Not legible text or meaningful content.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+
   // What is exempt is the PHRASE and not the sentence, which is the difference between narrowing
   // the veto and disabling it. Every one of these names the marks and denies text in the same
   // breath as describing the scan — the shape the real logs are written in — and the description of
@@ -338,6 +366,12 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. A few specks are visible, but the figures do not resolve into words.",
     "Page is blank. Dust is present, and the stamp does not resolve into words.",
     "Page is blank. A few specks, and the signature does not resolve into words.",
+    // The veto list has to match the inflections its own exemption matches. `resolve` was bare
+    // between word boundaries, so the third person slipped past the veto entirely — and each of
+    // these says printing exists and did not come out as characters.
+    "Page is blank. The text resolves into no legible words.",
+    "Page appears blank. The handwriting resolves into no characters.",
+    "Page is blank. Whatever is printed here resolves into nothing legible.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }

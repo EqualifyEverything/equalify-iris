@@ -536,7 +536,7 @@ const BLANK_LOG =
 // (it matches "high quality" as readily as the other), and geometry is not legibility, so a
 // rotated or skewed page says nothing about whether its words could be read.
 const UNREADABLE_LOG =
-  /\b(illegible|unreadable|not legible|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry)|blurr\w*|obscur\w*|resolve|corrupt\w*|partial\w*|error)\b/i;
+  /\b(illegible|unreadable|not legible|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry)|blurr\w*|obscur\w*|resolves?|corrupt\w*|partial\w*|error)\b/i;
 const DEGRADED_IMAGE_LOG =
   /\b(dark|faint|washed|blurry|blurred|noisy|noise|grainy|pixelat\w*|low[- ]?res\w*|resolution|(poor|low|bad|degraded)( \w+)? quality|quality (is|was|of)|(out of|not in|soft) focus|did ?n[o']?t load|not load\w*)\b/i;
 
@@ -556,8 +556,14 @@ const DEGRADED_IMAGE_LOG =
 // the declaration on `blurry`. Dropping the sentence instead would deliver that page blank with no
 // marker and nothing in `pages_failed`, which is the failure mode the whole file is built against.
 // None of these nouns is a veto word, which is what makes the exemption below narrow: the only
-// words it can ever remove are the veto words used AS MODIFIERS of one of them.
-const MARK = String.raw`specks?|speckles?|flecks?|dots?|dust|debris|smudges?|blemishes?|artifacts?|stray marks?`;
+// words it can ever remove are the veto words used AS MODIFIERS of one of them. Bare `marks` is
+// here because `agents/page.md` writes it in exactly this construction ("where marks do not resolve
+// into characters even then, write `[not legible]`"), so the agent is primed with it — and
+// `BLANK_LOG` already accepts "no marks" as a way of asserting the page is empty, which left the
+// file holding two opinions about one word. `shadows` is deliberately not here: a shadow is a
+// condition of the capture, not something on the sheet, so "shadows do not resolve into text" is a
+// log about the photograph and has to keep refusing.
+const MARK = String.raw`specks?|speckles?|speckling|flecks?|dots?|dust|debris|smudges?|smears?|stains?|blotches|blotch|streaks?|spots?|blemishes?|artifacts?|marks?|markings?`;
 // What may stand between a quantifier and that noun. The veto words are here on purpose — `faint
 // specks` is the paper and `faint scan` is the image — alongside the words that are not veto words
 // at all, because the run has to reach the noun in one piece to match ("a few scattered
@@ -609,11 +615,25 @@ const MARKS_PHRASE = new RegExp(
 // so the safe direction there is a whitelist of substrate words, which is the same completeness
 // problem pointed the other way, and getting it wrong reports a blank page as lost — the #190 defect
 // again. The wording needed to reach what this list misses asserts blankness, names the marks, and
-// affirms an unlisted page object in ONE sentence with no doubt word anywhere in it, which nothing
-// in nine bench rounds has produced. If a round ever produces one, the noun goes in the list.
+// AFFIRMS an unlisted page object between them — denying it is what a blank page's log does, and
+// `NEGATED` reads that correctly — with no doubt word anywhere in the log, which nothing in nine
+// bench rounds has produced. If a round ever produces one, the noun goes in the list.
 const TEXT_NOUN = String.raw`text|texts|content|printing|prints|lines?|words?|characters?|letters?|glyphs?|digits?|numerals?|handwriting|writing|typing|paragraphs?|sentences?|headings?|captions?|figures?|images?|illustrations?|diagrams?|tables?|stamps?|signatures?|labels?|logos?|seals?`;
-// The gap: anything up to the end of the sentence that does not name text.
-const MARKS_ANCHOR = String.raw`(?<=\b(?:${MARK})\b(?:(?!\b(?:${TEXT_NOUN})\b)[^.;])*)`;
+// A name for text only affirms it where it is not NEGATED, which is the difference between "the
+// printed text does not resolve" and "no printed text". The prompt asks the agent for both halves of
+// the observation in one breath — name the marks, deny the text — so without this the more explicit
+// answer is the one that loses its page: adding `no text` to one of #190's own logs took it from
+// delivered to lost, and most of what `TEXT_NOUN` lists is a noun a blank page's log DENIES (no
+// signature, no stamp, no figures).
+const NEGATED = String.raw`(?<!\b(?:no|not|without|nor|none|nothing|neither)\s(?:[\w'-]+\s){0,2})`;
+// The gap between the marks and the construction: anything that does not affirm text. It may cross
+// ONE sentence or semicolon boundary, so the same observation split into two clauses is read the same
+// way — "Specks/dots are visible on the page. They do not resolve into any characters." is the same
+// answer as the version with a `but` in it, and #190's whole finding was that which pages get lost
+// was being decided by wording the agent picks per call. Nothing escapes through the wider gap: the
+// veto lists run over the entire log either way, and a doubt word anywhere in it still refuses.
+const MARKS_GAP = String.raw`(?:(?!${NEGATED}\b(?:${TEXT_NOUN})\b)[^.;])*`;
+const MARKS_ANCHOR = String.raw`(?<=\b(?:${MARK})\b${MARKS_GAP}(?:[.;]\s*${MARKS_GAP})?)`;
 // "…specks/dots … do not resolve into any characters": `resolve` is in `UNREADABLE_LOG` for "could
 // not resolve", and a destination after it turns the sentence into a denial that the marks are
 // characters.
