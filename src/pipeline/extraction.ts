@@ -348,9 +348,10 @@ except the reader it failed. Mark each change of language with lang on the eleme
 <section lang="ko">, or lang="es" on the single <td> that switches — using the BCP 47 tag for the
 language the page prints there. A page wholly in one language changes language nowhere, and is the
 case that needs the attribute most: put lang on every top-level element you emit for it. The
-document you are writing into declares English around your fragment, so a Korean page returned with
-no lang of its own is delivered as English text, pronounced as English, to the reader who has no way
-to see that it is not.
+document you are writing into takes its language from the pages inside it, and can only do that
+where they all say what they are: one fragment returned with no lang of its own leaves the whole
+document declared English, so a Korean page is delivered as English text, pronounced as English, to
+the reader who has no way to see that it is not.
 And transcribe that language; do not translate it. Returning a Korean page in English is not
 accessibility work but a different document: those words are not words on the page, the original is
 not recoverable from what you emit, and a mistranslation is invisible to exactly the reader who

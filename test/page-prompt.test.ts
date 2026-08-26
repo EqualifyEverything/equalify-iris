@@ -683,13 +683,15 @@ test("the page agent's multilingual rule keeps parity, lang, and the refusal to 
       /Mark each change of language with lang on the element that holds it — <section lang="ko">, or lang="es" on the single <td> that switches — using the BCP 47 tag/],
     // And the case #121 actually reported: a page wholly in one language, which contains no
     // CHANGE of language, so a rule keyed on changes never fires for it. `wrapDocument`
-    // (src/pipeline/assembly.ts) declares lang="en" on the shell and nothing derives it from
-    // the content, so without this clause that page ships as English text — the one output
-    // where the attribute is the whole of what the reader needed.
+    // (src/pipeline/assembly.ts) now derives the shell's lang from the body, but only where
+    // every top-level element agrees — so a page that says nothing does not merely go
+    // unlabelled itself, it drops the whole document back to lang="en" and takes its Korean
+    // siblings with it. This is the other half of #163, and the incentive the sentence below
+    // has to carry, because a page cannot see what the other pages said.
     ["a page wholly in another language carries lang on what it emits, change or no change",
       /A page wholly in one language changes language nowhere, and is the case that needs the attribute most: put lang on every top-level element you emit for it/],
-    ["and the reason: the document declares English around the fragment",
-      /The document you are writing into declares English around your fragment, so a Korean page returned with no lang of its own is delivered as English text, pronounced as English/],
+    ["and the reason: the shell's language is derived from the pages, and only if they all say",
+      /The document you are writing into takes its language from the pages inside it, and can only do that where they all say what they are: one fragment returned with no lang of its own leaves the whole document declared English, so a Korean page is delivered as English text, pronounced as English/],
     // The declined ask, with all three reasons, since any one of them alone reads as a
     // technicality.
     ["translation is refused",
