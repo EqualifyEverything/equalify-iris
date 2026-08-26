@@ -180,9 +180,11 @@ providers:
   # section headroom that decide what happens when one does, were all sized against
   # how this model behaves at it. A stronger model is a supported choice costing no
   # code change (see per_agent above) — it is just not one those thresholds were
-  # tuned for. It also moves the upload limits this deployment publishes, since the
-  # long edge follows the model generation (see image_limits below), so a copy of
-  # this file now accepts exactly what the reference deployment accepts.
+  # tuned for. It also moves the long edge `GET /v1/limits` and the upload hint
+  # PUBLISH, since that number follows the model generation (see image_limits below).
+  # Only what is published: the long edge is advice about downscaling and rejects
+  # nothing, and the two limits an upload is actually refused by do not follow the
+  # model at all.
   #
   # Checked against the deployment 2026-08-26. The block in prd.md §10.3 illustrates
   # the SHAPE of this config and is not a second recommendation.
