@@ -736,6 +736,14 @@ test("a log that says something is on the page contradicts its own blank claim",
     "Page is blank. Text is absent from the upper half and printed at the foot.",
     "Page is blank. Printing is absent from the top and still visible at the bottom.",
     "Page is blank. Handwriting is missing from the label on the sheet.",
+    // The object walk reads `printed` as the adjective it is here rather than as the name for text
+    // `TEXT_NOUN` also matches (#204's review), and these hold that the real object is still found
+    // when there is one: the noun is two words past the preposition instead of next to it.
+    "Page is blank. Text is missing from the printed heading.",
+    "Page is blank. Nothing is legible except the printed caption.",
+    // A complement at the end of its statement is a predicate with no noun after it to be an
+    // adjective on, and predicating is what makes it an affirmation.
+    "Page is blank. Text is absent from the top and still visible.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }
@@ -881,6 +889,18 @@ test("the affirmations a blank page's own log is made of are not contradictions"
     "Page is blank. Handwriting is missing and no marks are visible.",
     "Page is blank. Printing is absent from the front and the back.",
     "Page is blank. No legible text, and nothing else on the page.",
+    // The two shapes #204's review measured as blank pages newly reported failed, and the reason the
+    // contrast read now asks what its complement modifies and the object walk reads `printed` as an
+    // adjective. A page with scanner dust on it, and a blank pre-printed form or verso.
+    "Page is blank. Text is absent, but visible dust remains.",
+    "Page is blank. Printing is absent, and still visible speckling covers the sheet.",
+    "Page is blank. Text is absent and visible marks remain.",
+    "Page is blank. No content is present in the printed area of the form.",
+    "Page is blank. Text is absent within the printed border.",
+    "Page is blank. No text is present under the printed rule at the top.",
+    "Page is blank. No writing is present on the printed side.",
+    "Page is blank. Nothing is legible except in the printed margin.",
+    "Page is blank. No handwriting is present in the printed box.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
