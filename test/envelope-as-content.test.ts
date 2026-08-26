@@ -331,6 +331,13 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. A few specks are visible, but the printed text does not resolve into words.",
     "Page is blank. Apart from dust, the typed lines are not legible text.",
     "Page is blank. Dust is present, and the handwriting does not resolve into words.",
+    // What the gap must not cross is an affirmation that the page has something on it, and a page
+    // bears more than text. `content` above all: the other half of this rule already counts it as a
+    // name for text, and the two cannot disagree about the same word.
+    "Page is blank. Apart from dust, the content is not legible text.",
+    "Page is blank. A few specks are visible, but the figures do not resolve into words.",
+    "Page is blank. Dust is present, and the stamp does not resolve into words.",
+    "Page is blank. A few specks, and the signature does not resolve into words.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }

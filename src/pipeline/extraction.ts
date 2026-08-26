@@ -592,7 +592,13 @@ const MARKS_PHRASE = new RegExp(
 // (dust/noise) and do not resolve into…", "specks/dots that appear to be scanning artifacts, not
 // legible text"), so requiring the noun immediately before the verb, or refusing to cross a comma,
 // `but` or `and`, would cost three of the four pages this exists for.
-const TEXT_NOUN = String.raw`text|texts|printing|prints|lines?|words?|characters?|letters?|glyphs?|digits?|handwriting|writing|typing|paragraphs?|sentences?|headings?|captions?|numerals?`;
+// Every name for something printed on a page, not only for text: what the gap must not cross is an
+// affirmation that the page HAS something on it, and `the content is not legible text` affirms as
+// plainly as `the lines` do. `content` matters most because `NOT_LEGIBLE_TEXT`'s own lookahead
+// counts it as a name for text, and the two must not disagree about the same word. None of this
+// costs the four round-9 logs: they all put `content` after the veto word ("do not resolve into any
+// characters or content"), never in the gap ahead of it, which is the only region examined.
+const TEXT_NOUN = String.raw`text|texts|content|printing|prints|lines?|words?|characters?|letters?|glyphs?|digits?|numerals?|handwriting|writing|typing|paragraphs?|sentences?|headings?|captions?|figures?|images?|illustrations?|diagrams?|tables?|stamps?|signatures?|labels?|logos?|seals?`;
 // The gap: anything up to the end of the sentence that does not name text.
 const MARKS_ANCHOR = String.raw`(?<=\b(?:${MARK})\b(?:(?!\b(?:${TEXT_NOUN})\b)[^.;])*)`;
 // "…specks/dots … do not resolve into any characters": `resolve` is in `UNREADABLE_LOG` for "could
