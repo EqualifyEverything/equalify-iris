@@ -317,9 +317,16 @@ export interface Diagnostics {
   // Both are counted rather than dropped, so subtracting them is the reader's choice; `kinds`
   // uses the same five as `verification.verify_kinds` on purpose, so the two splits can be read
   // against each other.
+  //
+  // `pages` is every page an observation named, guesses included, because `pages` is where a
+  // person should look and a guess that turns out to be right is worth the look. `unattached_pages`
+  // is the subset of it the editor could NOT see, so the difference is the set backed by an image
+  // the model had in front of it — that decomposition is why the page list is a union rather than
+  // two disjoint fields.
   fidelity_observed: {
     observed: number;
     pages: number[];
+    unattached_pages: number[];
     kinds: {
       content_missing: number;
       content_wrong: number;
@@ -788,20 +795,32 @@ export function summarizeRun(
   const observed: Diagnostics["fidelity_observed"] = {
     observed: 0,
     pages: [],
+    unattached_pages: [],
     kinds: { content_missing: 0, content_wrong: 0, structure_wrong: 0, a11y_only: 0, alt_quality: 0, untagged: 0 },
     unattached: 0,
     unplaced: 0,
   };
   const observedPages = new Set<number>();
+  const unattachedPages = new Set<number>();
   for (const e of events) {
     if (e.type !== "editor_fidelity_observed" || !Array.isArray(e.observations)) continue;
     observed.unattached += typeof e.unattached === "number" ? e.unattached : 0;
     observed.unplaced += typeof e.unplaced === "number" ? e.unplaced : 0;
+    // Which pages the editor actually had. Read per line rather than unioned across the run,
+    // because the attachment is per round: page 4 attached in round 1 and not in round 2 makes an
+    // observation filed in round 2 a guess, and unioning would launder it into a checkable one.
+    // A line with no `attached` at all leaves every page unnamed here rather than naming them
+    // all — there is nothing to tell against, and the count on that line is what says how many
+    // were guesses.
+    const attached = Array.isArray(e.attached) ? e.attached : null;
     for (const entry of e.observations) {
       if (entry === null || typeof entry !== "object") continue;
       const rec = entry as Record<string, unknown>;
       observed.observed += 1;
-      if (typeof rec.page === "number") observedPages.add(rec.page);
+      if (typeof rec.page === "number") {
+        observedPages.add(rec.page);
+        if (attached !== null && !attached.includes(rec.page)) unattachedPages.add(rec.page);
+      }
       // The closed list again, for the reason `verify_kinds` uses it: a `kind` naming a
       // function on Object.prototype would otherwise be incremented rather than counted as
       // the unrecognized label it is.
@@ -811,6 +830,7 @@ export function summarizeRun(
     }
   }
   observed.pages = [...observedPages].sort((a, b) => a - b);
+  observed.unattached_pages = [...unattachedPages].sort((a, b) => a - b);
 
   const elapsed = ms(startedAt ?? undefined, endRef);
 

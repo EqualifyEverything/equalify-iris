@@ -224,6 +224,12 @@ image reaches the reader as what the page says. Report only pages whose image is
 anything else is a guess about a page you cannot see — and keep the list to what you would want a
 person to check, not everything you might improve. An empty list is the ordinary answer.
 
+This takes nothing off your list. An issue the reviewer raised is still yours to fix, and a
+[not legible] marker on an attached page is still yours to resolve as described above, even though
+both are content the page shows and the HTML does not: reporting is for what nobody asked you
+about. When a problem is both — the reviewer raised it AND you can see more of it on the page than
+the issue names — fix what was raised and report the rest.
+
 Give each observation the page it is on, one sentence, and its kind: ${VERIFY_KINDS.join(", ")} —
 the same five the fidelity check uses, by what a reader LOSES, with the earliest of them that
 applies winning (content absent from the HTML is content_missing even though it is also a WCAG

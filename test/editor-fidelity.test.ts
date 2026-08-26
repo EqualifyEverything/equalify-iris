@@ -42,8 +42,26 @@ test("the editor is asked for the same five kinds the fidelity check uses, and a
   // Only pages it can see. An observation about a page whose image was not attached is a guess
   // about a page the model was not shown, which is the same rule the Reader is held to.
   assert.match(EDITOR_SYSTEM, /Report only pages whose image is attached/);
-  // The body comes first in the contract, so a reply that ran out of room mid-list can still
-  // have its document read out of it.
+  // And the scope, which two earlier instructions need protecting from: "content the page shows
+  // that the HTML does not have" is also the [not legible] rule ("look at that region again … put
+  // the words the page shows in the marker's place") and also an ordinary structural issue the
+  // Reader raised. Both are still the editor's to FIX; this paragraph is later and more general
+  // than either, so it says so rather than leaving "nobody asked you about" to carry it alone.
+  assert.match(EDITOR_SYSTEM, /This takes nothing off your list/);
+  assert.match(EDITOR_SYSTEM, /An issue the reviewer raised is still yours to fix/);
+  assert.match(EDITOR_SYSTEM, /\[not legible\] marker on an attached page is still yours to resolve/);
+  assert.ok(
+    EDITOR_SYSTEM.indexOf("put the words the page shows in the marker's place") <
+      EDITOR_SYSTEM.indexOf("This takes nothing off your list"),
+    "the carve-out comes after the rules it protects",
+  );
+  // The body comes first in the contract because it is what the round exists to produce and the
+  // list is an aside — a model that answers in the order it was asked spends its output on the
+  // document first. NOT for truncation salvage: a reply that hits the ceiling throws
+  // `TruncatedResponseError` in the provider before anything parses its text, so a reply cut off
+  // mid-list is discarded whole and re-made a section at a time, whatever order the fields were
+  // in. Which is also the one cost this feature has: on a reply already close to the ceiling, the
+  // appended observations are what push a round that would have fit into that salvage path.
   assert.ok(
     EDITOR_SYSTEM.indexOf('"html"') < EDITOR_SYSTEM.indexOf("fidelity_observed"),
     "the corrected body is asked for first",
@@ -290,6 +308,7 @@ test("the tally counts observations and the distinct pages they are about", () =
   const d = summarizeRun(text, done(Date.parse(T(3))));
   assert.equal(d.fidelity_observed.observed, 3);
   assert.deepEqual(d.fidelity_observed.pages, [2, 5]);
+  assert.deepEqual(d.fidelity_observed.unattached_pages, [], "both pages were attached when reported");
   assert.deepEqual(d.fidelity_observed.kinds, {
     content_missing: 2, content_wrong: 0, structure_wrong: 0, a11y_only: 0, alt_quality: 1, untagged: 0,
   });
@@ -313,10 +332,30 @@ test("an unlabelled observation is untagged, and the uncheckable ones are counte
   const d = summarizeRun(text, done(Date.parse(T(2))));
   assert.equal(d.fidelity_observed.observed, 3);
   assert.deepEqual(d.fidelity_observed.pages, [2, 9], "the page it named, whether or not it was attached");
+  // …and which of those the editor could not see, so `pages` minus this is the set backed by an
+  // image. `pages` stays the union because it is where a person should look and a guess that turns
+  // out to be right is worth the look.
+  assert.deepEqual(d.fidelity_observed.unattached_pages, [9]);
   assert.equal(d.fidelity_observed.kinds.content_missing, 1);
   assert.equal(d.fidelity_observed.kinds.untagged, 2);
   assert.equal(d.fidelity_observed.unattached, 1);
   assert.equal(d.fidelity_observed.unplaced, 1);
+});
+
+test("a line that does not say what was attached names no page as a guess", () => {
+  // Nothing to tell against, so the page is in `pages` like any other and the line's own
+  // `unattached` count is the only thing that says some of them were guesses. Naming them all
+  // would read as "the editor saw none of these", which the line does not say.
+  const text = logOf(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "editor_fidelity_observed", count: 1, unattached: 1, observations: [
+      { page: 4, kind: "content_wrong", observation: "the date disagrees with the page" },
+    ] },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(1))));
+  assert.deepEqual(d.fidelity_observed.pages, [4]);
+  assert.deepEqual(d.fidelity_observed.unattached_pages, []);
+  assert.equal(d.fidelity_observed.unattached, 1);
 });
 
 test("a run with no observations reports zeros rather than nothing", () => {
@@ -326,6 +365,7 @@ test("a run with no observations reports zeros rather than nothing", () => {
   assert.deepEqual(d.fidelity_observed, {
     observed: 0,
     pages: [],
+    unattached_pages: [],
     kinds: { content_missing: 0, content_wrong: 0, structure_wrong: 0, a11y_only: 0, alt_quality: 0, untagged: 0 },
     unattached: 0,
     unplaced: 0,

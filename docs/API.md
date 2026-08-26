@@ -706,7 +706,7 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
     }
   },
   "fidelity_observed": {
-    "observed": 3, "pages": [2, 5],
+    "observed": 3, "pages": [2, 5], "unattached_pages": [],
     "kinds": { "content_missing": 2, "content_wrong": 0, "structure_wrong": 0,
                "a11y_only": 0, "alt_quality": 1, "untagged": 0 },
     "unattached": 0, "unplaced": 0
@@ -921,7 +921,13 @@ content, which is the failure mode no count in `verification` can see. `pages` i
 observations were filed about, so one page reported in three rounds is one page and three
 observations; `observed` is the observations. `unattached` and `unplaced` are the ones to discount
 first — an observation about a page whose image was not attached is a guess about a page the model
-could not see, and one that named no page cannot be checked at all. `untagged` in `kinds` is the
+could not see, and one that named no page cannot be checked at all. `pages` includes the guessed
+pages, because it is where a person should look and a guess that turns out to be right is worth the
+look; `unattached_pages` is the subset the editor could **not** see, so the difference between the
+two is the set that was backed by an image in front of the model. Attachment is judged per round, so
+a page attached in round 1 and reported in round 2 without its image counts as a guess — and a log
+line that does not say what was attached puts its pages in `pages` and none in `unattached_pages`,
+leaving its own `unattached` count as the only statement that some were guesses. `untagged` in `kinds` is the
 usual companion: an observation whose kind this version does not recognize is counted there and in no
 other bucket, and the kinds are not a partition, so read each against `observed`. None of this
 changes the delivered document — an observation is addressed to a person, and acting on one would
