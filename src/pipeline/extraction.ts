@@ -563,8 +563,9 @@ const DEGRADED_IMAGE_LOG =
 // the bare noun for the OPPOSITE case: "where marks do not resolve into characters even then, write
 // `[not legible]`" is the instruction for a page that HAS content the agent could not read, where
 // empty `html` is the wrong answer. `handwritten marks`, `pen marks` and `blurry marks` therefore go
-// on refusing, and `NOT_LEGIBLE_TEXT`'s lookahead below can go on counting `markings` as a name for
-// something worth reporting, which bare `marks?` here contradicted.
+// on refusing, and `NOT_LEGIBLE_TEXT` below can go on counting `markings` as a name for something
+// worth reporting — both as the noun it strips and in `PAGE_BEARS`, where it needs a denial in front
+// of it — which bare `marks?` here contradicted.
 //
 // `spots`, `streaks`, `blotches`, `smears` and `stains` are not here, for the same reason `shadows`
 // is not: a dark streak or a dark spot is a condition of the capture rather than something on the
@@ -607,8 +608,9 @@ const MARKS_PHRASE = new RegExp(
 // `but` or `and`, would cost three of the four pages this exists for.
 // Every name for something printed on a page, not only for text: what the gap must not cross is an
 // affirmation that the page HAS something on it, and `the content is not legible text` affirms as
-// plainly as `the lines` do. `content` matters most because `NOT_LEGIBLE_TEXT`'s own lookahead
-// counts it as a name for text, and the two must not disagree about the same word. None of this
+// plainly as `the lines` do. `content` matters most because `NOT_LEGIBLE_TEXT` counts it as a name
+// for text on both sides — as the noun it strips and in `PAGE_BEARS` — and no two of the three may
+// disagree about the same word. None of this
 // costs the four round-9 logs: they all put `content` after the veto word ("do not resolve into any
 // characters or content"), never in the gap ahead of it, which is the only region examined.
 //
@@ -738,6 +740,28 @@ const DENIAL_WORD = new Set(
     "residual noise grain"
   ).split(" "),
 );
+// The vocabulary above is what a denial is BUILT from, and the same bricks build the opposite claim:
+// `only a heading is visible`, `the page contains figures`, `some words remain visible` are made
+// entirely of listed words and each says the page has something on it. So a name for what a page
+// bears has to be introduced by a denial where it appears — `or content`, `nor any figures`, `no
+// writing` — and not by a determiner that affirms it. Naming the substrate is exempt, because `on the
+// page` is another way of saying the sheet is empty; that asymmetry is the whole difference between
+// the two, and it is the same rule `NEGATED` applies to the gap on the near side of the construction.
+//
+// Reading back over qualifiers (`or any other printed words`) but never over a determiner is what
+// separates `nor the words` — a glance — from `only a heading is visible` — a page.
+const PAGE_BEARS = new Set(
+  (
+    "text texts content contents word words character characters letter letters glyph glyphs digit " +
+    "digits numeral numerals figure figures line lines print prints printing writing handwriting " +
+    "typing mark marks marking markings paragraph paragraphs sentence sentences heading headings " +
+    "caption captions label labels legend legends"
+  ).split(" "),
+);
+const DENIAL_CONNECTOR = new Set("no not nor neither none nothing or and any".split(" "));
+const QUALIFIER = new Set(
+  "meaningful legible readable printed typed visible discernible apparent recognizable clear other more".split(" "),
+);
 // A denial made of nothing but these words is a short one, so a statement that runs past this refuses
 // rather than being read further. That keeps the work per match bounded — a log with a thousand
 // `not legible text`s in it and no full stop anywhere would otherwise re-read its own tail a thousand
@@ -753,12 +777,19 @@ function deniesToStatementEnd(log: string, start: number): boolean {
     end++;
   }
   if (end - start >= DENIAL_STATEMENT_MAX) return false;
-  return log
+  const words = log
     .slice(start, end)
     .replace(/[’‘]/g, "'")
     .split(/[^A-Za-z']+/)
     .filter(Boolean)
-    .every((word) => DENIAL_WORD.has(word.toLowerCase()));
+    .map((word) => word.toLowerCase());
+  if (!words.every((word) => DENIAL_WORD.has(word))) return false;
+  return words.every((word, i) => {
+    if (!PAGE_BEARS.has(word)) return true;
+    let before = i - 1;
+    while (before >= 0 && QUALIFIER.has(words[before]!)) before--;
+    return before >= 0 && DENIAL_CONNECTOR.has(words[before]!);
+  });
 }
 // Terms no exemption reaches, checked over the WHOLE log rather than a phrase: a failure to read
 // ("the scan is too dark"), something hidden ("dust and noise obscure the text" — which names

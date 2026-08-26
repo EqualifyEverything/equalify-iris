@@ -360,6 +360,8 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. A few specks. Not legible text across the page.",
     "Page is blank. A few specks. Not legible text, no numerals, nothing at all.",
     "Page is blank. Only dust. Not legible markings of any kind on this sheet.",
+    // A name for text is read back over qualifiers, so a denial may go on qualifying what it denies.
+    "Page is blank. A few specks. Not legible text or any other printed words.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -488,6 +490,22 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. A few specks. Not legible text, nor any figures in the footer.",
     "Page is blank. A few specks. Not legible text or anything beneath the stamp.",
     "Page is blank. A few specks. Not legible text, the note is in the corner.",
+    // The words a denial is built from build the opposite claim too, so the vocabulary alone cannot
+    // decide it: each of these is made entirely of listed words and each says the page HAS something
+    // on it — which is the case the bare-`marks` exclusion exists for, at its most explicit. What
+    // separates them is that a name for what the page bears is introduced here by a determiner and
+    // not by a denial. Naming the substrate stays exempt: "not legible text on the page" denies.
+    "Page is blank apart from a few specks. Not legible text, only a heading is visible.",
+    "Page appears blank. A few specks. Not legible text, only a line of handwriting is visible.",
+    "Page is blank. A few specks. Not legible text, some printing appears on the page.",
+    "Page is blank. A few specks. Not legible text, the page contains figures.",
+    "Page is blank. A few specks. Not legible text; the handwriting is present.",
+    "Page is blank. A few specks. Not legible text, some words remain visible.",
+    "Page is blank. A few specks. Not legible text, the numerals are printed on the page.",
+    "Page is blank. A few specks. Not legible printing, characters are present.",
+    "Page is blank. A few specks. Not legible text, a caption is visible.",
+    "Page is blank. A few specks. Not legible text, these words appear on the sheet.",
+    "Page is blank. A few specks. Not legible text, some marks are visible.",
     // A question mark is a hedge and not a full stop, and a bare one is the shape `HARD_DOUBT` cannot
     // see: the model asking itself whether the page is empty is not the model saying that it is.
     "Page is blank. A few specks. Not legible text?",
