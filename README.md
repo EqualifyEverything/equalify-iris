@@ -850,8 +850,9 @@ pages the verifier may well have been right to fail.
 
 Two things the report says out loud, because the counts alone would read as results: calls where
 nothing was judged (no Feedback Agent, an unparseable reply — `verifyAgentOutput` answers ok=true
-in those cases so verification can never cost a page) are excluded from every rate, and defects
-that were never applied are named rather than left looking like zeroes.
+in those cases so verification can never cost a page — or a call that threw, which is listed with
+its error) are excluded from every rate, and defects that were never applied are named rather than
+left looking like zeroes.
 
 Each page is judged against the contract **it was written to**, recovered from git by the blob SHA
 its session's log recorded. The verifier is not rolled back — today's judge is the subject — but
