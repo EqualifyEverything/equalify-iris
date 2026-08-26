@@ -10,10 +10,13 @@
 // Which was measurable only on rounds that failed, where the delivered body is still the body that
 // went in: three of them across four bench rounds, all three `editor_no_output`, all three removing
 // about 1.7% of the body. Three samples, one document. So these four numbers go on the `editor`
-// line, which turns that into one sample per round on the population that actually matters — and
-// both pairs go on it, because the finding those three produced was that the two move
-// independently: a round that un-wraps a mis-structured page moves structure counts hard and
-// character count not at all, and one that deletes a duplicated heading does the reverse.
+// line, which turns that into one sample per round on the population that actually matters.
+//
+// Both pairs, because a length cannot say whether a round lost content or lost wrappers, which is
+// the question a floor is asked — the same reason #166 needed both on `page_corrected`. Not because
+// the three rounds showed the two pairs diverging: no `text_chars_*` ratio exists for a review round
+// yet, and what those three showed beyond length was their STRUCTURE counts moving (0.714–1.333)
+// while their length moved 1.6%, which is an argument for a count this line does not carry.
 //
 // This file pins what the numbers mean, not a threshold. There is no threshold yet, and picking one
 // off n=3 is what #174 says not to do.
@@ -115,10 +118,11 @@ test("a round records the body it was given as well as the body it returned", as
 
 test("markup work and prose work are told apart, which one pair of numbers could not do", async () => {
   await withTemp(async (dir) => {
-    // The shape the bench measurement actually found: the editor un-wraps a mis-structured page.
-    // Every word survives, so a reader receives exactly what they did before — and the character
-    // count moves by more than 20%, which is the size of change a naive floor would be placed to
-    // catch. Reading `chars_*` alone here says a fifth of the document went missing.
+    // The editor un-wraps a mis-structured page: every word survives, so a reader receives exactly
+    // what they did before, and 53% of the characters go with the wrappers. Reading `chars_*` alone
+    // here says half the document went missing. Constructed rather than taken from the bench —
+    // the three measured rounds moved their structure counts hard and their LENGTH by 1.6%, which is
+    // the argument for a structure count and not for this pair. This is the pair's own case.
     const before = "<section><div><h2>Outlook</h2><div><p>Steady growth.</p></div></div></section>";
     const after = "<h2>Outlook</h2><p>Steady growth.</p>";
     const { data } = await round(dir, before, after);

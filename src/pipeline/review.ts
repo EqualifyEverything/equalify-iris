@@ -1564,12 +1564,20 @@ export async function runReview(
     // `editor_no_output`. #174's whole point is that a floor on the whole-body path cannot be
     // given a number off three samples, and this is what turns three into one per round.
     //
-    // Both pairs, because the finding those three produced was that the two move independently: a
-    // round that un-wraps a mis-structured page changes structure counts hard and character count
-    // not at all, and one that deletes a duplicated heading does the reverse. `chars_*` is the
-    // whole fragment and `text_chars_*` is what a reader receives, the same two readings
-    // `page_corrected` carries, so a round and a page correction can be read against each other
-    // (0.62–2.32 on 265 page corrections, 0.982–0.984 on the three rounds).
+    // Both pairs, because a length cannot answer the question a floor is asked, which is whether a
+    // round lost CONTENT or lost wrappers. `chars_*` is the whole fragment and `text_chars_*` is
+    // what a reader receives; markup-only work leaves the second pair equal and moves the first, and
+    // a round that deleted a paragraph moves both. That is the same argument, and the same two
+    // readings, that #166 needed on `page_corrected` — so a round and a page correction can be read
+    // against each other, which is why `visibleText` is shared rather than reimplemented.
+    //
+    // Note what the three measured rounds do NOT establish. Their `chars_*` ratios are 0.982–0.984
+    // and their structure counts span 0.714–1.333 — one of them dropped 5 of 7 lists and 13 of 47
+    // list items while its length moved 1.6% — so the evidence for a signal beyond `chars_*` is
+    // evidence for a STRUCTURE count, which this line does not carry and #174's open half may want.
+    // No `text_chars_*` ratio exists for a review round at all yet; that is what this produces. The
+    // 0.62–2.32 span on 265 page corrections is raw length too, so both published ranges are
+    // `chars_*` and the second pair starts with no corpus, exactly as it did on the page path.
     //
     // Measured on the body, which is the `<main>` content: the wrapper and the markers after
     // `</main>` are added downstream and are not what any round returned. Taken AFTER the role
