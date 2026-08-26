@@ -579,29 +579,41 @@ const MARKS_PHRASE = new RegExp(
   "gi",
 );
 // Two constructions that say the marks are not text, and so are the declaration rather than a
-// failure to read. Both are anchored to a marks noun EARLIER IN THE SAME CLAUSE, which is the
-// subject the exemption is claiming they are about — without that anchor they read as exempt
-// wherever they sit, including in a log that affirms the text is there ("the text does not resolve
-// into legible words", "the typed lines are not legible characters"), and a page that has text on
-// it would be delivered as an empty fragment with no marker and nothing in `pages_failed`.
+// failure to read. Both are anchored to a marks noun earlier in the sentence with NO NAME FOR TEXT
+// in between, which is what makes the marks the thing being denied. Without the anchor they read as
+// exempt wherever they sit, including in a log that affirms the text is there ("the text does not
+// resolve into legible words"); with a plain same-sentence anchor, a marks noun anywhere ahead of
+// the affirmation exempts it ("a few specks are visible, but the printed text does not resolve into
+// words") — and either way a page that has text on it is delivered as an empty fragment with no
+// marker and nothing in `pages_failed`.
 //
+// It has to be a gap and not adjacency: the real logs put the whole predicate between them ("Specks
+// /dots are visible on the page but do not resolve into any characters", "artifacts of the scan
+// (dust/noise) and do not resolve into…", "specks/dots that appear to be scanning artifacts, not
+// legible text"), so requiring the noun immediately before the verb, or refusing to cross a comma,
+// `but` or `and`, would cost three of the four pages this exists for.
+const TEXT_NOUN = String.raw`text|texts|printing|prints|lines?|words?|characters?|letters?|glyphs?|digits?|handwriting|writing|typing|paragraphs?|sentences?|headings?|captions?|numerals?`;
+// The gap: anything up to the end of the sentence that does not name text.
+const MARKS_ANCHOR = String.raw`(?<=\b(?:${MARK})\b(?:(?!\b(?:${TEXT_NOUN})\b)[^.;])*)`;
 // "…specks/dots … do not resolve into any characters": `resolve` is in `UNREADABLE_LOG` for "could
 // not resolve", and a destination after it turns the sentence into a denial that the marks are
 // characters.
-const MARKS_NOT_TEXT = new RegExp(String.raw`(?<=\b(?:${MARK})\b[^.;]*)\bresolves?\s+(?:in)?to\b`, "gi");
+const MARKS_NOT_TEXT = new RegExp(`${MARKS_ANCHOR}\\bresolves?\\s+(?:in)?to\\b`, "gi");
 // "specks/dots … not legible text" denies the marks are text; "the text is not legible" is a claim
 // about text that exists. Both the word order and the anchor are needed: `the typed lines are not
 // legible characters` has the noun after it too, and names no marks.
 const NOT_LEGIBLE_TEXT = new RegExp(
-  String.raw`(?<=\b(?:${MARK})\b[^.;]*)\bnot legible(?=\s+(?:text|content|words?|characters?|print(?:ed|ing)?|writing|markings?))`,
+  `${MARKS_ANCHOR}\\bnot legible(?=\\s+(?:text|content|words?|characters?|print(?:ed|ing)?|writing|markings?))`,
   "gi",
 );
 // Terms no exemption reaches, checked over the WHOLE log rather than a phrase: a failure to read
 // ("the scan is too dark"), something hidden ("dust and noise obscure the text" — which names
 // marks and denies nothing), or a concession ("a few specks, though the scan is very faint"). A
 // concession word is free to include here, because every exemption above needs a marks noun to
-// reach anything, so blocking them on `though` costs nothing in a log that names none. A log
-// carrying one of these is a failed page whatever else it says.
+// reach anything, so blocking them on `though` costs nothing in a log that names none. This list
+// only disables the exemptions — the verdict is still the two veto lists', and six of these words
+// are in neither, so "Page is blank. Only a few specks, though." is a blank page today and was one
+// before any of this.
 const HARD_DOUBT =
   /\b(illegible|unreadable|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry|grainy)|obscur\w*|hidden|corrupt\w*|error|did ?n[o']?t load|not load\w*|though|although|however|uncertain|not (entirely |fully )?(sure|certain))\b/i;
 

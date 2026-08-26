@@ -326,6 +326,11 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. The typed lines are not legible characters.",
     // And the anchor is a clause, not a log: marks in one sentence do not exempt the next.
     "Page is blank. A few specks are on the sheet. The printed lines do not resolve into words.",
+    // Nor does naming the marks first exempt an affirmation of text later in the same sentence. The
+    // anchor's gap cannot cross a name for text, which is what makes the marks what is being denied.
+    "Page is blank. A few specks are visible, but the printed text does not resolve into words.",
+    "Page is blank. Apart from dust, the typed lines are not legible text.",
+    "Page is blank. Dust is present, and the handwriting does not resolve into words.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }
