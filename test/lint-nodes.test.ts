@@ -296,6 +296,46 @@ test("a document failing many rules does not fill the window with selectors", as
   for (let r = 0; r < 12; r++) assert.match(prompt, new RegExp(`- rule-${r} \\(serious\\)`));
 });
 
+// "the last N rules" is a claim about POSITION, so N has to be every rule below the one the
+// ceiling stopped at — including one that carried no examples of its own. A rule like that is
+// only reachable from a hand-built violation or one stored before #161 (`runAxe` always fills
+// `examples`), but counting only the rules that HAD examples names a shorter run than the one
+// that is unlisted, and the sentence then reads as though the rule it skipped had its elements
+// listed: pointing the Reader at a line that names nothing.
+test("the run of rules with no elements is counted from where the ceiling stopped", async () => {
+  const withExamples = (r: number) => ({
+    id: `rule-${r}`,
+    impact: "serious",
+    description: `Ensure rule ${r}`,
+    nodes: 3,
+    examples: Array.from({ length: 3 }, (_, n) => ({ target: `#r${r}n${n}`, html: `<p id="r${r}n${n}">` })),
+  });
+  // Eight rules of three spend the ceiling exactly; then a bare one, then two more that would
+  // have had examples to list. Three rules are unlisted and they are the last three.
+  const prompt = await readerPrompt({
+    ok: false,
+    violations: [
+      ...Array.from({ length: 8 }, (_, r) => withExamples(r)),
+      { id: "rule-8", impact: "minor", description: "Ensure rule 8", nodes: 2 },
+      withExamples(9),
+      withExamples(10),
+    ],
+  });
+  assert.equal((prompt.match(/^    - `#r/gm) ?? []).length, MAX_EXAMPLES_TOTAL);
+  assert.match(prompt, /No elements are listed for the last 3 rules above/);
+  // And a bare rule ABOVE the ceiling is not in that run: nothing was cut from it, so counting
+  // it would overstate what the ceiling did and break the positional claim the other way.
+  const early = await readerPrompt({
+    ok: false,
+    violations: [
+      withExamples(0),
+      { id: "rule-bare", impact: "minor", description: "Ensure rule bare", nodes: 2 },
+      ...Array.from({ length: 8 }, (_, r) => withExamples(r + 1)),
+    ],
+  });
+  assert.match(early, /No elements are listed for the last 1 rule above/);
+});
+
 test("a lint with nothing to point at reads exactly as it did before", async () => {
   // A violation carrying no examples — a hand-built one, a stored one from before #161 — is
   // rendered as the single line it always was, with no paragraph introducing elements that are

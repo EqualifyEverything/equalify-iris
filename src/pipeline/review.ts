@@ -349,7 +349,12 @@ function lintSummary(lint: LintResult, withExamples: boolean): string {
     const head = `- ${v.id} (${v.impact}): ${v.description} [${v.nodes} nodes]`;
     const examples = (v.examples ?? []).slice(0, budget);
     if (examples.length === 0) {
-      if (withExamples && (v.examples ?? []).length > 0) unlisted++;
+      // Counted once the budget is gone, whether or not this rule HAD examples to spend it
+      // on. The paragraph below points at "the last N rules", which is a claim about position
+      // and is only true if N is every unlisted rule: a violation carrying no examples at all
+      // (hand-built, or stored before #161) sitting between two that were cut would otherwise
+      // be skipped in the tally and read as one of the rules whose elements are listed.
+      if (withExamples && listed > 0 && budget === 0) unlisted++;
       return head;
     }
     budget -= examples.length;
