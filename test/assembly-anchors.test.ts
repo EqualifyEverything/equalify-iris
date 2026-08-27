@@ -292,9 +292,13 @@ test("a page linking one spoken-for note three times reports the fact once", () 
   // is one fact however many markers carry it — and the round that produced #233 had a
   // page with six. The number of links a reader can follow to nothing is measured
   // elsewhere, on the delivered bytes (links.ts, #234).
+  //
+  // Both owners link to their own copy, so page 3's markers are aimed at neither. With only
+  // page 1 spoken for they would all be repointed at page 2's free note, which is the
+  // separate test above.
   const { body, anchors } = assembleBodyWithReport([
     frag(1, `<p>A<sup><a id="fnref-1" href="#fn-1">1</a></sup></p><ol><li id="fn-1">One</li></ol>`),
-    frag(2, `<ol><li id="fn-1">Two</li></ol>`),
+    frag(2, `<p>B<sup><a id="fnref-1" href="#fn-1">1</a></sup></p><ol><li id="fn-1">Two</li></ol>`),
     frag(3, `<p>a<a href="#fn-1">1</a> b<a href="#fn-1">1</a> c<a href="#fn-1">1</a></p><p id="fn-9">Nine</p>`),
   ]);
   assert.deepEqual(anchors.unrepointed, [{ page: 3, ref: "fn-1" }]);
@@ -316,6 +320,80 @@ test("a note nobody else has claimed still adopts an outside marker", () => {
   assert.match(body, /href="#p1-fn-1"/, "a note no page had claimed did not adopt the outside marker");
   assert.deepEqual(anchors.ambiguous, [{ page: 3, ref: "fn-1" }]);
   assert.deepEqual(anchors.unrepointed, [], "a reference that resolved was reported as given up on");
+});
+
+test("a spoken-for first owner is passed over, not given up on", () => {
+  // Why the test is "the first FREE owner" and not "the first owner, is it free?". Page 1's
+  // `fn-1` has its own marker, so it is spoken for. Page 2's is the note continued onto that
+  // page and nothing claims it. Page 3 carries the marker for page 2's note — the only claim
+  // on it — so the link belongs there, and a version of this rule that consulted only the
+  // first owner left it bare with page 2's note unreachable from anywhere.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<p>A<sup><a id="fnref-1" href="#fn-1">1</a></sup></p><ol><li id="fn-1">One</li></ol>`),
+    frag(2, `<ol><li id="fn-1">…continued from the previous page</li></ol>`),
+    frag(3, `<p>C<sup><a href="#fn-1">1</a></sup></p>`),
+  ]);
+  // `fnref-1` is page 1's alone, so it does not collide and is not renamed; only the note it
+  // points at is.
+  assert.match(body, /<a id="fnref-1" href="#p1-fn-1">/, "page 1's own reciprocal pair was broken");
+  // Positionally, because page 1's own marker legitimately points at `#p1-fn-1` and a bare
+  // match would pass on that alone: the SECOND link in the document is page 3's.
+  const hrefs = [...new JSDOM(`<body>${body}</body>`).window.document.querySelectorAll("a[href^='#']")].map((a) =>
+    a.getAttribute("href"),
+  );
+  assert.deepEqual(hrefs, ["#p1-fn-1", "#p2-fn-1"], "page 3's link did not skip past the spoken-for owner");
+  assert.deepEqual(anchors.ambiguous, [{ page: 3, ref: "fn-1" }]);
+  assert.deepEqual(anchors.unrepointed, [], "a link that found a free owner was reported as given up on");
+});
+
+test("an owner left as written is a target like any other, and the bare link finds it", () => {
+  // Where the rule meets the reserialization guard. Page 2 owns the free copy of `fn-1` and
+  // is delivered as written (an orphan `<tr>` would be dropped by a rewrite), so it keeps the
+  // BARE id — which means page 3's link, left bare, resolves to it. Page 1's spoken-for copy
+  // is renamed out of the way, so there is no earlier bare `fn-1` for the link to land on
+  // first. Nothing is `unrepointed` here: the link was aimed at an owner, and that owner's id
+  // simply did not move.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<p>A<sup><a href="#fn-1">1</a></sup></p><ol><li id="fn-1">One</li></ol>`),
+    frag(2, `<ol><li id="fn-1">…continued</li></ol><tr><td>IMPORTANT DATA</td></tr>`),
+    frag(3, `<p>C<sup><a href="#fn-1">1</a></sup></p>`),
+  ]);
+  assert.deepEqual(anchors.skipped_pages, [2]);
+  assert.match(body, /<li id="fn-1">…continued<\/li>/, "the skipped page was rewritten after all");
+  assert.match(body, /<li id="p1-fn-1">One<\/li>/, "the spoken-for owner was not moved out of the way");
+  assert.deepEqual(anchors.unrepointed, [], "a link that lands on a delivered-as-written owner reads as given up on");
+  // Page 3's link is bare and page 2's is the only bare `fn-1` in the document, so it
+  // resolves — to the continued note, which is the one nothing else claimed.
+  const doc = new JSDOM(`<body>${body}</body>`).window.document;
+  const hrefs = [...doc.querySelectorAll("a[href^='#']")].map((a) => a.getAttribute("href"));
+  assert.deepEqual(hrefs, ["#p1-fn-1", "#fn-1"]);
+  assert.equal(doc.querySelectorAll("#fn-1").length, 1, "the bare target the link needs is not unique");
+});
+
+test("a link left bare does not fight a pin for the id it is not taking", () => {
+  // The other crossing: `fn-1` is pinned, because page 4 is delivered as written and its
+  // frozen `href="#fn-1"` can only find a bare id. Pages 1 and 2 both own a self-linked copy,
+  // so page 3's link is aimed at no owner and reported. The pin is unaffected — it is about
+  // the FIRST owner keeping its id, which page 4's reference still resolves to — and page 2's
+  // copy is still renamed, so the collision is still narrowed rather than abandoned.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<p>A<sup><a href="#fn-1">1</a></sup></p><ol><li id="fn-1">One</li></ol>`),
+    frag(2, `<p>B<sup><a href="#fn-1">1</a></sup></p><ol><li id="fn-1">Two</li></ol>`),
+    frag(3, `<p>C<sup><a href="#fn-1">1</a></sup></p>`),
+    frag(4, `<p>D<sup><a href="#fn-1">1</a></sup></p><tr><td>IMPORTANT DATA</td></tr>`),
+  ]);
+  assert.deepEqual(anchors.skipped_pages, [4]);
+  assert.deepEqual(anchors.pinned_ids, ["fn-1"], "the frozen reference did not pin its first owner");
+  assert.deepEqual(anchors.unrepointed, [{ page: 3, ref: "fn-1" }]);
+  assert.match(body, /<li id="fn-1">One<\/li>/, "the pinned first owner was renamed");
+  assert.match(body, /<li id="p2-fn-1">Two<\/li>/, "the collision was abandoned rather than narrowed");
+  // Page 1's own link stays bare because its target is pinned; page 2's follows its rename;
+  // pages 3 and 4 are both bare, and land on page 1's note — for page 4 that is the pin doing
+  // its job, and for page 3 it is the honest outcome of a marker whose note is not here.
+  const hrefs = [...new JSDOM(`<body>${body}</body>`).window.document.querySelectorAll("a[href^='#']")].map((a) =>
+    a.getAttribute("href"),
+  );
+  assert.deepEqual(hrefs, ["#fn-1", "#p2-fn-1", "#fn-1", "#fn-1"]);
 });
 
 test("the rule is about links, not about the attributes a name depends on", () => {

@@ -861,9 +861,18 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     //
     // A reciprocal pair is the evidence. A marker and its note are written together by one
     // agent looking at one image, so an id whose owner links to it is spoken for and no
-    // other page's link can have meant it. Where the owner does NOT link to its own copy —
+    // other page's link can have meant it. Where an owner does NOT link to its own copy —
     // a note continued from an earlier page, a real shape in this corpus — the reference is
     // repointed exactly as before, because there the outside link is the only claim on it.
+    //
+    // Which is why a link takes the first owner that is not spoken for, rather than checking
+    // only the first owner and giving up. Consulting only the first was the first version of
+    // this rule and it threw away right answers: with page 1 owning a self-linked `fn-1`,
+    // page 2 owning the note it continues (no marker of its own), and page 3 carrying the
+    // marker for page 2's note, page 3's link is the ONLY claim on page 2's note — the case
+    // the paragraph above says is still repointed — and first-owner-only left it bare with
+    // page 2's note unreachable from anywhere. Only when every owner already has a marker is
+    // there nothing to aim at.
     //
     // Links only. For `for`/`headers`/`aria-*` this file's header refuses precisely this
     // trade, and rightly: a no-target `for` is a 1.3.1/4.1.2 failure where the wrong-target
@@ -876,28 +885,44 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     const reportedUnrepointed = new Set<string>();
     const resolve = (index: number, mine: Set<string>, token: string, viaLink = false) => {
       if (!colliding.has(token)) return token; // includes `href="#"`, whose token is ""
-      const owner = mine.has(token) ? index : claims.get(token)![0];
-      // A page left as written kept its bare ids, so a reference to it must stay bare.
-      if (skipped.has(owner)) return token;
-      // And the first owner of a pinned id keeps its bare form for a skipped page's
-      // reference, so a reference resolved TO that owner has to stay bare as well —
-      // otherwise this page's reference is the one left naming nothing.
-      if (pinned.has(token) && owner === claims.get(token)![0]) return token;
-      // The #233 rule. After the two above, so a bare target that a frozen reference still
-      // needs keeps winning: those are about an id that STAYS bare and findable, where this
-      // is about refusing to aim at one that moved.
-      if (viaLink && owner !== index && selfLinked.get(owner)?.has(token)) {
+      const owners = claims.get(token)!;
+      // The owner this reference is aimed at: the page's own copy when it has one, otherwise
+      // the first in document order — except for a link, which passes over every owner that
+      // already links to its own copy (#233) and takes the first that does not. `undefined`
+      // means every owner is spoken for, which is the only case with nothing to aim at. A
+      // link never selects its own page here: if this page owned the id, the first branch
+      // took it.
+      const owner = mine.has(token)
+        ? index
+        : viaLink
+          ? owners.find((o) => !selfLinked.get(o)?.has(token))
+          : owners[0];
+      if (owner === undefined) {
         // Deduplicated per page and token, the way `ambiguous` is: this runs once per
         // element, and a page carrying three markers numbered 1 would otherwise report the
         // same fact three times. The count that matters — how many links the reader can
         // follow to nothing — is on the delivered bytes, where links.ts measures it.
-        const key = `${index} ${token}`;
+        const key = `${index} ${token}`;
         if (!reportedUnrepointed.has(key)) {
           reportedUnrepointed.add(key);
           report.unrepointed.push({ page: pages[index].order, ref: token });
         }
         return token;
       }
+      // A page left as written kept its bare ids, so a reference to it must stay bare.
+      //
+      // One inexactness, stated rather than chased: if the chosen owner is such a page AND an
+      // EARLIER owner is delivered as written too, the bare reference resolves to that earlier
+      // copy rather than to this one, because a browser takes the first bare id in document
+      // order. It needs a colliding id with two owners the reserialization guard refused, and
+      // the reference lands on a real copy of the note either way.
+      if (skipped.has(owner)) return token;
+      // And the first owner of a pinned id keeps its bare form for a skipped page's
+      // reference, so a reference resolved TO that owner has to stay bare as well —
+      // otherwise this page's reference is the one left naming nothing. Compared against
+      // `owners[0]` specifically: a link repointed to a LATER owner takes that owner's prefix,
+      // since the pin holds only the first owner's id bare and renames all the rest.
+      if (pinned.has(token) && owner === owners[0]) return token;
       return `${prefixFor(owner)}${token}`;
     };
 

@@ -575,12 +575,13 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   nothing, so the field loses its accessible name and axe reports `label` on a document a plain
   concatenation passed. Ambiguous references are named in the run log as `assembly_anchors`.
 
-  One case is left bare on purpose: a *link* to a colliding id whose first owner links to its own
-  copy. That target is already spoken for — a footnote marker on page 3 pointing at `#fn-1` where
-  pages 1 and 2 each carry their own `fn-1` *and* their own marker for it is not a tie document
-  order can break, and aiming it at page 1 gives one note two markers while page 3's note stays
-  unreachable. An owner that does *not* link its own copy is a footnote continued from an earlier
-  page, so an outside reference to it is still repointed. These are listed in the same log line as
+  A *link* is aimed slightly differently: it takes the first owner that does not already link to
+  its own copy. That owner's target is spoken for — a footnote marker on page 3 pointing at `#fn-1`
+  where pages 1 and 2 each carry their own `fn-1` *and* their own marker for it is not a tie
+  document order can break, and aiming it at page 1 gives one note two markers while page 3's note
+  stays unreachable. An owner that does *not* link its own copy is a footnote continued from an
+  earlier page, so a link is still repointed there. Only when every owner has its own marker is the
+  link left bare. Those are listed in the same log line as
   `unrepointed`, a subset of `ambiguous`, and the references themselves are counted as unresolved in
   the delivered document (`internal_links`). Links only: a `for`, `headers` or `aria-*` reference
   with no target is an axe violation, so those still take the first owner. A page
