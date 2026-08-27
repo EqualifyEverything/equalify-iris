@@ -1065,12 +1065,29 @@ test("a log that says something is on the page contradicts its own blank claim",
     "Page is blank. The printed page number and a heading are visible.",
     "Page is blank. The printed folio is visible, and a caption is present at the foot.",
     "Page is blank. Printed numerals are visible.",
-    // And the residual, pinned as the cost it is: an inverted cleft puts the folio behind a preposition
-    // and a verb (`the only thing printed on it IS the page number`), where what the affirmation names
-    // cannot be read off the word after `printed`. Crossing a preposition to find out would let a real
-    // affirmation through — `Printing is visible beside the page number.` is the same shape — so this
-    // page is reported instead, which costs a glance at a page with nothing on it.
+    // `page numeral` is as much a folio as `page number`, and is refused anyway: `numerals?` is in
+    // `TEXT_NOUN` itself, so skipping the `printed` in front of it hands the affirmation to the noun two
+    // words on. Pinned as the limit it is rather than covered — the only ways to cover it are taking
+    // `numerals` out of the names for text or stepping the loop past a noun it would otherwise read, and
+    // the second is what keeps `The printed page number and a heading are visible.` refused (#230's
+    // review).
+    "The page is blank. The printed page numeral 14 is visible at the foot.",
+    "The page is blank. The printed page numerals are visible at the foot.",
+    // The residuals, pinned as the cost they are, all three the same shape of cost: a folio-only page
+    // reported is a glance, and the reads that would cover these would let a real affirmation through.
+    //
+    // An inverted cleft puts the folio behind a preposition and a verb (`the only thing printed on it IS
+    // the page number`), where what the affirmation names cannot be read off the word after `printed`;
+    // crossing a preposition to find out would take `Printing is visible beside the page number.` with
+    // it.
     "Page 14 is blank; the only thing printed on it is the page number.",
+    // And the post-verb shapes, where the folio is the OBJECT: `affirmedObjectAfter` returns the
+    // `printed` it finds in the object gap without consulting `folioAt`, so these are unchanged from
+    // before #222. What saves the `only` wordings of these exact three sentences — pinned as delivered
+    // above — is that quantifier ending the object walk, not the folio.
+    "The page is blank. There is a printed page number at the foot.",
+    "The page is blank. The sheet contains a printed page number.",
+    "The page is blank. It shows a printed page number at the foot.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }
@@ -1292,6 +1309,29 @@ test("the affirmations a blank page's own log is made of are not contradictions"
     // `folio` and `pagination` are outside `TEXT_NOUN`, and `number` alone is outside it too.
     "The page is blank apart from the folio.",
     "Page is blank. The pagination is visible at the foot.",
+    // The folio as the OBJECT of `there is` or of a transitive verb, delivered — and not by anything
+    // #222 did: `only` is a quantifier that ends the object walk before it reaches the `printed`. Pinned
+    // beside the same three sentences without it, which are refused (below), because the pair is the
+    // whole difference and neither reading consults `folioAt`.
+    "The page is blank. There is only a printed page number on the sheet.",
+    "The page is blank. The page contains only its printed page number.",
+    "The page is blank. It shows only a printed page number at the foot.",
+    // What `printed` was accidentally covering, in the three shapes #230's review measured, each pinned
+    // beside the same sentence with the folio phrase taken out — which is already delivered on the tree
+    // before #222 and always was. So the exemption removed cover rather than opening a class: an
+    // elliptical tail with no verb of its own, a noun behind a preposition, a noun with a verb outside
+    // the affirming list, and a noun outside `TEXT_NOUN` are each undefended in their own right, and
+    // whatever defends them later has to defend the second of each pair too. That is the point of pinning
+    // both: a widening of `AFFIRMING_VERB` or `TEXT_NOUN` must not leave this exemption as the only thing
+    // dropping the first of each pair.
+    "Page is blank. The printed page number 4 is visible at the foot, and a heading at the top.",
+    "Page is blank. A heading at the top.",
+    "Page is blank. The printed page number is visible over the signature.",
+    "Page is blank. A signature sits under the printed page number.",
+    "Page is blank. The printed folio is visible; handwriting fills the margin.",
+    "Page is blank. Handwriting fills the margin.",
+    "Page is blank. Printed page numbers and a running title are visible.",
+    "Page is blank. A running title is visible.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }

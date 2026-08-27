@@ -120,6 +120,8 @@ that boundary a name of its own in the delivered document. Emit one wherever the
 first thing you emit for that page — the number marks where the page begins rather than being part
 of what it says, so it goes there whether the page prints it at the head or the foot — and use the
 number the page shows (iv, 5, A-3), never the position of the image you were given in the file.
+A page with nothing else on it is the one exception, and the blank-page rule below is where it lives:
+no marker there, whatever the paper prints.
 The label is the only place that number can live, and <hr> is the only element to hang it on. Do not
 transcribe the folio as text beside the marker either: the marker goes at the head of the page
 whichever end the page prints its number on, so a visible copy of it would stand at the top of the
@@ -1343,8 +1345,15 @@ function participleAfterCopula(tokens: Word[], i: number): boolean {
 // whose sole named subject is the folio is let through. `page number` is required as a phrase —
 // `number` alone names a figure number or a total as readily as a folio, and `numbers are visible` is
 // a page with content on it.
+// `numeral` and `numerals` are deliberately NOT here, though `page numeral` is as much a folio as
+// `page number` is: `numerals?` is itself in `TEXT_NOUN`, so skipping the `printed` in front of it
+// hands the affirmation to the noun two words on and the verdict does not move — only the span
+// `blank_contradicted` quotes does (#230's review measured both trees). An entry that cannot change an
+// answer is an entry claiming a coverage it does not have, and covering those two would mean taking
+// `numerals` out of the names for text or stepping the loop past a noun it would otherwise read.
+// `number` and `numbers` are outside `TEXT_NOUN`, which is what makes them the entries doing the work.
 const FOLIO_HEAD = new Set("folio folios pagination".split(" "));
-const FOLIO_COUNT = new Set("number numbers numeral numerals".split(" "));
+const FOLIO_COUNT = new Set("number numbers".split(" "));
 function folioAt(tokens: Word[], i: number): boolean {
   const word = tokens[i]?.word;
   if (word === undefined) return false;

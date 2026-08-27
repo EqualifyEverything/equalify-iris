@@ -89,6 +89,8 @@ that boundary a name of its own in the delivered document. Emit one wherever the
 first thing you emit for that page — the number marks where the page begins rather than being part
 of what it says, so it goes there whether the page prints it at the head or the foot — and use the
 number the page shows (iv, 5, A-3), never the position of the image you were given in the file.
+A page with nothing else on it is the one exception, and the blank-page rule below is where it lives:
+no marker there, whatever the paper prints.
 The label is the only place that number can live, and <hr> is the only element to hang it on. Do not
 transcribe the folio as text beside the marker either: the marker goes at the head of the page
 whichever end the page prints its number on, so a visible copy of it would stand at the top of the
