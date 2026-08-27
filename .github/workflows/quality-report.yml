@@ -394,8 +394,11 @@ jobs:
               # document, where one violation is 100% and crosses this threshold — an
               # issue filed about a prompt on the strength of a single page, and a
               # 30-day cooldown started on a rule that was never really measured. The
-              # lint-error finding above fires in that window too and outranks this,
-              # but it does not crowd it out: both fit under MAX_ISSUES_PER_RUN.
+              # lint-error finding above fires in that window too and outranks this, so
+              # a week that also crosses one more threshold fills both MAX_ISSUES_PER_RUN
+              # slots and defers this rule finding — named in the run summary rather than
+              # dropped, and offered again next run. That order is the right one: an
+              # unlinted deployment is the reason the rule share is untrustworthy here.
               + ( [ $q.rules[]? | select($q.documents_linted >= $min) | select(.share > $t.rule)
                     | { key: ("rule-" + .id), sev: 5,
                         title: ("Quality regression: axe rule `" + .id + "` fails on a large share of documents"),

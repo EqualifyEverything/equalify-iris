@@ -229,8 +229,10 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   rises with document length alone — it went 1/4 → 2/4 → 3/4 across three bench rounds in which
   every section came back — and an alarm on it would fire on a pipeline that lost nothing (#159).
 * `editor_truncated_lost_rate` — share of documents where that retry did **not** cover the whole
-  body: it was declined (no boundary under the budget, too many sections, a budget too small to be
-  worth cutting at) or a section truncated in its turn and kept the text it went in with. This is
+  body: it was declined or came back with nothing — the run log says which on an
+  `editor_sections_declined` line, whose `reason` is one of `unmeasured`, `budget_too_small`,
+  `budget_exceeds_body`, `indivisible` or `too_many_sections` — or a section truncated in its turn
+  and kept the text it went in with. This is
   the truncation number that carries a threshold, because it is the one that costs a reader
   something: those parts of the document had no editor pass at all, and a truncation is the loop's
   last round, so nothing looks for their issues again. A strict subset of `editor_truncated_rate`
@@ -599,8 +601,8 @@ section at a time and `C` of `N` sections came back corrected, so those correcti
 but each was made by a request that saw one section and not the rest of the document; the
 `@unresolved` list is the reading that preceded them and was never taken again, so some of it may
 already be fixed. The bare `@editor-truncated` means nothing was rescued — the round was
-discarded and **none** of the issues below it were worked on. Both forms, and `C` short of `N` in
-the first, are what `editor_truncated_lost_rate` counts deployment-wide; `C` equal to `N` is a
+discarded and **none** of the issues below it were worked on. The bare form, and `C` short of `N`
+in the first, are what `editor_truncated_lost_rate` counts deployment-wide; `C` equal to `N` is a
 document that cost more and lost nothing. A third comment,
 `<!-- @lint-unavailable -->`, says axe-core could not run on this document at all, so **nothing**
 in it was checked for accessibility violations and an empty `@unresolved` is not a clean bill of
