@@ -81,6 +81,63 @@ export function visibleText(html: string): string {
 const CONTENT_WITHOUT_TEXT =
   /<(?:img|svg|math|video|audio|object|embed|iframe|canvas|input|select|textarea|button|table)\b/i;
 
+// The same content when an ATTRIBUTE is what says so and the element name says nothing (issue #224,
+// raised by the review of #221). The list above tests the name only, so `<div role="img"
+// aria-label="A photo of the mayor"></div>` — a picture, announced as one, with a description a reader
+// hears — read as an empty wrapper and carried nothing.
+//
+// A role that names one of the things in the list above is that thing: `img`, `figure`, `math` and
+// `table` are the picture, the equation and the grid written on a neutral element, `graphics-*` is how
+// an inline drawing arrives when it is not an `<svg>`, and an interactive role is a control. Roles that
+// say the element is NOT content are absent for the reason a page-break `<hr>` is: `presentation`,
+// `none` and `separator` describe where something sat rather than what was on it.
+//
+// A whole token list is read rather than the first token, though ARIA takes the first valid one, for
+// the reason the rest of this predicate leans that way: reading `img presentation` as a picture costs a
+// glance at a page that was fine, and reading it as nothing drops a page with a picture on it.
+const CONTENT_ROLE = new Set(
+  (
+    "img figure math table grid treegrid graphics-document graphics-symbol graphics-object link " +
+    "button checkbox radio switch slider spinbutton textbox combobox listbox option " +
+    "menuitem menuitemcheckbox menuitemradio tab progressbar meter"
+  ).split(" "),
+);
+
+// One attribute's value off one start tag, or `undefined` where the tag does not carry it. The
+// lookbehind is `altText`'s: without it `role` opens on `data-role=` and `aria-label` on anything
+// ending in those characters. Unquoted values are read too, because model output writes them.
+function tagAttr(tag: string, name: string): string | undefined {
+  const m = new RegExp(String.raw`(?<![-\w])${name}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`, "i").exec(tag);
+  return m === null ? undefined : decodeEntities(m[1] ?? m[2] ?? m[3] ?? "");
+}
+
+// Tag by tag, on the same scan `attrText` uses, because a role and a name on ONE element is the claim —
+// a `role="img"` on a wrapper and an `aria-label` three tags later are two separate ones.
+//
+// The named link is the second shape and the only one that needs a name to count: a link is the one
+// interactive thing whose element name is not in `CONTENT_WITHOUT_TEXT`, and `<a href="#x"
+// aria-label="Next"></a>` is something a reader can follow and hear named. An accessible name anywhere
+// else is not read as content — `<div aria-label="Main content">` labels a wrapper that holds nothing,
+// and counting that would make every labelled empty box a page.
+//
+// Unreachable on today's prompts: `agents/page.md` asks for `<img>` and `<figure>` for a picture and
+// never a `role="img"` wrapper, and all 33 markup-spelled blanks in the corpus are a comment, an empty
+// paragraph or a page-break marker. It is here because the day a prompt allows one of these shapes is
+// not a day anyone will be thinking about this file, and what it costs then is a page with a picture on
+// it delivered empty, reported blank, with nothing in `pages_failed` to look for.
+function attributeCarriesContent(markup: string): boolean {
+  for (const tag of markup.match(TAG) ?? []) {
+    if (tag.startsWith("</")) continue;
+    const role = tagAttr(tag, "role");
+    if (role !== undefined && role.split(/\s+/).some((token) => CONTENT_ROLE.has(token.toLowerCase()))) return true;
+    if (/^<a\b/i.test(tag) && tagAttr(tag, "href") !== undefined) {
+      const name = tagAttr(tag, "aria-label") ?? tagAttr(tag, "aria-labelledby");
+      if (name !== undefined && name.trim() !== "") return true;
+    }
+  }
+  return false;
+}
+
 // Does this fragment give a reader anything at all?
 //
 // Beside `visibleText` because it is the same reading of the same characters, which is what makes it
@@ -95,7 +152,8 @@ const CONTENT_WITHOUT_TEXT =
 // for (issue #219).
 export function carriesContent(html: string): boolean {
   if (visibleText(html).trim() !== "") return true;
-  return CONTENT_WITHOUT_TEXT.test(html.replace(COMMENT, " "));
+  const markup = html.replace(COMMENT, " ");
+  return CONTENT_WITHOUT_TEXT.test(markup) || attributeCarriesContent(markup);
 }
 
 // How many of each kind of structure a fragment holds. Exported for the review loop, on the

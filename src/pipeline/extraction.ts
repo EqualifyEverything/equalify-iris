@@ -606,8 +606,9 @@ function replyShape(text: string, parsed: unknown): string {
 // `<!-- blank page -->` for a page with content replaced the content with the comment.
 //
 // What a reader receives is `carriesContent` (correction.ts), which is `visibleText` plus the elements
-// that are content with no text in them. So a comment, an empty wrapper and a page-break marker are
-// nothing; a picture, a table and a form control are something. PROSE is something too, deliberately:
+// that are content with no text in them, plus the attributes that make a neutral element one of those
+// (#224). So a comment, an empty wrapper and a page-break marker are nothing; a picture, a table, a
+// form control and a `<div role="img">` are something. PROSE is something too, deliberately:
 // one further render answers `<p><em>This page is blank.</em></p>`, and a page that prints "This page
 // intentionally left blank" is a page whose correct transcription is that sentence. Nothing here can
 // tell the two apart, so the sentence is delivered as the page said it.
