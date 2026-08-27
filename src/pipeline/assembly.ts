@@ -2,6 +2,7 @@ import { runAxe, lintErrorFields, isKnownLanguage, type LintResult } from "./lin
 import { cutPoints } from "./sections.ts";
 import { namespaceAnchors, type AnchorReport } from "./anchors.ts";
 import { stripDeprecatedRoles, type RoleStrip } from "./roles.ts";
+import { joinContinuedTables } from "./tables.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PipelineContext } from "./context.ts";
 
@@ -318,7 +319,16 @@ export async function runAssembly(
   fragments: Fragment[],
   opts: { unresolved?: string[] } = {},
 ): Promise<AssemblyResult> {
-  const { body, anchors, deprecatedRoles } = assembleBodyWithReport(fragments);
+  const { body: joinedPages, anchors, deprecatedRoles } = assembleBodyWithReport(fragments);
+  // A table the source printed across a page break arrives here as two tables, and this is the
+  // first moment both halves exist in one string — each page was extracted alone, so the agent that
+  // wrote the second half had nothing to append to (#239). The join belongs on THIS side of the
+  // lint and of review: the linted document and the document the Reader reads should be the one
+  // that ships, and a joined table is a different document to both of them.
+  //
+  // Returns the body it was given whenever it cannot do better, so the failure mode of this stage
+  // is the output the pipeline had before it existed.
+  const body = await joinContinuedTables(ctx, joinedPages);
   const html = wrapDocument(body, opts);
   const lint = await runAxe(html);
   // `lint_error` is logged because a gate that could not run has to be distinguishable

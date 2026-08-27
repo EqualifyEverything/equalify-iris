@@ -657,6 +657,37 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   DPUB's own remedy is to make it a list item — a restructure, not an attribute rewrite. A document
   with no such role comes back byte-identical, which is what the loop's change detection and the
   reserialization caution above both need.
+- **A table printed across a page break is rejoined into one table.** Each page is extracted alone,
+  so the agent that wrote the second half had one image and the rest of the table was not on it: it
+  ships as a fresh `<table>` repeating the header, and a screen-reader user reading down the column
+  gets the header row again mid-data with nothing saying the two are one table (issue #239). The
+  halves are *findable* because the second one says so — all 18 continuation captions measured in
+  the reference corpus carry a "Continued" marker, in four different spellings, against 48 tables.
+  The rule reads that marker anywhere in the caption after a dash, a bracket or a parenthesis:
+  requiring it at the *end* drops 4 of the 18, and requiring the `Table N` stem to repeat drops 8,
+  because a second half often keeps the title and loses the number. The predecessor is the
+  immediately preceding table in document order in all 18.
+  The **merge** is a Copy Editor call, because the halves do not agree on what to concatenate: two
+  of the 18 pairs declare a different column count from their own first half, 13 repeat a header
+  block carrying footnote-*reference* ids that an endnote links back to, and a bracketed unit note
+  is reprinted with the header and belongs in the joined table once. Everything around the ask is
+  deterministic: which tables are halves (the caption rule), where their bytes are, whether the
+  answer kept the table, and the splice. The body is never reserialized — the halves' source spans
+  are found by a depth-counting scan and checked against the parsed DOM, and the reply is spliced in
+  as a string, for the same reason `anchors.ts` refuses a whole-body round trip. A pair whose bytes
+  the source does not delimit is left alone (`table_join_failed`, `unmatched_source`); that is what
+  an unclosed `<table>` on a page does, since an unclosed opener swallows the table after it.
+  The answer is then verified: one table, a caption without the marker, no column or row lost
+  against the larger half, and every distinct row label from either half still present as a cell.
+  Labels by **set** rather than a row count, because the duplicated header block legitimately goes
+  and a legitimately dropped duplicate row must not read as loss — and over all cells, not first
+  cells, so a label the merge moved along a column still counts. Any failure keeps **both halves
+  byte for byte**, which is what makes this safe to ask a model for: unlike a correction round,
+  which adopts a whole new body, a refusal here costs one table's structure and not the document.
+  A failed pair is not asked twice, so one unjoinable pair does not starve the next. It runs where
+  the pages are joined, before the shell and before the lint, so the document the gate cleared and
+  the document the Reader reads are the document that ships. Logged as `table_continuations`,
+  `table_joined`, `table_join_failed` and `table_joins_capped`.
 - **A page the document has no content for is reported once, not once per chunk.** Two kinds of
   source page contribute nothing: one extraction *lost* (`pages_failed`, and a `@page-failed`
   comment where the content would have been) and one that is *blank in the source*, delivered as an
