@@ -231,6 +231,11 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
     // and an unnamed break is the same dead end as a pruned one.
     ["a page that prints no number gets no marker",
       /Where the page prints no number, emit no marker: a break with nothing to name says only that something ended/],
+    // #216: asked for the other half of that, from a run where the model gave unnumbered pages
+    // a marker apiece to keep the sequence going. Each page is a separate request, so "no
+    // marker" has to hold without reference to the pages on either side of this one.
+    ["and it decides that on its own page, not on the run it sits in",
+      /a run of pages that print no number produces no markers at all, not one apiece, whatever the pages around them do/],
     // The consistency half of the report: seven markers in a 25-page document is arbitrary,
     // and a page-local rule is what makes it not arbitrary.
     ["a marker is emitted wherever the page prints its number, first in the page's output",
@@ -694,6 +699,63 @@ test("the page agent's list rule keeps the clauses that make it a rule", () => {
       /Never lift a cell's items out of the table to stand as <li> elements beside it or as a run of items after it/],
     ["what leaving the cell costs is the row and the column, named",
       /the reader is left with Flour and Salt and no way back to the Ingredients column of step 3/],
+    // #216: a Directions cell whose steps the page ran together as one block of prose came
+    // back as one <p>. The typography clause above covers items "run together in one paragraph
+    // with first… then… finally"; this says the cell case is the same case even where the page
+    // prints no ordering words at all.
+    ["a cell's steps are a list even where the page runs them together as prose",
+      /That holds whether or not the page sets the steps apart: three steps run together as one block of prose in a Directions cell are three <li> elements/],
+    // And the same for a procedure the page prints as a paragraph with no table around it.
+    ["a procedure printed as a paragraph outside a table is an <ol> of its steps",
+      /A procedure the page runs as a paragraph outside a table is the same case.*is an <ol> of its steps/],
+    // The cut boundary, which is what keeps this from re-cutting prose on the model's own
+    // judgement: it splits where the page ended a step, and a step whose own wording joins two
+    // actions stays one item — because the cut that separates them deletes a printed word, and
+    // every neighbouring rule says words leave the page only under a named exception.
+    ["the re-cut follows the page's boundaries and no others",
+      /Cut it on the page's own boundaries and no others: a sentence, a semicolon, a printed "then" or "finally"/],
+    ["a step whose wording joins two actions stays one item",
+      /One step whose wording joins two actions \("add water and run for ten seconds"\) is one item, because the cut that separates them deletes the "and" the page prints/],
+    // The guard the review of #217 asked for. A sentence end is the FIRST boundary this rule
+    // names, so cutting a procedure paragraph at sentences is the normal case — and a paragraph
+    // that mixes directions with a prohibition ("Unplug the unit. Wipe the housing. Never immerse
+    // the base in water.") would then say the caution is step 3 of an order the page never
+    // printed. What makes an item is that the page told the reader to do it.
+    ["only a direction is one of the steps; a caution or an explanation is not",
+      /Only what the page tells the reader to DO is one of those steps: a sentence that warns, explains or states a fact .* is not a step/],
+    ["what an <ol> that numbers it would assert",
+      /an <ol> that numbers it tells the reader the page put a prohibition third in an order it never printed/],
+    ["the caution stays the paragraph it is, where the page printed it",
+      /It stays the <p> it is, where the page printed it/],
+    // The re-review of #217 asked where "where the page printed it" puts a caution printed BETWEEN
+    // two directions, since it cannot be both in place and outside a single list. Two <ol>s with
+    // the <p> between them, and the numbering carried across — a second list restarting at 1 says
+    // the page printed two procedures, which is the same kind of false statement about the page
+    // that the flat run of <h2>s at the top of this issue was.
+    ["a caution between two directions leaves two lists with it between them",
+      /the steps before it and the steps after it are two <ol>s with the caution as a <p> between them, and start on the second so its numbering carries on from the first/],
+    ["and why the numbering carries: what a list beginning again at 1 tells the reader",
+      /a list that begins again at 1 tells the reader the page printed two procedures/],
+    // Reconciled with the start rule further down, which fires on numbers the PAGE prints — a
+    // prose procedure prints none, so nothing there would have asked for start="3".
+    ["the start rule is about printed numbers; here the <ol> supplies them",
+      /The start rule below is about numbers the page itself prints\. Here the <ol> supplies them/],
+    ["and the resolution this rule refuses: moving the caution to the end",
+      /Never move it to the end of the procedure to keep the list in one piece — a warning the page printed above step 3 announced after step 5 is the reading order this rule exists to keep/],
+    // And the reading this must not invite: a run of cautions is still a list of cautions. What
+    // the guard excludes is one caution numbered as a step of the procedure it sits in.
+    ["a run of cautions of its own is still a <ul>",
+      /A run of cautions printed as a set of its own is a <ul> of cautions as at the top of this rule/],
+    ["a paragraph left with one direction is a paragraph, not a list of one",
+      /A paragraph left with one direction, or none, is a <p> and not a list of one/],
+    ["and with no boundary of the page's to cut on, it stays a paragraph",
+      /where the page gives no boundary to cut on it stays a <p>/],
+    // #216's third ask. The rule already named this block among its examples; what it did not
+    // say is how many items it is, which is the half the session got wrong. It answers that on
+    // the merge/split clause rather than inside the example series, where a review of #217 read
+    // the count as one more member of the comma list.
+    ["a block of notices is one item per notice",
+      /never split one instruction across two — a block of four copyright and trademark notices is four <li> elements and not one/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
@@ -807,6 +869,27 @@ test("the page agent promotes a sub-topic the page names, and invents no outline
     ["the name is the page's own", /Use the name the page prints for each/],
     ["and where the page names nothing, no outline is supplied",
       /this promotes a label the page gives, it does not supply an outline the page does not have/],
+    // #216, from a session on an appliance manual: the page printed a label over the two
+    // cord-safety topics and another over the two grinding topics, and all of it came back
+    // as a flat run of <h2>s. The promotion rule above makes the sub-topics headings; it
+    // did not say the label above them is their parent, so nothing decided their level.
+    ["a printed label over a cluster of sub-topics is their parent, not their peer",
+      /A label the page prints over a cluster of those sub-topics is their parent and not their peer/],
+    ["the group label's children step one level down, named concretely",
+      /a group label at <h2> makes them <h3>/],
+    // The condition, after the review of #217: as first written it fired only where the title was
+    // "followed by nothing but those sub-topics", so a group label with a lead-in sentence under
+    // it — the common printing of Important Safeguards — fell back to the flat run of <h2>s this
+    // issue reports.
+    ["a lead-in sentence under the label does not make it their peer",
+      /A lead-in sentence of the label's own, or a scope note under it, does not make it their peer/],
+    ["what decides it is whether the label stands over them or beside them",
+      /the question is whether it stands over them or beside them, not whether it was printed alone/],
+    // The guard, in the same shape as the promotion rule's: this promotes a label the page
+    // prints. A grouping heading the page does not print is an outline invented for it, which
+    // is the defect the user asked to fix, with the structure fabricated instead of flattened.
+    ["a grouping heading is never invented, and ungrouped sub-topics keep their own level",
+      /The label has to be printed: a grouping heading is never invented, and sub-topics the page groups under nothing stay at the level their own content calls for/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }

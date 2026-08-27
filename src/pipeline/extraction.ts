@@ -132,7 +132,8 @@ separator, so there is nothing for the role to contradict. Do not look to the li
 this one: it says nothing about <p role="doc-pagebreak" aria-label="Page 5">5</p> and speaks only
 when such a marker is empty, which is how one habit passes on six markers in a document and fails
 on the seventh. Where the page prints no number, emit no marker: a break with nothing to name says
-only that something ended.
+only that something ended. Each page answers that on its own evidence — a run of pages that print
+no number produces no markers at all, not one apiece, whatever the pages around them do.
 
 A page with nothing on it is a page you can answer completely. Return "html" as an empty string and
 say in the "log" field that the page is blank — that is the whole answer, and it is a correct one:
@@ -190,6 +191,15 @@ Ten structures are easy to render as something that merely looks right, so be ex
   only visually has none of them in the outline. Use the name the page prints for each. Where the
   page names no sub-topics there is nothing to add and none is invented — this promotes a label the
   page gives, it does not supply an outline the page does not have.
+  A label the page prints over a cluster of those sub-topics is their parent and not their peer:
+  where two or more of them sit under a title that names the group, that title is the heading and
+  they each step one level down under it — a group label at <h2> makes them <h3>, not a run of four
+  <h2>s that says the cord warnings and the grinding instructions are the same kind of thing as
+  each other and as the page's own subject. A lead-in sentence of the label's own, or a scope note
+  under it, does not make it their peer: what puts it above them is that the sub-topics under it
+  are the ones it names, and the question is whether it stands over them or beside them, not
+  whether it was printed alone. The label has to be printed: a grouping heading is never invented,
+  and sub-topics the page groups under nothing stay at the level their own content calls for.
   Where this page puts two headings of the same level under the same words, they are one section
   and not two: a section title reprinted above content that continues it does not open a new
   section, so emit that title once — the reprint is not a heading and is not emitted as one — give
@@ -281,7 +291,8 @@ Ten structures are easy to render as something that merely looks right, so be ex
   screen-reader user no way to know how many items there are, which one they are on, or where it
   ends. Use <ol> where the order is part of the instruction (do this, then that) and <ul> where it
   is not (a set of cautions, a list of parts), with one item's worth of text per <li>: never merge
-  two instructions into one item, and never split one instruction across two. Typography does not
+  two instructions into one item, and never split one instruction across two — a block of four
+  copyright and trademark notices is four <li> elements and not one. Typography does not
   decide this. Items set as separate lines, or run together in one paragraph with "first… then…
   finally", are a list where they are discrete and parallel, and the absence of bullet glyphs is
   not evidence that they are not. Re-cutting prose into items moves no words: "First, remove the
@@ -292,7 +303,10 @@ Ten structures are easy to render as something that merely looks right, so be ex
   inside a table cell exactly as it does in the body: a
   Directions cell holding three steps is a cell containing an <ol>, an Ingredients cell holding
   four items is a cell containing a <ul>, and neither is <br>-separated text — the cell boundary
-  groups them for the eye, and for nobody else.
+  groups them for the eye, and for nobody else. That holds whether or not the page sets the steps
+  apart: three steps run together as one block of prose in a Directions cell are three <li>
+  elements, because what makes them a list is that a reader does them in order, not the line breaks
+  the page did or did not print.
   And the list stays in the cell. Never lift a cell's items out of the table to stand as <li>
   elements beside it or as a run of items after it: a cell says which row and which column its
   contents belong to, that is the whole of what a table adds, and four ingredients emitted at
@@ -300,6 +314,27 @@ Ten structures are easy to render as something that merely looks right, so be ex
   way back to the Ingredients column of step 3, which is less than even the <br> version would have
   given them. However the page separates the items inside that cell, the markup for them goes
   inside the <td>.
+  A procedure the page runs as a paragraph outside a table is the same case — a cleaning routine, a
+  maintenance sequence, an installation walk-through — and is an <ol> of its steps. Cut it on the
+  page's own boundaries and no others: a sentence, a semicolon, a printed "then" or "finally". One
+  step whose wording joins two actions ("add water and run for ten seconds") is one item, because
+  the cut that separates them deletes the "and" the page prints. Only what the page tells the
+  reader to DO is one of those steps: a sentence that warns, explains or states a fact — "Never
+  immerse the base in water", "The housing may still be warm" — is not a step, and an <ol> that
+  numbers it tells the reader the page put a prohibition third in an order it never printed. It
+  stays the <p> it is, where the page printed it. Printed between two directions, that means the
+  steps before it and the steps after it are two <ol>s with the caution as a <p> between them, and
+  start on the second so its numbering carries on from the first: a list that begins again at 1
+  tells the reader the page printed two procedures, and a reader told "list of 2 items, item 1"
+  about what the page printed as step 3 has lost their place in it. (The start rule below is about
+  numbers the page itself prints. Here the <ol> supplies them, and what it has to supply is the
+  numbering the one procedure would have had.) Never move it to the end of the procedure to keep
+  the list in one piece — a warning the page printed above step 3 announced after step 5 is the
+  reading order this rule exists to keep. A run of cautions printed as a set of its own is a <ul>
+  of cautions as at the top of this
+  rule; what is excluded here is numbering one of them as a step of the procedure it interrupts. A
+  paragraph left with one direction, or none, is a <p> and not a list of one, and where the page
+  gives no boundary to cut on it stays a <p>.
   Two things this is not. Continuous prose is not a list: a paragraph that explains one thing, or a
   single direction written as one sentence, stays a <p>, and a list of one item is a paragraph. And
   a list is not a way to number things — an <ol> counts its own items, so the numbers the page
