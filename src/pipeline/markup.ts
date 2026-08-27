@@ -113,6 +113,12 @@ function countTags(text: string, element: string): { open: number; close: number
 // a `<th>`": a table whose body cells are all `<th scope="row">` is legal and full of content,
 // and calling those rows headers would report every such table as empty. That was the whole
 // argument against the `<td>`-absence test, and it applies here too.
+//
+// The residual, worth knowing when the first real rate comes back: a table with no `<thead>`
+// whose data cells are unscoped `<th>` reads as all headers and is over-reported. The carve-out
+// covers the shape `agents/page.md` asks for, and an unscoped `<th>` data cell arrives on the
+// same prompt drift that produces the defect this counts — so for a count with no threshold,
+// over-reporting a table that has no data cell in it at all is the side to err on.
 function isHeaderRow(row: Element): boolean {
   const cells = [...row.querySelectorAll(":scope > th, :scope > td")];
   return cells.every(
