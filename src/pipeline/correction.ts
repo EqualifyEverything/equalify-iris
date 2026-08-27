@@ -121,6 +121,14 @@ const CONTENT_ROLE = new Set(
 // where a search for `role=` across the whole tag found the prose inside the quotes — the same
 // prose-about-markup hole `visibleText` and `attrText` close by reading comments and quotes rather than
 // characters. The tag name is stripped first so `<a>` does not read as an attribute.
+// What an accessible name can be made of and still be no name. `trim` handles a space, and `\s` covers a
+// decoded non-breaking one — so what is left is the spellings `decodeEntities` deliberately leaves alone
+// (it names the five XML entities and nothing else, src/util/html.ts), plus the zero-width characters no
+// `\s` matches: the entity by name, the code point in decimal or hex, and the raw character. A reader
+// hears nothing of any of them, which is the only question this predicate asks.
+const NAMELESS =
+  /&(?:nbsp|ensp|emsp|thinsp|zwnj|zwj|#0*(?:32|160|8194|8195|8201|8203)|#x0*(?:20|a0|2002|2003|2009|200b));|[\u200b-\u200d\ufeff]/gi;
+
 function tagAttrs(tag: string): Map<string, string> {
   const inner = tag.replace(/^<[a-z][a-z0-9]*/i, "").replace(/\/?>?$/, "");
   const attrs = new Map<string, string>();
@@ -137,10 +145,14 @@ function tagAttrs(tag: string): Map<string, string> {
 // The named link is the second shape, and the only one that needs a name to count: a link is the one
 // interactive thing whose element name is not in `CONTENT_WITHOUT_TEXT` — an `<a>` is a wrapper as
 // often as it is a control — so `<a href="#x" aria-label="Next"></a>` is something a reader can follow
-// and hear named, and a bare `<a href="#x"></a>` is an empty box. `role="link"` is read the same way
-// rather than as one of the roles above, so the two spellings of a link agree. An accessible name
-// anywhere else is not content: `<div aria-label="Main content">` labels a wrapper that holds nothing,
-// and `<p aria-label="Blank page"></p>` is one of the corpus's own 33 blanks.
+// and hear named, and a bare `<a href="#x"></a>` is an empty box. `<area href>` is read as one too, the
+// other interactive element the list above does not name. `role="link"` is read the same way rather than
+// as one of the roles above, and it counts on ITS OWN — an `href` is what makes an `<a>` a link, and a
+// role saying so is the author making the same claim without one, so `<a role="link" aria-label="Next">`
+// and `<span role="link" aria-label="Next">` agree (#229's review found the first of those reading as
+// nothing, which is the arm that loses a page). An accessible name anywhere else is not content:
+// `<div aria-label="Main content">` labels a wrapper that holds nothing, and `<p aria-label="Blank
+// page"></p>` is one of the corpus's own 33 blanks.
 //
 // An `aria-labelledby` pointing at an id the fragment does not contain is counted, though its
 // accessible name computes to nothing. Deliberate, and priced by where this predicate is read: both
@@ -148,7 +160,11 @@ function tagAttrs(tag: string): Map<string, string> {
 // markup is a blank page or a REPORTED one, and neither delivers the fragment either way. So a
 // dangling reference costs the same glance the rest of this leans toward, and refusing it would drop a
 // link the model meant to put on the page. A name that is only whitespace is refused, because that is
-// the author writing no name rather than pointing at one that has gone missing.
+// the author writing no name rather than pointing at one that has gone missing — and a space written as
+// an ENTITY is the same no-name however it was spelled, which `trim` alone could not tell: `&#160;`
+// decodes to a non-breaking space and vanishes, while `&nbsp;` survives `decodeEntities` as six literal
+// characters and read as a name (#229's review). The five XML entities are all that function decodes on
+// purpose, so the space spellings are undone here, where the question is what a reader would hear.
 //
 // Unreachable on today's prompts: `agents/page.md` asks for `<img>` and `<figure>` for a picture and
 // never a `role="img"` wrapper, and the only role it mandates is the `doc-pagebreak` on the page-break
@@ -161,9 +177,9 @@ function attributeCarriesContent(markup: string): boolean {
     const attrs = tagAttrs(tag);
     const roles = (attrs.get("role") ?? "").split(/\s+/).map((token) => token.toLowerCase());
     if (roles.some((role) => CONTENT_ROLE.has(role))) return true;
-    if (/^<a\b/i.test(tag) ? attrs.has("href") : roles.includes("link")) {
+    if (roles.includes("link") || (/^<(?:a|area)\b/i.test(tag) && attrs.has("href"))) {
       const name = attrs.get("aria-label") ?? attrs.get("aria-labelledby");
-      if (name !== undefined && name.trim() !== "") return true;
+      if (name !== undefined && name.replace(NAMELESS, " ").trim() !== "") return true;
     }
   }
   return false;

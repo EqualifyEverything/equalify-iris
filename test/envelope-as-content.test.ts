@@ -340,9 +340,26 @@ test("the declaration is read off what a reader receives, not off how long the f
   assert.equal(declaredBlank({ html: '<a href="#x"></a>', log: "The page is blank." }), true);
   assert.equal(declaredBlank({ html: '<a aria-label="Next"></a>', log: "The page is blank." }), true);
   // ...and `role="link"` is read as a link rather than as one of the roles above, so the two spellings
-  // of the same control agree: named is content, bare is an empty box.
+  // of the same control agree: named is content, bare is an empty box. `<a role="link" aria-label>` with
+  // no `href` is the third spelling and read as the same claim — #229's review found it reading as
+  // nothing because the element name decided which rule applied, and that is the arm that loses a page.
+  // `<area href>` is here for the other half of the same gap: it is the one interactive element besides
+  // `<a>` that `CONTENT_WITHOUT_TEXT` does not name.
   assert.equal(declaredBlank({ html: '<span role="link" aria-label="Next"></span>', log: "The page is blank." }), false);
+  assert.equal(declaredBlank({ html: '<a role="link" aria-label="Next"></a>', log: "The page is blank." }), false);
+  assert.equal(declaredBlank({ html: '<area href="#x" aria-label="Next">', log: "The page is blank." }), false);
   assert.equal(declaredBlank({ html: '<div role="link"></div>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<a role="link"></a>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<area href="#x">', log: "The page is blank." }), true);
+  // A space is no name however it was spelled. `decodeEntities` names the five XML entities and nothing
+  // else on purpose, so `&#160;` decoded to a non-breaking space and vanished under `trim` while
+  // `&nbsp;` survived as six literal characters and read as a name (#229's review) — one non-breaking
+  // space, two spellings, and the decoded arm was the page-dropping one. Undone where the question is
+  // what a reader would hear, not in the decoder.
+  assert.equal(declaredBlank({ html: '<a href="#x" aria-label="&#160;"></a>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<a href="#x" aria-label="&nbsp;"></a>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<a href="#x" aria-label="&#x200B;"></a>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<a href="#x" aria-label="&nbsp;Next"></a>', log: "The page is blank." }), false);
   // An `aria-labelledby` whose target is not in the fragment computes to no accessible name and counts
   // anyway (#229's review). Deliberate: both callers use this to decide blank-versus-REPORTED and
   // neither delivers the fragment, so a dangling reference costs a glance where refusing it would drop
