@@ -257,6 +257,72 @@ test("only a reply that says the page is blank is read as a blank page", () => {
   assert.equal(declaredBlank({ html: "<p>Hi</p>", log: "This page is blank." }), false);
 });
 
+test("the declaration is read off what a reader receives, not off how long the fragment is", () => {
+  // The empty `html` the prompt asks for is not the only way the model writes a blank page. Across
+  // 818 initial renders in the bench logs, 78 replies handed a reader nothing and 33 of them spelled
+  // it in markup — 18 a bare page-break marker, 13 a comment, 2 an empty paragraph (issue #219).
+  // Read as content, each of those was a page that produced markup: `pages_blank` did not count it,
+  // and the document carried the comment, or the empty `<p>`, or an anchor claiming the document's
+  // page 14 begins here when the paper prints no folio. Each fixture below is one of those replies.
+  assert.equal(
+    declaredBlank({
+      html: '<hr role="doc-pagebreak" aria-label="Page 14" id="page-14">',
+      log: "Page 14 appears to be blank. No text, images, or other content is visible.",
+    }),
+    true,
+    "a marker says where a page began, not what was on it",
+  );
+  assert.equal(
+    declaredBlank({
+      html: "<!-- blank page -->",
+      log: "Page 2 appears to be entirely blank (white). No text, images, or other content is visible.",
+    }),
+    true,
+  );
+  assert.equal(
+    declaredBlank({ html: "<!-- Page 16: blank page -->", log: "Page 16 appears to be entirely blank." }),
+    true,
+  );
+  assert.equal(declaredBlank({ html: "<p> </p>", log: "Page 4 appears to be blank." }), true);
+  assert.equal(
+    declaredBlank({ html: '<p aria-label="Blank page"></p>', log: "Page 2 of 25 is entirely blank." }),
+    true,
+  );
+  // Wrappers hold nothing either, however deep they go.
+  assert.equal(declaredBlank({ html: "<section><div></div></section>", log: "The page is blank." }), true);
+  // And a comment that talks about markup is prose about markup, not markup — the same reading
+  // `visibleText` and `attrText` take (correction.ts).
+  assert.equal(declaredBlank({ html: "<!-- the <img> is overleaf -->", log: "The page is blank." }), true);
+
+  // What is still a page. PROSE first, and deliberately: one further render in that corpus answers
+  // `<p><em>This page is blank.</em></p>`, and a page that PRINTS "This page intentionally left
+  // blank" is a page whose correct transcription is that sentence. Nothing here can tell the two
+  // apart, so the words are delivered as the page said them.
+  assert.equal(declaredBlank({ html: "<p><em>This page is blank.</em></p>", log: "The page is blank." }), false);
+  // Then the elements that are content with no text in them: the picture, the grid, the control. A
+  // reader receives something from every one of them, and `visibleText` returns nothing for all three.
+  assert.equal(declaredBlank({ html: '<img src="p4.png" alt="">', log: "The page is blank." }), false);
+  assert.equal(declaredBlank({ html: "<table><tr><td></td></tr></table>", log: "The page is blank." }), false);
+  assert.equal(declaredBlank({ html: '<input type="checkbox">', log: "The page is blank." }), false);
+
+  // The veto still has the last word, whichever way the fragment was written: how the model spelled
+  // its empty page does not decide the routing (#220 is the wordings that refuse a real blank page).
+  assert.equal(
+    declaredBlank({ html: "<!-- blank page -->", log: "The scan is too dark to resolve any text." }),
+    false,
+  );
+  const refused = blankDeclaration({
+    html: "<!-- blank page -->",
+    log: "Page 2 is blank, but the scan is too dark to be sure.",
+  });
+  assert.equal(refused.blank, false);
+  assert.deepEqual(
+    [refused.asserted, refused.vetoes],
+    [true, ["too dark to", "dark"]],
+    "asserted and refused, which is what puts the words on the failure line rather than on nothing",
+  );
+});
+
 test("a log describing the specks on an empty sheet is not a log doubting the scan", () => {
   // Round 9 of the bench delivered five blank pages and lost four, and all four were lost to one
   // word inside the agent's own explanation of WHY the page is blank (issue #190). The same
@@ -1163,6 +1229,62 @@ test("a page the agent reports blank is a page, not a lost one", async () => {
       fragments.filter((f) => f.order !== 2).map((f) => f.innerHtml),
       ["<p>page 1</p>", "<p>page 3</p>"],
     );
+  });
+});
+
+test("a blank page spelled in markup is a blank page, and the markup stays out of the document", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The two commonest markup spellings in the corpus, both verbatim. What they used to be:
+    // `page_blank` empty, both pages counted as pages that produced markup, and the document
+    // carrying `<!-- blank page -->` for one of them and a `doc-pagebreak` anchor for the other —
+    // an anchor whose label is the image's position in the file, on a page whose own log says no
+    // number is printed (issue #219).
+    const marker =
+      '{"html": "<hr role=\\"doc-pagebreak\\" aria-label=\\"Page 2\\" id=\\"page-2\\">", ' +
+      '"log": "Page 2 appears to be blank. No text, images, or other content is visible. No page number is printed on the page."}';
+    const comment = '{"html": "<!-- Page 3: blank page -->", "log": "Page 3 appears to be entirely blank."}';
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, { render: (o) => (o === 2 ? marker : o === 3 ? comment : good(o)) }),
+    );
+    assert.deepEqual(failedPages, [], "two blank pages are not two holes");
+    assert.deepEqual(of(events, "page_blank").map((e) => e.page), [2, 3]);
+    assert.equal(of(events, "page_no_output").length, 0);
+    // The same empty fragment an empty `html` produces, so one shape of fragment stands for a blank
+    // page however the model wrote it — and nothing a reader receives is lost, because there was
+    // nothing in either reply for a reader.
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "");
+    assert.equal(fragments.find((f) => f.order === 3)!.innerHtml, "");
+    // What was discarded is on the log line, which is the field #219 had to replay 818 replies to
+    // reconstruct: a run can now tell the empty `html` spelling from this one with a grep.
+    assert.equal(of(events, "page_blank")[0].dropped, '<hr role="doc-pagebreak" aria-label="Page 2" id="page-2">');
+    assert.equal(of(events, "page_blank")[1].dropped, "<!-- Page 3: blank page -->");
+  });
+});
+
+test("a markup-spelled declaration the veto refuses is the failed page an empty one already was", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The spelling of the fragment does not decide the routing: this reply says the page could not be
+    // read, and a page nobody could read is a page to look at whether the model wrote `""` or a
+    // comment. Nine renders in the corpus are refused this way, and #220 is the argument about the
+    // wordings — what this pins is that they reach the failure line at all, with the word that did it
+    // on it, instead of being delivered as a comment nobody counted.
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) =>
+          o === 2
+            ? '{"html": "<!-- blank page -->", "log": "Page 2 is blank, but the scan is too dark to be sure."}'
+            : good(o),
+      }),
+    );
+    assert.deepEqual(failedPages, [2]);
+    assert.equal(of(events, "page_blank").length, 0);
+    const refused = of(events, "page_no_output");
+    assert.equal(refused.length, 1);
+    assert.equal(refused[0].shape, "empty_html", "an envelope that was read perfectly and carried no page");
+    assert.deepEqual(refused[0].blank_vetoed, ["too dark to", "dark"]);
+    assert.match(fragments.find((f) => f.order === 2)!.innerHtml, /@page-failed 2:/);
   });
 });
 

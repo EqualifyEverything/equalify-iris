@@ -68,6 +68,36 @@ export function visibleText(html: string): string {
     .trim();
 }
 
+// Elements that are a page's content although they hold no text of their own: a reader given one
+// receives something, and `visibleText` above returns nothing for all of them. Kept as a named list
+// because the question "does this fragment give a reader anything" has to be answerable without
+// reference to what the page was supposed to contain — `<img>` and `<svg>` are the picture, `<math>`
+// is the equation, `<table>` is a grid whose cells could all be empty and still be a table on the
+// page, and a form control is something to operate.
+//
+// Void and near-void elements that are NOT here are the ones a reader receives nothing from: a
+// wrapper (`<div>`, `<section>`, `<p>`) with nothing in it, a `<br>`, and a page-break `<hr>`, which
+// says where a page began rather than what was on it.
+const CONTENT_WITHOUT_TEXT =
+  /<(?:img|svg|math|video|audio|object|embed|iframe|canvas|input|select|textarea|button|table)\b/i;
+
+// Does this fragment give a reader anything at all?
+//
+// Beside `visibleText` because it is the same reading of the same characters, which is what makes it
+// usable as a gate: comments are stripped first for the reason that function gives (`<!-- the <img>
+// is overleaf -->` is prose about markup, not a picture), so a fragment made only of a comment, only
+// of empty wrappers, or only of a page-break marker carries nothing.
+//
+// The page agent's blank-page declaration is the caller (extraction.ts `blankDeclaration`), and the
+// distinction is not "is this string empty": across 818 initial renders in the bench logs, 78 replies
+// delivered a fragment with nothing in it for a reader and 33 of those spelled it in markup — a
+// comment, an empty `<p>`, a bare page-break marker — rather than as the empty `html` the prompt asks
+// for (issue #219).
+export function carriesContent(html: string): boolean {
+  if (visibleText(html).trim() !== "") return true;
+  return CONTENT_WITHOUT_TEXT.test(html.replace(COMMENT, " "));
+}
+
 // How many of each kind of structure a fragment holds. Exported for the review loop, on the
 // same argument as `visibleText`: a round and a page correction measured by different scans
 // could not be read against each other, and #174 asks for exactly that comparison.

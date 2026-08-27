@@ -7,6 +7,7 @@ import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } fr
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { verifyAgentOutput, type VerifyVerdict } from "./feedback.ts";
 import {
+  carriesContent,
   changedAnything,
   claimRecheck,
   correctionEffect,
@@ -589,8 +590,27 @@ function replyShape(text: string, parsed: unknown): string {
   return t ? "prose" : "empty";
 }
 
-// A page the agent says has nothing on it: `html` PRESENT and empty, with a `log` line saying
-// so. Both halves are load-bearing.
+// A page the agent says has nothing on it: `html` PRESENT and carrying nothing a reader receives,
+// with a `log` line saying so. Both halves are load-bearing.
+//
+// "Carrying nothing" rather than "empty", because the reply the prompt asks for is not the only reply
+// the model writes. Across 818 initial renders in the bench logs, 78 delivered a fragment with nothing
+// in it for a reader; 45 spelled it as the empty `html` this asked for, and 33 put the blankness into
+// markup instead — 18 a bare page-break marker, 13 a comment (`<!-- blank page -->`), 2 an empty
+// paragraph — every one of them with a log saying the page is blank (issue #219). Read as content,
+// those 33 cost three things: `pages_blank` counted them as pages that produced markup, the document
+// carried the comment or the empty `<p>` or an anchor claiming a folio the paper never printed (see
+// the marker paragraph below, which recorded this shape from #179 and left it delivering), and the
+// refusal at `renderPage` — the one thing on the re-extraction path that stops a declaration deleting
+// content Iris already holds (#194) — could not see them at all, so a re-extraction answering
+// `<!-- blank page -->` for a page with content replaced the content with the comment.
+//
+// What a reader receives is `carriesContent` (correction.ts), which is `visibleText` plus the elements
+// that are content with no text in them. So a comment, an empty wrapper and a page-break marker are
+// nothing; a picture, a table and a form control are something. PROSE is something too, deliberately:
+// one further render answers `<p><em>This page is blank.</em></p>`, and a page that prints "This page
+// intentionally left blank" is a page whose correct transcription is that sentence. Nothing here can
+// tell the two apart, so the sentence is delivered as the page said it.
 //
 // This used to be a reported page failure, and the comment here defended that on the grounds
 // that `agents/page.md` did not say what to return for a page with nothing on it, so `""` was
@@ -619,6 +639,15 @@ function replyShape(text: string, parsed: unknown): string {
 // page whose log is phrased outside both patterns is reported as a failed page, which is the
 // direction to be wrong in: a page wrongly reported as failed costs a glance, a page wrongly
 // dropped costs the page.
+//
+// That holds whatever the fragment looked like: how the model spelled its empty page does not decide
+// the routing, so a comment or a bare marker with a REFUSED log is the failed page an empty `html`
+// with the same log already was. Nine of the 33 markup-spelled declarations above are refused that
+// way, and their wordings are #220 — two read as self-contradictions that are not there, seven the
+// #190 case in phrasings the exemption below does not reach. Until that issue is settled those nine
+// are pages reported as holes in documents that have none, which is the cost this paragraph accepts
+// and #179 measured; what they are not any more is invisible, since a refused declaration now reaches
+// `page_no_output` with `blank_vetoed` on it whichever way the fragment was written.
 //
 // The one place the doubt is not fatal is a veto word MODIFYING the marks on the paper
 // (`MARKS_PHRASE` below): "a few faint specks, no legible text" describes an empty sheet, and
@@ -1529,7 +1558,7 @@ export interface BlankDeclaration {
 // empty and a page reported lost, and it is worth pinning on the reply shapes directly.
 export function blankDeclaration(parsed: { html?: string; log?: string } | null): BlankDeclaration {
   const none = { asserted: false, blank: false, vetoes: [] };
-  if (typeof parsed?.html !== "string" || parsed.html.trim()) return none;
+  if (typeof parsed?.html !== "string" || carriesContent(parsed.html)) return none;
   const log = parsed.log?.trim();
   if (!log || !BLANK_LOG.test(log)) return none;
   const scope = vetoScope(log);
@@ -1626,7 +1655,7 @@ async function renderPage(
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
   const parsed = extractJson<{ html?: string; log?: string; suggested_agent?: { name?: string; reason?: string } }>(res.text);
   const html = parsed?.html ?? bareHtml(res.text);
-  // No HTML in this reply at all. Throwing hands the page to `failedPage`, which is what
+  // Nothing for a reader in this reply. Throwing hands the page to `failedPage`, which is what
   // every other unusable answer in this file already does: the page is lost, and the run
   // SAYS the page is lost (`page_extraction_failed`, `pages_failed`, a @page-failed
   // comment where the content would have been). The alternative — the old fallback's —
@@ -1634,7 +1663,14 @@ async function renderPage(
   // delivered while one of them is a JSON envelope with prose around it. On a feedback
   // re-extraction the throw is cheaper still: `previous` is kept, so the page keeps the
   // content it already had.
-  if (!html?.trim()) {
+  //
+  // `carriesContent` rather than a length, because a fragment can be several dozen characters of
+  // markup and still hand a reader nothing: a comment, an empty paragraph, a bare page-break marker.
+  // 33 of 818 initial renders in the bench logs are exactly that, all of them the model's way of
+  // saying the page is blank, and read as content they were counted as pages that produced markup and
+  // delivered into the document (issue #219). Everything below then treats them as what they are: a
+  // declaration if the log makes one, and the same failure an empty `html` is if it does not.
+  if (!html?.trim() || !carriesContent(html)) {
     // Unless the agent said the page is blank, in which case an empty page is the answer and
     // not the absence of one (see `declaredBlank`). Reported on its own event and counted apart
     // from failure, because the two need different things from whoever reads the run: a failed
@@ -1658,19 +1694,33 @@ async function renderPage(
     // re-extraction path would catch it: `destroyedPage` guards the correction pass, where
     // `before` is this round's own render, so prior → empty never reaches a size comparison.
     const declaration = blankDeclaration(parsed);
+    // What the model sent instead of the page, where it sent anything: the markup a declaration was
+    // spelled in, bounded, on both lines that discard it. Without it a run says a page was declared
+    // blank and not whether the reply was the empty `html` the prompt asks for or a marker naming a
+    // folio the paper never printed — which is the difference #219 had to reconstruct by replaying
+    // 818 replies, and the field that would have shown it in one grep.
+    const dropped = html?.trim() ? { dropped: html.trim().slice(0, 200) } : {};
     if (declaration.blank && previous?.trim()) {
       ctx.log.event("page_blank_refused", {
         image: img.name,
         page: img.order,
         chars_kept: previous.trim().length,
         log: parsed?.log ?? "",
+        ...dropped,
       });
       throw new Error(
         `page agent declared a blank page that already had ${previous.trim().length} chars of content`,
       );
     }
     if (declaration.blank) {
-      ctx.log.event("page_blank", { image: img.name, page: img.order, log: parsed?.log ?? "" });
+      ctx.log.event("page_blank", { image: img.name, page: img.order, log: parsed?.log ?? "", ...dropped });
+      // `""` whatever the reply held, so one shape of fragment stands for a blank page however the
+      // model wrote it. What that discards is a page-break marker on 18 of the 33 markup-spelled
+      // declarations — and every one of those logs says the paper prints no number, which makes the
+      // marker's label the image's position in the file and its anchor a claim that the document's
+      // page 14 begins here. The prompt forbids exactly that and the paragraph at `blankDeclaration`
+      // has the reasoning; a blank page that DID print its folio loses an anchor to nothing, which is
+      // the cheaper mistake. The markup is on the log line above either way.
       return { html: "", log: parsed?.log ?? "" };
     }
     const shape = replyShape(res.text, parsed);

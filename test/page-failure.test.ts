@@ -323,6 +323,27 @@ test("a re-extraction cannot blank a page the document has content for", async (
   });
 });
 
+test("a re-extraction cannot blank that page by writing the declaration as markup either", async () => {
+  await withTemp(async (dir) => {
+    // The refusal above is the only thing on this path that stops a declaration deleting content Iris
+    // already holds (#194), and it used to look at whether `html` was empty — so a re-extraction
+    // answering `<!-- blank page -->` walked past it and the page's content became that comment, with
+    // the run reporting nothing missing. 13 renders in the bench corpus are that reply (#219).
+    const comment = JSON.stringify({ html: "<!-- Page 2: blank page -->", log: "Page 2 appears to be blank." });
+    const { ctx, rec } = makeCtx(dir, 3, [], truncated, (o) => (o === 2 ? comment : undefined));
+    const { fragments, failedPages } = await reExtractPages(ctx, [prior(1), prior(2), prior(3)], [2, 3]);
+    assert.deepEqual(failedPages, []);
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "<p>prior 2</p>", "the content is still there");
+    const refused = ev(rec, "page_blank_refused");
+    assert.equal(refused.length, 1);
+    assert.equal(refused[0].data.chars_kept, "<p>prior 2</p>".length);
+    // And what arrived instead, so the line says which spelling walked into the refusal.
+    assert.equal(refused[0].data.dropped, "<!-- Page 2: blank page -->");
+    assert.equal(ev(rec, "page_blank").length, 0);
+    assert.equal(ev(rec, "page_extraction_failed")[0].data.kept, "prior");
+  });
+});
+
 test("a page that was lost can come back blank, and that fills the hole", async () => {
   await withTemp(async (dir) => {
     // The other side of the refusal: a failed page is shown no previous output (its fragment
