@@ -18,6 +18,7 @@ import { sessionsRouter } from "./routes/sessions.ts";
 import { statsRouter } from "./routes/stats.ts";
 import { limitsRouter } from "./routes/limits.ts";
 import { qualityRouter } from "./routes/quality.ts";
+import { visionModelWarning } from "./providers/imageLimits.ts";
 import { authRateLimit, generalRateLimit } from "./util/requestLimits.ts";
 
 const cfg = loadConfig();
@@ -42,6 +43,12 @@ if (ttlWarning) console.warn(`WARNING: ${ttlWarning}`);
 // only symptom is that the deployment is on the path it was trying to leave.
 const apiWarning = bedrockApiWarning(cfg.providers);
 if (apiWarning) console.warn(`WARNING: ${apiWarning}`);
+
+// What that switch made reachable: a vision model this build has no image limits for.
+// Everything still runs, on the conservative defaults — but the limits it publishes are
+// then a guess, and nothing downstream of here can say so (providers/imageLimits.ts).
+const visionWarning = visionModelWarning(cfg);
+if (visionWarning) console.warn(`WARNING: ${visionWarning}`);
 
 // Ensure the on-disk layout exists (PRD §8.1).
 mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });

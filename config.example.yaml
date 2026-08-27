@@ -212,10 +212,17 @@ providers:
     # by and what `GET /v1/limits` publishes.
     #
     # Override only for something that table cannot know: a model released after it
-    # was written, or a platform with its own cap. Setting these too HIGH does not
-    # raise what the model accepts — it re-creates the failure the check exists to
-    # prevent, where an upload is accepted and then dies minutes later inside a model
-    # call.
+    # was written, a platform with its own cap, or a vision model Anthropic did not
+    # make. That last case is the one Iris warns about at boot — Claude's vision
+    # documentation is the only source behind the pixel limits and the format list, so
+    # on any other model they are conservative guesses rather than facts, and the hint
+    # `GET /v1/limits` publishes says so instead of promising what the model discards.
+    # Setting `max_long_edge_px` here is how you say you have read that model's own
+    # documentation; it silences the warning and the qualification with it.
+    #
+    # Setting these too HIGH does not raise what the model accepts — it re-creates the
+    # failure the check exists to prevent, where an upload is accepted and then dies
+    # minutes later inside a model call.
     # Each value is read from the block of the provider it belongs to and then the
     # STRICTEST across the agents that see an upload is what gets published, so a
     # tighter number set here still narrows the limit in a mixed deployment where
@@ -308,6 +315,10 @@ providers:
     # Anthropic did not make: `default_model` above cannot name a Qwen or a Nova on
     # `invoke`, whatever the config comments imply, because such a model rejects the
     # body outright.
+    #
+    # If you do point a vision model there that is not a Claude, read the note on
+    # image_limits above first: what Iris publishes about uploads is documented for
+    # Claude and guessed for anything else, and boot says which one you are running.
     #
     # Left off because parity is not yet measured, not because it is doubted (issue
     # #178). The two send the same prompt, ask for the same cache breakpoints on the same

@@ -14,11 +14,13 @@ import {
   formatBytes,
   imageLimitsHint,
   imageRejection,
+  limitsBasisFor,
   longEdgeFor,
   modelGeneration,
   rasterizedPageRejection,
   rawBytesForBase64Cap,
   resolveImageLimits,
+  visionModelWarning,
 } from "../src/providers/imageLimits.ts";
 import { imageDimensions } from "../src/util/imageSize.ts";
 import { limitsRouter } from "../src/routes/limits.ts";
@@ -251,6 +253,233 @@ test("a config with no reachable provider publishes defaults, never Infinity", (
   assert.ok(Number.isFinite(limits.max_image_bytes));
   assert.equal(limits.max_image_bytes, BEDROCK_RAW);
   assert.equal(limits.max_long_edge_px, 1568);
+});
+
+// ── Whether the published limits are facts or guesses ────────────────────────────────
+//
+// Everything above resolves NUMBERS. These resolve whether Iris is entitled to state
+// them: `providers.bedrock.api: converse` can reach a model Anthropic did not make, and
+// then the pixel limits and the format list are Claude's, published in the same voice as
+// a checked number. The numbers stay put — being conservative is right while nobody has
+// measured — so the whole difference is in what is claimed, which is what these pin.
+
+const QWEN_VL = "qwen.qwen3-vl-235b-a22b-instruct-v1:0";
+
+test("a model id decides whether the limits are documented or assumed", () => {
+  // Both spellings and the legacy ordering: the question is the same one modelGeneration
+  // answers, deliberately, so there is no second list of names to keep in step.
+  assert.equal(limitsBasisFor(SONNET_46), "documented");
+  assert.equal(limitsBasisFor("anthropic/claude-opus-4.7"), "documented");
+  assert.equal(limitsBasisFor("anthropic.claude-3-5-sonnet-20240620-v1:0"), "documented");
+  // Nothing here is a judgement about the model — a Qwen or a Nova may well read larger
+  // images than any Claude. It is that this file has not been told, so it cannot speak
+  // for it.
+  assert.equal(limitsBasisFor(QWEN_VL), "assumed");
+  assert.equal(limitsBasisFor("us.amazon.nova-pro-v1:0"), "assumed");
+  assert.equal(limitsBasisFor("mock-model"), "assumed");
+  assert.equal(limitsBasisFor(""), "assumed");
+});
+
+test("an unrecognized vision model changes the claim, not the limits", () => {
+  const providers = { region: "us-east-1", api: "converse" };
+  const onClaude = resolveImageLimits(
+    cfg({ default: "bedrock", bedrock: { ...providers, default_model: SONNET_46 } }),
+  );
+  const onQwen = resolveImageLimits(
+    cfg({ default: "bedrock", bedrock: { ...providers, default_model: QWEN_VL } }),
+  );
+  // Same numbers: the conservative end of what Iris knows is the right thing to serve an
+  // upload with while nobody has checked, and lowering them would refuse files that
+  // convert fine to make a point about documentation.
+  assert.equal(onQwen.max_image_bytes, onClaude.max_image_bytes);
+  assert.equal(onQwen.max_long_edge_px, onClaude.max_long_edge_px);
+  assert.equal(onQwen.max_dimension_px, onClaude.max_dimension_px);
+  // What differs is whether they are facts.
+  assert.equal(onClaude.basis, "documented");
+  assert.equal(onQwen.basis, "assumed");
+});
+
+test("one unrecognized agent is enough, because one sentence is published", () => {
+  // Same rule as the strictest number winning: the hint has to hold for every call the
+  // upload makes, so a deployment that extracts on a Claude and verifies elsewhere is a
+  // deployment whose pixel limits are a guess about half its calls.
+  const limits = resolveImageLimits(
+    cfg({
+      default: "bedrock",
+      bedrock: { region: "us-east-1", default_model: OPUS_47 },
+      per_agent: { feedback: { model: QWEN_VL } },
+    }),
+  );
+  assert.equal(limits.basis, "assumed");
+  // And the number is still the honest one across both models.
+  assert.equal(limits.max_long_edge_px, 1568);
+});
+
+test("an operator who sets the long edge has answered the question", () => {
+  // The escape hatch is the answer this asks for: a number on the provider block is the
+  // operator saying they read their model's documentation, so it stops being a guess —
+  // and the guess is what the qualification and the boot warning are about.
+  const config = cfg({
+    default: "bedrock",
+    bedrock: {
+      region: "us-east-1",
+      default_model: QWEN_VL,
+      image_limits: { max_long_edge_px: 3000 },
+    },
+  });
+  const limits = resolveImageLimits(config);
+  assert.equal(limits.max_long_edge_px, 3000);
+  assert.equal(limits.basis, "documented");
+  assert.equal(visionModelWarning(config), null);
+});
+
+test("an override cannot answer for a model it was not written about", () => {
+  // The override is per provider BLOCK and the basis question is per MODEL, so a block
+  // that serves both can be read as an answer about the wrong one. Here the operator set
+  // 2576 px having read Claude 4.7's documentation — which is what default_model is — and
+  // `per_agent` sends the Feedback Agent to a Qwen on the same block. Reading the override
+  // as an answer published "reads at most 2576 px … loses nothing" about the Qwen: the
+  // exact sentence this flag exists to prevent, re-entered through the escape hatch.
+  const mixed = cfg({
+    default: "bedrock",
+    bedrock: {
+      region: "us-east-1",
+      default_model: OPUS_47,
+      image_limits: { max_long_edge_px: 2576 },
+    },
+    per_agent: { feedback: { model: QWEN_VL } },
+  });
+  assert.equal(resolveImageLimits(mixed).basis, "assumed");
+  assert.match(String(visionModelWarning(mixed)), /feedback/);
+  // The operator's number is still applied — it is their block, and this is about what is
+  // CLAIMED of it, not about second-guessing the limit.
+  assert.equal(resolveImageLimits(mixed).max_long_edge_px, 2576);
+
+  // And the same override on a block that serves nothing else can only have been written
+  // about the model it does serve, so there it is an answer.
+  const foreign = cfg({
+    default: "bedrock",
+    bedrock: {
+      region: "us-east-1",
+      default_model: QWEN_VL,
+      image_limits: { max_long_edge_px: 2576 },
+    },
+  });
+  assert.equal(resolveImageLimits(foreign).basis, "documented");
+  assert.equal(visionModelWarning(foreign), null);
+});
+
+test("a valueless override is not an answer, and does not silence the warning", () => {
+  // YAML reads `max_long_edge_px:` with nothing after it as null, which falls back to the
+  // table. Treating the presence of the key as the operator's answer would quietly accept
+  // a line that changed nothing.
+  const config = cfg({
+    default: "bedrock",
+    bedrock: {
+      region: "us-east-1",
+      default_model: QWEN_VL,
+      image_limits: { max_long_edge_px: null as unknown as number },
+    },
+  });
+  assert.equal(resolveImageLimits(config).basis, "assumed");
+  assert.match(String(visionModelWarning(config)), /conservative guess/);
+});
+
+test("the hint promises what the model discards only when that is known", () => {
+  const documented = imageLimitsHint(
+    resolveImageLimits(
+      cfg({ default: "bedrock", bedrock: { region: "us-east-1", default_model: SONNET_46 } }),
+    ),
+  );
+  const assumed = imageLimitsHint(
+    resolveImageLimits(
+      cfg({ default: "bedrock", bedrock: { region: "us-east-1", default_model: QWEN_VL } }),
+    ),
+  );
+  // "Loses nothing" is a claim about the model's downscaling. On a model nobody has
+  // limits for it is advice to destroy detail that may have been read — worse than the
+  // rejection it is explaining, and invisible to the user it happens to.
+  assert.match(documented, /reads at most 1568 px/);
+  assert.match(documented, /loses nothing/);
+  assert.doesNotMatch(assumed, /loses nothing/);
+  assert.doesNotMatch(assumed, /reads at most/);
+  // Still actionable, and still the same pixel number — offered as a size known to work
+  // rather than as a size above which nothing counts.
+  assert.match(assumed, /1568 px/);
+  assert.match(assumed, /assumed to read/);
+  // Both still lead with the rule an upload is actually rejected by, which is a fact
+  // about the provider's endpoint and not in question either way.
+  for (const hint of [documented, assumed]) {
+    assert.ok(hint.startsWith("Each image must be under 3.7 MB"), hint);
+    assert.match(hint, /PNG, JPEG, GIF, WEBP/);
+  }
+});
+
+test("the hard ceiling is attributed to whoever actually refuses the image", () => {
+  const big = { name: "poster.png", bytes: 1000, width: 9000, height: 400 };
+  const onClaude = imageRejection(
+    big,
+    resolveImageLimits(
+      cfg({ default: "bedrock", bedrock: { region: "us-east-1", default_model: SONNET_46 } }),
+    ),
+  );
+  const onQwen = imageRejection(
+    big,
+    resolveImageLimits(
+      cfg({ default: "bedrock", bedrock: { region: "us-east-1", default_model: QWEN_VL } }),
+    ),
+  );
+  // Both refuse it — Iris enforces the same 8000 px either way, because finding out
+  // four minutes into a run is the failure this module exists to remove.
+  assert.match(String(onClaude), /8000 px limit on a side/);
+  assert.match(String(onQwen), /8000 px limit on a side/);
+  // Only one of them can say the model does the refusing.
+  assert.match(String(onClaude), /the vision model refuses an image that large/);
+  assert.doesNotMatch(String(onQwen), /the vision model refuses/);
+  assert.match(String(onQwen), /Iris does not send an image that large/);
+});
+
+test("boot says once that the published image limits are a guess", () => {
+  // The hint qualifies itself for the user; this line is for whoever can fix it. Boot is
+  // the only place that can be said, because every downstream reader of these limits is
+  // written to be quoted verbatim.
+  const config = cfg({
+    default: "bedrock",
+    bedrock: { region: "us-east-1", default_model: QWEN_VL, api: "converse" },
+  });
+  const warning = String(visionModelWarning(config));
+  // Which agents, and which model — an operator reading this has to be able to find the
+  // line of config that caused it.
+  assert.match(warning, /page/);
+  assert.match(warning, /feedback/);
+  assert.match(warning, new RegExp(QWEN_VL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(warning, /providers\.bedrock\.image_limits/);
+  // Quoting the numbers actually published, from the same resolution the route uses, so
+  // the warning cannot describe a limit nobody is serving.
+  const limits = resolveImageLimits(config);
+  assert.match(warning, new RegExp(`${limits.max_long_edge_px} px on the long edge`));
+  assert.match(warning, new RegExp(`${limits.max_dimension_px} px per side`));
+  // The byte cap is named too, on the other side of the line: it is the provider's
+  // endpoint limit, so it is the one published number this changes nothing about, and an
+  // operator reading a list of suspect numbers should not have to wonder about it.
+  assert.match(warning, new RegExp(`${formatBytes(limits.max_image_bytes)} per-image cap`));
+  // And it is silent on a deployment running a model this build knows.
+  assert.equal(
+    visionModelWarning(
+      cfg({ default: "bedrock", bedrock: { region: "us-east-1", default_model: SONNET_46 } }),
+    ),
+    null,
+  );
+});
+
+test("a config that resolves no model at all warns about nothing", () => {
+  // Nothing is configured to warn ABOUT, and a config whose default provider has no
+  // block fails validateConfig at startup anyway — a second line here would be noise on
+  // top of the error that actually stops the boot.
+  const config = cfg({ default: "missing" });
+  assert.equal(visionModelWarning(config), null);
+  // But the limits it publishes are still not documented about anything.
+  assert.equal(resolveImageLimits(config).basis, "assumed");
 });
 
 test("the format allowlist is the model's, not the one Iris used to advertise", () => {
@@ -579,6 +808,30 @@ test("GET /v1/limits does not publish the deployment's model or provider", async
     assert.doesNotMatch(raw, /anthropic/i);
     assert.doesNotMatch(raw, /bedrock/i);
     assert.doesNotMatch(raw, /us-east-1/);
+  } finally {
+    s.close();
+  }
+});
+
+test("and says no more about an unrecognized one than that it is unrecognized", async () => {
+  // Where the line sits, now that the hint qualifies itself. The assumed wording tells an
+  // unauthenticated caller exactly one thing about the deployment: that Iris has no
+  // published image limits for the model behind it. That is the price of not making a
+  // promise about pixels that could be false, it is paid in the text a client is told to
+  // quote rather than in a field of its own, and it must not grow into naming the model —
+  // which is the whole reason `basis` is not published.
+  const s = await serve(
+    limitsRouter(
+      cfg({ default: "bedrock", bedrock: { region: "us-east-1", default_model: QWEN_VL } }),
+    ),
+  );
+  try {
+    const raw = await (await s.get()).text();
+    assert.match(raw, /assumed to read/); // the qualification is there
+    assert.doesNotMatch(raw, /qwen/i);
+    assert.doesNotMatch(raw, /bedrock/i);
+    assert.doesNotMatch(raw, /us-east-1/);
+    assert.doesNotMatch(raw, /claude/i); // nor which family the numbers came from
   } finally {
     s.close();
   }
