@@ -301,6 +301,9 @@ test("a round that did not fit is made again a section at a time, and the correc
     // The ceiling was still hit — that is the deployment's signal and it is unchanged (#143's
     // `editor_truncated_rate` counts documents, not lost corrections).
     assert.equal(result.editorTruncated, true);
+    // And nothing was lost by it: every section came back, so this document is the reason
+    // `editor_truncated_rate` cannot carry a threshold and `editor_truncated_lost_rate` can (#159).
+    assert.equal(result.editorTruncatedLost, false);
     const start = rec.events.find((e) => e.type === "editor_sections");
     assert.equal(start?.data.sections, 3);
     assert.equal(start?.data.budget, BUDGET, "the budget is measured from the response that did not fit");
@@ -363,6 +366,11 @@ test("a section that cannot be returned either costs that section and nothing el
     assert.equal(failed?.data.chars, 9_000, "the numbers that say whether a smaller section would have fitted");
     const editor = rec.events.find((e) => e.type === "editor");
     assert.equal(editor?.data.corrected, 2, "the count must say how much of the document was reached");
+    // Section 2 kept the text it went in with, so its issues had no editor pass at all and no
+    // later round looks for them: the quality tally must count this document as a loss and not
+    // only as a ceiling that was hit (#159).
+    assert.equal(result.editorTruncated, true);
+    assert.equal(result.editorTruncatedLost, true);
     assert.match((await review(ctxWith(dir, {
       sectionAnswer: (s) => (s.index === 2 ? null : `${s.html}\n<p class="fix">fixed ${s.index}</p>`),
     }).ctx)).body, /fixed 3/, "a reply with nothing usable in it is contained the same way");
@@ -375,6 +383,7 @@ test("a round where no section came back is exactly the round that used to be di
     const result = await review(ctx);
     assert.equal(result.body, LONG, "the body that entered the round is what is delivered");
     assert.equal(result.editorTruncated, true);
+    assert.equal(result.editorTruncatedLost, true, "a round that rescued nothing is the whole round lost");
     assert.deepEqual(result.unresolved.map((i) => i.issue), ISSUES.map((i) => i.issue));
     // No `editor` line, which is how the log tells a round that produced nothing from one that
     // ran, and the discarded-round wording in the document.

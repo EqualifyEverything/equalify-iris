@@ -183,7 +183,7 @@ jobs:
               ;;
           esac
 
-          if ! jq -e '.documents? != null and .documents_linted? != null and .window_days? != null and .rules? != null' /tmp/quality.json >/dev/null 2>&1; then
+          if ! jq -e '.documents? != null and .documents_linted? != null and .window_days? != null and .rules? != null and .editor_truncated_rate? != null and .editor_truncated_lost_rate? != null' /tmp/quality.json >/dev/null 2>&1; then
             # A 200 that is not the tally: a login page, a proxy error page, an older
             # deployment. Treated like an unreachable endpoint rather than parsed
             # optimistically, because every threshold below reads a missing field as
@@ -198,6 +198,16 @@ jobs:
             # why `window_days` is listed too, though every version of the endpoint has
             # returned it: every one of those bodies opens with it. Whoever adds the next
             # quoted field should add it here in the same commit.
+            #
+            # The two truncation rates are the newest of those and the ones that date this
+            # file: a deployment from before #159 answers without `editor_truncated_lost_rate`
+            # (and one from before #151 without either), and the whole run stops here rather
+            # than that one threshold going quiet. That is the trade this gate exists to make
+            # — the alternative reads a missing field as `null`, compares it against a number,
+            # and reports a clean week — and it resolves itself the moment the deployment
+            # catches up with main. `editor_truncated_rate` is demanded even though nothing is
+            # thresholded against it, because the lost-rate issue body quotes it: the two
+            # numbers are only meaningful beside each other.
             echo "should_run=false" >> "$GITHUB_OUTPUT"
             echo "::error::$BASE/v1/quality returned 200 but not a quality tally. Nothing was measured this week."
             exit 1
@@ -243,6 +253,28 @@ jobs:
           # to be watched separately. One occurrence is a bug in Iris, not a bad
           # document.
           LINT_ERROR_RATE_MAX=0
+          # Fraction of documents where a correction round hit the model's output ceiling and
+          # the sectioned retry did NOT cover the whole body — so part of the document kept the
+          # text it entered the round with, and nothing looked at those issues again (#159).
+          #
+          # This is the truncation number a threshold can be put on, and `editor_truncated_rate`
+          # is deliberately NOT one, which is the thing to read before changing either. The
+          # editor's answer is as long as the document it is rewriting, so at a large `max_pages`
+          # a perfectly healthy document hits the ceiling every time: that rate went 1/4 → 2/4 →
+          # 3/4 across bench rounds 6-8 while every one of those rounds delivered every section,
+          # and a threshold at 50% would have fired three weeks running on a pipeline that lost
+          # nothing. It is a cost and configuration signal — is `max_tokens` too low for the
+          # documents this deployment accepts, or `max_pages` too high for that ceiling — and the
+          # run summary prints it every week for whoever is asking that question.
+          #
+          # The number: across the 16 truncations in the bench archive, the 10 since the sectioned
+          # retry existed rescued 9 rounds whole and lost one section of four on the tenth — one
+          # document of the 16 in those rounds, 0.0625. So this fires on a repeat of the worst
+          # round observed plus a little, and not on that round itself; a deployment losing more
+          # than one document in ten this way has a ceiling that does not fit its documents. It is
+          # also immune to the length co-variance above, because absorbing length is exactly what
+          # the sectioned retry does.
+          EDITOR_TRUNCATED_LOST_RATE_MAX=0.10
           # Mean EDITOR passes per document, against a default cap of 3
           # (`defaults.max_review_iterations`). A document the Reader passes on its
           # first look costs 0, so low is good and 0 is best. Above 2.5 the loop is
@@ -293,9 +325,11 @@ jobs:
             --argjson unresolved "$UNRESOLVED_RATE_MAX" \
             --argjson links "$LINKS_DROPPED_RATE_MAX" \
             --argjson lint "$LINT_ERROR_RATE_MAX" \
+            --argjson truncated "$EDITOR_TRUNCATED_LOST_RATE_MAX" \
             --argjson rounds "$MEAN_ROUNDS_MAX" \
             --argjson rule "$RULE_SHARE_MAX" \
-            '{unresolved: $unresolved, links: $links, lint: $lint, rounds: $rounds, rule: $rule}')
+            '{unresolved: $unresolved, links: $links, lint: $lint, truncated: $truncated,
+              rounds: $rounds, rule: $rule}')
 
           # Each finding gets a STABLE title and a title-derived key. Stable is the
           # load-bearing word, and it rules out TWO kinds of number: this week's rate,
@@ -318,10 +352,14 @@ jobs:
           #                    below it is understated. Fix this before believing them.
           #   2 dropped links — content the user gave us is missing from what we
           #                    returned. Data loss outranks imperfect output.
-          #   3 unresolved    — known barriers, shipped, listed in unresolved.md.
-          #   4 a rule        — a specific recurring barrier: the most actionable of
+          #   3 truncation lost — corrections the editor made were thrown away, or never
+          #                    attempted, because the response did not fit. Below dropped
+          #                    links because the source content is all still there, above
+          #                    unresolved because these issues had no editor pass at all.
+          #   4 unresolved    — known barriers, shipped, listed in unresolved.md.
+          #   5 a rule        — a specific recurring barrier: the most actionable of
           #                    these, but narrower than the three above it.
-          #   5 rounds        — a cost and quality proxy, and the weakest signal here.
+          #   6 rounds        — a cost and quality proxy, and the weakest signal here.
           jq -r --argjson t "$THRESHOLDS" --argjson min "$MIN_DOCUMENTS" '
             . as $q
             | ( if ($q.lint_error_rate // 0) > $t.lint then
@@ -334,8 +372,18 @@ jobs:
                       title: "Quality regression: links from the source document are being dropped",
                       metric: "links_dropped_rate", value: $q.links_dropped_rate, threshold: $t.links } ]
                 else [] end )
+              # The LOST rate, not `editor_truncated_rate` — see EDITOR_TRUNCATED_LOST_RATE_MAX
+              # for why the ceiling itself is not the alarm. `// 0` like the others, though the
+              # shape gate above already refuses a response without this field: the two say the
+              # same thing about a missing number and neither is the place to relax it.
+              + ( if ($q.editor_truncated_lost_rate // 0) > $t.truncated then
+                  [ { key: "truncated-lost", sev: 3,
+                      title: "Quality regression: correction rounds are being lost at the output ceiling",
+                      metric: "editor_truncated_lost_rate", value: $q.editor_truncated_lost_rate,
+                      threshold: $t.truncated } ]
+                else [] end )
               + ( if ($q.unresolved_rate // 0) > $t.unresolved then
-                  [ { key: "unresolved", sev: 3,
+                  [ { key: "unresolved", sev: 4,
                       title: "Quality regression: too many documents ship with unresolved issues",
                       metric: "unresolved_rate", value: $q.unresolved_rate, threshold: $t.unresolved } ]
                 else [] end )
@@ -349,12 +397,12 @@ jobs:
               # lint-error finding above fires in that window too and outranks this,
               # but it does not crowd it out: both fit under MAX_ISSUES_PER_RUN.
               + ( [ $q.rules[]? | select($q.documents_linted >= $min) | select(.share > $t.rule)
-                    | { key: ("rule-" + .id), sev: 4,
+                    | { key: ("rule-" + .id), sev: 5,
                         title: ("Quality regression: axe rule `" + .id + "` fails on a large share of documents"),
                         metric: ("rules[\"" + .id + "\"].share"), value: .share, threshold: $t.rule,
                         rule: .id, impact: (.impact // "unknown"), rule_documents: .documents, nodes: .nodes } ] )
               + ( if ($q.mean_rounds // 0) > $t.rounds then
-                  [ { key: "mean-rounds", sev: 5,
+                  [ { key: "mean-rounds", sev: 6,
                       title: "Quality regression: the review loop is using nearly its whole round budget",
                       metric: "mean_rounds", value: $q.mean_rounds, threshold: $t.rounds } ]
                 else [] end )
@@ -505,6 +553,7 @@ jobs:
                   {
                     "lint-error": "Over the last \($tally.window_days) days, **\(.value | pct)% of \($tally.documents) documents** had a lint pass that errored instead of running.\n\nThe threshold is \(.threshold | pct)% — that is, any occurrence at all.\n\nThis one sorts to the top because those documents have **no accessibility verdict at all**: axe-core could not run on them, so nothing in them was checked, the review loop had no violations to act on, and they were delivered with an `@lint-unavailable` comment saying so. They are excluded from `documents_linted` (\($tally.documents_linted) of \($tally.documents) here), so the rule shares in this report are not dragged down by them — but the unchecked documents were still shipped, and how bad they were is unknown.\n\nStart with `src/pipeline/lint.ts` and the `iris:lint-error` signal recorded in `src/pipeline/orchestrator.ts`; the run log for an affected session carries the error, its stack and where it happened, on the `assembly` line or on a `lint_unavailable` line if a correction round is what broke it.",
                     "links-dropped": "Over the last \($tally.window_days) days, **\(.value | pct)% of \($tally.documents) documents** lost at least one hyperlink between the assembled HTML and what the copy editor returned.\n\nThe threshold is \(.threshold | pct)% of documents.\n\nThis is content loss rather than imperfect output: the link was in the user'"'"'s source document, Iris had it, and the delivered HTML does not. The editor is a text model rewriting a fragment, so dropping an `href` while otherwise improving the prose around it is a plausible failure — and one the loop currently records (`editor_links_dropped`) without preventing.\n\nWhere to look: `droppedHrefs` and its caller in `src/pipeline/review.ts` for how it is detected, and `agents/copy_editor.md` for the instruction that is not holding. Whether the fix is a stronger instruction or a mechanical restore of the missing `href`s is the interesting question; the PDF link-preservation work in the recent history is relevant prior art.",
+                    "truncated-lost": "Over the last \($tally.window_days) days, **\(.value | pct)% of \($tally.documents) documents** hit the model'"'"'s output ceiling on a correction round and did not get the whole document back from the sectioned retry, so part of each of them kept the text it entered that round with.\n\nThe threshold is \(.threshold | pct)% of documents. The wider rate beside it — every document that hit the ceiling, whether or not the retry covered it — is `editor_truncated_rate` = \($tally.editor_truncated_rate | pct)%, and that one deliberately has no threshold: the copy editor is asked for the whole document, so its answer is as long as the document, and at a large `max_pages` a perfectly healthy document hits the ceiling every time. The gap between the two numbers is the sectioned retry doing its job.\n\nWhat a reader loses here is not source content — every character of the document is still in it — but the corrections for the part that came back uncorrected, and those issues had no editor pass at all: a truncation is the last round the loop runs, so nothing looks for them again. The delivered document says so under `@editor-truncated`, with `sections N of M` where some of it was rescued.\n\nThe remedy is usually the deployment rather than a prompt: `providers.<name>.max_tokens` too low for the documents this deployment accepts, or `max_pages` too high for that ceiling. `correctBySection` in `src/pipeline/review.ts` (with `MIN_SECTION_BUDGET` and `MAX_SECTIONS`) is where the retry decides what it can do, and an affected session'"'"'s run log says which of those it was on an `editor_sections_declined` or `editor_section_failed` line.",
                     "unresolved": "Over the last \($tally.window_days) days, **\(.value | pct)% of \($tally.documents) documents** finished the review loop with issues the loop could not resolve.\n\nThe threshold is \(.threshold | pct)% of documents.\n\nThese are barriers the Reader Agent found, reported, and that the loop then shipped anyway — listed in each session'"'"'s `unresolved.md`. Some floor here is inherent, because a source document can be genuinely ambiguous, so what this issue actually asks is whether the current rate is that floor or a pattern.\n\nOnly the **count** is available here, deliberately: an unresolved-issue description is model-written prose about one person'"'"'s document, so it cannot leave the deployment (see `src/routes/quality.ts`). Reading the descriptions themselves means looking at recent sessions on the deployment. Worth checking whether `defaults.max_review_iterations` (3) is simply too low before treating this as a prompt defect.",
                     "mean-rounds": "Over the last \($tally.window_days) days, documents needed **\(.value) editor passes on average** across \($tally.documents) documents.\n\nThe threshold is \(.threshold), against a default cap of 3 (`defaults.max_review_iterations`). A document the Reader passes on its first look costs 0 passes, so this number rising means more documents are coming out of assembly needing repair.\n\nThe average document using nearly the whole budget means extraction and assembly are producing work the review loop then has to undo. Every round is a full pass of two agents over the whole document, so this is a latency and cost number as much as a quality one. It is the weakest signal in this report and may simply mean the cap wants raising — the useful version of the question is *what the second and third rounds keep fixing*, which points at `agents/page.md` rather than at the loop."
                   }[.key] // "No description available for finding key `\(.key)`."

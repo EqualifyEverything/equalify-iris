@@ -187,15 +187,36 @@ export const SIGNAL_LINKS_DROPPED = "iris:links-dropped";
 // what `documents_linted` is derived from, i.e. what keeps those rates' denominator
 // meaning "documents this was actually measured on" (#164).
 export const SIGNAL_LINT_ERROR = "iris:lint-error";
-// A correction round's response hit the model's output token ceiling, so the round was
-// abandoned and the document delivered as it entered it (issue #143). Recorded because
-// the cost of it is invisible in every other rate here: the document ships, its issues
-// go into `iris:unresolved` exactly like issues the editor tried and failed to fix, and
-// the one thing that distinguishes them — a whole document's worth of output paid for
-// and discarded — would be a line in one session's log. It is also the rate that says
-// whether a deployment's `max_tokens` fits the documents it is being given, which is a
-// question about the deployment rather than about any one run.
+// A correction round's response hit the model's output token ceiling (issue #143).
+// Recorded because the cost of it is invisible in every other rate here: the document
+// ships, its issues go into `iris:unresolved` exactly like issues the editor tried and
+// failed to fix, and the one thing that distinguishes them — a whole document's worth of
+// output paid for and discarded — would be a line in one session's log.
+//
+// What it does NOT say, since #165, is that anything was lost. The round is made again a
+// section at a time before it is given up on, so this signal fires on a round that came
+// back complete by the expensive route as well as on one that came back not at all: of the
+// 16 truncations in the bench archive, the 6 from before the sectioned retry existed lost
+// their round outright, and of the 10 after it, 9 delivered every section. It is therefore
+// a question about the DEPLOYMENT — whether `providers.<name>.max_tokens` fits the
+// documents it is being given, or `max_pages` is too high for that ceiling — and the cost
+// of taking the long way round, which is a real cost: the section calls were 32.9% of one
+// bench round's spend. What a truncation cost the READER of the document is the signal
+// below, and the two are separate because a threshold can only be put on the second (#159).
 export const SIGNAL_EDITOR_TRUNCATED = "iris:editor-truncated";
+// The truncated round did not come back whole: the body could not be sectioned at all, or
+// a section truncated in its turn and kept the text it went in with (`correctBySection`).
+// Those sections' issues are in the delivered document uncorrected, and no later round
+// looks for them again, because a truncation is the loop's last round.
+//
+// A strict subset of SIGNAL_EDITOR_TRUNCATED above, and of `iris:unresolved` too — a
+// truncated round only happens on a document the Reader raised issues about, so every
+// document here has an unresolved row as well. It adds no population to this table; what it
+// adds is attribution, and that is exactly what it is for. `unresolved_rate` answers "did
+// documents ship with issues open" over every cause at once, at a threshold loose enough to
+// live with the inherent floor; this answers "did the output ceiling stop the loop from
+// trying", whose remedy is one number in the deployment's config rather than a prompt.
+export const SIGNAL_EDITOR_TRUNCATED_LOST = "iris:editor-truncated-lost";
 // How many windows of the document the review's last read of it came back with no usable
 // answer for (issue #186). Recorded only when non-zero, like the three above.
 //
@@ -252,9 +273,18 @@ export interface QualityStats {
   // counts every unexamined document as one where the rule did not fire, so a run of
   // failing lints makes every rule look like it is being fixed.
   documents_linted: number;
-  // Share of documents where a correction round's response hit the output ceiling and
-  // was discarded. Those documents are delivered, with that round's issues unresolved.
+  // Share of documents where a correction round's response hit the output ceiling. A cost
+  // and configuration number, not a content one: since #165 the round is re-made a section
+  // at a time, so this counts the documents that took the expensive route whether or not it
+  // worked. Deliberately unthresholded in `.github/workflows/quality-report.yml`, which says
+  // why beside the thresholds it does have (#159).
   editor_truncated_rate: number;
+  // Share of documents where that retry did not cover the whole body, so part of the
+  // document kept the text it entered the round with and nothing looked at those issues
+  // again. A strict subset of `editor_truncated_rate` above and of `unresolved_rate`, and
+  // the one of the two truncation numbers a threshold can be put on — the other rises with
+  // document length alone.
+  editor_truncated_lost_rate: number;
   // Share of documents where part of the reviewer's last read came back unusable, so some
   // of the document has no review verdict at all (#186). Disjoint from nothing: a document
   // here may also be in `unresolved_rate` (the windows that DID answer found issues) or in
@@ -1033,6 +1063,7 @@ export class Store {
       lint_error_rate: rate(SIGNAL_LINT_ERROR),
       documents_linted: documentsLinted,
       editor_truncated_rate: rate(SIGNAL_EDITOR_TRUNCATED),
+      editor_truncated_lost_rate: rate(SIGNAL_EDITOR_TRUNCATED_LOST),
       review_unread_rate: rate(SIGNAL_REVIEW_UNREAD),
       rules,
     };

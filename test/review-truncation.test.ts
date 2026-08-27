@@ -124,6 +124,10 @@ test("a truncated round delivers the document that entered it", async () => {
     assert.equal(result.body, BODY, "the body that entered the round is what is delivered");
     assert.ok(result.html.includes(BODY));
     assert.equal(result.editorTruncated, true);
+    // A 67-character body has no boundary to cut at, so the sectioned retry declines and this
+    // is the round lost in full — the case a threshold is put on, as against a truncation the
+    // retry absorbs (`editor-sections.test.ts`, issue #159).
+    assert.equal(result.editorTruncatedLost, true);
     // And the round's issues are reported rather than silently forgotten: the loop's own
     // way of saying a document shipped with known problems.
     assert.deepEqual(result.unresolved.map((i) => i.issue), ISSUES.map((i) => i.issue));
@@ -200,6 +204,7 @@ test("a size refusal still degrades to a text-only retry, and a truncated retry 
     assert.equal(event?.data.attached, 0);
     assert.equal(result.body, BODY);
     assert.equal(result.editorTruncated, true);
+    assert.equal(result.editorTruncatedLost, true, "the retry truncated too, so the round is still lost");
   });
 });
 
@@ -221,6 +226,7 @@ test("an ordinary round is unchanged", async () => {
     const { ctx, rec } = ctxWith(dir, () => undefined, { maxReviewIterations: 1 });
     const result = await runReview(ctx, { body: BODY, lint: { ok: true, violations: [] }, pages: PAGES });
     assert.equal(result.editorTruncated, false);
+    assert.equal(result.editorTruncatedLost, false, "and neither rate counts a round that fitted");
     assert.match(result.body, /Edited/, "the correction was kept");
     assert.doesNotMatch(result.html, /@editor-truncated/);
     assert.equal(rec.events.find((e) => e.type === "editor_truncated"), undefined);

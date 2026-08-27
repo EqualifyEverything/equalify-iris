@@ -44,7 +44,9 @@ export interface ReviewResult {
   // document and must not reach the quality tally (see Store.recordRunSignals).
   droppedLinks: number;
   // True when a correction round's response hit the model's output ceiling, so the loop
-  // stopped early and the document is the one that entered that round (issue #143).
+  // stopped early (issue #143). Since #165 the round is re-made a section at a time before it
+  // is given up on, so this no longer implies the delivered document is the one that entered
+  // the round — `editorTruncatedLost` below is what says whether anything was lost.
   //
   // Returned rather than left in the run log for the same reason `droppedLinks` is: it
   // says something about the document the user received that the document itself cannot,
@@ -52,6 +54,17 @@ export interface ReviewResult {
   // distinguishes the two ways a document arrives with unresolved issues — the loop ran
   // its rounds and some issues survived them, or a round could not be completed at all.
   editorTruncated: boolean;
+  // True when that round did not come back whole: no section could be made of the body, or a
+  // section truncated in its turn and kept the text it went in with. Never true with
+  // `editorTruncated` false.
+  //
+  // The delivered document has carried this distinction since #165 — `@editor-truncated
+  // sections 3 of 4` against a bare `@editor-truncated` — and the quality tally had not, so a
+  // deployment could not tell a ceiling it is paying to work around from one that is costing
+  // its readers corrections. The two need separate rates because only this one can carry a
+  // threshold: the other rises with document length by itself, since the editor's answer is as
+  // long as the document it is rewriting (#159).
+  editorTruncatedLost: boolean;
   // How many windows of the document the LAST read of it came back with no usable answer
   // for — an unparseable reply, or one carrying no issue list this code can read (issue
   // #186). 0 on a document that was reviewed in full, which is almost all of them.
@@ -1453,11 +1466,12 @@ export async function runReview(
   let lastWindows = 0;
   let droppedLinks = 0;
   let editorTruncated = false;
-  // What the truncated round's section calls rescued, when there was one. Only the document
-  // needs it — it is the difference between "this document was not corrected" and "it was
-  // corrected a piece at a time, and the pieces could not see each other" — so it stays a local
-  // rather than joining ReviewResult: the store counts truncations, and a truncation is what
-  // this was either way.
+  let editorTruncatedLost = false;
+  // What the truncated round's section calls rescued, when there was one: the difference
+  // between "this document was not corrected" and "it was corrected a piece at a time, and the
+  // pieces could not see each other". The document says it in those terms and the store says it
+  // as a boolean (`editorTruncatedLost`), because a rate over documents cannot use "3 of 4" —
+  // but it is the same fact and this local is where both readings are taken from.
   let editorSections: { of: number; corrected: number } | undefined;
   // The page index is built from the fragments as they entered review. Pages are
   // deliberately NOT re-indexed as the editor rewrites the body: the index exists
@@ -1511,6 +1525,7 @@ export async function runReview(
         lint,
         droppedLinks,
         editorTruncated,
+        editorTruncatedLost,
         // 0 by the guard above. Passed rather than written as a literal for the same reason
         // `editorTruncated` is: the field's value is the loop's, and a return that states it
         // itself is a place where the two can come apart.
@@ -1550,6 +1565,12 @@ export async function runReview(
       // is too high for that ceiling.
       editorTruncated = true;
       editorSections = round.sections;
+      // And whether it cost the document anything, which is the half of this a threshold can
+      // be put on. `sections` absent is a round given up on entirely — declined, or every
+      // section failed (`sectionRound`) — and `corrected` short of `of` is a section that kept
+      // the text it went in with. Either way those issues are in the delivered document
+      // uncorrected and this is the last round, so nothing looks for them again.
+      editorTruncatedLost = !round.sections || round.sections.corrected < round.sections.of;
       // Nothing came back from the section calls either — or there were none to make — so the
       // round ends where it used to: the body that entered it is delivered with that round's
       // issues unresolved. It still counts as a round; it was made and paid for, a full
@@ -1776,6 +1797,7 @@ export async function runReview(
     lint,
     droppedLinks,
     editorTruncated,
+    editorTruncatedLost,
     unreviewedWindows: lastUnread,
   };
 }
