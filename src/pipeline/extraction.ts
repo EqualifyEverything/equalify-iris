@@ -782,12 +782,24 @@ const MARK_QUANTIFIER = String.raw`(?:(?:a|an|the|only|just|some|few|several|cou
 // A hyphen counts only with a space in front of it — spaced it is the dash somebody typed on a
 // keyboard without one, unspaced it is inside `washed-out` and inside the phrase's own separator.
 //
-// The cost is a comma'd stack in a sentence that opened by saying the page is empty: "Page is blank —
-// only faint, isolated marks are visible" has `is` to the left of the stack in the same sentence, so
-// the comma is not read as a list separator there and `faint` refuses the declaration. That page is
-// reported failed, which is a glance rather than a page, and no corpus wording is written that way:
-// all nine of #220's start the sentence the marks are in ("Only faint, isolated marks are visible…",
-// "A few faint specks or artifacts are present…"), which is what the guard is shaped to allow.
+// Which punctuation resets the reach and which is evidence is the whole of what this decides, so it is
+// worth stating rather than leaving to be read off the character class. A full stop, a semicolon and a
+// line break RESET it: they start a new clause, and a stack at the head of one has nothing to its left
+// to describe. A colon and a dash do not reset it, because they are the evidence — they say what
+// follows describes the thing just named. So the same claim gets opposite verdicts on the delimiter the
+// model typed: "This page is blank; only faint, isolated marks are visible" declares blank and "Page is
+// blank — only faint, isolated marks are visible" does not, because the dash's own reading is that
+// `blank` is what the stack is about. Both are pinned, and the second is the cost this guard pays: that
+// page is reported failed, which is a glance rather than a page.
+//
+// One thing that follows and is NOT closed: a doubt word leading a stack that opens its own sentence is
+// stripped, because there is nothing to its left to say otherwise — "Dark, blurry, faint specks
+// throughout, no legible text" is read as the marks and would have refused on `dark` before #220. That
+// position is exactly the one #220's nine need (each starts the sentence its marks are in: "Only faint,
+// isolated marks are visible…", "A few faint specks or artifacts are present…"), and in it the two
+// readings are indistinguishable — `blurry specks` is grammatically the marks, which is the reading the
+// exemption exists for, and no wording in the sentence says the model meant the capture. Closing it
+// would cost #220 its wordings to catch a sentence nobody has written yet.
 const NOT_CLAUSE_HEAD = String.raw`(?<!(?:\b(?:is|are|was|were|be|been|being|appears?|appeared|seems?|seemed|looks?|looked|shows?|showed|showing|remains?|has|have|had)\b|[:—–]|\s-)[^.!?;\n]{0,200})`;
 const MARKS_PHRASE = new RegExp(
   String.raw`\b(?:` +

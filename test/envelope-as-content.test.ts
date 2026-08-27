@@ -470,6 +470,20 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // stack, so a stack that opens its own sentence or sits behind a count is still one phrase.
     "Page is blank. Faint, isolated marks are visible, no text.",
     "Page is blank. A few faint, scattered specks are visible, no text.",
+    // A full stop, a semicolon and a line break reset the guard's reach, because a stack at the head of
+    // its own clause has nothing to its left to describe. The semicolon form is pinned beside the dash
+    // form below, which is the same claim refused: which verdict a log gets turns on the delimiter the
+    // model typed, and that asymmetry is on record here rather than left to be read off a character
+    // class.
+    "This page is blank; only faint, isolated marks are visible.",
+    "Page is blank:\nonly faint, isolated marks are visible, no text.",
+    // A doubt word LEADING a stack that opens its own sentence is stripped, and this is the position
+    // #220's nine all need. In it the two readings cannot be told apart — `blurry specks` is
+    // grammatically the marks, which is what the exemption is for, and nothing in the sentence says the
+    // model meant the capture — so these are accepted knowingly, not overlooked.
+    "Page 12 appears blank. Dark, blurry, faint specks throughout, no legible text.",
+    "Page 12 appears blank. Grainy, faint specks throughout, no legible text.",
+    "Page 3 is blank. No text or images. Faint, grey speckling from the scan, nothing legible.",
     // `not legible` predicated on the marks by a relative clause, with and without the `as`.
     "Page 16 appears to be blank. No text, images, or other content is visible. Only a few scattered specks/artifacts are present, which are not legible as content.",
     "Page 16 appears to be blank. No text or meaningful content is visible. No page number is printed on the page; the page-break marker uses the sequence number 16 from the file metadata. Only a few scattered specks/artifacts are present, which are not legible marks.",
