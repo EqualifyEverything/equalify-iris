@@ -68,6 +68,69 @@ export function visibleText(html: string): string {
     .trim();
 }
 
+// How many of each kind of structure a fragment holds. Exported for the review loop, on the
+// same argument as `visibleText`: a round and a page correction measured by different scans
+// could not be read against each other, and #174 asks for exactly that comparison.
+//
+// This is the signal #174's own measurement pointed at and neither path carries. Across the
+// three review rounds whose input survived, LENGTH moved 1.6% while the structure counts moved
+// 0.714–1.333 — one round dropping 5 of 7 lists and 13 of 47 list items, another gaining a
+// table — so "how much of the document is left" and "how much of its structure is left" are
+// different questions about the same round, and only the first has numbers on the line today.
+// Which of them a floor should be read off is the open half of #174, and it cannot be settled
+// without both being logged.
+export interface StructureCounts {
+  headings: number;
+  paragraphs: number;
+  lists: number;
+  items: number;
+  terms: number;
+  definitions: number;
+  tables: number;
+  rows: number;
+  cells: number;
+  images: number;
+  links: number;
+}
+
+// Grouped rather than one count per element name, and h1-h6 into one number in particular.
+// Half of agents/page.md is about which LEVEL a heading takes — a sub-topic the page names is
+// promoted, a group label above a cluster of them is their parent, a step of a procedure sits
+// one level under it — so a round that re-levels a section is doing the job, and a per-level
+// count would report every one of those as two structures changed. What no rule in that file
+// asks for is a heading that stops existing, which is what this number sees.
+//
+// `<a>` is counted although `droppedHrefs` already watches URLs: that check answers "did this
+// href survive", and a round that turns three links into one keeping every URL in it is a
+// different fact. Same for `<img>`, whose alt text has its own signal in this module and whose
+// disappearance has none.
+const STRUCTURE_GROUP: Record<string, keyof StructureCounts> = {
+  h1: "headings", h2: "headings", h3: "headings", h4: "headings", h5: "headings", h6: "headings",
+  p: "paragraphs",
+  ul: "lists", ol: "lists", dl: "lists",
+  li: "items",
+  dt: "terms", dd: "definitions",
+  table: "tables", tr: "rows", th: "cells", td: "cells",
+  img: "images", a: "links",
+};
+
+// Opening tags only. A closing tag is not a second structure, and model output mid-pipeline is
+// not guaranteed to have one for every element it opens — counting both would make a fragment's
+// numbers depend on how well-formed the reply happens to be, which is the artifact the scan
+// exists to avoid. Comments are stripped first, for the reason `attrText` gives: `<!-- the <ul>
+// continues overleaf -->` is prose about markup, not markup.
+export function structureCounts(html: string): StructureCounts {
+  const out: StructureCounts = {
+    headings: 0, paragraphs: 0, lists: 0, items: 0, terms: 0, definitions: 0,
+    tables: 0, rows: 0, cells: 0, images: 0, links: 0,
+  };
+  for (const m of html.replace(COMMENT, " ").matchAll(/<([a-z][a-z0-9]*)/gi)) {
+    const group = STRUCTURE_GROUP[m[1].toLowerCase()];
+    if (group) out[group]++;
+  }
+  return out;
+}
+
 // Every alt attribute's value, in document order, joined on a separator an attribute
 // value cannot itself contain. A space would let a rewrite that moves one word from one
 // image's description into the next one's compare equal to the original: both descriptions
