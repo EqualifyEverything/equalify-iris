@@ -657,6 +657,62 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   DPUB's own remedy is to make it a list item — a restructure, not an attribute rewrite. A document
   with no such role comes back byte-identical, which is what the loop's change detection and the
   reserialization caution above both need.
+- **A table printed across a page break is rejoined into one table.** Each page is extracted alone,
+  so the agent that wrote the second half had one image and the rest of the table was not on it: it
+  ships as a fresh `<table>` repeating the header, and a screen-reader user reading down the column
+  gets the header row again mid-data with nothing saying the two are one table (issue #239). The
+  halves are *findable* because the second one says so — all 18 continuation captions measured in
+  the reference corpus carry a "Continued" marker, in four different spellings, against 48 tables.
+  The rule reads that marker anywhere in the caption after a dash, a bracket or a parenthesis:
+  requiring it at the *end* drops 4 of the 18, and requiring the `Table N` stem to repeat drops 8,
+  because a second half often keeps the title and loses the number. The predecessor is the
+  immediately preceding table in document order in all 18.
+  The **merge** is a Copy Editor call, because the halves do not agree on what to concatenate: two
+  of the 18 pairs declare a different column count from their own first half, 13 repeat a header
+  block carrying footnote-*reference* ids that an endnote links back to, and a bracketed unit note
+  is reprinted with the header and belongs in the joined table once. Everything around the ask is
+  deterministic: which tables are halves (the caption rule), where their bytes are, whether the
+  answer kept the table, and the splice. The body is never reserialized — the halves' source spans
+  are found by a depth-counting scan and checked against the parsed DOM, and the reply is spliced in
+  as a string, for the same reason `anchors.ts` refuses a whole-body round trip. A pair whose bytes
+  the source does not delimit is left alone (`table_join_failed`, `unmatched_source`); that is what
+  an unclosed `<table>` on a page does, since an unclosed opener swallows the table after it.
+  The answer is then verified: one table, a caption without the marker, no column lost, a header
+  block still made of `<th>` cells, and the rows accounted for two ways. Labels as a **set**, because
+  the duplicated header block legitimately goes and a legitimately dropped duplicate row must not
+  read as loss — and over all cells, not first cells, so a label the merge moved along a column still
+  counts. And a **count** floored on the sum of both halves, less one header block and the one
+  bracketed unit note a continued page reprints. The header credit is the more permissive of two
+  readings — one shared block, at the smaller of the two declared depths, or whatever the joined
+  table's own depth says went — because each of them is wrong once: the halves declare headers of
+  different depths in 4 of the 18 pairs, so the smaller depth alone under-credits a merge that kept
+  the deeper block, and reading the drop off the joined table alone charges a merge that *promoted*
+  the reprinted unit note into `<thead>` for a row that is still in the table, which cancels the one
+  drop the prompt asks for and refuses the same content for sitting on the other side of `<thead>`.
+  The shared-block reading is bounded by that same one row, because the two things that deepen a
+  joined header are a row promoted into it and a header block *kept*: past one block plus one row,
+  the merge is carrying the duplicate header this stage exists to remove, nothing went, and the
+  shared-block credit would hand back that block's worth of unlabelled rows. To within one row, that
+  is: a reply that keeps a single duplicated header row is inside the bound and can lose one
+  unlabelled row with it, which is the size of the drop the floor forgives anyway and indivisible
+  from the promotion the prompt asks for. What is ruled out is slack a whole header block deep.
+  The count is needed at all because the label set is blind to a row that has no
+  label: a printed statistical table gives a multi-line row label continuation lines whose first cell
+  is empty, and neither a label set nor a floor at the larger half can see those disappear. Header
+  cells are checked because nothing else would: a merged header block returned as `<td>` keeps every
+  label, every column and every row, and axe reports nothing on a data table with no headers, so it
+  would ship having removed the header association from the tables this stage exists to improve.
+  Any failure keeps **both halves byte for byte**, which is what makes this safe to ask a model for:
+  unlike a correction round, which adopts a whole new body, a refusal here costs one table's
+  structure and not the document. That includes markup no parser can read — jsdom parses by
+  recursion and a body nested a few hundred thousand levels deep overflows it, which is reachable
+  because `anchors.ts` delivers a page past 500 levels as written, so the failure is caught and the
+  document ships as it arrived rather than the phase failing. A failed pair is not asked twice, and
+  it is remembered by its two halves' bytes rather than by its caption, since two pairs in one chain
+  share a caption and one refusal must not silently cover both. It runs where the pages are joined,
+  before the shell and before the lint, so the document the gate cleared and the document the Reader
+  reads are the document that ships. Logged as `table_continuations`, `table_joined`,
+  `table_join_failed` and `table_joins_capped`.
 - **A page the document has no content for is reported once, not once per chunk.** Two kinds of
   source page contribute nothing: one extraction *lost* (`pages_failed`, and a `@page-failed`
   comment where the content would have been) and one that is *blank in the source*, delivered as an
