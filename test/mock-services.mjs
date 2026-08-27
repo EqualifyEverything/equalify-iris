@@ -239,7 +239,20 @@ const or = createServer(async (req, res) => {
         // and there is no axe rule for a same-document link that lands nowhere. It is
         // here to prove the orchestrator MEASURES it, and the repetition is what proves
         // the two units apart — three references, one id.
-        `<p><a href="#appendix-a">See Appendix A</a></p>`,
+        `<p><a href="#appendix-a">See Appendix A</a></p>` +
+        // The #240 defects, on page 1 only so the counts are exact. Both are invisible to
+        // the lint gate by construction, which is the whole point of measuring them on the
+        // delivered bytes: the parser closes the `<div>` at end of document before axe sees
+        // a tree, and a table with a header block and no rows is perfectly well formed —
+        // there is no rule for a table that announces nine columns and holds nothing.
+        //
+        // The div is unclosed rather than the table: an unclosed `<table>` foster-parents
+        // everything after it out of the table, which would reorder the delivered text and
+        // break the page-order assertions this same document exists to make.
+        (page === 1
+          ? `\n<div>\n<table><caption>Table 1. Revenue by region</caption>\n` +
+            `<thead><tr><th scope="col">Region</th><th scope="col">Revenue</th></tr></thead></table>\n`
+          : ``),
       log: "",
       // Only when the e2e has armed it, and only on page 1, so the run yields
       // exactly one dispatch attempt to assert on.

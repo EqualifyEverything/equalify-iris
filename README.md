@@ -543,6 +543,24 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   *cross-page* duplicates itself, so what reaches the review loop is the ids duplicated **within a
   single page** — which the assembler cannot fix, because there is no second page to attribute the
   copy to — plus the collisions on any page the reserialization guard left as written.
+- **The delivered document's own structure is measured outside the lint gate, because axe cannot
+  see it.** axe lints a parsed DOM, and an HTML parser's job is to turn malformed markup into a
+  well-formed tree before anything downstream looks at it. A document delivered with an unclosed
+  `<table>` therefore reaches axe as sixteen tidy tables: on one bench round, a document whose
+  bytes read sixteen `<table>` start tags and fifteen end tags reported `final_lint.ok: true`,
+  zero violations, `ready_for_review`. The other half is content that is not there for the parser
+  to repair — a table in the same document had a caption, a two-row header block naming nine
+  columns, and no rows, which a screen reader announces and reads out as an empty table. axe has
+  no rule for that either (`empty-table-header` is about a header *cell* with no text), so zero
+  violations was the honest answer to the question axe was asked. Both are checked on the
+  delivered bytes instead (`markup.ts`), reported as `delivered_markup` in the run log, and
+  tallied as `iris:markup-unbalanced` / `iris:table-no-body`. Two narrowings are worth knowing.
+  Only elements whose end tag HTML *requires* are balance-checked: `<ul><li>a<li>b</ul>` is
+  correct markup, and counting it would bury the real finding under legal output. And a table
+  counts as empty when it has no row outside its header block, not when it has no `<td>` — a
+  table whose body cells are all `<th scope="row">` is legal and full of content. Nothing here
+  is repaired and no run fails on it: a count with no threshold, on the same argument as
+  `internal_links`, until there is enough of a rate to calibrate.
 - **Colliding ids are namespaced during assembly (§7.7 v1.2).** A page is extracted alone and
   concurrently, so it cannot know that another page also numbered its first footnote 1 — and the
   page prompt asks it to preserve the source numbering. `assembleBody` prefixes the ids that more

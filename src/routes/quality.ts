@@ -44,7 +44,8 @@ function bearer(header: string | undefined): string | null {
  *
  * ```json
  * { "window_days": 30, "documents": 212, "mean_rounds": 1.8, "unresolved_rate": 0.07,
- *   "links_dropped_rate": 0.02, "links_unresolved_rate": 0.11, "lint_error_rate": 0.01,
+ *   "links_dropped_rate": 0.02, "links_unresolved_rate": 0.11,
+ *   "markup_unbalanced_rate": 0.01, "table_no_body_rate": 0.005, "lint_error_rate": 0.01,
  *   "documents_linted": 210,
  *   "editor_truncated_rate": 0.01, "editor_truncated_lost_rate": 0.002,
  *   "rules": [ { "id": "heading-order", "impact": "moderate", "documents": 81,
