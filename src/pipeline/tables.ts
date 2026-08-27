@@ -300,16 +300,28 @@ To decline: { "html": null, "log": "why", "declined": true }`;
 // content. A document that legitimately repeats more than one such row is refused and ships split,
 // with `rows_lost` in the log saying so, which is the direction this stage errs in everywhere else.
 const JOIN_DROPPABLE_ROWS = 1;
-// Which half's header block goes is the editor's call — rule 3 asks for the structure that describes
-// the rows, and that is sometimes the second half's — so the floor cannot assume which one, and it
-// does not have to: the joined table says how many header rows came out, so the number that went is
-// arithmetic. Read that way rather than as "the larger of the two", which forgave the DIFFERENCE
-// between the two depths on top of the block itself. That is not a corner: halves describing their
-// columns at different depths are 4 of the corpus's 18 pairs (see the notes at the top of this file),
-// and on a pair with a 3-row header against a 1-row one it left three rows of slack — enough for a
-// reply to keep every labelled row, drop three unlabelled continuation lines, and be accepted.
+// How many rows a sound join may lose to the duplicated header, which is the rest of the floor. It
+// cannot be assumed to be one half's block — rule 3 asks for the structure that describes the rows,
+// and that is sometimes the second half's, which may be a different DEPTH (4 of the corpus's 18 pairs
+// declare different header structures). Two readings each get one case right and one wrong, so the
+// credit is the more permissive of them, and neither one's error is a loss:
+//
+//   * The joined table's own depth says what went: `first + second - joined`. Exact where a block was
+//     dropped whole, and wrong where the merge PROMOTED a row into the header — rule 6's reprinted
+//     unit note belongs "once, at the top" and reads naturally as a `<thead>` row, and a promotion
+//     decrements this reading, charging the join for a row that is still in the table.
+//   * One shared block goes: `min(first, second)`. Blind to a merge that dropped the DEEPER of two
+//     unequal blocks, which is 3 rows credited as 1 on a 3-against-1 pair.
+//
+// Taking the larger of the two is safe in the direction that matters, because a reply cannot buy
+// slack by inflating the joined header depth: that lowers the first reading and the `min` is a
+// ceiling on what it can fall back to. Deflating it — demoting the header block to plain rows — does
+// raise the credit, and is refused before this by `header_cells_lost`.
 function rowFloor(pair: ContinuationPair, joined: TablePiece): number {
-  const headerDropped = pair.first.headerRows + pair.second.headerRows - joined.headerRows;
+  const headerDropped = Math.max(
+    Math.min(pair.first.headerRows, pair.second.headerRows),
+    pair.first.headerRows + pair.second.headerRows - joined.headerRows,
+  );
   return Math.max(0, pair.first.rows + pair.second.rows - headerDropped - JOIN_DROPPABLE_ROWS);
 }
 
@@ -339,13 +351,14 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // depths — a two-row spanned header merged down to the other half's single row is rule 3 being
   // followed.
   //
-  // The `min` is a floor and not the whole check, because a floor of zero is no check at all: with
-  // one half carrying no `<th>` — a header stub that came back rowless — the exact flattening this
-  // exists to catch would pass. So a joined table with NO header cells is refused whenever either
-  // half had some, which closes the zero case without narrowing what the floor allows.
-  const headerFloor = Math.min(pair.first.headerCells, pair.second.headerCells);
-  const hadHeaders = Math.max(pair.first.headerCells, pair.second.headerCells) > 0;
-  if (joined.headerCells < headerFloor || (hadHeaders && joined.headerCells === 0)) return "header_cells_lost";
+  // The `min` is over the halves that HAVE a header block, because what it exists to permit is two
+  // blocks collapsing into one — and a half with no header cells has no block to collapse, so its
+  // zero is not a smaller allowance, it is the absence of one. Read as a plain minimum it took the
+  // floor to zero and the check with it: on a pair whose second half is a rowless header stub, a
+  // reply flattening the first half's whole block to `<td>` would have passed. Zero on BOTH sides
+  // leaves it inert, which is the right answer for a pair with no header cells to lose.
+  const blocks = [pair.first.headerCells, pair.second.headerCells].filter((n) => n > 0);
+  if (blocks.length > 0 && joined.headerCells < Math.min(...blocks)) return "header_cells_lost";
   if (joined.rows < rowFloor(pair, joined)) return "rows_lost";
   // Every label from either half, somewhere in the joined table's cells — not necessarily as a
   // first cell, because a join that adds a column legitimately moves the label along one, and a
@@ -415,7 +428,9 @@ async function joinCall(
 // the body moves every span after it, so a refused pair would be asked again on the next pass. The
 // bytes of both halves are both unique and stable, and two pairs whose bytes are identical would get
 // identical answers, so sharing one refusal between them is correct rather than merely tolerable.
-const pairKey = (p: ContinuationPair) => `${p.first.html} ${p.second.html}`;
+// The separator is written as an escape and not as a literal control byte: a raw NUL in the source
+// makes every ordinary text tool, `grep` included, read this file as binary and stop reading it.
+const pairKey = (p: ContinuationPair) => `${p.first.html}\u0000${p.second.html}`;
 
 // A parse, which is the one thing in this stage that can throw, and the reason "never throws" below
 // needs enforcing rather than asserting. jsdom builds the tree by recursion, so a body nested a few

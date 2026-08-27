@@ -681,10 +681,15 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   block still made of `<th>` cells, and the rows accounted for two ways. Labels as a **set**, because
   the duplicated header block legitimately goes and a legitimately dropped duplicate row must not
   read as loss — and over all cells, not first cells, so a label the merge moved along a column still
-  counts. And a **count** floored on the sum of both halves, less the header rows that actually went
-  — read off the joined table, so a merge that kept the deeper header block is not also forgiven the
-  difference between the two depths — and the one bracketed unit note a continued page reprints,
-  because the label set is blind to a row that has no
+  counts. And a **count** floored on the sum of both halves, less one header block and the one
+  bracketed unit note a continued page reprints. The header credit is the more permissive of two
+  readings — one shared block, at the smaller of the two declared depths, or whatever the joined
+  table's own depth says went — because each of them is wrong once: the halves declare headers of
+  different depths in 4 of the 18 pairs, so the smaller depth alone under-credits a merge that kept
+  the deeper block, and reading the drop off the joined table alone charges a merge that *promoted*
+  the reprinted unit note into `<thead>` for a row that is still in the table, which cancels the one
+  drop the prompt asks for and refuses the same content for sitting on the other side of `<thead>`.
+  The count is needed at all because the label set is blind to a row that has no
   label: a printed statistical table gives a multi-line row label continuation lines whose first cell
   is empty, and neither a label set nor a floor at the larger half can see those disappear. Header
   cells are checked because nothing else would: a merged header block returned as `<td>` keeps every

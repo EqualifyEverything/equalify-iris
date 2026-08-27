@@ -227,6 +227,31 @@ test("the rows the floor forgives are one, not one per level of header the halve
   assert.equal(verifyJoin(pair, lossy), "rows_lost");
 });
 
+test("a row the join moved into the header is not charged as a row lost", () => {
+  // Rule 6's own case: both halves reprint a bracketed unit note as a full-width row, the note
+  // belongs once and "at the top", and `<thead>` is where a note at the top reads naturally. Reading
+  // the dropped header rows off the joined table alone charges that promotion as a header row that
+  // never went — which cancels the one drop rule 6 asks for, so the same content is accepted or
+  // refused depending only on which side of `<thead>` the note lands.
+  const note = `<tr><td colspan="3">[In millions of dollars]</td></tr>`;
+  const data = (labels: string[]) => labels.map((l) => `<tr><th scope="row">${l}</th><td>1.0</td><td>2.0</td></tr>`).join("");
+  const head = `<thead><tr><th>State</th><th>A</th><th>B</th></tr></thead>`;
+  const half = (caption: string, labels: string[]) =>
+    `<table><caption>${caption}</caption>${head}<tbody>${note}${data(labels)}</tbody></table>`;
+  const [pair] = continuationPairs(
+    half("Table 3.—Collections", ["Alabama", "Alaska", "Arizona"]) + half("Table 3.—Collections—Continued", ["Vermont", "Virginia"]),
+  ).pairs;
+  assert.deepEqual([pair.first.rows, pair.first.headerRows, pair.second.rows, pair.second.headerRows], [5, 1, 4, 1]);
+
+  // The same join twice: one header row, the note once, all five data rows. Only the note moves.
+  const inBody = `<table><caption>Table 3.—Collections</caption>${head}<tbody>${note}${data(["Alabama", "Alaska", "Arizona", "Vermont", "Virginia"])}</tbody></table>`;
+  const inHead = `<table><caption>Table 3.—Collections</caption>${head.replace("</thead>", `${note}</thead>`)}<tbody>${data(["Alabama", "Alaska", "Arizona", "Vermont", "Virginia"])}</tbody></table>`;
+  assert.equal(inBody.match(/<tr/g)!.length, 7);
+  assert.equal(inHead.match(/<tr/g)!.length, 7);
+  assert.equal(verifyJoin(pair, inBody), null);
+  assert.equal(verifyJoin(pair, inHead), null, "the same content was refused for sitting in <thead>");
+});
+
 test("a join that turned the header cells into data cells is refused", () => {
   // The one property a data table cannot lose here and still be the fix: its header cells. A reply
   // that emitted the merged header block as `<td>` keeps every label (the label set is matched over
