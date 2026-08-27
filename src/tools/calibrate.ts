@@ -11,8 +11,9 @@
 // This is a measurement tool, not part of a run. Nothing in `src/pipeline` imports it and
 // no endpoint reaches it; it exists so that the number in #180 can be produced again after
 // `agents/feedback.md` changes.
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { basename, join, sep } from "node:path";
 import { loadConfig } from "../config.ts";
 import { Paths } from "../store/paths.ts";
@@ -52,8 +53,13 @@ function usage(): never {
       "",
       "Pages are selected from `page_verify_ok` in each session's log: the pages this",
       "verifier already passed, which is what makes a rejection of the clean copy a",
-      "false positive rather than a disagreement with a different judge. --all-pages drops",
-      "that and measures the verifier against pages it may well have been right to fail.",
+      "false positive rather than a disagreement with a different judge. Two kinds of",
+      "pass are left out, because neither is the verifier looking at a page and finding",
+      "nothing wrong: one no verdict could be read from at all (`unjudged`), and one",
+      "whose verdict named a defect and shipped the page anyway",
+      "(`page_verify_inconsistent`). Older logs record neither, so their such pages stay",
+      "in. --all-pages drops the whole selection and measures the verifier against pages",
+      "it may well have been right to fail.",
       "",
     ].join("\n"),
   );
@@ -146,25 +152,51 @@ function fail(message: string): never {
 // per page whose first verify came back with nothing to correct (extraction.ts), so this
 // is exactly the population #180 asks for, taken from the record rather than re-derived.
 //
-// Except for one case the event does not distinguish by itself: verification is
-// non-blocking, so a page nobody could judge — no Feedback Agent, a reply that would not
-// parse — also writes `page_verify_ok`. Those pages are not evidence that the verifier
-// passed anything, and selecting them would put pages the verifier never had an opinion
-// about into a false-positive rate. Runs from this version on mark them `unjudged: true`
-// and they are dropped here; older logs cannot say, and their unjudged pages come out as
-// unjudged clean copies in the report, excluded from the rates there instead.
-function passedImages(logPath: string): Set<string> {
+// Except for two cases the event does not distinguish by itself.
+//
+// Verification is non-blocking, so a page nobody could judge — no Feedback Agent, a reply
+// that would not parse — also writes `page_verify_ok`. Those pages are not evidence that the
+// verifier passed anything, and selecting them would put pages the verifier never had an
+// opinion about into a false-positive rate. Runs from this version on mark them
+// `unjudged: true` and they are dropped here; older logs cannot say, and their unjudged pages
+// come out as unjudged clean copies in the report, excluded from the rates there instead.
+//
+// And a page can pass while its own verdict describes a defect in it: `ok` is the verdict's
+// flags, and a problem named with both flags true ships the page (issue #210). That page is
+// not a clean baseline — the verifier has said in prose that it is wrong — so injecting a
+// defect on top of it and asking whether the verifier objects measures two things at once,
+// and a "false positive" scored on its clean copy is the verifier being right about the
+// original. `page_verify_inconsistent` is what makes those findable, and they are dropped for
+// the same reason as the unjudged ones: this corpus is the pages the verifier had nothing to
+// say about. Only a log from this version on carries the line, so an older log's such pages
+// stay in, exactly as they did when the measurement was first published.
+//
+// This reads the whole log, not the last `run_start` onwards as `diagnostics.ts` does, and
+// that is deliberate: a feedback re-run re-extracts only the pages the feedback touched, so
+// in the two multi-round sessions of the corpus behind #180 every passed page — 4 of the 11 —
+// was passed in round 1 and the last round passed none. Scoping to the last round would have
+// thrown away a third of the population and changed a published rate. The cost is that the
+// two subtractions are not symmetric across rounds: a page unjudged in an early round and
+// judged clean later is kept, on the later verdict, while a page described in an early round
+// stays dropped even if a later round passed it with nothing said. That direction only ever
+// makes the corpus smaller, never lets a page the verifier called wrong be scored as a clean
+// baseline, which is the error that would misreport the thing being measured.
+export function passedImages(logPath: string): Set<string> {
   const passed = new Set<string>();
+  const described = new Set<string>();
   if (!existsSync(logPath)) return passed;
   for (const line of readFileSync(logPath, "utf8").split("\n")) {
-    if (!line.includes("page_verify_ok")) continue;
+    if (!line.includes("page_verify_ok") && !line.includes("page_verify_inconsistent")) continue;
     try {
       const entry = JSON.parse(line) as { type?: string; image?: string; unjudged?: boolean };
-      if (entry.type === "page_verify_ok" && entry.image && !entry.unjudged) passed.add(entry.image);
+      if (!entry.image) continue;
+      if (entry.type === "page_verify_ok" && !entry.unjudged) passed.add(entry.image);
+      else if (entry.type === "page_verify_inconsistent") described.add(entry.image);
     } catch {
       // A truncated last line in a log that was being written is not an error here.
     }
   }
+  for (const image of described) passed.delete(image);
   return passed;
 }
 
@@ -434,4 +466,17 @@ async function main(): Promise<void> {
   if (args.json) writeFileSync(args.json, `${JSON.stringify(report, null, 2)}\n`);
 }
 
-await main();
+// Only when this file IS the command, so the selection above can be imported and tested. It
+// decides which pages a published false-positive rate is measured over — two conditions now,
+// both of them subtractions — and until this guard the only way to reach it was to run the tool.
+// `realpathSync` on both sides because a worktree reaches this file through a symlinked path.
+const invokedDirectly = (() => {
+  const argv = process.argv[1];
+  if (!argv) return false;
+  try {
+    return realpathSync(argv) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+if (invokedDirectly) await main();

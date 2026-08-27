@@ -34,6 +34,7 @@ import { VERIFY_KINDS, verifyAgentOutput } from "../src/pipeline/feedback.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 import { loadAgent } from "../src/agents/loader.ts";
+import { passedImages } from "../src/tools/calibrate.ts";
 
 const defect = (id: string) => {
   const d = DEFECTS.find((x) => x.id === id);
@@ -800,6 +801,61 @@ test("every verify call goes against the page's own image", async () => {
       const fromA = call.html.includes("Quarterly");
       assert.equal(call.image, fromA ? "bytes-for-0" : "bytes-for-1", "each copy went with its own page's image");
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The population itself, which is the other half of the number. `calibrateVerifier` above is
+// measured against pages the verifier passed, and `passedImages` is the code that decides
+// which pages those are — read off `page_verify_ok` in a finished session's log. It carries
+// two subtractions now (unjudged verdicts, and verdicts that described a defect and shipped
+// the page anyway), and until this test the only way to exercise either was to run the tool
+// against a real session. A page wrongly kept here is a page whose clean copy is not clean,
+// and its rejection is scored as a false positive against the verifier.
+test("the calibration corpus is the pages the verifier looked at and had nothing to say about", () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-passed-"));
+  try {
+    const log = join(dir, "run.jsonl");
+    writeFileSync(
+      log,
+      [
+        // Kept: judged, passed, nothing said.
+        JSON.stringify({ type: "page_verify_ok", image: "clean.png", page: 1 }),
+        // Dropped: nobody could judge it, so it is not evidence the verifier passed anything.
+        JSON.stringify({ type: "page_verify_ok", image: "unjudged.png", page: 2, unjudged: true }),
+        // Dropped, and the order matters: the `ok` line for a described page comes first in a
+        // real log, because the inconsistency is only detectable once the verdict has passed.
+        JSON.stringify({ type: "page_verify_ok", image: "described.png", page: 3 }),
+        JSON.stringify({ type: "page_verify_inconsistent", image: "described.png", page: 3, kinds: ["content_wrong"] }),
+        // ...and dropped the other way round too, so the subtraction cannot depend on order.
+        JSON.stringify({ type: "page_verify_inconsistent", image: "late.png", page: 4, kinds: [] }),
+        JSON.stringify({ type: "page_verify_ok", image: "late.png", page: 4 }),
+        // Not a pass at all. Named here because the line matches the cheap substring test.
+        JSON.stringify({ type: "page_verify_failed", image: "failed.png", page: 5 }),
+        // A log still being written. Its truncated tail must not throw away the whole file.
+        '{"type":"page_verify_ok","image":"trunc',
+      ].join("\n"),
+      "utf8",
+    );
+    assert.deepEqual([...passedImages(log)].sort(), ["clean.png"]);
+
+    // An older log — every one published before this version — says nothing about either
+    // case, and comes out exactly as it did when the measurement was first taken.
+    const old = join(dir, "old.jsonl");
+    writeFileSync(
+      old,
+      [
+        JSON.stringify({ type: "page_verify_ok", image: "a.png", page: 1 }),
+        JSON.stringify({ type: "page_verify_ok", image: "b.png", page: 2 }),
+      ].join("\n"),
+      "utf8",
+    );
+    assert.deepEqual([...passedImages(old)].sort(), ["a.png", "b.png"]);
+
+    // A session whose log is not there yet is empty, not an exception: the tool takes a list
+    // of sessions and one of them having no log must not lose the others.
+    assert.equal(passedImages(join(dir, "nope.jsonl")).size, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

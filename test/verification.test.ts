@@ -259,6 +259,11 @@ interface Behaviour {
   // verdict out of that and returns its non-blocking default, which is a page nothing
   // judged rather than a page that passed.
   verifyGarbles?: boolean;
+  // The first verdict names its problems and sets both flags TRUE anyway — the verifier that
+  // describes a defect and ticks the box (issue #210). Everything else here derives `faithful`
+  // from whether the list is empty, which is the contract; this is the measured departure from
+  // it, and the only way to reach the branch that ships such a page.
+  describesAndPasses?: boolean;
   // The same, on the RE-verification only: the first verdict is real and the second is prose.
   // Separate from `verifyGarbles` because a garbled first verdict passes the page and so buys
   // no correction and no recheck — the two flags cannot reach the same call.
@@ -317,7 +322,7 @@ function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 2): Pipelin
           const problems = n === 1 ? b.problems(order) : (b.recheck ?? (() => []))(order);
           return {
             text: JSON.stringify({
-              faithful: problems.length === 0,
+              faithful: problems.length === 0 || (n === 1 && b.describesAndPasses === true),
               accessible: true,
               problems,
             }),
@@ -1030,6 +1035,56 @@ test("a page nobody could judge says so on the line that says it passed", async 
     assert.equal(d.verification.pages_verified, 2);
     assert.equal(d.verification.pages_unjudged, 2);
     assert.equal(d.verification.verify_failed, 0);
+  });
+});
+
+test("a verdict that describes a defect and passes the page says so on its own line", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The measured case: both flags true, the defect written out in full. `failedCheck` needs a
+    // false flag AND a named problem, so the page ships, nothing is corrected, and until this
+    // event the sentence was nowhere in the log — `page_verify_ok` carries no `problems`
+    // (issue #210: 3 of 30 injected defects were described and passed, which is most of the
+    // gap between the 28 the verifier perceived and the 25 it flagged).
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<p>Payment terms: net 30.</p><p>The standard fee is $5,555.00.</p>`,
+        problems: (o) =>
+          o === 1
+            ? [{ kind: "structure_wrong", problem: "the fee paragraph comes first in the image; the HTML reverses the two" }]
+            : [{ kind: "alt_quality", problem: "the chart's description could name the units" }],
+        corrected: () => "",
+        describesAndPasses: true,
+      }),
+    );
+    // Nothing about the run changes: this event decides nothing and costs nothing.
+    assert.equal(of(events, "page_verify_ok").length, 2);
+    assert.equal(of(events, "page_verify_failed").length, 0);
+    assert.equal(of(events, "page_corrected").length, 0, "a passing verdict buys no correction");
+    for (const f of result.fragments) assert.match(f.innerHtml, /Payment terms/);
+
+    const said = of(events, "page_verify_inconsistent");
+    assert.equal(said.length, 2);
+    assert.equal(said[0].image, "page-001.png");
+    assert.deepEqual(said[0].kinds, ["structure_wrong"]);
+    assert.equal(said[0].untagged, 0);
+    // The prose, because the prose is the finding — a count of it cannot be read back as
+    // evidence that the verifier saw the defect.
+    assert.match(String((said[0].problems as string[])[0]), /the HTML reverses the two/);
+    assert.deepEqual(said[1].kinds, ["alt_quality"]);
+    // And a page whose only note is advice is not this bug, which is the whole reason the
+    // kinds are on the line: it is one of the two pages, and neither of the two page calls a
+    // kind-gated rule would buy.
+    const d = summarizeRun(
+      events.map((e) => JSON.stringify({ ts: new Date(Date.UTC(2026, 0, 1)).toISOString(), ...e })).join("\n"),
+      { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.UTC(2026, 0, 1) },
+    );
+    assert.equal(d.verification.pages_verified, 2, "both pages passed, and are counted once each");
+    assert.equal(d.verification.verify_failed, 0);
+    assert.equal(d.verification.verify_inconsistent.pages, 2);
+    assert.equal(d.verification.verify_inconsistent.structure_wrong, 1);
+    assert.equal(d.verification.verify_inconsistent.alt_quality, 1);
+    assert.equal(d.verification.verify_inconsistent.content_or_structure, 1);
   });
 });
 

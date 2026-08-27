@@ -2062,6 +2062,46 @@ async function extractPage(
     // judged as its population (issue #180, src/pipeline/calibration.ts). Omitted, not
     // false, on the ordinary pass — a log full of `unjudged: false` says nothing.
     ctx.log.event("page_verify_ok", verdict.unjudged ? { image: img.name, unjudged: true } : { image: img.name });
+    // The verdict that describes a defect and then passes the page. `ok` is the verdict's
+    // `faithful`/`accessible` FLAGS, and `failedCheck` needs a false flag AND a named problem
+    // before the run will spend a correction — so a verdict that names one while both flags
+    // stay true ships the page, and the sentence it wrote goes nowhere: `page_verify_ok`
+    // above carries no `problems`, and nothing downstream looks at the image again.
+    //
+    // Measured while calibrating the verifier against injected defects: of 30 damaged pages
+    // it perceived 28 and flagged 25, and 3 of the 5 it did not flag it described in full —
+    // a swapped pair of paragraphs quoted back verbatim, an `<h4>` among `<h2>` siblings
+    // named as such, `faithful: true` on both (issue #210). Which is a different repair from
+    // a verifier that cannot see: what it needs is for the flag to follow the prose.
+    //
+    // Logged and not acted on, deliberately. The one-line fix — any named problem fails the
+    // page — would buy a correction round for every `alt_quality` suggestion the same agent
+    // is asked to volunteer, which is the class of finding least likely to be worth a page
+    // call, on top of a verification share already under investigation for costing 24%. The
+    // kind-gated version (a `content_missing`, `content_wrong` or `structure_wrong` problem
+    // fails the page whatever the flags say) is the one worth having, and pricing it needs
+    // this count over a fleet rather than over an 11-page corpus. So this event decides
+    // nothing and costs nothing: the page ships exactly as it did.
+    //
+    // Only the first verdict, which is the one that decides whether a correction is bought.
+    // A recheck's own disagreement is already readable on its line, since
+    // `page_correction_recheck` carries both its `ok` and its `problems`.
+    if (verdict.problems.length > 0) {
+      ctx.log.event("page_verify_inconsistent", {
+        image: img.name,
+        page: img.order,
+        // The prose, because the prose is the finding: "the HTML reverses this order" is what
+        // says the verifier saw the defect, and no count of it can be re-read as that.
+        problems: verdict.problems,
+        // And the kinds, because they are what a kind-gated rule would act on — a page whose
+        // problems are all `alt_quality` is not this bug, it is the agent doing what it was
+        // asked. `untagged` is the honest reading of a verdict in plain prose, which is what
+        // an agent file predating the kinds returns and what makes a kind-gated rule a no-op
+        // on that page: it cannot be counted for or against.
+        kinds: verdict.kinds,
+        untagged: verdict.untagged,
+      });
+    }
   }
 
   const problems = [
