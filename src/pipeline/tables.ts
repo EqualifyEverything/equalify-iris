@@ -304,7 +304,7 @@ const JOIN_DROPPABLE_ROWS = 1;
 // cannot be assumed to be one half's block — rule 3 asks for the structure that describes the rows,
 // and that is sometimes the second half's, which may be a different DEPTH (4 of the corpus's 18 pairs
 // declare different header structures). Two readings each get one case right and one wrong, so the
-// credit is the more permissive of them, and neither one's error is a loss:
+// credit is the more permissive of them, within the bound below:
 //
 //   * The joined table's own depth says what went: `first + second - joined`. Exact where a block was
 //     dropped whole, and wrong where the merge PROMOTED a row into the header — rule 6's reprinted
@@ -313,15 +313,30 @@ const JOIN_DROPPABLE_ROWS = 1;
 //   * One shared block goes: `min(first, second)`. Blind to a merge that dropped the DEEPER of two
 //     unequal blocks, which is 3 rows credited as 1 on a 3-against-1 pair.
 //
-// Taking the larger of the two is safe in the direction that matters, because a reply cannot buy
-// slack by inflating the joined header depth: that lowers the first reading and the `min` is a
-// ceiling on what it can fall back to. Deflating it — demoting the header block to plain rows — does
-// raise the credit, and is refused before this by `header_cells_lost`.
+// Taking the larger of the two is not free, though, and the `min` is not the harmless ceiling it
+// looks like. It wins exactly when the joined header is DEEPER than either half's — which is the
+// promotion above, and is equally true of a reply that keeps BOTH header blocks, repeating the second
+// one mid-table as all-`<th>` rows. That is the pre-PR duplicate-header state, nothing went, the
+// correct credit is 0, and crediting a shared block instead hands back that block's worth of rows:
+// measured on a pair of 3-row headers, a reply that kept the duplicate block and dropped 3 of the 5
+// unlabelled continuation lines was accepted with `table_joined` in the log, four rows of numbers
+// gone and invisible to the label set by construction.
+//
+// So the `min` reading is available only while the joined header can be READ as one block plus the
+// row rule 6 lets a merge promote into it. Past that depth the extra rows are a second block kept,
+// not a promotion, and the credit is what the joined table's depth says — floored at zero, since a
+// header deeper than both blocks together means rows moved rather than went, and the row count does
+// not change when a row moves. Counts alone cannot tell a promotion from a kept duplicate (both only
+// raise the depth), so the depth gate is where the two are separated. Deflating the depth instead —
+// demoting the header block to plain rows — does raise the credit, and is refused before this by
+// `header_cells_lost`.
 function rowFloor(pair: ContinuationPair, joined: TablePiece): number {
-  const headerDropped = Math.max(
-    Math.min(pair.first.headerRows, pair.second.headerRows),
-    pair.first.headerRows + pair.second.headerRows - joined.headerRows,
-  );
+  const deepest = Math.max(pair.first.headerRows, pair.second.headerRows);
+  const byDepth = pair.first.headerRows + pair.second.headerRows - joined.headerRows;
+  const headerDropped =
+    joined.headerRows <= deepest + JOIN_DROPPABLE_ROWS
+      ? Math.max(Math.min(pair.first.headerRows, pair.second.headerRows), byDepth)
+      : Math.max(0, byDepth);
   return Math.max(0, pair.first.rows + pair.second.rows - headerDropped - JOIN_DROPPABLE_ROWS);
 }
 

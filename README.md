@@ -689,6 +689,10 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   the deeper block, and reading the drop off the joined table alone charges a merge that *promoted*
   the reprinted unit note into `<thead>` for a row that is still in the table, which cancels the one
   drop the prompt asks for and refuses the same content for sitting on the other side of `<thead>`.
+  The shared-block reading is bounded by that same one row, because the two things that deepen a
+  joined header are a row promoted into it and a header block *kept*: past one block plus one row,
+  the merge is carrying the duplicate header this stage exists to remove, nothing went, and the
+  shared-block credit would hand back that block's worth of unlabelled rows.
   The count is needed at all because the label set is blind to a row that has no
   label: a printed statistical table gives a multi-line row label continuation lines whose first cell
   is empty, and neither a label set nor a floor at the larger half can see those disappear. Header

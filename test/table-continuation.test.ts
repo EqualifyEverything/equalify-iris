@@ -252,6 +252,42 @@ test("a row the join moved into the header is not charged as a row lost", () => 
   assert.equal(verifyJoin(pair, inHead), null, "the same content was refused for sitting in <thead>");
 });
 
+test("a join that kept the second header block is credited with dropping nothing", () => {
+  // The other side of the promotion credit, and the direction that costs content: "one shared block
+  // went" also wins whenever the joined header is deeper than either half's, which a reply keeping
+  // BOTH blocks — the second one repeated mid-table as all-`<th>` rows, i.e. exactly the state this
+  // stage exists to remove — satisfies without having dropped a thing.
+  const spanned = `<tr><th>State</th><th colspan="2">Amount</th></tr><tr><th></th><th>1959</th><th>1960</th></tr>`;
+  const head = `<thead><tr><th colspan="3">Receipts</th></tr>${spanned}</thead>`;
+  const labelled = (labels: string[]) => labels.map((l) => `<tr><th scope="row">${l}</th><td>1.0</td><td>2.0</td></tr>`).join("");
+  const blank = `<tr><td></td><td>3.0</td><td>4.0</td></tr>`;
+  const withRuns = (labels: string[]) => labels.map((l) => labelled([l]) + blank).join("");
+  const half = (caption: string, labels: string[]) =>
+    `<table><caption>${caption}</caption>${head}<tbody>${withRuns(labels)}</tbody></table>`;
+  const [pair] = continuationPairs(
+    half("Table 5.—Receipts", ["Alabama", "Alaska", "Arizona"]) + half("Table 5.—Receipts—Continued", ["Vermont", "Virginia"]),
+  ).pairs;
+  assert.deepEqual([pair.first.rows, pair.first.headerRows, pair.second.rows, pair.second.headerRows], [9, 3, 7, 3]);
+
+  // Keeps its own header, repeats the second half's block mid-table, and drops 3 of the 5 unlabelled
+  // continuation lines. 12 rows, which cleared a floor of 16 − 3 − 1 while the shared-block credit
+  // was unconditional: three rows of numbers shipped gone under a `table_joined` line, with the
+  // duplicated header still in the delivered table.
+  const lossy =
+    `<table><caption>Table 5.—Receipts</caption>${head}<tbody>` +
+    `${labelled(["Alabama", "Alaska", "Arizona"])}${blank}${spanned}${labelled(["Vermont", "Virginia"])}${blank}</tbody></table>`;
+  assert.equal(lossy.match(/<tr/g)!.length, 12);
+  assert.equal(verifyJoin(pair, lossy), "rows_lost");
+
+  // And the same reply with every row present is accepted — the refusal above is the missing rows,
+  // not the kept block, which no count can see and which rule 3 is what asks for.
+  const whole =
+    `<table><caption>Table 5.—Receipts</caption>${head}<tbody>` +
+    `${withRuns(["Alabama", "Alaska", "Arizona"])}${spanned}${withRuns(["Vermont", "Virginia"])}</tbody></table>`;
+  assert.equal(whole.match(/<tr/g)!.length, 15);
+  assert.equal(verifyJoin(pair, whole), null);
+});
+
 test("a join that turned the header cells into data cells is refused", () => {
   // The one property a data table cannot lose here and still be the fix: its header cells. A reply
   // that emitted the merged header block as `<td>` keeps every label (the label set is matched over
