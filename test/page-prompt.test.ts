@@ -965,20 +965,30 @@ test("the page agent's definition-list rule keeps the clauses that make it a rul
 // across as <strong> — presentation where the structure was. So the clauses that matter are the
 // ones that name the wrong shape, not the ones that describe the right one.
 //
-// Three clauses are guards rather than instructions, and they are pinned for the same reason the
+// Two clauses are guards rather than instructions, and they are pinned for the same reason the
 // heading rule's are: 34 rows across 31 tables in that round are narrower than their table, and
 // reading them shows almost all are second tiers of COLUMN headers — a spanning "Federal" over two
-// columns — which is the shape this rule must not claim. #236 also asked for one <tbody> per group;
-// 0 of the 48 tables use more than one <tbody>, including the one that gets the rowgroup header
-// right, so it is permitted rather than required, and the rule says so in order not to make the
-// two halves look like one behaviour.
+// columns — which is the shape this rule must not claim.
+//
+// The `<tbody>`-per-group half of #236 is asked for rather than merely permitted, and the mechanism
+// is why: HTML scopes a `scope="rowgroup"` header to the rest of ITS row group, so a table that runs
+// every group through one `<tbody>` has the first group's label applying to every row below it and
+// each later group inheriting all the labels above it. 0 of the 48 tables in that round use more than
+// one `<tbody>`, so this is the part of the rule that is new behaviour rather than an existing one
+// made reliable — and `runAxe` on the exact shape (a `<caption>`, a `<thead>`, and a `<tbody>` per
+// group opened by its label row) reports no violation, so what is asked for passes Iris's own gate.
 test("the page agent's table row-group rule keeps the clauses that make it a rule", () => {
   const prompt = normalize(section("System prompt")!);
   for (const [what, re] of [
     ["a printed group label is structure that has to reach the markup",
       /where a table gathers its rows under printed group labels[\s\S]*?grouping is structure and has to reach the markup/],
-    ["the shape asked for is a spanning rowgroup header with member rows under it",
-      /Emit each label as its own row holding a single <th scope="rowgroup" colspan="N">, N being the number of columns it spans, and the rows of the group after it as ordinary rows with <th scope="row"> for their own labels/],
+    ["the shape asked for is a <tbody> per group, opened by a spanning rowgroup header",
+      /Open a <tbody> for each group, its first row holding a single <th scope="rowgroup" colspan="N"> with the group's label \(N being the number of columns it spans\), then the rows of that group as ordinary rows with <th scope="row"> for their own labels, and close the <tbody> where the group ends/],
+    // The spec's own reading of the keyword, which is what makes the <tbody> load-bearing rather
+    // than decorative. Pinned because it is the sentence that stops the requirement being trimmed
+    // back to a bare label row again.
+    ["why the <tbody> is what makes the label mean what it says",
+      /scope="rowgroup" applies a header to the rest of ITS row group, so a table that runs every group through one <tbody> has "New England:" applying to the Southeast rows as well, and each group after the first inherits the labels of all the groups above it/],
     // The two shapes on file in the bench round, quoted, so a model can recognise its own output.
     ["the spanning-cell and bold-cell shapes it replaces are named",
       /The same row emitted as <td colspan="4">Southeast:<\/td>, or as <td colspan="4"><strong>Southeast<\/strong><\/td>, prints the same ink and carries none of it/],
@@ -990,19 +1000,18 @@ test("the page agent's table row-group rule keeps the clauses that make it a rul
     // it is the part a model can apply from one page image.
     ["a group boundary is not a reason to start or nest a table, with the test that decides it",
       /A group boundary is never a reason to start a second table, or to nest one inside a cell: if the columns are the same, it is the same table, and the group label is a row within it/],
-    ["a group name reprinted because the group runs on is another header in the same table",
-      /Where the page reprints a group's name because the group runs on, that reprint is another rowgroup header in the same table/],
+    ["a group name reprinted because the group runs on opens another <tbody>, not another table",
+      /Where the page reprints a group's name because the group runs on, that reprint opens another <tbody> carrying the same label as its rowgroup header, in the same table/],
     ["a group's total row stays in the table, where the page prints it",
       /A group's total or subtotal row belongs to the same table too, as a row with <th scope="row"> for its label, wherever the page prints it/],
     // Guard one: the shape this rule is most likely to be misapplied to.
     ["a second tier of column headers is not a row group",
       /is a second tier of COLUMN headers and belongs in <thead> with the row it qualifies; this rule is for a row that names a group of the ROWS/],
-    // Guard two: #236's other half, permitted and not required.
-    ["a <tbody> per group is allowed and not required, and what actually does the associating",
-      /A <tbody> per group is allowed and is not required: what associates a member row with its group is the rowgroup header above it, and one <tbody> holding every group is a correct table/],
-    // Guard three, the same guard the heading rule needs: no structure the page did not print.
+    // Guard two, the same guard the heading rule needs: no structure the page did not print. It has
+    // to say what an ungrouped table looks like now that the rule asks for a <tbody> per group, or
+    // "one <tbody> per group" reads as a reason to invent groups to put them in.
     ["no grouping is invented where the page groups nothing",
-      /no grouping is invented — a table whose rows the page gathers under nothing is one run of rows, and a label you supply is a group only you can see/],
+      /no grouping is invented — a table whose rows the page gathers under nothing is one <tbody> and one run of rows, and a label you supply is a group only you can see/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
