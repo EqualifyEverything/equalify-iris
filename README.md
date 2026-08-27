@@ -137,6 +137,22 @@ from the environment at startup; changes require a restart.
   successful result — the same failure the truncation guard exists to prevent, arriving by a
   different road. Conversely the terminal event ends the read then and there, so a connection
   held open after the message is finished cannot let the silence clock discard a whole document.
+  *Which* event is terminal is a property of the wire format rather than of the word "stop": on
+  Bedrock's Converse stream the `metadata` event carrying every token count arrives **after**
+  `messageStop`, so the read ends at `metadata` there — breaking at the stop event, the literal
+  translation of the Anthropic path, would report every Converse call as free.
+  The Bedrock adapter speaks **two dialects**, chosen by `providers.bedrock.api`. `invoke` (the
+  default) is `InvokeModelWithResponseStream` carrying an Anthropic-native body, and it is what
+  every published number in this repo was measured through. `converse` is `ConverseStream`, whose
+  request and response shapes belong to Bedrock rather than to a model vendor — and it is the only
+  one of the two that can reach a non-Anthropic model, which `providers.bedrock.default_model` has
+  always looked like it could (#178). It is off by default because parity between them is an
+  empirical question about a live endpoint: the request bodies differ in every field, and no test
+  here talks to AWS. So the key is there to be measured with, not to be assumed — a one-page probe
+  and one bench round on `converse` are what would move the default. An unrecognized value falls
+  back to `invoke` and says so at boot, because both dialects just return text: without the
+  warning, a deployment that meant to be trying Converse would be measuring the path it already
+  had.
 - **Concurrency** (§9.4): two independent knobs under `defaults`.
   `extraction_concurrency` is *within* a run — pages in parallel during extraction, and during
   review both the Reader's chunk reads and the section calls a too-long correction round is

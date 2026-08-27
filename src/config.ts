@@ -46,6 +46,14 @@ export interface ProviderBlock {
   // asking for only where runs arrive in bursts more than five minutes and less than an
   // hour apart. Anything unrecognized reads as the default. Normalized where it is read.
   prompt_cache_ttl?: string;
+  // BEDROCK ONLY, and off by default. Which Bedrock API the calls go out on: `invoke`
+  // (the default — `InvokeModelWithResponseStream` with an Anthropic-native body, which
+  // is what every deployment has always sent) or `converse` (`ConverseStream`, whose
+  // request shape belongs to Bedrock rather than to a model vendor and therefore reaches
+  // a non-Claude model at all). See providers/bedrock.ts `bedrockApi`: parity between the
+  // two is an empirical question about a live endpoint, so this exists to be measured
+  // with. Anything unrecognized is the default, and is warned about at boot.
+  api?: string;
 }
 
 // How much one caller may ask of this deployment per minute, and how many uploads it
@@ -470,6 +478,42 @@ export function promptCacheTtlWarning(providers: IrisConfig["providers"]): strin
     `what a cache write is BILLED at (1.25x against 2x), not in the token counts ` +
     `diagnostics publishes, so a deployment that meant to hold its cache for an hour ` +
     `would never find out from Iris.`
+  );
+}
+
+// The same kind of warning for `api`, which picks the Bedrock API a block's calls go out
+// on (providers/bedrock.ts `bedrockApi`).
+//
+// Same asymmetry as the TTL above and the same treatment: an unrecognized value falls back
+// to `invoke`, which is the path that works, and nothing downstream can tell you it did.
+// Both APIs return the same text through the same interface, so an operator who wrote
+// `Converse` or `converse-stream` and set out to measure the new path against the old
+// would be measuring the old path twice.
+//
+// Named blocks rather than a bare complaint, and only Bedrock blocks: the field is
+// meaningless to the OpenRouter adapter, and warning about it there would send an operator
+// looking for a setting that does not exist. Which blocks are Bedrock is decided by the
+// provider NAME, the same way loadConfig decides which adapter to construct.
+export function bedrockApiWarning(providers: IrisConfig["providers"]): string | undefined {
+  const bad: string[] = [];
+  for (const [name, block] of Object.entries(providers)) {
+    if (name !== "bedrock") continue;
+    if (!block || typeof block !== "object" || Array.isArray(block)) continue;
+    const v = (block as ProviderBlock).api as unknown;
+    if (v === null || v === undefined) continue;
+    const text = String(v).trim();
+    // An empty value is an operator who set nothing, which is what the default is for.
+    if (text === "") continue;
+    const normalized = text.toLowerCase();
+    if (normalized !== "invoke" && normalized !== "converse") bad.push(`${name}: "${text}"`);
+  }
+  if (bad.length === 0) return undefined;
+  return (
+    `providers.${bad.join(", providers.")} — api must be "invoke" or "converse". ` +
+    `This one is ignored and the calls go out on "invoke", the Anthropic-native path. ` +
+    `Nothing downstream will report that: both APIs return the same text through the same ` +
+    `interface, so a deployment that meant to be testing ConverseStream would be measuring ` +
+    `the path it already had.`
   );
 }
 

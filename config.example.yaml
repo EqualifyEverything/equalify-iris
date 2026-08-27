@@ -300,6 +300,22 @@ providers:
       vision: us.anthropic.claude-sonnet-4-6
       structured_output: us.anthropic.claude-sonnet-4-6
       text: us.anthropic.claude-sonnet-4-6
+    # WHICH BEDROCK API the calls go out on. `invoke` (the default, and what is left set
+    # here by omission) is InvokeModelWithResponseStream carrying an Anthropic Messages
+    # body — every number this project publishes was measured through it. `converse` is
+    # ConverseStream, whose request shape belongs to Bedrock rather than to a model
+    # vendor, and which is therefore the only one of the two that can reach a model
+    # Anthropic did not make: `default_model` above cannot name a Qwen or a Nova on
+    # `invoke`, whatever the config comments imply, because such a model rejects the
+    # body outright.
+    #
+    # Left off because parity is not yet measured, not because it is doubted (issue
+    # #178). The two send the same prompt, ask for the same cache breakpoints on the same
+    # text, and report the same four token counts under different names — all of which is
+    # tested — but no round has been run on `converse`, and one variable at a time is how
+    # a model comparison stays interpretable. Turn it on to run that round; anything but
+    # `invoke` or `converse` is ignored, with a warning at boot.
+    # api: converse
 
 defaults:
   # How many reader/editor rounds a document gets before the review loop stops and
