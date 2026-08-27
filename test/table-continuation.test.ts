@@ -196,6 +196,37 @@ test("a join that came back short of rows is refused", () => {
   );
 });
 
+test("the rows the floor forgives are one, not one per level of header the halves disagree by", () => {
+  // Halves that describe their columns at different depths are 4 of the corpus's 18 pairs, and a
+  // floor that subtracted "the larger header block" forgave the DIFFERENCE between the two depths as
+  // well: a 3-row header against a 1-row one left three rows of slack, which is exactly enough for a
+  // reply to keep every labelled row, drop three unlabelled continuation lines, and be accepted. The
+  // floor reads the JOINED table's header depth instead, so what it forgives is what actually went.
+  const rows = (labels: string[]) =>
+    labels.map((l) => `<tr><th scope="row">${l}</th><td>1.0</td><td>2.0</td></tr><tr><td></td><td>4.1</td><td>4.2</td></tr>`).join("");
+  const head = (n: number) =>
+    `<thead>${Array.from({ length: n }, (_, i) => `<tr><th>A${i}</th><th>B${i}</th><th>C${i}</th></tr>`).join("")}</thead>`;
+  const half = (caption: string, headRows: number, labels: string[]) =>
+    `<table><caption>${caption}</caption>${head(headRows)}<tbody>${rows(labels)}</tbody></table>`;
+  const [pair] = continuationPairs(
+    half("Table 8.—Yield", 3, ["Alabama", "Alaska", "Arizona"]) + half("Table 8.—Yield—Continued", 1, ["Vermont"]),
+  ).pairs;
+  assert.deepEqual([pair.first.rows, pair.first.headerRows, pair.second.rows, pair.second.headerRows], [9, 3, 3, 1]);
+
+  const kept = `<table><caption>Table 8.—Yield</caption>${head(3)}<tbody>${rows(["Alabama", "Alaska", "Arizona", "Vermont"])}</tbody></table>`;
+  assert.equal(verifyJoin(pair, kept), null);
+  // Every labelled row kept, three of the four unlabelled continuation lines dropped: three rows of
+  // numbers gone, invisible to the label set by construction, columns and header cells intact. The
+  // old floor was 8 and this reply has 8 rows, so it was accepted and logged as a join.
+  const labelledOnly = (labels: string[]) =>
+    labels.map((l) => `<tr><th scope="row">${l}</th><td>1.0</td><td>2.0</td></tr>`).join("");
+  const lossy =
+    `<table><caption>Table 8.—Yield</caption>${head(3)}` +
+    `<tbody>${rows(["Alabama"])}${labelledOnly(["Alaska", "Arizona", "Vermont"])}</tbody></table>`;
+  assert.equal(lossy.match(/<tr/g)!.length, 8);
+  assert.equal(verifyJoin(pair, lossy), "rows_lost");
+});
+
 test("a join that turned the header cells into data cells is refused", () => {
   // The one property a data table cannot lose here and still be the fix: its header cells. A reply
   // that emitted the merged header block as `<td>` keeps every label (the label set is matched over
@@ -210,6 +241,14 @@ test("a join that turned the header cells into data cells is refused", () => {
   // And the join that legitimately collapses two header blocks into one is not refused by it: the
   // floor is the smaller half's count, so merging a two-row header down to one row is allowed.
   assert.equal(verifyJoin(pair, goodJoin("Table 1.—Income", STATES, REST)), null);
+
+  // A floor of zero is no check at all, so the flattening is refused on its own terms too. Reachable
+  // wherever one half has no header cells to floor against — a header stub that came back rowless is
+  // the shape, and it is one of the corpus's three-piece chains.
+  const stub = `<table><caption>Table 1.—Income—Continued</caption><tbody><tr><td>1.0</td><td>2.0</td><td>3.0</td></tr></tbody></table>`;
+  const [stubPair] = continuationPairs(piece("Table 1.—Income", STATES) + stub).pairs;
+  assert.equal(stubPair.second.headerCells, 0, "the fixture is not the case being tested");
+  assert.equal(verifyJoin(stubPair, flattened), "header_cells_lost");
 });
 
 test("a row the join dropped is caught by its label even when the count is right", () => {

@@ -300,12 +300,17 @@ To decline: { "html": null, "log": "why", "declined": true }`;
 // content. A document that legitimately repeats more than one such row is refused and ships split,
 // with `rows_lost` in the log saying so, which is the direction this stage errs in everywhere else.
 const JOIN_DROPPABLE_ROWS = 1;
-// Which half's header block goes is the editor's call (rule 3 asks for the structure that describes
-// the rows, and that is sometimes the second half's), so the floor allows the LARGER of the two to
-// be the one dropped.
-function rowFloor(pair: ContinuationPair): number {
-  const header = Math.max(pair.first.headerRows, pair.second.headerRows);
-  return Math.max(0, pair.first.rows + pair.second.rows - header - JOIN_DROPPABLE_ROWS);
+// Which half's header block goes is the editor's call — rule 3 asks for the structure that describes
+// the rows, and that is sometimes the second half's — so the floor cannot assume which one, and it
+// does not have to: the joined table says how many header rows came out, so the number that went is
+// arithmetic. Read that way rather than as "the larger of the two", which forgave the DIFFERENCE
+// between the two depths on top of the block itself. That is not a corner: halves describing their
+// columns at different depths are 4 of the corpus's 18 pairs (see the notes at the top of this file),
+// and on a pair with a 3-row header against a 1-row one it left three rows of slack — enough for a
+// reply to keep every labelled row, drop three unlabelled continuation lines, and be accepted.
+function rowFloor(pair: ContinuationPair, joined: TablePiece): number {
+  const headerDropped = pair.first.headerRows + pair.second.headerRows - joined.headerRows;
+  return Math.max(0, pair.first.rows + pair.second.rows - headerDropped - JOIN_DROPPABLE_ROWS);
 }
 
 export function verifyJoin(pair: ContinuationPair, merged: string): string | null {
@@ -332,10 +337,16 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // the SMALLER half's count rather than the larger, because collapsing two header blocks into one
   // legitimately loses header cells and the two halves may describe their columns at different
   // depths — a two-row spanned header merged down to the other half's single row is rule 3 being
-  // followed. Zero on either side leaves this inert, which is the right answer for a half that had
-  // no header cells to keep.
-  if (joined.headerCells < Math.min(pair.first.headerCells, pair.second.headerCells)) return "header_cells_lost";
-  if (joined.rows < rowFloor(pair)) return "rows_lost";
+  // followed.
+  //
+  // The `min` is a floor and not the whole check, because a floor of zero is no check at all: with
+  // one half carrying no `<th>` — a header stub that came back rowless — the exact flattening this
+  // exists to catch would pass. So a joined table with NO header cells is refused whenever either
+  // half had some, which closes the zero case without narrowing what the floor allows.
+  const headerFloor = Math.min(pair.first.headerCells, pair.second.headerCells);
+  const hadHeaders = Math.max(pair.first.headerCells, pair.second.headerCells) > 0;
+  if (joined.headerCells < headerFloor || (hadHeaders && joined.headerCells === 0)) return "header_cells_lost";
+  if (joined.rows < rowFloor(pair, joined)) return "rows_lost";
   // Every label from either half, somewhere in the joined table's cells — not necessarily as a
   // first cell, because a join that adds a column legitimately moves the label along one, and a
   // guard that refuses that would refuse the repair it exists to protect.

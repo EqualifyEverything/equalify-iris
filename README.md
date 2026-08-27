@@ -681,8 +681,10 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   block still made of `<th>` cells, and the rows accounted for two ways. Labels as a **set**, because
   the duplicated header block legitimately goes and a legitimately dropped duplicate row must not
   read as loss — and over all cells, not first cells, so a label the merge moved along a column still
-  counts. And a **count** floored on the sum of both halves, less one header block and the one
-  bracketed unit note a continued page reprints, because the label set is blind to a row that has no
+  counts. And a **count** floored on the sum of both halves, less the header rows that actually went
+  — read off the joined table, so a merge that kept the deeper header block is not also forgiven the
+  difference between the two depths — and the one bracketed unit note a continued page reprints,
+  because the label set is blind to a row that has no
   label: a printed statistical table gives a multi-line row label continuation lines whose first cell
   is empty, and neither a label set nor a floor at the larger half can see those disappear. Header
   cells are checked because nothing else would: a merged header block returned as `<td>` keeps every
