@@ -649,6 +649,29 @@ test("an event between the stop and the hang does not put the idle clock back", 
   assert.equal(res.text, "<p>a whole page</p>");
 });
 
+test("the tail is bounded as a whole, not one window per frame", async () => {
+  // Nothing re-arms the window after the stop event, so a tail that keeps sending frames
+  // this adapter recognizes cannot hold the call open: the alternative bound is the
+  // 15-minute backstop, spent on a document that was already complete.
+  let frames = 0;
+  const bedrock = new BedrockProvider(
+    { default_model: MODEL, api: "converse" } as never,
+    { trailingTimeoutMs: 60, idleTimeoutMs: 5_000, firstOutputTimeoutMs: 5_000 },
+  );
+  stubConverse(bedrock, async function* (signal: AbortSignal) {
+    yield { contentBlockDelta: { delta: { text: "<p>a whole page</p>" }, contentBlockIndex: 0 } };
+    yield { messageStop: { stopReason: "end_turn" } };
+    for (let i = 0; i < 200; i++) {
+      await sleepUnlessAborted(20, signal);
+      frames++;
+      yield { contentBlockStop: { contentBlockIndex: i } };
+    }
+  });
+  const res = await bedrock.complete(req());
+  assert.equal(res.text, "<p>a whole page</p>");
+  assert.ok(frames < 20, `the tail should be cut off in one window, not re-armed 200 times (${frames})`);
+});
+
 test("a failure in the tail does not take the document with it", async () => {
   // Same rule from the other side: the message had already stopped, so a throttling or
   // stream error arriving afterwards is about the accounting, not about the page. The

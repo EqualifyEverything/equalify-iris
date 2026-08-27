@@ -141,11 +141,15 @@ from the environment at startup; changes require a restart.
   Bedrock's Converse stream the `metadata` event carrying every token count arrives **after**
   `messageStop`, so the read ends at `metadata` there — breaking at the stop event, the literal
   translation of the Anthropic path, would report every Converse call as free. That tail gets a
-  short window of its own (**10s**) rather than the idle clock, and running out of it returns the
-  response: once the message has stopped there is no document left to protect, only a number, and
-  spending a minute waiting for it and then discarding a finished document would be the worse
-  trade. The call is then simply one that reported no usage, which diagnostics already counts
-  (`tokens.calls_reported`).
+  single short window of its own (**10s** from the stop event, not per frame) rather than the idle
+  clock, and once the message has stopped **no tail failure fails the call**: running out of the
+  window, a stream error, a throttling exception, even the 15-minute backstop all end the read and
+  return the document. There is nothing left to protect at that point but a number, and spending a
+  minute waiting for it and then discarding a finished document would be the worse trade. The
+  price is that a Converse stream error arriving after the message is absorbed silently; what a
+  reader sees of it is a call reporting no usage, which diagnostics already counts
+  (`tokens.calls_reported`). The same failure one event *earlier* still fails the call, which is
+  the line that makes absorbing it safe: before the stop event the document is not whole.
   Finally, **stopping is not the same as finishing**, and which stop reasons mean "the answer is
   whole" is a shorter list than which exist. The Anthropic body stops only for `end_turn`,
   `max_tokens`, `stop_sequence`, `tool_use` or `refusal`, so one truncation check covered every

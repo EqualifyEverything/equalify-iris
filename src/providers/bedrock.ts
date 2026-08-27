@@ -646,23 +646,27 @@ export class BedrockProvider implements ModelProvider {
         if (reading.text) text += reading.text;
         if (reading.stopReason) stopReason = reading.stopReason;
         mergeUsage(reading.usage);
-        if (reading.stopped) sawStop = true;
-        // Which clock the read runs on from here. Once the upstream says the message is
-        // over, the silence clocks have nothing left to protect — the document is in
-        // hand and only the accounting can still be arriving — so the tail gets its own
-        // short window instead. Re-armed on EVERY event after the stop, not only on the
-        // stop itself: a stream that sends `messageStop`, then anything else this adapter
-        // recognizes, then hangs would otherwise be back to spending a full idle minute
-        // and then discarding a finished document, which is the trade this window exists
-        // to avoid.
+        // Which clock the read runs on. Before the stop event, the silence windows,
+        // re-armed after accumulating so `text` reflects this event when choosing between
+        // them. A keepalive is skipped: letting it reset the clock would defeat the
+        // timeout in the one case it exists for — a generation that hangs on a connection
+        // that stays chatty would then run to the 15-minute backstop and report itself as
+        // too large, which is the opposite diagnosis.
         //
-        // Before the stop, re-armed after accumulating so `text` reflects this event when
-        // choosing the window. A keepalive is skipped: letting it reset the clock would
-        // defeat the timeout in the one case it exists for — a generation that hangs on a
-        // connection that stays chatty would then run to the 15-minute backstop and
-        // report itself as too large, which is the opposite diagnosis.
-        if (sawStop) armTrailing();
-        else if (!reading.quiet) progressed();
+        // The stop event hands the read over to the tail window ONCE and nothing re-arms
+        // it after that, so the whole tail is bounded rather than each frame of it: those
+        // windows have nothing left to protect (the document is in hand, and only the
+        // accounting can still be arriving), and a tail that kept sending recognized
+        // frames would otherwise run to the 15-minute backstop to deliver a page that was
+        // already whole. Letting a post-stop frame re-arm the idle clock instead would be
+        // worse still: a stream that sends `messageStop`, one more frame, then hangs would
+        // spend a full minute and then discard a finished document.
+        if (!sawStop) {
+          if (reading.stopped) {
+            sawStop = true;
+            armTrailing();
+          } else if (!reading.quiet) progressed();
+        }
         // Nothing further this adapter reads. Stop rather than waiting for the upstream
         // to close the body: nothing today holds it open, but if anything did, a live
         // clock would fire on a response that is already whole. It also stops every
