@@ -1058,6 +1058,36 @@ test("a log that says something is on the page contradicts its own blank claim",
     // reason — no noun there names anything a reader wanted.
     "Page is blank. Text is absent from the table on this blank form.",
     "Page is blank. No content is present in the label field of the form.",
+    // The folio exemption (#222) is one SUBJECT skipped, not one statement excused: the loop keeps
+    // reading, so a log that names the page number and then something else still affirms through the
+    // something else. `page number` is required as a phrase for the same reason — a bare `number` names
+    // a figure number or a total as readily as a folio.
+    "Page is blank. The printed page number and a heading are visible.",
+    "Page is blank. The printed folio is visible, and a caption is present at the foot.",
+    "Page is blank. Printed numerals are visible.",
+    // `page numeral` is as much a folio as `page number`, and is refused anyway: `numerals?` is in
+    // `TEXT_NOUN` itself, so skipping the `printed` in front of it hands the affirmation to the noun two
+    // words on. Pinned as the limit it is rather than covered — the only ways to cover it are taking
+    // `numerals` out of the names for text or stepping the loop past a noun it would otherwise read, and
+    // the second is what keeps `The printed page number and a heading are visible.` refused (#230's
+    // review).
+    "The page is blank. The printed page numeral 14 is visible at the foot.",
+    "The page is blank. The printed page numerals are visible at the foot.",
+    // The residuals, pinned as the cost they are, all three the same shape of cost: a folio-only page
+    // reported is a glance, and the reads that would cover these would let a real affirmation through.
+    //
+    // An inverted cleft puts the folio behind a preposition and a verb (`the only thing printed on it IS
+    // the page number`), where what the affirmation names cannot be read off the word after `printed`;
+    // crossing a preposition to find out would take `Printing is visible beside the page number.` with
+    // it.
+    "Page 14 is blank; the only thing printed on it is the page number.",
+    // And the post-verb shapes, where the folio is the OBJECT: `affirmedObjectAfter` returns the
+    // `printed` it finds in the object gap without consulting `folioAt`, so these are unchanged from
+    // before #222. What saves the `only` wordings of these exact three sentences — pinned as delivered
+    // above — is that quantifier ending the object walk, not the folio.
+    "The page is blank. There is a printed page number at the foot.",
+    "The page is blank. The sheet contains a printed page number.",
+    "The page is blank. It shows a printed page number at the foot.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }
@@ -1260,6 +1290,48 @@ test("the affirmations a blank page's own log is made of are not contradictions"
     "Page is blank. Spots are visible, no text.",
     "Page is blank. Ink stains are visible, no text.",
     "Page is blank. Shadows fall across the sheet, no text.",
+    // The page's own printed number named as the one thing on the sheet (#222). A folio is not content
+    // here: `agents/page.md` forbids transcribing it as text, the only place its number may live is the
+    // page-break marker's label, and `renderPage` discards that marker on every accepted declaration —
+    // so a page printing nothing else has nothing on it a reader loses, and a log that says so
+    // contradicts nothing. `printed` is what refused these: it is in `TEXT_NOUN` for the noun sense and
+    // here it is an adjective on the number.
+    "The page is blank. The printed page number 4 is visible at the foot.",
+    "The page is blank; only the printed folio 14 is visible.",
+    "The page is blank. Only the printed page number 14 is on the sheet.",
+    "The page is blank except for its printed page number 14.",
+    "Page 14 is blank apart from the printed page number.",
+    "Page 14 is blank except for its printed folio.",
+    // The two wordings `agents/page.md` now quotes to the model, which have to be the ones that survive.
+    "The page is blank apart from the printed page number.",
+    "The page is blank except for its printed folio.",
+    // Already delivered before #222, because the subject-verb scan never reached their subjects —
+    // `folio` and `pagination` are outside `TEXT_NOUN`, and `number` alone is outside it too.
+    "The page is blank apart from the folio.",
+    "Page is blank. The pagination is visible at the foot.",
+    // The folio as the OBJECT of `there is` or of a transitive verb, delivered — and not by anything
+    // #222 did: `only` is a quantifier that ends the object walk before it reaches the `printed`. Pinned
+    // beside the same three sentences without it, which are refused (below), because the pair is the
+    // whole difference and neither reading consults `folioAt`.
+    "The page is blank. There is only a printed page number on the sheet.",
+    "The page is blank. The page contains only its printed page number.",
+    "The page is blank. It shows only a printed page number at the foot.",
+    // What `printed` was accidentally covering, in the three shapes #230's review measured, each pinned
+    // beside the same sentence with the folio phrase taken out — which is already delivered on the tree
+    // before #222 and always was. So the exemption removed cover rather than opening a class: an
+    // elliptical tail with no verb of its own, a noun behind a preposition, a noun with a verb outside
+    // the affirming list, and a noun outside `TEXT_NOUN` are each undefended in their own right, and
+    // whatever defends them later has to defend the second of each pair too. That is the point of pinning
+    // both: a widening of `AFFIRMING_VERB` or `TEXT_NOUN` must not leave this exemption as the only thing
+    // dropping the first of each pair.
+    "Page is blank. The printed page number 4 is visible at the foot, and a heading at the top.",
+    "Page is blank. A heading at the top.",
+    "Page is blank. The printed page number is visible over the signature.",
+    "Page is blank. A signature sits under the printed page number.",
+    "Page is blank. The printed folio is visible; handwriting fills the margin.",
+    "Page is blank. Handwriting fills the margin.",
+    "Page is blank. Printed page numbers and a running title are visible.",
+    "Page is blank. A running title is visible.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -1543,6 +1615,40 @@ test("a blank page spelled in markup is a blank page, and the markup stays out o
     // reconstruct: a run can now tell the empty `html` spelling from this one with a grep.
     assert.equal(of(events, "page_blank")[0].dropped, '<hr role="doc-pagebreak" aria-label="Page 2" id="page-2">');
     assert.equal(of(events, "page_blank")[1].dropped, "<!-- Page 3: blank page -->");
+  });
+});
+
+// The page the marker rule and the blank rule used to disagree about: a sheet whose only printed
+// content IS its folio. `agents/page.md` prescribes a marker and nothing else for a page that prints
+// its number, and forbids transcribing the folio as text — so the correct answer to such a page was a
+// marker-only fragment, which carries nothing a reader receives, and where the log named the number
+// instead of declaring the page blank the page was reported lost (issue #222). Both halves are now
+// answered in one direction: the prompt says a folio-only page IS a blank page, and the log a model
+// writes about it — the number named as the one thing on the sheet — no longer contradicts that.
+//
+// A folio is the one thing a page can bear that this pipeline never delivers, which is why naming it
+// is not naming content: the marker its number may live in is discarded here for every declaration,
+// and that is the trade `page_blank` above already takes.
+test("a page printing nothing but its own number is a blank page, not a lost one", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const marker = '<hr role=\\"doc-pagebreak\\" aria-label=\\"Page 2\\" id=\\"page-2\\">';
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) =>
+          o === 2
+            ? `{"html": "${marker}", "log": "Page 2 is blank apart from the printed page number."}`
+            : good(o),
+      }),
+    );
+    assert.deepEqual(failedPages, [], "a page with nothing on it but its folio is not a hole");
+    assert.deepEqual(of(events, "page_blank").map((e) => e.page), [2]);
+    assert.equal(of(events, "page_no_output").length, 0);
+    // The anchor goes with the rest of the fragment, as it does for every accepted declaration: a
+    // marker in front of nothing names a boundary with nothing after it to begin.
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "");
+    assert.equal(of(events, "page_blank")[0].dropped, '<hr role="doc-pagebreak" aria-label="Page 2" id="page-2">');
+    assert.equal(of(events, "page_blank")[0].log, "Page 2 is blank apart from the printed page number.");
   });
 });
 
