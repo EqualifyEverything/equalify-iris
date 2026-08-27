@@ -360,6 +360,25 @@ test("the declaration is read off what a reader receives, not off how long the f
   assert.equal(declaredBlank({ html: '<a href="#x" aria-label="&nbsp;"></a>', log: "The page is blank." }), true);
   assert.equal(declaredBlank({ html: '<a href="#x" aria-label="&#x200B;"></a>', log: "The page is blank." }), true);
   assert.equal(declaredBlank({ html: '<a href="#x" aria-label="&nbsp;Next"></a>', log: "The page is blank." }), false);
+  // Double-encoded, which is the only spelling the numeric branches of that pattern can see: `&#160;`
+  // is decoded before they run, and `&amp;#160;` decodes to it.
+  assert.equal(declaredBlank({ html: '<a href="#x" aria-label="&amp;#160;"></a>', log: "The page is blank." }), true);
+  // Either attribute having a value is the test, rather than one falling back to the other:
+  // `aria-labelledby` outranks `aria-label` in the accessible-name computation, so reaching for the
+  // label first read a link whose name comes from the reference as nameless (#229's review). Asking
+  // whether either is non-empty makes the precedence moot, which is all this question can claim.
+  assert.equal(
+    declaredBlank({ html: '<a href="#x" aria-label="" aria-labelledby="lbl"></a>', log: "The page is blank." }),
+    false,
+  );
+  assert.equal(
+    declaredBlank({ html: '<a href="#x" aria-labelledby="" aria-label="Next"></a>', log: "The page is blank." }),
+    false,
+  );
+  assert.equal(
+    declaredBlank({ html: '<a href="#x" aria-label="" aria-labelledby=""></a>', log: "The page is blank." }),
+    true,
+  );
   // An `aria-labelledby` whose target is not in the fragment computes to no accessible name and counts
   // anyway (#229's review). Deliberate: both callers use this to decide blank-versus-REPORTED and
   // neither delivers the fragment, so a dangling reference costs a glance where refusing it would drop

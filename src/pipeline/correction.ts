@@ -115,20 +115,28 @@ const CONTENT_ROLE = new Set(
   ).split(" "),
 );
 
+// What an accessible name can be made of and still be no name, read AFTER `tagAttrs` has decoded the
+// value. Three shapes, and each is here for its own reason (#229's review corrected the account this
+// comment gave of the third):
+//
+//   - A character `trim` cannot see. `\s` covers a decoded space and a non-breaking one, so what is left
+//     is the zero-width family — `&#x200B;` decodes to U+200B and survives `trim` as a name.
+//   - A named reference `decodeEntities` leaves written: it names the five XML entities and nothing else
+//     on purpose (src/util/html.ts), so `&nbsp;` arrives as six literal characters where `&#160;` arrives
+//     as the space it means. One non-breaking space, two spellings, and without this they answered
+//     opposite ways.
+//   - The numeric spellings, which `decodeEntities` DOES resolve — so they reach this pattern only when
+//     the value was encoded twice (`&amp;#160;` decodes to `&#160;`). Kept for that, not for the plain
+//     form the bullet above covers.
+const NAMELESS =
+  /&(?:nbsp|ensp|emsp|thinsp|zwnj|zwj|#0*(?:32|160|8194|8195|8201|8203)|#x0*(?:20|a0|2002|2003|2009|200b));|[\u200b-\u200d\ufeff]/gi;
+
 // One start tag's attributes, first value winning as a parser resolves a repeated one. The pair scan is
 // `attrText`'s, and reusing it is what keeps `role` out of another attribute's VALUE: the pattern
 // consumes a quoted value whole, so `<span title="see role=button">` yields one `title` and no role,
 // where a search for `role=` across the whole tag found the prose inside the quotes — the same
 // prose-about-markup hole `visibleText` and `attrText` close by reading comments and quotes rather than
 // characters. The tag name is stripped first so `<a>` does not read as an attribute.
-// What an accessible name can be made of and still be no name. `trim` handles a space, and `\s` covers a
-// decoded non-breaking one — so what is left is the spellings `decodeEntities` deliberately leaves alone
-// (it names the five XML entities and nothing else, src/util/html.ts), plus the zero-width characters no
-// `\s` matches: the entity by name, the code point in decimal or hex, and the raw character. A reader
-// hears nothing of any of them, which is the only question this predicate asks.
-const NAMELESS =
-  /&(?:nbsp|ensp|emsp|thinsp|zwnj|zwj|#0*(?:32|160|8194|8195|8201|8203)|#x0*(?:20|a0|2002|2003|2009|200b));|[\u200b-\u200d\ufeff]/gi;
-
 function tagAttrs(tag: string): Map<string, string> {
   const inner = tag.replace(/^<[a-z][a-z0-9]*/i, "").replace(/\/?>?$/, "");
   const attrs = new Map<string, string>();
@@ -154,6 +162,12 @@ function tagAttrs(tag: string): Map<string, string> {
 // `<div aria-label="Main content">` labels a wrapper that holds nothing, and `<p aria-label="Blank
 // page"></p>` is one of the corpus's own 33 blanks.
 //
+// EITHER attribute having a value is the whole test, rather than one falling back to the other: an
+// `aria-labelledby` outranks an `aria-label` in the accessible-name computation, and reaching for the
+// label first meant `<a href="#x" aria-label="" aria-labelledby="lbl">` — whose computed name is
+// whatever `lbl` holds — read as nameless (#229's review). Asking whether either is non-empty makes the
+// precedence moot, which is all a question about whether there is a name at all can honestly claim.
+//
 // An `aria-labelledby` pointing at an id the fragment does not contain is counted, though its
 // accessible name computes to nothing. Deliberate, and priced by where this predicate is read: both
 // callers (extraction.ts `blankDeclaration` and `renderPage`) use it to decide whether a reply's
@@ -178,8 +192,10 @@ function attributeCarriesContent(markup: string): boolean {
     const roles = (attrs.get("role") ?? "").split(/\s+/).map((token) => token.toLowerCase());
     if (roles.some((role) => CONTENT_ROLE.has(role))) return true;
     if (roles.includes("link") || (/^<(?:a|area)\b/i.test(tag) && attrs.has("href"))) {
-      const name = attrs.get("aria-label") ?? attrs.get("aria-labelledby");
-      if (name !== undefined && name.replace(NAMELESS, " ").trim() !== "") return true;
+      const named = ["aria-labelledby", "aria-label"].some(
+        (attr) => (attrs.get(attr) ?? "").replace(NAMELESS, " ").trim() !== "",
+      );
+      if (named) return true;
     }
   }
   return false;
