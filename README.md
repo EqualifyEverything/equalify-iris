@@ -883,6 +883,14 @@ the log and nothing done about it. That is a fixable contract problem, not a per
 it is why the report scores "said but did not flag" in its own column instead of counting it as a
 miss: the two failures point at different repairs.
 
+Every run now records that case as it happens: a verdict that names a problem while passing the page
+writes `page_verify_inconsistent`, and the diagnostics summary counts those pages in
+`verification.verify_inconsistent`, split by the kind of problem named. Nothing acts on it — the
+repair worth having is to fail a page whose verdict names missing, wrong or misshapen *content*
+whatever its flags say, and that is a page call per such page, which wants a fleet's worth of
+counting before it changes what a document costs. Failing on any named problem instead would buy one
+for every `alt_quality` suggestion the same agent is asked to volunteer.
+
 Small corpus — 11 pages over 3 documents, and two of the defects were exercised on a single page
 each — so treat the per-defect rates as directional. Both runs of it produced identical totals, and
 the dry run over the same five sessions still reports the same 11 pages and 30 damaged copies after

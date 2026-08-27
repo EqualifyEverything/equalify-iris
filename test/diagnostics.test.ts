@@ -478,6 +478,90 @@ test("a page nothing judged is counted apart from a page that passed", () => {
   assert.equal(summarizeRun(sloppy, done(Date.parse(T(3)))).verification.pages_unjudged, 0);
 });
 
+test("a page the verifier described and passed is counted, and priced by kind", () => {
+  // The verdict that names a defect and ticks the box: `ok` is the `faithful`/`accessible`
+  // flags, and a correction needs a false flag AND a named problem, so a page whose verdict
+  // describes a swapped pair of paragraphs with both flags true ships unchanged and its
+  // sentence goes nowhere — `page_verify_ok` carries no `problems` (issue #210).
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_verify_ok", image: "a.png" },
+    { ts: T(1), type: "page_verify_inconsistent", image: "a.png", page: 1,
+      problems: ["the first two paragraphs are in the reverse of the source order"],
+      kinds: ["structure_wrong"], untagged: 0 },
+    // A page whose only note is advice. Not this bug — the agent was asked for it, and a rule
+    // that failed the page for it would buy a page call per suggestion — so it is in `pages`
+    // and out of `content_or_structure`.
+    { ts: T(2), type: "page_verify_ok", image: "b.png" },
+    { ts: T(2), type: "page_verify_inconsistent", image: "b.png", page: 2,
+      problems: ["the chart's description could name the units"],
+      kinds: ["alt_quality"], untagged: 0 },
+    // One page, two kinds, one of them content: counted in each bucket and once in the
+    // pricing field, which is a page count and has to divide into `pages`.
+    { ts: T(3), type: "page_verify_ok", image: "c.png" },
+    { ts: T(3), type: "page_verify_inconsistent", image: "c.png", page: 3,
+      problems: ["the total reads 1,240 and the image shows 1,420", "the alt text is thin"],
+      kinds: ["content_wrong", "alt_quality"], untagged: 0 },
+    // And the shape the measured corpus is entirely made of: prose with no kind, because the
+    // kinds are newer than those runs. A kind-gated rule can act on it neither way, which is
+    // what `untagged_pages` is here to say.
+    { ts: T(4), type: "page_verify_ok", image: "d.png" },
+    { ts: T(4), type: "page_verify_inconsistent", image: "d.png", page: 4,
+      problems: ["the heading is marked <h4> among <h2> siblings"] },
+    { ts: T(5), type: "page_verify_failed", image: "e.png", problems: ["a table row is missing"],
+      kinds: ["content_missing"], untagged: 0 },
+    { ts: T(6), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(6))));
+  assert.deepEqual(d.verification.verify_inconsistent, {
+    pages: 4,
+    content_missing: 0,
+    content_wrong: 1,
+    structure_wrong: 1,
+    a11y_only: 0,
+    alt_quality: 2,
+    untagged_pages: 1,
+    content_or_structure: 2,
+  });
+  // Not folded as verified pages: each of these lines sits beside a `page_verify_ok` for the
+  // same page, and counting both would make the denominator larger than the run.
+  assert.equal(d.verification.pages_verified, 5);
+  assert.equal(d.verification.verify_failed, 1);
+  // The failure's own kinds are untouched by the new fold — two counts of two populations.
+  assert.equal(d.verification.verify_kinds.content_missing, 1);
+  assert.equal(d.verification.verify_kinds.structure_wrong, 0);
+
+  // A log from before the event reports zeros, and a line whose `kinds` is not a list of
+  // known kinds is a page in no bucket rather than a page added to a function.
+  const old = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_verify_ok", image: "a.png" },
+    { ts: T(2), type: "page_verify_inconsistent", image: "b.png", page: 2, problems: ["…"],
+      kinds: ["constructor", "toString"], untagged: "some" },
+    { ts: T(3), type: "run_complete" },
+  );
+  assert.deepEqual(summarizeRun(old, done(Date.parse(T(3)))).verification.verify_inconsistent, {
+    pages: 1,
+    content_missing: 0,
+    content_wrong: 0,
+    structure_wrong: 0,
+    a11y_only: 0,
+    alt_quality: 0,
+    untagged_pages: 1,
+    content_or_structure: 0,
+  });
+  assert.deepEqual(summarizeRun("", done(Date.parse(T(0)))).verification.verify_inconsistent, {
+    pages: 0,
+    content_missing: 0,
+    content_wrong: 0,
+    structure_wrong: 0,
+    a11y_only: 0,
+    alt_quality: 0,
+    untagged_pages: 0,
+    content_or_structure: 0,
+  });
+});
+
 test("a correction that bought nothing is counted apart from one that was kept", () => {
   // The cost signal: `identical` and `empty` are page calls that were paid for and
   // produced no change, and `rejected` is one whose change was discarded.
