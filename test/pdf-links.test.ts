@@ -695,6 +695,10 @@ test("an id= inside another attribute's value is not an id this document has", (
   assert.deepEqual(unresolvedRefs(`<div data-id="s1"></div><a href="#s1">x</a>`).ids, ["s1"]);
   // And the same guard on the href side: a query parameter named `href` is not a link.
   assert.equal(unresolvedRefs(`<a href="https://example.org/go?href=%23gone">x</a>`).refs, 0);
+  // The other half of the guard, and the reason a closing quote counts as a separator:
+  // a browser reads this as two attributes, and a page's output is delivered
+  // unserialized when no id collides, so a real id must not go unseen over spacing.
+  assert.equal(unresolvedRefs(`<a href="#x">x</a><p class="a"id="x">x</p>`).dangling, 0);
 });
 
 // ---------------------------------------------------------------------------

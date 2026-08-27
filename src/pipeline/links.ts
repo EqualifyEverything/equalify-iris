@@ -177,12 +177,23 @@ export function droppedHrefs(before: string, after: string): string[] {
 // and a table of contents pointing forty times at one missing section would otherwise
 // spend the whole cap on a single fact.
 //
-// Both attribute scans require whitespace or `<` in front of the name, which matters more
-// than it looks. `\bid=` matches inside ANOTHER attribute's value — a source PDF whose
-// annotation carries `?id=intro` would register `intro` as an id the document contains,
-// silencing a genuinely dead `#intro`, and `data-id="s1"` masks `#s1` the same way (`-` is
-// a non-word character, so `\b` is satisfied). That failure mode is the worst one
-// available here: it hides exactly the defect this function exists to surface.
+// Both attribute scans require whitespace, `<`, or a closing quote in front of the name,
+// which matters more than it looks. `\bid=` matches inside ANOTHER attribute's value — a
+// source PDF whose annotation carries `?id=intro` would register `intro` as an id the
+// document contains, silencing a genuinely dead `#intro`, and `data-id="s1"` masks `#s1`
+// the same way (`-` is a non-word character, so `\b` is satisfied). That failure mode is
+// the worst one available here: it hides exactly the defect this function exists to
+// surface.
+//
+// What it gives up, so the next person to touch the regex has the whole argument: a quote
+// is in the class because a browser reads `class="a"id="x"` as two attributes and a page
+// agent's output is delivered unserialized when no id collides (anchors.ts), so without it
+// a real id would go unseen. The cost is the mirror case — `title='he said "id=y"'`, where
+// the quote is inside a value — which registers an id the document does not have. Both are
+// spellings a model would have to go out of its way to produce, and they fail in opposite
+// directions: the first over-reports a dead reference, the second hides one. Neither is
+// thresholded, so either costs a maintainer a glance rather than a run. Anything more
+// exact than this is a parse, and this function runs on bytes that are already delivered.
 export function unresolvedRefs(html: string): {
   refs: number;
   empty: number;
@@ -191,14 +202,14 @@ export function unresolvedRefs(html: string): {
 } {
   const text = html.replace(/<!--[\s\S]*?-->/g, " ");
   const ids = new Set<string>();
-  for (const m of text.matchAll(/(?<=[\s<])id\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+  for (const m of text.matchAll(/(?<=[\s<"'])id\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
     ids.add(normalizeFragment(m[1] ?? m[2] ?? m[3] ?? ""));
   }
   let refs = 0;
   let empty = 0;
   let dangling = 0;
   const failed = new Set<string>();
-  for (const m of text.matchAll(/(?<=[\s<])href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+  for (const m of text.matchAll(/(?<=[\s<"'])href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
     const href = decodeEntities(m[1] ?? m[2] ?? m[3] ?? "").trim();
     if (!href.startsWith("#")) continue;
     refs++;
