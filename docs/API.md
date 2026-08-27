@@ -385,6 +385,13 @@ loses nothing the conversion would have used. There is one hard ceiling, `max_di
 (8000 px on either edge): above it the model rejects the request outright rather than
 downscaling, so Iris rejects it here instead, reading the dimensions from the file's header.
 
+Both statements in that paragraph are documented for Claude, which is what a deployment normally
+runs. One that runs a vision model Iris has no published limits for gets the same two numbers
+enforced the same way — they are the conservative end of what is known — but they are then
+stand-ins rather than facts about it: nothing promises that the model discards the pixels above
+the long edge, and the 8000 px ceiling is Iris's rule rather than a refusal it has seen. This is
+why `hint` is the thing to quote (§3.1): it is written from whichever of the two holds.
+
 ### 3.1 Upload limits (unauthenticated)
 
 `GET /v1/limits` — unauthenticated. What this deployment accepts, resolved from the model and

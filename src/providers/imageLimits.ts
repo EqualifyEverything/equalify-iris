@@ -351,7 +351,7 @@ interface AgentImageLimits {
 }
 
 function perAgentImageLimits(cfg: IrisConfig): AgentImageLimits[] {
-  const out: AgentImageLimits[] = [];
+  const resolvedAgents: { agent: string; provider: string; model: string }[] = [];
   for (const agent of IMAGE_AGENTS) {
     // A per_agent entry naming a provider with no config block is a startup error
     // (config.ts validateConfig), but this must not be the thing that throws while
@@ -362,10 +362,32 @@ function perAgentImageLimits(cfg: IrisConfig): AgentImageLimits[] {
     } catch {
       continue;
     }
-    const override = (cfg.providers[resolved.provider] as ProviderBlock | undefined)?.image_limits;
+    resolvedAgents.push({ agent, ...resolved });
+  }
+
+  // Which blocks serve NOTHING this file can read. An `image_limits.max_long_edge_px` is
+  // the operator's own number, and on one of these blocks it can only have been written
+  // about a model this file cannot place — there is no other model on it for the operator
+  // to have been reading about. That is what lets the override answer the basis question
+  // below, and why it cannot answer it anywhere else: a block whose default_model is a
+  // Claude and whose `per_agent` sends one agent to a Qwen accepts the same override,
+  // and reading it as an answer would publish "reads at most 2576 px … loses nothing"
+  // about the Qwen — the exact sentence this flag exists to prevent, re-entered through
+  // the escape hatch.
+  const foreignOnly = new Set(
+    [...new Set(resolvedAgents.map((a) => a.provider))].filter((provider) =>
+      resolvedAgents
+        .filter((a) => a.provider === provider)
+        .every((a) => limitsBasisFor(a.model) === "assumed"),
+    ),
+  );
+
+  const out: AgentImageLimits[] = [];
+  for (const { agent, provider, model } of resolvedAgents) {
+    const override = (cfg.providers[provider] as ProviderBlock | undefined)?.image_limits;
     const base64Cap = normalizeOverride(
       override?.max_base64_bytes,
-      BASE64_CAP_BY_PROVIDER[resolved.provider] ?? DEFAULT_BASE64_CAP,
+      BASE64_CAP_BY_PROVIDER[provider] ?? DEFAULT_BASE64_CAP,
     );
     // Derived from THIS provider's cap, so an override of one number still moves the
     // other: raising the base64 cap for a platform that allows 10 MB raises the file
@@ -376,17 +398,20 @@ function perAgentImageLimits(cfg: IrisConfig): AgentImageLimits[] {
     // normalizeOverride sends to the fallback, and treating it as an operator's answer
     // would silence the warning below with a line that changed nothing.
     const edgeOverride = normalizeOverride(override?.max_long_edge_px, 0);
+    const known = limitsBasisFor(model);
     out.push({
       agent,
-      provider: resolved.provider,
-      model: resolved.model,
+      provider,
+      model,
       base64Cap,
       rawCap,
-      longEdge: edgeOverride > 0 ? edgeOverride : longEdgeFor(resolved.model),
-      // An operator who set the long edge for this provider has answered the question
-      // the basis asks, whatever the model id says: the number published is now their
-      // fact about their model rather than this file's guess at it.
-      basis: edgeOverride > 0 ? "documented" : limitsBasisFor(resolved.model),
+      longEdge: edgeOverride > 0 ? edgeOverride : longEdgeFor(model),
+      // Documented when this file knows the model, or when the operator has said what
+      // they know about it: a long edge set on a block that serves nothing else is them
+      // answering the question this asks, and their number stops being anyone's guess.
+      basis: known === "documented" || (edgeOverride > 0 && foreignOnly.has(provider))
+        ? "documented"
+        : "assumed",
     });
   }
   return out;
@@ -569,11 +594,17 @@ export function rasterizedPageRejection(
 // decide which explanation to give, never to reject anything.
 const NORMAL_PAGE_MAX_PX = 2000;
 
+// Says "what this deployment accepts" rather than "what the vision model accepts", which
+// is what it used to say. Both limits it explains are reached by the same page: the byte
+// cap belongs to the provider's endpoint and the 8000 px ceiling is Iris's own rule on any
+// model it has no published limits for (see `dimensionReason`), so neither is the vision
+// model's refusal to attribute — and the page's owner cannot act on whose rule it is
+// anyway. The one sentence that IS about the model is in the hint, which qualifies itself.
 const LARGE_FORMAT_ADVICE =
   `Iris rasterizes every page at a fixed resolution, so the page image scales with the physical ` +
   `page: a page much larger than letter or A4 — a drawing, a poster, a fold-out — renders past ` +
-  `what the vision model accepts. Export or split those pages at a smaller page size, or upload ` +
-  `them as images you have resized.`;
+  `what this deployment accepts for one page image. Export or split those pages at a smaller ` +
+  `page size, or upload them as images you have resized.`;
 
 // Two different documents reach the byte limit, and the remedy differs, so the message
 // has to name the right one. A large-format page is over because of its SIZE. A

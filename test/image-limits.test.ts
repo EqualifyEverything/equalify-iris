@@ -333,6 +333,42 @@ test("an operator who sets the long edge has answered the question", () => {
   assert.equal(visionModelWarning(config), null);
 });
 
+test("an override cannot answer for a model it was not written about", () => {
+  // The override is per provider BLOCK and the basis question is per MODEL, so a block
+  // that serves both can be read as an answer about the wrong one. Here the operator set
+  // 2576 px having read Claude 4.7's documentation — which is what default_model is — and
+  // `per_agent` sends the Feedback Agent to a Qwen on the same block. Reading the override
+  // as an answer published "reads at most 2576 px … loses nothing" about the Qwen: the
+  // exact sentence this flag exists to prevent, re-entered through the escape hatch.
+  const mixed = cfg({
+    default: "bedrock",
+    bedrock: {
+      region: "us-east-1",
+      default_model: OPUS_47,
+      image_limits: { max_long_edge_px: 2576 },
+    },
+    per_agent: { feedback: { model: QWEN_VL } },
+  });
+  assert.equal(resolveImageLimits(mixed).basis, "assumed");
+  assert.match(String(visionModelWarning(mixed)), /feedback/);
+  // The operator's number is still applied — it is their block, and this is about what is
+  // CLAIMED of it, not about second-guessing the limit.
+  assert.equal(resolveImageLimits(mixed).max_long_edge_px, 2576);
+
+  // And the same override on a block that serves nothing else can only have been written
+  // about the model it does serve, so there it is an answer.
+  const foreign = cfg({
+    default: "bedrock",
+    bedrock: {
+      region: "us-east-1",
+      default_model: QWEN_VL,
+      image_limits: { max_long_edge_px: 2576 },
+    },
+  });
+  assert.equal(resolveImageLimits(foreign).basis, "documented");
+  assert.equal(visionModelWarning(foreign), null);
+});
+
 test("a valueless override is not an answer, and does not silence the warning", () => {
   // YAML reads `max_long_edge_px:` with nothing after it as null, which falls back to the
   // table. Treating the presence of the key as the operator's answer would quietly accept
@@ -772,6 +808,30 @@ test("GET /v1/limits does not publish the deployment's model or provider", async
     assert.doesNotMatch(raw, /anthropic/i);
     assert.doesNotMatch(raw, /bedrock/i);
     assert.doesNotMatch(raw, /us-east-1/);
+  } finally {
+    s.close();
+  }
+});
+
+test("and says no more about an unrecognized one than that it is unrecognized", async () => {
+  // Where the line sits, now that the hint qualifies itself. The assumed wording tells an
+  // unauthenticated caller exactly one thing about the deployment: that Iris has no
+  // published image limits for the model behind it. That is the price of not making a
+  // promise about pixels that could be false, it is paid in the text a client is told to
+  // quote rather than in a field of its own, and it must not grow into naming the model —
+  // which is the whole reason `basis` is not published.
+  const s = await serve(
+    limitsRouter(
+      cfg({ default: "bedrock", bedrock: { region: "us-east-1", default_model: QWEN_VL } }),
+    ),
+  );
+  try {
+    const raw = await (await s.get()).text();
+    assert.match(raw, /assumed to read/); // the qualification is there
+    assert.doesNotMatch(raw, /qwen/i);
+    assert.doesNotMatch(raw, /bedrock/i);
+    assert.doesNotMatch(raw, /us-east-1/);
+    assert.doesNotMatch(raw, /claude/i); // nor which family the numbers came from
   } finally {
     s.close();
   }
