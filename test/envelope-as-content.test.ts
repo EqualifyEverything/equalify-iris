@@ -470,12 +470,15 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // stack, so a stack that opens its own sentence or sits behind a count is still one phrase.
     "Page is blank. Faint, isolated marks are visible, no text.",
     "Page is blank. A few faint, scattered specks are visible, no text.",
-    // A full stop, a semicolon and a line break reset the guard's reach, because a stack at the head of
-    // its own clause has nothing to its left to describe. The semicolon form is pinned beside the dash
-    // form below, which is the same claim refused: which verdict a log gets turns on the delimiter the
-    // model typed, and that asymmetry is on record here rather than left to be read off a character
-    // class.
+    // A full stop and a semicolon reset the guard's reach, because a stack at the head of a new clause
+    // has nothing to its left to describe. Pinned beside the dash form below, which is the same claim
+    // refused: which verdict a log gets turns on the delimiter the model typed, and that asymmetry is on
+    // record here rather than left to be read off a character class.
     "This page is blank; only faint, isolated marks are visible.",
+    // A line break resets it on the other ground — layout — and outranks the evidence: a colon at the
+    // end of a line is introducing a list ("Notes:", "Scan quality:") and the lines under it are its
+    // items, so it does not reach them. The same colon INLINE refuses, and is pinned below. Filed here
+    // under the line break rather than the clause, because a colon does not end a clause.
     "Page is blank:\nonly faint, isolated marks are visible, no text.",
     // A doubt word LEADING a stack that opens its own sentence is stripped, and this is the position
     // #220's nine all need. In it the two readings cannot be told apart — `blurry specks` is
@@ -708,6 +711,9 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // is to the left of the stack in the same sentence, so `faint` refuses — a glance, not a page, and
     // no corpus wording puts the marks anywhere but at the start of their own sentence.
     "Page is blank — only faint, isolated marks are visible, no text.",
+    // The same colon as the accepted line-break form above, inline: here it has the clause it governs on
+    // its own line, which is the case the evidence reading is for.
+    "Page is blank: only faint, isolated marks are visible, no text.",
     // Bare `marks` is the marks behind `stray`, `scattered`, `isolated`, `random` or `residual` — the
     // words that say the marks are nowhere in particular — and behind nothing else. `agents/page.md`
     // uses the bare noun for a page that HAS content nobody could read, which is what these are.

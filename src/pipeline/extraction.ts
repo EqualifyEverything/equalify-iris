@@ -783,14 +783,24 @@ const MARK_QUANTIFIER = String.raw`(?:(?:a|an|the|only|just|some|few|several|cou
 // keyboard without one, unspaced it is inside `washed-out` and inside the phrase's own separator.
 //
 // Which punctuation resets the reach and which is evidence is the whole of what this decides, so it is
-// worth stating rather than leaving to be read off the character class. A full stop, a semicolon and a
-// line break RESET it: they start a new clause, and a stack at the head of one has nothing to its left
-// to describe. A colon and a dash do not reset it, because they are the evidence — they say what
-// follows describes the thing just named. So the same claim gets opposite verdicts on the delimiter the
-// model typed: "This page is blank; only faint, isolated marks are visible" declares blank and "Page is
-// blank — only faint, isolated marks are visible" does not, because the dash's own reading is that
-// `blank` is what the stack is about. Both are pinned, and the second is the cost this guard pays: that
-// page is reported failed, which is a glance rather than a page.
+// worth stating rather than leaving to be read off the character class. A full stop and a semicolon
+// RESET it: they end a clause, and a stack at the head of a new one has nothing to its left to describe.
+// A colon and a dash do not reset it, because they are the evidence — they say what follows describes
+// the thing just named. So the same claim gets opposite verdicts on the delimiter the model typed:
+// "This page is blank; only faint, isolated marks are visible" declares blank and "Page is blank — only
+// faint, isolated marks are visible" does not, because the dash's own reading is that `blank` is what
+// the stack is about. Both are pinned, and the second is the cost this guard pays: that page is
+// reported failed, which is a glance rather than a page.
+//
+// A line break resets it too, and on a different ground — layout, not grammar. It ends a note the way a
+// full stop ends a sentence, and it OUTRANKS the evidence: `[^.!?;\n]` cannot span it, so a colon at the
+// end of a line does not reach the line below, while the same colon inline does ("Page is blank:\nonly
+// faint, isolated marks are visible" declares blank; "Page is blank: only faint, isolated marks are
+// visible" does not). Both are pinned. That ranking is deliberate and it is a claim about how these logs
+// are laid out rather than about what a colon means: a colon at the end of a line is introducing a list
+// — "Notes:", "Scan quality:" — and the lines under it are its items, so reading it as a description of
+// what the colon named would refuse a blank page for the shape of the note it came in. Inline, the same
+// colon has the clause it governs on the same line, which is the case the evidence reading is for.
 //
 // One thing that follows and is NOT closed: a doubt word leading a stack that opens its own sentence is
 // stripped, because there is nothing to its left to say otherwise — "Dark, blurry, faint specks
