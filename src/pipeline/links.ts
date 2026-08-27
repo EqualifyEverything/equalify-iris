@@ -40,6 +40,31 @@ function normalizeHref(href: string): string {
     .replace(/\/+$/, "");
 }
 
+// An attribute's value in source HTML: double-quoted, single-quoted, or bare. One
+// definition because `unresolvedRefs` scans two attribute names with it and a difference
+// between the two would be a difference in what counts as a reference versus a target.
+const VALUE = `\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`;
+
+// What may sit immediately before those attribute names. Deliberately NOT anchors.ts's
+// `ATTR_SEP`, and the difference is the whole reason this is written out: that constant is
+// measured for what can precede an attribute in a TAG, and this scan does not read tags —
+// it reads every byte of the delivered document, values and text included.
+//
+// So this is ATTR_SEP without `/`. That character is in ATTR_SEP because `<br/id="x">`
+// parses an `id`; it is out here because a `/` is far commoner inside a URL, where
+// `<a href="https://x.example/id=intro">` registers a phantom `intro` and silences a
+// genuinely dead `#intro` — the direction this function's comment below calls the worse one.
+// The mirror cost is that an id written `<br/id="x">` goes unseen here, so a live `#x` is
+// reported as dangling; that over-reports, which is the direction to fail in, and it needs a
+// page agent to write an attribute with no space in front of it.
+//
+// `<` is not in either class, and for the same reason `/` is out of this one: the first
+// attribute of a tag is preceded by whitespace anyway (`<p id="x">`), so `<` catches nothing
+// a separator does not — while `<id="foo">` is a tag whose NAME the tokenizer reads as
+// `id="foo"`, which would be one more phantom id. An earlier version of this class had it,
+// with a rationale that did not survive being written down.
+const SEP = `[\\s"']`;
+
 // Does this href name a scheme? Both comparisons below are about URLs that came from
 // (or claim to have come from) the source file's annotations, and only an absolute
 // href can be one of those.
@@ -194,6 +219,12 @@ export function droppedHrefs(before: string, after: string): string[] {
 // they hide a dead reference rather than invent one — and the first is the likelier of the
 // two, since a page can transcribe `id=` literally.
 //
+// The class is `SEP` above, which is close to but deliberately not anchors.ts's measured
+// `ATTR_SEP` — see there for the two-character difference and why each class excludes what
+// the other includes. Sharing that constant outright was tried and it made this scan worse:
+// its `/` fires inside a URL path, which is a phantom id, which is the failure mode this
+// paragraph is about.
+//
 // Left as a scan anyway. Every remaining case needs a delivered document that both
 // contains such a value AND has a dead reference to the id that value names, nothing here
 // is thresholded, so the cost is a maintainer's glance rather than a run. The exact fix,
@@ -210,14 +241,14 @@ export function unresolvedRefs(html: string): {
 } {
   const text = html.replace(/<!--[\s\S]*?-->/g, " ");
   const ids = new Set<string>();
-  for (const m of text.matchAll(/(?<=[\s<"'])id\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+  for (const m of text.matchAll(new RegExp(`(?<=${SEP})id${VALUE}`, "gi"))) {
     ids.add(normalizeFragment(m[1] ?? m[2] ?? m[3] ?? ""));
   }
   let refs = 0;
   let empty = 0;
   let dangling = 0;
   const failed = new Set<string>();
-  for (const m of text.matchAll(/(?<=[\s<"'])href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+  for (const m of text.matchAll(new RegExp(`(?<=${SEP})href${VALUE}`, "gi"))) {
     const href = decodeEntities(m[1] ?? m[2] ?? m[3] ?? "").trim();
     if (!href.startsWith("#")) continue;
     refs++;

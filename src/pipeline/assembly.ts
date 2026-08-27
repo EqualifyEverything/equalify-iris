@@ -386,6 +386,20 @@ export async function runAssembly(
       collisions: anchors.collisions,
       pinned_ids: anchors.pinned_ids,
       ambiguous: anchors.ambiguous.map((u) => `page ${u.page}: #${u.ref}`),
+      // The subset aimed at no owner at all, because every page claiming the id already
+      // links to its own copy (#233). Carried separately from `ambiguous` because the two ask
+      // different things of whoever reads this line: an ambiguous reference resolved
+      // somewhere and may well be right, while one of these is a link left bare — the page
+      // that wrote it transcribed a marker whose note nothing in this document holds, which
+      // is a page worth looking at.
+      //
+      // "Left bare", not "dead": two shapes ship a bare copy of the id, and in both the link
+      // still resolves — to a note that has its own marker, which is the defect, but not to
+      // nothing. One is an owner delivered as written (`skipped_pages`), which keeps every id
+      // it has; the other is a `pinned_ids` id, whose first owner is held bare on purpose so
+      // that a frozen reference elsewhere keeps finding it. Whether a reference lands is
+      // measured on the delivered bytes (`internal_links`), not here.
+      unrepointed: anchors.unrepointed.map((u) => `page ${u.page}: #${u.ref}`),
       skipped_pages: anchors.skipped_pages,
     });
   }
