@@ -726,6 +726,13 @@ fbst=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID" | jq -r '.status')
   && pass "the queued re-run's stored status is queued too" \
   || fail "feedback queueing" "GET /sessions/\$SID says '$fbst', expected queued"
 
+# B's pages are written cleanly, which this step needs for a second reason: it is the one
+# session in the run whose delivered document has nothing structurally wrong with it, so it
+# is what pins the `delivered_markup` line as CONDITIONAL (#240). Every other session's page 1
+# carries the defects on purpose, and a log line that appears on every document is a line
+# nobody reads.
+curl -s -X POST -H 'content-type: application/json' -d '{"clean":true}' \
+  "http://localhost:$OR_PORT/__clean-markup" >/dev/null
 qb=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
   -F "images=@$png;filename=queue-b-001.png")
 QB=$(echo "$qb" | jq -r '.session_id')
@@ -759,6 +766,19 @@ qrunning=$(echo "$qlog" | jq -c 'select(.type=="run_queued")' | tail -1 | jq -r 
 [ "$qwait" -gt 0 ] && [ "$qrunning" = "1" ] \
   && pass "the wait is visible in the run log (waited_ms=$qwait, running=$qrunning at submit)" \
   || fail "queue logging" "expected waited_ms>0 and running=1, got waited_ms=$qwait running=$qrunning"
+
+# B's document is the clean one, so the structural check must have run and said nothing (#240).
+# Both halves matter: no `delivered_markup` line, and the `internal_links` line still there —
+# every page keeps its dead `#appendix-a` reference — so an absence caused by the check not
+# running at all would fail here rather than read as a clean document.
+echo "$qlog" | jq -e 'select(.type=="delivered_markup")' >/dev/null \
+  && fail "delivered markup gate" "a clean document logged delivered_markup: $(echo "$qlog" | jq -c 'select(.type=="delivered_markup")')" \
+  || pass "a clean document says nothing about its markup, so the line means something"
+echo "$qlog" | jq -e 'select(.type=="internal_links")' >/dev/null \
+  && pass "and the measurement did run on it — its dead reference is still reported" \
+  || fail "delivered markup gate" "no internal_links either, so the silence above proves nothing"
+curl -s -X POST -H 'content-type: application/json' -d '{"clean":false}' \
+  "http://localhost:$OR_PORT/__clean-markup" >/dev/null   # back to the defective page
 
 # Only the flagged page's image reached the editor earlier; here the point is that
 # the queue did not corrupt either document. B is single-page and must be complete.

@@ -214,8 +214,15 @@ export const SIGNAL_LINKS_UNRESOLVED = "iris:links-unresolved";
 // anchor text. Either way the document the model believes it wrote and the document a browser
 // builds are not the same document, and nothing else here would say so.
 export const SIGNAL_MARKUP_UNBALANCED = "iris:markup-unbalanced";
-// Tables in the delivered document with a header block and no rows under it (#240) — announced
-// to a screen-reader user by caption and column headers, with nothing in them.
+// Tables in the delivered document that hold no row a reader receives as content (#240) —
+// announced to a screen-reader user by caption and column headers, with nothing in them.
+//
+// "No content row" rather than "a header block and no body", because the defect is what the
+// reader gets and it arrives in more than one shape: no rows at all, no row outside a declared
+// `<thead>`, or — where the model declared no header block — no row that is anything but column
+// headers, which is what the parser leaves when a bare `<tr><th scope="col">` becomes the
+// implicit body. A table whose body cells are all `<th scope="row">` is content and is not
+// counted.
 //
 // Measured on the PARSED tree, unlike the signal above, because this is a question about what
 // a reader receives and the parser's recovery is part of that. 1 of 48 tables in one bench
@@ -327,10 +334,10 @@ export interface QualityStats {
   // Unthresholded, like `links_unresolved_rate` and for the same reason — one document of four
   // in the round that found it, and the producers are what a threshold should follow.
   markup_unbalanced_rate: number;
-  // Share of documents delivered with at least one table that has a header block and no rows
-  // under it (#240) — announced by caption and column headers with nothing in it. Measured on
-  // the parsed tree, because that is what a reader gets. No axe rule covers it, and the
-  // captions stay on the deployment: a caption is text out of the user's own document.
+  // Share of documents delivered with at least one table holding no row a reader receives as
+  // content (#240) — announced by caption and column headers with nothing in it. Measured on the
+  // parsed tree, because that is what a reader gets. No axe rule covers it, and the captions stay
+  // on the deployment: a caption is text out of the user's own document.
   table_no_body_rate: number;
   // Share of documents where axe-core could not run.
   lint_error_rate: number;

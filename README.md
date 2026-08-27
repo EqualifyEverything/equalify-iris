@@ -557,8 +557,11 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   tallied as `iris:markup-unbalanced` / `iris:table-no-body`. Two narrowings are worth knowing.
   Only elements whose end tag HTML *requires* are balance-checked: `<ul><li>a<li>b</ul>` is
   correct markup, and counting it would bury the real finding under legal output. And a table
-  counts as empty when it has no row outside its header block, not when it has no `<td>` — a
-  table whose body cells are all `<th scope="row">` is legal and full of content. Nothing here
+  counts as empty when it holds no row a reader receives as *content*, not when it has no `<td>` —
+  a table whose body cells are all `<th scope="row">` is legal and full of content. So what is
+  counted is a table with no rows at all, none outside a declared `<thead>`, or — where the model
+  declared no header block, which is the shape it writes when it has drifted from the page prompt
+  — none that is anything but column headers. Nothing here
   is repaired and no run fails on it: a count with no threshold, on the same argument as
   `internal_links`, until there is enough of a rate to calibrate.
 - **Colliding ids are namespaced during assembly (§7.7 v1.2).** A page is extracted alone and

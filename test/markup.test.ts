@@ -50,6 +50,16 @@ test("comments are stripped first, or every count is noise", () => {
   assert.deepEqual(markupReport(html).unbalanced, []);
 });
 
+test("a comment nobody closed runs to the end, because that is what the parser does", () => {
+  // Stopping at `-->` only would strip nothing here, and then every `<table>` quoted inside the
+  // marker is counted as real markup — a document whose bytes are fine reporting `table 2/1`,
+  // which is the one failure that would make these counts worth ignoring. `wrapDocument` always
+  // closes its markers, so reaching this takes a stray `<!--` in model body text; the point is
+  // that when it happens the check goes quiet rather than wrong.
+  const html = `<table><tr><td>a</td></tr></table><!-- @unresolved: the <table> on page 4 never closes`;
+  assert.deepEqual(markupReport(html).unbalanced, []);
+});
+
 test("a tag name is matched whole, not as a prefix", () => {
   // `<tablet>` is not a `<table>`, and `<article>` must not be counted as an `<a>`. Both would
   // be permanent phantom imbalances on documents that have neither element.
@@ -78,6 +88,33 @@ test("a table with a header block and no rows under it is what survives the pars
   // Well-formed throughout, so the other half of the check says nothing — which is the point:
   // one document had both defects and either can occur without the other.
   assert.deepEqual(report.unbalanced, []);
+});
+
+test("a header-only table written without a thead is still a header-only table", () => {
+  // The shape the check would otherwise miss entirely, and it is the likely one: the parser drops
+  // a bare `<tr><th scope="col">` into the implicit `<tbody>`, so a row of column headers reads as
+  // a body row. To a reader this is the same defect as the `<thead>` version — caption and column
+  // headers announced, nothing under them — and a page agent writes it precisely when it has
+  // drifted from the prompt's `<caption>`/`<thead>`/`<th scope>` instruction, i.e. on the runs
+  // where the defect appears at all.
+  const html = `<table><caption>Table 4. Yield</caption><tr><th scope="col">State</th><th scope="col">Total</th></tr></table>`;
+  const report = markupReport(html);
+  assert.equal(report.tablesWithoutBody, 1);
+  assert.deepEqual(report.emptyTableCaptions, ["Table 4. Yield"]);
+  // One row of headers and one of data is an ordinary table, header block or not.
+  assert.equal(
+    markupReport(`<table><tr><th scope="col">State</th></tr><tr><td>TX</td></tr></table>`).tablesWithoutBody,
+    0,
+  );
+});
+
+test("a declared thead is taken at its word, so an unscoped th below it is content", () => {
+  // The limit of the rule above, deliberately: a table that said where its header ends is not
+  // second-guessed. Without this, a body row of `<th>` cells with no `scope` — legal, if not what
+  // the prompt asks for — would read as a second header block and the table would report empty
+  // while a reader gets both rows.
+  const html = `<table><thead><tr><th scope="col">Region</th></tr></thead><tbody><tr><th>Northeast</th></tr></tbody></table>`;
+  assert.equal(markupReport(html).tablesWithoutBody, 0);
 });
 
 test("a table whose body cells are all row headers is not empty", () => {

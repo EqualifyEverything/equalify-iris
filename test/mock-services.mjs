@@ -155,6 +155,12 @@ let failPage = null;
 // service used to handle silently. Toggled via POST /__suggest.
 let suggestAgent = null;
 
+// When set, page 1's output drops the #240 structural defects below and every page is written
+// cleanly. The e2e uses it to prove the run log stays QUIET on a clean document — the
+// `delivered_markup` line is gated on having something to say, and with every session's page 1
+// dirty there would be nothing behind that gate. Toggled via POST /__clean-markup.
+let cleanMarkup = false;
+
 // When set, the Feedback Agent's TASK: classify call fails with a 500 — the first
 // model call of the post-delivery training step. Lets the e2e prove that training
 // which dies takes nothing with it: the document has already been delivered and the
@@ -177,6 +183,11 @@ const or = createServer(async (req, res) => {
     const raw = await readBody(req);
     suggestAgent = JSON.parse(raw || "{}").name ?? null;
     return json(res, 200, { suggest: suggestAgent });
+  }
+  if (req.method === "POST" && new URL(req.url, "http://x").pathname === "/__clean-markup") {
+    const raw = await readBody(req);
+    cleanMarkup = JSON.parse(raw || "{}").clean === true;
+    return json(res, 200, { clean_markup: cleanMarkup });
   }
   if (req.method === "POST" && new URL(req.url, "http://x").pathname === "/__fail-training") {
     const raw = await readBody(req);
@@ -249,7 +260,7 @@ const or = createServer(async (req, res) => {
         // The div is unclosed rather than the table: an unclosed `<table>` foster-parents
         // everything after it out of the table, which would reorder the delivered text and
         // break the page-order assertions this same document exists to make.
-        (page === 1
+        (page === 1 && !cleanMarkup
           ? `\n<div>\n<table><caption>Table 1. Revenue by region</caption>\n` +
             `<thead><tr><th scope="col">Region</th><th scope="col">Revenue</th></tr></thead></table>\n`
           : ``),

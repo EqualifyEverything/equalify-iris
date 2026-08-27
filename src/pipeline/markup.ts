@@ -68,8 +68,13 @@ export interface MarkupReport {
   // is a stray end tag it discarded, and either says the model's picture of the document's
   // structure and the document's own disagree.
   unbalanced: { element: string; open: number; close: number }[];
-  // Tables in the PARSED document — what a reader's browser really gets, after recovery —
-  // and how many of them have no row outside their `<thead>`.
+  // Tables in the PARSED document — what a reader's browser really gets, after recovery — and
+  // how many of them have no row a reader receives as content: no row outside a declared
+  // `<thead>`, or, where none was declared, no row that is anything but column headers. A table
+  // with no rows at all is counted too, and so is one that put its only data row inside its
+  // `<thead>` — in both the reader is announced a table and given nothing under its headers,
+  // which is the finding. It is deliberately not narrowed to "has a header block and no body":
+  // an empty `<table></table>` is the same defect with less evidence about how it happened.
   tables: number;
   tablesWithoutBody: number;
   // The captions of those tables, trimmed, so a maintainer knows which table to look at
@@ -100,14 +105,39 @@ function countTags(text: string, element: string): { open: number; close: number
   };
 }
 
-// A table's rows that are not part of its header block, and only its own — `:scope` rather
-// than a descendant search, or a nested table's rows would count as the outer table's body
-// and an empty outer table would report as full.
+// A row that holds nothing but column headers, which is what a header-only table's one row is
+// when the model wrote no `<thead>` around it. `.every` on a row with no cells at all is true
+// by the same reading: an empty `<tr>` is not content either.
+//
+// `scope="row"`/`"rowgroup"` is the carve-out and the reason this is not simply "every cell is
+// a `<th>`": a table whose body cells are all `<th scope="row">` is legal and full of content,
+// and calling those rows headers would report every such table as empty. That was the whole
+// argument against the `<td>`-absence test, and it applies here too.
+function isHeaderRow(row: Element): boolean {
+  const cells = [...row.querySelectorAll(":scope > th, :scope > td")];
+  return cells.every(
+    (cell) => cell.tagName === "TH" && !/^row(group)?$/i.test(cell.getAttribute("scope") ?? ""),
+  );
+}
+
+// A table's rows that a reader receives as content, and only its own — `:scope` rather than a
+// descendant search, or a nested table's rows would count as the outer table's body and an
+// empty outer table would report as full.
 //
 // `<tbody>` is in the selector because the parser inserts one whether or not the source did,
 // and `<tfoot>` because a footer row is content a reader can reach.
+//
+// A table that declared a `<thead>` is taken at its word: it said where its header ends, so
+// everything outside is content and nothing here second-guesses it. Only a table that declared
+// no header block gets its rows inspected — the parser drops a bare `<tr><th scope="col">` into
+// the implicit `<tbody>`, so without this a header-only table written without `<thead>` reads as
+// a table with one body row. That is the same defect this exists to count, in the shape a page
+// agent produces exactly when it has drifted from the prompt's `<caption>`/`<thead>`/`<th scope>`
+// instruction — i.e. on the runs where it turns up.
 function bodyRowCount(table: Element): number {
-  return table.querySelectorAll(":scope > tr, :scope > tbody > tr, :scope > tfoot > tr").length;
+  const rows = [...table.querySelectorAll(":scope > tr, :scope > tbody > tr, :scope > tfoot > tr")];
+  if (table.querySelector(":scope > thead")) return rows.length;
+  return rows.filter((row) => !isHeaderRow(row)).length;
 }
 
 // What the delivered bytes say about their own structure.
@@ -118,7 +148,14 @@ export function markupReport(html: string): MarkupReport {
   // an unpredictable amount — measured, the raw bytes of that bench round report `table 25/19`
   // on a document whose real imbalance is nothing at all, and the one genuinely broken document
   // reports `19/15` instead of `16/15`. Every number here would have been noise.
-  const text = html.replace(/<!--[\s\S]*?-->/g, " ");
+  //
+  // An unterminated `<!--` runs to the end, because that is what the parser does with one: a
+  // comment with no `-->` swallows the rest of the document, and matching that is both correct
+  // and the safe direction. Stopping at `-->` only would have left every `<table>` quoted after
+  // a stray `<!--` counted as real markup — a document whose bytes are fine reporting an
+  // imbalance, which is the one failure that would make these counts worth ignoring.
+  // `wrapDocument` always closes its markers, so this needs a stray `<!--` in model body text.
+  const text = html.replace(/<!--[\s\S]*?(?:-->|$)/g, " ");
   const unbalanced: MarkupReport["unbalanced"] = [];
   for (const element of BALANCED_ELEMENTS) {
     const { open, close } = countTags(text, element);
