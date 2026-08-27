@@ -691,13 +691,23 @@ const BLANK_LOG =
 const UNREADABLE_LOG =
   /\b(illegible|unreadable|not legible|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry)|blurr\w*|obscur\w*|resolves?|corrupt\w*|partial\w*|error)\b/i;
 //
-// `smear`, `streak` and `blotch` are here for the reason `dark` is: each names something spread ACROSS
-// the sheet, and a sheet with a streak over it is one where "no text is visible" and "the text is
+// `smear`, `streak` and `blotch` are here for the reason `dark` is: each names something that can lie
+// OVER content, and a sheet with a streak on it is one where "no text is visible" and "the text is
 // covered" are the same sentence. `MARK` excludes all three from its exemption on that argument, but
 // the argument bought nothing while none of them was a doubt word — "a streak covers most of the sheet;
-// no text is visible" had no veto word in it and was delivered blank (issue #226). Their siblings
-// `spots`, `stains` and `shadows` are deliberately NOT here, and the comment on `MARK` now says why:
-// they name something in one place, which a page with writing on it is not described as having.
+// no text is visible" had no veto word in it and was delivered blank (issue #226).
+//
+// The NOUN is what decides, not what the sentence says about its extent: "an ink smear in the lower
+// corner, nothing else" refuses, though a smear in a corner covers no more than the `smudges` `MARK`
+// exempts two lines up. Reading extent would mean trusting the same sentence whose reliability is in
+// question, and the words are near-synonyms a log picks between freely — so the split is which word a
+// log reaches for and nothing finer: `smudges` is #193's, with corpus wordings behind it, and these
+// three are the ones a covering is described with. What that costs is a glance at a page that was
+// fine, which is the trade this file makes everywhere; what reading extent would risk is the page.
+//
+// Their siblings `spots`, `stains` and `shadows` are deliberately NOT here, and the comment on `MARK`
+// says why: they name something in one place, which a page with writing on it is not described as
+// having, and `spots` is a word a log may use for the specks it is already allowed to describe.
 const DEGRADED_IMAGE_LOG =
   /\b(dark|faint|washed|blurry|blurred|noisy|noise|grainy|pixelat\w*|low[- ]?res\w*|resolution|smear\w*|streak\w*|blotch\w*|(poor|low|bad|degraded)( \w+)? quality|quality (is|was|of)|(out of|not in|soft) focus|did ?n[o']?t load|not load\w*)\b/i;
 
@@ -733,9 +743,11 @@ const DEGRADED_IMAGE_LOG =
 // sheet, and either can cover content — which is why `dark` is a veto word at all. Adding them made
 // "the scan shows dark streaks" a blank page. `smudges` stays, as a mark left on the paper.
 //
-// That argument only bit on the three that name something spread ACROSS the sheet, and only once they
-// were doubt words in their own right: `smear`, `streak` and `blotch` are in `DEGRADED_IMAGE_LOG`, so
-// leaving them out here is what keeps them refusing (issue #226). `spots`, `stains` and `shadows` are
+// That argument only bit on the three that name something a reader would have lost content under, and
+// only once they were doubt words in their own right: `smear`, `streak` and `blotch` are in
+// `DEGRADED_IMAGE_LOG`, so leaving them out here is what keeps them refusing (issue #226) — and the
+// comment there says why the noun decides that on its own, without reading how big the log says it is.
+// `spots`, `stains` and `shadows` are
 // out of both lists on purpose, and the reason is narrower than the one above: they name something in
 // ONE PLACE, which is what a scanner leaves and not how a covered page is described — and `spots` is a
 // word a log may reach for to name the specks it is already allowed to describe. So a log that says

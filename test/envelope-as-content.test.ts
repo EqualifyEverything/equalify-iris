@@ -490,6 +490,9 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // `not legible` predicated on the marks by a relative clause, with and without the `as`.
     "Page 16 appears to be blank. No text, images, or other content is visible. Only a few scattered specks/artifacts are present, which are not legible as content.",
     "Page 16 appears to be blank. No text or meaningful content is visible. No page number is printed on the page; the page-break marker uses the sequence number 16 from the file metadata. Only a few scattered specks/artifacts are present, which are not legible marks.",
+    // `smudges` is a mark left on the paper and stays exempt, which is the line the three nouns #226
+    // added are measured against: this is delivered, and `an ink smear in the lower corner` is not.
+    "Page is blank. A few faint smudges on the paper, no text.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -732,6 +735,13 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. Blotches are visible, no text.",
     "Page is blank. Ink is smeared across the sheet, no text.",
     "Page is blank. The scan is blotchy, no text.",
+    // What that costs, raised by #228's review: the noun decides on its own, so a smear the log puts in
+    // one corner refuses too, though it covers no more than the `smudges` `MARK` exempts. Reading the
+    // extent would mean trusting the same sentence whose reliability is the question, and the two nouns
+    // are near-synonyms a log picks between freely. A glance at a page that was fine, pinned as the
+    // price — `A few faint smudges on the paper, no text.` above is the other side of it, delivered.
+    "Page is blank. An ink smear in the lower corner, nothing else.",
+    "Page is blank. A small blotch of toner in the corner, no text.",
     // A comma-separated list continues the denial only while every word in it denies: a verb saying
     // the noun is there ends it, wherever in the list it sits.
     "Page is blank. A few specks. They do not resolve into any characters, printing is visible.",
@@ -1118,8 +1128,17 @@ test("the affirmations a blank page's own log is made of are not contradictions"
     "Page is blank. Faint specks are visible, not legible text, none visible.",
     // A comma'd list with more than one name for text in it is a list and not a clause, whatever the
     // word after its last member is. Without that the middle noun's own index made the last one look
-    // like a statement of its own.
+    // like a statement of its own. `no text, figures, captions visible` is an ordinary way to deny
+    // three things at once, and it is the shape #228's review names as the residual — a log that says
+    // `not legible text, words, heading visible` goes on being delivered blank. The two are the same
+    // sentence to the word, so the reading is a choice about which is likelier and not an oversight,
+    // and it costs the affirmation rather than these denials because a log naming two page objects and
+    // predicating only the second, with no conjunction anywhere, is a wording nothing in the corpus
+    // uses. The one-noun form it does use is refused above.
     "Page is blank. Faint specks do not resolve into any characters, words, diagrams present.",
+    "Page is blank. A few specks, not legible text, figures, captions visible.",
+    "Page is blank. A few specks, not legible text, headings, labels present.",
+    "Page is blank. A few specks, not legible text, words, heading visible.",
     // And the denial's own noun, predicated: `not legible text visible` and `not legible text present`
     // are the commonest wordings in the corpus, and the word after the noun belongs to the denial.
     "Page is blank. Faint specks are visible, not legible text present.",
