@@ -716,12 +716,31 @@ test("the page agent's list rule keeps the clauses that make it a rule", () => {
       /Cut it on the page's own boundaries and no others: a sentence, a semicolon, a printed "then" or "finally"/],
     ["a step whose wording joins two actions stays one item",
       /One step whose wording joins two actions \("add water and run for ten seconds"\) is one item, because the cut that separates them deletes the "and" the page prints/],
+    // The guard the review of #217 asked for. A sentence end is the FIRST boundary this rule
+    // names, so cutting a procedure paragraph at sentences is the normal case — and a paragraph
+    // that mixes directions with a prohibition ("Unplug the unit. Wipe the housing. Never immerse
+    // the base in water.") would then say the caution is step 3 of an order the page never
+    // printed. What makes an item is that the page told the reader to do it.
+    ["only a direction is one of the steps; a caution or an explanation is not",
+      /Only what the page tells the reader to DO is one of those steps: a sentence that warns, explains or states a fact .* is not a step/],
+    ["what an <ol> that numbers it would assert",
+      /an <ol> that numbers it tells the reader the page put a prohibition third in an order it never printed/],
+    ["the caution stays the paragraph it is, where the page printed it",
+      /It stays the <p> it is, where the page printed it, before or after the list the directions around it make/],
+    // And the reading this must not invite: a run of cautions is still a list of cautions. What
+    // the guard excludes is one caution numbered as a step of the procedure it sits in.
+    ["a run of cautions of its own is still a <ul>",
+      /A run of cautions printed as a set of its own is a <ul> of cautions as at the top of this rule/],
+    ["a paragraph left with one direction is a paragraph, not a list of one",
+      /A paragraph left with one direction, or none, is a <p> and not a list of one/],
     ["and with no boundary of the page's to cut on, it stays a paragraph",
-      /Where the page gives no boundary to cut on, it stays a <p>/],
+      /where the page gives no boundary to cut on it stays a <p>/],
     // #216's third ask. The rule already named this block among its examples; what it did not
-    // say is how many items it is, which is the half the session got wrong.
+    // say is how many items it is, which is the half the session got wrong. It answers that on
+    // the merge/split clause rather than inside the example series, where a review of #217 read
+    // the count as one more member of the comma list.
     ["a block of notices is one item per notice",
-      /a block of separate copyright and trademark notices, one <li> per notice/],
+      /never split one instruction across two — a block of four copyright and trademark notices is four <li> elements and not one/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
@@ -843,6 +862,14 @@ test("the page agent promotes a sub-topic the page names, and invents no outline
       /A label the page prints over a cluster of those sub-topics is their parent and not their peer/],
     ["the group label's children step one level down, named concretely",
       /a group label at <h2> makes them <h3>/],
+    // The condition, after the review of #217: as first written it fired only where the title was
+    // "followed by nothing but those sub-topics", so a group label with a lead-in sentence under
+    // it — the common printing of Important Safeguards — fell back to the flat run of <h2>s this
+    // issue reports.
+    ["a lead-in sentence under the label does not make it their peer",
+      /A lead-in sentence of the label's own, or a scope note under it, does not make it their peer/],
+    ["what decides it is whether the label stands over them or beside them",
+      /the question is whether it stands over them or beside them, not whether it was printed alone/],
     // The guard, in the same shape as the promotion rule's: this promotes a label the page
     // prints. A grouping heading the page does not print is an outline invented for it, which
     // is the defect the user asked to fix, with the structure fabricated instead of flattened.

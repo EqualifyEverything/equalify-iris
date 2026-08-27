@@ -192,12 +192,14 @@ Ten structures are easy to render as something that merely looks right, so be ex
   page names no sub-topics there is nothing to add and none is invented — this promotes a label the
   page gives, it does not supply an outline the page does not have.
   A label the page prints over a cluster of those sub-topics is their parent and not their peer:
-  where two or more of them sit under a title that names the group and is followed by nothing but
-  those sub-topics, that title is the heading and they each step one level down under it — a group
-  label at <h2> makes them <h3>, not a run of four <h2>s that says the cord warnings and the
-  grinding instructions are the same kind of thing as each other and as the page's own subject. The
-  label has to be printed: a grouping heading is never invented, and sub-topics the page groups
-  under nothing stay at the level their own content calls for.
+  where two or more of them sit under a title that names the group, that title is the heading and
+  they each step one level down under it — a group label at <h2> makes them <h3>, not a run of four
+  <h2>s that says the cord warnings and the grinding instructions are the same kind of thing as
+  each other and as the page's own subject. A lead-in sentence of the label's own, or a scope note
+  under it, does not make it their peer: what puts it above them is that the sub-topics under it
+  are the ones it names, and the question is whether it stands over them or beside them, not
+  whether it was printed alone. The label has to be printed: a grouping heading is never invented,
+  and sub-topics the page groups under nothing stay at the level their own content calls for.
   Where this page puts two headings of the same level under the same words, they are one section
   and not two: a section title reprinted above content that continues it does not open a new
   section, so emit that title once — the reprint is not a heading and is not emitted as one — give
@@ -284,13 +286,13 @@ Ten structures are easy to render as something that merely looks right, so be ex
   never invent one.
 - LISTS: a group of discrete, parallel items is a list, whatever the page uses to separate them.
   Procedural steps, cleaning or maintenance tasks, a run of cautions, the ingredients of a recipe,
-  a block of separate copyright and trademark notices, one <li> per notice — each of those is a set
-  of items of one kind, and emitting it as a run of <p> elements, or as one <p> with line breaks in
-  it, leaves a
+  a block of separate copyright and trademark notices — each of those is a set of items of one
+  kind, and emitting it as a run of <p> elements, or as one <p> with line breaks in it, leaves a
   screen-reader user no way to know how many items there are, which one they are on, or where it
   ends. Use <ol> where the order is part of the instruction (do this, then that) and <ul> where it
   is not (a set of cautions, a list of parts), with one item's worth of text per <li>: never merge
-  two instructions into one item, and never split one instruction across two. Typography does not
+  two instructions into one item, and never split one instruction across two — a block of four
+  copyright and trademark notices is four <li> elements and not one. Typography does not
   decide this. Items set as separate lines, or run together in one paragraph with "first… then…
   finally", are a list where they are discrete and parallel, and the absence of bullet glyphs is
   not evidence that they are not. Re-cutting prose into items moves no words: "First, remove the
@@ -316,8 +318,15 @@ Ten structures are easy to render as something that merely looks right, so be ex
   maintenance sequence, an installation walk-through — and is an <ol> of its steps. Cut it on the
   page's own boundaries and no others: a sentence, a semicolon, a printed "then" or "finally". One
   step whose wording joins two actions ("add water and run for ten seconds") is one item, because
-  the cut that separates them deletes the "and" the page prints. Where the page gives no boundary
-  to cut on, it stays a <p>.
+  the cut that separates them deletes the "and" the page prints. Only what the page tells the
+  reader to DO is one of those steps: a sentence that warns, explains or states a fact — "Never
+  immerse the base in water", "The housing may still be warm" — is not a step, and an <ol> that
+  numbers it tells the reader the page put a prohibition third in an order it never printed. It
+  stays the <p> it is, where the page printed it, before or after the list the directions around it
+  make. A run of cautions printed as a set of its own is a <ul> of cautions as at the top of this
+  rule; what is excluded here is numbering one of them as a step of the procedure it interrupts. A
+  paragraph left with one direction, or none, is a <p> and not a list of one, and where the page
+  gives no boundary to cut on it stays a <p>.
   Two things this is not. Continuous prose is not a list: a paragraph that explains one thing, or a
   single direction written as one sentence, stays a <p>, and a list of one item is a paragraph. And
   a list is not a way to number things — an <ol> counts its own items, so the numbers the page
