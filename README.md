@@ -154,9 +154,13 @@ from the environment at startup; changes require a restart.
   each of which arrives on a well-formed stream and would otherwise pass every check above and
   deliver partial HTML as a success. The adapter therefore allowlists the reasons that mean whole
   and fails on the rest, so a reason a future model invents is refused rather than trusted. The
-  ceiling keeps its own error (it is the one with a knob to name); running out of context window
-  is reported as a size problem, which routes it to the same retry-without-images path Iris
-  already uses when a request is refused for size up front.
+  allowlist governs **both** dialects: nothing an Anthropic body can send today falls outside it
+  (Iris configures no server tools, guardrails or context management), so the live path does not
+  move — what changes is the direction it fails in when that stops being true. The ceiling keeps
+  its own error (it is the one with a knob to name); running out of context window is reported as
+  a size problem, which routes it to the same retry-without-images path Iris already uses when a
+  request is refused for size up front — one place where that path names a call that was billed
+  in full rather than refused before it ran.
   The Bedrock adapter speaks **two dialects**, chosen by `providers.bedrock.api`. `invoke` (the
   default) is `InvokeModelWithResponseStream` carrying an Anthropic-native body, and it is what
   every published number in this repo was measured through. `converse` is `ConverseStream`, whose

@@ -130,8 +130,16 @@ export function isTruncatedResponseError(e: unknown): boolean {
 //
 // Worth telling apart from every other failure because it is the one a caller can
 // answer: the payload is Iris's own doing (page images, a whole document body), so
-// dropping part of it and asking again is a real recovery, and the refusal is cheap
-// — no prompt was read, so nothing was billed and it comes back in under a second.
+// dropping part of it and asking again is a real recovery, and the refusal is usually
+// cheap — no prompt was read, so nothing was billed and it comes back in under a second.
+//
+// "Usually" because one member of this set is not a refusal at all: Bedrock's Converse
+// API can report `model_context_window_exceeded` as a STOP REASON, after a full
+// generation that was billed in both directions (providers/bedrock.ts). It is matched
+// here on purpose — the remedy is identical, and it is the only one Iris has — but it
+// means the `editor_images_refused` event this routes to can name a call that cost a
+// round of output rather than nothing. The event carries the error message, which is
+// what tells the two apart.
 //
 // Matched on the message, because neither adapter is given anything better. Bedrock
 // raises a ValidationException whose message is "Input is too long for requested

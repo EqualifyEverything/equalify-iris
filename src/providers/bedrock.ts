@@ -296,6 +296,13 @@ function readConverse(event: object): Reading {
 // model or SDK adds is unrecognized, and an unrecognized reason to stop is not a promise
 // that the answer is finished. `refusal` is in the list because a refusal IS a complete
 // response — an unhelpful one, which the verify pass downstream is what judges.
+//
+// It governs BOTH dialects, not just the new one. Today the Anthropic body cannot produce
+// a reason outside this list plus `max_tokens` — Iris sends no server tools (so no
+// `pause_turn`), no guardrail config and no context management — so nothing about the
+// live path changes. What changes is the direction it fails in when that stops being
+// true, and there is no version of "a stop reason we have never seen" that should ship a
+// document.
 const WHOLE_ANSWER_STOP_REASONS = new Set(["end_turn", "stop_sequence", "tool_use", "refusal"]);
 
 // ConverseStream's token counts under the names the rest of Iris uses.
@@ -572,14 +579,12 @@ export class BedrockProvider implements ModelProvider {
     // The wait for whatever follows the stop event, which on ConverseStream is the
     // `metadata` event carrying every token count. Aborts the same controller and is
     // deliberately NOT a StallKind: the message is already complete by the time this is
-    // armed, so it ends the read rather than failing the call (see the catch below).
-    let trailingCutoff = false;
+    // armed, so running out of it ends the read rather than failing the call — which is
+    // `sawStop` in the catch below, not a flag of its own, because every other way the
+    // tail can go wrong is decided the same way.
     const armTrailing = (): void => {
       clearTimeout(stallTimer);
-      stallTimer = setTimeout(() => {
-        trailingCutoff = true;
-        controller.abort();
-      }, this.trailingTimeoutMs);
+      stallTimer = setTimeout(() => controller.abort(), this.trailingTimeoutMs);
     };
     const totalTimer = setTimeout(() => {
       expired = "total";
@@ -641,23 +646,23 @@ export class BedrockProvider implements ModelProvider {
         if (reading.text) text += reading.text;
         if (reading.stopReason) stopReason = reading.stopReason;
         mergeUsage(reading.usage);
-        // Re-armed after accumulating, so `text` reflects this event when choosing the
-        // window. A keepalive is skipped: letting it reset the clock would defeat the
-        // timeout in the one case it exists for — a generation that hangs on a connection
-        // that stays chatty would then run to the 15-minute backstop and report itself as
-        // too large, which is the opposite diagnosis.
-        if (!reading.quiet) progressed();
-        // Once the upstream says the message is over, the silence clocks have nothing
-        // left to protect: the document is in hand, and only the accounting can still
-        // be arriving. So the wait for it gets its own short window, and running out of
-        // it returns the response rather than failing the call — a connection that sends
-        // messageStop and then hangs would otherwise spend 60 seconds and then throw
-        // away a complete document, which is the failure this window exists to avoid,
-        // not one to accept for the sake of a token count.
-        if (reading.stopped) {
-          sawStop = true;
-          armTrailing();
-        }
+        if (reading.stopped) sawStop = true;
+        // Which clock the read runs on from here. Once the upstream says the message is
+        // over, the silence clocks have nothing left to protect — the document is in
+        // hand and only the accounting can still be arriving — so the tail gets its own
+        // short window instead. Re-armed on EVERY event after the stop, not only on the
+        // stop itself: a stream that sends `messageStop`, then anything else this adapter
+        // recognizes, then hangs would otherwise be back to spending a full idle minute
+        // and then discarding a finished document, which is the trade this window exists
+        // to avoid.
+        //
+        // Before the stop, re-armed after accumulating so `text` reflects this event when
+        // choosing the window. A keepalive is skipped: letting it reset the clock would
+        // defeat the timeout in the one case it exists for — a generation that hangs on a
+        // connection that stays chatty would then run to the 15-minute backstop and
+        // report itself as too large, which is the opposite diagnosis.
+        if (sawStop) armTrailing();
+        else if (!reading.quiet) progressed();
         // Nothing further this adapter reads. Stop rather than waiting for the upstream
         // to close the body: nothing today holds it open, but if anything did, a live
         // clock would fire on a response that is already whole. It also stops every
@@ -665,12 +670,17 @@ export class BedrockProvider implements ModelProvider {
         if (reading.done) break;
       }
     } catch (e) {
-      // An abort surfaces from the SDK as an opaque AbortError. If one of our own
-      // clocks fired, that is the real cause and it can be described precisely — except
-      // the trailing one, which is not a failure: the message had already stopped, so the
-      // only thing lost is the usage block, and an unreported call is something
-      // diagnostics already counts (`tokens.calls_reported`).
-      if (!trailingCutoff) {
+      // An abort surfaces from the SDK as an opaque AbortError. If one of our own clocks
+      // fired, that is the real cause and it can be described precisely.
+      //
+      // Unless the message had already stopped, in which case nothing that goes wrong
+      // afterwards is about the document: the text is whole and in hand, and what was
+      // still arriving is only the accounting. So a tail that times out, errors, or hits
+      // the total backstop ends the read rather than throwing away a finished document —
+      // the call is then simply one that reported no usage, which diagnostics already
+      // counts (`tokens.calls_reported`). Discarding a page over a token count would be
+      // the worse trade in either direction.
+      if (!sawStop) {
         if (expired) throw stalled(expired);
         throw e;
       }
@@ -685,7 +695,10 @@ export class BedrockProvider implements ModelProvider {
     // throwing, and an event stream that simply stops early. Both would otherwise
     // return HTML cut mid-tag as a successful result — the exact failure
     // TruncatedResponseError exists to prevent, arriving by a different road.
-    if (expired) throw stalled(expired);
+    //
+    // `!sawStop` for the same reason as the catch above: a clock that fired in the tail
+    // of a message that had already stopped took nothing from the document.
+    if (expired && !sawStop) throw stalled(expired);
     if (!sawStop && !stopReason) {
       throw new Error(
         `bedrock: the response stream ended without completing (${text.length} chars received, ` +

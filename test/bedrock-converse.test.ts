@@ -631,6 +631,57 @@ test("a connection that hangs after the stop event returns the document it alrea
   assert.equal(res.usage, undefined);
 });
 
+test("an event between the stop and the hang does not put the idle clock back", async () => {
+  // The window is re-armed by every event after the stop, not only by the stop itself: if a
+  // recognized event in the tail handed the read back to the 60s clock, a stream that sent
+  // messageStop, one more frame, and then hung would be back to discarding a whole document.
+  const bedrock = new BedrockProvider(
+    { default_model: MODEL, api: "converse" } as never,
+    { trailingTimeoutMs: 60, idleTimeoutMs: 5_000, firstOutputTimeoutMs: 5_000 },
+  );
+  stubConverse(bedrock, async function* (signal: AbortSignal) {
+    yield { contentBlockDelta: { delta: { text: "<p>a whole page</p>" }, contentBlockIndex: 0 } };
+    yield { messageStop: { stopReason: "end_turn" } };
+    yield { contentBlockStop: { contentBlockIndex: 0 } };
+    await sleepUnlessAborted(10_000, signal);
+  });
+  const res = await bedrock.complete(req());
+  assert.equal(res.text, "<p>a whole page</p>");
+});
+
+test("a failure in the tail does not take the document with it", async () => {
+  // Same rule from the other side: the message had already stopped, so a throttling or
+  // stream error arriving afterwards is about the accounting, not about the page. The
+  // document is delivered and the call simply reports no usage.
+  const bedrock = converse();
+  stubConverse(
+    bedrock,
+    script([
+      { contentBlockDelta: { delta: { text: "<p>a whole page</p>" }, contentBlockIndex: 0 } },
+      { messageStop: { stopReason: "end_turn" } },
+      { throttlingException: { message: "slow down" } },
+    ]),
+  );
+  const res = await bedrock.complete(req());
+  assert.equal(res.text, "<p>a whole page</p>");
+  assert.equal(res.usage, undefined);
+});
+
+test("a failure BEFORE the message stops still fails the call", async () => {
+  // The boundary that makes the two tests above safe: the same exception one event earlier
+  // is a partial document, and partial documents are never returned.
+  const bedrock = converse();
+  stubConverse(
+    bedrock,
+    script([
+      { contentBlockDelta: { delta: { text: "<p>half" }, contentBlockIndex: 0 } },
+      { throttlingException: { message: "slow down" } },
+      { messageStop: { stopReason: "end_turn" } },
+    ]),
+  );
+  await assert.rejects(() => bedrock.complete(req()), /throttlingException: slow down/);
+});
+
 test("the trailing window does not rescue a stream that stopped before the message did", async () => {
   // The short window is armed by the stop event and by nothing else, so a stream that goes
   // quiet mid-generation still gets the idle diagnosis rather than a 10-second one.
