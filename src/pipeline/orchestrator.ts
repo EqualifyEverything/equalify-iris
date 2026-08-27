@@ -6,6 +6,7 @@ import {
   SIGNAL_LINKS_DROPPED,
   SIGNAL_LINT_ERROR,
   SIGNAL_EDITOR_TRUNCATED,
+  SIGNAL_EDITOR_TRUNCATED_LOST,
   SIGNAL_REVIEW_UNREAD,
   SIGNAL_ROUNDS,
   SIGNAL_UNRESOLVED,
@@ -300,10 +301,15 @@ export async function runPipeline(args: {
         // A linter that could not run has no violations to report, which is why its
         // failure is recorded as a signal rather than inferred from an empty list.
         ...(review.lint.error ? [{ code: SIGNAL_LINT_ERROR, count: 1 }] : []),
-        // A round that was paid for in full and delivered nothing. Counted per document,
-        // not per round: the loop stops at the first one, because the next request would
-        // be the same length as the one that did not fit.
+        // A round whose whole-body answer was paid for in full and could not be used. Counted
+        // per document, not per round: the loop stops at the first one, because the next
+        // request would be the same length as the one that did not fit.
         ...(review.editorTruncated ? [{ code: SIGNAL_EDITOR_TRUNCATED, count: 1 }] : []),
+        // And whether the sectioned retry left any of the document uncorrected. Two signals
+        // rather than one because they answer different questions — the ceiling this deployment
+        // is paying to work around, against the corrections its readers did not get — and
+        // because a threshold can only be put on the second (see SIGNAL_EDITOR_TRUNCATED_LOST).
+        ...(review.editorTruncatedLost ? [{ code: SIGNAL_EDITOR_TRUNCATED_LOST, count: 1 }] : []),
         // How much of the document the reviewer's last read did not answer about. The one
         // signal here that changes what `clean_rate` MEANS rather than adding a rate beside
         // it: without it, a document whose review said nothing is indistinguishable from one

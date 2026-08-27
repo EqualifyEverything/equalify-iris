@@ -6,6 +6,8 @@ import { join } from "node:path";
 import {
   MAX_QUALITY_WINDOW_DAYS,
   PUBLIC_QUALITY_MIN_DOCUMENTS,
+  SIGNAL_EDITOR_TRUNCATED,
+  SIGNAL_EDITOR_TRUNCATED_LOST,
   SIGNAL_LINKS_DROPPED,
   SIGNAL_LINT_ERROR,
   SIGNAL_REVIEW_UNREAD,
@@ -288,6 +290,7 @@ test("nothing per-session, per-user or per-document is exposed", () => {
       [
         "documents",
         "documents_linted",
+        "editor_truncated_lost_rate",
         "editor_truncated_rate",
         "links_dropped_rate",
         "lint_error_rate",
@@ -382,6 +385,39 @@ test("a document that is not clean for both reasons is subtracted once", () => {
     const q = store.qualityStats();
     assert.equal(q.unresolved_rate, 1 / 20, "the two rates are not disjoint and neither claims to be");
     assert.equal(q.review_unread_rate, 1 / 20);
+  });
+});
+
+// Issue #159. Two rates over one event, because it has two costs and only the narrower one can
+// carry a threshold: the copy editor is asked for the whole document, so its answer is as long
+// as the document, and at a large `max_pages` the ceiling is hit by documents with nothing wrong
+// with them. That is what the wider rate measures — 10 of the 16 truncations in the bench archive
+// came back whole from the sectioned retry, and a threshold on it would have fired three bench
+// rounds running on a pipeline that lost nothing.
+test("a truncation the sectioned retry rescued is counted as a cost, not as a loss", () => {
+  withStore((store) => {
+    // Three documents hit the ceiling; one of them did not come back whole.
+    atFloor(store, (i) =>
+      i < 3
+        ? [
+            { code: SIGNAL_UNRESOLVED, count: 2 },
+            { code: SIGNAL_EDITOR_TRUNCATED, count: 1 },
+            ...(i === 0 ? [{ code: SIGNAL_EDITOR_TRUNCATED_LOST, count: 1 }] : []),
+          ]
+        : [],
+    );
+    const q = store.qualityStats();
+    assert.equal(q.editor_truncated_rate, 3 / 20, "every document that hit the ceiling");
+    assert.equal(q.editor_truncated_lost_rate, 1 / 20, "and only the one that lost corrections to it");
+    // A strict subset of both rates beside it, which is what makes this attribution rather than
+    // a new population: nothing here is a document `unresolved_rate` did not already count.
+    assert.ok(q.editor_truncated_lost_rate <= q.editor_truncated_rate, "the lost rate cannot exceed its parent");
+    assert.equal(q.unresolved_rate, 3 / 20);
+    // And the wider rate is not a loss rate wearing a different name: two of those three
+    // documents were corrected in full, by the expensive route. Compared rather than
+    // subtracted-and-equated, because 3/20 - 1/20 is 0.09999999999999999 in a double and this
+    // assertion is about the pipeline, not about IEEE 754; the two counts are pinned above.
+    assert.ok(q.editor_truncated_rate > q.editor_truncated_lost_rate, "a rescued truncation is not a lost one");
   });
 });
 

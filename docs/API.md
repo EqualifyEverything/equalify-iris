@@ -143,6 +143,7 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   "lint_error_rate": 0.01,
   "documents_linted": 210,
   "editor_truncated_rate": 0.01,
+  "editor_truncated_lost_rate": 0.002,
   "review_unread_rate": 0.01,
   "rules": [
     { "id": "heading-order", "impact": "moderate", "documents": 81, "share": 0.382, "nodes": 240 }
@@ -222,7 +223,22 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   block are the reading that preceded the truncated round and were never looked for again.
   A non-zero value is a statement about the **deployment**, not about the documents: either
   `providers.<name>.max_tokens` is too low for the pages allowed per session, or `max_pages` is
-  too high for it.
+  too high for it. It is deliberately the one rate here with **no threshold** in
+  `.github/workflows/quality-report.yml`, and the rate below is why: on a 100-page document a
+  whole-body rewrite does not fit under a 32,000-token ceiling and never will, so this number
+  rises with document length alone — it went 1/4 → 2/4 → 3/4 across three bench rounds in which
+  every section came back — and an alarm on it would fire on a pipeline that lost nothing (#159).
+* `editor_truncated_lost_rate` — share of documents where that retry did **not** cover the whole
+  body: it was declined or came back with nothing — the run log says which on an
+  `editor_sections_declined` line, whose `reason` is one of `unmeasured`, `budget_too_small`,
+  `budget_exceeds_body`, `indivisible` or `too_many_sections` — or a section truncated in its turn
+  and kept the text it went in with. This is
+  the truncation number that carries a threshold, because it is the one that costs a reader
+  something: those parts of the document had no editor pass at all, and a truncation is the loop's
+  last round, so nothing looks for their issues again. A strict subset of `editor_truncated_rate`
+  above and of `unresolved_rate` — it adds no documents to this tally, it says *why* those
+  documents ended where they did, and the remedy it points at is a `max_tokens` or `max_pages`
+  number rather than a prompt.
 * `review_unread_rate` — share of documents where part of the reviewer's last read of them came back
   **unusable**, so some of the document has no review verdict at all. The document is read in windows
   (long ones in several), and a reply that carries no issue list this code can read — prose, an
@@ -585,7 +601,9 @@ section at a time and `C` of `N` sections came back corrected, so those correcti
 but each was made by a request that saw one section and not the rest of the document; the
 `@unresolved` list is the reading that preceded them and was never taken again, so some of it may
 already be fixed. The bare `@editor-truncated` means nothing was rescued — the round was
-discarded and **none** of the issues below it were worked on. A third comment,
+discarded and **none** of the issues below it were worked on. The bare form, and `C` short of `N`
+in the first, are what `editor_truncated_lost_rate` counts deployment-wide; `C` equal to `N` is a
+document that cost more and lost nothing. A third comment,
 `<!-- @lint-unavailable -->`, says axe-core could not run on this document at all, so **nothing**
 in it was checked for accessibility violations and an empty `@unresolved` is not a clean bill of
 health (§0c `lint_error_rate`). Returns `409` while the session is still running.
