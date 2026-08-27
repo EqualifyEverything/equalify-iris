@@ -14,11 +14,13 @@
 // worked. Three samples, one document, one quantity away. So these four numbers go on the `editor`
 // line, which turns that into one sample per round on the population that actually matters.
 //
-// Both pairs, because a length cannot say whether a round lost content or lost wrappers, which is
-// the question a floor is asked — the same reason #166 needed both on `page_corrected`. Not because
+// Both length pairs, because a length cannot say whether a round lost content or lost wrappers, which
+// is the question a floor is asked — the same reason #166 needed both on `page_corrected`. Not because
 // the three rounds showed the two pairs diverging: no `text_chars_*` ratio exists for a review round
 // yet, and what those three showed beyond length was their STRUCTURE counts moving (0.714–1.333)
-// while their length moved 1.6%, which is an argument for a count this line does not carry.
+// while their length moved 1.6% — one round dropping 5 of 7 lists and 13 of 47 list items. So the
+// counts are on the line too, grouped so that re-levelling a heading is not a heading lost, and the
+// two tests below are the cases each reading sees and the other cannot.
 //
 // This file pins what the numbers mean, not a threshold. There is no threshold yet, and picking one
 // off n=3 is what #174 says not to do.
@@ -28,6 +30,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runReview, type ReviewIssue } from "../src/pipeline/review.ts";
+import { structureCounts } from "../src/pipeline/correction.ts";
 import type { InputImage, PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 
@@ -155,6 +158,50 @@ test("prose the round deleted is visible in the prose sizes, where a floor would
   });
 });
 
+test("the structure a round kept is counted too, which is what those three rounds actually moved", async () => {
+  await withTemp(async (dir) => {
+    // The case the length pairs are blind to, and the one the bench numbers describe: a round that
+    // drops a list. Every word survives — the items become paragraphs — so `text_chars_*` is equal
+    // and `chars_*` barely moves, while a screen-reader user has lost how many items there are,
+    // which one they are on, and where the list ends. That is the loss agents/page.md's LISTS rule
+    // exists to prevent, and until now no number on this line could see it.
+    const before = "<h2>Care</h2><ul><li>Unplug it</li><li>Wipe it</li><li>Dry it</li></ul>";
+    const after = "<h2>Care</h2><p>Unplug it</p><p>Wipe it</p><p>Dry it</p>";
+    const { data } = await round(dir, before, after);
+
+    const from = data.structure_before as Record<string, number>;
+    const to = data.structure_after as Record<string, number>;
+    assert.deepEqual([from.lists, from.items, from.paragraphs], [1, 3, 0]);
+    assert.deepEqual([to.lists, to.items, to.paragraphs], [0, 0, 3]);
+    // What the length pairs say about the same round, pinned here so the two readings are held
+    // against each other rather than separately. The prose pair is exactly equal — no word moved —
+    // and the raw length loses 22%, all of it the tags themselves. Every item in the document is
+    // gone and neither number is anywhere near a floor that a destroyed document would trip.
+    assert.equal(data.text_chars_before, data.text_chars_after);
+    assert.ok(
+      (data.chars_after as number) / (data.chars_before as number) > 0.75,
+      "the length a floor would read is barely down, on a round that deleted the list",
+    );
+  });
+});
+
+test("re-levelling a heading is not a structure lost, because half the page rules are about levels", async () => {
+  await withTemp(async (dir) => {
+    // The reason h1-h6 are one number. agents/page.md promotes a sub-topic the page named, makes a
+    // printed group label the parent of the cluster under it, and puts a procedure's step one level
+    // under its heading — so a round that re-levels a section is doing what it was asked. Counted
+    // per level, every one of those reads as one heading gone and another arrived, and a floor on
+    // "headings lost" would fire on the corrections this pipeline is for.
+    const before = "<h2>Safeguards</h2><h2>Cord</h2><h2>Grinding</h2>";
+    const after = "<h2>Safeguards</h2><h3>Cord</h3><h3>Grinding</h3>";
+    const { data } = await round(dir, before, after);
+
+    assert.equal((data.structure_before as Record<string, number>).headings, 3);
+    assert.equal((data.structure_after as Record<string, number>).headings, 3);
+    assert.equal(data.changed, true, "the round did change the document; what it did not do is lose a heading");
+  });
+});
+
 test("a round that returned nothing usable reports the ratio it is: unchanged, and beside the reason", async () => {
   await withTemp(async (dir) => {
     // The three samples the whole distribution was read off were replies with no usable body in
@@ -176,4 +223,54 @@ test("a round that returned nothing usable reports the ratio it is: unchanged, a
       "the line that says the round did not run is what the equal sizes have to be read with",
     );
   });
+});
+
+// The scan behind those counts, pinned on its own because both sides of every ratio above depend
+// on it reading two fragments the same way — which is the whole reason correction.ts scans rather
+// than parses (a parser that repairs one side differently reports a change that is an artifact of
+// the repair).
+test("the structure scan counts elements, not tags, and reads model output as it arrives", () => {
+  // Opening tags only. A reply that closed its <li> elements and one that did not are the same
+  // document; counting closing tags too would make the numbers depend on how well-formed the
+  // reply happened to be, and a floor would then fire on tidiness.
+  assert.equal(structureCounts("<ul><li>a<li>b</ul>").items, 2);
+  assert.equal(structureCounts("<ul><li>a</li><li>b</li></ul>").items, 2);
+
+  // Prose about markup is not markup — the same reading `attrText` takes, and the reason a page
+  // whose comment mentions a continued list does not count one.
+  assert.deepEqual(
+    structureCounts("<!-- the <ul> continues overleaf --><p>Done</p>"),
+    structureCounts("<p>Done</p>"),
+  );
+
+  // A table is counted in five places, because a round can keep the table and lose the rows — and
+  // because a <th> demoted to a <td> is the loss that strips a screen-reader table of its header
+  // association, with no axe rule behind it to catch what a folded cell count would miss.
+  const t = structureCounts(
+    "<table><caption>Revenue</caption><tr><th>Q1</th><td>9%</td></tr><tr><td>flat</td></tr></table>",
+  );
+  assert.deepEqual([t.tables, t.captions, t.rows, t.header_cells, t.cells], [1, 1, 2, 1, 2]);
+  const demoted = structureCounts("<table><tr><td>Q1</td><td>9%</td></tr><tr><td>flat</td></tr></table>");
+  assert.equal(demoted.header_cells, 0, "the header cell is gone and the count says so");
+  assert.equal(demoted.rows, t.rows, "on a round that kept every row, which is why folding them hides it");
+
+  // An attribute value that contains something tag-shaped is not markup. Counted by scanning for
+  // `<` and a name, the alt text below holds a paragraph — and a round that rewrote only that alt
+  // would then report a paragraph LOST, a structure change invented by the reading.
+  assert.deepEqual(
+    structureCounts('<img src="f3.png" alt="Figure 3 <p> label">'),
+    structureCounts('<img src="f3.png" alt="Figure 3">'),
+  );
+
+  // Wrappers are not structures. A <section>/<div> nest is what the second test above unwraps
+  // legitimately, so it must not read as content arriving or leaving.
+  assert.deepEqual(
+    structureCounts("<section><div><p>One</p></div></section>"),
+    structureCounts("<p>One</p>"),
+  );
+
+  // And <a>/<img> are counted although links.ts and the alt signal already watch their contents:
+  // three links collapsed into one keeps every URL, and a dropped <img> has no other signal.
+  const a = structureCounts('<p><a href="/a">a</a> <a href="/b">b</a></p><img src="c.png" alt="c">');
+  assert.deepEqual([a.links, a.images], [2, 1]);
 });

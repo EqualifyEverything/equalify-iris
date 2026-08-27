@@ -6,7 +6,7 @@ import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseErro
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
 import { stripDeprecatedRoles } from "./roles.ts";
-import { visibleText } from "./correction.ts";
+import { structureCounts, visibleText } from "./correction.ts";
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { joinSections, splitSections } from "./sections.ts";
 import { flatten } from "./flatten.ts";
@@ -1591,7 +1591,7 @@ export async function runReview(
     // `editor_no_output`. #174's whole point is that a floor on the whole-body path cannot be
     // given a number off three samples, and this is what turns three into one per round.
     //
-    // Both pairs, because a length cannot answer the question a floor is asked, which is whether a
+    // Both length pairs, because a length cannot answer the question a floor is asked, which is whether a
     // round lost CONTENT or lost wrappers. `chars_*` is the whole fragment and `text_chars_*` is
     // what a reader receives; markup-only work leaves the second pair equal and moves the first, and
     // a round that deleted a paragraph moves both. That is the same argument, and the same two
@@ -1606,7 +1606,13 @@ export async function runReview(
     // published 0.982 there are the same round measured two ways. What the three do show beyond
     // length is their structure counts moving (0.714–1.333, one round dropping 5 of 7 lists and 13
     // of 47 list items while its length moved 1.6%), so the evidence for a second signal is
-    // evidence for a STRUCTURE count, which this line does not carry and #174's open half may want.
+    // evidence for a STRUCTURE count — which is why `structure_before`/`structure_after` are on this
+    // line as well, and why they are the reading #174's open half is most likely to want. Note the
+    // direction of that evidence: on those three rounds the structure counts are the LESS stable
+    // number, moving in both directions on rounds that were doing their job, so a floor read off
+    // them needs a looser threshold than a length floor and catches less with it. That is an
+    // argument about where to set a number, not about which numbers to record, and it is one of the
+    // things the next few rounds can settle now that both are on the line.
     // No `text_chars_*` ratio exists for a review round at all yet; that is what this produces. The
     // 0.62–2.32 span on 265 page corrections is raw length too — delivered against given, the
     // reading this line takes — so the second pair starts with no corpus, as it did on the page path.
@@ -1625,6 +1631,14 @@ export async function runReview(
       chars_after: body.length,
       text_chars_before: visibleText(before).length,
       text_chars_after: visibleText(body).length,
+      // The third reading, and the one the three measured rounds actually moved (see
+      // `structureCounts`): a length pair cannot tell a round that deleted a list from a round
+      // that unwrapped one, and both pairs above answer in characters. Full counts rather than
+      // only what changed, because a ratio needs its denominator — the question a threshold is
+      // chosen against is "how much of the structure is left", not "did any of it move", and the
+      // second question is already answered by `changed` on this same line.
+      structure_before: structureCounts(before),
+      structure_after: structureCounts(body),
       ...(round.sections ? { sections: round.sections.of, corrected: round.sections.corrected } : {}),
     });
 
