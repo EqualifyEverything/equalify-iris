@@ -450,6 +450,24 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. Specks/dots are visible on the page but do not resolve into any characters or content, and no page number is printed.",
     "Page is blank. Specks/dots are visible but do not resolve into any characters or content; no page-break marker is emitted.",
     "Page is blank. A few scattered specks/dots that appear to be scanning artifacts, not legible text or meaningful content, and no printed page number is visible.",
+    // #220's seven, verbatim from the bench corpus — the same #190 case in wordings the exemption did
+    // not reach, and every one of them a page reported as a hole in a document that has none. They
+    // were latent until #219: each spells its empty page in markup, so none of them reached this
+    // predicate at all.
+    //
+    // `scanning noise` names the class the specks belong to rather than the state of the capture.
+    "Page 8 of 25 appears to be blank or nearly blank. Only a few scattered specks/artifacts are visible, consistent with scanning noise. No legible text, images, tables, or other content could be identified.",
+    // A stack of modifiers written as a list, with `isolated` letting bare `marks` be the marks.
+    "Page 14 of 25 appears to be blank or nearly blank. Only faint, isolated marks are visible (a small dot near the upper-left area and a few very faint specks elsewhere) that do not resolve into any characters, words, diagrams, or other content. No text, images, tables, or other elements were transcribed.",
+    // `do not resolve into` with more nouns conjoined onto the object than the tail read would follow:
+    // the comma is the list continuing, not the denial ending.
+    "Page 14 appears to be blank or nearly blank. No legible text or meaningful content is visible. A few faint specks or artifacts are present but do not resolve into any characters, images, or structure. No page number is printed on the page itself, so the page-break marker uses the sequential page number 14 from the file position.",
+    "Page 14 appears to be blank. A few very faint specks or marks are visible but do not resolve into any legible text, images, or other content. No page number is printed on the page. The page-break marker has been emitted without a page number since none is visible; if a number is confirmed from document metadata it should be added. No content to transcribe.",
+    // The same wording with the qualifier spelled the British way, which is a per-call choice.
+    "Page 14 appears to be blank. No readable text or meaningful content is visible. A few faint specks or marks are present but do not resolve into characters or recognisable content. No page number is printed on the page; the page-break marker uses the sequential position (14) from the file metadata.",
+    // `not legible` predicated on the marks by a relative clause, with and without the `as`.
+    "Page 16 appears to be blank. No text, images, or other content is visible. Only a few scattered specks/artifacts are present, which are not legible as content.",
+    "Page 16 appears to be blank. No text or meaningful content is visible. No page number is printed on the page; the page-break marker uses the sequence number 16 from the file metadata. Only a few scattered specks/artifacts are present, which are not legible marks.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -633,6 +651,26 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // `printing|prints` without bare `print` was the same two-lists-disagree-about-one-word shape as
     // `content`: `NOT_LEGIBLE_TEXT`'s own lookahead has counted `print` as a name for text all along.
     "Page is blank. A few specks are visible, but the print does not resolve into words.",
+    // The doors #220's fix opens, each shut on the constraint the issue names. `noise` is the marks
+    // only where a word in front of it says what made them: the scan being noisy is the scan.
+    "Page is blank. The scan is noisy.",
+    "Page appears blank. There is noise in the scan.",
+    // A comma may join two modifiers of a marks noun, and a description of the capture is not one:
+    // the phrase starts after `with`, so both doubt words stay.
+    "Page is blank. The scan is dark, blurry, with a few specks and no text.",
+    // Bare `marks` is the marks behind `stray`, `scattered`, `isolated`, `random` or `residual` — the
+    // words that say the marks are nowhere in particular — and behind nothing else. `agents/page.md`
+    // uses the bare noun for a page that HAS content nobody could read, which is what these are.
+    "Page is blank. Only faint marks are visible, no text.",
+    "Page is blank. Handwritten marks are visible; they are not legible as content.",
+    // `as` between `not legible` and the noun is still anchored to a marks noun, so a log that names
+    // none says its heading could not be read.
+    "Page is blank. The heading is not legible as printed text.",
+    "Page is blank. The pen marks are not legible as text.",
+    // A comma-separated list continues the denial only while every word in it denies: a verb saying
+    // the noun is there ends it, wherever in the list it sits.
+    "Page is blank. A few specks. They do not resolve into any characters, printing is visible.",
+    "Page is blank. A few specks. They do not resolve into any characters, words, a heading is visible.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }
@@ -718,6 +756,12 @@ test("a log that says something is on the page contradicts its own blank claim",
     "Page is blank. Headings are visible.",
     "Page is blank. Some words remain visible.",
     "Page is blank. A caption was visible at the foot.",
+    // `printed` behind a copula is a participle and not a subject (#220), and nothing is lost by
+    // reading it that way: the affirmation here is `heading`, two words earlier, and it finds the same
+    // verb. Pinned beside the denial it was costing ("No page number is printed on the page itself,
+    // but…", above), because the two turn on the same word.
+    "Page is blank. The heading is printed on the page.",
+    "Page is blank. A caption is printed at the foot.",
     // The transitive shape, where the subject is the paper and the text is the object — invisible to a
     // subject-verb scan, and measured as delivered-blank before the branch that reads it existed.
     "Page is blank. The page contains handwriting.",
@@ -883,6 +927,14 @@ test("the affirmations a blank page's own log is made of are not contradictions"
     "Page is blank. No visible text, images or diagrams are present.",
     "Page is blank. Nothing but faint specks; no words, lines or numerals are visible.",
     "Page is blank. No content of any kind, printed or handwritten, is present.",
+    // #220's two, verbatim from the corpus, and both are denials the walk stopped one word short of.
+    // The first coordinates two nouns with a word between the second and its qualifier that names no
+    // text and joins no clause, so `content` read as un-negated and found the list's own `is present`.
+    "Page 14 appears to be blank. No readable text or meaningful visual content is present. A few faint specks/artifacts are visible but carry no informational content.",
+    // The second is a denial of the page NUMBER, in the passive: `printed` is the one name for text in
+    // this file that is also something a page can be, and read as a subject it reached the affirming
+    // verb of the clause after the `but` — a clause about where the number came from.
+    "Page 4 appears to be blank. Only a few scattered specks/dust marks are visible; no text, images, tables, or other content is present. No page number is printed on the page itself, but the file metadata indicates this is page 4 of 25, so the page-break marker has been emitted with that number.",
     // The same shape with the other joiners and the longer lists these logs use. The fourth is the
     // page-number clause `agents/page.md` asks for with one more noun conjoined onto it, which is
     // #190's own log — the defect this whole area exists downstream of.
@@ -1284,6 +1336,16 @@ test("a markup-spelled declaration the veto refuses is the failed page an empty 
     assert.equal(refused.length, 1);
     assert.equal(refused[0].shape, "empty_html", "an envelope that was read perfectly and carried no page");
     assert.deepEqual(refused[0].blank_vetoed, ["too dark to", "dark"]);
+    // And the line that has to be triaged carries the markup the veto word was written beside, which
+    // is what makes a wording like #220's a grep rather than a corpus replay (#223). `chars` is the
+    // whole reply, so it cannot stand in for the fragment.
+    assert.equal(refused[0].dropped, "<!-- blank page -->");
+    // The message says what arrived. `no HTML` for a reply that sent a comment is the same wrong
+    // reading of `empty_html` that sent #190's four pages to be traced by hand, and this string is
+    // what `page_extraction_failed.error` carries into the run.
+    const error = String(of(events, "page_extraction_failed")[0].error);
+    assert.match(error, /no page in 19 chars of HTML/);
+    assert.doesNotMatch(error, /no HTML/);
     assert.match(fragments.find((f) => f.order === 2)!.innerHtml, /@page-failed 2:/);
   });
 });

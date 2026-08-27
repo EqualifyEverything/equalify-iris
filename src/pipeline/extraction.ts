@@ -724,7 +724,20 @@ const DEGRADED_IMAGE_LOG =
 // is not: a dark streak or a dark spot is a condition of the capture rather than something on the
 // sheet, and either can cover content — which is why `dark` is a veto word at all. Adding them made
 // "the scan shows dark streaks" a blank page. `smudges` stays, as a mark left on the paper.
-const MARK = String.raw`specks?|speckles?|speckling|flecks?|dots?|dust|debris|smudges?|blemishes?|artifacts?|stray marks?|stray markings?`;
+//
+// What lets bare `marks` in behind one of these words is what the word says about them: `stray`,
+// `scattered`, `isolated`, `random` and `residual` place the marks nowhere in particular, which is
+// what a scanner leaves and not how a page with writing on it is described. `stray` was here alone
+// and the other four are #220's wordings ("Only faint, isolated marks are visible … that do not
+// resolve into any characters"). Bare `marks` still refuses on its own, so `handwritten marks`, `pen
+// marks` and `blurry marks` are the content-bearing pages #193 kept them for.
+const SPARSE = String.raw`stray|scattered|isolated|random|residual`;
+// `noise` is a veto word and standing alone it is a claim about the image, but named for the thing
+// that made it — `scanning noise`, `scanner noise`, `scan noise` — it names the marks instead: it is
+// the class the specks belong to, which is what "consistent with scanning noise" says about them.
+// `the scan is noisy` and `there is noise in the scan` have no such word in front of the noun and go
+// on refusing (#220).
+const MARK = String.raw`specks?|speckles?|speckling|flecks?|dots?|dust|debris|smudges?|blemishes?|artifacts?|(?:${SPARSE})\s+mark(?:s|ings?)?|(?:scan|scanner|scanning)[\s/-]?noise`;
 // What may stand between a quantifier and that noun. The veto words are here on purpose — `faint
 // specks` is the paper and `faint scan` is the image — alongside the words that are not veto words
 // at all, because the run has to reach the noun in one piece to match ("a few scattered
@@ -739,9 +752,14 @@ const MARK_MODIFIER = String.raw`faint|light|pale|grey|gray|dark|darker|noisy|gr
 // `noise` is only in the joined tail (`dust/noise`, `specks, noise`) and never a head, because it
 // is a veto word itself and standing alone it is a claim about the image: "the scan has noise"
 // must go on refusing the declaration.
+// A comma may stand between two of the modifiers, because a stack of them is written as a list as
+// often as not: "Only faint, isolated marks are visible" is one phrase, and matching it from
+// `isolated` left `faint` behind to veto the page as a doubt about the scan (#220). The head is still
+// a marks noun, so the comma widens what may dress those nouns and nothing else — "The page is dark,
+// with faint specks" keeps its `dark`, since `with` is not a modifier and the phrase starts after it.
 const MARKS_PHRASE = new RegExp(
   String.raw`\b(?:(?:a|an|the|only|just|some|few|several|couple|of)\s+){0,4}` +
-    String.raw`(?:(?:${MARK_MODIFIER})[\s/-]+){0,3}` +
+    String.raw`(?:(?:${MARK_MODIFIER}),?[\s/-]+){0,3}` +
     `(?:${MARK})(?:\\s*[/,&]\\s*(?:${MARK}|noise))*`,
   "gi",
 );
@@ -816,9 +834,12 @@ const MARKS_GAP = String.raw`(?:(?!${NEGATED}\b(?:${TEXT_NOUN})\b)[^.;])*`;
 // inverted form is the same door again ("Nor does the barcode resolve into words"). `nor` and
 // `neither` are prefixes only for the same reason: inversion is what they are for, and a bare one
 // swallowed the subject that followed it.
-// Names for what a page bears, and what may qualify one, for the `any` branch below.
+// Names for what a page bears, and what may qualify one, for the `any` branch below. `recogni[sz]able`
+// is the one word in any of these lists whose British and American spellings both arrive — one #220
+// log is written "recognisable content" — and the spelling a log picks is a per-call choice, so every
+// list that names the word names both spellings.
 const TAIL_NOUN = String.raw`(?:text|texts|content|words?|characters?|print(?:s|ed|ing)?|writing|markings?|lines?|letters?|glyphs?|digits?|numerals?|figures?|images?|handwriting|anything|something)`;
-const TAIL_QUALIFIER = String.raw`(?:a|an|any|no|the|some|other|more|meaningful|legible|readable|printed|typed|visible|discernible|recognizable|clear)`;
+const TAIL_QUALIFIER = String.raw`(?:a|an|any|no|the|some|other|more|meaningful|legible|readable|printed|typed|visible|discernible|recogni[sz]able|clear)`;
 const CONT_CORE =
   String.raw`(?:(?:they|these|those)\b` +
   String.raw`|(?:it|this)\s+(?:doesn'?t|isn'?t|wasn'?t)\b` +
@@ -869,8 +890,15 @@ const MARKS_NOT_TEXT = new RegExp(`${MARKS_ANCHOR}\\bresolves?\\s+(?:in)?to\\b`,
 // would otherwise place the text. A `?` anywhere in the statement refuses: "Not legible text?" is the
 // model asking whether the page is empty rather than saying it is, and a bare one is the one hedge
 // `HARD_DOUBT` cannot see.
+// `as` between the two is the same denial with the noun made a predicate of the marks rather than the
+// object of the reading: "specks/artifacts are present, which are not legible AS content" and "…are
+// not legible content" say the one thing, and only the first was refused (#220). And `marks` joins
+// `markings` in the noun list for the same reason it is a `MARK` behind one of the `SPARSE` words: the
+// anchor is what decides whether marks are the subject at all, and it has already found a marks noun
+// with no name for text since — "The typed lines are not legible marks." reaches no anchor and goes on
+// refusing, as does anything the anchor cannot cross a boundary into.
 const NOT_LEGIBLE_TEXT = new RegExp(
-  `${MARKS_ANCHOR}\\bnot legible\\s+(?:text|content|words?|characters?|print(?:ed|ing)?|writing|markings?)\\b`,
+  `${MARKS_ANCHOR}\\bnot legible\\s+(?:as\\s+)?(?:text|content|words?|characters?|print(?:ed|ing)?|writing|mark(?:s|ings?)?)\\b`,
   "gi",
 );
 // Nothing here is a veto word except by describing the marks, so a doubt word smuggled into the tail is
@@ -890,7 +918,13 @@ const DENIAL_WORD = new Set(
     "paragraphs sentence sentences heading headings caption captions label labels legend legends " +
     "dust speck specks speckle speckles speckling fleck flecks dot dots debris smudge smudges blemish " +
     "blemishes artifact artifacts scanner scanning stray scattered faint tiny small minor isolated random " +
-    "residual noise grain"
+    "residual noise grain " +
+    // The rest of the list a denial of content is written as. `structure`, `diagrams` and
+    // `illustrations` are #220's wordings ("do not resolve into any characters, images, or
+    // structure", "…any characters, words, diagrams, or other content") and are the same kind of
+    // word as the `figures` beside them; `recognisable` is `recognizable` as a log spelled it, and
+    // every list that names one names both, because which spelling arrives is a per-call choice.
+    "structure structures diagram diagrams illustration illustrations recognisable"
   ).split(" "),
 );
 // The vocabulary above is what a denial is BUILT from, and the same bricks build the opposite claim:
@@ -908,7 +942,8 @@ const PAGE_BEARS = new Set(
     "text texts content contents word words character characters letter letters glyph glyphs digit " +
     "digits numeral numerals figure figures line lines print prints printing writing handwriting " +
     "typing mark marks marking markings paragraph paragraphs sentence sentences heading headings " +
-    "caption captions label labels legend legends"
+    "caption captions label labels legend legends diagram diagrams illustration illustrations " +
+    "structure structures"
   ).split(" "),
 );
 const DENIAL_CONNECTOR = new Set("no not nor neither none nothing or and any".split(" "));
@@ -936,7 +971,7 @@ const NEGATOR = new Set("no not nor neither none nothing".split(" "));
 // alternative refuses a wording blank pages are actually written in.
 const AFFIRMING_VERB = new Set("is are was were appear appears remain remains contain contains hold holds".split(" "));
 const QUALIFIER = new Set(
-  "meaningful legible readable printed typed visible discernible apparent recognizable clear other more".split(" "),
+  "meaningful legible readable printed typed visible discernible apparent recognizable recognisable clear other more".split(" "),
 );
 // `image` is the one word the lists genuinely disagree about: it is the substrate in "not legible text
 // in this image" and a thing the page bears in "an image is visible", and both wordings are ones these
@@ -982,9 +1017,23 @@ function deniesToStatementEnd(log: string, start: number): boolean {
   return words.every((word, i) => {
     if (!PAGE_BEARS.has(word) && !LOCATIVE_SUBSTRATE.has(word)) return true;
     let before = i - 1;
-    while (before >= 0 && QUALIFIER.has(words[before]!)) before--;
-    if (before >= 0 && DENIAL_CONNECTOR.has(words[before]!)) {
-      if (!CONJUNCTION.has(words[before]!)) return true;
+    // Over a qualifier, and over an earlier member of the same list: what governs the first noun in
+    // `any characters, words, diagrams, or other content` governs all four, and each of them is
+    // checked at its own index anyway, so a name for text between this noun and its connector is one
+    // more list member and not a new claim. The same coordination rule `negatedInList` applies from
+    // the other side. A determiner still stops the walk, which is what keeps `only a heading is
+    // visible` the affirmation it is.
+    while (before >= 0 && (QUALIFIER.has(words[before]!) || PAGE_BEARS.has(words[before]!))) before--;
+    // A noun that OPENS the statement is in the same position as one a conjunction introduced, and for
+    // the same reason: the denial in front of the construction is what governs it, and the only thing
+    // between them is the comma the list is written with. "…do not resolve into any characters,
+    // images, or structure" denies three nouns, and reading the comma as the end of the denial refused
+    // four of #220's nine logs on the `resolve` in front of them. Read exactly as `or` is, not more
+    // loosely — a verb saying the noun is there still refuses, so "…into any characters, printing is
+    // visible" is the failure notice it always was.
+    const openedStatement = before < 0;
+    if (openedStatement || DENIAL_CONNECTOR.has(words[before]!)) {
+      if (!openedStatement && !CONJUNCTION.has(words[before]!)) return true;
       const tail = words.slice(i + 1);
       const nextDenial = tail.findIndex((later) => NEGATOR.has(later));
       const governed = nextDenial === -1 ? tail : tail.slice(0, nextDenial);
@@ -1008,7 +1057,7 @@ function deniesToStatementEnd(log: string, start: number): boolean {
 // characters or content" still declares the page blank and "…into any characters, only a heading in
 // the margin" does not.
 const RESOLVE_OBJECT = new RegExp(
-  String.raw`^\s*(?:(?:a|an|any|the|some|few|several|more|other|meaningful|legible|readable|printed|typed|visible|discernible|apparent|recognizable|clear)\s+)*[A-Za-z][A-Za-z'-]*`,
+  String.raw`^\s*(?:(?:a|an|any|the|some|few|several|more|other|meaningful|legible|readable|printed|typed|visible|discernible|apparent|recogni[sz]able|clear)\s+)*[A-Za-z][A-Za-z'-]*`,
 );
 function deniesAfterResolveObject(log: string, start: number): boolean {
   // Bounded so the scan stays O(1) per match, the same reason `DENIAL_STATEMENT_MAX` exists.
@@ -1134,6 +1183,21 @@ function definiteBefore(tokens: Word[], i: number): boolean {
   return k >= 0 && DEFINITE.has(tokens[k]!.word);
 }
 
+// A word that is both a name for text and something a page can BE is a participle behind a copula, and
+// there is exactly one of those: `printed` is in `TEXT_NOUN` and in `QUALIFIER` both, the same overlap
+// `exceptiveOrLocativeObject` settles for the object of a denial. "No page number IS PRINTED on the
+// page itself, but the file metadata indicates this is page 4 of 25" is a denial of the page number,
+// and taking `printed` for a subject of its own handed it the next affirming verb in the sentence —
+// ten words and a `but` away, in a clause about where the number came from — which reported a blank
+// page as lost (#220). Nothing is missed by skipping it: "The heading is printed on the page" affirms
+// through `heading`, which is a subject the loop reads two words earlier and finds the same `is` for.
+const COPULA = new Set("is are was were be been being isn't aren't wasn't weren't".split(" "));
+function participleAfterCopula(tokens: Word[], i: number): boolean {
+  if (!QUALIFIER.has(tokens[i]!.word)) return false;
+  const before = tokens[i - 1];
+  return before !== undefined && COPULA.has(before.word);
+}
+
 function negatedBefore(tokens: Word[], i: number): boolean {
   for (let k = Math.max(0, i - AFFIRM_LOOKBACK); k < i; k++) {
     if (NEGATOR.has(tokens[k]!.word) || tokens[k]!.word === "without") return true;
@@ -1151,9 +1215,14 @@ function negatedBefore(tokens: Word[], i: number): boolean {
 // `handwritten` and its spellings are here rather than in `QUALIFIER`, which four other functions
 // read: what they are needed for is reaching back over `no printed or handwritten content`, and
 // widening the qualifier list would change how the denial tails and the object gaps are read too.
+//
+// `visual` is here for the same reason and from the same measurement: "No readable text or meaningful
+// VISUAL content is present." is one denial of two coordinated nouns, and the one word between the
+// second noun and the qualifier in front of it was enough to end the walk — so `content` found the
+// list's shared `is present` and a blank page was reported lost (#220).
 const CHAIN_LINK = new Set(
   ("or and either handwritten hand-written typewritten of any all at whatsoever else kind sort type " +
-    "page pages number numbers").split(" "),
+    "page pages number numbers visual").split(" "),
 );
 // A coordination has no length limit, so this walk needs one: a log with two hundred conjoined nouns
 // in it should not be re-read from every one of them. Sixteen tokens is longer than any denial the
@@ -1277,7 +1346,7 @@ const NEGATIVE_COMPLEMENT = new Set(["absent", "missing", "nowhere", "nonexisten
 // are the wording a partial denial reaches for ("absent from the top and printed at the bottom").
 // The overlap with `TEXT_NOUN` on `printed` is NOT deliberate in the same way: see the object walk.
 const AFFIRMING_COMPLEMENT = new Set(
-  "present visible legible readable discernible apparent recognizable shown printed typed written handwritten stamped".split(" "),
+  "present visible legible readable discernible apparent recognizable recognisable shown printed typed written handwritten stamped".split(" "),
 );
 // What a predicate complement may tail into. A complement standing at the end of its clause, or
 // running on into a place, is the clause's own predicate — `and present at the bottom`, `and still
@@ -1489,7 +1558,7 @@ export function contentAffirmed(scope: string): string | null {
         if (noun >= 0) return tokens.slice(i, noun + 1).map((t) => t.word).join(" ");
         continue;
       }
-      if (!AFFIRMED_NOUN.test(word) || negatedInList(tokens, i)) continue;
+      if (!AFFIRMED_NOUN.test(word) || negatedInList(tokens, i) || participleAfterCopula(tokens, i)) continue;
       if (LOCATIVE_SUBSTRATE.has(word) && definiteBefore(tokens, i)) continue;
       const verb = reach[i + 1]!;
       if (verb < 0) continue;
@@ -1727,15 +1796,28 @@ async function renderPage(
     // A declaration the veto refused is recorded as the refusal it is, with the words that did it:
     // the failure line alone reads as "the model answered with no page", which is the opposite of
     // what happened, and every page issue #190 recovered had to be traced back to a word by hand.
+    //
+    // `dropped` belongs here as much as on the two lines above, and for the same reason one line
+    // further on: this is where a refused declaration lands, so this is the line that has to be
+    // triaged, and `chars` counts the whole reply rather than the fragment. Without it the wording that
+    // walked into the veto is on record and the markup it was written beside is not — the half of
+    // #219's reconstruction the fix left behind (#223).
     ctx.log.event("page_no_output", {
       image: img.name,
       page: img.order,
       chars: res.text.length,
       shape,
+      ...dropped,
       ...(declaration.asserted ? { blank_vetoed: declaration.vetoes, log: parsed?.log ?? "" } : {}),
       ...(declaration.affirmed ? { blank_contradicted: declaration.affirmed } : {}),
     });
-    throw new Error(`page agent returned no HTML (${shape}, ${res.text.length} chars)`);
+    // The message says what arrived, which for a fragment carrying nothing is not "no HTML": a reply
+    // that sent a comment or a bare marker sent HTML, and it is `page_extraction_failed.error` that
+    // carries this string to whoever reads the run.
+    const arrived = html?.trim()
+      ? `no page in ${html.trim().length} chars of HTML`
+      : `no HTML (${shape}, ${res.text.length} chars)`;
+    throw new Error(`page agent returned ${arrived}`);
   }
   const sa = parsed?.suggested_agent;
   return {
