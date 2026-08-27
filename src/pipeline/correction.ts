@@ -86,52 +86,83 @@ const CONTENT_WITHOUT_TEXT =
 // aria-label="A photo of the mayor"></div>` — a picture, announced as one, with a description a reader
 // hears — read as an empty wrapper and carried nothing.
 //
-// A role that names one of the things in the list above is that thing: `img`, `figure`, `math` and
-// `table` are the picture, the equation and the grid written on a neutral element, `graphics-*` is how
-// an inline drawing arrives when it is not an `<svg>`, and an interactive role is a control. Roles that
-// say the element is NOT content are absent for the reason a page-break `<hr>` is: `presentation`,
-// `none` and `separator` describe where something sat rather than what was on it.
+// Each role here says the element IS one of the things above, written on a name that says nothing:
+// `img` and `graphics-*` are the picture when it is not an `<img>` or an `<svg>`, `math` is the
+// equation, and `table`, `grid` and `treegrid` are the grid whose cells the list above already allows
+// to be empty. The control roles are `<input>`, `<select>` and `<button>` the same way, plus the
+// members of a composite widget — an `option`, a `tab`, a `menuitem` — which HTML has no entry in that
+// list for and which are as much a thing to operate as the widget around them.
+//
+// This set is NOT a mirror of the element list, and two absences are where it would read as one.
+// `figure` is out because `<figure>` is out: both are a wrapper, and an empty one hands a reader
+// nothing — a role cannot make a box that holds nothing into a picture. `meter` and `progressbar` are
+// out because `<meter>` and `<progress>` are, and a gauge with no value on it is the same empty box.
+// `link` is out of this set for a different reason and handled below, because a link is content when a
+// reader can hear what it is and not before, however it is spelled. Roles that say the element is not
+// content are absent for the reason a page-break `<hr>` is: `presentation`, `none` and `separator`
+// describe where something sat rather than what was on it, and `doc-pagebreak` is the one this prompt
+// actually asks for — 18 of the corpus's 33 markup-spelled blanks are a bare page-break marker, so it
+// being absent from here is what keeps every one of them a blank page rather than a reported failure.
 //
 // A whole token list is read rather than the first token, though ARIA takes the first valid one, for
 // the reason the rest of this predicate leans that way: reading `img presentation` as a picture costs a
 // glance at a page that was fine, and reading it as nothing drops a page with a picture on it.
 const CONTENT_ROLE = new Set(
   (
-    "img figure math table grid treegrid graphics-document graphics-symbol graphics-object link " +
+    "img math table grid treegrid graphics-document graphics-symbol graphics-object " +
     "button checkbox radio switch slider spinbutton textbox combobox listbox option " +
-    "menuitem menuitemcheckbox menuitemradio tab progressbar meter"
+    "menuitem menuitemcheckbox menuitemradio tab"
   ).split(" "),
 );
 
-// One attribute's value off one start tag, or `undefined` where the tag does not carry it. The
-// lookbehind is `altText`'s: without it `role` opens on `data-role=` and `aria-label` on anything
-// ending in those characters. Unquoted values are read too, because model output writes them.
-function tagAttr(tag: string, name: string): string | undefined {
-  const m = new RegExp(String.raw`(?<![-\w])${name}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`, "i").exec(tag);
-  return m === null ? undefined : decodeEntities(m[1] ?? m[2] ?? m[3] ?? "");
+// One start tag's attributes, first value winning as a parser resolves a repeated one. The pair scan is
+// `attrText`'s, and reusing it is what keeps `role` out of another attribute's VALUE: the pattern
+// consumes a quoted value whole, so `<span title="see role=button">` yields one `title` and no role,
+// where a search for `role=` across the whole tag found the prose inside the quotes — the same
+// prose-about-markup hole `visibleText` and `attrText` close by reading comments and quotes rather than
+// characters. The tag name is stripped first so `<a>` does not read as an attribute.
+function tagAttrs(tag: string): Map<string, string> {
+  const inner = tag.replace(/^<[a-z][a-z0-9]*/i, "").replace(/\/?>?$/, "");
+  const attrs = new Map<string, string>();
+  for (const m of inner.matchAll(/([a-z_:][\w:.-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/gi)) {
+    const name = m[1].toLowerCase();
+    if (!attrs.has(name)) attrs.set(name, decodeEntities(m[2] ?? m[3] ?? m[4] ?? ""));
+  }
+  return attrs;
 }
 
 // Tag by tag, on the same scan `attrText` uses, because a role and a name on ONE element is the claim —
 // a `role="img"` on a wrapper and an `aria-label` three tags later are two separate ones.
 //
-// The named link is the second shape and the only one that needs a name to count: a link is the one
-// interactive thing whose element name is not in `CONTENT_WITHOUT_TEXT`, and `<a href="#x"
-// aria-label="Next"></a>` is something a reader can follow and hear named. An accessible name anywhere
-// else is not read as content — `<div aria-label="Main content">` labels a wrapper that holds nothing,
-// and counting that would make every labelled empty box a page.
+// The named link is the second shape, and the only one that needs a name to count: a link is the one
+// interactive thing whose element name is not in `CONTENT_WITHOUT_TEXT` — an `<a>` is a wrapper as
+// often as it is a control — so `<a href="#x" aria-label="Next"></a>` is something a reader can follow
+// and hear named, and a bare `<a href="#x"></a>` is an empty box. `role="link"` is read the same way
+// rather than as one of the roles above, so the two spellings of a link agree. An accessible name
+// anywhere else is not content: `<div aria-label="Main content">` labels a wrapper that holds nothing,
+// and `<p aria-label="Blank page"></p>` is one of the corpus's own 33 blanks.
+//
+// An `aria-labelledby` pointing at an id the fragment does not contain is counted, though its
+// accessible name computes to nothing. Deliberate, and priced by where this predicate is read: both
+// callers (extraction.ts `blankDeclaration` and `renderPage`) use it to decide whether a reply's
+// markup is a blank page or a REPORTED one, and neither delivers the fragment either way. So a
+// dangling reference costs the same glance the rest of this leans toward, and refusing it would drop a
+// link the model meant to put on the page. A name that is only whitespace is refused, because that is
+// the author writing no name rather than pointing at one that has gone missing.
 //
 // Unreachable on today's prompts: `agents/page.md` asks for `<img>` and `<figure>` for a picture and
-// never a `role="img"` wrapper, and all 33 markup-spelled blanks in the corpus are a comment, an empty
-// paragraph or a page-break marker. It is here because the day a prompt allows one of these shapes is
-// not a day anyone will be thinking about this file, and what it costs then is a page with a picture on
-// it delivered empty, reported blank, with nothing in `pages_failed` to look for.
+// never a `role="img"` wrapper, and the only role it mandates is the `doc-pagebreak` on the page-break
+// marker, which is absent from the set above. It is here because the day a prompt allows one of these
+// shapes is not a day anyone will be thinking about this file, and what it costs then is a page with a
+// picture on it delivered empty, reported blank, with nothing in `pages_failed` to look for.
 function attributeCarriesContent(markup: string): boolean {
   for (const tag of markup.match(TAG) ?? []) {
     if (tag.startsWith("</")) continue;
-    const role = tagAttr(tag, "role");
-    if (role !== undefined && role.split(/\s+/).some((token) => CONTENT_ROLE.has(token.toLowerCase()))) return true;
-    if (/^<a\b/i.test(tag) && tagAttr(tag, "href") !== undefined) {
-      const name = tagAttr(tag, "aria-label") ?? tagAttr(tag, "aria-labelledby");
+    const attrs = tagAttrs(tag);
+    const roles = (attrs.get("role") ?? "").split(/\s+/).map((token) => token.toLowerCase());
+    if (roles.some((role) => CONTENT_ROLE.has(role))) return true;
+    if (/^<a\b/i.test(tag) ? attrs.has("href") : roles.includes("link")) {
+      const name = attrs.get("aria-label") ?? attrs.get("aria-labelledby");
       if (name !== undefined && name.trim() !== "") return true;
     }
   }
