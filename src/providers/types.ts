@@ -73,6 +73,13 @@ export interface CompletionResult {
 export interface ModelProvider {
   name: string;
   capabilities: Capability[];
+  // Which wire format the calls go out on, for a provider that has more than one.
+  // Only Bedrock does (`providers.bedrock.api`, an Anthropic-native body or Bedrock's
+  // own Converse API), and it is here rather than private to that adapter because the
+  // router puts it on the `model_call` log event: the point of that switch is comparing
+  // two dialects against each other, and a comparison whose run log does not say which
+  // side produced a number is not one. Undefined for a provider with a single API.
+  dialect?: string;
   complete(request: CompletionRequest): Promise<CompletionResult>;
 }
 

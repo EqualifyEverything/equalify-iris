@@ -25,7 +25,13 @@ import { ConverseStreamCommand, InvokeModelWithResponseStreamCommand } from "@aw
 import { BedrockProvider, bedrockApi } from "../src/providers/bedrock.ts";
 import { cachePointBlock } from "../src/providers/promptCache.ts";
 import { bedrockApiWarning } from "../src/config.ts";
-import { StalledStreamError, TruncatedResponseError } from "../src/providers/types.ts";
+import {
+  StalledStreamError,
+  TruncatedResponseError,
+  isRequestTooLargeError,
+  isTruncatedResponseError,
+} from "../src/providers/types.ts";
+import { ProviderRouter } from "../src/providers/index.ts";
 
 // A model whose id `promptCache.ts` recognizes as cacheable, so the breakpoint tests are
 // testing the adapter and not the model table.
@@ -518,6 +524,176 @@ test("protocol events between blocks do keep the call alive", async () => {
   });
   const res = await bedrock.complete(req());
   assert.equal(res.text, "arrived in the end");
+});
+
+// --- the other ways this API stops short ------------------------------------------------
+
+test("every stop reason that means the answer is not whole fails the call", async () => {
+  // The Anthropic body can only stop for end_turn/max_tokens/stop_sequence/tool_use, so one
+  // max_tokens check covered every incomplete case there. Bedrock's own StopReason adds five
+  // more, and each of them arrives as a SET stop reason on an otherwise well-formed stream —
+  // which satisfies the completeness check and would return partial HTML as a success.
+  for (const stopReason of [
+    "malformed_model_output",
+    "malformed_tool_use",
+    "content_filtered",
+    "guardrail_intervened",
+    // Not in today's SDK union at all: an allowlist means a reason invented next year is
+    // refused rather than trusted.
+    "some_reason_aws_ships_in_2027",
+  ]) {
+    const bedrock = converse();
+    stubConverse(
+      bedrock,
+      script([
+        { contentBlockDelta: { delta: { text: "<p>most of a page" }, contentBlockIndex: 0 } },
+        { messageStop: { stopReason } },
+        { metadata: { usage: { inputTokens: 3, outputTokens: 4 } } },
+      ]),
+    );
+    await assert.rejects(
+      () => bedrock.complete(req()),
+      (e: Error) => {
+        assert.match(e.message, new RegExp(`stopped for "${stopReason}"`), stopReason);
+        assert.match(e.message, /response is incomplete \(17 chars received\)/, stopReason);
+        // Not the ceiling error: raising max_tokens fixes none of these, and the review
+        // loop's truncation salvage would be the wrong response to them.
+        assert.ok(!(e instanceof TruncatedResponseError), stopReason);
+        assert.ok(!isTruncatedResponseError(e), stopReason);
+        assert.ok(!isRequestTooLargeError(e), stopReason);
+        return true;
+      },
+    );
+  }
+});
+
+test("running out of context window is reported as the size problem it is", async () => {
+  // Distinguished from the others on purpose: prompt-plus-response overflowing the window is
+  // a request Iris can make smaller, and the review loop already knows how — drop the page
+  // images and retry text-only, which is what it does when Bedrock refuses an oversized
+  // request up front. `isRequestTooLargeError` is the predicate that routes it there.
+  const bedrock = converse();
+  stubConverse(
+    bedrock,
+    script([
+      { contentBlockDelta: { delta: { text: "<p>most of a page" }, contentBlockIndex: 0 } },
+      { messageStop: { stopReason: "model_context_window_exceeded" } },
+    ]),
+  );
+  await assert.rejects(
+    () => bedrock.complete(req()),
+    (e: Error) => {
+      assert.match(e.message, /exceeded the model's context window/);
+      assert.ok(isRequestTooLargeError(e), "the size-refusal path must recognize it");
+      assert.ok(!isTruncatedResponseError(e), "it is not the output ceiling");
+      return true;
+    },
+  );
+});
+
+test("a refusal is a complete response, and stop_sequence and tool_use are too", async () => {
+  // The allowlist is what is whole, not what is useful: judging an unhelpful answer is the
+  // verify pass's job downstream, and failing here would turn it into a dead call instead.
+  for (const stopReason of ["end_turn", "stop_sequence", "tool_use", "refusal"]) {
+    const bedrock = converse();
+    stubConverse(
+      bedrock,
+      script([
+        { contentBlockDelta: { delta: { text: "an answer" }, contentBlockIndex: 0 } },
+        { messageStop: { stopReason } },
+      ]),
+    );
+    const res = await bedrock.complete(req());
+    assert.equal(res.text, "an answer", stopReason);
+  }
+});
+
+test("a connection that hangs after the stop event returns the document it already sent", async () => {
+  // The clocks exist to tell a dead stream from a slow one; once the message has stopped
+  // there is no document left to protect, only the token counts. So the wait for metadata
+  // gets its own short window, and running out of it returns the response — spending a
+  // whole idle minute and then throwing away a finished document to punish a missing
+  // number would be the worse trade.
+  const bedrock = new BedrockProvider(
+    { default_model: MODEL, api: "converse" } as never,
+    { trailingTimeoutMs: 60, idleTimeoutMs: 5_000, firstOutputTimeoutMs: 5_000 },
+  );
+  stubConverse(bedrock, async function* (signal: AbortSignal) {
+    yield { contentBlockDelta: { delta: { text: "<p>a whole page</p>" }, contentBlockIndex: 0 } };
+    yield { messageStop: { stopReason: "end_turn" } };
+    // Never sends metadata, and never closes either.
+    await sleepUnlessAborted(10_000, signal);
+    yield { metadata: { usage: { inputTokens: 1 } } };
+  });
+  const res = await bedrock.complete(req());
+  assert.equal(res.text, "<p>a whole page</p>");
+  // Unreported rather than zero, which is the distinction `tokens.calls_reported` exists for.
+  assert.equal(res.usage, undefined);
+});
+
+test("the trailing window does not rescue a stream that stopped before the message did", async () => {
+  // The short window is armed by the stop event and by nothing else, so a stream that goes
+  // quiet mid-generation still gets the idle diagnosis rather than a 10-second one.
+  const bedrock = new BedrockProvider(
+    { default_model: MODEL, api: "converse" } as never,
+    { trailingTimeoutMs: 60, idleTimeoutMs: 120, firstOutputTimeoutMs: 5_000 },
+  );
+  stubConverse(bedrock, async function* (signal: AbortSignal) {
+    yield { contentBlockDelta: { delta: { text: "<p>half" }, contentBlockIndex: 0 } };
+    await sleepUnlessAborted(10_000, signal);
+  });
+  await assert.rejects(
+    () => bedrock.complete(req()),
+    (e: Error) => {
+      assert.ok(e instanceof StalledStreamError);
+      assert.equal((e as StalledStreamError).kind, "idle");
+      return true;
+    },
+  );
+});
+
+// --- which dialect a run used ------------------------------------------------------------
+
+test("the dialect rides on every model_call, so a bench round says which one produced it", async () => {
+  // The point of the switch is comparing two APIs against each other; a comparison whose run
+  // log does not say which side a number came from is not one. Reported per call rather than
+  // once at boot, because a deployment can be reconfigured between runs of the same session.
+  assert.equal(converse().dialect, "converse");
+  assert.equal(new BedrockProvider({ default_model: MODEL } as never).dialect, "invoke");
+
+  const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+  const router = new ProviderRouter(
+    { providers: { default: "bedrock", bedrock: { default_model: MODEL, api: "converse" } } } as never,
+    (type, data) => events.push({ type, data }),
+  );
+  const provider = (router as unknown as { build(n: string): BedrockProvider }).build("bedrock");
+  stubConverse(provider, script(done("end_turn", { inputTokens: 4, outputTokens: 5 })));
+  await router.complete("page", "vision", [{ role: "user", content: "hi" }]);
+  for (const e of events) {
+    assert.equal(e.data.api, "converse", e.type);
+    assert.equal(e.data.provider, "bedrock", e.type);
+  }
+  assert.deepEqual(
+    events.map((e) => e.type),
+    ["model_call_start", "model_call"],
+  );
+});
+
+test("a provider with one API adds no api field, so today's log lines are unchanged", async () => {
+  const events: Array<Record<string, unknown>> = [];
+  const router = new ProviderRouter(
+    { providers: { default: "openrouter", openrouter: { default_model: "m", api_key: "k" } } } as never,
+    (_type, data) => events.push(data),
+  );
+  const provider = (router as unknown as { build(n: string): { complete: unknown } }).build("openrouter");
+  (provider as { complete: unknown }).complete = async () => ({
+    text: "ok",
+    model: "m",
+    provider: "openrouter",
+  });
+  await router.complete("page", "vision", [{ role: "user", content: "hi" }]);
+  assert.ok(events.length > 0);
+  for (const data of events) assert.ok(!("api" in data), JSON.stringify(data));
 });
 
 test("a response carrying neither stream nor body fails as one, whichever API sent it", async () => {

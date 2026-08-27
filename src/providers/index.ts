@@ -83,7 +83,16 @@ export class ProviderRouter {
 
     // Emit a start marker BEFORE the call so a hung/in-flight call is visible
     // in diagnostics (a start with no matching end), and time the call.
-    const meta = { agent: agentName, capability, model, provider: providerName };
+    // `api` only when the adapter has more than one (Bedrock: invoke vs converse), so
+    // every other provider's log line is unchanged and a bench round on the new dialect
+    // says so on every call rather than only in the config that started it.
+    const meta = {
+      agent: agentName,
+      capability,
+      model,
+      provider: providerName,
+      ...(provider.dialect ? { api: provider.dialect } : {}),
+    };
     this.onEvent?.("model_call_start", meta);
     const startedAt = Date.now();
     // Collected through the callback rather than read off the result, so a call that

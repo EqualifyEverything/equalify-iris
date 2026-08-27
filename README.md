@@ -140,7 +140,23 @@ from the environment at startup; changes require a restart.
   *Which* event is terminal is a property of the wire format rather than of the word "stop": on
   Bedrock's Converse stream the `metadata` event carrying every token count arrives **after**
   `messageStop`, so the read ends at `metadata` there — breaking at the stop event, the literal
-  translation of the Anthropic path, would report every Converse call as free.
+  translation of the Anthropic path, would report every Converse call as free. That tail gets a
+  short window of its own (**10s**) rather than the idle clock, and running out of it returns the
+  response: once the message has stopped there is no document left to protect, only a number, and
+  spending a minute waiting for it and then discarding a finished document would be the worse
+  trade. The call is then simply one that reported no usage, which diagnostics already counts
+  (`tokens.calls_reported`).
+  Finally, **stopping is not the same as finishing**, and which stop reasons mean "the answer is
+  whole" is a shorter list than which exist. The Anthropic body stops only for `end_turn`,
+  `max_tokens`, `stop_sequence`, `tool_use` or `refusal`, so one truncation check covered every
+  incomplete case; Bedrock's own `StopReason` adds `model_context_window_exceeded`,
+  `malformed_model_output`, `malformed_tool_use`, `content_filtered` and `guardrail_intervened` —
+  each of which arrives on a well-formed stream and would otherwise pass every check above and
+  deliver partial HTML as a success. The adapter therefore allowlists the reasons that mean whole
+  and fails on the rest, so a reason a future model invents is refused rather than trusted. The
+  ceiling keeps its own error (it is the one with a knob to name); running out of context window
+  is reported as a size problem, which routes it to the same retry-without-images path Iris
+  already uses when a request is refused for size up front.
   The Bedrock adapter speaks **two dialects**, chosen by `providers.bedrock.api`. `invoke` (the
   default) is `InvokeModelWithResponseStream` carrying an Anthropic-native body, and it is what
   every published number in this repo was measured through. `converse` is `ConverseStream`, whose
@@ -152,7 +168,9 @@ from the environment at startup; changes require a restart.
   and one bench round on `converse` are what would move the default. An unrecognized value falls
   back to `invoke` and says so at boot, because both dialects just return text: without the
   warning, a deployment that meant to be trying Converse would be measuring the path it already
-  had.
+  had. Every `model_call` line carries the dialect it went out on (`api`), since the point of the
+  switch is comparing the two and a comparison whose run log does not say which side produced a
+  number is not one.
 - **Concurrency** (§9.4): two independent knobs under `defaults`.
   `extraction_concurrency` is *within* a run — pages in parallel during extraction, and during
   review both the Reader's chunk reads and the section calls a too-long correction round is
