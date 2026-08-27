@@ -5,6 +5,8 @@ import { ProviderRouter } from "../providers/index.ts";
 import {
   SIGNAL_LINKS_DROPPED,
   SIGNAL_LINKS_UNRESOLVED,
+  SIGNAL_MARKUP_UNBALANCED,
+  SIGNAL_TABLE_NO_BODY,
   SIGNAL_LINT_ERROR,
   SIGNAL_EDITOR_TRUNCATED,
   SIGNAL_EDITOR_TRUNCATED_LOST,
@@ -24,6 +26,7 @@ import { runAxe, lintErrorFields } from "./lint.ts";
 import { learnFromFeedback, proposeAgentUpdatesFromFeedback, scopeFeedback } from "./feedback.ts";
 import { runContribution } from "./contribute.ts";
 import { unresolvedRefs } from "./links.ts";
+import { markupReport } from "./markup.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PdfLink } from "../util/pdf.ts";
 
@@ -277,6 +280,31 @@ export async function runPipeline(args: {
         ids: internalLinks.ids.slice(0, 20),
       });
     }
+    // And whether the document's own markup says what the model thought it said (#240),
+    // measured on the same bytes and for the same reason: this is the file the caller gets.
+    //
+    // Two findings on one line, because they are one question asked either side of the parser.
+    // `unbalanced` is the source's own tag counts — the only place an unclosed `<table>` is
+    // still visible, since the parse that axe lints repairs it first — and `tables_without_body`
+    // is what survives that repair: a caption and nine column headers with no rows under them.
+    //
+    // Logged only when something is wrong, `parse_error` included, since a check that could not
+    // run must not read as a check that found nothing (#164).
+    const markup = markupReport(review.html);
+    if (markup.unbalanced.length || markup.tablesWithoutBody || markup.parseError) {
+      log.event("delivered_markup", {
+        // `element open/close`, e.g. `table 16/15`, which is what a maintainer needs in order
+        // to know whether to care: the parser's recovery from an unclosed `<table>` costs a
+        // reader nothing, an unclosed `<a>` swallows the text up to the next link.
+        unbalanced: markup.unbalanced.map((u) => `${u.element} ${u.open}/${u.close}`),
+        tables: markup.tables,
+        tables_without_body: markup.tablesWithoutBody,
+        // Captions, so the table can be found without diffing the document. Content from the
+        // user's file, so it stays here and never reaches the tally (see QualityStats).
+        empty_table_captions: markup.emptyTableCaptions.slice(0, 10),
+        ...(markup.parseError ? { parse_error: markup.parseError } : {}),
+      });
+    }
     // Final accessibility lint result, summarized into the PR description on close (§7.13).
     writeFileSync(paths.sessionLint(sessionId), JSON.stringify(review.lint, null, 2));
     if (review.unresolved.length) {
@@ -330,6 +358,13 @@ export async function runPipeline(args: {
         ...(internalLinks.empty + internalLinks.dangling
           ? [{ code: SIGNAL_LINKS_UNRESOLVED, count: internalLinks.empty + internalLinks.dangling }]
           : []),
+        // Markup that does not balance, counted per ELEMENT rather than per missing tag: the
+        // scan compares totals, so `table 16/15` is one finding about one element name and how
+        // many tags are missing is not something a count of counts can say.
+        ...(markup.unbalanced.length ? [{ code: SIGNAL_MARKUP_UNBALANCED, count: markup.unbalanced.length }] : []),
+        // Tables announced with a header block and nothing under it. Per table, so a document
+        // that emitted the same continued header three times reads as three.
+        ...(markup.tablesWithoutBody ? [{ code: SIGNAL_TABLE_NO_BODY, count: markup.tablesWithoutBody }] : []),
         // A linter that could not run has no violations to report, which is why its
         // failure is recorded as a signal rather than inferred from an empty list.
         ...(review.lint.error ? [{ code: SIGNAL_LINT_ERROR, count: 1 }] : []),

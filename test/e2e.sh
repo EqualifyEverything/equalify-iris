@@ -351,6 +351,27 @@ echo "$stats" | grep -q 'appendix-a' \
   && fail "internal links leak" "a failing fragment reached the stats payload" \
   || pass "the failing fragment stays in the run log, not in the tally"
 
+# The delivered document's own structure (#240). Page 1's mock output ships an unclosed
+# `<div>` and a table with a header block and no rows, and the run reaches
+# ready_for_review with `final_lint.ok: true` — which is the finding, not a bug in the
+# mock. axe lints a tree the parser has already repaired, so neither defect can reach it.
+# Only this step proves the check runs on the delivered bytes rather than on that tree.
+dm=$(echo "$logs" | jq -c 'select(.type == "delivered_markup")' | head -1)
+[ -n "$dm" ] \
+  && pass "the delivered document's structure is measured on its own bytes ($dm)" \
+  || fail "delivered markup" "no delivered_markup event in the run log"
+echo "$dm" | jq -e '.unbalanced == ["div 1/0"] and .tables == 1 and .tables_without_body == 1' >/dev/null \
+  && pass "an unclosed div and a rowless table are both named, past a clean lint" \
+  || fail "delivered markup units" "$dm"
+# The caption is the user's own text, so it takes the same route the dead fragment does:
+# named in the run log, never in a payload that leaves the deployment.
+echo "$dm" | jq -e '.empty_table_captions == ["Table 1. Revenue by region"]' >/dev/null \
+  && pass "the empty table is identified by its caption, so a maintainer can find it" \
+  || fail "delivered markup captions" "$dm"
+echo "$stats" | grep -q 'Revenue by region' \
+  && fail "delivered markup leak" "an empty table's caption reached the stats payload" \
+  || pass "the caption stays in the run log, not in the tally"
+
 echo "==> 8b. GET /v1/sessions/{id}/diagnostics"
 diag=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/diagnostics")
 echo "$diag" | jq -e '.model_calls.count >= 1 and .in_flight == null and (.phase_durations_ms | length >= 1)' >/dev/null \
@@ -705,6 +726,13 @@ fbst=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID" | jq -r '.status')
   && pass "the queued re-run's stored status is queued too" \
   || fail "feedback queueing" "GET /sessions/\$SID says '$fbst', expected queued"
 
+# B's pages are written cleanly, which this step needs for a second reason: it is the one
+# session in the run whose delivered document has nothing structurally wrong with it, so it
+# is what pins the `delivered_markup` line as CONDITIONAL (#240). Every other session's page 1
+# carries the defects on purpose, and a log line that appears on every document is a line
+# nobody reads.
+curl -s -X POST -H 'content-type: application/json' -d '{"clean":true}' \
+  "http://localhost:$OR_PORT/__clean-markup" >/dev/null
 qb=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
   -F "images=@$png;filename=queue-b-001.png")
 QB=$(echo "$qb" | jq -r '.session_id')
@@ -738,6 +766,19 @@ qrunning=$(echo "$qlog" | jq -c 'select(.type=="run_queued")' | tail -1 | jq -r 
 [ "$qwait" -gt 0 ] && [ "$qrunning" = "1" ] \
   && pass "the wait is visible in the run log (waited_ms=$qwait, running=$qrunning at submit)" \
   || fail "queue logging" "expected waited_ms>0 and running=1, got waited_ms=$qwait running=$qrunning"
+
+# B's document is the clean one, so the structural check must have run and said nothing (#240).
+# Both halves matter: no `delivered_markup` line, and the `internal_links` line still there —
+# every page keeps its dead `#appendix-a` reference — so an absence caused by the check not
+# running at all would fail here rather than read as a clean document.
+echo "$qlog" | jq -e 'select(.type=="delivered_markup")' >/dev/null \
+  && fail "delivered markup gate" "a clean document logged delivered_markup: $(echo "$qlog" | jq -c 'select(.type=="delivered_markup")')" \
+  || pass "a clean document says nothing about its markup, so the line means something"
+echo "$qlog" | jq -e 'select(.type=="internal_links")' >/dev/null \
+  && pass "and the measurement did run on it — its dead reference is still reported" \
+  || fail "delivered markup gate" "no internal_links either, so the silence above proves nothing"
+curl -s -X POST -H 'content-type: application/json' -d '{"clean":false}' \
+  "http://localhost:$OR_PORT/__clean-markup" >/dev/null   # back to the defective page
 
 # Only the flagged page's image reached the editor earlier; here the point is that
 # the queue did not corrupt either document. B is single-page and must be complete.
@@ -922,6 +963,12 @@ docs=$(echo "$q" | jq -r '.documents')
 echo "$q" | jq -e '.links_unresolved_rate > 0 and .links_unresolved_rate <= 1' >/dev/null \
   && pass "links_unresolved_rate carries the dead reference through ($(echo "$q" | jq -r '.links_unresolved_rate'))" \
   || fail "quality" "links_unresolved_rate=$(echo "$q" | jq -r '.links_unresolved_rate') though a delivered document had one"
+# The same for the two structural findings from step 8, which are the ones no lint gate can
+# report. Separate rates because one document can have either: an unclosed tag is the
+# model's markup, an empty table is its reading of the page.
+echo "$q" | jq -e '.markup_unbalanced_rate > 0 and .table_no_body_rate > 0' >/dev/null \
+  && pass "the delivered document's structure reaches the tally (markup $(echo "$q" | jq -r '.markup_unbalanced_rate'), tables $(echo "$q" | jq -r '.table_no_body_rate'))" \
+  || fail "quality" "markup_unbalanced_rate=$(echo "$q" | jq -r '.markup_unbalanced_rate'), table_no_body_rate=$(echo "$q" | jq -r '.table_no_body_rate') though a delivered document had both"
 # ...and the rule table's own denominator, which counts only the documents axe-core
 # actually examined (#164). It can be smaller than `documents` but never larger, and
 # never absent: a missing key here would make every rule share divide by zero.
@@ -956,7 +1003,7 @@ done
 # `inside` compares strings with `contains`, i.e. substring containment, so
 # `["doc"] | inside(["documents"])` is true and any new leaf whose name happens to be a
 # substring of an allowed one would slip through the one check that enforces this.
-allowed='["window_days","documents","since","mean_rounds","unresolved_rate","review_unread_rate","links_dropped_rate","links_unresolved_rate","lint_error_rate","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","id","impact","share","nodes"]'
+allowed='["window_days","documents","since","mean_rounds","unresolved_rate","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","lint_error_rate","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","id","impact","share","nodes"]'
 extra=$(echo "$q" | jq -c --argjson allowed "$allowed" '([paths(scalars) | last] | unique) - $allowed')
 [ "$extra" = "[]" ] \
   && pass "the payload's key set is exactly the documented one (no session id, login or document content)" \

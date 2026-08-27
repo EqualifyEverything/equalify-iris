@@ -219,6 +219,13 @@ jobs:
             # threshold today would file the same issue every week about a defect already
             # tracked in #234, and the two MAX_ISSUES_PER_RUN slots would go to it instead of
             # to whatever changed that week.
+            #
+            # `markup_unbalanced_rate` and `table_no_body_rate` (#240) are left off for the same
+            # reason and on the same terms. Both are new measurements of a class nothing could
+            # see before — an unclosed tag is repaired by the parser before axe reads the
+            # document, and a table with headers and no rows has no axe rule — so the first
+            # question is how often they fire on a deployment's real traffic, not what number is
+            # too high. The summary prints them either way.
             echo "should_run=false" >> "$GITHUB_OUTPUT"
             echo "::error::$BASE/v1/quality returned 200 but not a quality tally. Nothing was measured this week."
             exit 1

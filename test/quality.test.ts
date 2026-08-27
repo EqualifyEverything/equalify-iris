@@ -10,6 +10,8 @@ import {
   SIGNAL_EDITOR_TRUNCATED_LOST,
   SIGNAL_LINKS_DROPPED,
   SIGNAL_LINKS_UNRESOLVED,
+  SIGNAL_MARKUP_UNBALANCED,
+  SIGNAL_TABLE_NO_BODY,
   SIGNAL_LINT_ERROR,
   SIGNAL_REVIEW_UNREAD,
   SIGNAL_ROUNDS,
@@ -59,6 +61,8 @@ test("an empty deployment reports zeroes rather than dividing by zero", () => {
       q.unresolved_rate,
       q.links_dropped_rate,
       q.links_unresolved_rate,
+      q.markup_unbalanced_rate,
+      q.table_no_body_rate,
       q.lint_error_rate,
     ]) {
       assert.equal(rate, 0);
@@ -260,6 +264,28 @@ test("a document with a reference that lands nowhere is counted once, however ma
   });
 });
 
+test("markup and empty-table findings are separate rates, because one document can have either", () => {
+  withStore((store) => {
+    // The bench document that produced #240 had both, which is exactly why they must not be
+    // one number: an unclosed tag is a defect in the bytes that the parser repairs, and a
+    // table with no rows is a defect that survives it. A fix for either leaves the other.
+    delivered(store, "a", [
+      { code: SIGNAL_MARKUP_UNBALANCED, count: 1 },
+      { code: SIGNAL_TABLE_NO_BODY, count: 1 },
+    ]);
+    delivered(store, "b", [{ code: SIGNAL_MARKUP_UNBALANCED, count: 3 }]);
+    delivered(store, "c", [{ code: SIGNAL_TABLE_NO_BODY, count: 4 }]);
+    delivered(store, "d");
+    const q = store.qualityStats();
+    // Per document however many findings it had, like every other rate here.
+    assert.equal(q.markup_unbalanced_rate, 2 / 4);
+    assert.equal(q.table_no_body_rate, 2 / 4);
+    // And neither is visible in the lint numbers, which is the whole argument for measuring
+    // them: axe was handed a repaired tree and had no rule for the empty table.
+    assert.equal(q.lint_error_rate, 0);
+  });
+});
+
 test("the window is clamped, and echoed back so a caller sees what it got", () => {
   withStore((store) => {
     delivered(store, "a");
@@ -320,10 +346,12 @@ test("nothing per-session, per-user or per-document is exposed", () => {
         "links_dropped_rate",
         "links_unresolved_rate",
         "lint_error_rate",
+        "markup_unbalanced_rate",
         "mean_rounds",
         "review_unread_rate",
         "rules",
         "since",
+        "table_no_body_rate",
         "unresolved_rate",
         "window_days",
       ],

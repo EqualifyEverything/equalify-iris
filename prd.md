@@ -644,7 +644,7 @@ Implemented as `.github/workflows/issue-to-pr.yml`, on `schedule` (Sun–Wed, 22
 
 Three pieces, and the boundary between them is the design:
 
-- **`run_signals`**, a table written once per delivered document (`Store.recordRunSignals`, called from the orchestrator). One row per measurement: `iris:rounds` for every delivered document, plus `iris:unresolved`, `iris:links-dropped`, `iris:links-unresolved`, `iris:lint-error` and one row per violated axe rule id when applicable.
+- **`run_signals`**, a table written once per delivered document (`Store.recordRunSignals`, called from the orchestrator). One row per measurement: `iris:rounds` for every delivered document, plus `iris:unresolved`, `iris:links-dropped`, `iris:links-unresolved`, `iris:markup-unbalanced`, `iris:table-no-body`, `iris:lint-error` and one row per violated axe rule id when applicable.
 - **`GET /v1/quality`**, which aggregates that table over a window and returns rates. Documented in `docs/API.md` §0c rather than under §9 here, alongside `/v1/stats` — §9 specifies the session lifecycle, and neither tally is part of it.
 - **`.github/workflows/quality-report.yml`**, which reads the endpoint weekly, compares the rates against thresholds **held in the workflow**, and files one issue per crossed threshold. §7.15's triage then ranks those issues alongside every other open issue, and may open a PR against one.
 

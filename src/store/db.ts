@@ -198,6 +198,41 @@ export const SIGNAL_LINKS_DROPPED = "iris:links-dropped";
 // stay on the deployment — a fragment is text chosen out of the document.) The rate below
 // then reduces this to one document, as every rate here does.
 export const SIGNAL_LINKS_UNRESOLVED = "iris:links-unresolved";
+// The delivered document's own markup does not balance: some element whose end tag HTML
+// REQUIRES has a different number of start and end tags (#240). One per element name, not per
+// missing tag, and recorded only when something is off.
+//
+// Unreachable by the lint gate, and not by omission — axe lints a parsed DOM, and the parser's
+// job is to make malformed markup well-formed before axe sees it. A bench document delivered
+// with `table 16/15` reached axe as sixteen tidy tables and returned zero violations. This is
+// the one check that has to run on the BYTES, because that is the only place the evidence
+// still exists.
+//
+// What it means for a reader depends on the element, which is why the log line names it and
+// this count does not pretend to: the parser's recovery from an unclosed `<table>` costs
+// nothing at all, while an unclosed `<a>` swallows every word up to the next link into its
+// anchor text. Either way the document the model believes it wrote and the document a browser
+// builds are not the same document, and nothing else here would say so.
+export const SIGNAL_MARKUP_UNBALANCED = "iris:markup-unbalanced";
+// Tables in the delivered document that hold no row a reader receives as content (#240) —
+// announced to a screen-reader user by caption and column headers, with nothing in them.
+//
+// "No content row" rather than "a header block and no body", because the defect is what the
+// reader gets and it arrives in more than one shape: no rows at all, no row outside a declared
+// `<thead>`, or — where the model declared no header block — no row that is anything but column
+// headers, which is what the parser leaves when a bare `<tr><th scope="col">` becomes the
+// implicit body. A table whose body cells are all `<th scope="row">` is content and is not
+// counted.
+//
+// Measured on the PARSED tree, unlike the signal above, because this is a question about what
+// a reader receives and the parser's recovery is part of that. 1 of 48 tables in one bench
+// round, in the same document as the unbalanced tag: the continued header block of a table
+// split across three pieces was emitted twice and one copy got no body.
+//
+// axe has no rule for it (`empty-table-header` is about a header cell with no text), and it
+// cannot be inferred from anything else recorded here: the data was not lost, the split halves
+// are both present, and the document lints clean.
+export const SIGNAL_TABLE_NO_BODY = "iris:table-no-body";
 // axe-core failed to run at all. Recorded because a linter that did not run reports no
 // violations, so without this signal a broken linter would quietly drive every
 // accessibility rate in this table to zero and read as a fixed deployment. It is also
@@ -290,6 +325,20 @@ export interface QualityStats {
   // of 4 documents affected, so a threshold today would file the same issue every week about
   // a defect already tracked in #234. It belongs in the change that fixes the producers.
   links_unresolved_rate: number;
+  // Share of documents delivered with markup that does not balance — an element whose end tag
+  // HTML requires, with a different number of start and end tags (#240). The one rate here that
+  // is about the delivered BYTES rather than the parsed document, and it has to be: an HTML
+  // parser repairs malformed markup before axe can see it, so a document with an unclosed
+  // `<table>` lints clean. Which element it was is in the run's `delivered_markup` line.
+  //
+  // Unthresholded, like `links_unresolved_rate` and for the same reason — one document of four
+  // in the round that found it, and the producers are what a threshold should follow.
+  markup_unbalanced_rate: number;
+  // Share of documents delivered with at least one table holding no row a reader receives as
+  // content (#240) — announced by caption and column headers with nothing in it. Measured on the
+  // parsed tree, because that is what a reader gets. No axe rule covers it, and the captions stay
+  // on the deployment: a caption is text out of the user's own document.
+  table_no_body_rate: number;
   // Share of documents where axe-core could not run.
   lint_error_rate: number;
   // How many of `documents` the linter actually examined — the rest are the
@@ -1087,6 +1136,8 @@ export class Store {
       unresolved_rate: rate(SIGNAL_UNRESOLVED),
       links_dropped_rate: rate(SIGNAL_LINKS_DROPPED),
       links_unresolved_rate: rate(SIGNAL_LINKS_UNRESOLVED),
+      markup_unbalanced_rate: rate(SIGNAL_MARKUP_UNBALANCED),
+      table_no_body_rate: rate(SIGNAL_TABLE_NO_BODY),
       lint_error_rate: rate(SIGNAL_LINT_ERROR),
       documents_linted: documentsLinted,
       editor_truncated_rate: rate(SIGNAL_EDITOR_TRUNCATED),
