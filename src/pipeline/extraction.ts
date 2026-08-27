@@ -138,14 +138,22 @@ no number produces no markers at all, not one apiece, whatever the pages around 
 
 A page with nothing on it is a page you can answer completely. Return "html" as an empty string and
 say in the "log" field that the page is blank — that is the whole answer, and it is a correct one:
-there is no content to transcribe, so there is nothing to put in the document for this page. Emit the
-page-break marker only if the page prints its own number, by the rule above; a blank page usually
-prints nothing at all, and the position of the image in the file is never a number to label a marker
-with. Do not fill the page instead — not a note that it is blank, not [not legible], not a marker
+there is no content to transcribe, so there is nothing to put in the document for this page. Emit no
+page-break marker on such a page, whatever the paper prints: a page accepted as blank is delivered as
+no fragment at all, so a marker written on one is dropped rather than placed, and a blank page that
+did print its folio loses an anchor to a page with nothing to anchor to. Do not fill the page instead — not a note that it is blank, not [not legible], not a marker
 standing for content you did not find. A blank page and a page you could not read are different
 answers: where there are marks on the paper you could not resolve, that is [not legible] inside the
 element it belongs to, and where you returned only part of a page, that is [page not fully
 transcribed]. An empty "html" says the paper is empty, and it is read that way.
+
+A page whose only printed content is its own number is one of those pages. The folio is not content
+here: the rule above forbids transcribing it as text, and the marker its number may be carried in is
+not delivered, so a sheet printing nothing but a page number has nothing on it a reader receives — and
+the answer is the blank page's answer, an empty "html" and a log saying the page is blank. Answer it
+that way rather than with a marker and nothing else: a fragment carrying nothing a reader receives is
+not a page, and one that arrives with a log which does not say the page is empty is reported as a page
+nobody transcribed.
 
 Say that and nothing else in the same breath. A log that reports the page blank and then names
 something on it — a heading, a caption, a signature, handwriting, an image — contradicts the answer
@@ -154,7 +162,11 @@ reported as one nobody transcribed, which is a worse outcome for it than either 
 alone. Anything on the paper worth naming in the log is worth putting in "html", and anything you
 could see but not read is worth [not legible] inside the element it belongs to. Describing the
 specks and dust that establish a page IS empty is not naming content and is welcome; naming
-something you read is the answer to a different question than the one you just gave.
+something you read is the answer to a different question than the one you just gave. The page's own
+printed number is the one thing you may name and still be believed — "blank apart from the printed
+page number", "blank except for its printed folio" are each read as the blank page they describe —
+and only because that number is the one thing on the paper this pipeline never delivers. Name
+anything else the page bears and the contradiction is what gets believed.
 
 Ten structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
@@ -1311,6 +1323,35 @@ function participleAfterCopula(tokens: Word[], i: number): boolean {
   return before !== undefined && COPULA.has(before.word);
 }
 
+// The page's own printed number is the one thing a page can bear that a reader never receives. The
+// prompt forbids transcribing the folio as text (`agents/page.md`: "Do not transcribe the folio as
+// text beside the marker either"), the only place its number may live is the page-break marker's
+// label, and `renderPage` discards that marker on every accepted declaration. So a log that says the
+// page is empty and then names its printed page number contradicts nothing: there is no content a
+// reader loses on that page, which is the only question this check asks. Before this, a page whose
+// only printed content WAS its folio — a correct answer to the prompt, and a page with nothing to
+// transcribe — was refused in three of the four wordings it reports itself in and lost as a failed
+// page (#222).
+//
+// The refusal came from `printed` every time. It is in `TEXT_NOUN` for the noun sense ("printing is
+// visible") and here it is an adjective on the number, the same overlap `participleAfterCopula`
+// settles for the copula shape; the intersection of `TEXT_NOUN` and `QUALIFIER` is that one word, so
+// reading the qualifier list is a way of asking whether this subject could be an adjective at all.
+//
+// What is skipped is the SUBJECT, not the statement: the loop keeps reading, so "The printed page
+// number and a heading are visible." still affirms through `heading` two words later, and only a log
+// whose sole named subject is the folio is let through. `page number` is required as a phrase —
+// `number` alone names a figure number or a total as readily as a folio, and `numbers are visible` is
+// a page with content on it.
+const FOLIO_HEAD = new Set("folio folios pagination".split(" "));
+const FOLIO_COUNT = new Set("number numbers numeral numerals".split(" "));
+function folioAt(tokens: Word[], i: number): boolean {
+  const word = tokens[i]?.word;
+  if (word === undefined) return false;
+  if (FOLIO_HEAD.has(word)) return true;
+  return (word === "page" || word === "pages") && FOLIO_COUNT.has(tokens[i + 1]?.word ?? "");
+}
+
 function negatedBefore(tokens: Word[], i: number): boolean {
   for (let k = Math.max(0, i - AFFIRM_LOOKBACK); k < i; k++) {
     if (NEGATOR.has(tokens[k]!.word) || tokens[k]!.word === "without") return true;
@@ -1673,6 +1714,9 @@ export function contentAffirmed(scope: string): string | null {
       }
       if (!AFFIRMED_NOUN.test(word) || negatedInList(tokens, i) || participleAfterCopula(tokens, i)) continue;
       if (LOCATIVE_SUBSTRATE.has(word) && definiteBefore(tokens, i)) continue;
+      // `printed page number`, `printed folio` — a name for text dressing the one thing on the paper
+      // this pipeline never delivers (`folioAt`).
+      if (QUALIFIER.has(word) && folioAt(tokens, i + 1)) continue;
       const verb = reach[i + 1]!;
       if (verb < 0) continue;
       if (!deniedAfterVerb(tokens, verb)) {
