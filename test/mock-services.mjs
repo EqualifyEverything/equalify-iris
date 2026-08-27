@@ -232,7 +232,14 @@ const or = createServer(async (req, res) => {
     content = JSON.stringify({
       html:
         `<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n` +
-        `<p>Page marker ${page}.${revised ? " Revised." : ""}</p>`,
+        `<p>Page marker ${page}.${revised ? " Revised." : ""}</p>\n` +
+        // A reference to a section no page transcribes — the #234 defect, on every
+        // page, so the delivered document has three references to one dead id. Nothing
+        // repairs it: anchors.ts repoints a fragment only when some page claims the id,
+        // and there is no axe rule for a same-document link that lands nowhere. It is
+        // here to prove the orchestrator MEASURES it, and the repetition is what proves
+        // the two units apart — three references, one id.
+        `<p><a href="#appendix-a">See Appendix A</a></p>`,
       log: "",
       // Only when the e2e has armed it, and only on page 1, so the run yields
       // exactly one dispatch attempt to assert on.

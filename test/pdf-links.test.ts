@@ -20,6 +20,7 @@ import {
   missingLinks,
   pageLinkContext,
   unexpectedHrefs,
+  unresolvedRefs,
 } from "../src/pipeline/links.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
 import { enumerateInputs } from "../src/pipeline/orchestrator.ts";
@@ -594,6 +595,110 @@ test("a rewrite that loses a link is detectable; one that only renames anchors i
   assert.deepEqual(droppedHrefs(before, `<p><a href="https://example.org/a">a</a> <a href="#fn-2">1</a></p>`), []);
   // Link text may change (2.4.4) as long as the target survives.
   assert.deepEqual(droppedHrefs(before, `<p><a href="https://example.org/a">the annual report</a></p>`), []);
+});
+
+// ---------------------------------------------------------------------------
+// In-document references (#234)
+// ---------------------------------------------------------------------------
+
+test("a reference that lands is not reported; one whose id is nowhere is", () => {
+  const html = `<a href="#s1">one</a> <a href="#s9">nine</a> <h2 id="s1">One</h2>`;
+  assert.deepEqual(unresolvedRefs(html), { refs: 2, empty: 0, dangling: 1, ids: ["s9"] });
+});
+
+test("href=\"#\" is counted apart from a dangling id, because it cannot be repaired", () => {
+  // The shape a page agent produces when it is asked for a table of contents and the
+  // destinations are not on the page it can see. There is no id to rename it to, so
+  // reporting it beside the dangling ones would put an unfixable and a fixable defect
+  // under one number.
+  const toc = `<ul><li><a href="#">Introduction</a></li><li><a href="#">Methods</a></li></ul>`;
+  assert.deepEqual(unresolvedRefs(toc), { refs: 2, empty: 2, dangling: 0, ids: [] });
+});
+
+test("#top resolves without an element, in whatever case it is written", () => {
+  // HTML defines both `#` and `#top` as the top of the document; a browser scrolls
+  // there whether or not anything is named `top`. Only `#` is counted, and as `empty`.
+  assert.deepEqual(unresolvedRefs(`<a href="#top">back to top</a>`), {
+    refs: 1,
+    empty: 0,
+    dangling: 0,
+    ids: [],
+  });
+  // An element that IS called `top` changes nothing, which is the point.
+  assert.equal(unresolvedRefs(`<a href="#top">top</a><div id="top"></div>`).dangling, 0);
+  // The `top` fragment is matched ASCII case-insensitively, unlike an id — so this is
+  // the one comparison here that folds case, and a document full of "#TOP" back-links
+  // is not a document full of dead references.
+  assert.deepEqual(unresolvedRefs(`<a href="#TOP">back to top</a>`).ids, []);
+});
+
+test("only in-document references are this function's business", () => {
+  const html = `<a href="https://example.org/a">a</a> <a href="page2.html#s1">next</a> <a>none</a>`;
+  // An absolute URL is missingLinks/droppedHrefs/unexpectedHrefs territory, and a
+  // fragment on ANOTHER document names an id this document cannot be expected to have
+  // — reporting it would call a working cross-document link broken.
+  assert.deepEqual(unresolvedRefs(html), { refs: 0, empty: 0, dangling: 0, ids: [] });
+});
+
+test("a fragment and the id it means match through percent-encoding and entities", () => {
+  // The two are written by different components in different escapings: a fragment is
+  // part of a URL and gets percent-encoded, an id is attribute text and gets entities.
+  // Comparing the bytes would report every non-ASCII anchor in the document as dead.
+  assert.equal(unresolvedRefs(`<a href="#f%C3%BC">f</a><p id="fü">x</p>`).dangling, 0);
+  assert.equal(unresolvedRefs(`<a href="#a&amp;b">a</a><p id="a&b">x</p>`).dangling, 0);
+  // A malformed escape is compared as written rather than thrown on: a reference is
+  // not dead on account of a stray `%`.
+  assert.equal(unresolvedRefs(`<a href="#100%">p</a><p id="100%">x</p>`).dangling, 0);
+});
+
+test("markup inside a comment is not markup — the delivered document carries prose in one", () => {
+  // Every delivered document ends with the @unresolved list and its siblings, which
+  // are model-written sentences ABOUT the document and quote its markup freely. An
+  // <a> in there is not a link a reader can activate, and counting one inflates the
+  // count and invents ids that were never in the body. (The first hand count of this
+  // defect was wrong for exactly this reason.)
+  const html =
+    `<a href="#s1">one</a><h2 id="s1">One</h2>` +
+    `<!-- @unresolved: the page wrote <a href="#s404"> and no such section exists -->`;
+  assert.deepEqual(unresolvedRefs(html), { refs: 1, empty: 0, dangling: 0, ids: [] });
+});
+
+test("references are counted per link and the ids are the distinct set", () => {
+  // Two units on purpose, because they answer different questions. `dangling` is what
+  // `refs` is the denominator of — "4 of 5 references go nowhere" is the fact the tally
+  // publishes — while `ids` is capped at 20 in the log line, so a table of contents
+  // pointing forty times at one missing section must not spend the cap on one fact.
+  const html = `<a href="#b">1</a><a href="#b">2</a><a href="#b">3</a><a href="#a">4</a><a href="#c">5</a>`;
+  const got = unresolvedRefs(`${html}<h2 id="c">C</h2>`);
+  assert.equal(got.refs, 5);
+  assert.equal(got.dangling, 4);
+  assert.deepEqual(got.ids, ["a", "b"]);
+});
+
+test("an id on any element counts, however it was written", () => {
+  // The scan is a scan, like the rest of this file: single quotes and unquoted values
+  // are what a model writes from time to time, and an id missed here reads as a dead
+  // reference to a target that is right there.
+  const html = `<a href="#x">x</a><a href="#y">y</a><a href="#z">z</a>` +
+    `<p id='x'>x</p><td ID="y">y</td><div id=z>z</div>`;
+  assert.equal(unresolvedRefs(html).dangling, 0);
+});
+
+test("an id= inside another attribute's value is not an id this document has", () => {
+  // The failure mode worth a test of its own, because it hides the very defect this
+  // function exists to find. A source PDF's annotation carrying `?id=intro` would
+  // otherwise register `intro` as a target, and a genuinely dead `#intro` would report
+  // clean — a silent under-count on the one metric nothing else measures.
+  const html = `<a href="https://example.org/doc?id=intro">report</a><a href="#intro">Introduction</a>`;
+  assert.deepEqual(unresolvedRefs(html).ids, ["intro"]);
+  // `-` is a non-word character, so a `\bid=` scan reads `data-id` as an id too.
+  assert.deepEqual(unresolvedRefs(`<div data-id="s1"></div><a href="#s1">x</a>`).ids, ["s1"]);
+  // And the same guard on the href side: a query parameter named `href` is not a link.
+  assert.equal(unresolvedRefs(`<a href="https://example.org/go?href=%23gone">x</a>`).refs, 0);
+  // The other half of the guard, and the reason a closing quote counts as a separator:
+  // a browser reads this as two attributes, and a page's output is delivered
+  // unserialized when no id collides, so a real id must not go unseen over spacing.
+  assert.equal(unresolvedRefs(`<a href="#x">x</a><p class="a"id="x">x</p>`).dangling, 0);
 });
 
 // ---------------------------------------------------------------------------

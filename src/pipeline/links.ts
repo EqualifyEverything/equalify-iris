@@ -139,6 +139,115 @@ export function droppedHrefs(before: string, after: string): string[] {
   return [...hrefsIn(before)].filter((h) => isAbsolute(h) && !kept.has(h)).sort();
 }
 
+// Every in-document reference in the delivered document, and whether it lands (#234).
+//
+// This is the question no component asked. `missingLinks` asks whether the source file's
+// URLs arrived, `droppedHrefs` asks whether a rewrite lost one, `unexpectedHrefs` asks
+// whether one was invented — all three about absolute URLs, and all three deliberately
+// silent about `href="#…"`, which anchors.ts owns. anchors.ts, in turn, resolves a
+// reference only when at least one page CLAIMS the id: `resolve` returns any other token
+// unchanged, so a reference nobody can have meant is neither repointed nor reported
+// (`ambiguous: []` on a document whose whole table of contents was dead). Each component
+// is right about its own question; the end state — does every reference in the document
+// that ships land on an id in that document — belonged to nobody.
+//
+// Two shapes, counted apart because they have different causes and different remedies:
+//
+//   `empty`     `href="#"`. A link the agent wrote knowing it had no target, which is
+//               what a model produces when it is asked for the shape of a table of
+//               contents and the destinations are not on this page. Not recoverable by
+//               renaming anything: there is no target to find.
+//   `dangling`  a fragment naming an id the document does not contain — a target that
+//               moved, was never emitted (a footnote marker whose note the page did not
+//               transcribe), or is in a part of the document this run did not have.
+//
+// Neither is an axe violation, so a document full of them lints clean and reads as
+// finished. `#` and `#top` are the two fragments a browser resolves without an element
+// (HTML's "top of the document"), so `#top` is not dangling and `#` is reported as its own
+// number rather than as a missing id.
+//
+// Comments are stripped before anything is counted. The delivered document carries the
+// @unresolved list and the other markers, which are model-written prose about the
+// document and can quote markup — an `<a>` inside a comment is not a link, and counting
+// one inflates both the numerator and the denominator.
+//
+// Every count here is per REFERENCE, so `refs` is the denominator of `empty + dangling`
+// and "12 of 226 go nowhere" reads as a maintainer expects. `ids` is the odd one out and
+// deliberately so: it is the distinct set, because it goes into a log line capped at 20
+// and a table of contents pointing forty times at one missing section would otherwise
+// spend the whole cap on a single fact.
+//
+// Both attribute scans require whitespace, `<`, or a closing quote in front of the name,
+// which matters more than it looks. `\bid=` matches inside ANOTHER attribute's value — a
+// source PDF whose annotation carries `?id=intro` would register `intro` as an id the
+// document contains, silencing a genuinely dead `#intro`, and `data-id="s1"` masks `#s1`
+// the same way (`-` is a non-word character, so `\b` is satisfied). That failure mode is
+// the worst one available here: it hides exactly the defect this function exists to
+// surface.
+//
+// What it gives up, so the next person to touch the regex has the whole argument: a quote
+// is in the class because a browser reads `class="a"id="x"` as two attributes and a page
+// agent's output is delivered unserialized when no id collides (anchors.ts), so without it
+// a real id would go unseen. The cost is that a quote can also be an OPENING one, so a
+// value whose text begins or contains `id=` registers a phantom id: `alt="id=intro"` on a
+// scanned form field, or `title='he said "id=y"'`. Those fail in the worse direction —
+// they hide a dead reference rather than invent one — and the first is the likelier of the
+// two, since a page can transcribe `id=` literally.
+//
+// Left as a scan anyway. Every remaining case needs a delivered document that both
+// contains such a value AND has a dead reference to the id that value names, nothing here
+// is thresholded, so the cost is a maintainer's glance rather than a run. The exact fix,
+// if this ever carries a threshold, is a parse: unlike the rest of this file, this function
+// alone runs on the FINAL document, which is well-formed enough for jsdom — `[id]` and
+// `a[href]` off a tree would settle every one of these, at the price of parsing a large
+// document a second time. The lint step's tree is not that tree: axe is given the document
+// WITHOUT the `@` markers and these bytes have them, so the parse has to be its own.
+export function unresolvedRefs(html: string): {
+  refs: number;
+  empty: number;
+  dangling: number;
+  ids: string[];
+} {
+  const text = html.replace(/<!--[\s\S]*?-->/g, " ");
+  const ids = new Set<string>();
+  for (const m of text.matchAll(/(?<=[\s<"'])id\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+    ids.add(normalizeFragment(m[1] ?? m[2] ?? m[3] ?? ""));
+  }
+  let refs = 0;
+  let empty = 0;
+  let dangling = 0;
+  const failed = new Set<string>();
+  for (const m of text.matchAll(/(?<=[\s<"'])href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+    const href = decodeEntities(m[1] ?? m[2] ?? m[3] ?? "").trim();
+    if (!href.startsWith("#")) continue;
+    refs++;
+    const token = normalizeFragment(href.slice(1));
+    if (token === "") empty++;
+    // `top` is matched ASCII case-insensitively by a browser, unlike an id, which is
+    // why only this comparison is folded and `ids.has` is left exact.
+    else if (token.toLowerCase() !== "top" && !ids.has(token)) {
+      dangling++;
+      failed.add(token);
+    }
+  }
+  return { refs, empty, dangling, ids: [...failed].sort() };
+}
+
+// An id or a fragment, reduced to the form the other spelling of it agrees on. Entities
+// because a model writes `&amp;` into an href where the id it means says `&`; percent
+// decoding because a fragment is percent-encoded in a URL and an id is not, so
+// `href="#f%C3%BC"` and `id="fü"` are the same reference. A malformed escape is left as
+// written rather than thrown on: reporting it as dangling on account of a `%` is worse
+// than comparing the bytes.
+function normalizeFragment(value: string): string {
+  const decoded = decodeEntities(value).trim();
+  try {
+    return decodeURIComponent(decoded);
+  } catch {
+    return decoded;
+  }
+}
+
 // Absolute URLs the output links to that no annotation on this page accounts for.
 //
 // Reported for visibility, NOT corrected, and only for a page that had annotations —
