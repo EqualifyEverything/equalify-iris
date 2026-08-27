@@ -53,8 +53,13 @@ function usage(): never {
       "",
       "Pages are selected from `page_verify_ok` in each session's log: the pages this",
       "verifier already passed, which is what makes a rejection of the clean copy a",
-      "false positive rather than a disagreement with a different judge. --all-pages drops",
-      "that and measures the verifier against pages it may well have been right to fail.",
+      "false positive rather than a disagreement with a different judge. Two kinds of",
+      "pass are left out, because neither is a page the verifier had nothing to say",
+      "about: one no verdict could be read from (`unjudged`), and one whose own verdict",
+      "named a defect and shipped the page anyway (`page_verify_inconsistent`). Older",
+      "logs record neither, so their such pages stay in. --all-pages drops the whole",
+      "selection and measures the verifier against pages it may well have been right",
+      "to fail.",
       "",
     ].join("\n"),
   );
@@ -165,6 +170,17 @@ function fail(message: string): never {
 // the same reason as the unjudged ones: this corpus is the pages the verifier had nothing to
 // say about. Only a log from this version on carries the line, so an older log's such pages
 // stay in, exactly as they did when the measurement was first published.
+//
+// This reads the whole log, not the last `run_start` onwards as `diagnostics.ts` does, and
+// that is deliberate: a feedback re-run re-extracts only the pages the feedback touched, so
+// in the two multi-round sessions of the corpus behind #180 every passed page — 4 of the 11 —
+// was passed in round 1 and the last round passed none. Scoping to the last round would have
+// thrown away a third of the population and changed a published rate. The cost is that the
+// two subtractions are not symmetric across rounds: a page unjudged in an early round and
+// judged clean later is kept, on the later verdict, while a page described in an early round
+// stays dropped even if a later round passed it with nothing said. That direction only ever
+// makes the corpus smaller, never lets a page the verifier called wrong be scored as a clean
+// baseline, which is the error that would misreport the thing being measured.
 export function passedImages(logPath: string): Set<string> {
   const passed = new Set<string>();
   const described = new Set<string>();
