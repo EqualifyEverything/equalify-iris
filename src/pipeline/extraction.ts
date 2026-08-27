@@ -690,8 +690,16 @@ const BLANK_LOG =
 // rotated or skewed page says nothing about whether its words could be read.
 const UNREADABLE_LOG =
   /\b(illegible|unreadable|not legible|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry)|blurr\w*|obscur\w*|resolves?|corrupt\w*|partial\w*|error)\b/i;
+//
+// `smear`, `streak` and `blotch` are here for the reason `dark` is: each names something spread ACROSS
+// the sheet, and a sheet with a streak over it is one where "no text is visible" and "the text is
+// covered" are the same sentence. `MARK` excludes all three from its exemption on that argument, but
+// the argument bought nothing while none of them was a doubt word — "a streak covers most of the sheet;
+// no text is visible" had no veto word in it and was delivered blank (issue #226). Their siblings
+// `spots`, `stains` and `shadows` are deliberately NOT here, and the comment on `MARK` now says why:
+// they name something in one place, which a page with writing on it is not described as having.
 const DEGRADED_IMAGE_LOG =
-  /\b(dark|faint|washed|blurry|blurred|noisy|noise|grainy|pixelat\w*|low[- ]?res\w*|resolution|(poor|low|bad|degraded)( \w+)? quality|quality (is|was|of)|(out of|not in|soft) focus|did ?n[o']?t load|not load\w*)\b/i;
+  /\b(dark|faint|washed|blurry|blurred|noisy|noise|grainy|pixelat\w*|low[- ]?res\w*|resolution|smear\w*|streak\w*|blotch\w*|(poor|low|bad|degraded)( \w+)? quality|quality (is|was|of)|(out of|not in|soft) focus|did ?n[o']?t load|not load\w*)\b/i;
 
 // The marks a scanner leaves on an empty sheet, and the exemption for describing them. The words
 // for the marks and the words for a bad image overlap almost completely (`faint`, `noise`, `dark`),
@@ -724,6 +732,14 @@ const DEGRADED_IMAGE_LOG =
 // is not: a dark streak or a dark spot is a condition of the capture rather than something on the
 // sheet, and either can cover content — which is why `dark` is a veto word at all. Adding them made
 // "the scan shows dark streaks" a blank page. `smudges` stays, as a mark left on the paper.
+//
+// That argument only bit on the three that name something spread ACROSS the sheet, and only once they
+// were doubt words in their own right: `smear`, `streak` and `blotch` are in `DEGRADED_IMAGE_LOG`, so
+// leaving them out here is what keeps them refusing (issue #226). `spots`, `stains` and `shadows` are
+// out of both lists on purpose, and the reason is narrower than the one above: they name something in
+// ONE PLACE, which is what a scanner leaves and not how a covered page is described — and `spots` is a
+// word a log may reach for to name the specks it is already allowed to describe. So a log that says
+// only "spots are visible, no text" is believed, and "a streak covers most of the sheet" is not.
 //
 // What lets bare `marks` in behind one of these words is what the word says about them: `stray`,
 // `scattered`, `isolated`, `random` and `residual` place the marks nowhere in particular, which is
@@ -1030,6 +1046,14 @@ const AFFIRMING_VERB = new Set("is are was were appear appears remain remains co
 const QUALIFIER = new Set(
   "meaningful legible readable printed typed visible discernible apparent recognizable recognisable clear other more".split(" "),
 );
+// The words that affirm a noun with no verb between them: "heading visible" is "a heading is visible"
+// with the copula dropped, which is how a log written in fragments says a page has something on it.
+// `detected`, `seen` and `found` are left out for the reason `AFFIRMING_VERB` leaves them out — they are
+// the wording a denial reaches for — and `legible` and `readable` are left out because they are read as
+// qualifiers in front of the noun everywhere else in the file, and a post-nominal one is not a wording
+// these logs use. Every word here is one `DENIAL_WORD` also lists, which is the only way the read is
+// reached at all: a statement with a word outside that list in it has already refused a line above.
+const PREDICATED = new Set("visible present apparent discernible".split(" "));
 // `image` is the one word the lists genuinely disagree about: it is the substrate in "not legible text
 // in this image" and a thing the page bears in "an image is visible", and both wordings are ones these
 // logs use. So it is read by what introduces it — a locative preposition makes it the scan, anything
@@ -1080,7 +1104,11 @@ function deniesToStatementEnd(log: string, start: number): boolean {
     // more list member and not a new claim. The same coordination rule `negatedInList` applies from
     // the other side. A determiner still stops the walk, which is what keeps `only a heading is
     // visible` the affirmation it is.
-    while (before >= 0 && (QUALIFIER.has(words[before]!) || PAGE_BEARS.has(words[before]!))) before--;
+    let listMember = false;
+    while (before >= 0 && (QUALIFIER.has(words[before]!) || PAGE_BEARS.has(words[before]!))) {
+      if (PAGE_BEARS.has(words[before]!)) listMember = true;
+      before--;
+    }
     // A noun that OPENS the statement is in the same position as one a conjunction introduced, and for
     // the same reason: the denial in front of the construction is what governs it, and the only thing
     // between them is the comma the list is written with. "…do not resolve into any characters,
@@ -1091,6 +1119,21 @@ function deniesToStatementEnd(log: string, start: number): boolean {
     const openedStatement = before < 0;
     if (openedStatement || DENIAL_CONNECTOR.has(words[before]!)) {
       if (!openedStatement && !CONJUNCTION.has(words[before]!)) return true;
+      // An affirmation written without a verb has none for the tail read to find: "not legible text,
+      // heading visible" and "…do not resolve into any characters, diagrams visible" say the page has
+      // something on it in the same words a denial is built from, and the verb the read looks for is
+      // simply missing (issue #227). What tells the two apart is the CONNECTOR, not the noun: a denial
+      // coordinates its list ("not legible text or diagrams visible" denies both, and #220's own logs
+      // are written that way — "any characters, words, diagrams, or other content"), while an
+      // affirmation is a fresh clause dropped in behind a bare comma. So only a noun that OPENS the
+      // statement is read this way, and a conjunction in front of it keeps the denial it always had.
+      //
+      // `listMember` is the rest of that same rule: a comma'd list needs no conjunction until its last
+      // member, so a noun with an earlier name for text behind it is one more item in the denial and not
+      // a new clause, however the item after it reads. That is what keeps "…any characters, words,
+      // diagrams, or other content" whole. The narrow reading is the deliberate one: a single noun, then
+      // a word saying it is there, and nothing else between it and the comma.
+      if (openedStatement && !listMember && PREDICATED.has(words[i + 1] ?? "")) return false;
       const tail = words.slice(i + 1);
       const nextDenial = tail.findIndex((later) => NEGATOR.has(later));
       const governed = nextDenial === -1 ? tail : tail.slice(0, nextDenial);
