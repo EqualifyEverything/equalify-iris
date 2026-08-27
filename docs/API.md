@@ -260,7 +260,12 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   body: it was declined or came back with nothing — the run log says which on an
   `editor_sections_declined` line, whose `reason` is one of `unmeasured`, `budget_too_small`,
   `budget_exceeds_body`, `indivisible` or `too_many_sections` — or a section truncated in its turn
-  and kept the text it went in with. This is
+  and kept the text it went in with, or a section that came back complete but with under half the
+  prose it was given (`editor_section_failed`, `reason: "shrank"`). That last cause is why this
+  rate is no longer only about the output ceiling: it also fires on the SHAPE of a reply — one
+  section answered with a sentence about itself rather than with the section — and the remedy for
+  that is not more `max_tokens`. The log line says which, and the two differ in what they cost a
+  reader only in that the shrunk one had a reply and declined to trust it. This is
   the truncation number that carries a threshold, because it is the one that costs a reader
   something: those parts of the document had no editor pass at all, and a truncation is the loop's
   last round, so nothing looks for their issues again. A strict subset of `editor_truncated_rate`

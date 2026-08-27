@@ -705,9 +705,13 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   reply carrying a fifth of the document. A half rather than the page path's quarter, because the
   populations are further apart here (one section of these bodies is 0.016–0.379 of it) and the
   costs are asymmetric: refusing a good round costs that round's corrections and says so in
-  `@unresolved`, while accepting a fragment costs the document. Bodies with under 1,000 characters
-  of prose are not judged at all — the legitimate deletions are fixed-size, so on a short body a
-  single resolved `[page not fully transcribed]` marker is half the prose. The initial page render
+  `@unresolved`, while accepting a fragment costs the document. The one legitimate round that can
+  approach a half is the deletion the editor's own prompt sanctions — the same content rendered as
+  both a form and a table, where dropping the table drops the copy carrying more prose — and on a
+  body that is mostly such a pair the round is refused and its other fixes go with it; that cost is
+  taken knowingly and is on the log with both sizes. Bodies with under 1,000 characters
+  of prose are not judged at all — the legitimate deletions are otherwise fixed-size, so on a short
+  body a single resolved `[page not fully transcribed]` marker is half the prose. The initial page render
   is the third path that adopts `html` wholesale and is deliberately still unguarded: it has no
   before-page to compare against, so a floor there is an absolute plausibility check on what a page
   image that carried text may produce, which is #116's question and not this one's.

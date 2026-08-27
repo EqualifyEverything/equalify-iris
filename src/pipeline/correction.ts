@@ -507,18 +507,34 @@ export function destroyedPage(before: string, after: string): boolean {
 //
 // Both stay on the `editor` line as measurements. What sees a markup-only loss is the structure
 // pair plus the re-lint of the body that ships; what sees content leaving is this.
+//
+// The known cost, named because it is the one legitimate round that can approach a half on the
+// prose: EDITOR_SYSTEM sanctions one deletion that scales with the document — "remove duplicated or
+// redundant content (e.g. the same content rendered as both a form and a table — keep the best
+// single representation)". On a scanned form whose extraction emitted both, dropping the table drops
+// the copy carrying MORE prose, because a table repeats its labels once per row. A body that is
+// mostly such a pair therefore lands near or under 0.5 and is refused, and the refusal is not
+// confined to that fix: the round is `usable: false`, so every other correction in the same reply
+// goes with it, and the next round asks the same thing of the same body and is refused again to the
+// cap, so those issues ship @unresolved. That is the trade taken knowingly — the alternative is a
+// floor that also admits a reply carrying one section of the document — and it is reported rather
+// than silent: `editor_shrank` carries both prose sizes, so a round refused for a deletion that was
+// the point of it is visible in the log, which is where the evidence for anything cleverer (a floor
+// that reads the duplicated representation's own size) would have to come from. No round in
+// `runs-231` is this shape; the four measured are all within 0.6%.
 export const EDITOR_SHRINK_FLOOR = 2;
 
 // How much prose a body needs before a PROPORTION of it is a measurement at all, in visible
 // characters. Under this, nothing is refused.
 //
 // Not an escape hatch — the arithmetic of the floor above stops working at the bottom of the range.
-// The legitimate deletions #174 lists are fixed-size, not proportional: `[page not fully
-// transcribed]` is 28 characters, a duplicated heading is 20–60, a transcribed page number is one
-// to three. Ten of those is 300 characters however long the document is, so on a body of 500 the
-// floor is reachable by the editor doing exactly what it was asked, and on a body of 50 — which is
-// what several of this repo's own round fixtures are — a single resolved marker trips it. A
-// thousand puts the smallest firing at 500 characters of prose gone, which is not a count of
+// The legitimate deletions #174 lists are fixed-size rather than proportional (the one sanctioned
+// deletion that is not is named above, and it is the floor's known cost, not this bound's): `[page
+// not fully transcribed]` is 28 characters, a duplicated heading is 20–60, a transcribed page
+// number is one to three. Ten of those is 300 characters however long the document is, so on a body
+// of 500 the floor is reachable by the editor doing exactly what it was asked, and on a body of
+// 50 — which is what several of this repo's own round fixtures are — a single resolved marker trips
+// it. A thousand puts the smallest firing at 500 characters of prose gone, which is not a count of
 // headings and page numbers, it is paragraphs.
 //
 // What it gives up is the floor on a document with under about 150 words in it, and that is the

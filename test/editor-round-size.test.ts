@@ -53,8 +53,9 @@ interface Recorded {
   events: { type: string; data: Record<string, unknown> }[];
 }
 
-// One issue on page 2, so the editor runs; one round, so the log has one `editor` line on it.
-function ctxWith(dir: string, editorReply: string): { ctx: PipelineContext; rec: Recorded } {
+// One issue on page 2, so the editor runs; one round by default, so the log has one `editor` line on
+// it. `iterations` is for the one test that needs to see what the NEXT round does with a refusal.
+function ctxWith(dir: string, editorReply: string, iterations = 1): { ctx: PipelineContext; rec: Recorded } {
   const inputDir = join(dir, "input");
   mkdirSync(inputDir, { recursive: true });
   const png = Buffer.from(
@@ -74,7 +75,7 @@ function ctxWith(dir: string, editorReply: string): { ctx: PipelineContext; rec:
   const ctx = {
     sessionId: "ses_test",
     images,
-    maxReviewIterations: 1,
+    maxReviewIterations: iterations,
     extractionConcurrency: 4,
     paths: {
       agentsDir: join(dir, "agents"),
@@ -214,6 +215,29 @@ test("a reply with a fifth of the document's prose in it does not get to be the 
     // And NOT as a convergence. `review_converged` claims the editor read the document and decided
     // it was better left alone, with rounds to spare; a refused reply is the opposite claim, and
     // the loop must be free to spend another round asking again.
+    assert.equal(rec.events.find((e) => e.type === "review_converged"), undefined);
+  });
+});
+
+test("a refused round is not the end of the loop, it is a round that asks again", async () => {
+  await withTemp(async (dir) => {
+    // The other half of `usable: false`, and the half the test above can only assert the absence of.
+    // A refusal is not a truncation: truncation is the loop's last round because a body that does
+    // not fit will not fit next time either, so `editorCall` breaks out. A reply that came back
+    // COMPLETE and was refused for its shape says nothing about the next reply, and the issues it
+    // was asked to fix are still open — so the loop is entitled to spend another round on them, the
+    // same way it does when a reply cannot be parsed at all (`editor_no_output`,
+    // test/review-converge.test.ts). Turning this into `usable: true`, or reusing the truncation
+    // branch's `break`, passes every other test in this file; this is the one it fails.
+    const before = longBody();
+    const after = "<h1>Quarterly Report</h1><p>The report has been reviewed and corrected.</p>";
+    const { ctx, rec } = ctxWith(dir, JSON.stringify({ html: after }), 2);
+    const result = await runReview(ctx, { body: before, lint: { ok: true, violations: [] }, pages: PAGES });
+
+    assert.equal(rec.events.filter((e) => e.type === "editor_shrank").length, 2, "the second round never ran");
+    assert.equal(rec.events.filter((e) => e.type === "editor").length, 2);
+    // Two rounds spent, and the document that ships is still the one that entered the first of them.
+    assert.equal(result.body, before);
     assert.equal(rec.events.find((e) => e.type === "review_converged"), undefined);
   });
 });
