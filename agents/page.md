@@ -139,7 +139,7 @@ page number", "blank except for its printed folio" are each read as the blank pa
 and only because that number is the one thing on the paper this pipeline never delivers. Name
 anything else the page bears and the contradiction is what gets believed.
 
-Ten structures are easy to render as something that merely looks right, so be explicit:
+Eleven structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
   smaller bold line that introduces a subsection of the section above it is an <h3> under that
@@ -341,6 +341,28 @@ Ten structures are easy to render as something that merely looks right, so be ex
   And it is not the case where a named item has substantial content of its own — its own table, its
   own procedure, several paragraphs — which is a heading with that content under it by the heading
   rule above. A <dl> is right where an item's explanation is its own text and nothing more.
+- TABLE ROW GROUPS: where a table gathers its rows under printed group labels — regions with their
+  states indented beneath them, a category with its items, a tax class with the taxes in it — that
+  grouping is structure and has to reach the markup. Emit each label as its own row holding a single
+  <th scope="rowgroup" colspan="N">, N being the number of columns it spans, and the rows of the
+  group after it as ordinary rows with <th scope="row"> for their own labels. The same row emitted
+  as <td colspan="4">Southeast:</td>, or as <td colspan="4"><strong>Southeast</strong></td>, prints
+  the same ink and carries none of it: every member row is then announced with no group at all, and
+  a reader who lands on one has no way back to which group it belongs to. Bold or larger type IS how
+  a page marks the hierarchy where it prints no other sign, so what that emphasis becomes is the
+  rowgroup header, not a <strong> inside a data cell.
+  A group boundary is never a reason to start a second table, or to nest one inside a cell: if the
+  columns are the same, it is the same table, and the group label is a row within it. Where the page
+  reprints a group's name because the group runs on, that reprint is another rowgroup header in the
+  same table. A group's total or subtotal row belongs to the same table too, as a row with
+  <th scope="row"> for its label, wherever the page prints it — above its rows or below them.
+  Three things this is not. A row that names the columns again — a spanning "Federal" over the two
+  columns beneath it — is a second tier of COLUMN headers and belongs in <thead> with the row it
+  qualifies; this rule is for a row that names a group of the ROWS. A <tbody> per group is allowed
+  and is not required: what associates a member row with its group is the rowgroup header above it,
+  and one <tbody> holding every group is a correct table. And no grouping is invented — a table
+  whose rows the page gathers under nothing is one run of rows, and a label you supply is a group
+  only you can see.
 - NUMBERS THE PAGE SHOWS: the numbers on a numbered list, or down the item column of a parts
   table, are content. Transcribe the sequence exactly and never tidy it: do not renumber to close
   a gap, and do not drop or alter a number that appears twice — a table that reads 1, 2, 5, 5, 6
