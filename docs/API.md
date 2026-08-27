@@ -428,6 +428,13 @@ rejected upload will have broken. The model and provider that produced these num
 deliberately not named here; that is deployment detail, and this endpoint answers a question
 about files.
 
+That last point is also why the advice about pixels lives in `hint` rather than in a field of its
+own. A deployment may run a vision model Iris has no published image limits for, and then the two
+pixel numbers are its conservative stand-ins rather than facts about that model — the same values,
+enforced the same way, but not something to tell a user they can rely on. `hint` is written from
+whichever of the two situations holds, so quoting it is always accurate; composing your own
+sentence from `max_long_edge_px` is what can go stale, and this is a second reason not to.
+
 `upload` is what one **request** may be, as opposed to what one image may be: `max_files` parts and
 `max_request_bytes` across all of them. They are refused at different moments, which matters if you
 are streaming: the byte total is checked before the body is read (or counted as it arrives, when the

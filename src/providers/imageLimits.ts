@@ -23,6 +23,12 @@ import { resolveAgentModel } from "./index.ts";
 // Sources (checked 2026-08-13):
 //   https://platform.claude.com/docs/en/build-with-claude/vision  (Request limits,
 //   Supported formats, Resolution and token cost)
+//
+// That is the ONLY source here, which is now something the file has to admit rather than
+// assume: a deployment can point its vision agents at a model Anthropic did not make, and
+// then the pixel limits and the format list below are guesses about it. See `LimitsBasis`
+// — the numbers stay conservative, the sentences stop claiming to be facts, and boot says
+// so once.
 
 // Per-image cap, in BASE64 characters — the unit the platform documents, and the one
 // that binds: both adapters send images base64-encoded, which is 4 characters on the
@@ -140,6 +146,27 @@ export const IMAGE_MEDIA_TYPES: Record<string, string> = {
 // at upload time.
 const IMAGE_AGENTS = ["page", "feedback", "copy_editor", "builder"] as const;
 
+// Whether the PIXEL limits and the format list are documented facts about the model
+// this deployment is actually running, or Iris's conservative stand-ins for one it
+// cannot recognize. The byte cap is not in question either way — that one is a fact
+// about the provider's endpoint, which serves every model it hosts the same.
+//
+// The distinction did not exist while every model Iris could reach was a Claude. It does
+// now: `providers.bedrock.api: converse` sends a request shape that belongs to Bedrock
+// rather than to a model vendor (providers/bedrock.ts), so `per_capability.vision` can
+// name a Qwen or a Nova. Then `modelGeneration()` answers null — correctly, it is not a
+// Claude — `longEdgeFor()` returns the standard tier, and everything downstream states
+// 1568 px as what the model reads. Wrong in the reading direction as well as the
+// writing one: the sentence tells a user to throw away pixels the model may well have
+// used, which is the same class of undiagnosable damage this module was written to end,
+// only quieter, because nothing fails.
+//
+// The NUMBERS do not move with this flag. Every one of them is already the conservative
+// end of what Iris knows, which is the right thing to serve an upload with while nobody
+// has checked. What moves is the CLAIM: what a hint promises, and whose refusal a
+// rejection is attributed to.
+export type LimitsBasis = "documented" | "assumed";
+
 export interface ImageLimits {
   // The largest file, in bytes on disk, that may be uploaded as one page.
   max_image_bytes: number;
@@ -151,6 +178,11 @@ export interface ImageLimits {
   max_dimension_px: number;
   media_types: string[];
   extensions: string[];
+  // Whether the two pixel numbers above describe the configured vision model or are
+  // Iris's guess at it. Not published by `GET /v1/limits`: the endpoint deliberately
+  // says nothing about which model serves the deployment, and this is the wording of
+  // `hint` rather than a field of its own.
+  basis: LimitsBasis;
 }
 
 // Raw bytes that fit inside a base64 cap. Base64 is 4 characters per 3 bytes, so a
@@ -216,6 +248,21 @@ export function longEdgeFor(model: string): number {
     : STANDARD_LONG_EDGE_PX;
 }
 
+// Whether this file has read documentation about a model id's images, or is guessing.
+//
+// Claude only, because the source at the top of this file is Claude's vision docs and
+// there is nothing else here to be documented BY. Deliberately the same question
+// `modelGeneration` answers rather than a second list of names to keep in step: an id
+// this file cannot place in the Claude generations is an id whose pixel limits it does
+// not know, and those are the same id.
+//
+// This is not a judgement about the model. A vision model Anthropic did not make may
+// read larger images than any Claude; the point is that Iris has not been told, so it
+// must not speak for it.
+export function limitsBasisFor(model: string): LimitsBasis {
+  return modelGeneration(model) === null ? "assumed" : "documented";
+}
+
 // Coerce a configured `image_limits` number: absent, unparseable or nonsensical
 // falls back to what the table says. Same trap as config.ts's other normalizers —
 // YAML parses a valueless `max_image_bytes:` as null and Number(null) is 0, which
@@ -247,10 +294,64 @@ function normalizeOverride(value: unknown, fallback: number): number {
 // strictest — a mixed deployment can have the tighter byte cap on one provider and
 // the smaller long edge on the other — so one winning block cannot carry both.
 export function resolveImageLimits(cfg: IrisConfig): ImageLimits {
-  let base64Cap = Infinity;
-  let rawCap = Infinity;
-  let longEdge = Infinity;
+  const perAgent = perAgentImageLimits(cfg);
 
+  // Nothing resolved at all (a config with no reachable provider). Fall back to the
+  // conservative defaults rather than publishing Infinity — and to "assumed", because
+  // limits resolved from no model at all are not documented about anything.
+  if (perAgent.length === 0) {
+    const base64Cap = DEFAULT_BASE64_CAP;
+    return published(rawBytesForBase64Cap(base64Cap), base64Cap, STANDARD_LONG_EDGE_PX, "assumed");
+  }
+
+  return published(
+    Math.min(...perAgent.map((a) => a.rawCap)),
+    Math.min(...perAgent.map((a) => a.base64Cap)),
+    Math.min(...perAgent.map((a) => a.longEdge)),
+    // Documented only when it is documented for EVERY agent an upload passes through,
+    // for the same reason the strictest number wins above: one sentence is published,
+    // and it has to hold for every call the upload makes. A deployment that extracts on
+    // a Claude and verifies on something else is a deployment whose published pixel
+    // limits are a guess about half its calls.
+    perAgent.every((a) => a.basis === "documented") ? "documented" : "assumed",
+  );
+}
+
+// The fixed parts, assembled in one place so the two returns above cannot drift.
+function published(
+  rawCap: number,
+  base64Cap: number,
+  longEdge: number,
+  basis: LimitsBasis,
+): ImageLimits {
+  return {
+    max_image_bytes: rawCap,
+    max_base64_bytes: base64Cap,
+    max_long_edge_px: longEdge,
+    max_dimension_px: MAX_DIMENSION_PX,
+    media_types: [...new Set(Object.values(IMAGE_MEDIA_TYPES))],
+    extensions: Object.keys(IMAGE_MEDIA_TYPES),
+    basis,
+  };
+}
+
+// What ONE agent's own provider block and model say, before the strictest across them
+// is taken. Split out because two callers need the identical walk — the limits this
+// deployment publishes, and the boot warning about a model those limits were not written
+// for — and a warning derived from its own second walk would eventually describe
+// something other than the numbers it is warning about.
+interface AgentImageLimits {
+  agent: string;
+  provider: string;
+  model: string;
+  base64Cap: number;
+  rawCap: number;
+  longEdge: number;
+  basis: LimitsBasis;
+}
+
+function perAgentImageLimits(cfg: IrisConfig): AgentImageLimits[] {
+  const out: AgentImageLimits[] = [];
   for (const agent of IMAGE_AGENTS) {
     // A per_agent entry naming a provider with no config block is a startup error
     // (config.ts validateConfig), but this must not be the thing that throws while
@@ -262,34 +363,69 @@ export function resolveImageLimits(cfg: IrisConfig): ImageLimits {
       continue;
     }
     const override = (cfg.providers[resolved.provider] as ProviderBlock | undefined)?.image_limits;
-    const cap = normalizeOverride(
+    const base64Cap = normalizeOverride(
       override?.max_base64_bytes,
       BASE64_CAP_BY_PROVIDER[resolved.provider] ?? DEFAULT_BASE64_CAP,
     );
     // Derived from THIS provider's cap, so an override of one number still moves the
     // other: raising the base64 cap for a platform that allows 10 MB raises the file
     // size that follows from it, without the operator restating the arithmetic.
-    const raw = normalizeOverride(override?.max_image_bytes, rawBytesForBase64Cap(cap));
-    const edge = normalizeOverride(override?.max_long_edge_px, longEdgeFor(resolved.model));
-    if (cap < base64Cap) base64Cap = cap;
-    if (raw < rawCap) rawCap = raw;
-    if (edge < longEdge) longEdge = edge;
+    const rawCap = normalizeOverride(override?.max_image_bytes, rawBytesForBase64Cap(base64Cap));
+    // Asked for as a USABLE number rather than a present key, because that is what the
+    // basis turns on: `max_long_edge_px:` with nothing after it is YAML for null, which
+    // normalizeOverride sends to the fallback, and treating it as an operator's answer
+    // would silence the warning below with a line that changed nothing.
+    const edgeOverride = normalizeOverride(override?.max_long_edge_px, 0);
+    out.push({
+      agent,
+      provider: resolved.provider,
+      model: resolved.model,
+      base64Cap,
+      rawCap,
+      longEdge: edgeOverride > 0 ? edgeOverride : longEdgeFor(resolved.model),
+      // An operator who set the long edge for this provider has answered the question
+      // the basis asks, whatever the model id says: the number published is now their
+      // fact about their model rather than this file's guess at it.
+      basis: edgeOverride > 0 ? "documented" : limitsBasisFor(resolved.model),
+    });
   }
+  return out;
+}
 
-  // Nothing resolved at all (a config with no reachable provider). Fall back to the
-  // conservative defaults rather than publishing Infinity.
-  if (!Number.isFinite(base64Cap)) base64Cap = DEFAULT_BASE64_CAP;
-  if (!Number.isFinite(rawCap)) rawCap = rawBytesForBase64Cap(base64Cap);
-  if (!Number.isFinite(longEdge)) longEdge = STANDARD_LONG_EDGE_PX;
-
-  return {
-    max_image_bytes: rawCap,
-    max_base64_bytes: base64Cap,
-    max_long_edge_px: longEdge,
-    max_dimension_px: MAX_DIMENSION_PX,
-    media_types: [...new Set(Object.values(IMAGE_MEDIA_TYPES))],
-    extensions: Object.keys(IMAGE_MEDIA_TYPES),
-  };
+// The one thing worth saying at boot about images: this deployment's vision model is not
+// one this file has limits for, so what it publishes and enforces about images is a
+// guess. Null when every agent that sees an upload resolves to a model it does know.
+//
+// A warning and not a startup error, and nothing is refused. Pointing
+// `per_capability.vision` at a model Anthropic did not make is a supported thing to do
+// (providers/bedrock.ts, `api: converse`), and the guesses are the conservative end of
+// what Iris knows, which is the right way to serve an upload nobody has measured. What
+// is not supportable is publishing them in the same voice as a checked number:
+// `GET /v1/limits`, the demo's hint and the `400` a caller gets are all written to be
+// quoted, and boot is the only place an operator can be told which of the two they are
+// quoting. The hint qualifies itself for the user; this line is for whoever can fix it.
+//
+// It goes quiet as soon as that is done: an `image_limits.max_long_edge_px` on the
+// provider block serving the agent is the operator saying they have read the model's
+// documentation, which is exactly what this asks for.
+export function visionModelWarning(cfg: IrisConfig): string | null {
+  const guessed = perAgentImageLimits(cfg).filter((a) => a.basis === "assumed");
+  if (guessed.length === 0) return null;
+  const limits = resolveImageLimits(cfg);
+  const formats = limits.media_types.map((t) => t.replace("image/", "").toUpperCase()).join("/");
+  const blocks = [...new Set(guessed.map((a) => `providers.${a.provider}.image_limits`))];
+  return (
+    `the vision model for ${guessed.map((a) => a.agent).join(", ")} ` +
+    `(${[...new Set(guessed.map((a) => a.model))].join(", ")}) is not one Iris has documented ` +
+    `image limits for, so what it publishes about an image's pixels and formats is a ` +
+    `conservative guess: ${limits.max_long_edge_px} px on the long edge, ` +
+    `${limits.max_dimension_px} px per side, ${formats}. Those are the documented limits for the ` +
+    `models this build does know, and GET /v1/limits, the upload check and the demo all read ` +
+    `them — for this model they may be wrong in either direction, including refusing an image it ` +
+    `would have accepted. The ${formatBytes(limits.max_image_bytes)} per-image cap is the ` +
+    `provider's own and holds whatever the model. Set ${blocks.join(" / ")} to the numbers this ` +
+    `model's documentation gives.`
+  );
 }
 
 // Sizes as a person reads them, for messages and for the published limits. One
@@ -314,13 +450,30 @@ export function formatBytes(bytes: number): string {
 // shrunk at no cost — a user told only "too large" reasonably fears losing detail the
 // conversion needs, and the answer is that the model was going to discard those
 // pixels anyway.
+//
+// That answer is only available when the model's downscaling is documented, which is
+// what the second half switches on. "Loses nothing" is a promise about the model, and on
+// a model this build has no limits for it would be advice to destroy detail that may
+// have been read — a worse outcome than the rejection it is explaining, and one the user
+// would never learn about. So the same pixel number is offered as a size that is known
+// to work rather than as a size above which nothing counts.
 export function imageLimitsHint(limits: ImageLimits): string {
-  return (
+  const lead =
     `Each image must be under ${formatBytes(limits.max_image_bytes)} and in one of ` +
-    `${limits.media_types.map((t) => t.replace("image/", "").toUpperCase()).join(", ")} format. ` +
-    `The vision model reads at most ${limits.max_long_edge_px} px on the long edge and downscales ` +
-    `anything larger, so re-saving a big photo or scan at ${limits.max_long_edge_px} px — or as a ` +
-    `JPEG — loses nothing the conversion would have used.`
+    `${limits.media_types.map((t) => t.replace("image/", "").toUpperCase()).join(", ")} format. `;
+  if (limits.basis === "documented") {
+    return (
+      lead +
+      `The vision model reads at most ${limits.max_long_edge_px} px on the long edge and downscales ` +
+      `anything larger, so re-saving a big photo or scan at ${limits.max_long_edge_px} px — or as a ` +
+      `JPEG — loses nothing the conversion would have used.`
+    );
+  }
+  return (
+    lead +
+    `The reliable way to bring a big photo or scan under that is to re-save it as a JPEG, or at ` +
+    `${limits.max_long_edge_px} px on the long edge — the size this deployment's vision model is ` +
+    `assumed to read, since no published limit for it was available.`
   );
 }
 
@@ -361,11 +514,23 @@ export function imageRejection(image: CandidateImage, limits: ImageLimits): stri
   if (overDimension(image)) {
     return (
       `${image.name} is ${image.width}x${image.height} px, over the ` +
-      `${limits.max_dimension_px} px limit on a side — the vision model refuses an image that ` +
-      `large outright rather than shrinking it. ${imageLimitsHint(limits)}`
+      `${limits.max_dimension_px} px limit on a side — ${dimensionReason(limits)}. ` +
+      `${imageLimitsHint(limits)}`
     );
   }
   return null;
+}
+
+// Whose refusal the one hard ceiling is. Documented for Claude, which returns an error
+// for an image over it instead of downscaling. On a model with no published limit Iris
+// enforces the same number anyway — the conservative end of what it knows, and better
+// than discovering the answer four minutes into a run — but says so as its own rule
+// rather than putting a refusal in the model's mouth.
+function dimensionReason(limits: ImageLimits): string {
+  return limits.basis === "documented"
+    ? "the vision model refuses an image that large outright rather than shrinking it"
+    : "Iris does not send an image that large to any vision model, because the ones it has " +
+        "published limits for refuse it outright rather than shrinking it";
 }
 
 // The same two limits, for a page Iris rasterized out of a PDF rather than one the

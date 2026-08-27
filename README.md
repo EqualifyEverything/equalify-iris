@@ -780,6 +780,20 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   50 MB ceiling and died two to four minutes later as "no output arrived within 120s". Switching
   models now moves every one of those surfaces together. An operator can still override per
   provider (`providers.<name>.image_limits`) for a model newer than the table.
+
+  One source sits behind all of it — Claude's vision documentation — and since
+  `providers.bedrock.api: converse` can reach a model Anthropic did not make, the file now says
+  which of its numbers it has actually read. A vision model it cannot place in the Claude
+  generations resolves the same conservative limits (they are the right ones to serve an upload
+  with while nobody has measured) but marks them `assumed`, and the *claims* change with that
+  flag: the hint stops promising that re-saving at the long edge "loses nothing the conversion
+  would have used" — a promise about the model's downscaling, and on an unmeasured model advice to
+  destroy detail that may have been read — and the 8000 px rejection stops attributing itself to
+  the model's refusal. Boot warns once, naming the agents, the model and the config path, because
+  every downstream surface here is written to be quoted verbatim and none of them can qualify
+  itself. Setting `image_limits.max_long_edge_px` is the operator answering, and it silences both.
+  `GET /v1/limits` gains no field for this: the endpoint deliberately says nothing about which
+  model serves the deployment, so the qualification is in the wording of `hint`.
 - **Starting work on a session is a claim, not a check (`store.claimSession`).** The two endpoints
   that begin non-idempotent work — `POST /:id/feedback` (enqueues a pipeline) and `POST /:id/close`
   (files regression fixtures into the shared agent library, deletes the tmp tree) — used to read the
