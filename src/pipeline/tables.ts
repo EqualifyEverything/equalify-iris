@@ -88,8 +88,11 @@ export interface TablePiece {
   // judgement being asked for: a header cell that reads "Col 1" in the input and something better
   // in the answer is the repair, not a loss. What counts as a header row is a row inside `<thead>`
   // — all 48 tables in the corpus put theirs there, and all 92 of their multi-cell all-`<th>` rows
-  // are inside one — plus, for a table that has no `<thead>` at all, a row of more than one cell
-  // that is all `<th>`. A one-cell all-`<th>` row is NOT excluded: that is a
+  // are inside one — plus, wherever it sits, a row of more than one cell that is all `<th>`. That
+  // second reading is deliberately not conditional on the table lacking a `<thead>`, and `rowFloor`
+  // now rests on it: a reply that keeps the duplicate header block by repeating it mid-`<tbody>` is
+  // only visible as a deeper joined header BECAUSE those rows count, and that depth is what the
+  // credit's gate reads. A one-cell all-`<th>` row is NOT excluded: that is a
   // `<th scope="rowgroup">` group label (12 of them in the corpus), which is content the join must
   // keep and rule 5 of the prompt asks for.
   labels: string[];
@@ -327,7 +330,13 @@ const JOIN_DROPPABLE_ROWS = 1;
 // not a promotion, and the credit is what the joined table's depth says — floored at zero, since a
 // header deeper than both blocks together means rows moved rather than went, and the row count does
 // not change when a row moves. Counts alone cannot tell a promotion from a kept duplicate (both only
-// raise the depth), so the depth gate is where the two are separated. Deflating the depth instead —
+// raise the depth), so the depth is where the two are separated — and separated to within one row,
+// not outright: a joined header exactly one row deeper than the deepest block is inside the gate, so
+// a reply that kept ONE duplicated header row is still credited with a shared block and can lose one
+// unlabelled row with it. That residual is the same size as the drop `JOIN_DROPPABLE_ROWS` already
+// forgives, and closing it would mean refusing rule 6's promotion, which is the same shape. What is
+// bounded, and all that is claimed here, is that the slack cannot be a header BLOCK deep.
+// Deflating the depth instead —
 // demoting the header block to plain rows — does raise the credit, and is refused before this by
 // `header_cells_lost`.
 function rowFloor(pair: ContinuationPair, joined: TablePiece): number {

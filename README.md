@@ -692,7 +692,10 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   The shared-block reading is bounded by that same one row, because the two things that deepen a
   joined header are a row promoted into it and a header block *kept*: past one block plus one row,
   the merge is carrying the duplicate header this stage exists to remove, nothing went, and the
-  shared-block credit would hand back that block's worth of unlabelled rows.
+  shared-block credit would hand back that block's worth of unlabelled rows. To within one row, that
+  is: a reply that keeps a single duplicated header row is inside the bound and can lose one
+  unlabelled row with it, which is the size of the drop the floor forgives anyway and indivisible
+  from the promotion the prompt asks for. What is ruled out is slack a whole header block deep.
   The count is needed at all because the label set is blind to a row that has no
   label: a printed statistical table gives a multi-line row label continuation lines whose first cell
   is empty, and neither a label set nor a floor at the larger half can see those disappear. Header
