@@ -146,25 +146,40 @@ function fail(message: string): never {
 // per page whose first verify came back with nothing to correct (extraction.ts), so this
 // is exactly the population #180 asks for, taken from the record rather than re-derived.
 //
-// Except for one case the event does not distinguish by itself: verification is
-// non-blocking, so a page nobody could judge — no Feedback Agent, a reply that would not
-// parse — also writes `page_verify_ok`. Those pages are not evidence that the verifier
-// passed anything, and selecting them would put pages the verifier never had an opinion
-// about into a false-positive rate. Runs from this version on mark them `unjudged: true`
-// and they are dropped here; older logs cannot say, and their unjudged pages come out as
-// unjudged clean copies in the report, excluded from the rates there instead.
+// Except for two cases the event does not distinguish by itself.
+//
+// Verification is non-blocking, so a page nobody could judge — no Feedback Agent, a reply
+// that would not parse — also writes `page_verify_ok`. Those pages are not evidence that the
+// verifier passed anything, and selecting them would put pages the verifier never had an
+// opinion about into a false-positive rate. Runs from this version on mark them
+// `unjudged: true` and they are dropped here; older logs cannot say, and their unjudged pages
+// come out as unjudged clean copies in the report, excluded from the rates there instead.
+//
+// And a page can pass while its own verdict describes a defect in it: `ok` is the verdict's
+// flags, and a problem named with both flags true ships the page (issue #210). That page is
+// not a clean baseline — the verifier has said in prose that it is wrong — so injecting a
+// defect on top of it and asking whether the verifier objects measures two things at once,
+// and a "false positive" scored on its clean copy is the verifier being right about the
+// original. `page_verify_inconsistent` is what makes those findable, and they are dropped for
+// the same reason as the unjudged ones: this corpus is the pages the verifier had nothing to
+// say about. Only a log from this version on carries the line, so an older log's such pages
+// stay in, exactly as they did when the measurement was first published.
 function passedImages(logPath: string): Set<string> {
   const passed = new Set<string>();
+  const described = new Set<string>();
   if (!existsSync(logPath)) return passed;
   for (const line of readFileSync(logPath, "utf8").split("\n")) {
-    if (!line.includes("page_verify_ok")) continue;
+    if (!line.includes("page_verify_ok") && !line.includes("page_verify_inconsistent")) continue;
     try {
       const entry = JSON.parse(line) as { type?: string; image?: string; unjudged?: boolean };
-      if (entry.type === "page_verify_ok" && entry.image && !entry.unjudged) passed.add(entry.image);
+      if (!entry.image) continue;
+      if (entry.type === "page_verify_ok" && !entry.unjudged) passed.add(entry.image);
+      else if (entry.type === "page_verify_inconsistent") described.add(entry.image);
     } catch {
       // A truncated last line in a log that was being written is not an error here.
     }
   }
+  for (const image of described) passed.delete(image);
   return passed;
 }
 

@@ -846,7 +846,12 @@ money. `--session` takes a session id or a path (a worktree can read the main ch
 sessions), and `--help` lists the rest. Pages are selected from `page_verify_ok` in each
 session's log, so a rejection of the clean copy really is a contradiction of an earlier verdict
 rather than a disagreement with a different judge; `--all-pages` drops that and measures against
-pages the verifier may well have been right to fail.
+pages the verifier may well have been right to fail. A page whose verdict *described* a defect while
+passing it (`page_verify_inconsistent`, below) is not a clean copy either and comes out with the
+unjudged ones — the verifier has already said in prose that the page is wrong, so a rejection of it
+would be that verdict repeated rather than a false positive. Only logs written since that event
+existed can say, so this changes nothing about the corpus below: the dry run over the same five
+sessions still selects the same 11 pages and 30 damaged copies.
 
 Two things the report says out loud, because the counts alone would read as results: calls where
 nothing was judged (no Feedback Agent, an unparseable reply — `verifyAgentOutput` answers ok=true

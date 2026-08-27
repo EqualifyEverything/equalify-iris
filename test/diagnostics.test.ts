@@ -504,28 +504,52 @@ test("a page the verifier described and passed is counted, and priced by kind", 
       kinds: ["content_wrong", "alt_quality"], untagged: 0 },
     // And the shape the measured corpus is entirely made of: prose with no kind, because the
     // kinds are newer than those runs. A kind-gated rule can act on it neither way, which is
-    // what `untagged_pages` is here to say.
+    // what `undecided_pages` is here to say.
     { ts: T(4), type: "page_verify_ok", image: "d.png" },
     { ts: T(4), type: "page_verify_inconsistent", image: "d.png", page: 4,
       problems: ["the heading is marked <h4> among <h2> siblings"] },
+    // A partly-tagged page, and the case that separates this fold's rule from the failure
+    // fold's: one tagged `content_missing` and one problem in prose. The rule fails this page
+    // on the tag it HAS, so it is decided — counting it as undecided too would double it in a
+    // sum whose halves are meant to bracket the bill.
+    { ts: T(5), type: "page_verify_ok", image: "f.png" },
+    { ts: T(5), type: "page_verify_inconsistent", image: "f.png", page: 6,
+      problems: ["the second table row is absent", "something is off about the footer"],
+      kinds: ["content_missing"], untagged: 1 },
+    // Where a partial tag leaves it undecided: the only kind named is advice, and the untagged
+    // problem beside it could be anything.
+    { ts: T(5), type: "page_verify_ok", image: "g.png" },
+    { ts: T(5), type: "page_verify_inconsistent", image: "g.png", page: 7,
+      problems: ["the alt text is thin", "the second column looks wrong"],
+      kinds: ["alt_quality"], untagged: 1 },
     { ts: T(5), type: "page_verify_failed", image: "e.png", problems: ["a table row is missing"],
       kinds: ["content_missing"], untagged: 0 },
     { ts: T(6), type: "run_complete" },
   );
   const d = summarizeRun(text, done(Date.parse(T(6))));
   assert.deepEqual(d.verification.verify_inconsistent, {
-    pages: 4,
-    content_missing: 0,
+    pages: 6,
+    content_missing: 1,
     content_wrong: 1,
     structure_wrong: 1,
     a11y_only: 0,
-    alt_quality: 2,
-    untagged_pages: 1,
-    content_or_structure: 2,
+    alt_quality: 3,
+    content_or_structure: 3,
+    undecided_pages: 2,
   });
+  // The floor and the ceiling on what a kind-gated rule would cost this run: 3 pages it would
+  // certainly fail, and 2 more it could not decide either way. Addable because neither
+  // contains the other — page 6 is tagged `content_missing` AND carries an untagged problem,
+  // and is in the first only.
+  assert.equal(
+    d.verification.verify_inconsistent.content_or_structure +
+      d.verification.verify_inconsistent.undecided_pages,
+    5,
+    "and the sixth page's only note was advice, which such a rule would leave alone",
+  );
   // Not folded as verified pages: each of these lines sits beside a `page_verify_ok` for the
   // same page, and counting both would make the denominator larger than the run.
-  assert.equal(d.verification.pages_verified, 5);
+  assert.equal(d.verification.pages_verified, 7);
   assert.equal(d.verification.verify_failed, 1);
   // The failure's own kinds are untouched by the new fold — two counts of two populations.
   assert.equal(d.verification.verify_kinds.content_missing, 1);
@@ -547,8 +571,8 @@ test("a page the verifier described and passed is counted, and priced by kind", 
     structure_wrong: 0,
     a11y_only: 0,
     alt_quality: 0,
-    untagged_pages: 1,
     content_or_structure: 0,
+    undecided_pages: 1,
   });
   assert.deepEqual(summarizeRun("", done(Date.parse(T(0)))).verification.verify_inconsistent, {
     pages: 0,
@@ -557,8 +581,8 @@ test("a page the verifier described and passed is counted, and priced by kind", 
     structure_wrong: 0,
     a11y_only: 0,
     alt_quality: 0,
-    untagged_pages: 0,
     content_or_structure: 0,
+    undecided_pages: 0,
   });
 });
 

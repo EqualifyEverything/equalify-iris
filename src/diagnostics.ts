@@ -180,14 +180,22 @@ export interface Diagnostics {
     // is most of the gap between what it perceived (28 of 30) and what it flagged (25) — a
     // different failure from a verifier that cannot see, and a different repair (issue #210).
     //
-    // `pages` counts them; the five kind fields and `untagged_pages` split them the way
-    // `verify_kinds` splits the failures, in pages and not a partition. `content_or_structure`
-    // is the pricing field: pages naming at least ONE of `content_missing`, `content_wrong` or
-    // `structure_wrong`, which is exactly the population a kind-gated failure rule would newly
-    // fail and newly pay a correction for. The complement is not a bug to fix — an
-    // `alt_quality` suggestion on a page that ships is the Feedback Agent doing what it was
-    // asked — and `untagged_pages` is the population such a rule could not act on at all,
-    // since a problem in plain prose carries no kind to gate on.
+    // `pages` counts them; the five kind fields split them the way `verify_kinds` splits the
+    // failures, in pages and not a partition. `content_or_structure` is the pricing field:
+    // pages naming at least ONE of `content_missing`, `content_wrong` or `structure_wrong`,
+    // which is exactly the population a kind-gated failure rule would newly fail and newly pay
+    // a correction for. The complement is not a bug to fix — an `alt_quality` suggestion on a
+    // page that ships is the Feedback Agent doing what it was asked.
+    //
+    // `undecided_pages` is the unknown ABOVE that floor: pages where a kind-gated rule has
+    // nothing to decide on, because a problem arrived with no kind this code knows and no
+    // content or structure kind was named either. So `content_or_structure` is the least such a
+    // rule would cost and `content_or_structure + undecided_pages` the most, and the two can be
+    // added because neither contains the other. That is deliberately NOT the rule beside
+    // `verify_kinds`, whose `untagged_pages` counts a partly-tagged page too: there the field
+    // audits a SPLIT, and a page with one tag missing is a page whose split is incomplete;
+    // here the question is whether a decision can be made, and a page already naming
+    // `content_missing` is decided whatever else it left untagged.
     //
     // Nothing in the run reads any of this: the event decides nothing, and these counts exist
     // so the rule can be priced over a fleet before it changes what pages cost. Zero on every
@@ -200,8 +208,8 @@ export interface Diagnostics {
       structure_wrong: number;
       a11y_only: number;
       alt_quality: number;
-      untagged_pages: number;
       content_or_structure: number;
+      undecided_pages: number;
     };
     corrections: number;
     // How each correction pass ended: `kept` CHANGED the delivered document, `rejected` was
@@ -717,8 +725,8 @@ export function summarizeRun(
       structure_wrong: 0,
       a11y_only: 0,
       alt_quality: 0,
-      untagged_pages: 0,
       content_or_structure: 0,
+      undecided_pages: 0,
     },
     corrections: 0,
     results: { kept: 0, rejected: 0, identical: 0, empty: 0, failed: 0 },
@@ -781,21 +789,27 @@ export function summarizeRun(
       // rejection rate's denominator larger than the run's page count.
       verification.verify_inconsistent.pages += 1;
       // Same closed list and the same reasons as the failure fold above: a kind is counted
-      // only if this code knows it, a page counts once per kind however many problems carried
-      // it, and a page whose problems arrived in prose is `untagged_pages` — the case a
-      // kind-gated rule could not act on, and the one the corpus this was measured on is
-      // entirely made of, since the kinds are newer than those runs.
+      // only if this code knows it, and a page counts once per kind however many problems
+      // carried it.
       const named: unknown = e.kinds;
       const kinds = Array.isArray(named) ? VERIFY_KINDS.filter((k) => named.includes(k)) : [];
       for (const kind of kinds) verification.verify_inconsistent[kind] += 1;
-      const untagged = typeof e.untagged === "number" && e.untagged > 0 ? e.untagged : 0;
-      if (kinds.length === 0 || untagged > 0) {
-        verification.verify_inconsistent.untagged_pages += 1;
-      }
       // The pricing field: one per PAGE naming at least one of the three, not one per kind, so
       // it can be read against `pages` as a share and against `corrections` as a bill.
-      if (kinds.some((k) => k === "content_missing" || k === "content_wrong" || k === "structure_wrong")) {
-        verification.verify_inconsistent.content_or_structure += 1;
+      const decided = kinds.some(
+        (k) => k === "content_missing" || k === "content_wrong" || k === "structure_wrong",
+      );
+      if (decided) verification.verify_inconsistent.content_or_structure += 1;
+      // And the unknown above it, which is why this is not the `||` the failure fold uses: a
+      // page already naming one of those three is DECIDED, whatever else it left untagged, so
+      // counting it here too would double it in a sum whose two halves are meant to bracket the
+      // bill. What is undecided is a page carrying a problem with no kind this code knows —
+      // including a page whose only tags are `a11y_only` or `alt_quality`, since the untagged
+      // one beside them could be anything — and a line with no readable count at all, which is
+      // every verdict written in plain prose and the whole of the corpus this was measured on.
+      const untagged = typeof e.untagged === "number" && e.untagged > 0 ? e.untagged : 0;
+      if (!decided && (untagged > 0 || kinds.length === 0)) {
+        verification.verify_inconsistent.undecided_pages += 1;
       }
     } else if (e.type === "page_corrected") {
       verification.corrections += 1;

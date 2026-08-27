@@ -698,9 +698,9 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
     "verify_kinds": { "content_missing": 5, "content_wrong": 2, "structure_wrong": 6,
                       "a11y_only": 3, "alt_quality": 4, "untagged_pages": 1 },
     "verify_untagged_problems": 2,
-    "verify_inconsistent": { "pages": 2, "content_missing": 0, "content_wrong": 1,
+    "verify_inconsistent": { "pages": 3, "content_missing": 0, "content_wrong": 1,
                              "structure_wrong": 1, "a11y_only": 0, "alt_quality": 1,
-                             "untagged_pages": 1, "content_or_structure": 2 },
+                             "content_or_structure": 2, "undecided_pages": 1 },
     "results": { "kept": 12, "rejected": 0, "identical": 2, "empty": 0, "failed": 0 },
     "triggers": { "verify": 13, "links": 1, "both": 0 },
     "effects": { "alt_only": 4, "text": 8, "attrs": 3, "structure": 6, "text_grew": 5, "text_shrank": 1 },
@@ -845,13 +845,20 @@ split cannot be read at all.
 problem. Those are not in `verify_failed` and they bought no correction — a page fails only when a
 `faithful` / `accessible` flag is false *and* a problem is named — so this is the one place the
 sentence such a verdict wrote is counted at all. `pages` is how many, split by kind in pages exactly
-as `verify_kinds` splits the failures and just as much not a partition, with `untagged_pages` for the
-verdicts that named their problems in prose. `content_or_structure` is the field to read: pages naming
-at least one `content_missing`, `content_wrong` or `structure_wrong`, which is precisely the
-population a kind-gated failure rule would newly fail and newly pay a page call for. Read the rest as
-the run working, not failing — an `alt_quality` note on a page that ships is the Feedback Agent
-answering a question it was asked to answer. Nothing in the pipeline reads any of this; it exists so
-that rule can be priced over a fleet before it changes what a document costs (issue #210). Paired with
+as `verify_kinds` splits the failures and just as much not a partition. `content_or_structure` is the
+field to read: pages naming at least one `content_missing`, `content_wrong` or `structure_wrong`,
+which is precisely the population a kind-gated failure rule would newly fail and newly pay a page call
+for. Read the rest as the run working, not failing — an `alt_quality` note on a page that ships is the
+Feedback Agent answering a question it was asked to answer. `undecided_pages` is the unknown above
+that floor: pages where such a rule has nothing to decide on, because a problem arrived with no kind
+this version knows and no content or structure kind was named either. The two are addable —
+`content_or_structure` is the least the rule would cost and their sum the most — which is why this
+field is **not** the same rule as `verify_kinds`' `untagged_pages`: that one counts a partly-tagged
+page as well, because it audits a split and a missing tag makes the split incomplete, whereas a page
+already naming `content_missing` is decided here whatever else it left untagged. Expect
+`undecided_pages` to be the whole of `pages` on a log from an agent file whose VERIFY contract
+predates the kinds. Nothing in the pipeline reads any of this; it exists so that rule can be priced
+over a fleet before it changes what a document costs (issue #210). Paired with
 `effects` on the `page_corrected` line for the same page, this is what says whether a correction
 addressed what was reported: a page flagged `content_missing` whose correction came back
 `alt_changed` only did not get fixed.
