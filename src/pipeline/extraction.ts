@@ -767,8 +767,18 @@ const MARK_MODIFIER = String.raw`faint|light|pale|grey|gray|dark|darker|noisy|gr
 // exempting `the visible artifacts are faint specks` as it always did. Written as two alternatives
 // rather than one guarded stack for that reason: only the comma needs the guard.
 const MARK_QUANTIFIER = String.raw`(?:(?:a|an|the|only|just|some|few|several|couple|of)\s+){0,4}`;
+// A degree word does not change what the clause is about — "the scan is VERY grainy, faint specks"
+// is "the scan is grainy" with one word in the middle — and a dash introduces a description of the
+// capture exactly as a colon does, so both lookbehinds read past a hedge and every delimiter is
+// named. A hyphen counts only with a space in front of it — spaced it is the dash somebody typed on
+// a keyboard without one, unspaced it is inside `washed-out` and inside the phrase's own separator.
+// A quantifier still passes, and it is matched before these are read, so "Page is blank — only
+// faint, isolated marks are visible" is the phrase it looks like and only a stack sitting straight
+// against the delimiter is refused.
+const MARK_HEDGE = String.raw`very|quite|somewhat|rather|extremely|slightly|fairly|too|so|mostly|generally|a bit`;
 const NOT_CLAUSE_HEAD =
-  String.raw`(?<!\b(?:is|are|was|were|be|been|being|appears?|appeared|seems?|seemed|looks?|looked|shows?|showed|showing|remains?|has|have|had)\s)(?<!:\s*)`;
+  String.raw`(?<!\b(?:is|are|was|were|be|been|being|appears?|appeared|seems?|seemed|looks?|looked|shows?|showed|showing|remains?|has|have|had)\s(?:(?:${MARK_HEDGE})\s)?)` +
+  String.raw`(?<!(?:[:—–]|\s-)\s*(?:(?:${MARK_HEDGE})\s)?)`;
 const MARKS_PHRASE = new RegExp(
   String.raw`\b(?:` +
     String.raw`${MARK_QUANTIFIER}${NOT_CLAUSE_HEAD}(?:${MARK_MODIFIER}),[\s/-]+(?:(?:${MARK_MODIFIER}),?[\s/-]+){0,2}` +

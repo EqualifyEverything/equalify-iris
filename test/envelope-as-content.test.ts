@@ -470,6 +470,9 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // stack, so a stack that opens its own sentence or sits behind a count is still one phrase.
     "Page is blank. Faint, isolated marks are visible, no text.",
     "Page is blank. A few faint, scattered specks are visible, no text.",
+    // A quantifier passes whatever delimiter is in front of it, because it is what makes the stack the
+    // phrase's own rather than the clause's.
+    "Page is blank — only faint, isolated marks are visible, no text.",
     // `not legible` predicated on the marks by a relative clause, with and without the `as`.
     "Page 16 appears to be blank. No text, images, or other content is visible. Only a few scattered specks/artifacts are present, which are not legible as content.",
     "Page 16 appears to be blank. No text or meaningful content is visible. No page number is printed on the page; the page-break marker uses the sequence number 16 from the file metadata. Only a few scattered specks/artifacts are present, which are not legible marks.",
@@ -672,6 +675,14 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. The image is dark, faint specks are visible. No legible text.",
     "Page is blank. The scan is noisy, scattered marks are visible, no text.",
     "Page 12 appears blank. The image is washed-out, faint specks are visible, no text.",
+    // A degree word between the copula and the stack, and a dash where the delimiter was a colon: the
+    // clause is about the capture either way, and the first two read as likelier model prose than the
+    // bare `is grainy,` above. A spaced hyphen is the dash typed without one.
+    "Page 12 appears blank. The scan is very grainy, faint specks are all that appear.",
+    "Page 12 appears blank. The scan seems quite dark, faint specks are all that appear.",
+    "Page 12 appears blank. Scan quality — dark, blurry, faint specks throughout, no legible text.",
+    "Page 12 appears blank. Scan quality - dark, blurry, faint specks throughout, no legible text.",
+    "Page 12 appears blank. Scan quality: somewhat dark, blurry, faint specks throughout, no text.",
     // Bare `marks` is the marks behind `stray`, `scattered`, `isolated`, `random` or `residual` — the
     // words that say the marks are nowhere in particular — and behind nothing else. `agents/page.md`
     // uses the bare noun for a page that HAS content nobody could read, which is what these are.
