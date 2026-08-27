@@ -102,7 +102,8 @@ separator, so there is nothing for the role to contradict. Do not look to the li
 this one: it says nothing about <p role="doc-pagebreak" aria-label="Page 5">5</p> and speaks only
 when such a marker is empty, which is how one habit passes on six markers in a document and fails
 on the seventh. Where the page prints no number, emit no marker: a break with nothing to name says
-only that something ended.
+only that something ended. Each page answers that on its own evidence — a run of pages that print
+no number produces no markers at all, not one apiece, whatever the pages around them do.
 
 A page with nothing on it is a page you can answer completely. Return "html" as an empty string and
 say in the "log" field that the page is blank — that is the whole answer, and it is a correct one:
@@ -160,6 +161,13 @@ Ten structures are easy to render as something that merely looks right, so be ex
   only visually has none of them in the outline. Use the name the page prints for each. Where the
   page names no sub-topics there is nothing to add and none is invented — this promotes a label the
   page gives, it does not supply an outline the page does not have.
+  A label the page prints over a cluster of those sub-topics is their parent and not their peer:
+  where two or more of them sit under a title that names the group and is followed by nothing but
+  those sub-topics, that title is the heading and they each step one level down under it — a group
+  label at <h2> makes them <h3>, not a run of four <h2>s that says the cord warnings and the
+  grinding instructions are the same kind of thing as each other and as the page's own subject. The
+  label has to be printed: a grouping heading is never invented, and sub-topics the page groups
+  under nothing stay at the level their own content calls for.
   Where this page puts two headings of the same level under the same words, they are one section
   and not two: a section title reprinted above content that continues it does not open a new
   section, so emit that title once — the reprint is not a heading and is not emitted as one — give
@@ -246,8 +254,9 @@ Ten structures are easy to render as something that merely looks right, so be ex
   never invent one.
 - LISTS: a group of discrete, parallel items is a list, whatever the page uses to separate them.
   Procedural steps, cleaning or maintenance tasks, a run of cautions, the ingredients of a recipe,
-  a block of separate copyright and trademark notices — each of those is a set of items of one
-  kind, and emitting it as a run of <p> elements, or as one <p> with line breaks in it, leaves a
+  a block of separate copyright and trademark notices, one <li> per notice — each of those is a set
+  of items of one kind, and emitting it as a run of <p> elements, or as one <p> with line breaks in
+  it, leaves a
   screen-reader user no way to know how many items there are, which one they are on, or where it
   ends. Use <ol> where the order is part of the instruction (do this, then that) and <ul> where it
   is not (a set of cautions, a list of parts), with one item's worth of text per <li>: never merge
@@ -262,7 +271,10 @@ Ten structures are easy to render as something that merely looks right, so be ex
   inside a table cell exactly as it does in the body: a
   Directions cell holding three steps is a cell containing an <ol>, an Ingredients cell holding
   four items is a cell containing a <ul>, and neither is <br>-separated text — the cell boundary
-  groups them for the eye, and for nobody else.
+  groups them for the eye, and for nobody else. That holds whether or not the page sets the steps
+  apart: three steps run together as one block of prose in a Directions cell are three <li>
+  elements, because what makes them a list is that a reader does them in order, not the line breaks
+  the page did or did not print.
   And the list stays in the cell. Never lift a cell's items out of the table to stand as <li>
   elements beside it or as a run of items after it: a cell says which row and which column its
   contents belong to, that is the whole of what a table adds, and four ingredients emitted at
@@ -270,6 +282,12 @@ Ten structures are easy to render as something that merely looks right, so be ex
   way back to the Ingredients column of step 3, which is less than even the <br> version would have
   given them. However the page separates the items inside that cell, the markup for them goes
   inside the <td>.
+  A procedure the page runs as a paragraph outside a table is the same case — a cleaning routine, a
+  maintenance sequence, an installation walk-through — and is an <ol> of its steps. Cut it on the
+  page's own boundaries and no others: a sentence, a semicolon, a printed "then" or "finally". One
+  step whose wording joins two actions ("add water and run for ten seconds") is one item, because
+  the cut that separates them deletes the "and" the page prints. Where the page gives no boundary
+  to cut on, it stays a <p>.
   Two things this is not. Continuous prose is not a list: a paragraph that explains one thing, or a
   single direction written as one sentence, stays a <p>, and a list of one item is a paragraph. And
   a list is not a way to number things — an <ol> counts its own items, so the numbers the page
