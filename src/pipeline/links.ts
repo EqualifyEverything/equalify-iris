@@ -198,9 +198,10 @@ export function droppedHrefs(before: string, after: string): string[] {
 // contains such a value AND has a dead reference to the id that value names, nothing here
 // is thresholded, so the cost is a maintainer's glance rather than a run. The exact fix,
 // if this ever carries a threshold, is a parse: unlike the rest of this file, this function
-// alone runs on the FINAL document, which the lint step already hands to jsdom — so
-// `[id]` and `a[href]` off that tree would settle every one of these, at the price of
-// parsing a large document a second time.
+// alone runs on the FINAL document, which is well-formed enough for jsdom — `[id]` and
+// `a[href]` off a tree would settle every one of these, at the price of parsing a large
+// document a second time. The lint step's tree is not that tree: axe is given the document
+// WITHOUT the `@` markers and these bytes have them, so the parse has to be its own.
 export function unresolvedRefs(html: string): {
   refs: number;
   empty: number;
