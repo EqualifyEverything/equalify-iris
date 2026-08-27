@@ -292,8 +292,16 @@ Ten structures are easy to render as something that merely looks right, so be ex
   reader to DO is one of those steps: a sentence that warns, explains or states a fact — "Never
   immerse the base in water", "The housing may still be warm" — is not a step, and an <ol> that
   numbers it tells the reader the page put a prohibition third in an order it never printed. It
-  stays the <p> it is, where the page printed it, before or after the list the directions around it
-  make. A run of cautions printed as a set of its own is a <ul> of cautions as at the top of this
+  stays the <p> it is, where the page printed it. Printed between two directions, that means the
+  steps before it and the steps after it are two <ol>s with the caution as a <p> between them, and
+  start on the second so its numbering carries on from the first: a list that begins again at 1
+  tells the reader the page printed two procedures, and a reader told "list of 2 items, item 1"
+  about what the page printed as step 3 has lost their place in it. (The start rule below is about
+  numbers the page itself prints. Here the <ol> supplies them, and what it has to supply is the
+  numbering the one procedure would have had.) Never move it to the end of the procedure to keep
+  the list in one piece — a warning the page printed above step 3 announced after step 5 is the
+  reading order this rule exists to keep. A run of cautions printed as a set of its own is a <ul>
+  of cautions as at the top of this
   rule; what is excluded here is numbering one of them as a step of the procedure it interrupts. A
   paragraph left with one direction, or none, is a <p> and not a list of one, and where the page
   gives no boundary to cut on it stays a <p>.

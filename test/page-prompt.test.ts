@@ -726,7 +726,22 @@ test("the page agent's list rule keeps the clauses that make it a rule", () => {
     ["what an <ol> that numbers it would assert",
       /an <ol> that numbers it tells the reader the page put a prohibition third in an order it never printed/],
     ["the caution stays the paragraph it is, where the page printed it",
-      /It stays the <p> it is, where the page printed it, before or after the list the directions around it make/],
+      /It stays the <p> it is, where the page printed it/],
+    // The re-review of #217 asked where "where the page printed it" puts a caution printed BETWEEN
+    // two directions, since it cannot be both in place and outside a single list. Two <ol>s with
+    // the <p> between them, and the numbering carried across — a second list restarting at 1 says
+    // the page printed two procedures, which is the same kind of false statement about the page
+    // that the flat run of <h2>s at the top of this issue was.
+    ["a caution between two directions leaves two lists with it between them",
+      /the steps before it and the steps after it are two <ol>s with the caution as a <p> between them, and start on the second so its numbering carries on from the first/],
+    ["and why the numbering carries: what a list beginning again at 1 tells the reader",
+      /a list that begins again at 1 tells the reader the page printed two procedures/],
+    // Reconciled with the start rule further down, which fires on numbers the PAGE prints — a
+    // prose procedure prints none, so nothing there would have asked for start="3".
+    ["the start rule is about printed numbers; here the <ol> supplies them",
+      /The start rule below is about numbers the page itself prints\. Here the <ol> supplies them/],
+    ["and the resolution this rule refuses: moving the caution to the end",
+      /Never move it to the end of the procedure to keep the list in one piece — a warning the page printed above step 3 announced after step 5 is the reading order this rule exists to keep/],
     // And the reading this must not invite: a run of cautions is still a list of cautions. What
     // the guard excludes is one caution numbered as a step of the procedure it sits in.
     ["a run of cautions of its own is still a <ul>",
