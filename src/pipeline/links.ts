@@ -170,28 +170,48 @@ export function droppedHrefs(before: string, after: string): string[] {
 // @unresolved list and the other markers, which are model-written prose about the
 // document and can quote markup — an `<a>` inside a comment is not a link, and counting
 // one inflates both the numerator and the denominator.
+//
+// Every count here is per REFERENCE, so `refs` is the denominator of `empty + dangling`
+// and "12 of 226 go nowhere" reads as a maintainer expects. `ids` is the odd one out and
+// deliberately so: it is the distinct set, because it goes into a log line capped at 20
+// and a table of contents pointing forty times at one missing section would otherwise
+// spend the whole cap on a single fact.
+//
+// Both attribute scans require whitespace or `<` in front of the name, which matters more
+// than it looks. `\bid=` matches inside ANOTHER attribute's value — a source PDF whose
+// annotation carries `?id=intro` would register `intro` as an id the document contains,
+// silencing a genuinely dead `#intro`, and `data-id="s1"` masks `#s1` the same way (`-` is
+// a non-word character, so `\b` is satisfied). That failure mode is the worst one
+// available here: it hides exactly the defect this function exists to surface.
 export function unresolvedRefs(html: string): {
   refs: number;
   empty: number;
-  dangling: string[];
+  dangling: number;
+  ids: string[];
 } {
   const text = html.replace(/<!--[\s\S]*?-->/g, " ");
   const ids = new Set<string>();
-  for (const m of text.matchAll(/\bid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+  for (const m of text.matchAll(/(?<=[\s<])id\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
     ids.add(normalizeFragment(m[1] ?? m[2] ?? m[3] ?? ""));
   }
   let refs = 0;
   let empty = 0;
-  const dangling = new Set<string>();
-  for (const m of text.matchAll(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+  let dangling = 0;
+  const failed = new Set<string>();
+  for (const m of text.matchAll(/(?<=[\s<])href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
     const href = decodeEntities(m[1] ?? m[2] ?? m[3] ?? "").trim();
     if (!href.startsWith("#")) continue;
     refs++;
     const token = normalizeFragment(href.slice(1));
     if (token === "") empty++;
-    else if (token !== "top" && !ids.has(token)) dangling.add(token);
+    // `top` is matched ASCII case-insensitively by a browser, unlike an id, which is
+    // why only this comparison is folded and `ids.has` is left exact.
+    else if (token.toLowerCase() !== "top" && !ids.has(token)) {
+      dangling++;
+      failed.add(token);
+    }
   }
-  return { refs, empty, dangling: [...dangling].sort() };
+  return { refs, empty, dangling, ids: [...failed].sort() };
 }
 
 // An id or a fragment, reduced to the form the other spelling of it agrees on. Entities

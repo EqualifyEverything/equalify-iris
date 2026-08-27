@@ -267,12 +267,14 @@ export async function runPipeline(args: {
     // deployment; the tally below gets counts only, because that one reaches a public
     // issue (see QualityStats).
     const internalLinks = unresolvedRefs(review.html);
-    if (internalLinks.empty || internalLinks.dangling.length) {
+    if (internalLinks.empty || internalLinks.dangling) {
       log.event("internal_links", {
         refs: internalLinks.refs,
         empty: internalLinks.empty,
-        dangling: internalLinks.dangling.length,
-        ids: internalLinks.dangling.slice(0, 20),
+        dangling: internalLinks.dangling,
+        // Distinct ids, so this is shorter than `dangling` when one dead target is
+        // linked repeatedly — which is the ordinary case for a table of contents.
+        ids: internalLinks.ids.slice(0, 20),
       });
     }
     // Final accessibility lint result, summarized into the PR description on close (§7.13).
@@ -325,8 +327,8 @@ export async function runPipeline(args: {
         // this document ship with navigation that does not navigate — and the split
         // between "written with no target" and "target absent" is a diagnosis a
         // maintainer reads on the deployment (see SIGNAL_LINKS_UNRESOLVED).
-        ...(internalLinks.empty + internalLinks.dangling.length
-          ? [{ code: SIGNAL_LINKS_UNRESOLVED, count: internalLinks.empty + internalLinks.dangling.length }]
+        ...(internalLinks.empty + internalLinks.dangling
+          ? [{ code: SIGNAL_LINKS_UNRESOLVED, count: internalLinks.empty + internalLinks.dangling }]
           : []),
         // A linter that could not run has no violations to report, which is why its
         // failure is recorded as a signal rather than inferred from an empty list.

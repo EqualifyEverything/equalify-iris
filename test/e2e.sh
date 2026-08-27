@@ -334,6 +334,23 @@ logs=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/logs")
 echo "$logs" | head -1 | jq -e '.type' >/dev/null \
   && pass "run log is ndjson ($(echo "$logs" | wc -l | tr -d ' ') lines)" || fail "logs" "$logs"
 
+# The in-document references in what shipped (#234). Every page's mock output links to
+# #appendix-a and no page defines it, so this asserts the whole measurement path — the
+# check runs on the delivered bytes, the event carries both units, and the ids are the
+# distinct set. Unit tests cover the function; only this covers the wiring.
+il=$(echo "$logs" | jq -c 'select(.type == "internal_links")' | head -1)
+[ -n "$il" ] \
+  && pass "a dead in-document reference is measured on what shipped ($il)" \
+  || fail "internal links" "no internal_links event in the run log"
+echo "$il" | jq -e '.refs == 3 and .empty == 0 and .dangling == 3 and .ids == ["appendix-a"]' >/dev/null \
+  && pass "counted per reference (3), ids are the distinct set (1)" \
+  || fail "internal links units" "$il"
+# And the ids are the one part of this that must not leave the deployment: a fragment is
+# text the model chose out of the document, so the public tally gets counts only.
+echo "$stats" | grep -q 'appendix-a' \
+  && fail "internal links leak" "a failing fragment reached the stats payload" \
+  || pass "the failing fragment stays in the run log, not in the tally"
+
 echo "==> 8b. GET /v1/sessions/{id}/diagnostics"
 diag=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/diagnostics")
 echo "$diag" | jq -e '.model_calls.count >= 1 and .in_flight == null and (.phase_durations_ms | length >= 1)' >/dev/null \
@@ -899,6 +916,12 @@ docs=$(echo "$q" | jq -r '.documents')
 [ "$docs" -ge 1 ] \
   && pass "the completed runs are in the denominator ($docs document(s))" \
   || fail "quality" "documents=$docs after successful runs — recordRunSignals is not being called"
+# The dead reference measured back at step 8 reaching the published rate. A per-document
+# share, so three references to one missing id raise it once — the count that says three
+# is on the run log, and the rate is the number the weekly workflow reads.
+echo "$q" | jq -e '.links_unresolved_rate > 0 and .links_unresolved_rate <= 1' >/dev/null \
+  && pass "links_unresolved_rate carries the dead reference through ($(echo "$q" | jq -r '.links_unresolved_rate'))" \
+  || fail "quality" "links_unresolved_rate=$(echo "$q" | jq -r '.links_unresolved_rate') though a delivered document had one"
 # ...and the rule table's own denominator, which counts only the documents axe-core
 # actually examined (#164). It can be smaller than `documents` but never larger, and
 # never absent: a missing key here would make every rule share divide by zero.

@@ -191,6 +191,12 @@ export const SIGNAL_LINKS_DROPPED = "iris:links-dropped";
 // claims — so a document whose whole table of contents is dead lints clean, reports
 // `ambiguous: []`, and ships as `ready_for_review`. A count of 82 of 226 links in one bench
 // round is what this signal exists to stop being invisible.
+//
+// Per REFERENCE, not per distinct dead id: one missing section linked forty times is forty
+// references a reader can activate to no effect, and 82-of-226 is the reading the count has
+// to support. (The distinct ids are on the run's `internal_links` line, capped at 20, and
+// stay on the deployment — a fragment is text chosen out of the document.) The rate below
+// then reduces this to one document, as every rate here does.
 export const SIGNAL_LINKS_UNRESOLVED = "iris:links-unresolved";
 // axe-core failed to run at all. Recorded because a linter that did not run reports no
 // violations, so without this signal a broken linter would quietly drive every
