@@ -762,23 +762,33 @@ const MARK_MODIFIER = String.raw`faint|light|pale|grey|gray|dark|darker|noisy|gr
 // must not reach across: "the scan is grainy, faint specks are all that appear" and "Scan quality:
 // dark, blurry, faint specks throughout" put a doubt word about the IMAGE exactly where a modifier of
 // the marks goes, and stripping it ships a grainy capture as a blank page with no marker on it. So
-// the comma'd form may not OPEN a clause — nothing may stand in front of it but a quantifier, never a
-// copula and never a colon — while the form without a comma is untouched from before #220 and goes on
-// exempting `the visible artifacts are faint specks` as it always did. Written as two alternatives
-// rather than one guarded stack for that reason: only the comma needs the guard.
+// the comma'd form may not open the clause that describes the capture, while the form without a comma
+// is untouched from before #220 and goes on exempting `the visible artifacts are faint specks` as it
+// always did. Written as two alternatives rather than one guarded stack for that reason: only the comma
+// needs the guard, and the plain form is left free to match further along the same sentence — which is
+// what makes a refused comma'd stack behave exactly as it did before #220 rather than keeping words the
+// old pattern stripped.
 const MARK_QUANTIFIER = String.raw`(?:(?:a|an|the|only|just|some|few|several|couple|of)\s+){0,4}`;
-// A degree word does not change what the clause is about — "the scan is VERY grainy, faint specks"
-// is "the scan is grainy" with one word in the middle — and a dash introduces a description of the
-// capture exactly as a colon does, so both lookbehinds read past a hedge and every delimiter is
-// named. A hyphen counts only with a space in front of it — spaced it is the dash somebody typed on
-// a keyboard without one, unspaced it is inside `washed-out` and inside the phrase's own separator.
-// A quantifier still passes, and it is matched before these are read, so "Page is blank — only
-// faint, isolated marks are visible" is the phrase it looks like and only a stack sitting straight
-// against the delimiter is refused.
-const MARK_HEDGE = String.raw`very|quite|somewhat|rather|extremely|slightly|fairly|too|so|mostly|generally|a bit`;
-const NOT_CLAUSE_HEAD =
-  String.raw`(?<!\b(?:is|are|was|were|be|been|being|appears?|appeared|seems?|seemed|looks?|looked|shows?|showed|showing|remains?|has|have|had)\s(?:(?:${MARK_HEDGE})\s)?)` +
-  String.raw`(?<!(?:[:—–]|\s-)\s*(?:(?:${MARK_HEDGE})\s)?)`;
+// The guard asks about the CLAUSE, not about the token in front of the stack, because the token is a
+// class with no end to it: `is grainy,` was closed by naming the copula, `is very grainy,` by naming
+// the degree word, and `is noticeably grainy,` / `is a little dark,` / `is only dark,` were next —
+// three roads into the same wording, each of which a list closes one instance of. So the stack may not
+// have a copula, a colon or a dash anywhere to its left within its own clause: what those say is that
+// the sentence is describing something already named — the scan, the image, the quality of the capture
+// — and a modifier of that thing is not a modifier of the marks. Bounded to the sentence, since
+// `[^.!?;\n]` cannot cross a full stop, a semicolon or a line break, and bounded in length for the
+// reason `DENIAL_STATEMENT_MAX` is: the work per match stays flat.
+//
+// A hyphen counts only with a space in front of it — spaced it is the dash somebody typed on a
+// keyboard without one, unspaced it is inside `washed-out` and inside the phrase's own separator.
+//
+// The cost is a comma'd stack in a sentence that opened by saying the page is empty: "Page is blank —
+// only faint, isolated marks are visible" has `is` to the left of the stack in the same sentence, so
+// the comma is not read as a list separator there and `faint` refuses the declaration. That page is
+// reported failed, which is a glance rather than a page, and no corpus wording is written that way:
+// all nine of #220's start the sentence the marks are in ("Only faint, isolated marks are visible…",
+// "A few faint specks or artifacts are present…"), which is what the guard is shaped to allow.
+const NOT_CLAUSE_HEAD = String.raw`(?<!(?:\b(?:is|are|was|were|be|been|being|appears?|appeared|seems?|seemed|looks?|looked|shows?|showed|showing|remains?|has|have|had)\b|[:—–]|\s-)[^.!?;\n]{0,200})`;
 const MARKS_PHRASE = new RegExp(
   String.raw`\b(?:` +
     String.raw`${MARK_QUANTIFIER}${NOT_CLAUSE_HEAD}(?:${MARK_MODIFIER}),[\s/-]+(?:(?:${MARK_MODIFIER}),?[\s/-]+){0,2}` +

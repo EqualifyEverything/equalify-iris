@@ -470,9 +470,6 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // stack, so a stack that opens its own sentence or sits behind a count is still one phrase.
     "Page is blank. Faint, isolated marks are visible, no text.",
     "Page is blank. A few faint, scattered specks are visible, no text.",
-    // A quantifier passes whatever delimiter is in front of it, because it is what makes the stack the
-    // phrase's own rather than the clause's.
-    "Page is blank — only faint, isolated marks are visible, no text.",
     // `not legible` predicated on the marks by a relative clause, with and without the `as`.
     "Page 16 appears to be blank. No text, images, or other content is visible. Only a few scattered specks/artifacts are present, which are not legible as content.",
     "Page 16 appears to be blank. No text or meaningful content is visible. No page number is printed on the page; the page-break marker uses the sequence number 16 from the file metadata. Only a few scattered specks/artifacts are present, which are not legible marks.",
@@ -675,14 +672,28 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. The image is dark, faint specks are visible. No legible text.",
     "Page is blank. The scan is noisy, scattered marks are visible, no text.",
     "Page 12 appears blank. The image is washed-out, faint specks are visible, no text.",
-    // A degree word between the copula and the stack, and a dash where the delimiter was a colon: the
-    // clause is about the capture either way, and the first two read as likelier model prose than the
-    // bare `is grainy,` above. A spaced hyphen is the dash typed without one.
+    // The same clause with something between the copula and the stack, or with a delimiter other than
+    // a colon. What refuses these is not a list of the words that can sit there — that list has no end,
+    // and three separate wordings walked through three versions of it — but the copula, colon or dash
+    // being anywhere to the left of the stack inside the sentence.
     "Page 12 appears blank. The scan is very grainy, faint specks are all that appear.",
     "Page 12 appears blank. The scan seems quite dark, faint specks are all that appear.",
+    "Page 12 appears blank. The scan is noticeably grainy, faint specks are all that appear.",
+    "Page 12 appears blank. The scan is a little dark, faint specks are all that appear.",
+    "Page 12 appears blank. The image is heavily grainy, faint specks are visible, no text.",
+    // A quantifier between the copula and the stack is the same road: `only` is what the phrase's own
+    // prefix is made of, so naming it there would have been a fourth patch on one wording.
+    "Page 12 appears blank. The scan is only dark, blurry, faint specks throughout, no legible text.",
+    // Every delimiter that says a description of something already named follows. A spaced hyphen is
+    // the dash typed without one; unspaced it is inside `washed-out` and inside the phrase's own
+    // separator, so that one is not a delimiter.
     "Page 12 appears blank. Scan quality — dark, blurry, faint specks throughout, no legible text.",
     "Page 12 appears blank. Scan quality - dark, blurry, faint specks throughout, no legible text.",
     "Page 12 appears blank. Scan quality: somewhat dark, blurry, faint specks throughout, no text.",
+    // What this costs: a comma'd stack in a sentence that opened by saying the page is empty. The `is`
+    // is to the left of the stack in the same sentence, so `faint` refuses — a glance, not a page, and
+    // no corpus wording puts the marks anywhere but at the start of their own sentence.
+    "Page is blank — only faint, isolated marks are visible, no text.",
     // Bare `marks` is the marks behind `stray`, `scattered`, `isolated`, `random` or `residual` — the
     // words that say the marks are nowhere in particular — and behind nothing else. `agents/page.md`
     // uses the bare noun for a page that HAS content nobody could read, which is what these are.
