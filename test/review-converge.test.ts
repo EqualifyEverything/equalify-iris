@@ -132,7 +132,7 @@ test("a round that changes something keeps the loop going", async () => {
   assert.equal(round.result.iterationsCompleted, 3);
 });
 
-// The counts of an empty structure, so the two assertions below can say which of the eleven the
+// The counts of an empty structure, so the two assertions below can say which of the thirteen the
 // round moved and be read as the whole line at the same time.
 const NO_STRUCTURE = {
   headings: 0, paragraphs: 0, lists: 0, items: 0, terms: 0, definitions: 0,

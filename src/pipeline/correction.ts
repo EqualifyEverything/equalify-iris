@@ -102,14 +102,20 @@ export interface StructureCounts {
 // count would report every one of those as two structures changed. What no rule in that file
 // asks for is a heading that stops existing, which is what this number sees.
 //
-// What makes that grouping defensible is that it has a second reader: a round that flattens every
-// heading to one level is caught by axe's `heading-order` in the re-lint the review loop runs after
-// each round. `<th>` has no such second reader — no axe rule fires on a header cell demoted to a
-// data cell, which is exactly the loss that strips a table's header association from a screen
-// reader — so header cells are counted APART from data cells rather than folded in with them, and
-// `<caption>` is counted too, since a dropped table name is otherwise invisible here as well. The
-// total is still available by addition; what is not recoverable from a total is which of the two a
-// round turned into the other.
+// The residual that grouping leaves is NOT covered elsewhere, and this comment said it was for one
+// push: a round that rewrote every heading in the body to the same level leaves a sequence with no
+// downward skip, so the re-lint's `heading-order` is silent — it fires only where a level goes down
+// by more than one (lint.ts documents that reach and pins it) — while `headings` here is unchanged
+// and the prose pair is equal. Every level distinction in the outline would be gone with no number
+// on the line to say so. The grouping is still the right call for the reason above; what it does
+// not have is a second opinion behind it.
+//
+// The table counts are apart for the same missing-second-opinion reason, in the direction that
+// costs nothing: no axe rule fires on a `<th>` demoted to a `<td>`, which is the loss that strips a
+// table's header association from a screen reader, so header cells are counted APART from data
+// cells rather than folded in with them, and `<caption>` too, since a dropped table name would
+// otherwise be invisible here as well. The total is still available by addition; what is not
+// recoverable from a total is which of the two a round turned into the other.
 //
 // `<a>` is counted although `droppedHrefs` already watches URLs: that check answers "did this
 // href survive", and a round that turns three links into one keeping every URL in it is a
