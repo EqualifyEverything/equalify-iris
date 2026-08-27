@@ -188,12 +188,19 @@ export function droppedHrefs(before: string, after: string): string[] {
 // What it gives up, so the next person to touch the regex has the whole argument: a quote
 // is in the class because a browser reads `class="a"id="x"` as two attributes and a page
 // agent's output is delivered unserialized when no id collides (anchors.ts), so without it
-// a real id would go unseen. The cost is the mirror case — `title='he said "id=y"'`, where
-// the quote is inside a value — which registers an id the document does not have. Both are
-// spellings a model would have to go out of its way to produce, and they fail in opposite
-// directions: the first over-reports a dead reference, the second hides one. Neither is
-// thresholded, so either costs a maintainer a glance rather than a run. Anything more
-// exact than this is a parse, and this function runs on bytes that are already delivered.
+// a real id would go unseen. The cost is that a quote can also be an OPENING one, so a
+// value whose text begins or contains `id=` registers a phantom id: `alt="id=intro"` on a
+// scanned form field, or `title='he said "id=y"'`. Those fail in the worse direction —
+// they hide a dead reference rather than invent one — and the first is the likelier of the
+// two, since a page can transcribe `id=` literally.
+//
+// Left as a scan anyway. Every remaining case needs a delivered document that both
+// contains such a value AND has a dead reference to the id that value names, nothing here
+// is thresholded, so the cost is a maintainer's glance rather than a run. The exact fix,
+// if this ever carries a threshold, is a parse: unlike the rest of this file, this function
+// alone runs on the FINAL document, which the lint step already hands to jsdom — so
+// `[id]` and `a[href]` off that tree would settle every one of these, at the price of
+// parsing a large document a second time.
 export function unresolvedRefs(html: string): {
   refs: number;
   empty: number;
