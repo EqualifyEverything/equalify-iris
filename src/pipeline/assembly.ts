@@ -393,10 +393,12 @@ export async function runAssembly(
       // that wrote it transcribed a marker whose note nothing in this document holds, which
       // is a page worth looking at.
       //
-      // "Left bare", not "dead": in the one shape where an owner of that id was itself
-      // delivered as written, its copy keeps the bare id and the link still resolves — to a
-      // note that has its own marker, which is the defect, but not to nothing. Whether a
-      // reference lands is measured on the delivered bytes (`internal_links`), not here.
+      // "Left bare", not "dead": two shapes ship a bare copy of the id, and in both the link
+      // still resolves — to a note that has its own marker, which is the defect, but not to
+      // nothing. One is an owner delivered as written (`skipped_pages`), which keeps every id
+      // it has; the other is a `pinned_ids` id, whose first owner is held bare on purpose so
+      // that a frozen reference elsewhere keeps finding it. Whether a reference lands is
+      // measured on the delivered bytes (`internal_links`), not here.
       unrepointed: anchors.unrepointed.map((u) => `page ${u.page}: #${u.ref}`),
       skipped_pages: anchors.skipped_pages,
     });

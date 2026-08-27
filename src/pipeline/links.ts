@@ -50,19 +50,20 @@ const VALUE = `\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`;
 // measured for what can precede an attribute in a TAG, and this scan does not read tags —
 // it reads every byte of the delivered document, values and text included.
 //
-// So the two classes differ by exactly two characters, each excluded from the class that
-// cannot use it. `/` is in ATTR_SEP because `<br/id="x">` parses an `id`; it is out here
-// because a `/` is far commoner inside a URL, where `<a href="https://x.example/id=intro">`
-// would register a phantom `intro` and silence a genuinely dead `#intro` — the direction
-// this function's comment below calls the worse one. `<` is in here because `<id=` and
-// `<href=` are tag NAMES, never attributes, so it costs nothing and catches the first
-// attribute of every tag; it is out of ATTR_SEP because that class is only ever applied
-// after a tag name has been consumed.
+// So this is ATTR_SEP without `/`. That character is in ATTR_SEP because `<br/id="x">`
+// parses an `id`; it is out here because a `/` is far commoner inside a URL, where
+// `<a href="https://x.example/id=intro">` registers a phantom `intro` and silences a
+// genuinely dead `#intro` — the direction this function's comment below calls the worse one.
+// The mirror cost is that an id written `<br/id="x">` goes unseen here, so a live `#x` is
+// reported as dangling; that over-reports, which is the direction to fail in, and it needs a
+// page agent to write an attribute with no space in front of it.
 //
-// The cost of dropping `/` is the mirror case: an id written `<br/id="x">` goes unseen, so a
-// live `#x` is reported as dangling. That over-reports, which is the direction to fail in,
-// and it needs a page agent to write an attribute with no space before it.
-const SEP = `[\\s<"']`;
+// `<` is not in either class, and for the same reason `/` is out of this one: the first
+// attribute of a tag is preceded by whitespace anyway (`<p id="x">`), so `<` catches nothing
+// a separator does not — while `<id="foo">` is a tag whose NAME the tokenizer reads as
+// `id="foo"`, which would be one more phantom id. An earlier version of this class had it,
+// with a rationale that did not survive being written down.
+const SEP = `[\\s"']`;
 
 // Does this href name a scheme? Both comparisons below are about URLs that came from
 // (or claim to have come from) the source file's annotations, and only an absolute

@@ -766,6 +766,20 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
         // refers to one it does not own. `skipped_pages` is documented as "may still carry a
         // collision or a stranded reference" and a human is asked to act on it, so a page
         // that cannot be rewritten while doing neither is noise there.
+        // A page delivered as written still OWNS its ids, so it can still be the owner a
+        // link is aimed at, and its own marker still speaks for its own note (#233). Read
+        // from its tree, which a too-deeply-nested page keeps — `querySelectorAll` does not
+        // recurse, the same argument the comment above makes for its references. Without
+        // this, such a page reads as free and the link is repointed at its already-marked
+        // note, which is precisely the shape the rule exists to avoid.
+        //
+        // A page whose PARSE threw is the one case left out. Its self-links would have to
+        // come from a fourth source scan, and `sourceRefs` cannot say which attribute a
+        // reference came from, so the rule's "links only" boundary is not available there.
+        // Such a page therefore reads as free and its notes are treated as they were before
+        // #233 — a reference aimed at one still resolves; it may resolve to a note that has
+        // its own marker.
+        if (dom) recordSelfLinks(i, dom, mine);
         const readRefs = dom ? referencesIn(dom.window.document) : [...sourceRefs(page.innerHtml)];
         const frozenRefs = new Set(readRefs.filter((r) => colliding.has(r) && !mine.has(r)));
         if (!ownsCollision && frozenRefs.size === 0) continue;

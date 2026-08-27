@@ -370,6 +370,30 @@ test("an owner left as written is a target like any other, and the bare link fin
   assert.equal(doc.querySelectorAll("#fn-1").length, 1, "the bare target the link needs is not unique");
 });
 
+test("an owner too deep to rewrite still speaks for its own note", () => {
+  // A page delivered as written because of its nesting keeps its ids, so it is still an owner
+  // a link can be aimed at — and its own marker still speaks for its own note. Read from its
+  // tree, which such a page keeps. Without that, page 1 looks free, page 3's link is
+  // repointed at the note page 1's own marker already claims, and page 2's free note is
+  // unreachable from anywhere: the #233 defect, reintroduced through the one route that
+  // reports nothing.
+  const deep = "<div>".repeat(600);
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `${deep}<p>A<sup><a href="#fn-1">1</a></sup></p><ol><li id="fn-1">One</li></ol>`),
+    frag(2, `<ol><li id="fn-1">…continued</li></ol>`),
+    frag(3, `<p>C<sup><a href="#fn-1">1</a></sup></p>`),
+  ]);
+  assert.deepEqual(anchors.skipped_pages, [1], "the too-deep page was rewritten after all");
+  assert.match(body, /<li id="fn-1">One<\/li>/, "the page delivered as written did not keep its bare id");
+  assert.match(body, /<li id="p2-fn-1">…continued<\/li>/, "the free owner was not renamed");
+  assert.deepEqual(anchors.unrepointed, []);
+  // Page 1's own marker is frozen bare and finds its own note; page 3's is repointed past it.
+  const hrefs = [...new JSDOM(`<body>${body}</body>`).window.document.querySelectorAll("a[href^='#']")].map((a) =>
+    a.getAttribute("href"),
+  );
+  assert.deepEqual(hrefs, ["#fn-1", "#p2-fn-1"], "page 3's link was aimed at the deep page's already-marked note");
+});
+
 test("a link left bare does not fight a pin for the id it is not taking", () => {
   // The other crossing: `fn-1` is pinned, because page 4 is delivered as written and its
   // frozen `href="#fn-1"` can only find a bare id. Pages 1 and 2 both own a self-linked copy,

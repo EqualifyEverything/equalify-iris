@@ -703,6 +703,12 @@ test("an id= inside another attribute's value is not an id this document has", (
   // Sharing that constant was tried, and it turned a URL PATH segment into a phantom id —
   // the same silent under-count as the first case above, on a likelier spelling.
   assert.deepEqual(unresolvedRefs(`<a href="https://x.example/id=intro">r</a><a href="#intro">I</a>`).ids, ["intro"]);
+  // `<` is not a separator either: a tag's first attribute has whitespace in front of it
+  // anyway, so `<` catches nothing, while `<id="foo">` is a tag whose NAME the tokenizer
+  // reads as `id="foo"` — one more phantom, no upside.
+  assert.deepEqual(unresolvedRefs(`<id="foo"><a href="#foo">f</a>`).ids, ["foo"]);
+  // The separator still has to catch a real first attribute, which is the whitespace case.
+  assert.equal(unresolvedRefs(`<p id="ok">o</p><a href="#ok">o</a>`).dangling, 0);
 });
 
 // ---------------------------------------------------------------------------
