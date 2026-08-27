@@ -141,9 +141,11 @@ const NO_STRUCTURE = {
 
 test("each round says whether it changed the document, and by how much", async () => {
   // The sizes and the structure counts are on the same line as `changed`, and they are the whole
-  // line: nothing else about a round answered whole. A round that replaced the body with something
-  // a fifth of its size, and both its headings with nothing, is delivered — there is no floor on
-  // this path (issue #174) — and this is where a log says so.
+  // line: nothing else about a round answered whole. Here a round replaced the body with something
+  // a fifth of its size and both its headings with nothing, and it is delivered — this body holds
+  // 49 characters of prose, which is under `EDITOR_FLOOR_MIN_TEXT`, and a proportion of 49
+  // characters is not a measurement (#174). What the floor does above that size is pinned in
+  // test/editor-round-size.test.ts; what this pins is that the numbers are reported either way.
   const changed = await loop(() => JSON.stringify({ html: "<p>edited</p>" }), 1);
   assert.deepEqual(typed(changed, "editor")[0].data, {
     iteration: 1,

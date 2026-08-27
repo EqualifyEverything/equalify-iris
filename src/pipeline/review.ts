@@ -6,7 +6,7 @@ import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseErro
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
 import { stripDeprecatedRoles } from "./roles.ts";
-import { structureCounts, visibleText } from "./correction.ts";
+import { destroyedBody, EDITOR_SHRINK_FLOOR, structureCounts, visibleText } from "./correction.ts";
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { joinSections, splitSections } from "./sections.ts";
 import { flatten } from "./flatten.ts";
@@ -1122,6 +1122,30 @@ async function editorCall(
     ctx.log.event("editor_no_output", { chars: res.text.length });
     return { body, usable: false };
   }
+  // And the floor #174 asked for: a reply that came back with less than half the prose of the
+  // document it was given did not correct that document, whatever it parsed as. This is the one
+  // path where the model's `html` is adopted for the WHOLE body with nothing compared against what
+  // went in, and the blast radius is the deliverable — so the reply that answers and then quotes
+  // the contract back, the reply that returned section three, the reply that summarised, all
+  // arrive here indistinguishable from a corrected document. See `destroyedBody` for the number
+  // and for why it reads the visible text rather than the characters or the structure counts.
+  //
+  // Reported as `usable: false`, the same as an unparseable reply, because the two are the same
+  // fact about the round: nothing came back that can be used as this document. That keeps the body
+  // that entered — the loop reads `body === before` with `usable` false and runs another round
+  // rather than crediting a convergence — so a floor that fires on a sampled fluke costs one
+  // request, not the document's corrections. Both length pairs on the line, because the ratio
+  // that tripped and the ratio that did not are the evidence for moving this number.
+  if (destroyedBody(body, corrected)) {
+    ctx.log.event("editor_shrank", {
+      chars_before: body.length,
+      chars_after: corrected.length,
+      text_chars_before: visibleText(body).length,
+      text_chars_after: visibleText(corrected).length,
+      floor: EDITOR_SHRINK_FLOOR,
+    });
+    return { body, usable: false };
+  }
   return { body: corrected, usable: true };
 }
 
@@ -1303,6 +1327,29 @@ async function editorSectionCall(
   const corrected = extractJson<{ html?: string }>(res.text)?.html?.trim();
   if (!corrected) {
     ctx.log.event("editor_section_failed", { section: index + 1, of, reason: "no_output", chars: res.text.length });
+    return null;
+  }
+  // #174's floor at the other unit. The same reply shapes reach here — this prompt asks for one
+  // section and a model that answers with a sentence about it, or with the first paragraph of it,
+  // produces markup that parses — and the same containment already exists for them: a section that
+  // came back unusable keeps the text it went in with (`joinSections`), so this costs that
+  // section's corrections rather than the document's.
+  //
+  // Same number as the whole-body path, and the sectioned rounds are part of what places it: 13
+  // section calls across three rounds, every one of them answered, and the joined bodies land at
+  // 0.998–1.006 of their input. A section that had returned under half its own prose would have
+  // moved a five-section join by a tenth, and none of them moved by more than 0.6%.
+  if (destroyedBody(section, corrected)) {
+    ctx.log.event("editor_section_failed", {
+      section: index + 1,
+      of,
+      reason: "shrank",
+      chars_before: section.length,
+      chars_after: corrected.length,
+      text_chars_before: visibleText(section).length,
+      text_chars_after: visibleText(corrected).length,
+      floor: EDITOR_SHRINK_FLOOR,
+    });
     return null;
   }
   return corrected;
@@ -1628,15 +1675,20 @@ export async function runReview(
     // length is their structure counts moving (0.714–1.333, one round dropping 5 of 7 lists and 13
     // of 47 list items while its length moved 1.6%), so the evidence for a second signal is
     // evidence for a STRUCTURE count — which is why `structure_before`/`structure_after` are on this
-    // line as well, and why they are the reading #174's open half is most likely to want. Note the
-    // direction of that evidence: on those three rounds the structure counts are the LESS stable
-    // number, moving in both directions on rounds that were doing their job, so a floor read off
-    // them needs a looser threshold than a length floor and catches less with it. That is an
-    // argument about where to set a number, not about which numbers to record, and it is one of the
-    // things the next few rounds can settle now that both are on the line.
-    // No `text_chars_*` ratio exists for a review round at all yet; that is what this produces. The
-    // 0.62–2.32 span on 265 page corrections is raw length too — delivered against given, the
-    // reading this line takes — so the second pair starts with no corpus, as it did on the page path.
+    // line as well.
+    //
+    // The next round settled which of them a floor reads, and it was not the structure counts: see
+    // `EDITOR_SHRINK_FLOOR`, placed on `text_chars_*` because the whole-body round in `runs-231`
+    // moved `terms` from 55 to 3 while moving its prose 0.3%. The direction of the evidence above
+    // is what that confirmed — the structure counts are the LESS stable number, moving in both
+    // directions on rounds that were doing their job — and the conclusion is that a floor on them
+    // catches nothing a useful threshold could survive. All three readings stay on this line
+    // regardless: two of them are now what a person reads when the third has fired.
+    // The `text_chars_*` corpus for a review round is four rounds deep and starts here: 0.997 on
+    // the round answered whole, 0.998 / 1.006 / 1.001 on the three answered section by section.
+    // Note it is not the same quantity as the published page span — 0.62–2.32 over 265 page
+    // corrections is RAW length, delivered against given — so the two cannot be read as one band,
+    // and the review floor is set off these four rather than off that one.
     //
     // Measured on the body, which is the `<main>` content: the wrapper and the markers after
     // `</main>` are added downstream and are not what any round returned. Taken AFTER the role

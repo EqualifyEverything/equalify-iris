@@ -22,15 +22,21 @@
 // counts are on the line too, grouped so that re-levelling a heading is not a heading lost, and the
 // two tests below are the cases each reading sees and the other cannot.
 //
-// This file pins what the numbers mean, not a threshold. There is no threshold yet, and picking one
-// off n=3 is what #174 says not to do.
+// The threshold arrived once those numbers had, which is the second half of this file. One bench
+// round (`runs-231`) logged four legitimate rounds with all three readings on them, and they placed
+// the floor on the prose pair and ruled the other two out: raw characters because unwrapping a
+// mis-structured document keeps every word and loses half the bytes, and the structure counts
+// because the whole-body round rewrote a 55-item `<dl>` into list items — a ratio of 0.055 on
+// `terms` — while its prose moved 0.3%. So `EDITOR_SHRINK_FLOOR` reads `text_chars_*`, and the tests
+// below are one per reading: the two shapes that must survive it, the shape that must not, and the
+// size under which none of it is a measurement.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runReview, type ReviewIssue } from "../src/pipeline/review.ts";
-import { structureCounts } from "../src/pipeline/correction.ts";
+import { EDITOR_FLOOR_MIN_TEXT, structureCounts, visibleText } from "../src/pipeline/correction.ts";
 import type { InputImage, PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 
@@ -96,11 +102,31 @@ const PAGES = [
 
 const round = async (dir: string, body: string, html: string) => {
   const { ctx, rec } = ctxWith(dir, JSON.stringify({ html }));
-  await runReview(ctx, { body, lint: { ok: true, violations: [] }, pages: PAGES });
+  const result = await runReview(ctx, { body, lint: { ok: true, violations: [] }, pages: PAGES });
   const editor = rec.events.find((e) => e.type === "editor");
   assert.ok(editor, "the round produced no editor line to measure");
-  return { data: editor.data, rec };
+  return { data: editor.data, rec, result };
 };
+
+// A body long enough for a proportion of it to mean something — the floor declines to judge
+// anything under `EDITOR_FLOOR_MIN_TEXT` visible characters, and every fixture above is far under
+// it, which is the point of the last test in this file. Paragraphs of ordinary prose rather than one
+// repeated string, so the structure counts and the two length pairs all have somewhere to move.
+function longBody(): string {
+  const paras = [];
+  for (let i = 1; i <= 12; i++) {
+    paras.push(
+      `<p>Section ${i} of the report describes the quarter's revenue by region, the costs ` +
+        `booked against it, and the reconciliation the finance team performed before publication.</p>`,
+    );
+  }
+  const body = `<h1>Quarterly Report</h1><h2>Outlook</h2>${paras.join("")}`;
+  assert.ok(
+    visibleText(body).length > EDITOR_FLOOR_MIN_TEXT * 1.5,
+    "the fixture has to clear the floor's minimum with room to spare, or it tests the exemption",
+  );
+  return body;
+}
 
 test("a round records the body it was given as well as the body it returned", async () => {
   await withTemp(async (dir) => {
@@ -138,11 +164,13 @@ test("markup work and prose work are told apart, which one pair of numbers could
   });
 });
 
-test("prose the round deleted is visible in the prose sizes, where a floor would have to see it", async () => {
+test("prose the round deleted is visible in the prose sizes, which is where the floor reads it", async () => {
   await withTemp(async (dir) => {
-    // The other direction, and the one the missing floor is about: the reply is well-formed HTML
-    // and is most of the document short. Nothing here rejects it — that is #174's open half — but
-    // the log now says by how much, which is what a threshold has to be chosen against.
+    // The other direction, and the one the floor is about: the reply is well-formed HTML and is
+    // most of the document short. On a document of this size nothing rejects it — 64 characters of
+    // prose is under `EDITOR_FLOOR_MIN_TEXT` and a proportion of it is not a measurement, which the
+    // last test in this file is about — so what this pins is the reading itself: the numbers say by
+    // how much, on the same line, whether or not the floor acted on them.
     const before = "<h1>Report</h1><p>Revenue rose nine percent over the year.</p><p>Costs held flat.</p>";
     const after = "<h1>Report</h1>";
     const { data } = await round(dir, before, after);
@@ -152,9 +180,124 @@ test("prose the round deleted is visible in the prose sizes, where a floor would
       (data.text_chars_after as number) / (data.text_chars_before as number) < 0.2,
       "a body that lost four fifths of its prose says so on its own line",
     );
-    // And it was delivered, because there is no floor on this path yet. The point of the numbers
-    // is that a run log now shows this; the point of #174 is that nothing stops it.
     assert.equal(data.changed, true);
+  });
+});
+
+test("a reply with a fifth of the document's prose in it does not get to be the document", async () => {
+  await withTemp(async (dir) => {
+    // #174's actual gap: the Copy Editor's `html` is adopted for the WHOLE body with nothing
+    // compared against what went in, so a reply that answered about section three, or summarised,
+    // or quoted the contract back after answering, arrives here shaped like a corrected document.
+    // The blast radius is the deliverable rather than one page, which is why this path got the
+    // floor first.
+    const before = longBody();
+    const after = "<h1>Quarterly Report</h1><p>The report has been reviewed and corrected.</p>";
+    const { data, rec, result } = await round(dir, before, after);
+
+    const shrank = rec.events.find((e) => e.type === "editor_shrank");
+    assert.ok(shrank, "the round was refused with nothing on the log to say so");
+    assert.equal(shrank.data.text_chars_before, visibleText(before).length);
+    assert.equal(shrank.data.text_chars_after, visibleText(after).length);
+    // Both pairs, because the ratio that tripped and the ratio that did not are together the
+    // evidence for ever moving this number.
+    assert.equal(shrank.data.chars_before, before.length);
+    assert.equal(shrank.data.chars_after, after.length);
+    assert.equal(shrank.data.floor, 2);
+
+    // The body that entered is the body that ships, and the `editor` line reports the round as
+    // having changed nothing — which is true of the document, and is what the refusal costs: the
+    // issues the round was asked to fix stay unresolved.
+    assert.equal(result.body, before);
+    assert.equal(data.changed, false);
+    assert.equal(data.chars_after, before.length);
+    // And NOT as a convergence. `review_converged` claims the editor read the document and decided
+    // it was better left alone, with rounds to spare; a refused reply is the opposite claim, and
+    // the loop must be free to spend another round asking again.
+    assert.equal(rec.events.find((e) => e.type === "review_converged"), undefined);
+  });
+});
+
+test("unwrapping the document is not losing it, which is why the floor is not on the characters", async () => {
+  await withTemp(async (dir) => {
+    // The same shape as the second test in this file, at a size the floor actually judges: a
+    // procedure whose every step arrived inside two levels of wrapper, unwrapped. Every word
+    // survives and more than half the characters go — and #174's own examples of legitimate
+    // deletion are exactly this ("an unwarranted `<section>` wrapper"). A floor on `chars_*` at a
+    // half would refuse this round; one loose enough not to would be past the fragment it exists
+    // to catch.
+    //
+    // The share here is written to make the arithmetic visible in one assertion, but the risk it
+    // stands for is measured: markup is 21% of the bytes of the prose document in `runs-231` and
+    // 56% of the table-heavy one, so on a real body the raw pair's headroom to a half is anywhere
+    // from comfortable to none, and which it is depends on what the document happens to contain.
+    // That is not a quantity to hang a refusal on.
+    const steps = [];
+    for (let i = 0; i < 40; i++) steps.push(`<p>Turn the valve and record the reading.</p>`);
+    const after = `<h2>Procedure</h2>${steps.join("")}`;
+    const before = after.replace(
+      /<p>(.*?)<\/p>/g,
+      "<section><div><section><div><p>$1</p></div></section></div></section>",
+    );
+    assert.ok(visibleText(after).length > EDITOR_FLOOR_MIN_TEXT, "the fixture has to clear the minimum");
+    const { data, rec, result } = await round(dir, before, after);
+
+    assert.equal(data.text_chars_before, data.text_chars_after, "no word moved");
+    assert.ok((data.chars_after as number) / (data.chars_before as number) < 0.6, "and yet the bytes did");
+    assert.equal(rec.events.find((e) => e.type === "editor_shrank"), undefined);
+    assert.equal(result.body, after, "the round was kept");
+  });
+});
+
+test("rewriting a definition list into a list is not losing it either, which rules out the counts", async () => {
+  await withTemp(async (dir) => {
+    // The measured round, reduced. `runs-231`'s whole-body round moved `terms` from 55 to 3 and
+    // `items` from 113 to 164 while its prose moved 0.3% — a `<dl>` used for content that was never
+    // a definition list, rewritten into one that is a list. That is the editor doing what this
+    // pipeline is for, and it is the reason `EDITOR_SHRINK_FLOOR` is not read off a structure count:
+    // a threshold loose enough to permit a ratio of 0.055 permits anything.
+    const pairs = [];
+    const items = [];
+    for (let i = 1; i <= 20; i++) {
+      pairs.push(`<dt>Step ${i}</dt><dd>Turn the valve and record the reading before continuing.</dd>`);
+      items.push(`<li>Step ${i}: turn the valve and record the reading before continuing.</li>`);
+    }
+    const before = `<h2>Procedure</h2><dl>${pairs.join("")}</dl>`;
+    const after = `<h2>Procedure</h2><ol>${items.join("")}</ol>`;
+    const { data, rec, result } = await round(dir, before, after);
+
+    const from = data.structure_before as Record<string, number>;
+    const to = data.structure_after as Record<string, number>;
+    assert.deepEqual([from.terms, from.items], [20, 0]);
+    assert.deepEqual([to.terms, to.items], [0, 20]);
+    assert.ok(
+      (data.text_chars_after as number) / (data.text_chars_before as number) > 0.9,
+      "the prose is all still there, which is the reading that decides",
+    );
+    assert.equal(rec.events.find((e) => e.type === "editor_shrank"), undefined);
+    assert.equal(result.body, after, "a floor on `terms` would have thrown this away");
+  });
+});
+
+test("a document too short for a proportion to mean anything is not judged by one", async () => {
+  await withTemp(async (dir) => {
+    // Why `EDITOR_FLOOR_MIN_TEXT` exists, in the shape that forced it: the legitimate deletions are
+    // fixed-size, not proportional. `[page not fully transcribed]` is 28 characters and a duplicated
+    // heading is 20–60, so on a body of 50 a single resolved marker is half the prose — the floor
+    // would fire on the editor doing its job, and several of this repo's own round fixtures are that
+    // small. What is given up is the floor on a document with under about 150 words in it, where a
+    // ratio is noise and the thing unprotected is a document a reader loses a paragraph of.
+    const before = "<p>Torque to [not legible] Nm.</p><p>[page not fully transcribed]</p>";
+    const after = "<p>Torque to 40 Nm.</p>";
+    assert.ok(visibleText(before).length < EDITOR_FLOOR_MIN_TEXT);
+    assert.ok(
+      visibleText(after).length * 2 < visibleText(before).length,
+      "the ratio itself is under the floor; the size is what exempts it",
+    );
+    const { rec, result } = await round(dir, before, after);
+
+    assert.equal(rec.events.find((e) => e.type === "editor_shrank"), undefined);
+    assert.equal(result.body, after, "the round was kept, because resolving two markers is what it looks like");
   });
 });
 

@@ -227,9 +227,17 @@ export function carriesContent(html: string): boolean {
 // three review rounds whose input survived, LENGTH moved 1.6% while the structure counts moved
 // 0.714–1.333 — one round dropping 5 of 7 lists and 13 of 47 list items, another gaining a
 // table — so "how much of the document is left" and "how much of its structure is left" are
-// different questions about the same round, and only the first has numbers on the line today.
-// Which of them a floor should be read off is the open half of #174, and it cannot be settled
-// without both being logged.
+// different questions about the same round.
+//
+// The answer that argument was pointing at is NO, and the first round to log both is what
+// settled it: the whole-body round in `runs-231` rewrote a 55-item `<dl>` into list items —
+// `terms` 55 -> 3, `items` 113 -> 164, a ratio of 0.055 on the count — while its prose moved
+// 0.3% and every word survived. That is the editor doing precisely what it is for, and there is
+// no threshold on a structure count that both permits it and refuses a reply that came back with
+// a fifth of the document. So `EDITOR_SHRINK_FLOOR` reads the visible text, and these counts stay
+// what they were: the reading that says which KIND of thing a round moved, once a person is
+// already looking at the round. Their instability in both directions on rounds that were working
+// is the finding, not a defect in the counting.
 export interface StructureCounts {
   headings: number;
   paragraphs: number;
@@ -459,6 +467,78 @@ export const CORRECTION_SHRINK_FLOOR = 4;
 // Did the correction lose the page rather than correct it?
 export function destroyedPage(before: string, after: string): boolean {
   return after.length * CORRECTION_SHRINK_FLOOR < before.length;
+}
+
+// The same question about a review round's BODY, which is a different distribution and so a
+// different number, read on a different quantity (#174). Two constants rather than one because
+// #174 said so in as many words — "not this floor's number" — and the measurement below is why.
+//
+// A HALF, not a quarter, because the two populations are further apart here than they are on the
+// page path and the cost of getting it wrong is asymmetric. Every legitimate round that records
+// both sizes lands within 0.6% of the body it was given: 0.997 on the one answered whole, and
+// 0.998 / 1.006 / 1.001 on the three answered section by section (`runs-231`, four documents, the
+// first bench round carrying these numbers). The three earlier samples are 1.000 by construction —
+// a reply with nothing usable in it is a body handed back untouched — so they bound nothing, and
+// this is a band read off four rounds, which is why it is set so far from all of them. What it is
+// set BELOW is the failure it exists to catch: a reply that returns one part of the document
+// instead of the document, and a section of one of these bodies is 0.016–0.379 of it. Half sits
+// clear of both ends.
+//
+// The asymmetry: refusing a legitimate round costs that round's corrections, and the document is
+// delivered with those issues marked @unresolved — a state this loop already supports and reports.
+// Accepting a reply that is not the document costs the document. So the floor belongs as high as
+// the legitimate distribution safely allows, which is the opposite of how the page floor was
+// placed (there, a refused correction ships a page nobody checked again).
+//
+// On the VISIBLE TEXT, and this is the substantive finding rather than a detail. Neither of the
+// other two readings on the `editor` line can carry a floor:
+//
+//   - Raw characters cannot, because unwrapping a mis-structured document is the editor doing its
+//     job and it is mostly bytes. `<section><div><h2>x</h2><div><p>y</p></div></div></section>`
+//     unwrapped keeps every word and loses 53% of the characters (the case pinned in
+//     test/editor-round-size.test.ts), and #174's own examples of legitimate deletion — "an
+//     unwarranted `<section>` wrapper" — are exactly that shape. A raw floor at a half would refuse
+//     it; one loose enough not to would be past the fragment it needs to catch.
+//   - The structure counts cannot, and this is the reading #174 guessed would be the better one.
+//     The measured whole-body round rewrote a 55-item `<dl>` into list items: `terms` 55 -> 3, a
+//     ratio of 0.055, while its prose moved 0.3% and every word survived. A structure floor loose
+//     enough to allow that round is loose enough to allow anything, and one tight enough to be
+//     worth having would have thrown away a correct rewrite of the whole document.
+//
+// Both stay on the `editor` line as measurements. What sees a markup-only loss is the structure
+// pair plus the re-lint of the body that ships; what sees content leaving is this.
+export const EDITOR_SHRINK_FLOOR = 2;
+
+// How much prose a body needs before a PROPORTION of it is a measurement at all, in visible
+// characters. Under this, nothing is refused.
+//
+// Not an escape hatch — the arithmetic of the floor above stops working at the bottom of the range.
+// The legitimate deletions #174 lists are fixed-size, not proportional: `[page not fully
+// transcribed]` is 28 characters, a duplicated heading is 20–60, a transcribed page number is one
+// to three. Ten of those is 300 characters however long the document is, so on a body of 500 the
+// floor is reachable by the editor doing exactly what it was asked, and on a body of 50 — which is
+// what several of this repo's own round fixtures are — a single resolved marker trips it. A
+// thousand puts the smallest firing at 500 characters of prose gone, which is not a count of
+// headings and page numbers, it is paragraphs.
+//
+// What it gives up is the floor on a document with under about 150 words in it, and that is the
+// cheap end of the trade in both directions: the ratio there is noise, and the thing being
+// protected is a document a reader loses a paragraph of. The expensive case — a 25-page report
+// whose body comes back as one section — is nowhere near it: the four measured bodies carry
+// 43,969 to 72,197 characters of prose, so 44 to 72 times over this line. Sections are
+// judged by the same number and a section of pure markup can fall under it; same reasoning, and
+// bounded to that section rather than to the document (`joinSections` keeps the text that went in).
+//
+// The precedent for a lower bound on proportional machinery is `MIN_SECTION_BUDGET`, which declines
+// for the same kind of reason rather than guessing at a size the arithmetic cannot carry.
+export const EDITOR_FLOOR_MIN_TEXT = 1_000;
+
+// Did the round lose the body rather than correct it? Used on the whole body and on one section,
+// which are the same question about different amounts of document.
+export function destroyedBody(before: string, after: string): boolean {
+  const text = visibleText(before).length;
+  if (text < EDITOR_FLOOR_MIN_TEXT) return false;
+  return visibleText(after).length * EDITOR_SHRINK_FLOOR < text;
 }
 
 // How many measurement-only re-verifications a batch of pages may buy.
