@@ -136,7 +136,7 @@ test("a round that changes something keeps the loop going", async () => {
 // round moved and be read as the whole line at the same time.
 const NO_STRUCTURE = {
   headings: 0, paragraphs: 0, lists: 0, items: 0, terms: 0, definitions: 0,
-  tables: 0, rows: 0, cells: 0, images: 0, links: 0,
+  tables: 0, captions: 0, rows: 0, header_cells: 0, cells: 0, images: 0, links: 0,
 };
 
 test("each round says whether it changed the document, and by how much", async () => {

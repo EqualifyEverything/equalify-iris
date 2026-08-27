@@ -243,9 +243,24 @@ test("the structure scan counts elements, not tags, and reads model output as it
     structureCounts("<p>Done</p>"),
   );
 
-  // A table is counted in three places, because a round can keep the table and lose the rows.
-  const t = structureCounts("<table><tr><th>Q1</th><td>9%</td></tr><tr><td>flat</td></tr></table>");
-  assert.deepEqual([t.tables, t.rows, t.cells], [1, 2, 3]);
+  // A table is counted in five places, because a round can keep the table and lose the rows — and
+  // because a <th> demoted to a <td> is the loss that strips a screen-reader table of its header
+  // association, with no axe rule behind it to catch what a folded cell count would miss.
+  const t = structureCounts(
+    "<table><caption>Revenue</caption><tr><th>Q1</th><td>9%</td></tr><tr><td>flat</td></tr></table>",
+  );
+  assert.deepEqual([t.tables, t.captions, t.rows, t.header_cells, t.cells], [1, 1, 2, 1, 2]);
+  const demoted = structureCounts("<table><tr><td>Q1</td><td>9%</td></tr><tr><td>flat</td></tr></table>");
+  assert.equal(demoted.header_cells, 0, "the header cell is gone and the count says so");
+  assert.equal(demoted.rows, t.rows, "on a round that kept every row, which is why folding them hides it");
+
+  // An attribute value that contains something tag-shaped is not markup. Counted by scanning for
+  // `<` and a name, the alt text below holds a paragraph — and a round that rewrote only that alt
+  // would then report a paragraph LOST, a structure change invented by the reading.
+  assert.deepEqual(
+    structureCounts('<img src="f3.png" alt="Figure 3 <p> label">'),
+    structureCounts('<img src="f3.png" alt="Figure 3">'),
+  );
 
   // Wrappers are not structures. A <section>/<div> nest is what the second test above unwraps
   // legitimately, so it must not read as content arriving or leaving.

@@ -1635,8 +1635,8 @@ export async function runReview(
       // `structureCounts`): a length pair cannot tell a round that deleted a list from a round
       // that unwrapped one, and both pairs above answer in characters. Full counts rather than
       // only what changed, because a ratio needs its denominator — the question a threshold is
-      // chosen against is "how much of the structure is left", not "did any of it move", and
-      // `editor_markers_changed` below is the event for the other shape of that question.
+      // chosen against is "how much of the structure is left", not "did any of it move", and the
+      // second question is already answered by `changed` on this same line.
       structure_before: structureCounts(before),
       structure_after: structureCounts(body),
       ...(round.sections ? { sections: round.sections.of, corrected: round.sections.corrected } : {}),

@@ -87,7 +87,9 @@ export interface StructureCounts {
   terms: number;
   definitions: number;
   tables: number;
+  captions: number;
   rows: number;
+  header_cells: number;
   cells: number;
   images: number;
   links: number;
@@ -100,6 +102,15 @@ export interface StructureCounts {
 // count would report every one of those as two structures changed. What no rule in that file
 // asks for is a heading that stops existing, which is what this number sees.
 //
+// What makes that grouping defensible is that it has a second reader: a round that flattens every
+// heading to one level is caught by axe's `heading-order` in the re-lint the review loop runs after
+// each round. `<th>` has no such second reader — no axe rule fires on a header cell demoted to a
+// data cell, which is exactly the loss that strips a table's header association from a screen
+// reader — so header cells are counted APART from data cells rather than folded in with them, and
+// `<caption>` is counted too, since a dropped table name is otherwise invisible here as well. The
+// total is still available by addition; what is not recoverable from a total is which of the two a
+// round turned into the other.
+//
 // `<a>` is counted although `droppedHrefs` already watches URLs: that check answers "did this
 // href survive", and a round that turns three links into one keeping every URL in it is a
 // different fact. Same for `<img>`, whose alt text has its own signal in this module and whose
@@ -110,7 +121,7 @@ const STRUCTURE_GROUP: Record<string, keyof StructureCounts> = {
   ul: "lists", ol: "lists", dl: "lists",
   li: "items",
   dt: "terms", dd: "definitions",
-  table: "tables", tr: "rows", th: "cells", td: "cells",
+  table: "tables", caption: "captions", tr: "rows", th: "header_cells", td: "cells",
   img: "images", a: "links",
 };
 
@@ -119,13 +130,22 @@ const STRUCTURE_GROUP: Record<string, keyof StructureCounts> = {
 // numbers depend on how well-formed the reply happens to be, which is the artifact the scan
 // exists to avoid. Comments are stripped first, for the reason `attrText` gives: `<!-- the <ul>
 // continues overleaf -->` is prose about markup, not markup.
+//
+// Walked with `TAG`, which steps over whole quoted attribute values, rather than by scanning for
+// `<` and a name: `<img alt="Figure 3 <p> label">` holds a `<p>` inside an attribute, and a scan
+// that stopped at the angle bracket would count a paragraph there — then report one LOST when a
+// round rewrote that alt text, which is a structure change invented by the reading. `visibleText`
+// on the same `editor` line walks the same pattern for the same reason, and the two numbers have
+// to be able to disagree about a round without disagreeing about what a character is.
 export function structureCounts(html: string): StructureCounts {
   const out: StructureCounts = {
     headings: 0, paragraphs: 0, lists: 0, items: 0, terms: 0, definitions: 0,
-    tables: 0, rows: 0, cells: 0, images: 0, links: 0,
+    tables: 0, captions: 0, rows: 0, header_cells: 0, cells: 0, images: 0, links: 0,
   };
-  for (const m of html.replace(COMMENT, " ").matchAll(/<([a-z][a-z0-9]*)/gi)) {
-    const group = STRUCTURE_GROUP[m[1].toLowerCase()];
+  for (const tag of html.replace(COMMENT, " ").match(TAG) ?? []) {
+    const name = /^<([a-z][a-z0-9]*)/i.exec(tag);
+    if (!name) continue;
+    const group = STRUCTURE_GROUP[name[1].toLowerCase()];
     if (group) out[group]++;
   }
   return out;
