@@ -427,9 +427,55 @@ test("the verification tally counts what was checked, corrected and re-checked",
   });
   assert.deepEqual(d.verification.triggers, { verify: 2, links: 1, both: 0 });
   assert.deepEqual(d.verification.rechecks, {
-    sampled: 1, sampled_ok: 1, sampled_problems_before: 1, sampled_problems_after: 0,
-    binding: 0, binding_ok: 0,
+    sampled: 1, sampled_ok: 1, sampled_unjudged: 0,
+    sampled_problems_before: 1, sampled_problems_after: 0,
+    binding: 0, binding_ok: 0, binding_unjudged: 0,
   });
+  assert.equal(d.verification.pages_unjudged, 0, "every page here carried a real verdict");
+});
+
+test("a page nothing judged is counted apart from a page that passed", () => {
+  // Verification is non-blocking: with no Feedback Agent, nothing to verify, or a reply that
+  // will not parse, `verifyAgentOutput` answers ok=true and the page costs nothing — so "the
+  // verifier looked and was satisfied" and "nobody looked" both write `page_verify_ok`. A run
+  // that lost its Feedback Agent halfway through would read here as a run with an unusually
+  // good pass rate, and the rejection rate this tally exists to support would be computed over
+  // pages that were never judged (issue #211).
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_verify_ok", image: "page-001.png" },
+    { ts: T(2), type: "page_verify_ok", image: "page-002.png", unjudged: true },
+    { ts: T(3), type: "page_verify_ok", image: "page-003.png", unjudged: true },
+    { ts: T(4), type: "page_verify_failed", image: "page-004.png", problems: ["a table row is missing"] },
+    { ts: T(5), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(5))));
+  // A subset, not a deduction: `pages_verified` counts what it has always counted, because it
+  // is compared across runs and rounds and moving it silently would move every number already
+  // published against it. 1 of 2 is the rejection rate here, not 1 of 4.
+  assert.equal(d.verification.pages_verified, 4);
+  assert.equal(d.verification.pages_unjudged, 2);
+  assert.equal(d.verification.verify_failed, 1);
+
+  // An old log cannot say — before the flag existed, a run with no Feedback Agent wrote the
+  // same lines as a passing one — so silence is a judged page rather than a guess.
+  const old = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_verify_ok", image: "page-001.png" },
+    { ts: T(2), type: "run_complete" },
+  );
+  assert.equal(summarizeRun(old, done(Date.parse(T(2)))).verification.pages_unjudged, 0);
+
+  // And a flag that is not the boolean is not a flag. This reader trusts nothing on a log
+  // line: a page subtracted from the rejection rate on the strength of a string would be the
+  // same trap `result` and `kinds` are matched against closed lists for.
+  const sloppy = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_verify_ok", image: "page-001.png", unjudged: "true" },
+    { ts: T(2), type: "page_verify_ok", image: "page-002.png", unjudged: 1 },
+    { ts: T(3), type: "run_complete" },
+  );
+  assert.equal(summarizeRun(sloppy, done(Date.parse(T(3)))).verification.pages_unjudged, 0);
 });
 
 test("a correction that bought nothing is counted apart from one that was kept", () => {
@@ -481,8 +527,9 @@ test("a correction that bought nothing is counted apart from one that was kept",
   // counts stay out too — a binding verdict decides whether the rewrite ships rather than
   // measuring how far a kept one got, and its before-count is mostly missing links.
   assert.deepEqual(d.verification.rechecks, {
-    sampled: 0, sampled_ok: 0, sampled_problems_before: 0, sampled_problems_after: 0,
-    binding: 1, binding_ok: 0,
+    sampled: 0, sampled_ok: 0, sampled_unjudged: 0,
+    sampled_problems_before: 0, sampled_problems_after: 0,
+    binding: 1, binding_ok: 0, binding_unjudged: 0,
   });
 });
 
@@ -514,12 +561,14 @@ test("a log from before these events reports zeros, not absences", () => {
     alt_only: 0, text: 0, attrs: 0, structure: 0, text_grew: 0, text_shrank: 0,
   });
   assert.deepEqual(d.verification.rechecks, {
-    sampled: 0, sampled_ok: 0, sampled_problems_before: 0, sampled_problems_after: 0,
-    binding: 0, binding_ok: 0,
+    sampled: 0, sampled_ok: 0, sampled_unjudged: 0,
+    sampled_problems_before: 0, sampled_problems_after: 0,
+    binding: 0, binding_ok: 0, binding_unjudged: 0,
   });
   assert.deepEqual(summarizeRun("", done(Date.parse(T(0)))).verification.rechecks, {
-    sampled: 0, sampled_ok: 0, sampled_problems_before: 0, sampled_problems_after: 0,
-    binding: 0, binding_ok: 0,
+    sampled: 0, sampled_ok: 0, sampled_unjudged: 0,
+    sampled_problems_before: 0, sampled_problems_after: 0,
+    binding: 0, binding_ok: 0, binding_unjudged: 0,
   });
 });
 
@@ -547,7 +596,47 @@ test("a log from before the prose sizes and the problem counts leaves both sums 
   });
   // A sample was taken and it failed; how far it got is not in this log and is not invented.
   assert.deepEqual(d.verification.rechecks, {
-    sampled: 1, sampled_ok: 0, sampled_problems_before: 0, sampled_problems_after: 0,
-    binding: 0, binding_ok: 0,
+    sampled: 1, sampled_ok: 0, sampled_unjudged: 0,
+    sampled_problems_before: 0, sampled_problems_after: 0,
+    binding: 0, binding_ok: 0, binding_unjudged: 0,
   });
+});
+
+test("a recheck nothing judged is counted apart from a rewrite that was checked", () => {
+  // The same conflation one fold down, and the fold where it does the most damage: with no
+  // Feedback Agent every page passes its first check, so every corrected page is corrected for
+  // links and every recheck is the BINDING one — a whole run of "the rewrite was checked and
+  // stayed good" for pages nobody looked at (issue #211, note 3 on PR #212).
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_correction_recheck", image: "a.png", page: 1, ok: true,
+      problems: [], binding: true },
+    { ts: T(2), type: "page_correction_recheck", image: "b.png", page: 2, ok: true,
+      problems: [], binding: true, unjudged: true },
+    // A sampled recheck can go unjudged too — the first verdict was real and failed, the
+    // second reply would not parse — and its problem pair stays out of the convergence sums:
+    // `problems_after: 0` here is "nothing was named", and summed in it would report this
+    // page as a correction that fixed all two of the problems it was handed.
+    { ts: T(3), type: "page_correction_recheck", image: "c.png", page: 3, ok: true,
+      problems: [], problems_before: 2, problems_after: 0, binding: false, unjudged: true },
+    // Same trust as everywhere else here: a flag that is not the boolean is not a flag.
+    { ts: T(4), type: "page_correction_recheck", image: "d.png", page: 4, ok: true,
+      problems: [], binding: true, unjudged: "true" },
+    { ts: T(5), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(5))));
+  // Subsets, as above: 2 of the 3 binding rechecks were judged, and both of them passed —
+  // which is what makes the rate `(binding_ok - binding_unjudged) / (binding -
+  // binding_unjudged)` and not `binding_ok / (binding - binding_unjudged)`. An unjudged
+  // recheck logs `ok: true`, so it is inside `binding_ok` already and the second form reads
+  // 3 of 2. The problem pair is the exception: it counts judged samples only.
+  assert.deepEqual(d.verification.rechecks, {
+    sampled: 1, sampled_ok: 1, sampled_unjudged: 1,
+    sampled_problems_before: 0, sampled_problems_after: 0,
+    binding: 3, binding_ok: 3, binding_unjudged: 1,
+  });
+  assert.equal(
+    d.verification.rechecks.binding_ok - d.verification.rechecks.binding_unjudged, 2,
+    "two binding rechecks were judged and both passed",
+  );
 });

@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { changedAnything, correctionEffect, destroyedPage } from "../src/pipeline/correction.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
+import { summarizeRun } from "../src/diagnostics.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 import type { PdfLink } from "../src/util/pdf.ts";
@@ -254,6 +255,14 @@ interface Behaviour {
   recheck?: (order: number) => VerifyProblem[];
   // A provider error on the re-verification, the way ProviderRouter.complete raises one.
   recheckThrows?: boolean;
+  // The first verify answers prose with no JSON in it. `verifyAgentOutput` cannot read a
+  // verdict out of that and returns its non-blocking default, which is a page nothing
+  // judged rather than a page that passed.
+  verifyGarbles?: boolean;
+  // The same, on the RE-verification only: the first verdict is real and the second is prose.
+  // Separate from `verifyGarbles` because a garbled first verdict passes the page and so buys
+  // no correction and no recheck — the two flags cannot reach the same call.
+  recheckGarbles?: boolean;
   // A provider error on the CORRECTION call itself: the output ceiling, a stall, a throttle.
   // Not per page, unlike the rest of these — the correction prompt does not carry the page's
   // filename (it carries the page's own previous output), so `orderOf` cannot see which page
@@ -303,6 +312,8 @@ function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 2): Pipelin
           const n = (verifies.get(order) ?? 0) + 1;
           verifies.set(order, n);
           if (n > 1 && b.recheckThrows) throw new Error("ThrottlingException: Too many requests");
+          if (n === 1 && b.verifyGarbles) return { text: "I was unable to compare the HTML with the image." };
+          if (n > 1 && b.recheckGarbles) return { text: "I was unable to compare the HTML with the image." };
           const problems = n === 1 ? b.problems(order) : (b.recheck ?? (() => []))(order);
           return {
             text: JSON.stringify({
@@ -979,6 +990,90 @@ test("a correction that only re-typed a URL is delivered, not read as buying not
     // Nor is the link reported as still lost, which is the other half of the same bug: that
     // event lives behind the same gate, so a reverted fix would also have gone unmentioned.
     assert.equal(of(events, "page_links_unrecovered").length, 0);
+  });
+});
+
+test("a page nobody could judge says so on the line that says it passed", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // Verification is non-blocking, and that is not in question here: a verdict the model
+    // garbled must never cost a page, so the page ships and the event is still
+    // `page_verify_ok` — every reader of this log still counts it as one verified page.
+    //
+    // What the flag adds is that the two cases stop being the same line. "The verifier looked
+    // and was satisfied" and "nobody looked" were indistinguishable in the record, so a run
+    // that lost its Feedback Agent halfway through read as a run with an unusually good pass
+    // rate, and `verify_failed / pages_verified` was a rate over pages that were never judged
+    // (issue #211; the harness in #180 needed the same distinction from outside).
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<h2>Findings</h2><p>A page that rendered fine.</p>`,
+        problems: () => [],
+        corrected: () => "",
+        verifyGarbles: true,
+      }),
+    );
+    const ok = of(events, "page_verify_ok");
+    assert.equal(ok.length, 2, "both pages still pass — verification never breaks a run");
+    for (const e of ok) assert.equal(e.unjudged, true);
+    assert.equal(of(events, "page_verify_failed").length, 0);
+    assert.equal(of(events, "page_corrected").length, 0, "and nothing was corrected, so nothing was paid");
+    for (const f of result.fragments) assert.match(f.innerHtml, /A page that rendered fine/);
+
+    // The fold reads it back: two verified pages, neither of them judged. The other half of
+    // this is pinned in test/diagnostics.test.ts, over a hand-written log; this is the half
+    // that says the pipeline actually writes what that fold reads.
+    const d = summarizeRun(
+      events.map((e) => JSON.stringify({ ts: new Date(Date.UTC(2026, 0, 1)).toISOString(), ...e })).join("\n"),
+      { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.UTC(2026, 0, 1) },
+    );
+    assert.equal(d.verification.pages_verified, 2);
+    assert.equal(d.verification.pages_unjudged, 2);
+    assert.equal(d.verification.verify_failed, 0);
+  });
+});
+
+test("a rewrite nobody could judge says so on the line that keeps it", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const link = { text: "the full report", href: "https://example.org/report" };
+    // The dangerous half of the same conflation, and the one that is reachable with no
+    // Feedback Agent at all: a page that PASSED its check and lost a link is corrected on the
+    // links trigger, and that path's recheck is BINDING — it decides whether the rewrite
+    // ships. `ok` there is "the verifier named no problem", which is also what a reply nothing
+    // could be read out of returns, so a whole run of kept rewrites read as rewrites that had
+    // been checked and found good (issue #211).
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<p>Read the full report</p>`,
+        problems: () => [],
+        corrected: () => `<p>Read <a href="https://example.org/report">the full report</a></p>`,
+        recheckGarbles: true,
+        links: [link],
+      }),
+    );
+    const rechecks = of(events, "page_correction_recheck");
+    assert.equal(rechecks.length, 2, "both pages lost the link, so both rewrites were rechecked");
+    for (const r of rechecks) {
+      assert.equal(r.binding, true);
+      // Non-blocking, exactly as before the flag: an unreadable verdict must not discard a
+      // rewrite that recovered a link, so `ok` stays true and the page keeps the correction.
+      assert.equal(r.ok, true);
+      assert.equal(r.unjudged, true);
+    }
+    assert.equal(of(events, "page_links_correction_rejected").length, 0);
+    for (const f of result.fragments) assert.match(f.innerHtml, /href="https:\/\/example\.org\/report"/);
+
+    // And the fold reads it back: two binding rechecks, both nominally ok, neither judged —
+    // so the judged pass rate is 0 of 0 rather than 2 of 2.
+    const d = summarizeRun(
+      events.map((e) => JSON.stringify({ ts: new Date(Date.UTC(2026, 0, 1)).toISOString(), ...e })).join("\n"),
+      { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.UTC(2026, 0, 1) },
+    );
+    assert.equal(d.verification.rechecks.binding, 2);
+    assert.equal(d.verification.rechecks.binding_ok, 2);
+    assert.equal(d.verification.rechecks.binding_unjudged, 2);
+    assert.equal(d.verification.rechecks.sampled, 0);
   });
 });
 

@@ -106,7 +106,8 @@ export interface Diagnostics {
   // visible here: the log recorded the verdicts and said nothing about the corrections,
   // so the loop's cost was inferable from arithmetic and its value not at all.
   //
-  // The counts, not the rates: `verify_failed / pages_verified` is the rejection rate and
+  // The counts, not the rates: `verify_failed / (pages_verified - pages_unjudged)` is the
+  // rejection rate — over the pages a verdict was actually read from, see below — and
   // `results.identical + results.empty + results.failed` is what was paid for and bought
   // nothing — bought, not discarded: an `identical` fragment is still what ships, since what
   // the page call failed to buy is a change and not a page. `rejected` is the one that was
@@ -118,6 +119,23 @@ export interface Diagnostics {
   // feedback round verifies pages again, and both times count.
   verification: {
     pages_verified: number;
+    // Of those, the pages nothing actually judged: no Feedback Agent loaded, nothing to
+    // verify, a reply that would not parse. `verifyAgentOutput` answers ok=true in all three
+    // so that verification can never break a run (pipeline/feedback.ts), which means "the
+    // verifier looked and was satisfied" and "nobody looked" arrive at this fold as the same
+    // event — and a run that lost its Feedback Agent halfway through reads as a run with an
+    // unusually good pass rate.
+    //
+    // A SUBSET of `pages_verified` rather than a deduction from it, deliberately: that field
+    // is compared across runs and benchmark rounds, and quietly changing what it counts
+    // would move every published number without saying so. `verify_failed / (pages_verified
+    // - pages_unjudged)` is the rejection rate over the pages that were actually judged.
+    //
+    // Zero on every log written before the flag existed, which is the one thing it cannot
+    // distinguish: an old run with no Feedback Agent reported the same `page_verify_ok`
+    // lines as a passing one, and nothing recoverable from the file says which (issue #211,
+    // and #180 for the measurement that needed it).
+    pages_unjudged: number;
     verify_failed: number;
     // `verify_failed` split by what the verifier said was WRONG, counted in pages
     // (pipeline/feedback.ts `VERIFY_KINDS`). Two bench rounds rejected 74 of 94 and 76 of
@@ -261,7 +279,9 @@ export interface Diagnostics {
     // `page_corrected`'s `problems` is the whole bill.
     //
     // Sums over pages, so a single page with many problems moves them more than several with
-    // one each — read them as a ratio and not as a per-page average, and against `sampled`.
+    // one each — read them as a ratio and not as a per-page average, and against the samples
+    // they were summed over, which is `sampled` less the unjudged ones and less any line too
+    // old to carry both counts (see the field below).
     // And `sampled_problems_after: 0` does not mean the sample passed: the verdict's `ok` is
     // its `faithful`/`accessible` flags (pipeline/feedback.ts), which an agent can set false
     // while naming nothing, so `sampled_ok` remains the answer to whether it passed.
@@ -269,13 +289,38 @@ export interface Diagnostics {
     // The binding population has no such pair, for the reason it is counted apart: those pages
     // had PASSED their check, so their `problems_before` is 0 by construction and the question
     // their verdict answers is whether the rewrite lost something, not how far it got.
+    //
+    // `*_unjudged` is `pages_unjudged`'s argument one fold down, and the binding one is where
+    // it bites: a recheck's `ok` is also what an unavailable Feedback Agent looks like, and
+    // with none loaded every page passes its first check, so every corrected page's recheck is
+    // the BINDING one and every one of them is a "the rewrite was checked and stayed good"
+    // line for a page nobody looked at. Subsets of the counts above rather than deductions
+    // from them, so those totals keep counting what they always counted. Zero on every log
+    // written before the flag.
+    //
+    // The judged-only rate is `(binding_ok - binding_unjudged) / (binding - binding_unjudged)`,
+    // and the same shape for sampled — BOTH sides, which is where this differs from the fold
+    // two levels up. There, subtracting from the denominator alone is exact, because
+    // `verify_failed` can only come from `page_verify_failed` and an unjudged verdict cannot
+    // produce one, so the numerator and `pages_unjudged` are disjoint. Here the numerator is a
+    // PASS count and an unjudged recheck is a pass by construction — every one of them is
+    // inside `binding_ok` — so denominator-only subtraction reports a rate above 100%.
     rechecks: {
       sampled: number;
       sampled_ok: number;
+      sampled_unjudged: number;
+      // Summed over the JUDGED samples only — an unjudged recheck contributes neither, even
+      // though its line carries a real `problems_before`. Its `problems_after` is 0 because
+      // nothing was named, not because nothing was left, and pairing a true before-count with
+      // a non-verdict after-count would report that page as a correction that fixed
+      // everything it was given. Unlike `*_ok` there is no field to back that out of, and no
+      // published number moves by leaving it out: only a log carrying the flag can be
+      // affected, and the flag is newer than every round measured so far.
       sampled_problems_before: number;
       sampled_problems_after: number;
       binding: number;
       binding_ok: number;
+      binding_unjudged: number;
     };
   };
   // Source pages whose own extraction threw, so the delivered document carries a
@@ -622,6 +667,7 @@ export function summarizeRun(
   // silently attributing it to one.
   const verification: Diagnostics["verification"] = {
     pages_verified: 0,
+    pages_unjudged: 0,
     verify_failed: 0,
     verify_kinds: {
       content_missing: 0,
@@ -639,15 +685,22 @@ export function summarizeRun(
     rechecks: {
       sampled: 0,
       sampled_ok: 0,
+      sampled_unjudged: 0,
       sampled_problems_before: 0,
       sampled_problems_after: 0,
       binding: 0,
       binding_ok: 0,
+      binding_unjudged: 0,
     },
   };
   for (const e of events) {
     if (e.type === "page_verify_ok") {
       verification.pages_verified += 1;
+      // Strictly `true`, not truthy: this reader trusts nothing on a log line, and a page
+      // whose flag arrived as a string would otherwise be subtracted from the rejection rate
+      // on the strength of a typo. A line without the field is a judged page, which is what
+      // every log written before it says (issue #211).
+      if (e.unjudged === true) verification.pages_unjudged += 1;
     } else if (e.type === "page_verify_failed") {
       verification.pages_verified += 1;
       verification.verify_failed += 1;
@@ -719,17 +772,29 @@ export function summarizeRun(
       // boolean lands in neither bucket, for the same reason an unknown `result` does:
       // guessing which population a verdict belongs to is worse than a total that is
       // visibly short of the lines in the log.
+      // Strictly `true`, as on `page_verify_ok`: a recheck subtracted from the pass rate on
+      // the strength of a string would be the trap the closed lists here exist for.
+      const unjudged = e.unjudged === true;
       if (e.binding === true) {
         verification.rechecks.binding += 1;
         if (e.ok === true) verification.rechecks.binding_ok += 1;
+        if (unjudged) verification.rechecks.binding_unjudged += 1;
       } else if (e.binding === false) {
         verification.rechecks.sampled += 1;
         if (e.ok === true) verification.rechecks.sampled_ok += 1;
+        if (unjudged) verification.rechecks.sampled_unjudged += 1;
         // Only when the line carries both, so a log from before these existed leaves the two
         // sums alone rather than adding a zero to each. A missing `problems_before` counted as
         // 0 would read as a page corrected for no reason, which is the opposite of what
         // happened, and it would make the pair say the corrections had nothing to fix.
+        //
+        // And only when something judged it, for the mirror-image reason: an unjudged sample
+        // (the first verdict was real and failed, the second reply would not parse) carries a
+        // true before-count and an `problems_after` of 0 that means "nothing was named", not
+        // "nothing was left" — a page nobody looked at, summed in as a correction that fixed
+        // everything it was handed.
         if (
+          !unjudged &&
           typeof e.problems_before === "number" &&
           typeof e.problems_after === "number"
         ) {
