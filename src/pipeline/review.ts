@@ -1025,6 +1025,10 @@ async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue
     // (a stall, a stream error, a bad key) is not made better by asking again, and
     // retrying it would double the cost of every real failure.
     if (!selected.length || !isRequestTooLargeError(e)) throw e;
+    // `error` is on the event because "refused" is not always literally true: one case
+    // this predicate matches is a Converse stop reason that arrives after a full, billed
+    // generation (see isRequestTooLargeError), so the message is what distinguishes a
+    // request that cost nothing from one that cost a round of output.
     ctx.log.event("editor_images_refused", {
       attached: selected.length,
       of: ctx.images.length,

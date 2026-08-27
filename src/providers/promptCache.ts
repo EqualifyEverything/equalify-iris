@@ -109,6 +109,20 @@ export function cachedTextBlock(
   };
 }
 
+// The same breakpoint in Bedrock's own vocabulary, for the `ConverseStream` path (#178).
+//
+// Here the breakpoint is its own content block placed AFTER the text it applies to, rather
+// than a property of that text block — so the two spellings look nothing alike while
+// marking the same boundary. Kept beside `cachedTextBlock` for the reason that function
+// gives: two ways of asking for the same cache is how the paths drift.
+//
+// `ttl` is omitted at five minutes for the same reason as there, and the enum this
+// borrows from confirms the field is real on Converse (`CacheTTL`: "5m" | "1h"), so the
+// extended TTL an operator asks for is not silently downgraded on this path.
+export function cachePointBlock(ttl: CacheTtl = "5m"): { type: "default"; ttl?: "1h" } {
+  return ttl === "1h" ? { type: "default", ttl: "1h" } : { type: "default" };
+}
+
 // Whether this provider block permits explicit caching at all. On by default; an
 // operator sets `prompt_cache: false` to turn it off.
 //

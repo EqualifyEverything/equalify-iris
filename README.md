@@ -137,6 +137,48 @@ from the environment at startup; changes require a restart.
   successful result — the same failure the truncation guard exists to prevent, arriving by a
   different road. Conversely the terminal event ends the read then and there, so a connection
   held open after the message is finished cannot let the silence clock discard a whole document.
+  *Which* event is terminal is a property of the wire format rather than of the word "stop": on
+  Bedrock's Converse stream the `metadata` event carrying every token count arrives **after**
+  `messageStop`, so the read ends at `metadata` there — breaking at the stop event, the literal
+  translation of the Anthropic path, would report every Converse call as free. That tail gets a
+  single short window of its own (**10s** from the stop event, not per frame) rather than the idle
+  clock, and once the message has stopped **no tail failure fails the call**: running out of the
+  window, a stream error, a throttling exception, even the 15-minute backstop all end the read and
+  return the document. There is nothing left to protect at that point but a number, and spending a
+  minute waiting for it and then discarding a finished document would be the worse trade. The
+  price is that a Converse stream error arriving after the message is absorbed silently; what a
+  reader sees of it is a call reporting no usage, which diagnostics already counts
+  (`tokens.calls_reported`). The same failure one event *earlier* still fails the call, which is
+  the line that makes absorbing it safe: before the stop event the document is not whole.
+  Finally, **stopping is not the same as finishing**, and which stop reasons mean "the answer is
+  whole" is a shorter list than which exist. The Anthropic body stops only for `end_turn`,
+  `max_tokens`, `stop_sequence`, `tool_use` or `refusal`, so one truncation check covered every
+  incomplete case; Bedrock's own `StopReason` adds `model_context_window_exceeded`,
+  `malformed_model_output`, `malformed_tool_use`, `content_filtered` and `guardrail_intervened` —
+  each of which arrives on a well-formed stream and would otherwise pass every check above and
+  deliver partial HTML as a success. The adapter therefore allowlists the reasons that mean whole
+  and fails on the rest, so a reason a future model invents is refused rather than trusted. The
+  allowlist governs **both** dialects: nothing an Anthropic body can send today falls outside it
+  (Iris configures no server tools, guardrails or context management), so the live path does not
+  move — what changes is the direction it fails in when that stops being true. The ceiling keeps
+  its own error (it is the one with a knob to name); running out of context window is reported as
+  a size problem, which routes it to the same retry-without-images path Iris already uses when a
+  request is refused for size up front — one place where that path names a call that was billed
+  in full rather than refused before it ran.
+  The Bedrock adapter speaks **two dialects**, chosen by `providers.bedrock.api`. `invoke` (the
+  default) is `InvokeModelWithResponseStream` carrying an Anthropic-native body, and it is what
+  every published number in this repo was measured through. `converse` is `ConverseStream`, whose
+  request and response shapes belong to Bedrock rather than to a model vendor — and it is the only
+  one of the two that can reach a non-Anthropic model, which `providers.bedrock.default_model` has
+  always looked like it could (#178). It is off by default because parity between them is an
+  empirical question about a live endpoint: the request bodies differ in every field, and no test
+  here talks to AWS. So the key is there to be measured with, not to be assumed — a one-page probe
+  and one bench round on `converse` are what would move the default. An unrecognized value falls
+  back to `invoke` and says so at boot, because both dialects just return text: without the
+  warning, a deployment that meant to be trying Converse would be measuring the path it already
+  had. Every `model_call` line carries the dialect it went out on (`api`), since the point of the
+  switch is comparing the two and a comparison whose run log does not say which side produced a
+  number is not one.
 - **Concurrency** (§9.4): two independent knobs under `defaults`.
   `extraction_concurrency` is *within* a run — pages in parallel during extraction, and during
   review both the Reader's chunk reads and the section calls a too-long correction round is

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   applyTrustProxy,
+  bedrockApiWarning,
   bundledAppWarning,
   clientIdWarning,
   loadConfig,
@@ -36,6 +37,11 @@ if (appWarning) console.warn(`WARNING: ${appWarning}`);
 // is observable at all — the two TTLs differ in price, not in reported tokens.
 const ttlWarning = promptCacheTtlWarning(cfg.providers);
 if (ttlWarning) console.warn(`WARNING: ${ttlWarning}`);
+
+// And a Bedrock `api` nobody can spell, for the same reason: the fallback works, so the
+// only symptom is that the deployment is on the path it was trying to leave.
+const apiWarning = bedrockApiWarning(cfg.providers);
+if (apiWarning) console.warn(`WARNING: ${apiWarning}`);
 
 // Ensure the on-disk layout exists (PRD §8.1).
 mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
