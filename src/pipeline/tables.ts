@@ -70,6 +70,15 @@ export interface TablePiece {
   caption: string;
   rows: number;
   cols: number;
+  // The header block: the rows that describe the columns rather than carrying data, and the `<th>`
+  // cells in them. Both are read on each half so the join can be held to them — the header block is
+  // the one thing a merge is allowed to remove a COPY of, so the row floor has to know how big it is,
+  // and its cells being `<th>` is what makes the result a table with headers at all (`verifyJoin`).
+  // The count is the block's cells and not every `<th>` in the table, so that it says one thing: a
+  // table with a `<th scope="row">` per data row would otherwise scale this with its row count and
+  // report a lost ROW as a lost header.
+  headerRows: number;
+  headerCells: number;
   // The first cell of every DATA row, normalized and non-empty: on these tables that is the row's
   // label — the state, the tax, the year — which is what a reader loses when a join drops rows,
   // and what `verifyJoin` requires to survive. Not the numbers: a label is a string worth looking
@@ -153,6 +162,10 @@ function read(table: Element, span?: { start: number; end: number }, html = ""):
       (widest, r) => Math.max(widest, [...r.children].reduce((n, c) => n + (Number(c.getAttribute("colspan")) || 1), 0)),
       0,
     ),
+    headerRows: rows.filter(isHeaderRow).length,
+    headerCells: rows
+      .filter(isHeaderRow)
+      .reduce((n, r) => n + [...r.children].filter((c) => c.tagName === "TH").length, 0),
     labels: rows
       .filter((r) => !isHeaderRow(r))
       .map((r) => normalizeCell(r.children[0]?.textContent ?? ""))
@@ -181,8 +194,25 @@ export function continuationPairs(body: string): {
     const t = parse(body.slice(span.start, span.end)).querySelector("table");
     return t ? read(t, span, body) : null;
   });
-  const match = (piece: TablePiece): number =>
-    spanPieces.findIndex((p) => p !== null && p.caption === piece.caption && p.rows === piece.rows);
+  // A balanced body's Nth top-level span IS its Nth table, so the mapping is the identity and the
+  // content comparison becomes a self-check on that claim rather than a search. It is done this way
+  // round because a search cannot tell twins apart: on a body carrying two tables with the same
+  // caption and the same row count — a form printed twice, a table and its own summary — a search
+  // resolves the second to the FIRST one's span, and a real pair after it then reads as
+  // `not_adjacent`, which says something untrue about bytes that are in fact adjacent.
+  //
+  // The counts disagree exactly where position cannot be trusted: unbalanced markup (#240's
+  // unclosed `<table>`, 8 spans against 16 tables) and a table nested inside another (part of its
+  // parent's span, its own DOM node). There the search is the best available, ambiguity and all,
+  // and a wrong resolution still cannot splice — it fails the content check or the adjacency one.
+  const aligned = spanPieces.length === tables.length;
+  const match = (piece: TablePiece, i: number): number => {
+    if (aligned) {
+      const p = spanPieces[i];
+      return p !== null && p.caption === piece.caption && p.rows === piece.rows ? i : -1;
+    }
+    return spanPieces.findIndex((p) => p !== null && p.caption === piece.caption && p.rows === piece.rows);
+  };
 
   const pairs: ContinuationPair[] = [];
   const declined: { caption: string; reason: string }[] = [];
@@ -190,8 +220,8 @@ export function continuationPairs(body: string): {
     const second = read(tables[i]);
     if (!CONTINUED_CAPTION.test(second.caption)) continue;
     const first = read(tables[i - 1]);
-    const a = match(first);
-    const b = match(second);
+    const a = match(first, i - 1);
+    const b = match(second, i);
     if (a === -1 || b === -1) {
       declined.push({ caption: second.caption, reason: "unmatched_source" });
       continue;
@@ -252,10 +282,32 @@ To decline: { "html": null, "log": "why", "declined": true }`;
 // 25-page document, so it needs its own check, and the check it needs is about rows rather than
 // about size.
 //
-// The row check is on the LABELS and by set rather than by count. By set, because a legitimate join
-// drops rows on purpose — the repeated header, the repeated unit note — and every label those rows
-// carry still exists in the table once. As labels, because the alternative is a row count, and a
-// row count cannot tell a dropped repeat from a dropped state.
+// The row check is in two parts, because neither half of it sees what the other does. The LABELS are
+// checked as a set: a legitimate join drops rows on purpose — the repeated header, the repeated unit
+// note — and every label those rows carry still exists in the table once, so a set is what survives
+// a sound merge, and a label is a string worth looking for where a row count is not. And the COUNT
+// is checked against the sum of both halves, because the label set is blind to a row that has no
+// label: a printed statistical table gives its multi-line row labels a first line and then
+// continuation lines whose first cell is EMPTY (`<tr><td></td><td>4.1</td>…`), and those rows are
+// invisible to a check made of labels. Floored on the sum and not on the larger half, which is the
+// mistake this replaced: with a 21-row half and a 39-row half, a floor of 39 permits losing the
+// whole smaller one.
+//
+// The rows a sound join may drop, beyond one half's header block: rule 6's repeated bracketed unit
+// note (`[In millions of dollars]` as a full-width row, reprinted at the top of the continued page).
+// One, because rule 1 forbids every other kind of drop — "do not drop a row because it looks like a
+// repeat: two rows may legitimately carry the same label" — so anything past this is a merge losing
+// content. A document that legitimately repeats more than one such row is refused and ships split,
+// with `rows_lost` in the log saying so, which is the direction this stage errs in everywhere else.
+const JOIN_DROPPABLE_ROWS = 1;
+// Which half's header block goes is the editor's call (rule 3 asks for the structure that describes
+// the rows, and that is sometimes the second half's), so the floor allows the LARGER of the two to
+// be the one dropped.
+function rowFloor(pair: ContinuationPair): number {
+  const header = Math.max(pair.first.headerRows, pair.second.headerRows);
+  return Math.max(0, pair.first.rows + pair.second.rows - header - JOIN_DROPPABLE_ROWS);
+}
+
 export function verifyJoin(pair: ContinuationPair, merged: string): string | null {
   const trimmed = merged.trim();
   const doc = parse(trimmed);
@@ -273,7 +325,17 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   if (CONTINUED_CAPTION.test(joined.caption)) return "still_continued";
   const cols = Math.max(pair.first.cols, pair.second.cols);
   if (joined.cols < cols) return "columns_lost";
-  if (joined.rows < Math.max(pair.first.rows, pair.second.rows)) return "rows_lost";
+  // A table whose header cells all came back as `<td>` is a data table with no headers, which is the
+  // 1.3.1 failure this whole stage exists to reduce — and it would otherwise pass every check here:
+  // the labels are all present (they are matched over `th,td` together), the columns are unchanged,
+  // and the row count is unchanged. axe reports nothing on it either, so it would ship. Floored on
+  // the SMALLER half's count rather than the larger, because collapsing two header blocks into one
+  // legitimately loses header cells and the two halves may describe their columns at different
+  // depths — a two-row spanned header merged down to the other half's single row is rule 3 being
+  // followed. Zero on either side leaves this inert, which is the right answer for a half that had
+  // no header cells to keep.
+  if (joined.headerCells < Math.min(pair.first.headerCells, pair.second.headerCells)) return "header_cells_lost";
+  if (joined.rows < rowFloor(pair)) return "rows_lost";
   // Every label from either half, somewhere in the joined table's cells — not necessarily as a
   // first cell, because a join that adds a column legitimately moves the label along one, and a
   // guard that refuses that would refuse the repair it exists to protect.
@@ -334,6 +396,34 @@ async function joinCall(
   };
 }
 
+// A pair, identified by what it IS rather than by where it is or what it is called. Two things rule
+// out the easier keys. A caption is not unique: the three-piece chain below has a middle piece and a
+// third piece that both caption as "…—Continued", so keying on the caption makes a refusal of the
+// first pair silently refuse the second — a joinable pair abandoned with nothing in the log, since
+// `pending` counts by the same key and would read 0. And an offset is not stable: a splice earlier in
+// the body moves every span after it, so a refused pair would be asked again on the next pass. The
+// bytes of both halves are both unique and stable, and two pairs whose bytes are identical would get
+// identical answers, so sharing one refusal between them is correct rather than merely tolerable.
+const pairKey = (p: ContinuationPair) => `${p.first.html} ${p.second.html}`;
+
+// A parse, which is the one thing in this stage that can throw, and the reason "never throws" below
+// needs enforcing rather than asserting. jsdom builds the tree by recursion, so a body nested a few
+// hundred thousand levels deep — measured: 200,000 `<div>`s, or the same nesting inside a table cell
+// — raises `RangeError: Maximum call stack size exceeded` out of the parser itself. That shape is not
+// hypothetical here: `anchors.ts` refuses to rewrite a page past 500 levels and delivers it as
+// written, so a document reaching this stage can carry arbitrary nesting, and `assembly.ts` already
+// names it as the reachable case for the LINT overflowing. The lint's throw is caught and delivered
+// as `@lint-unavailable` (#164); an uncaught one here would fail the session instead, on a document
+// that shipped before this stage existed. Returns null so the caller can decline the pair — or the
+// whole document — the way it declines everything else.
+function attempt<T>(read: () => T): T | null {
+  try {
+    return read();
+  } catch {
+    return null;
+  }
+}
+
 // Join the halves of every table this body split across a page break, and return the body that
 // results. Never throws: a document that cannot be joined is the document this stage was added to,
 // so every failure here leaves the body exactly as it arrived.
@@ -358,12 +448,20 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
   let pending = 0;
   const refused = new Set<string>();
   for (let pass = 0; pass <= MAX_TABLE_JOINS; pass++) {
-    const found = continuationPairs(current);
+    const found = attempt(() => continuationPairs(current));
+    // The body could not be read at all, so there is nothing to join and nothing to say about what
+    // it holds. It ships as it arrived — which is the same body every other failure here ships —
+    // and the line says which failure it was, because a document with continuation markers in it
+    // and no `table_continuations` line would otherwise look like a document with none.
+    if (found === null) {
+      ctx.log.event("table_join_failed", { reason: "read_failed", stage: "body" });
+      return current;
+    }
     // What is left when the cap is what stopped this, rather than the document running out of
     // pairs. Read on the pass AFTER the last join, which is why the loop is allowed one more turn
     // than it may join: a "capped" line has to mean pairs remain, or it reads as a bound being hit
     // on a document that was in fact finished.
-    pending = found.pairs.filter((p) => !refused.has(p.second.caption)).length;
+    pending = found.pairs.filter((p) => !refused.has(pairKey(p))).length;
     if (pass === MAX_TABLE_JOINS) break;
     if (pass === 0) {
       if (found.pairs.length === 0 && found.declined.length === 0) return current;
@@ -382,7 +480,7 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
     // A pair the editor already refused, or answered badly, is not asked again: the next pass would
     // send the same two tables to the same prompt. Without this the loop spends MAX_TABLE_JOINS
     // requests on one unjoinable pair and never reaches the joinable one after it.
-    const pair = found.pairs.find((p) => !refused.has(p.second.caption));
+    const pair = found.pairs.find((p) => !refused.has(pairKey(p)));
     if (!pair) break;
 
     let answer: Awaited<ReturnType<typeof joinCall>>;
@@ -399,15 +497,20 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
         caption: pair.second.caption.slice(0, 200),
         error: (e as Error).message.slice(0, 300),
       });
-      refused.add(pair.second.caption);
+      refused.add(pairKey(pair));
       continue;
     }
-    const reason = answer.declined
-      ? "declined"
-      : answer.html === null
-        ? "no_output"
-        : verifyJoin(pair, answer.html);
-    if (reason !== null) {
+    // The verdict and the joined table's own figures together, because both of them parse the reply
+    // and a parse can throw (see `attempt`). A reply this stage cannot read is a reply it cannot
+    // check, which is `read_failed` for this pair and not for the document: the rest of it is still
+    // joinable and the pass after this one goes on to the next pair.
+    const checked = attempt(() => {
+      const reason = answer.declined ? "declined" : answer.html === null ? "no_output" : verifyJoin(pair, answer.html);
+      const merged = answer.html?.trim() ?? "";
+      return { reason, merged, result: reason === null ? read(parse(merged).querySelector("table")!) : null };
+    });
+    const reason = checked === null ? "read_failed" : checked.reason;
+    if (checked === null || checked.reason !== null) {
       ctx.log.event("table_join_failed", {
         reason,
         caption: pair.second.caption.slice(0, 200),
@@ -415,11 +518,10 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
         rows_second: pair.second.rows,
         ...(answer.log ? { editor_log: answer.log } : {}),
       });
-      refused.add(pair.second.caption);
+      refused.add(pairKey(pair));
       continue;
     }
-    const merged = answer.html!.trim();
-    const result = read(parse(merged).querySelector("table")!);
+    const { merged, result } = checked as { merged: string; result: TablePiece };
     // The splice: the first half's span becomes the joined table and the second half's span goes.
     // Whatever sat BETWEEN them — a page-break `<hr>`, a `<p>` carrying the printed page's running
     // head — is left exactly where it is, which is now after the joined table. Moving it there is

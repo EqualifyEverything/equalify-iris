@@ -677,17 +677,28 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   as a string, for the same reason `anchors.ts` refuses a whole-body round trip. A pair whose bytes
   the source does not delimit is left alone (`table_join_failed`, `unmatched_source`); that is what
   an unclosed `<table>` on a page does, since an unclosed opener swallows the table after it.
-  The answer is then verified: one table, a caption without the marker, no column or row lost
-  against the larger half, and every distinct row label from either half still present as a cell.
-  Labels by **set** rather than a row count, because the duplicated header block legitimately goes
-  and a legitimately dropped duplicate row must not read as loss — and over all cells, not first
-  cells, so a label the merge moved along a column still counts. Any failure keeps **both halves
-  byte for byte**, which is what makes this safe to ask a model for: unlike a correction round,
-  which adopts a whole new body, a refusal here costs one table's structure and not the document.
-  A failed pair is not asked twice, so one unjoinable pair does not starve the next. It runs where
-  the pages are joined, before the shell and before the lint, so the document the gate cleared and
-  the document the Reader reads are the document that ships. Logged as `table_continuations`,
-  `table_joined`, `table_join_failed` and `table_joins_capped`.
+  The answer is then verified: one table, a caption without the marker, no column lost, a header
+  block still made of `<th>` cells, and the rows accounted for two ways. Labels as a **set**, because
+  the duplicated header block legitimately goes and a legitimately dropped duplicate row must not
+  read as loss — and over all cells, not first cells, so a label the merge moved along a column still
+  counts. And a **count** floored on the sum of both halves, less one header block and the one
+  bracketed unit note a continued page reprints, because the label set is blind to a row that has no
+  label: a printed statistical table gives a multi-line row label continuation lines whose first cell
+  is empty, and neither a label set nor a floor at the larger half can see those disappear. Header
+  cells are checked because nothing else would: a merged header block returned as `<td>` keeps every
+  label, every column and every row, and axe reports nothing on a data table with no headers, so it
+  would ship having removed the header association from the tables this stage exists to improve.
+  Any failure keeps **both halves byte for byte**, which is what makes this safe to ask a model for:
+  unlike a correction round, which adopts a whole new body, a refusal here costs one table's
+  structure and not the document. That includes markup no parser can read — jsdom parses by
+  recursion and a body nested a few hundred thousand levels deep overflows it, which is reachable
+  because `anchors.ts` delivers a page past 500 levels as written, so the failure is caught and the
+  document ships as it arrived rather than the phase failing. A failed pair is not asked twice, and
+  it is remembered by its two halves' bytes rather than by its caption, since two pairs in one chain
+  share a caption and one refusal must not silently cover both. It runs where the pages are joined,
+  before the shell and before the lint, so the document the gate cleared and the document the Reader
+  reads are the document that ships. Logged as `table_continuations`, `table_joined`,
+  `table_join_failed` and `table_joins_capped`.
 - **A page the document has no content for is reported once, not once per chunk.** Two kinds of
   source page contribute nothing: one extraction *lost* (`pages_failed`, and a `@page-failed`
   comment where the content would have been) and one that is *blank in the source*, delivered as an

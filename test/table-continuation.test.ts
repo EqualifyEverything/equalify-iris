@@ -168,8 +168,48 @@ test("a join that came back short of rows is refused", () => {
   const [pair] = continuationPairs(body).pairs;
 
   assert.equal(verifyJoin(pair, goodJoin("Table 1.—Income", STATES, REST)), null);
-  assert.equal(verifyJoin(pair, piece("Table 1.—Income", STATES)), "labels_lost:3");
+  // The count is floored on the SUM of the two halves, less one header block and one droppable row,
+  // so a reply that returned only the half it was fondest of is caught by the count before the
+  // labels are even looked at. Floored on the larger half instead — which is what this was — the
+  // 5-row reply below passed the count and was caught only because its rows happened to carry
+  // labels: the check that sees a dropped row with no label at all is this one.
+  assert.equal(verifyJoin(pair, piece("Table 1.—Income", STATES)), "rows_lost");
   assert.equal(verifyJoin(pair, piece("Table 1.—Income", ["Alabama"])), "rows_lost");
+  // One row dropped, and it is one of the unlabelled continuation lines a printed table gives a
+  // multi-line row label — invisible to the label set by construction, since it has no label.
+  const withBlanks = (labels: string[]) =>
+    labels.map((l) => `<tr><th scope="row">${l}</th><td>1.0</td><td>2.0</td></tr><tr><td></td><td>4.1</td><td>4.2</td></tr>`).join("");
+  const cap = `<table><caption>Table 1.—Income</caption><thead><tr><th>A</th><th>B</th><th>C</th></tr></thead><tbody>`;
+  const withBlanksPair = continuationPairs(
+    `${cap}${withBlanks(STATES)}</tbody></table>${cap.replace("Income</caption>", "Income—Continued</caption>")}${withBlanks(REST)}</tbody></table>`,
+  ).pairs[0];
+  const BLANK = `<tr><td></td><td>4.1</td><td>4.2</td></tr>`;
+  const joinedWithBlanks = withBlanks([...STATES, ...REST]);
+  assert.equal(verifyJoin(withBlanksPair, `${cap}${joinedWithBlanks}</tbody></table>`), null);
+  // ONE dropped row is inside the floor's slack, and deliberately: rule 6 lets the join drop the
+  // bracketed unit note a continued page reprints, and that row is not distinguishable from this one
+  // by counting. Two is not, and every one of these rows is invisible to the label check.
+  assert.equal(verifyJoin(withBlanksPair, `${cap}${joinedWithBlanks.replace(BLANK, "")}</tbody></table>`), null);
+  assert.equal(
+    verifyJoin(withBlanksPair, `${cap}${joinedWithBlanks.replaceAll(BLANK, "")}</tbody></table>`),
+    "rows_lost",
+  );
+});
+
+test("a join that turned the header cells into data cells is refused", () => {
+  // The one property a data table cannot lose here and still be the fix: its header cells. A reply
+  // that emitted the merged header block as `<td>` keeps every label (the label set is matched over
+  // `th,td` together), every column and every row, and axe reports nothing on a data table with no
+  // header cells — so without this check it would ship, having removed the header association from
+  // exactly the tables this stage exists to improve.
+  const body = piece("Table 1.—Income", STATES) + piece("Table 1.—Income—Continued", REST);
+  const [pair] = continuationPairs(body).pairs;
+  const flattened = goodJoin("Table 1.—Income", STATES, REST).replace(/<th([^>]*)>/g, "<td>").replace(/<\/th>/g, "</td>");
+
+  assert.equal(verifyJoin(pair, flattened), "header_cells_lost");
+  // And the join that legitimately collapses two header blocks into one is not refused by it: the
+  // floor is the smaller half's count, so merging a two-row header down to one row is allowed.
+  assert.equal(verifyJoin(pair, goodJoin("Table 1.—Income", STATES, REST)), null);
 });
 
 test("a row the join dropped is caught by its label even when the count is right", () => {
@@ -275,6 +315,84 @@ test("a table in three pieces closes by joining twice", async () => {
   assert.equal(continuationPairs(out).pairs.length, 0);
 });
 
+test("two pairs in one chain that share a caption are two pairs", async () => {
+  // A refusal is remembered per PAIR, and the identity is the halves' bytes rather than the second
+  // half's caption, because captions collide: in a three-piece chain the second and third pieces
+  // both caption as "…—Continued". Keyed on the caption, the first pair being declined marked the
+  // second pair refused too — a joinable pair abandoned with nothing in the log to say so, since
+  // `pending` counted by the same key and read 0.
+  const a = piece("Table 15.—Yield", ["Alabama", "Alaska"]);
+  const b = piece("Table 15.—Yield—Continued", ["Arizona"]);
+  const c = piece("Table 15.—Yield—Continued", ["Arkansas", "California"]);
+  const merged = goodJoin("Table 15.—Yield (rest)", ["Arizona"], ["Arkansas", "California"]);
+  const { ctx, rec } = ctxWith((user) =>
+    // The first pair (A + B) is declined; the second (B + C) is not, and has to be asked.
+    user.includes("Alabama") ? envelope(null, { declined: true, log: "not one table" }) : envelope(merged),
+  );
+
+  const out = await joinContinuedTables(ctx, a + b + c);
+
+  assert.equal(rec.calls.length, 2, "the second pair was never asked");
+  assert.equal(events(rec, "table_joined").length, 1);
+  assert.equal(out, a + merged, "B and C were not joined, or A did not survive the splice");
+});
+
+test("a body the parser cannot read ships as it arrived rather than failing the phase", async () => {
+  // jsdom builds the tree by recursion, so this body raises `RangeError: Maximum call stack size
+  // exceeded` inside the parse — and a page nested this deeply reaches assembly delivered as
+  // written, because `anchors.ts` refuses to rewrite past 500 levels. Before this was guarded the
+  // throw failed the assembly phase and the session, on a document that shipped fine without this
+  // stage. The lint one line later treats its own overflow the same way (`@lint-unavailable`, #164).
+  const deep = "<div>".repeat(200_000);
+  const body = deep + piece("Table 1.—Income", STATES) + piece("Table 1.—Income—Continued", REST);
+  const { ctx, rec } = ctxWith(() => {
+    throw new Error("a document that could not be read was put to the editor");
+  });
+
+  assert.equal(await joinContinuedTables(ctx, body), body);
+  assert.equal(rec.calls.length, 0);
+  const [failed] = events(rec, "table_join_failed");
+  assert.deepEqual(failed.data, { reason: "read_failed", stage: "body" });
+  assert.equal(events(rec, "table_continuations").length, 0);
+});
+
+test("a reply the parser cannot read costs that pair and not the document", async () => {
+  const bad = piece("Table 1.—Income", STATES) + piece("Table 1.—Income—Continued", REST);
+  const good = piece("Table 2.—Costs", ["Steel", "Coal"]) + piece("Table 2.—Costs—Continued", ["Timber"]);
+  const { ctx, rec } = ctxWith((user) =>
+    user.includes("Steel")
+      ? envelope(goodJoin("Table 2.—Costs", ["Steel", "Coal"], ["Timber"]))
+      : envelope(`<table>${"<div>".repeat(200_000)}</table>`),
+  );
+
+  const out = await joinContinuedTables(ctx, bad + good);
+
+  assert.equal(events(rec, "table_join_failed")[0].data.reason, "read_failed");
+  assert.equal(events(rec, "table_joined").length, 1, "the second pair was refused with the first");
+  assert.ok(out.startsWith(bad), "an unreadable reply was spliced in");
+});
+
+test("an earlier twin of the first half does not steal its span", async () => {
+  // The span a table is spliced at is resolved by position on a body whose tables and spans agree in
+  // number, and only searched for by content when they do not. Searching first is what this replaced,
+  // and on this body — a table printed twice, then a continuation of the second copy — the search
+  // resolved the first half to the EARLIER twin's span, leaving the real pair one table apart and
+  // logged `not_adjacent`: a reason that says the bytes could not delimit the pair, about bytes that
+  // are adjacent.
+  const twin = piece("Table 4.—Rates", ["Alabama", "Alaska"]);
+  const body = twin + twin + piece("Table 4.—Rates—Continued", ["Arizona"]);
+  const merged = goodJoin("Table 4.—Rates", ["Alabama", "Alaska"], ["Arizona"]);
+  const { ctx, rec } = ctxWith(() => envelope(merged));
+
+  const found = continuationPairs(body);
+  assert.deepEqual(found.declined, []);
+  assert.equal(found.pairs.length, 1);
+
+  const out = await joinContinuedTables(ctx, body);
+  assert.equal(out, twin + merged, "the join landed on the wrong copy");
+  assert.equal(events(rec, "table_joined").length, 1);
+});
+
 test("a pair the editor declined is left exactly as it arrived, and not asked again", async () => {
   // Declining is an answer. Two halves whose columns no single header block describes are better
   // shipped as they are — the corpus has four such pairs, two of them with different column counts
@@ -298,7 +416,7 @@ test("a lossy answer costs one request and the document keeps both halves", asyn
   assert.equal(await joinContinuedTables(ctx, first + second), first + second);
   assert.equal(rec.calls.length, 1);
   const [failed] = events(rec, "table_join_failed");
-  assert.equal(failed.data.reason, "labels_lost:3");
+  assert.equal(failed.data.reason, "rows_lost");
   assert.equal(failed.data.rows_first, STATES.length + 1);
   assert.equal(failed.data.rows_second, REST.length + 1);
 });
