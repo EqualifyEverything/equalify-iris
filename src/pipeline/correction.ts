@@ -81,6 +81,126 @@ export function visibleText(html: string): string {
 const CONTENT_WITHOUT_TEXT =
   /<(?:img|svg|math|video|audio|object|embed|iframe|canvas|input|select|textarea|button|table)\b/i;
 
+// The same content when an ATTRIBUTE is what says so and the element name says nothing (issue #224,
+// raised by the review of #221). The list above tests the name only, so `<div role="img"
+// aria-label="A photo of the mayor"></div>` — a picture, announced as one, with a description a reader
+// hears — read as an empty wrapper and carried nothing.
+//
+// Each role here says the element IS one of the things above, written on a name that says nothing:
+// `img` and `graphics-*` are the picture when it is not an `<img>` or an `<svg>`, `math` is the
+// equation, and `table`, `grid` and `treegrid` are the grid whose cells the list above already allows
+// to be empty. The control roles are `<input>`, `<select>` and `<button>` the same way, plus the
+// members of a composite widget — an `option`, a `tab`, a `menuitem` — which HTML has no entry in that
+// list for and which are as much a thing to operate as the widget around them.
+//
+// This set is NOT a mirror of the element list, and two absences are where it would read as one.
+// `figure` is out because `<figure>` is out: both are a wrapper, and an empty one hands a reader
+// nothing — a role cannot make a box that holds nothing into a picture. `meter` and `progressbar` are
+// out because `<meter>` and `<progress>` are, and a gauge with no value on it is the same empty box.
+// `link` is out of this set for a different reason and handled below, because a link is content when a
+// reader can hear what it is and not before, however it is spelled. Roles that say the element is not
+// content are absent for the reason a page-break `<hr>` is: `presentation`, `none` and `separator`
+// describe where something sat rather than what was on it, and `doc-pagebreak` is the one this prompt
+// actually asks for — 18 of the corpus's 33 markup-spelled blanks are a bare page-break marker, so it
+// being absent from here is what keeps every one of them a blank page rather than a reported failure.
+//
+// A whole token list is read rather than the first token, though ARIA takes the first valid one, for
+// the reason the rest of this predicate leans that way: reading `img presentation` as a picture costs a
+// glance at a page that was fine, and reading it as nothing drops a page with a picture on it.
+const CONTENT_ROLE = new Set(
+  (
+    "img math table grid treegrid graphics-document graphics-symbol graphics-object " +
+    "button checkbox radio switch slider spinbutton textbox combobox listbox option " +
+    "menuitem menuitemcheckbox menuitemradio tab"
+  ).split(" "),
+);
+
+// What an accessible name can be made of and still be no name, read AFTER `tagAttrs` has decoded the
+// value. Three shapes, and each is here for its own reason (#229's review corrected the account this
+// comment gave of the third):
+//
+//   - A character `trim` cannot see. `\s` covers a decoded space and a non-breaking one, so what is left
+//     is the zero-width family — `&#x200B;` decodes to U+200B and survives `trim` as a name.
+//   - A named reference `decodeEntities` leaves written: it names the five XML entities and nothing else
+//     on purpose (src/util/html.ts), so `&nbsp;` arrives as six literal characters where `&#160;` arrives
+//     as the space it means. One non-breaking space, two spellings, and without this they answered
+//     opposite ways.
+//   - The numeric spellings, which `decodeEntities` DOES resolve — so they reach this pattern only when
+//     the value was encoded twice (`&amp;#160;` decodes to `&#160;`). Kept for that, not for the plain
+//     form the bullet above covers.
+const NAMELESS =
+  /&(?:nbsp|ensp|emsp|thinsp|zwnj|zwj|#0*(?:32|160|8194|8195|8201|8203)|#x0*(?:20|a0|2002|2003|2009|200b));|[\u200b-\u200d\ufeff]/gi;
+
+// One start tag's attributes, first value winning as a parser resolves a repeated one. The pair scan is
+// `attrText`'s, and reusing it is what keeps `role` out of another attribute's VALUE: the pattern
+// consumes a quoted value whole, so `<span title="see role=button">` yields one `title` and no role,
+// where a search for `role=` across the whole tag found the prose inside the quotes — the same
+// prose-about-markup hole `visibleText` and `attrText` close by reading comments and quotes rather than
+// characters. The tag name is stripped first so `<a>` does not read as an attribute.
+function tagAttrs(tag: string): Map<string, string> {
+  const inner = tag.replace(/^<[a-z][a-z0-9]*/i, "").replace(/\/?>?$/, "");
+  const attrs = new Map<string, string>();
+  for (const m of inner.matchAll(/([a-z_:][\w:.-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/gi)) {
+    const name = m[1].toLowerCase();
+    if (!attrs.has(name)) attrs.set(name, decodeEntities(m[2] ?? m[3] ?? m[4] ?? ""));
+  }
+  return attrs;
+}
+
+// Tag by tag, on the same scan `attrText` uses, because a role and a name on ONE element is the claim —
+// a `role="img"` on a wrapper and an `aria-label` three tags later are two separate ones.
+//
+// The named link is the second shape, and the only one that needs a name to count: a link is the one
+// interactive thing whose element name is not in `CONTENT_WITHOUT_TEXT` — an `<a>` is a wrapper as
+// often as it is a control — so `<a href="#x" aria-label="Next"></a>` is something a reader can follow
+// and hear named, and a bare `<a href="#x"></a>` is an empty box. `<area href>` is read as one too, the
+// other interactive element the list above does not name. `role="link"` is read the same way rather than
+// as one of the roles above, and it counts on ITS OWN — an `href` is what makes an `<a>` a link, and a
+// role saying so is the author making the same claim without one, so `<a role="link" aria-label="Next">`
+// and `<span role="link" aria-label="Next">` agree (#229's review found the first of those reading as
+// nothing, which is the arm that loses a page). An accessible name anywhere else is not content:
+// `<div aria-label="Main content">` labels a wrapper that holds nothing, and `<p aria-label="Blank
+// page"></p>` is one of the corpus's own 33 blanks.
+//
+// EITHER attribute having a value is the whole test, rather than one falling back to the other: an
+// `aria-labelledby` outranks an `aria-label` in the accessible-name computation, and reaching for the
+// label first meant `<a href="#x" aria-label="" aria-labelledby="lbl">` — whose computed name is
+// whatever `lbl` holds — read as nameless (#229's review). Asking whether either is non-empty makes the
+// precedence moot, which is all a question about whether there is a name at all can honestly claim.
+//
+// An `aria-labelledby` pointing at an id the fragment does not contain is counted, though its
+// accessible name computes to nothing. Deliberate, and priced by where this predicate is read: both
+// callers (extraction.ts `blankDeclaration` and `renderPage`) use it to decide whether a reply's
+// markup is a blank page or a REPORTED one, and neither delivers the fragment either way. So a
+// dangling reference costs the same glance the rest of this leans toward, and refusing it would drop a
+// link the model meant to put on the page. A name that is only whitespace is refused, because that is
+// the author writing no name rather than pointing at one that has gone missing — and a space written as
+// an ENTITY is the same no-name however it was spelled, which `trim` alone could not tell: `&#160;`
+// decodes to a non-breaking space and vanishes, while `&nbsp;` survives `decodeEntities` as six literal
+// characters and read as a name (#229's review). The five XML entities are all that function decodes on
+// purpose, so the space spellings are undone here, where the question is what a reader would hear.
+//
+// Unreachable on today's prompts: `agents/page.md` asks for `<img>` and `<figure>` for a picture and
+// never a `role="img"` wrapper, and the only role it mandates is the `doc-pagebreak` on the page-break
+// marker, which is absent from the set above. It is here because the day a prompt allows one of these
+// shapes is not a day anyone will be thinking about this file, and what it costs then is a page with a
+// picture on it delivered empty, reported blank, with nothing in `pages_failed` to look for.
+function attributeCarriesContent(markup: string): boolean {
+  for (const tag of markup.match(TAG) ?? []) {
+    if (tag.startsWith("</")) continue;
+    const attrs = tagAttrs(tag);
+    const roles = (attrs.get("role") ?? "").split(/\s+/).map((token) => token.toLowerCase());
+    if (roles.some((role) => CONTENT_ROLE.has(role))) return true;
+    if (roles.includes("link") || (/^<(?:a|area)\b/i.test(tag) && attrs.has("href"))) {
+      const named = ["aria-labelledby", "aria-label"].some(
+        (attr) => (attrs.get(attr) ?? "").replace(NAMELESS, " ").trim() !== "",
+      );
+      if (named) return true;
+    }
+  }
+  return false;
+}
+
 // Does this fragment give a reader anything at all?
 //
 // Beside `visibleText` because it is the same reading of the same characters, which is what makes it
@@ -95,7 +215,8 @@ const CONTENT_WITHOUT_TEXT =
 // for (issue #219).
 export function carriesContent(html: string): boolean {
   if (visibleText(html).trim() !== "") return true;
-  return CONTENT_WITHOUT_TEXT.test(html.replace(COMMENT, " "));
+  const markup = html.replace(COMMENT, " ");
+  return CONTENT_WITHOUT_TEXT.test(markup) || attributeCarriesContent(markup);
 }
 
 // How many of each kind of structure a fragment holds. Exported for the review loop, on the

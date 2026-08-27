@@ -304,6 +304,115 @@ test("the declaration is read off what a reader receives, not off how long the f
   assert.equal(declaredBlank({ html: '<img src="p4.png" alt="">', log: "The page is blank." }), false);
   assert.equal(declaredBlank({ html: "<table><tr><td></td></tr></table>", log: "The page is blank." }), false);
   assert.equal(declaredBlank({ html: '<input type="checkbox">', log: "The page is blank." }), false);
+  // And the same three when an ATTRIBUTE is what says so (issue #224, raised by the review of #221).
+  // A picture written on a `<div>` is a picture, announced as one and described to a reader, and the
+  // element-name list read it as an empty wrapper: a page with a photograph on it, answered with a
+  // blank-ish log, dropped in silence. Unreachable while `agents/page.md` asks for `<img>` and
+  // `<figure>` and nothing else, which is exactly why it is pinned — the prompt change that makes it
+  // reachable will not be made by anyone thinking about this file.
+  assert.equal(
+    declaredBlank({ html: '<div role="img" aria-label="A photo of the mayor"></div>', log: "The page is blank." }),
+    false,
+  );
+  assert.equal(declaredBlank({ html: '<span role="math"></span>', log: "The page is blank." }), false);
+  assert.equal(declaredBlank({ html: '<span role="button" tabindex="0"></span>', log: "The page is blank." }), false);
+  // The role set is not a mirror of the element list, and these are where it would read as one (#229's
+  // review). `figure`, `meter` and `progressbar` are absent because `<figure>`, `<meter>` and
+  // `<progress>` are: a wrapper and a gauge with nothing in them hand a reader nothing, and a role
+  // cannot make an empty box into a picture. Pinned in pairs so the two lists are read together.
+  assert.equal(declaredBlank({ html: "<figure></figure>", log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<div role="figure"></div>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: "<meter></meter>", log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<div role="meter"></div>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<div role="progressbar"></div>', log: "The page is blank." }), true);
+  // A `role` inside another attribute's VALUE is prose about markup, the same as one inside a comment:
+  // the attribute scan consumes a quoted value whole rather than searching the tag for `role=`.
+  assert.equal(declaredBlank({ html: '<span title="see role=button"></span>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<div role="img" title="role=none"></div>', log: "The page is blank." }), false);
+  // A role list is read through rather than at its first token: ARIA takes the first valid one, and
+  // being generous here costs a glance where being exact costs the page.
+  assert.equal(declaredBlank({ html: '<div role="img presentation"></div>', log: "The page is blank." }), false);
+  // A link is the one interactive thing whose element name is not in that list, so its accessible name
+  // is what makes it something a reader receives — and the name has to be on the link.
+  assert.equal(declaredBlank({ html: '<a href="#x" aria-label="Next"></a>', log: "The page is blank." }), false);
+  assert.equal(declaredBlank({ html: "<a href='/p/2' aria-labelledby='lbl'></a>", log: "The page is blank." }), false);
+  assert.equal(declaredBlank({ html: '<a href="#x" aria-label=" "></a>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<a href="#x"></a>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<a aria-label="Next"></a>', log: "The page is blank." }), true);
+  // ...and `role="link"` is read as a link rather than as one of the roles above, so the two spellings
+  // of the same control agree: named is content, bare is an empty box. `<a role="link" aria-label>` with
+  // no `href` is the third spelling and read as the same claim — #229's review found it reading as
+  // nothing because the element name decided which rule applied, and that is the arm that loses a page.
+  // `<area href>` is here for the other half of the same gap: it is the one interactive element besides
+  // `<a>` that `CONTENT_WITHOUT_TEXT` does not name.
+  assert.equal(declaredBlank({ html: '<span role="link" aria-label="Next"></span>', log: "The page is blank." }), false);
+  assert.equal(declaredBlank({ html: '<a role="link" aria-label="Next"></a>', log: "The page is blank." }), false);
+  assert.equal(declaredBlank({ html: '<area href="#x" aria-label="Next">', log: "The page is blank." }), false);
+  assert.equal(declaredBlank({ html: '<div role="link"></div>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<a role="link"></a>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<area href="#x">', log: "The page is blank." }), true);
+  // A space is no name however it was spelled. `decodeEntities` names the five XML entities and nothing
+  // else on purpose, so `&#160;` decoded to a non-breaking space and vanished under `trim` while
+  // `&nbsp;` survived as six literal characters and read as a name (#229's review) — one non-breaking
+  // space, two spellings, and the decoded arm was the page-dropping one. Undone where the question is
+  // what a reader would hear, not in the decoder.
+  assert.equal(declaredBlank({ html: '<a href="#x" aria-label="&#160;"></a>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<a href="#x" aria-label="&nbsp;"></a>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<a href="#x" aria-label="&#x200B;"></a>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<a href="#x" aria-label="&nbsp;Next"></a>', log: "The page is blank." }), false);
+  // Double-encoded, which is the only spelling the numeric branches of that pattern can see: `&#160;`
+  // is decoded before they run, and `&amp;#160;` decodes to it.
+  assert.equal(declaredBlank({ html: '<a href="#x" aria-label="&amp;#160;"></a>', log: "The page is blank." }), true);
+  // Either attribute having a value is the test, rather than one falling back to the other:
+  // `aria-labelledby` outranks `aria-label` in the accessible-name computation, so reaching for the
+  // label first read a link whose name comes from the reference as nameless (#229's review). Asking
+  // whether either is non-empty makes the precedence moot, which is all this question can claim.
+  assert.equal(
+    declaredBlank({ html: '<a href="#x" aria-label="" aria-labelledby="lbl"></a>', log: "The page is blank." }),
+    false,
+  );
+  assert.equal(
+    declaredBlank({ html: '<a href="#x" aria-labelledby="" aria-label="Next"></a>', log: "The page is blank." }),
+    false,
+  );
+  assert.equal(
+    declaredBlank({ html: '<a href="#x" aria-label="" aria-labelledby=""></a>', log: "The page is blank." }),
+    true,
+  );
+  // An `aria-labelledby` whose target is not in the fragment computes to no accessible name and counts
+  // anyway (#229's review). Deliberate: both callers use this to decide blank-versus-REPORTED and
+  // neither delivers the fragment, so a dangling reference costs a glance where refusing it would drop
+  // a link the model meant to put on the page. Whitespace is still no name — that is an author writing
+  // none rather than pointing at one that has gone missing.
+  assert.equal(declaredBlank({ html: '<a href="#x" aria-labelledby="nope"></a>', log: "The page is blank." }), false);
+  // A name on anything else labels a wrapper that holds nothing, which is the `<p aria-label="Blank
+  // page">` above — one of the corpus's own 33 — and reading it as content would deliver every one of
+  // them as a failed page. The roles that say the element is not content are out for the same reason a
+  // page-break `<hr>` is, and `data-role` is not a role.
+  assert.equal(declaredBlank({ html: '<div aria-label="Main content"></div>', log: "The page is blank." }), true);
+  // The role the prompt actually mandates, and the assertion with something to lose (#229's review):
+  // `agents/page.md` requires `<hr role="doc-pagebreak" aria-label="Page 5" id="page-5">`, and a bare
+  // page-break marker is 18 of the corpus's 33 markup-spelled blanks — the largest bucket #219 counted.
+  // It reads as nothing because `doc-pagebreak` is not a content role and a marker's `aria-label` is
+  // not a link's, not because a blank-page fragment carries no `role`. Both are pinned, since the one
+  // above is the shape the reader receives and this is the one the prompt writes.
+  assert.equal(
+    declaredBlank({
+      html: '<hr role="doc-pagebreak" aria-label="Page 5" id="page-5">',
+      log: "Page 5 appears to be blank. No text, images, or other content is visible.",
+    }),
+    true,
+  );
+  assert.equal(declaredBlank({ html: '<hr role="doc-pagebreak">', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<hr role="separator">', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<div role="presentation"></div>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<div role="none"></div>', log: "The page is blank." }), true);
+  assert.equal(declaredBlank({ html: '<div data-role="img"></div>', log: "The page is blank." }), true);
+  // A comment that talks about a role is prose about markup, on the same reading as the `<img>` above.
+  assert.equal(
+    declaredBlank({ html: '<!-- the <div role="img"> is overleaf -->', log: "The page is blank." }),
+    true,
+  );
 
   // The veto still has the last word, whichever way the fragment was written: how the model spelled
   // its empty page does not decide the routing (#220 is the wordings that refuse a real blank page).
