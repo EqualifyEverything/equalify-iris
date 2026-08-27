@@ -38,12 +38,14 @@
 // candidate" would deliver the version the model had just rejected, so size cannot be the
 // discriminator either.
 //
-// One path has a floor under this judgement and the others do not, which is worth stating
-// precisely: a self-CORRECTION that comes back a fraction of the size of the page it was given
-// is refused outright (`destroyedPage` in pipeline/correction.ts). The initial page render and
-// the Copy Editor's whole-body replacement adopt `html` as it comes, so on those two a decoy
-// placed after the answer would ship — the editor's at document scale. Nothing in the corpus
-// does it, and a comparable floor there needs its own calibration rather than this one's.
+// Two of the three paths have a floor under this judgement and one does not, which is worth
+// stating precisely. A self-CORRECTION that comes back a fraction of the size of the page it was
+// given is refused outright (`destroyedPage` in pipeline/correction.ts), and so is a review round
+// that comes back with under half the prose of the document it was given — its own number, its own
+// reading, read off its own rounds (`destroyedBody`, #174). What remains unguarded is the initial
+// page render, which adopts `html` as it comes: there is no before-page to compare it against, so a
+// floor there has to be an absolute plausibility check on what a page image that carried text may
+// produce, which is #116's territory rather than this one's.
 export function extractJson<T = unknown>(text: string): T | null {
   // A reply that is nothing but its JSON: much the commonest case, and no scan can improve
   // on it. Note this is the whole text and not a fenced block's content — the fenced case is

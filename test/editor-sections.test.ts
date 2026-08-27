@@ -377,6 +377,44 @@ test("a section that cannot be returned either costs that section and nothing el
   });
 });
 
+test("a section that came back as a sentence about itself keeps the text it went in with", async () => {
+  await withTemp(async (dir) => {
+    // #174's floor at this unit. The section prompt asks for one section and nothing compares the
+    // reply against it, so a model that answers with a summary of the section, or with its first
+    // paragraph, returns markup that parses — and until now that would have replaced the section.
+    // The containment it needs already existed for the truncated and the unusable reply, so this
+    // is the same outcome reached from a third reason: the section keeps its own text, the rest of
+    // the document keeps its corrections, and the round is a round that did not come back whole.
+    //
+    // The sectioned rounds are part of what places the number: 13 section calls across three bench
+    // rounds, every one answered, and the joined bodies land at 0.998–1.006 of their input. A
+    // section that had returned under half its own prose would have moved a five-section join by
+    // about a tenth, and none of them moved by more than 0.6%.
+    const { ctx, rec } = ctxWith(dir, {
+      sectionAnswer: (s) =>
+        s.index === 2 ? `<p>This section has been reviewed and reads correctly.</p>` : `${s.html}\n<p class="fix">fixed ${s.index}</p>`,
+    });
+    const result = await review(ctx);
+
+    const failed = rec.events.find((e) => e.type === "editor_section_failed");
+    assert.equal(failed?.data.section, 2);
+    assert.equal(failed?.data.reason, "shrank");
+    assert.equal(failed?.data.floor, 2);
+    assert.ok(
+      (failed?.data.text_chars_after as number) * 2 < (failed?.data.text_chars_before as number),
+      "the two numbers on the line have to be the ones that tripped it",
+    );
+    assert.match(result.body, /fixed 1/);
+    assert.doesNotMatch(result.body, /fixed 3.*reviewed and reads correctly/s);
+    assert.doesNotMatch(result.body, /reviewed and reads correctly/);
+    for (const p of PARAS) assert.ok(result.body.includes(p), `${p.slice(0, 14)} is missing from the document`);
+    // Reported as a round that did not come back whole, because that is what it is: section 2's
+    // issues had no editor pass and no later round looks for them (#159).
+    assert.equal(result.editorTruncatedLost, true);
+    assert.equal(rec.events.find((e) => e.type === "editor")?.data.corrected, 2);
+  });
+});
+
 test("a round where no section came back is exactly the round that used to be discarded", async () => {
   await withTemp(async (dir) => {
     const { ctx, rec } = ctxWith(dir, { sectionAnswer: () => truncated(9_000) });

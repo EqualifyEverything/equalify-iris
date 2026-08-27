@@ -688,6 +688,33 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   editor-rewritten body looks like once it no longer matches the source excerpts — so narrowing
   wrongly can leave a real issue unfixed at the iteration cap, while broadening wrongly costs no
   more than the behavior this optimization replaced.
+- **A correction round may not replace the document with a fraction of it, and the floor reads
+  prose.** The Copy Editor is asked for the whole corrected body and its `html` is adopted for the
+  body verbatim, so a reply that answered about one section, or summarised, or quoted the contract
+  back after answering arrives shaped like a corrected document — and the blast radius is the
+  deliverable rather than one page (issue #174). A round that comes back with under half the prose
+  of the body it was given is now refused, the body that entered is kept, and the loop is free to
+  spend another round asking again (`editor_shrank`; the same floor per section, as
+  `editor_section_failed` `reason: "shrank"`). Which of the three readings on the `editor` line
+  carries the floor was the open question, and the measurement answered it: across the four
+  legitimate rounds that record all three, the prose sizes land at 0.997–1.006 of the input while
+  the other two move hard on rounds that were working. Unwrapping a mis-structured document keeps
+  every word and loses half the *bytes*, which is one of the corrections this loop exists for; and
+  one of those rounds rewrote a 55-item `<dl>` into list items — `terms` 55 → 3, a ratio of 0.055 —
+  while its prose moved 0.3%, so no threshold on a *structure* count both permits that and refuses a
+  reply carrying a fifth of the document. A half rather than the page path's quarter, because the
+  populations are further apart here (one section of these bodies is 0.016–0.379 of it) and the
+  costs are asymmetric: refusing a good round costs that round's corrections and says so in
+  `@unresolved`, while accepting a fragment costs the document. The one legitimate round that can
+  approach a half is the deletion the editor's own prompt sanctions — the same content rendered as
+  both a form and a table, where dropping the table drops the copy carrying more prose — and on a
+  body that is mostly such a pair the round is refused and its other fixes go with it; that cost is
+  taken knowingly and is on the log with both sizes. Bodies with under 1,000 characters
+  of prose are not judged at all — the legitimate deletions are otherwise fixed-size, so on a short
+  body a single resolved `[page not fully transcribed]` marker is half the prose. The initial page render
+  is the third path that adopts `html` wholesale and is deliberately still unguarded: it has no
+  before-page to compare against, so a floor there is an absolute plausibility check on what a page
+  image that carried text may produce, which is #116's question and not this one's.
 - **The flattened screen-reader view must never lose text (§7.8).** `flatten.ts` has two
   consumers, and both fail *silently* when text goes missing: the Reader reviews this view
   instead of the source images, so anything absent from it cannot be reported as an issue; and
