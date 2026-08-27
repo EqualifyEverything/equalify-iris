@@ -11,8 +11,9 @@
 // This is a measurement tool, not part of a run. Nothing in `src/pipeline` imports it and
 // no endpoint reaches it; it exists so that the number in #180 can be produced again after
 // `agents/feedback.md` changes.
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { basename, join, sep } from "node:path";
 import { loadConfig } from "../config.ts";
 import { Paths } from "../store/paths.ts";
@@ -164,7 +165,7 @@ function fail(message: string): never {
 // the same reason as the unjudged ones: this corpus is the pages the verifier had nothing to
 // say about. Only a log from this version on carries the line, so an older log's such pages
 // stay in, exactly as they did when the measurement was first published.
-function passedImages(logPath: string): Set<string> {
+export function passedImages(logPath: string): Set<string> {
   const passed = new Set<string>();
   const described = new Set<string>();
   if (!existsSync(logPath)) return passed;
@@ -449,4 +450,17 @@ async function main(): Promise<void> {
   if (args.json) writeFileSync(args.json, `${JSON.stringify(report, null, 2)}\n`);
 }
 
-await main();
+// Only when this file IS the command, so the selection above can be imported and tested. It
+// decides which pages a published false-positive rate is measured over — two conditions now,
+// both of them subtractions — and until this guard the only way to reach it was to run the tool.
+// `realpathSync` on both sides because a worktree reaches this file through a symlinked path.
+const invokedDirectly = (() => {
+  const argv = process.argv[1];
+  if (!argv) return false;
+  try {
+    return realpathSync(argv) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+if (invokedDirectly) await main();
