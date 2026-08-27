@@ -35,6 +35,7 @@ function fakeStore(): { store: Store; state: { calls: number; days: number[] } }
         mean_rounds: 1.5,
         unresolved_rate: 0.1,
         links_dropped_rate: 0,
+        links_unresolved_rate: 0,
         lint_error_rate: 0,
         documents_linted: 10,
         editor_truncated_rate: 0,

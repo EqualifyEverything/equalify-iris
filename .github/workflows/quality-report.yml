@@ -208,6 +208,17 @@ jobs:
             # catches up with main. `editor_truncated_rate` is demanded even though nothing is
             # thresholded against it, because the lost-rate issue body quotes it: the two
             # numbers are only meaningful beside each other.
+            #
+            # `links_unresolved_rate` (#234) is deliberately NOT demanded, which is the rule
+            # working rather than an omission: it is thresholded nowhere and quoted in no issue
+            # body, so demanding it would stop the whole run against a deployment behind main
+            # over a number no step here reads. It still reaches a person every week — the
+            # summary below prints the entire payload — and the day something is thresholded
+            # against it, it belongs on this line in that commit. It carries no threshold yet
+            # because the first bench round to measure it found half the documents affected: a
+            # threshold today would file the same issue every week about a defect already
+            # tracked in #234, and the two MAX_ISSUES_PER_RUN slots would go to it instead of
+            # to whatever changed that week.
             echo "should_run=false" >> "$GITHUB_OUTPUT"
             echo "::error::$BASE/v1/quality returned 200 but not a quality tally. Nothing was measured this week."
             exit 1

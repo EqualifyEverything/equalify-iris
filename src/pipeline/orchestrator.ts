@@ -4,6 +4,7 @@ import type { IrisConfig } from "../config.ts";
 import { ProviderRouter } from "../providers/index.ts";
 import {
   SIGNAL_LINKS_DROPPED,
+  SIGNAL_LINKS_UNRESOLVED,
   SIGNAL_LINT_ERROR,
   SIGNAL_EDITOR_TRUNCATED,
   SIGNAL_EDITOR_TRUNCATED_LOST,
@@ -22,6 +23,7 @@ import { runReview, type ReviewResult } from "./review.ts";
 import { runAxe, lintErrorFields } from "./lint.ts";
 import { learnFromFeedback, proposeAgentUpdatesFromFeedback, scopeFeedback } from "./feedback.ts";
 import { runContribution } from "./contribute.ts";
+import { unresolvedRefs } from "./links.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PdfLink } from "../util/pdf.ts";
 
@@ -253,6 +255,26 @@ export async function runPipeline(args: {
     }
 
     writeFileSync(paths.sessionOutput(sessionId), review.html);
+    // Whether this document's own navigation works (#234), measured on the bytes just
+    // written rather than on `review.body` — every rename, every correction round and the
+    // wrapper's markers are finished here, and this is the file the caller receives.
+    //
+    // Logged whenever anything does not land, and not otherwise: a document whose
+    // references all resolve is the ordinary case and needs no line. `dangling` names the
+    // ids, bounded, because the remedy depends on WHICH — `#page-53` in a 25-page chunk is
+    // a reference to a part of the document this run never had, `#fn-3b` is a target no
+    // page ever wrote. Ids are structural rather than content, and this log stays on the
+    // deployment; the tally below gets counts only, because that one reaches a public
+    // issue (see QualityStats).
+    const internalLinks = unresolvedRefs(review.html);
+    if (internalLinks.empty || internalLinks.dangling.length) {
+      log.event("internal_links", {
+        refs: internalLinks.refs,
+        empty: internalLinks.empty,
+        dangling: internalLinks.dangling.length,
+        ids: internalLinks.dangling.slice(0, 20),
+      });
+    }
     // Final accessibility lint result, summarized into the PR description on close (§7.13).
     writeFileSync(paths.sessionLint(sessionId), JSON.stringify(review.lint, null, 2));
     if (review.unresolved.length) {
@@ -298,6 +320,14 @@ export async function runPipeline(args: {
         { code: SIGNAL_ROUNDS, count: review.iterationsCompleted },
         ...(review.unresolved.length ? [{ code: SIGNAL_UNRESOLVED, count: review.unresolved.length }] : []),
         ...(review.droppedLinks ? [{ code: SIGNAL_LINKS_DROPPED, count: review.droppedLinks }] : []),
+        // References in the delivered document that do not land. Counted together here
+        // even though the log splits them, because the rate answers one question — did
+        // this document ship with navigation that does not navigate — and the split
+        // between "written with no target" and "target absent" is a diagnosis a
+        // maintainer reads on the deployment (see SIGNAL_LINKS_UNRESOLVED).
+        ...(internalLinks.empty + internalLinks.dangling.length
+          ? [{ code: SIGNAL_LINKS_UNRESOLVED, count: internalLinks.empty + internalLinks.dangling.length }]
+          : []),
         // A linter that could not run has no violations to report, which is why its
         // failure is recorded as a signal rather than inferred from an empty list.
         ...(review.lint.error ? [{ code: SIGNAL_LINT_ERROR, count: 1 }] : []),

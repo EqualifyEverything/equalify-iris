@@ -9,6 +9,7 @@ import {
   SIGNAL_EDITOR_TRUNCATED,
   SIGNAL_EDITOR_TRUNCATED_LOST,
   SIGNAL_LINKS_DROPPED,
+  SIGNAL_LINKS_UNRESOLVED,
   SIGNAL_LINT_ERROR,
   SIGNAL_REVIEW_UNREAD,
   SIGNAL_ROUNDS,
@@ -54,7 +55,12 @@ test("an empty deployment reports zeroes rather than dividing by zero", () => {
     // The one that matters: 0/0 is NaN, which serializes to `null` in JSON and would
     // reach the workflow's `>` comparison as a silent false — a threshold that can
     // never trip, on a deployment where nothing has run yet.
-    for (const rate of [q.unresolved_rate, q.links_dropped_rate, q.lint_error_rate]) {
+    for (const rate of [
+      q.unresolved_rate,
+      q.links_dropped_rate,
+      q.links_unresolved_rate,
+      q.lint_error_rate,
+    ]) {
       assert.equal(rate, 0);
       assert.ok(Number.isFinite(rate), "a rate must be a number, not NaN");
     }
@@ -235,6 +241,25 @@ test("dropped links are counted per document and per link", () => {
   });
 });
 
+test("a document with a reference that lands nowhere is counted once, however many", () => {
+  withStore((store) => {
+    // Per document, like every other rate here: the endpoint's consumer copies these
+    // into a public issue, and "half the documents ship a dead reference" is the fact
+    // it can act on. The per-link total is on the deployment's run log, where the ids
+    // that failed are too — those never leave the box (they are document content).
+    delivered(store, "a", [{ code: SIGNAL_LINKS_UNRESOLVED, count: 82 }]);
+    delivered(store, "b", [{ code: SIGNAL_LINKS_UNRESOLVED, count: 1 }]);
+    delivered(store, "c");
+    delivered(store, "d");
+    const q = store.qualityStats();
+    assert.equal(q.links_unresolved_rate, 2 / 4);
+    // Not a subset of the dropped-links rate, and the reason both exist: a link the
+    // Copy Editor lost and a reference that never had a target are different defects
+    // with different fixes, and a document can have either without the other.
+    assert.equal(q.links_dropped_rate, 0);
+  });
+});
+
 test("the window is clamped, and echoed back so a caller sees what it got", () => {
   withStore((store) => {
     delivered(store, "a");
@@ -293,6 +318,7 @@ test("nothing per-session, per-user or per-document is exposed", () => {
         "editor_truncated_lost_rate",
         "editor_truncated_rate",
         "links_dropped_rate",
+        "links_unresolved_rate",
         "lint_error_rate",
         "mean_rounds",
         "review_unread_rate",

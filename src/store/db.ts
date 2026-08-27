@@ -181,6 +181,17 @@ export const SIGNAL_UNRESOLVED = "iris:unresolved";
 // loss (the href came from the source FILE, not the page image), invisible to every
 // later check in the loop, and previously only a line in one session's log.
 export const SIGNAL_LINKS_DROPPED = "iris:links-dropped";
+// How many in-document references in the delivered document do not land — `href="#"`, or a
+// fragment naming an id the document does not contain (#234). Recorded only when non-zero.
+//
+// Not a subset of anything else here, and not visible in any of it. axe has no rule for a
+// same-document reference that resolves to nothing, `duplicate-id` cannot fire because
+// anchors.ts already removed the collisions, `links_dropped_rate` is about absolute URLs
+// leaving the document, and the anchors report only ever names a reference at least one page
+// claims — so a document whose whole table of contents is dead lints clean, reports
+// `ambiguous: []`, and ships as `ready_for_review`. A count of 82 of 226 links in one bench
+// round is what this signal exists to stop being invisible.
+export const SIGNAL_LINKS_UNRESOLVED = "iris:links-unresolved";
 // axe-core failed to run at all. Recorded because a linter that did not run reports no
 // violations, so without this signal a broken linter would quietly drive every
 // accessibility rate in this table to zero and read as a fixed deployment. It is also
@@ -264,6 +275,15 @@ export interface QualityStats {
   unresolved_rate: number;
   // Share of documents where the Copy Editor dropped at least one link.
   links_dropped_rate: number;
+  // Share of documents delivered with at least one in-document reference that does not land:
+  // `href="#"`, or a fragment naming an id the document does not contain (#234). Independent
+  // of every other rate here — nothing else in this table, and no axe rule, can see it.
+  //
+  // Deliberately unthresholded in `.github/workflows/quality-report.yml` for now, and that
+  // file says why beside the thresholds it does have: the first round to measure it found 2
+  // of 4 documents affected, so a threshold today would file the same issue every week about
+  // a defect already tracked in #234. It belongs in the change that fixes the producers.
+  links_unresolved_rate: number;
   // Share of documents where axe-core could not run.
   lint_error_rate: number;
   // How many of `documents` the linter actually examined — the rest are the
@@ -1060,6 +1080,7 @@ export class Store {
       mean_rounds: documents ? Number(base.rounds) / documents : null,
       unresolved_rate: rate(SIGNAL_UNRESOLVED),
       links_dropped_rate: rate(SIGNAL_LINKS_DROPPED),
+      links_unresolved_rate: rate(SIGNAL_LINKS_UNRESOLVED),
       lint_error_rate: rate(SIGNAL_LINT_ERROR),
       documents_linted: documentsLinted,
       editor_truncated_rate: rate(SIGNAL_EDITOR_TRUNCATED),
