@@ -757,9 +757,24 @@ const MARK_MODIFIER = String.raw`faint|light|pale|grey|gray|dark|darker|noisy|gr
 // `isolated` left `faint` behind to veto the page as a doubt about the scan (#220). The head is still
 // a marks noun, so the comma widens what may dress those nouns and nothing else — "The page is dark,
 // with faint specks" keeps its `dark`, since `with` is not a modifier and the phrase starts after it.
+//
+// But a comma ends a clause as readily as it separates a list, and that is the one thing the stack
+// must not reach across: "the scan is grainy, faint specks are all that appear" and "Scan quality:
+// dark, blurry, faint specks throughout" put a doubt word about the IMAGE exactly where a modifier of
+// the marks goes, and stripping it ships a grainy capture as a blank page with no marker on it. So
+// the comma'd form may not OPEN a clause — nothing may stand in front of it but a quantifier, never a
+// copula and never a colon — while the form without a comma is untouched from before #220 and goes on
+// exempting `the visible artifacts are faint specks` as it always did. Written as two alternatives
+// rather than one guarded stack for that reason: only the comma needs the guard.
+const MARK_QUANTIFIER = String.raw`(?:(?:a|an|the|only|just|some|few|several|couple|of)\s+){0,4}`;
+const NOT_CLAUSE_HEAD =
+  String.raw`(?<!\b(?:is|are|was|were|be|been|being|appears?|appeared|seems?|seemed|looks?|looked|shows?|showed|showing|remains?|has|have|had)\s)(?<!:\s*)`;
 const MARKS_PHRASE = new RegExp(
-  String.raw`\b(?:(?:a|an|the|only|just|some|few|several|couple|of)\s+){0,4}` +
-    String.raw`(?:(?:${MARK_MODIFIER}),?[\s/-]+){0,3}` +
+  String.raw`\b(?:` +
+    String.raw`${MARK_QUANTIFIER}${NOT_CLAUSE_HEAD}(?:${MARK_MODIFIER}),[\s/-]+(?:(?:${MARK_MODIFIER}),?[\s/-]+){0,2}` +
+    "|" +
+    String.raw`${MARK_QUANTIFIER}(?:(?:${MARK_MODIFIER})[\s/-]+){0,3}` +
+    ")" +
     `(?:${MARK})(?:\\s*[/,&]\\s*(?:${MARK}|noise))*`,
   "gi",
 );

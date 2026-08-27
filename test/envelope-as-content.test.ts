@@ -465,6 +465,11 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page 14 appears to be blank. A few very faint specks or marks are visible but do not resolve into any legible text, images, or other content. No page number is printed on the page. The page-break marker has been emitted without a page number since none is visible; if a number is confirmed from document metadata it should be added. No content to transcribe.",
     // The same wording with the qualifier spelled the British way, which is a per-call choice.
     "Page 14 appears to be blank. No readable text or meaningful content is visible. A few faint specks or marks are present but do not resolve into characters or recognisable content. No page number is printed on the page; the page-break marker uses the sequential position (14) from the file metadata.",
+    // The comma'd stack without the `Only` in front of it, and one written the other way round. The
+    // guard that keeps a comma from reaching across a clause boundary is about what PRECEDES the
+    // stack, so a stack that opens its own sentence or sits behind a count is still one phrase.
+    "Page is blank. Faint, isolated marks are visible, no text.",
+    "Page is blank. A few faint, scattered specks are visible, no text.",
     // `not legible` predicated on the marks by a relative clause, with and without the `as`.
     "Page 16 appears to be blank. No text, images, or other content is visible. Only a few scattered specks/artifacts are present, which are not legible as content.",
     "Page 16 appears to be blank. No text or meaningful content is visible. No page number is printed on the page; the page-break marker uses the sequence number 16 from the file metadata. Only a few scattered specks/artifacts are present, which are not legible marks.",
@@ -658,6 +663,15 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // A comma may join two modifiers of a marks noun, and a description of the capture is not one:
     // the phrase starts after `with`, so both doubt words stay.
     "Page is blank. The scan is dark, blurry, with a few specks and no text.",
+    // The other way a comma is not a list separator: it ends the clause the doubt word belongs to.
+    // A comma'd stack of modifiers may not open a clause, so a copula or a colon in front of the
+    // first one leaves it where the veto lists can see it — a grainy capture can cover content, and
+    // accepted here it would ship as an empty page with no marker on it.
+    "Page 12 appears to be blank; the scan is grainy, faint specks are all that appear.",
+    "Page 12 appears blank. Scan quality: dark, blurry, faint specks throughout, no legible text.",
+    "Page is blank. The image is dark, faint specks are visible. No legible text.",
+    "Page is blank. The scan is noisy, scattered marks are visible, no text.",
+    "Page 12 appears blank. The image is washed-out, faint specks are visible, no text.",
     // Bare `marks` is the marks behind `stray`, `scattered`, `isolated`, `random` or `residual` — the
     // words that say the marks are nowhere in particular — and behind nothing else. `agents/page.md`
     // uses the bare noun for a page that HAS content nobody could read, which is what these are.
