@@ -1,5 +1,6 @@
 import { MAX_LINKS_PER_PAGE, type PdfLink } from "../util/pdf.ts";
 import { decodeEntities } from "../util/html.ts";
+import { ATTR_SEP } from "./anchors.ts";
 
 // Carrying a PDF's links into the delivered HTML.
 //
@@ -39,6 +40,11 @@ function normalizeHref(href: string): string {
     .replace(/^[A-Za-z][A-Za-z0-9+.-]*:/, (scheme) => scheme.toLowerCase())
     .replace(/\/+$/, "");
 }
+
+// An attribute's value in source HTML: double-quoted, single-quoted, or bare. One
+// definition because `unresolvedRefs` scans two attribute names with it and a difference
+// between the two would be a difference in what counts as a reference versus a target.
+const VALUE = `\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`;
 
 // Does this href name a scheme? Both comparisons below are about URLs that came from
 // (or claim to have come from) the source file's annotations, and only an absolute
@@ -194,6 +200,12 @@ export function droppedHrefs(before: string, after: string): string[] {
 // they hide a dead reference rather than invent one — and the first is the likelier of the
 // two, since a page can transcribe `id=` literally.
 //
+// The class itself is anchors.ts's ATTR_SEP, not a copy of it. That constant is MEASURED —
+// every ASCII character enumerated against jsdom, with the enumeration kept in a test — and
+// its comment says the two sniffs it serves have drifted apart twice, each time leaving a
+// bug in whichever one was not updated. This scan was a third hand-written copy and had
+// already drifted: it omitted `/`, so `<br/id="x">` was invisible to it.
+//
 // Left as a scan anyway. Every remaining case needs a delivered document that both
 // contains such a value AND has a dead reference to the id that value names, nothing here
 // is thresholded, so the cost is a maintainer's glance rather than a run. The exact fix,
@@ -210,14 +222,14 @@ export function unresolvedRefs(html: string): {
 } {
   const text = html.replace(/<!--[\s\S]*?-->/g, " ");
   const ids = new Set<string>();
-  for (const m of text.matchAll(/(?<=[\s<"'])id\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+  for (const m of text.matchAll(new RegExp(`(?<=${ATTR_SEP})id${VALUE}`, "gi"))) {
     ids.add(normalizeFragment(m[1] ?? m[2] ?? m[3] ?? ""));
   }
   let refs = 0;
   let empty = 0;
   let dangling = 0;
   const failed = new Set<string>();
-  for (const m of text.matchAll(/(?<=[\s<"'])href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+  for (const m of text.matchAll(new RegExp(`(?<=${ATTR_SEP})href${VALUE}`, "gi"))) {
     const href = decodeEntities(m[1] ?? m[2] ?? m[3] ?? "").trim();
     if (!href.startsWith("#")) continue;
     refs++;

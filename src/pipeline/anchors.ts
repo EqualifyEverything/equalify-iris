@@ -71,6 +71,12 @@ export interface AnchorReport {
   // wrote it is a document worth a human's attention. Named `ambiguous` and not
   // `unresolved`: they do resolve, just not on the page's own authority.
   ambiguous: { page: number; ref: string }[];
+  // The subset of `ambiguous` that was deliberately NOT repointed: a link whose target is
+  // already spoken for, so document order would have aimed it at a note that has its own
+  // marker (#233). Left bare, which means it lands nowhere once the owners are renamed —
+  // and that is the point. A subset, so every entry here is in `ambiguous` too; read the
+  // difference between the two as "disambiguated by document order" versus "given up on".
+  unrepointed: { page: number; ref: string }[];
   // Pages left exactly as written, either because rewriting them would have lost markup
   // (see `wouldChangeMarkup`) or because they could not be parsed at all (see
   // `parseFragment`), and which are relevant to the join: they own a colliding id or refer
@@ -81,7 +87,13 @@ export interface AnchorReport {
   skipped_pages: number[];
 }
 
-const EMPTY_REPORT: AnchorReport = { collisions: [], pinned_ids: [], ambiguous: [], skipped_pages: [] };
+const EMPTY_REPORT: AnchorReport = {
+  collisions: [],
+  pinned_ids: [],
+  ambiguous: [],
+  unrepointed: [],
+  skipped_pages: [],
+};
 
 // The characters that can sit immediately before an attribute name in source HTML, as a
 // regex character class. Both passes below use a cheap regex over the unparsed source to
@@ -617,7 +629,13 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     }
 
     const colliding = new Set(collisions);
-    const report: AnchorReport = { collisions: collisions.sort(), pinned_ids: [], ambiguous: [], skipped_pages: [] };
+    const report: AnchorReport = {
+      collisions: collisions.sort(),
+      pinned_ids: [],
+      ambiguous: [],
+      unrepointed: [],
+      skipped_pages: [],
+    };
     const out = pages.map((p) => p.innerHtml);
 
     // The prefix has to be one no id in the document already uses, or the rename
@@ -676,6 +694,21 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     // Colliding ids that a skipped page REFERS to but does not own — the references that
     // are stuck in their bare form, whatever the rest of the document does. See `pinned`.
     const refsOfSkipped = new Map<number, Set<string>>();
+    // Per page, the colliding ids it BOTH owns and links to itself — a reciprocal pair
+    // written by one agent looking at one image, e.g. a footnote marker beside its own
+    // note. Consulted by `resolve` to decide whether another page's link to that id may be
+    // aimed at this one. Only links count, not `for`/`headers`/`aria-*`: those are not
+    // reciprocal, and the whole point of the rule below is a target that already has its
+    // partner.
+    const selfLinked = new Map<number, Set<string>>();
+    const recordSelfLinks = (index: number, dom: JSDOM, mine: Set<string>) => {
+      const own = new Set<string>();
+      for (const el of dom.window.document.querySelectorAll("[href^='#']")) {
+        const token = el.getAttribute("href")!.slice(1);
+        if (token && colliding.has(token) && mine.has(token)) own.add(token);
+      }
+      if (own.size > 0) selfLinked.set(index, own);
+    };
     for (const [i, page] of pages.entries()) {
       const mine = owned[i];
       const ownsCollision = [...mine].some((id) => colliding.has(id));
@@ -744,6 +777,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       }
       if (!dom) continue;
       const { document } = dom.window;
+      recordSelfLinks(i, dom, mine);
       const refs = new Set(referencesIn(document).filter((r) => colliding.has(r) && !mine.has(r)));
       if (!ownsCollision && refs.size === 0) continue;
       // Reported whether or not the page can be rewritten — an ambiguity a skipped page
@@ -815,7 +849,32 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     // ran: arbitrary between the owners, but exactly as arbitrary as the behaviour it
     // replaces, and it keeps the association `for`/`headers`/`aria-*` depend on rather
     // than destroying it.
-    const resolve = (index: number, mine: Set<string>, token: string) => {
+    // One exception, and it is the only place this file prefers a reference that lands
+    // nowhere: a LINK aimed by document order at a target whose owner links to it itself
+    // (#233). Measured, not supposed — in one bench round, 18 of 63 footnote markers in the
+    // delivered documents pointed at another page's note. Page 6 transcribed two markers
+    // and no notes, so its `href="#fn-1"` was repointed at page 3's `fn-1`, which page 3's
+    // own marker already refers to. The reader following footnote 1 on page 6 arrives at
+    // page 3's note, whose back-reference returns them to page 3. Nothing catches it: the
+    // link resolves, axe has no rule for a link that lands on the wrong element, and
+    // namespacing already removed the duplicate id.
+    //
+    // A reciprocal pair is the evidence. A marker and its note are written together by one
+    // agent looking at one image, so an id whose owner links to it is spoken for and no
+    // other page's link can have meant it. Where the owner does NOT link to its own copy —
+    // a note continued from an earlier page, a real shape in this corpus — the reference is
+    // repointed exactly as before, because there the outside link is the only claim on it.
+    //
+    // Links only. For `for`/`headers`/`aria-*` this file's header refuses precisely this
+    // trade, and rightly: a no-target `for` is a 1.3.1/4.1.2 failure where the wrong-target
+    // one at least gave the field a name. A link is different in kind — a wrong target
+    // silently misinforms, where no target is at least a link that visibly does nothing —
+    // and since #234 it is also COUNTED, on the delivered bytes, as
+    // `links_unresolved_rate`. That is what makes leaving it bare an improvement rather
+    // than a shrug: before that check, this choice would have traded a confidently wrong
+    // document for an invisibly broken one.
+    const reportedUnrepointed = new Set<string>();
+    const resolve = (index: number, mine: Set<string>, token: string, viaLink = false) => {
       if (!colliding.has(token)) return token; // includes `href="#"`, whose token is ""
       const owner = mine.has(token) ? index : claims.get(token)![0];
       // A page left as written kept its bare ids, so a reference to it must stay bare.
@@ -824,6 +883,21 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       // reference, so a reference resolved TO that owner has to stay bare as well —
       // otherwise this page's reference is the one left naming nothing.
       if (pinned.has(token) && owner === claims.get(token)![0]) return token;
+      // The #233 rule. After the two above, so a bare target that a frozen reference still
+      // needs keeps winning: those are about an id that STAYS bare and findable, where this
+      // is about refusing to aim at one that moved.
+      if (viaLink && owner !== index && selfLinked.get(owner)?.has(token)) {
+        // Deduplicated per page and token, the way `ambiguous` is: this runs once per
+        // element, and a page carrying three markers numbered 1 would otherwise report the
+        // same fact three times. The count that matters — how many links the reader can
+        // follow to nothing — is on the delivered bytes, where links.ts measures it.
+        const key = `${index} ${token}`;
+        if (!reportedUnrepointed.has(key)) {
+          reportedUnrepointed.add(key);
+          report.unrepointed.push({ page: pages[index].order, ref: token });
+        }
+        return token;
+      }
       return `${prefixFor(owner)}${token}`;
     };
 
@@ -841,7 +915,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       }
       for (const el of document.querySelectorAll("[href^='#']")) {
         const target = el.getAttribute("href")!.slice(1);
-        const next = resolve(index, mine, target);
+        const next = resolve(index, mine, target, true);
         if (next !== target) el.setAttribute("href", `#${next}`);
       }
       for (const attr of IDREF_ATTRS) {
@@ -862,6 +936,7 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
     }
 
     report.ambiguous.sort((a, b) => a.page - b.page || a.ref.localeCompare(b.ref));
+    report.unrepointed.sort((a, b) => a.page - b.page || a.ref.localeCompare(b.ref));
     report.skipped_pages.sort((a, b) => a - b);
     return { pages: out, report };
   } finally {

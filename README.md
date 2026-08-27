@@ -573,7 +573,17 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   Leaving it dangling instead was the same defect in a new place: with a `<label for="q1">` on page
   1 and an `<input id="q1">` on pages 2 *and* 3, every owner is renamed and the label points at
   nothing, so the field loses its accessible name and axe reports `label` on a document a plain
-  concatenation passed. Ambiguous references are named in the run log as `assembly_anchors`. A page
+  concatenation passed. Ambiguous references are named in the run log as `assembly_anchors`.
+
+  One case is left bare on purpose: a *link* to a colliding id whose first owner links to its own
+  copy. That target is already spoken for — a footnote marker on page 3 pointing at `#fn-1` where
+  pages 1 and 2 each carry their own `fn-1` *and* their own marker for it is not a tie document
+  order can break, and aiming it at page 1 gives one note two markers while page 3's note stays
+  unreachable. An owner that does *not* link its own copy is a footnote continued from an earlier
+  page, so an outside reference to it is still repointed. These are listed in the same log line as
+  `unrepointed`, a subset of `ambiguous`, and the references themselves are counted as unresolved in
+  the delivered document (`internal_links`). Links only: a `for`, `headers` or `aria-*` reference
+  with no target is an axe violation, so those still take the first owner. A page
   whose markup would not survive a reserialization is left exactly as written, keeping its collision
   for lint to report and its bare ids for anything resolved to it. If such a page holds a *reference*
   instead, the referenced id's first owner keeps its bare form so that reference still resolves —

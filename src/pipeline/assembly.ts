@@ -386,6 +386,13 @@ export async function runAssembly(
       collisions: anchors.collisions,
       pinned_ids: anchors.pinned_ids,
       ambiguous: anchors.ambiguous.map((u) => `page ${u.page}: #${u.ref}`),
+      // The subset left to land nowhere, because the target already has its own marker
+      // (#233). Carried separately from `ambiguous` because the two ask for different
+      // things from whoever reads this line: an ambiguous reference resolved somewhere and
+      // may be right, while one of these is a link the document ships knowing it is dead —
+      // and the page that wrote it transcribed a marker whose note it never transcribed,
+      // which is a page worth looking at.
+      unrepointed: anchors.unrepointed.map((u) => `page ${u.page}: #${u.ref}`),
       skipped_pages: anchors.skipped_pages,
     });
   }

@@ -256,6 +256,92 @@ test("a page with no ids of its own has its ambiguous references repointed and r
   for (const href of fragHrefs(body)) assert.ok(ids.has(href), `href="#${href}" resolves to nothing`);
 });
 
+test("a link is not aimed at a note that already has its own marker", () => {
+  // #233, measured: in one bench round 18 of 63 footnote markers in the delivered
+  // documents pointed at another page's note. The page agent transcribed a superscript
+  // marker and not the note it refers to, so the page emitted `href="#fn-1"` with no
+  // `id="fn-1"` of its own — and first-owner repointing sent it to page 1, whose note
+  // already belongs to page 1's own marker. The reader following footnote 1 on page 3
+  // arrives at page 1's note and its back-reference returns them to page 1.
+  //
+  // The link resolves, so nothing caught it: axe has no rule for a link that lands on the
+  // wrong element, and namespacing removed the duplicate id that might have hinted at it.
+  // A reciprocal pair is the evidence — page 1 links to its own `fn-1`, so that note is
+  // spoken for — and the reference is left bare instead, which lands nowhere and is
+  // counted on the delivered bytes by links.ts (#234).
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<p>A<sup><a id="fnref-1" href="#fn-1">1</a></sup></p><ol><li id="fn-1">One<a href="#fnref-1">back</a></li></ol>`),
+    frag(2, `<p>B<sup><a id="fnref-1" href="#fn-1">1</a></sup></p><ol><li id="fn-1">Two<a href="#fnref-1">back</a></li></ol>`),
+    frag(3, `<p>C<sup><a id="fnref-9" href="#fn-1">1</a></sup></p><p id="fn-9">Nine</p>`),
+  ]);
+  // Each page that owns both halves keeps its own pair — ownership still wins, and that
+  // is the case this rule must not touch.
+  assert.match(body, /<a id="p1-fnref-1" href="#p1-fn-1">/, "page 1's own pair was broken");
+  assert.match(body, /<a id="p2-fnref-1" href="#p2-fn-1">/, "page 2's own pair was broken");
+  // Page 3's marker is left bare rather than sent to page 1's note.
+  assert.match(body, /<a id="fnref-9" href="#fn-1">/, "page 3's marker was repointed at a note that is spoken for");
+  assert.doesNotMatch(body, /id="fnref-9" href="#p1-fn-1"/, "page 3's marker was aimed at page 1's note");
+  assert.deepEqual(anchors.ambiguous, [{ page: 3, ref: "fn-1" }]);
+  // A subset of `ambiguous`, and the field that says this one was given up on rather
+  // than resolved by document order.
+  assert.deepEqual(anchors.unrepointed, [{ page: 3, ref: "fn-1" }]);
+});
+
+test("a page linking one spoken-for note three times reports the fact once", () => {
+  // The report is read by a person deciding which page to look at, so one page and one id
+  // is one fact however many markers carry it — and the round that produced #233 had a
+  // page with six. The number of links a reader can follow to nothing is measured
+  // elsewhere, on the delivered bytes (links.ts, #234).
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<p>A<sup><a id="fnref-1" href="#fn-1">1</a></sup></p><ol><li id="fn-1">One</li></ol>`),
+    frag(2, `<ol><li id="fn-1">Two</li></ol>`),
+    frag(3, `<p>a<a href="#fn-1">1</a> b<a href="#fn-1">1</a> c<a href="#fn-1">1</a></p><p id="fn-9">Nine</p>`),
+  ]);
+  assert.deepEqual(anchors.unrepointed, [{ page: 3, ref: "fn-1" }]);
+  assert.equal([...body.matchAll(/href="#fn-1"/g)].length, 3, "all three markers should be left bare");
+});
+
+test("a note nobody else has claimed still adopts an outside marker", () => {
+  // The other half of the same rule, and the reason it is not "never repoint a link". A
+  // footnote continued from an earlier page is a real shape in this corpus: the note is
+  // transcribed on the page where it appears and the marker was on the page before. Page 1
+  // owns `fn-1` and does NOT link to it, so nothing else claims that note and page 3's
+  // marker is the only reference there is — repointing it is right, and this is the
+  // behaviour that existed before #233.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<ol><li id="fn-1">Continued from the previous page</li></ol>`),
+    frag(2, `<ol><li id="fn-1">Another one</li></ol>`),
+    frag(3, `<p>C<sup><a href="#fn-1">1</a></sup></p><p id="fn-9">Nine</p>`),
+  ]);
+  assert.match(body, /href="#p1-fn-1"/, "a note no page had claimed did not adopt the outside marker");
+  assert.deepEqual(anchors.ambiguous, [{ page: 3, ref: "fn-1" }]);
+  assert.deepEqual(anchors.unrepointed, [], "a reference that resolved was reported as given up on");
+});
+
+test("the rule is about links, not about the attributes a name depends on", () => {
+  // The line this file's header draws, and where #233 stops. Page 2 owns `q1` and also
+  // references it — `<label for="q1">` beside its own input — so under the link rule page
+  // 1's orphaned label would be left bare, the field would lose its accessible name, and
+  // assembly would introduce a 1.3.1/4.1.2 failure into a document a plain concatenation
+  // passed. A no-target `for` is worse than a wrong-target one; a no-target LINK is not.
+  // So `for`/`headers`/`aria-*` keep first-owner repointing unconditionally.
+  const { body, anchors } = assembleBodyWithReport([
+    frag(1, `<h1>Form</h1><label for="q1">Your name</label>`),
+    frag(2, `<form><label for="q1">Your name</label><input id="q1" type="text"></form>`),
+    frag(3, `<form><label for="q1">Your name</label><input id="q1" type="text"></form>`),
+  ]);
+  // Page 1's label leads the document, so its own `for` is the first one in the body —
+  // matched positionally, because pages 1 and 2 both end up naming `p2-q1` and a bare
+  // search for that string would pass on page 2's label alone.
+  assert.match(body, /^<h1>Form<\/h1><label for="p2-q1">/, "the orphaned label was not repointed");
+  assert.match(body, /<label for="p3-q1">Your name<\/label><input id="p3-q1"/, "page 3's own pair was broken");
+  assert.deepEqual(anchors.unrepointed, [], "an IDREF attribute was left dangling by the link rule");
+  const ids = new Set(idsOf(body));
+  for (const value of body.matchAll(/for="([^"]*)"/g)) {
+    assert.ok(ids.has(value[1]), `for="${value[1]}" resolves to nothing`);
+  }
+});
+
 test("a third page claiming an id does not cost a label its field", async () => {
   // Where leaving an ambiguous reference alone showed its cost as a real violation,
   // not just a dead anchor. A form whose `<label for="q1">` is on page 1 and whose
