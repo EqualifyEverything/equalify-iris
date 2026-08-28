@@ -116,8 +116,11 @@ from the environment at startup; changes require a restart.
   the *model* enforces below that is a different failure — several non-Claude models on
   Bedrock refuse the request rather than clamping it, so a config-only model swap would fail
   every call — and the Bedrock adapter survives it: the rejection states the model's own
-  ceiling, so the call is sent again at that ceiling and it is remembered per model for the
-  rest of the process, with a warning naming `max_tokens` as the setting to fix.
+  ceiling, so the call is sent again at that ceiling and that number is what every later call
+  to the model asks for in the same process, with a warning (once per model) naming
+  `max_tokens` as the setting to fix. The cost of the swap is therefore one rejected request
+  per call already in flight when the first is refused, and none after that; a request Bedrock
+  never read is not billed.
   Both adapters **stream** their responses, to tell a stalled call apart from a slow one. A
   single non-streaming request cannot: "no answer yet" describes a dead socket and a large
   document being correctly rewritten equally well, so a total-duration cap kills both — and the

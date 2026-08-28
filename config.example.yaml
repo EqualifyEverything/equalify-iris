@@ -300,13 +300,17 @@ providers:
     # This number can be more output than a model will ACCEPT, which is a different
     # failure from hitting the ceiling: several non-Claude models on Bedrock cap
     # output well below 32000 and refuse the request outright rather than clamping
-    # it (Amazon Nova Pro caps at 10000). A model that does gets one rejected
-    # request, then the same call again at the ceiling Bedrock names in the
-    # rejection, and that number for every later call to it in the process — with a
-    # warning naming this key, because the config is still the thing to fix. So a
-    # model swap done here alone does not lose a document, but do read the warning:
-    # a ceiling the MODEL enforces is not one the thresholds above were sized
-    # against, and a dense page can then truncate where it used to fit.
+    # it (Amazon Nova Pro caps at 10000). Such a request is sent again at the
+    # ceiling Bedrock names in the rejection, and that number is what every later
+    # call to that model asks for in the same process — so the cost of the swap is
+    # one rejected request per call already IN FLIGHT when the first one is refused
+    # (five at a time by default, see extraction_concurrency) and none after that.
+    # Nothing is billed for a request Bedrock never read. The warning naming this
+    # key is printed once per model, because the config is still the thing to fix.
+    #
+    # So a model swap done here alone does not lose a document, but do read that
+    # warning: a ceiling the MODEL enforces is not one the thresholds above were
+    # sized against, and a dense page can then truncate where it used to fit.
     max_tokens: 32000
     # See the notes on openrouter.image_limits, openrouter.prompt_cache and
     # openrouter.prompt_cache_ttl above; the same overrides exist here and are just as

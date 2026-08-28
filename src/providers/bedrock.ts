@@ -338,15 +338,21 @@ function converseUsage(raw?: {
   return Object.keys(usage).length ? usage : undefined;
 }
 
-// What one attempt asked for, and how far it got. `maxTokens` because the ceiling a call
-// asks for is not always `this.maxTokens` — once Bedrock has stated a lower one for a
+// What one attempt asked for, and whether it cost anything. `maxTokens` because the ceiling
+// a call asks for is not always `this.maxTokens` — once Bedrock has stated a lower one for a
 // model, that is what the next call asks for, and the truncation error has to name the
-// number actually sent or it points an operator at the wrong figure. `chars` so the caller
-// can tell a request Bedrock REFUSED, having billed and streamed nothing, from a failure
-// that already produced output: only the first is safe to send again.
+// number actually sent or it points an operator at the wrong figure.
+//
+// `spent` is what makes sending a refused request again free: it is true as soon as anything
+// about this attempt has been paid for, which is output having streamed OR an upstream
+// having reported usage for it. Both, not just the first: the Anthropic stream reports the
+// PROMPT's counts in `message_start`, before a single delta, so a failure arriving after that
+// event has been billed for the whole prompt while having produced no text at all. Bedrock
+// delivers this refusal as an HTTP error today, before any of that — but a guard that has to
+// be re-derived from where AWS currently validates is not a guard.
 interface Attempt {
   maxTokens: number;
-  chars: number;
+  spent: boolean;
 }
 
 // The output ceiling a Bedrock rejection states, as Bedrock states it. Both messages below
@@ -469,6 +475,9 @@ export class BedrockProvider implements ModelProvider {
   // pays one rejected request per model to learn it again, which is the cost of having no
   // catalogue to go stale (issue #249).
   private ceilings = new Map<string, number>();
+  // Which models the paragraph about `max_tokens` has already been printed for. See the warn
+  // in `complete`: the first several calls of a run are in flight together and all refused.
+  private warnedCeilings = new Set<string>();
   private promptCache: boolean;
   private cacheTtl: CacheTtl;
   private firstOutputTimeoutMs: number;
@@ -554,14 +563,14 @@ export class BedrockProvider implements ModelProvider {
       .map((m) => m.content)
       .join("\n\n");
     const asked = this.ceilingFor(req.model);
-    const first: Attempt = { maxTokens: asked, chars: 0 };
+    const first: Attempt = { maxTokens: asked, spent: false };
     try {
       return await this.send(req, system, first);
     } catch (e) {
-      // `first.chars` is the guarantee that sending it again costs nothing: a refusal
-      // arrives before generation, so a failure that had already streamed output is not
+      // `first.spent` is the guarantee that sending it again costs nothing: a refusal
+      // arrives before generation, so a failure that had already been billed for is not
       // this one however its message reads, and re-sending would pay for the prompt twice.
-      if (!refusedForOutputCeiling(e) || first.chars > 0) throw e;
+      if (!refusedForOutputCeiling(e) || first.spent) throw e;
       const stated = statedOutputCeiling(e);
       // Refused over the ceiling with nothing to retry at: either the message did not state
       // a number, or it stated one that is not below what was asked, which is a rejection
@@ -569,24 +578,41 @@ export class BedrockProvider implements ModelProvider {
       // knob is wrong, which is the half of #249 that matters most on call.
       if (stated === null || stated >= asked) throw outputCeilingRefused(req.model, asked, e);
       this.ceilings.set(req.model, stated);
-      // Once per model per process, because the ceiling above is remembered. Not an error:
-      // the call is about to succeed, and a deployment that never reads its logs still gets
-      // its pages. It is worth saying anyway — the config is wrong, every later call pays
-      // nothing for that only because of the line above, and a ceiling the MODEL enforces
-      // is not one the shrink floor and section headroom were sized against.
-      console.warn(
-        `bedrock: ${req.model} refused ${asked} output tokens and stated its own ceiling of ` +
-          `${stated}, so the call was sent again at ${stated} and every later call to this ` +
-          `model in this process will ask for ${stated}. providers.bedrock.max_tokens is ` +
-          `${this.maxTokens}, which this model does not accept: nothing has to change for the ` +
-          `run to finish, but ${stated} is now the ceiling a dense page has to fit under, and ` +
-          `the shrink floor and section headroom were sized against ${this.maxTokens}.`,
-      );
-      const second: Attempt = { maxTokens: stated, chars: 0 };
+      // Once per model per process, and said with a flag of its own rather than left to the
+      // line above: pages are extracted five at a time (DEFAULT_EXTRACTION_CONCURRENCY), so
+      // on a fresh process every call already in flight asks for the deployment's ceiling
+      // before any of them has learned better, and all five are refused. The rejections are
+      // free — nothing is billed for a request that was never read — but five copies of a
+      // paragraph about config would read as five different problems.
+      //
+      // Not an error, either: the call is about to succeed, and a deployment that never reads
+      // its logs still gets its pages. Worth saying anyway, because the config is wrong, later
+      // calls pay nothing for that only because of the line above, and a ceiling the MODEL
+      // enforces is not one the shrink floor and section headroom were sized against.
+      if (!this.warnedCeilings.has(req.model)) {
+        this.warnedCeilings.add(req.model);
+        console.warn(
+          `bedrock: ${req.model} refused ${asked} output tokens and stated its own ceiling of ` +
+            `${stated}, so the call was sent again at ${stated} and every later call to this ` +
+            `model in this process will ask for ${stated}. providers.bedrock.max_tokens is ` +
+            `${this.maxTokens}, which this model does not accept: nothing has to change for ` +
+            `the run to finish, but ${stated} is now the ceiling a dense page has to fit ` +
+            `under, and the shrink floor and section headroom were sized against ` +
+            `${this.maxTokens}.`,
+        );
+      }
+      const second: Attempt = { maxTokens: stated, spent: false };
       try {
         return await this.send(req, system, second);
       } catch (again) {
-        if (!refusedForOutputCeiling(again) || second.chars > 0) throw again;
+        if (!refusedForOutputCeiling(again) || second.spent) throw again;
+        // This page is lost either way — a third attempt is not on offer, since a model that
+        // refuses the ceiling it just named is one this adapter has no model of. But the
+        // number it named the second time is still the best thing known about it, so the next
+        // call starts from there rather than re-learning the same two refusals. `ceilingFor`
+        // takes the lower of this and the deployment's, so a larger one changes nothing.
+        const narrower = statedOutputCeiling(again);
+        if (narrower !== null && narrower < stated) this.ceilings.set(req.model, narrower);
         throw outputCeilingRefused(req.model, stated, again);
       }
     }
@@ -781,6 +807,9 @@ export class BedrockProvider implements ModelProvider {
     let usage: Usage | undefined;
     const mergeUsage = (u?: Usage): void => {
       if (!u) return;
+      // An upstream that has counted anything has billed for it, whether or not any text has
+      // arrived yet — see Attempt.spent.
+      attempt.spent = true;
       usage = { ...usage, ...u };
       req.onUsage?.(usage);
     };
@@ -825,10 +854,10 @@ export class BedrockProvider implements ModelProvider {
         if (!reading) continue;
         if (reading.text) {
           text += reading.text;
-          // Reported out as it accumulates, for the same reason usage is: the caller decides
-          // whether a failed call may be sent again, and "nothing had streamed" is a fact
-          // only this loop holds.
-          attempt.chars = text.length;
+          // Reported out as it arrives, for the same reason usage is: the caller decides
+          // whether a failed call may be sent again, and "this attempt cost nothing" is a
+          // fact only this loop holds.
+          attempt.spent = true;
         }
         if (reading.stopReason) stopReason = reading.stopReason;
         mergeUsage(reading.usage);

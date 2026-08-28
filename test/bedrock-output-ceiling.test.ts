@@ -333,6 +333,93 @@ test("the stated ceiling is remembered, so the next page does not pay for the le
   assert.equal(warnings.length, 1, "said once per model, not once per page");
 });
 
+test("the pages already in flight when the first one is refused are not five reports of one problem", async () => {
+  // Pages are extracted five at a time (DEFAULT_EXTRACTION_CONCURRENCY), so on a fresh
+  // process every call in the first batch asks for the deployment's ceiling before any of
+  // them has learned better, and all five are refused. That is what a real run looks like,
+  // not an edge case: the rejections are free, but the paragraph about `max_tokens` is only
+  // worth reading once. Scripted by the ceiling ASKED FOR rather than by attempt number, so
+  // this test says nothing about the order five concurrent calls happen to resolve in.
+  const bedrock = provider({ default_model: NOVA, api: "converse" });
+  const asked: number[] = [];
+  (bedrock as unknown as { client: unknown }).client = {
+    send: async (cmd: any) => {
+      const ceiling: number = cmd.input.inferenceConfig.maxTokens;
+      asked.push(ceiling);
+      if (ceiling > 10_000) throw validationException(NOVA_REFUSAL);
+      return {
+        stream: (async function* () {
+          for (const e of converseDone("<p>page</p>")) yield e;
+        })(),
+      };
+    },
+  };
+
+  const [results, warnings] = await capturingWarnings(() =>
+    Promise.all([1, 2, 3, 4, 5].map(() => bedrock.complete(req(NOVA)))),
+  );
+  assert.equal(results.length, 5);
+  for (const r of results) assert.equal(r.text, "<p>page</p>");
+  // Five refusals is what concurrency costs, and it costs nothing: a request Bedrock never
+  // read is not billed. What is bounded is the talking.
+  assert.equal(asked.filter((n) => n === 32_000).length, 5);
+  assert.equal(asked.filter((n) => n === 10_000).length, 5);
+  assert.equal(warnings.length, 1, "one paragraph about the config, not one per in-flight page");
+
+  // And the batch after it has learned: no rejection at all.
+  const [, later] = await capturingWarnings(() => bedrock.complete(req(NOVA)));
+  assert.equal(asked.at(-1), 10_000);
+  assert.equal(later.length, 0);
+});
+
+test("a second refusal is at least learned from, so the next page does not repeat both of them", async () => {
+  // The page that met a model refusing the ceiling it had just named is lost — a third
+  // attempt is not on offer. But the number that model gave the second time is still the
+  // best thing known about it, and throwing it away would make the next call re-learn the
+  // same two refusals.
+  const bedrock = provider({ default_model: NOVA, api: "converse" });
+  const inputs = stubAttempts(bedrock, [
+    { throws: validationException(NOVA_REFUSAL) },
+    { throws: validationException("The maximum tokens you requested exceeds the model limit of 4096") },
+    { events: converseDone("<p>the next page</p>") },
+  ]);
+  await capturingWarnings(async () => {
+    await assert.rejects(() => bedrock.complete(req(NOVA)), /OutputCeilingRefused|setting at fault/);
+    const next = await bedrock.complete(req(NOVA));
+    assert.equal(next.text, "<p>the next page</p>");
+  });
+  assert.deepEqual(
+    inputs.map((i) => i.inferenceConfig.maxTokens),
+    [32_000, 10_000, 4_096],
+    "the third request should start from what the second refusal named",
+  );
+});
+
+test("a refusal that arrives after the prompt was billed is not sent again", async () => {
+  // `spent`, not "no text yet": the Anthropic stream reports the PROMPT's token counts in
+  // `message_start`, before any delta, so a failure arriving after that event has been paid
+  // for in full while having produced nothing. Re-sending it would buy the same prompt twice
+  // and — because the router keeps only the latest usage snapshot — lose the first attempt's
+  // input tokens from the `model_call` line entirely. Bedrock delivers this refusal as an
+  // HTTP error today; the guard does not depend on that staying true.
+  const bedrock = provider({ default_model: CLAUDE });
+  const seen: unknown[] = [];
+  const inputs = stubAttempts(bedrock, [
+    {
+      events: [
+        chunk({ type: "message_start", message: { usage: { input_tokens: 9_000 } } }),
+        { validationException: { message: NOVA_REFUSAL } },
+      ],
+    },
+  ]);
+  await assert.rejects(
+    () => bedrock.complete(req(CLAUDE, { onUsage: (u: unknown) => seen.push(u) })),
+    /validationException: The maximum tokens you requested exceeds/,
+  );
+  assert.equal(inputs.length, 1, "the prompt was already paid for, so this is not free to repeat");
+  assert.deepEqual(seen.at(-1), { input_tokens: 9_000 });
+});
+
 test("one model's ceiling does not clamp another served by the same provider block", async () => {
   // `per_capability` and `providers.per_agent` can put a Nova on vision and a Claude on
   // text through one block. Lowering the block's ceiling because the Nova refused would give
