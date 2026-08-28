@@ -612,7 +612,19 @@ export class BedrockProvider implements ModelProvider {
         // call starts from there rather than re-learning the same two refusals. `ceilingFor`
         // takes the lower of this and the deployment's, so a larger one changes nothing.
         const narrower = statedOutputCeiling(again);
-        if (narrower !== null && narrower < stated) this.ceilings.set(req.model, narrower);
+        if (narrower !== null && narrower < stated) {
+          this.ceilings.set(req.model, narrower);
+          // Said even though this model has been warned about already: the paragraph above
+          // told an operator that every later call would ask for `stated`, and that is no
+          // longer true. A number in the log the process has stopped using is worse than the
+          // repetition `warnedCeilings` exists to prevent.
+          console.warn(
+            `bedrock: ${req.model} refused ${stated} as well and stated a ceiling of ` +
+              `${narrower}, so later calls to it will ask for ${narrower} and not the ` +
+              `${stated} named above. This page is lost: a model that refuses the ceiling it ` +
+              `just named is not one this adapter will keep guessing at.`,
+          );
+        }
         throw outputCeilingRefused(req.model, stated, again);
       }
     }

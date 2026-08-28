@@ -155,6 +155,22 @@ test("a refusal over the PROMPT's size is never taken for a refusal over the out
   }
 });
 
+test("the Anthropic body's context refusal names max_tokens and is still a size refusal", () => {
+  // The wording an `invoke` deployment gets when the PROMPT plus the ceiling will not fit the
+  // window. It names `max_tokens` and a limit, which is the shape `refusedForOutputCeiling`'s
+  // broad branch looks for, and reading it as an output-ceiling refusal would tell an operator
+  // "the model is not being asked to do work it cannot do" about a prompt that does not fit.
+  // Two things follow from matching it in `isRequestTooLargeError` instead: the diagnosis is
+  // right, and the review loop's image-drop recovery (pipeline/review.ts) can reach a refusal
+  // it previously had no way to answer.
+  const e = validationException(
+    "input length and `max_tokens` exceed context limit: 199000 + 32000 > 200000, " +
+      "decrease input length or `max_tokens` and try again",
+  );
+  assert.equal(isRequestTooLargeError(e), true);
+  assert.equal(refusedForOutputCeiling(e), false);
+});
+
 test("a validation refusal naming the ceiling in other words is still recognized", () => {
   // No number to retry at, so nothing is retried — but it is worth recognizing anyway,
   // because naming the knob is most of what the issue asks for and a wording AWS changes
@@ -383,11 +399,18 @@ test("a second refusal is at least learned from, so the next page does not repea
     { throws: validationException("The maximum tokens you requested exceeds the model limit of 4096") },
     { events: converseDone("<p>the next page</p>") },
   ]);
-  await capturingWarnings(async () => {
+  const [, warnings] = await capturingWarnings(async () => {
     await assert.rejects(() => bedrock.complete(req(NOVA)), /OutputCeilingRefused|setting at fault/);
     const next = await bedrock.complete(req(NOVA));
     assert.equal(next.text, "<p>the next page</p>");
   });
+  // Two paragraphs on purpose, where every other case gets one: the first said later calls
+  // would ask for 10000, and after the second refusal that is no longer true. A number in the
+  // log the process has stopped using is worse than the repetition `warnedCeilings` prevents.
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /will ask for 10000/);
+  assert.match(warnings[1], /refused 10000 as well and stated a ceiling of 4096/);
+  assert.match(warnings[1], /not the 10000 named above/);
   assert.deepEqual(
     inputs.map((i) => i.inferenceConfig.maxTokens),
     [32_000, 10_000, 4_096],

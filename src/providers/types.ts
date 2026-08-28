@@ -174,6 +174,17 @@ export function isRequestTooLargeError(e: unknown): boolean {
     message.includes("prompt is too long") ||
     message.includes("context length") ||
     message.includes("context window") ||
+    // The Anthropic body's own wording for the same thing, which is what an `invoke`
+    // deployment gets: "input length and `max_tokens` exceed context limit: 199000 + 32000 >
+    // 200000, decrease input length or `max_tokens` and try again". Matched here for two
+    // reasons. It IS a prompt-size refusal, so the image-drop recovery in pipeline/review.ts
+    // is the right answer to it and had no way to reach it before. And because this predicate
+    // is checked first, matching it also keeps `refusedForOutputCeiling`
+    // (providers/bedrock.ts) from reading it as a refusal over the model's output ceiling: it
+    // names `max_tokens` and a limit, which is otherwise exactly that shape, and the
+    // resulting diagnosis would be "the model is not being asked to do work it cannot do"
+    // about a prompt that does not fit.
+    message.includes("context limit") ||
     message.includes("too many tokens") ||
     // Over the transport's or endpoint's size limit.
     message.includes("payload size") ||
