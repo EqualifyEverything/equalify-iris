@@ -475,8 +475,10 @@ export class BedrockProvider implements ModelProvider {
   // pays one rejected request per model to learn it again, which is the cost of having no
   // catalogue to go stale (issue #249).
   private ceilings = new Map<string, number>();
-  // Which models the paragraph about `max_tokens` has already been printed for. See the warn
-  // in `complete`: the first several calls of a run are in flight together and all refused.
+  // What has already been said about a ceiling, so a batch of concurrent pages that all met
+  // the same refusal does not report it as several problems. See the warns in `complete`: a
+  // model id for the paragraph naming `max_tokens`, and a model plus both numbers for the
+  // rarer one that corrects it.
   private warnedCeilings = new Set<string>();
   private promptCache: boolean;
   private cacheTtl: CacheTtl;
@@ -618,12 +620,21 @@ export class BedrockProvider implements ModelProvider {
           // told an operator that every later call would ask for `stated`, and that is no
           // longer true. A number in the log the process has stopped using is worse than the
           // repetition `warnedCeilings` exists to prevent.
-          console.warn(
-            `bedrock: ${req.model} refused ${stated} as well and stated a ceiling of ` +
-              `${narrower}, so later calls to it will ask for ${narrower} and not the ` +
-              `${stated} named above. This page is lost: a model that refuses the ceiling it ` +
-              `just named is not one this adapter will keep guessing at.`,
-          );
+          //
+          // Keyed by the whole fact rather than by the model, because that is what makes it a
+          // correction: several pages in flight at `stated` are each refused and would each
+          // report the identical pair of numbers, and one paragraph correcting one figure is
+          // the same amount of news however many pages found it out.
+          const correction = `${req.model}:${stated}:${narrower}`;
+          if (!this.warnedCeilings.has(correction)) {
+            this.warnedCeilings.add(correction);
+            console.warn(
+              `bedrock: ${req.model} refused ${stated} as well and stated a ceiling of ` +
+                `${narrower}, so later calls to it will ask for ${narrower} and not the ` +
+                `${stated} named above. This page is lost: a model that refuses the ceiling ` +
+                `it just named is not one this adapter will keep guessing at.`,
+            );
+          }
         }
         throw outputCeilingRefused(req.model, stated, again);
       }

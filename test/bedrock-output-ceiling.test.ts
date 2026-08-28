@@ -418,6 +418,29 @@ test("a second refusal is at least learned from, so the next page does not repea
   );
 });
 
+test("the correction is said once too, however many in-flight pages found it out", async () => {
+  // Same reason the first paragraph is gated: pages run five at a time, so every call already
+  // in flight at the refused ceiling meets the same second refusal, and one paragraph
+  // correcting one figure is the same amount of news however many pages discovered it.
+  const bedrock = provider({ default_model: NOVA, api: "converse" });
+  (bedrock as unknown as { client: unknown }).client = {
+    send: async (cmd: any) => {
+      const ceiling: number = cmd.input.inferenceConfig.maxTokens;
+      throw validationException(
+        ceiling > 10_000
+          ? NOVA_REFUSAL
+          : "The maximum tokens you requested exceeds the model limit of 4096",
+      );
+    },
+  };
+  const [, warnings] = await capturingWarnings(async () => {
+    const settled = await Promise.allSettled([1, 2, 3].map(() => bedrock.complete(req(NOVA))));
+    for (const s of settled) assert.equal(s.status, "rejected");
+  });
+  assert.equal(warnings.length, 2, "one paragraph and one correction, not one pair per page");
+  assert.match(warnings[1], /stated a ceiling of 4096/);
+});
+
 test("a refusal that arrives after the prompt was billed is not sent again", async () => {
   // `spent`, not "no text yet": the Anthropic stream reports the PROMPT's token counts in
   // `message_start`, before any delta, so a failure arriving after that event has been paid
