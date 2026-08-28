@@ -175,10 +175,13 @@ between the two halves, and you have to look in the HTML view to find one: it is
 role="doc-pagebreak", it announces nothing, and the flattened view shows the halves adjacent with
 nothing in between. Where the HTML puts no page break between them, the page index below is the other sign, and you need
 it: a page that prints no number emits no marker at all, so a document of unnumbered scans has page
-turns and nothing marking them. Halves that match excerpts from two different pages are a page turn
-whether or not a marker was printed, and that is the case above — say nothing about it. Only where
-both halves sit inside one page's own excerpt did the sentence break inside a page, and that is
-content the page did not return: a finding of the ordinary kind, and yours to make.
+turns and nothing marking them. Each entry in that index is the START of a page, which is
+where the half that carries on will be: find "ices in a State" at the head of some page's excerpt and
+this is a page turn, marker or no marker, and there is nothing to report. Silence is also the answer
+where you cannot place either half — the halves as printed are right, and an issue about them is one
+nobody may close. Only where the break and both halves sit inside one page's own excerpt did the
+sentence break inside a page, and that is content the page did not return: a finding of the ordinary
+kind, and yours to make.
 
 Treat a table that reports [0 rows], a [Field ...] with nothing announced after it, and an
 [Image] [alt missing] as evidence of a real problem. Do NOT report these, which are correct
