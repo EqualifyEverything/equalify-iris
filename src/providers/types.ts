@@ -95,10 +95,16 @@ export class TruncatedResponseError extends Error {
   readonly maxTokens: number;
   readonly chars: number;
 
-  constructor(provider: string, model: string, maxTokens: number, chars: number) {
+  // `note` is for the one case where "raise it" is the wrong instruction: a ceiling the
+  // MODEL enforces, below the one the deployment asked for, cannot be raised at all
+  // (providers/bedrock.ts, issue #249). Appended rather than replacing the sentence,
+  // because `isTruncatedResponseError` matches the fixed part of it and the review loop
+  // acts on that.
+  constructor(provider: string, model: string, maxTokens: number, chars: number, note?: string) {
     super(
       `${provider}: response hit the ${maxTokens}-token output ceiling and was truncated ` +
-        `(${chars} chars returned). Raise providers.${provider}.max_tokens.`,
+        `(${chars} chars returned). Raise providers.${provider}.max_tokens.` +
+        (note ? ` ${note}` : ""),
     );
     this.name = "TruncatedResponseError";
     this.provider = provider;

@@ -296,6 +296,17 @@ providers:
     # See the note on openrouter.max_tokens above. Retries are handled by the AWS
     # SDK's own `standard` strategy (3 attempts, exponential backoff, throttling +
     # 5xx + network errors), so there is no retry knob here.
+    #
+    # This number can be more output than a model will ACCEPT, which is a different
+    # failure from hitting the ceiling: several non-Claude models on Bedrock cap
+    # output well below 32000 and refuse the request outright rather than clamping
+    # it (Amazon Nova Pro caps at 10000). A model that does gets one rejected
+    # request, then the same call again at the ceiling Bedrock names in the
+    # rejection, and that number for every later call to it in the process — with a
+    # warning naming this key, because the config is still the thing to fix. So a
+    # model swap done here alone does not lose a document, but do read the warning:
+    # a ceiling the MODEL enforces is not one the thresholds above were sized
+    # against, and a dense page can then truncate where it used to fit.
     max_tokens: 32000
     # See the notes on openrouter.image_limits, openrouter.prompt_cache and
     # openrouter.prompt_cache_ttl above; the same overrides exist here and are just as
