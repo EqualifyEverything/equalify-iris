@@ -169,8 +169,18 @@ test("the Reader is told a page-broken sentence is not a defect and not its to r
     // the clause names the view the sign is actually in, and says what to do when it is absent.
     ["the sign is named, and the view it is actually in",
       /What tells you this is the case is a page break between the two halves, and you have to look in the HTML view to find one: it is an <hr> carrying role="doc-pagebreak", it announces nothing, and the flattened view shows the halves adjacent with nothing in between/],
-    ["and no page break between the halves means the loss is inside one page, and reportable",
-      /Where the HTML puts no page break between them, the sentence broke inside one page, which is content that page did not return, and that is a finding of the ordinary kind and yours to make/],
+    // The marker is conditional on the page printing a folio — `agents/page.md`: "Where the page
+    // prints no number, emit no marker" — so "no marker between them" cannot mean "not a page turn".
+    // On a document of unnumbered scans it would mean the opposite, and the Reader would file the
+    // issue the editor is forbidden to close, which is the recurrence this whole pair of clauses
+    // exists to prevent. The page index is the sign that survives an unnumbered page: two excerpts
+    // means two pages.
+    ["the page index is named as the sign that survives a page printing no number",
+      /the page index below is the other sign, and you need it: a page that prints no number emits no marker at all, so a document of unnumbered scans has page turns and nothing marking them/],
+    ["two excerpts means a page turn, whatever the markers say",
+      /Halves that match excerpts from two different pages are a page turn whether or not a marker was printed, and that is the case above — say nothing about it/],
+    ["and only both halves inside one page's excerpt is the loss that is reportable",
+      /Only where both halves sit inside one page's own excerpt did the sentence break inside a page, and that is content the page did not return: a finding of the ordinary kind, and yours to make/],
   ] as [string, RegExp][]) {
     assert.match(reader, re, `READER_SYSTEM no longer says: ${what}`);
   }

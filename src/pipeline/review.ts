@@ -173,9 +173,12 @@ again every round, about text that is already right. Joining the halves belongs 
 both, and is not this one. Say nothing about it. What tells you this is the case is a page break
 between the two halves, and you have to look in the HTML view to find one: it is an <hr> carrying
 role="doc-pagebreak", it announces nothing, and the flattened view shows the halves adjacent with
-nothing in between. Where the HTML puts no page break between them, the sentence broke inside one
-page, which is content that page did not return, and that is a finding of the ordinary kind and
-yours to make.
+nothing in between. Where the HTML puts no page break between them, the page index below is the other sign, and you need
+it: a page that prints no number emits no marker at all, so a document of unnumbered scans has page
+turns and nothing marking them. Halves that match excerpts from two different pages are a page turn
+whether or not a marker was printed, and that is the case above — say nothing about it. Only where
+both halves sit inside one page's own excerpt did the sentence break inside a page, and that is
+content the page did not return: a finding of the ordinary kind, and yours to make.
 
 Treat a table that reports [0 rows], a [Field ...] with nothing announced after it, and an
 [Image] [alt missing] as evidence of a real problem. Do NOT report these, which are correct
