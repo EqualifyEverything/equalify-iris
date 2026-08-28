@@ -176,12 +176,13 @@ role="doc-pagebreak", it announces nothing, and the flattened view shows the hal
 nothing in between. Where the HTML puts no page break between them, the page index below is the other sign, and you need
 it: a page that prints no number emits no marker at all, so a document of unnumbered scans has page
 turns and nothing marking them. Each entry in that index is the START of a page, which is
-where the half that carries on will be: find "ices in a State" at the head of some page's excerpt and
-this is a page turn, marker or no marker, and there is nothing to report. Silence is also the answer
-where you cannot place either half — the halves as printed are right, and an issue about them is one
-nobody may close. Only where the break and both halves sit inside one page's own excerpt did the
-sentence break inside a page, and that is content the page did not return: a finding of the ordinary
-kind, and yours to make.
+where the half that carries on will be: find "ices in a State" at or near the head of some page's
+excerpt — a numbered page puts its marker there first, so the words may be a little way in — and this
+is a page turn, marker or no marker, and there is nothing to report. Silence is also the answer where
+you cannot place either half — the halves as printed are right, and an issue about them is one nobody
+may close. Only where both halves and the words they break between sit inside one page's own excerpt
+did the sentence break inside a page, and that is content the page did not return: a finding of the
+ordinary kind, and yours to make.
 
 Treat a table that reports [0 rows], a [Field ...] with nothing announced after it, and an
 [Image] [alt missing] as evidence of a real problem. Do NOT report these, which are correct

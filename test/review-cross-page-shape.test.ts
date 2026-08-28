@@ -182,14 +182,20 @@ test("the Reader is told a page-broken sentence is not a defect and not its to r
     // READER_INDEX_EXCERPT_CHARS = 200 for the Reader — so the first half of a split sits at the END
     // of its page's HTML and matches no excerpt at all. What is findable is the half that carries on,
     // because that is the head of the next page.
-    ["the sign is the continuing half at the head of a page's excerpt",
-      /Each entry in that index is the START of a page, which is where the half that carries on will be: find "ices in a State" at the head of some page's excerpt and this is a page turn, marker or no marker, and there is nothing to report/],
+    // "at or near", because on a numbered page the marker is the first thing the page emits, so the
+    // entry begins `<hr role="doc-pagebreak" …>` and the continuing words are a few tens of
+    // characters in. Only on an unnumbered page are they at position 0.
+    ["the sign is the continuing half at or near the head of a page's excerpt",
+      /Each entry in that index is the START of a page, which is where the half that carries on will be: find "ices in a State" at or near the head of some page's excerpt — a numbered page puts its marker there first, so the words may be a little way in — and this is a page turn, marker or no marker, and there is nothing to report/],
     // And silence is the default when the index shows nothing either way, which is what actually keeps
     // an unclosable issue from being filed on a document the index cannot resolve.
     ["silence is also the answer when neither half can be placed",
       /Silence is also the answer where you cannot place either half — the halves as printed are right, and an issue about them is one nobody may close/],
-    ["and the reportable case is the break and both halves inside one page's excerpt",
-      /Only where the break and both halves sit inside one page's own excerpt did the sentence break inside a page, and that is content the page did not return: a finding of the ordinary kind, and yours to make/],
+    // Not "the break": this sentence sits inside the branch that begins "Where the HTML puts no page
+    // break between them", so a break is the one thing there is none of, and naming it made the
+    // condition unsatisfiable on a literal reading. What the Reader can point at is the words.
+    ["and the reportable case names the words, not a break that branch has none of",
+      /Only where both halves and the words they break between sit inside one page's own excerpt did the sentence break inside a page, and that is content the page did not return: a finding of the ordinary kind, and yours to make/],
   ] as [string, RegExp][]) {
     assert.match(reader, re, `READER_SYSTEM no longer says: ${what}`);
   }
