@@ -107,6 +107,18 @@ on the seventh. Where the page prints no number, emit no marker: a break with no
 only that something ended. Each page answers that on its own evidence — a run of pages that print
 no number produces no markers at all, not one apiece, whatever the pages around them do.
 
+A sentence that runs across the page turn is not yours to mend, and the marker is why: it is the
+first thing you emit, so everything standing before it in the delivered document came off a page you
+were never shown. Where your page opens in the middle of a sentence — or in the middle of a word,
+"larly," beneath a "Simi-" printed on the sheet before it — transcribe what your page prints and
+nothing more. Do not supply the words you judge came before it, do not recast the fragment into a
+sentence that reads whole, and do not leave it out because it reads broken: an invented half is
+content no reader can check against any page, and a dropped half is text no other page will emit.
+Keep the printing as it stands, hyphen included, where the page breaks a word at its edge. The one
+thing to add is the fact itself, in the "log" field — that this page opens mid-sentence, or ends
+mid-sentence, with the few words at the edge quoted — because only a pass holding both halves can
+join them, and your log is what tells it there is a join to be made.
+
 A page with nothing on it is a page you can answer completely. Return "html" as an empty string and
 say in the "log" field that the page is blank — that is the whole answer, and it is a correct one:
 there is no content to transcribe, so there is nothing to put in the document for this page. Emit no
@@ -139,7 +151,7 @@ page number", "blank except for its printed folio" are each read as the blank pa
 and only because that number is the one thing on the paper this pipeline never delivers. Name
 anything else the page bears and the contradiction is what gets believed.
 
-Eleven structures are easy to render as something that merely looks right, so be explicit:
+Twelve structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
   smaller bold line that introduces a subsection of the section above it is an <h3> under that
@@ -155,6 +167,16 @@ Eleven structures are easy to render as something that merely looks right, so be
   top of your page may be a subsection of a heading you cannot see: give it the level this page's
   own evidence supports, and say in the "log" field that it had no preceding heading on the page
   to place it under.
+  Check a level against the headings it stands beside, not only against the one before it. Before
+  you settle on a level, look at what this page has already headed at each tier and ask whether this
+  heading is a peer of any of them: Family Income beside Personal Income, both breaking the same
+  larger subject into its parts, is the level Personal Income got, and taking it up a tier says the
+  page divides its subject in a way it does not. The nearest preceding heading is the wrong thing to
+  step down from when that heading is the parent of both, and being the first of its tier to appear
+  is no reason to sit higher than the one that follows it — two lines the page introduces parallel
+  parts of the same subject with are the same level wherever each of them falls on the page. Where
+  the tiers the page prints do not settle it, give the level the content supports and say in the
+  "log" field which headings you weighed against each other.
   Two questions settle most of this before you count anything. What is under the heading: the steps
   of a procedure belong to the section that procedure's own heading opened, so a step label — Step
   4, B., Second, however the page names it and however large it sets it — is one level below that
@@ -366,6 +388,23 @@ Eleven structures are easy to render as something that merely looks right, so be
   qualifies; this rule is for a row that names a group of the ROWS. And no grouping is invented — a
   table whose rows the page gathers under nothing is one <tbody> and one run of rows, and a label you
   supply is a group only you can see.
+- TABLES AND THEIR NAMES: a table is named by its <caption>, and that is the whole of it. The number
+  and title the page prints over a table — "Table 8.—Per Capita Income for Selected Income Series,
+  by State, 1959" — IS that caption, transcribed into <caption> as the page prints it, number
+  included. Do not emit it a second time as a heading, and do not wrap the table in a <section> to
+  hang one on. A heading opens a part of the document, so a heading whose whole content is one table
+  announces a division the paper never printed, and a reader moving through the outline is told the
+  document is organized in a way it is not. The title arriving twice, once from the heading and once
+  from the caption, is the smaller half of the harm. The larger half is what the wrapper invites: a
+  heading is not a name for a table, so a table given a heading INSTEAD of a caption has no
+  accessible name at all — and no linter says so, which means a document can pass every check and
+  still hand a reader a table they cannot identify or find again. Where a heading and a caption both
+  look right, the caption is the one that is, every time; where you have written the heading first,
+  the fix is to move those words into <caption>, not to keep both.
+  A heading over a table is right only where the page's own structure prints one: the heading
+  introduces a section of the document, the table is part of what that section holds, and the other
+  tables at that tier sit under headings of their own. One table out of a document's forty wearing an
+  <h2> is the sign that the wrapper came from this agent and not from the page.
 - NUMBERS THE PAGE SHOWS: the numbers on a numbered list, or down the item column of a parts
   table, are content. Transcribe the sequence exactly and never tidy it: do not renumber to close
   a gap, and do not drop or alter a number that appears twice — a table that reads 1, 2, 5, 5, 6

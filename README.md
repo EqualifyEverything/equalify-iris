@@ -412,9 +412,17 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
 
   Reconciliation's *within-page* job also no longer exists: it was there to clean up after the
   fan-out, and one page now yields one fragment from one agent, so there are never two fragments
-  competing to represent the same content. Across pages the problem is real and open — a
-  paragraph or table can span a page break, and the page agent notes the cut-off edge rather
-  than joining anything (§7.6 v1.2).
+  competing to represent the same content. Across pages the problem is real, and half of it is now
+  closed: a **table** printed across a page break is rejoined where the pages are joined (the bullet
+  further down describes how), while a **sentence** that runs across the turn is not. Prose is the
+  harder half for a reason worth stating, because it is not a gap anyone can close in the page agent:
+  the page-break marker is the first thing a page emits, so a split sentence lands with its halves in
+  two different replies, and the agent that wrote `public serv-` was never shown the page that says
+  `ices`. Neither can emit that sentence whole without inventing the half it cannot see. So the page
+  agent's job there is to transcribe its own edge exactly, hyphen included, and declare in its `log`
+  that the page opens or ends mid-sentence; joining is left to a pass that holds both halves, and
+  there is no such pass yet (§7.6 v1.2). Measured on the last bench round: 22 of 90 page-break
+  markers stand where a sentence carries on, and 2 of those split a hyphenated word.
 - **One agent per page, not one per content type (§7.4 v1.2).** The PRD's nine per-content-type
   agents (`paragraph.md`, `table.md`, `formField.md`, …) have been **deleted**, and this is the
   decision on whether the agent library is the product: it is, but the library is not a taxonomy
