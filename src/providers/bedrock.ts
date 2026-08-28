@@ -9,7 +9,12 @@ import {
   type SystemContentBlock,
 } from "@aws-sdk/client-bedrock-runtime";
 import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
-import { StalledStreamError, TruncatedResponseError, type StallKind } from "./types.ts";
+import {
+  StalledStreamError,
+  TruncatedResponseError,
+  isRequestTooLargeError,
+  type StallKind,
+} from "./types.ts";
 import type { CompletionRequest, CompletionResult, ModelProvider, Usage } from "./types.ts";
 import {
   cacheableSystemPrompt,
@@ -333,6 +338,106 @@ function converseUsage(raw?: {
   return Object.keys(usage).length ? usage : undefined;
 }
 
+// What one attempt asked for, and whether it cost anything. `maxTokens` because the ceiling
+// a call asks for is not always `this.maxTokens` — once Bedrock has stated a lower one for a
+// model, that is what the next call asks for, and the truncation error has to name the
+// number actually sent or it points an operator at the wrong figure.
+//
+// `spent` is what makes sending a refused request again free: it is true as soon as anything
+// about this attempt has been paid for, which is output having streamed OR an upstream
+// having reported usage for it. Both, not just the first: the Anthropic stream reports the
+// PROMPT's counts in `message_start`, before a single delta, so a failure arriving after that
+// event has been billed for the whole prompt while having produced no text at all. Bedrock
+// delivers this refusal as an HTTP error today, before any of that — but a guard that has to
+// be re-derived from where AWS currently validates is not a guard.
+interface Attempt {
+  maxTokens: number;
+  spent: boolean;
+}
+
+// The output ceiling a Bedrock rejection states, as Bedrock states it. Both messages below
+// are verbatim, and both are one command to reproduce (us-east-1, 2026-08-28):
+//
+//   aws bedrock-runtime converse --model-id amazon.nova-pro-v1:0 \
+//     --messages '[{"role":"user","content":[{"text":"hi"}]}]' \
+//     --inference-config '{"maxTokens":32000}'
+//   → ValidationException: The maximum tokens you requested exceeds the model limit of
+//     10000. Try again with a maximum tokens value that is lower than 10000.
+//
+//   aws bedrock-runtime invoke-model --model-id us.anthropic.claude-sonnet-4-6 \
+//     --body '{"anthropic_version":"bedrock-2023-05-31","max_tokens":200000,...}' out.json
+//   → ValidationException: The maximum tokens you requested exceeds the model limit of
+//     128000
+//
+// So the sentence is Bedrock's own on both APIs, and the second one shows the trailing
+// advice is optional — which is why the number is read from "the model limit of N" and not
+// from "lower than N". "Lower than" is also wrong as an instruction: asking Nova Pro for
+// exactly 10000 succeeds (same command, `maxTokens: 10000`, 52 output tokens returned), so
+// the stated limit is the value to retry AT, not one to subtract from.
+const OUTPUT_CEILING_STATED = /maximum tokens you requested exceeds the model limit of\s*([\d,]+)/i;
+
+// Name and message together, because the AWS SDK puts "ValidationException" in `name` and
+// leaves the message the bare sentence. Only the CLI above prints them joined.
+function errorText(e: unknown): string {
+  return e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+}
+
+export function statedOutputCeiling(e: unknown): number | null {
+  const found = OUTPUT_CEILING_STATED.exec(errorText(e));
+  if (!found) return null;
+  const ceiling = Number(found[1].replace(/,/g, ""));
+  return Number.isSafeInteger(ceiling) && ceiling > 0 ? ceiling : null;
+}
+
+// Whether Bedrock refused the request over the model's OUTPUT ceiling, which is the one
+// refusal `providers.bedrock.max_tokens` answers.
+//
+// `isRequestTooLargeError` comes first and wins, because the two refusals read alike and
+// have opposite remedies: a call refused for the size of its PROMPT is one the review loop
+// recovers by dropping page images (pipeline/review.ts), and stealing it here would replace
+// a working recovery with a retry that changes nothing about the prompt. One phrasing in
+// the wild says both at once — a marketplace model rejecting with "This model's maximum
+// context length is 4096 tokens. However, you requested 4096 output tokens..." — and it is
+// a context refusal, so lowering the output ceiling would not have helped it.
+//
+// Past the sentence this adapter has seen, the test is a validation refusal that names the
+// output ceiling in some other words. Such an error is not retried — there is no number to
+// retry at — but it is still worth recognizing, because naming the knob is most of what
+// issue #249 asks for and a wording AWS changes tomorrow should not cost that.
+export function refusedForOutputCeiling(e: unknown): boolean {
+  if (isRequestTooLargeError(e)) return false;
+  const text = errorText(e).toLowerCase();
+  if (OUTPUT_CEILING_STATED.test(text)) return true;
+  return (
+    text.includes("validationexception") &&
+    /max_tokens|maxtokens|maximum tokens|output token/.test(text) &&
+    /limit|exceed|lower than|less than|maximum allowed/.test(text)
+  );
+}
+
+// The failure #249 is about, said in a way that names the setting at fault. Bedrock's own
+// message does not: an operator reading "the maximum tokens you requested exceeds the model
+// limit" beside a run of pages that all failed has no reason to look in config at all, and
+// the pipeline reports it as pages lost, which reads as a model that could not do the work.
+//
+// Deliberately worded clear of every phrase `isRequestTooLargeError` matches ("too large",
+// "context length", "too many tokens"): this call was refused over its OUTPUT ceiling, and
+// a caller that read it as a prompt-size refusal would drop the page images and ask again
+// with the same ceiling.
+function outputCeilingRefused(model: string, asked: number, cause: unknown): Error {
+  const said = cause instanceof Error ? cause.message : String(cause);
+  const error = new Error(
+    `bedrock: ${model} refused a request asking for ${asked} output tokens, and its own ` +
+      `ceiling is what it refused — the model is not being asked to do work it cannot do. ` +
+      `providers.bedrock.max_tokens is the setting at fault: lower it, or route this ` +
+      `capability to a model whose ceiling is at least that high (providers.per_agent). ` +
+      `Bedrock said: ${said}`,
+    { cause },
+  );
+  error.name = "OutputCeilingRefusedError";
+  return error;
+}
+
 // Amazon Bedrock adapter (PRD §10.3). Uses the Anthropic Messages format
 // that Bedrock's Claude models accept. Credentials come from the standard
 // AWS credential chain (env vars, shared profile, or IAM role).
@@ -362,6 +467,19 @@ export class BedrockProvider implements ModelProvider {
 
   private client: BedrockRuntimeClient;
   private maxTokens: number;
+  // Output ceilings Bedrock has stated in a rejection, per model id, learned in this
+  // process and never read from a table. Per MODEL rather than per provider because one
+  // provider block serves several: `per_capability` and `providers.per_agent` can put a
+  // Nova on vision and a Claude on text, and clamping the Claude because the Nova refused
+  // would lose output nothing had refused. Nothing persists it — a process that restarts
+  // pays one rejected request per model to learn it again, which is the cost of having no
+  // catalogue to go stale (issue #249).
+  private ceilings = new Map<string, number>();
+  // What has already been said about a ceiling, so a batch of concurrent pages that all met
+  // the same refusal does not report it as several problems. See the warns in `complete`: a
+  // model id for the paragraph naming `max_tokens`, and a model plus both numbers for the
+  // rarer one that corrects it.
+  private warnedCeilings = new Set<string>();
   private promptCache: boolean;
   private cacheTtl: CacheTtl;
   private firstOutputTimeoutMs: number;
@@ -419,26 +537,132 @@ export class BedrockProvider implements ModelProvider {
     return this.promptCache && cacheableSystemPrompt(req.model, system);
   }
 
+  // What this call may ask for: the deployment's ceiling, or the model's own where Bedrock
+  // has already stated a lower one.
+  private ceilingFor(model: string): number {
+    const stated = this.ceilings.get(model);
+    return stated === undefined ? this.maxTokens : Math.min(this.maxTokens, stated);
+  }
+
+  // A config-only model swap is what `providers` exists for, and `max_tokens: 32000` is
+  // more output than several Bedrock models will accept: Amazon Nova Pro caps at 10000 and
+  // REFUSES the request rather than clamping it, so every page of every document fails
+  // until someone reads the rejection and knows to change a second setting (issue #249).
+  //
+  // The refusal carries the remedy in it — Bedrock states the model's actual ceiling — so
+  // the call is sent again at that ceiling and the number is remembered for the rest of the
+  // process. No per-model table: a catalogue of ceilings would need editing every time AWS
+  // adds a model, and would be silently wrong for the one nobody remembered.
+  //
+  // Retried ONCE and only from the refusal, which is safe in the two ways that matter: a
+  // validation refusal happens before generation, so nothing was billed and no output was
+  // discarded (`attempt.chars`, held rather than assumed), and the second attempt asks for
+  // strictly less than the first, so this cannot recur. A second refusal is reported, not
+  // retried again.
   async complete(req: CompletionRequest): Promise<CompletionResult> {
     const system = req.messages
       .filter((m) => m.role === "system")
       .map((m) => m.content)
       .join("\n\n");
-    // Sent from inside the branch rather than after it, because the SDK's `send` is typed
-    // per command: a union of two commands matches neither overload, and widening it to
-    // make one call site work would be casting away the one check that says a Converse
-    // request is being sent to the Converse API.
-    if (this.dialect === "converse") {
-      const command = this.converseCommand(req, system);
-      return this.stream(req, (signal) => this.client.send(command, { abortSignal: signal }), readConverse);
+    const asked = this.ceilingFor(req.model);
+    const first: Attempt = { maxTokens: asked, spent: false };
+    try {
+      return await this.send(req, system, first);
+    } catch (e) {
+      // `first.spent` is the guarantee that sending it again costs nothing: a refusal
+      // arrives before generation, so a failure that had already been billed for is not
+      // this one however its message reads, and re-sending would pay for the prompt twice.
+      if (!refusedForOutputCeiling(e) || first.spent) throw e;
+      const stated = statedOutputCeiling(e);
+      // Refused over the ceiling with nothing to retry at: either the message did not state
+      // a number, or it stated one that is not below what was asked, which is a rejection
+      // this adapter does not understand well enough to answer. Both still get to say which
+      // knob is wrong, which is the half of #249 that matters most on call.
+      if (stated === null || stated >= asked) throw outputCeilingRefused(req.model, asked, e);
+      this.ceilings.set(req.model, stated);
+      // Once per model per process, and said with a flag of its own rather than left to the
+      // line above: pages are extracted five at a time (DEFAULT_EXTRACTION_CONCURRENCY), so
+      // on a fresh process every call already in flight asks for the deployment's ceiling
+      // before any of them has learned better, and all five are refused. The rejections are
+      // free — nothing is billed for a request that was never read — but five copies of a
+      // paragraph about config would read as five different problems.
+      //
+      // Not an error, either: the call is about to succeed, and a deployment that never reads
+      // its logs still gets its pages. Worth saying anyway, because the config is wrong, later
+      // calls pay nothing for that only because of the line above, and a ceiling the MODEL
+      // enforces is not one the shrink floor and section headroom were sized against.
+      if (!this.warnedCeilings.has(req.model)) {
+        this.warnedCeilings.add(req.model);
+        console.warn(
+          `bedrock: ${req.model} refused ${asked} output tokens and stated its own ceiling of ` +
+            `${stated}, so the call was sent again at ${stated} and every later call to this ` +
+            `model in this process will ask for ${stated}. providers.bedrock.max_tokens is ` +
+            `${this.maxTokens}, which this model does not accept: nothing has to change for ` +
+            `the run to finish, but ${stated} is now the ceiling a dense page has to fit ` +
+            `under, and the shrink floor and section headroom were sized against ` +
+            `${this.maxTokens}.`,
+        );
+      }
+      const second: Attempt = { maxTokens: stated, spent: false };
+      try {
+        return await this.send(req, system, second);
+      } catch (again) {
+        if (!refusedForOutputCeiling(again) || second.spent) throw again;
+        // This page is lost either way — a third attempt is not on offer, since a model that
+        // refuses the ceiling it just named is one this adapter has no model of. But the
+        // number it named the second time is still the best thing known about it, so the next
+        // call starts from there rather than re-learning the same two refusals. `ceilingFor`
+        // takes the lower of this and the deployment's, so a larger one changes nothing.
+        const narrower = statedOutputCeiling(again);
+        if (narrower !== null && narrower < stated) {
+          this.ceilings.set(req.model, narrower);
+          // Said even though this model has been warned about already: the paragraph above
+          // told an operator that every later call would ask for `stated`, and that is no
+          // longer true. A number in the log the process has stopped using is worse than the
+          // repetition `warnedCeilings` exists to prevent.
+          //
+          // Keyed by the whole fact rather than by the model, because that is what makes it a
+          // correction: several pages in flight at `stated` are each refused and would each
+          // report the identical pair of numbers, and one paragraph correcting one figure is
+          // the same amount of news however many pages found it out.
+          const correction = `${req.model}:${stated}:${narrower}`;
+          if (!this.warnedCeilings.has(correction)) {
+            this.warnedCeilings.add(correction);
+            console.warn(
+              `bedrock: ${req.model} refused ${stated} as well and stated a ceiling of ` +
+                `${narrower}, so later calls to it will ask for ${narrower} and not the ` +
+                `${stated} named above. This page is lost: a model that refuses the ceiling ` +
+                `it just named is not one this adapter will keep guessing at.`,
+            );
+          }
+        }
+        throw outputCeilingRefused(req.model, stated, again);
+      }
     }
-    const command = this.invokeCommand(req, system);
-    return this.stream(req, (signal) => this.client.send(command, { abortSignal: signal }), readInvoke);
+  }
+
+  // One attempt at one ceiling.
+  //
+  // Sent from inside the branch rather than after it, because the SDK's `send` is typed
+  // per command: a union of two commands matches neither overload, and widening it to
+  // make one call site work would be casting away the one check that says a Converse
+  // request is being sent to the Converse API.
+  private send(req: CompletionRequest, system: string, attempt: Attempt): Promise<CompletionResult> {
+    if (this.dialect === "converse") {
+      const command = this.converseCommand(req, system, attempt.maxTokens);
+      return this.stream(req, attempt, (signal) => this.client.send(command, { abortSignal: signal }), readConverse);
+    }
+    const command = this.invokeCommand(req, system, attempt.maxTokens);
+    return this.stream(req, attempt, (signal) => this.client.send(command, { abortSignal: signal }), readInvoke);
   }
 
   // The Anthropic Messages body, sent through `InvokeModelWithResponseStream`. What every
   // deployment runs, and the reference the `converse` path has to match.
-  private invokeCommand(req: CompletionRequest, system: string): InvokeModelWithResponseStreamCommand {
+  private invokeCommand(
+    req: CompletionRequest,
+    system: string,
+    maxTokens: number,
+  ): InvokeModelWithResponseStreamCommand {
     const messages = req.messages
       .filter((m) => m.role !== "system")
       .map((m) => {
@@ -469,7 +693,7 @@ export class BedrockProvider implements ModelProvider {
 
     const payload: Record<string, unknown> = {
       anthropic_version: "bedrock-2023-05-31",
-      max_tokens: this.maxTokens,
+      max_tokens: maxTokens,
       messages,
     };
     // The system prompt, and a cache breakpoint on it when it is worth one
@@ -504,7 +728,11 @@ export class BedrockProvider implements ModelProvider {
   //     retry, where a looser one costs them a rejected request.
   //   - `max_tokens` moves into `inferenceConfig`, which is where a model-agnostic API
   //     has to put it — the ceiling is a fact about the request, not about Claude.
-  private converseCommand(req: CompletionRequest, system: string): ConverseStreamCommand {
+  private converseCommand(
+    req: CompletionRequest,
+    system: string,
+    maxTokens: number,
+  ): ConverseStreamCommand {
     const messages: ConverseMessage[] = req.messages
       .filter((m) => m.role !== "system")
       .map((m) => {
@@ -546,7 +774,7 @@ export class BedrockProvider implements ModelProvider {
       // Omitted rather than sent empty when there is no system prompt: an empty list is
       // not the same request as no list, and the one this replaces sent no field at all.
       ...(systemBlocks.length ? { system: systemBlocks } : {}),
-      inferenceConfig: { maxTokens: this.maxTokens },
+      inferenceConfig: { maxTokens },
     });
   }
 
@@ -556,6 +784,7 @@ export class BedrockProvider implements ModelProvider {
   // it is on the other.
   private async stream(
     req: CompletionRequest,
+    attempt: Attempt,
     send: (signal: AbortSignal) => Promise<{
       body?: AsyncIterable<object>;
       stream?: AsyncIterable<object>;
@@ -601,6 +830,9 @@ export class BedrockProvider implements ModelProvider {
     let usage: Usage | undefined;
     const mergeUsage = (u?: Usage): void => {
       if (!u) return;
+      // An upstream that has counted anything has billed for it, whether or not any text has
+      // arrived yet — see Attempt.spent.
+      attempt.spent = true;
       usage = { ...usage, ...u };
       req.onUsage?.(usage);
     };
@@ -643,7 +875,13 @@ export class BedrockProvider implements ModelProvider {
         // progress — an unknown event repeating forever should trip the idle clock,
         // rather than defeat it.
         if (!reading) continue;
-        if (reading.text) text += reading.text;
+        if (reading.text) {
+          text += reading.text;
+          // Reported out as it arrives, for the same reason usage is: the caller decides
+          // whether a failed call may be sent again, and "this attempt cost nothing" is a
+          // fact only this loop holds.
+          attempt.spent = true;
+        }
         if (reading.stopReason) stopReason = reading.stopReason;
         mergeUsage(reading.usage);
         // Which clock the read runs on. Before the stop event, the silence windows,
@@ -717,7 +955,24 @@ export class BedrockProvider implements ModelProvider {
     // instead: the SDK will not retry this (it is a 200), so the error surfaces to
     // the caller and is recorded as a failed model call in diagnostics.
     if (stopReason === "max_tokens") {
-      throw new TruncatedResponseError(this.name, req.model, this.maxTokens, text.length);
+      // `attempt.maxTokens` and not `this.maxTokens`: on a model whose own ceiling is lower
+      // than the deployment's, what this response hit is the model's, and an operator told
+      // to raise a number the request never asked for would be chasing the wrong one. On
+      // that model the standing advice is wrong too — the ceiling cannot be raised, because
+      // the model refuses more — so the error says so rather than sending someone to edit a
+      // setting that is already higher than the answer.
+      throw new TruncatedResponseError(
+        this.name,
+        req.model,
+        attempt.maxTokens,
+        text.length,
+        attempt.maxTokens < this.maxTokens
+          ? `That ceiling is ${req.model}'s own, below the ${this.maxTokens} in ` +
+              `providers.bedrock.max_tokens, so raising that setting will not move it: this ` +
+              `model refuses a larger request outright. A document this long needs a model ` +
+              `with a higher ceiling, or fewer pages per call.`
+          : undefined,
+      );
     }
     // Every other way of stopping short. The ceiling above is the one with a knob to
     // name; these need their own message because raising max_tokens fixes none of them,

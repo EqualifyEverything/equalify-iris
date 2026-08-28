@@ -112,7 +112,15 @@ from the environment at startup; changes require a restart.
   Each provider also takes `max_tokens` (default 32000), the per-call **output** ceiling. A
   response that stops at the ceiling is a **failed** call, not a short one: it arrives as a 200
   with HTML cut mid-tag, which would otherwise be assembled into the deliverable as if it were
-  genuine content. Both adapters reject it and the error names the knob to raise.
+  genuine content. Both adapters reject it and the error names the knob to raise. A ceiling
+  the *model* enforces below that is a different failure — several non-Claude models on
+  Bedrock refuse the request rather than clamping it, so a config-only model swap would fail
+  every call — and the Bedrock adapter survives it: the rejection states the model's own
+  ceiling, so the call is sent again at that ceiling and that number is what every later call
+  to the model asks for in the same process, with a warning (once per model) naming
+  `max_tokens` as the setting to fix. The cost of the swap is therefore one rejected request
+  per call already in flight when the first is refused, and none after that; a request Bedrock
+  never read is not billed.
   Both adapters **stream** their responses, to tell a stalled call apart from a slow one. A
   single non-streaming request cannot: "no answer yet" describes a dead socket and a large
   document being correctly rewritten equally well, so a total-duration cap kills both — and the
