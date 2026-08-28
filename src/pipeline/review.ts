@@ -164,6 +164,26 @@ You do not see the source images, so never suggest what a marker stood for, and 
 be deleted — a document that once said a word could not be read, or a page not finished, and now
 says nothing tells every reader that the page arrived whole.
 
+A sentence or a word broken at a page turn is not a defect in the markup, and it is not yours to
+report. Where a paragraph ends "public serv-" and the next begins "ices in a State", or ends
+mid-sentence with the next continuing it in lower case, those are two pages transcribed exactly as
+they printed, by calls that could not see each other. The Copy Editor is told to leave both halves as
+they are and to invent no completion, so an issue naming one is an issue nobody may close: reported
+again every round, about text that is already right. Joining the halves belongs to a pass that holds
+both, and is not this one. Say nothing about it. What tells you this is the case is a page break
+between the two halves, and you have to look in the HTML view to find one: it is an <hr> carrying
+role="doc-pagebreak", it announces nothing, and the flattened view shows the halves adjacent with
+nothing in between. Where the HTML puts no page break between them, the page index below is the other sign, and you need
+it: a page that prints no number emits no marker at all, so a document of unnumbered scans has page
+turns and nothing marking them. Each entry in that index is the START of a page, which is
+where the half that carries on will be: find "ices in a State" at or near the head of some page's
+excerpt — a numbered page puts its marker there first, so the words may be a little way in — and this
+is a page turn, marker or no marker, and there is nothing to report. Silence is also the answer where
+you cannot place either half — the halves as printed are right, and an issue about them is one nobody
+may close. Only where both halves and the words they break between sit inside one page's own excerpt
+did the sentence break inside a page, and that is content the page did not return: a finding of the
+ordinary kind, and yours to make.
+
 Treat a table that reports [0 rows], a [Field ...] with nothing announced after it, and an
 [Image] [alt missing] as evidence of a real problem. Do NOT report these, which are correct
 markup: [decorative, alt empty] (an empty alt is right for a decorative image); a row with
@@ -243,6 +263,20 @@ document and not the rest of it, and this is the last round either way. Re-extra
 what has a whole response to itself. So leave the marker exactly
 where it stands, resolve the other issues around it, and never delete it — an unfinished page that
 says so can be finished, and one that does not looks complete to everyone downstream.
+
+A sentence or a word broken at a page boundary is not a defect in the markup either, and finishing
+one is the third text you may not add. Where a paragraph ends "public serv-" and the next begins
+"ices in a State", or ends mid-sentence with the next continuing it in lower case, those halves came
+off two pages extracted by calls that could not see each other, and the page-break marker between
+them is why: it is the first thing a page emits, so the split falls between two replies rather than
+inside either. Do not complete the word, do not rewrite either half into a sentence that reads
+whole, and do not delete the fragment that looks broken — every word of both halves is a word some
+page printed, and the completion is a word no page printed. Leave the text as it stands, and leave it
+off your observation list as well: a split straddles two pages, usually neither of them one whose
+image you hold, and none of the kinds below names it, so filing it there is a mistagged fidelity
+report rather than a record anyone acts on. The record already exists — the page that opened
+mid-sentence said so in its own log — and joining the halves belongs to a pass that holds both,
+because a plausible completion reaches the reader as what the page says.
 
 A link's target is content, and it is the one kind you cannot recover: an href came from the
 source FILE, not from the page image, so a URL you drop or alter is gone and a URL you invent

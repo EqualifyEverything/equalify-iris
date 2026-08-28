@@ -85,6 +85,36 @@ test("the page agent's heading-level rule keeps the clauses that make it a rule"
       /ends one or more subsections and resumes an outer section, go back to the level of the heading that opened that outer section/],
     ["a page-opening heading with no parent on the page is levelled from the page and logged",
       /shown one page and no other.*may be a subsection of a heading you cannot see.*say in the "log" field/],
+    // Issue #245's third rule. The clauses above settle a level by looking BACKWARD — step down from
+    // the nearest preceding heading — and the reported defect is what that misses: "The family income
+    // heading is at level [2] but shall be at level 3 because it is in the same group as personal
+    // income." Both headings break the same larger subject into parts, so the level is decided by the
+    // peer and not by the predecessor, which is the parent of both.
+    //
+    // Unlike the other two rules in #245, this one is not measurable on the corpus and the bench says
+    // so rather than approximating it: there is no reference outline for any document (#181), and
+    // axe's `heading-order` only catches a skipped level and fires zero times on that round. So the
+    // prompt is the whole of the fix, and pinning the clauses is the only regression test there is.
+    ["a level is checked against the headings it stands beside, not only the one before it",
+      /Check a level against the headings it stands beside, not only against the one before it/],
+    ["the reported case is named: parallel parts of one subject take the same level",
+      /Family Income beside Personal Income, both breaking the same larger subject into its parts, is the level Personal Income got, and taking it up a tier says the page divides its subject in a way it does not/],
+    ["the predecessor is the wrong thing to step down from when it is the parent of both",
+      /The nearest preceding heading is the wrong thing to step down from when that heading is the parent of both/],
+    ["being first of its tier is no reason to sit above the peer that follows",
+      /being the first of its tier to appear is no reason to sit higher than the one that follows it/],
+    ["and where the printed tiers do not settle it, the weighing goes in the log",
+      /Where the tiers the page prints do not settle it, give the level the content supports and say in the "log" field which headings you weighed against each other/],
+    // The limit of the check, said out loud rather than left to be discovered: a peer on another
+    // sheet cannot be weighed against, and the cross-page half of this defect belongs to the pass
+    // that reads the assembled document — READER_SYSTEM is told to report "sections of one sort
+    // [that] may open at [Heading 2] on four pages and [Heading 1] on the fifth"
+    // (src/pipeline/review.ts, pinned in test/review-cross-page-shape.test.ts). Without this clause
+    // the rule reads as if one page could settle a document-wide outline.
+    ["the check reaches only as far as this page, and guessing at an unseen peer is worse",
+      /This check reaches only as far as your page: a peer printed on a sheet you were not shown cannot be weighed against, and guessing at one is worse than levelling from the evidence you have/],
+    ["the assembled-document pass is named as the one that sees parallel sections at different levels",
+      /the pass that reads the assembled document is the one that can see two parallel sections opening at different levels, and it is told to/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
@@ -244,6 +274,57 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
     // the other number this agent is given (`page N of M` in the user message).
     ["the number is the one the page shows, never the image's position in the file",
       /use the number the page shows \(iv, 5, A-3\), never the position of the image you were given in the file/],
+    // Issue #245 asked for "a page-break marker must never be placed inside a sentence", and the
+    // bench round shows why that sentence cannot be given to this agent. Measured on runs-231: 0 of
+    // 90 markers are inside a <p> — not because the pages are careful, but because <hr> is not
+    // permitted inside <p>, so a parser closes the paragraph when it meets one; the shape the rule
+    // forbids is unobservable in a delivered tree. Meanwhile 22 of the 90 stand where a sentence
+    // carries on, and 2 of those split a hyphenated word ("Simi-" / "larly,", "public serv-" /
+    // "ices"). Every one of the 22 is at a JOIN between two page replies, because the marker is the
+    // first thing a page emits: the agent that wrote "Simi-" was never shown the page that says
+    // "larly", so neither can emit that sentence as one <p>. Asking them to would buy the rule's
+    // wording at the price of an invented half-sentence, which is the one failure this whole prompt
+    // is built to prevent. So what is pinned here is the executable version: transcribe your own
+    // edge, invent nothing, drop nothing, and declare the join in the log for the pass that can see
+    // both halves.
+    ["a sentence crossing the page turn is not the page's to mend, and the marker is why",
+      /A sentence that runs across the page turn is not yours to mend, and the marker is why: it is the first thing you emit, so everything standing before it in the delivered document came off a page you were never shown/],
+    ["the mid-word case is named with the printing that produces it",
+      /in the middle of a word, "larly," beneath a "Simi-" printed on the sheet before it/],
+    ["neither invent the missing half nor drop the fragment that looks broken",
+      /Do not supply the words you judge came before it, do not recast the fragment into a sentence that reads whole, and do not leave it out because it reads broken/],
+    ["and the reason for both halves of that is given",
+      /an invented half is content no reader can check against any page, and a dropped half is text no other page will emit/],
+    ["a word the page breaks at its edge keeps its hyphen",
+      /Keep the printing as it stands, hyphen included, where the page breaks a word at its edge/],
+    // And the case that sentence also reads on if it stands alone, which the second review of #247
+    // raised: a word the paper broke at the end of a LINE has both halves on this page, so keeping
+    // that hyphen ships `public serv- ices` inside one paragraph. Nothing downstream sees it — axe is
+    // silent and contentCoverage counts words — so the distinction has to be in the prompt, and the
+    // thing that draws it is what the agent can see rather than what the break looks like.
+    ["a word broken at a LINE edge is named as the opposite case",
+      /A word the paper broke at the end of a LINE is the opposite case, and what tells them apart is what you can see/],
+    // Deliberately a different word from the page-break example above ("Simi-" / "larly,"): the two
+    // cases carry opposite dispositions two paragraphs apart, and the identical string was the shape
+    // most likely to get the wrong one applied.
+    ["and it is written whole, with the column's hyphen dropped",
+      /a "condi-" ending one line with "tions" beginning the next is one word split to fit the column — write it whole, "conditions", and do not carry the break into the markup/],
+    // The exception without which the join manufactures a word no page printed, which is what the
+    // whole paragraph exists to prevent: "well-" over "being" is "well-being", not "wellbeing".
+    // Unmeasured — the corpus evidence is all page-edge — and joining line-broken words is already
+    // the default, so the risk arrived with the clause above rather than with the pipeline.
+    ["a hyphen the word owns survives the join",
+      /A hyphen the word itself owns survives that join: "well-" above "being" is "well-being" and not "wellbeing"/],
+    ["and an undecidable hyphen is kept, because the two errors are not equal",
+      /Where you cannot tell whose hyphen it is, keep it — a hyphen too many is a printing some page might have, and two words run into one is a word no page printed/],
+    // The paragraph's one-line summary, and the sentence most likely to be read alone in a paragraph
+    // whose whole risk is applying the wrong disposition — so it has to name the right half. The half
+    // you cannot see is on another sheet and is never transcribed at all; what is kept as printed is
+    // your own edge, which is the break whose other half you cannot see.
+    ["the summary names the break, not the half that was never transcribed",
+      /Only a break whose other half is on a sheet you cannot see is kept as printed/],
+    ["the fact is declared in the log, for the pass that holds both halves",
+      /that this page opens mid-sentence, or ends mid-sentence, with the few words at the edge quoted — because only a pass holding both halves can join them, and your log is what tells it there is a join to be made/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
@@ -1017,6 +1098,73 @@ test("the page agent's table row-group rule keeps the clauses that make it a rul
   }
 });
 
+// Issue #245, the table half: a user reported tables 4 and 8 sitting under their own <h2> when no
+// other table in the document does, and asked for the headings gone. The bench round's artifacts say
+// how often it happens and, more usefully, that the two ways it happens are not equally bad —
+// measured on runs-231 (build a4832f6, 48 delivered tables): 4 tables sit under their own heading,
+// all four at <h2>. Three repeat the caption's words in the heading, so the title is announced twice
+// and the outline gains a section the document does not have. The fourth (Table 21) has the heading
+// INSTEAD of a <caption> — no <caption> element at all — so that table has no accessible name.
+//
+// That fourth case is why this rule cannot be left to the linter, and the claim is checked rather
+// than assumed: `runAxe` on the heading-only shape, on the heading-and-caption shape, and on the
+// caption-only shape this rule asks for returns `ok: true` with no violations for all three. A
+// document can therefore pass every gate Iris has and still hand a reader a table they cannot
+// identify or find again — the same asymmetry the page-break rule has, where the shape the linter
+// stays quiet about is also the wrong one. The heading outline of that whole round fires nothing:
+// the only axe rule firing anywhere in it is `list`.
+//
+// So the clauses pinned below are the ones that name what goes wrong rather than the ones that
+// describe the right shape: the caption is the name, the heading is not a substitute for it, the
+// unnamed table is the harm, and a heading over a table is right only where the page's own section
+// structure prints one — with "other tables at that tier sit under headings of their own" as the
+// test, because that is the evidence the user's report actually turned on ("no other tables are
+// under their own headings and these shall not be either").
+test("the page agent's table-naming rule keeps the clauses that make it a rule", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["the caption is the table's name, and the printed number and title are that caption",
+      /a table is named by its <caption>, and that is the whole of it[\s\S]*?IS that caption, transcribed into <caption> as the page prints it, number included/],
+    ["the title is not emitted a second time as a heading, and no <section> is added to hang one on",
+      /Do not emit it a second time as a heading, and do not wrap the table in a <section> to hang one on/],
+    // Why, in terms of what the wrapper tells a reader — the half the user's report was about.
+    ["a heading whose whole content is a table announces a division the paper never printed",
+      /a heading whose whole content is one table announces a division the paper never printed, and a reader moving through the outline is told the document is organized in a way it is not/],
+    // Table 21: the case that is worse than the duplication, and the reason it needs saying here.
+    ["a heading in place of a caption leaves the table with no accessible name",
+      /a heading is not a name for a table, so a table given a heading INSTEAD of a caption has no accessible name at all/],
+    ["and no linter reports that, so the document can pass every check and still be unusable",
+      /no linter says so, which means a document can pass every check and still hand a reader a table they cannot identify or find again/],
+    // What to do having already written the heading. The remedy is stated in terms of the page's
+    // printed title rather than "those words", because the heading's words are often a truncation
+    // of the caption the page prints ("Per Capita Income" against "Table 8.—Per Capita Income for
+    // Selected Income Series, by State, 1959") and moving them verbatim would ship the short form.
+    ["a title over a table is a caption whichever element it was written as, in the page's own words",
+      /So where the words over a table are its number and title, that is a caption whichever element you reached for first: give the table the <caption> the page prints — the title's own words, number included — and emit no heading for it/],
+    // Guard: this is not a prohibition on headings above tables, it is a prohibition on inventing
+    // one. Stated as a sufficient condition on THIS page's evidence — the review of the first
+    // version caught it phrased as a conjunction whose third term ("the other tables at that tier
+    // sit under headings of their own") is about the rest of the document, which the page agent
+    // cannot see; read as necessary, it made the remedy delete a section heading the paper printed.
+    ["a heading over a table is right where the page's own structure prints one",
+      /A heading over a table is right where the page's own structure prints one: the heading introduces a section of the document, and the table is part of what that section holds/],
+    // And in that case BOTH exist, which is the clause that stops the remedy from costing the table
+    // its name: a section heading and a caption are not substitutes for one another.
+    ["a genuine section heading is kept and the table still gets its caption",
+      /Keep such a heading, and give the table its <caption> as well — the two then say different things, one naming the section and one naming the table, and neither stands in for the other/],
+    ["what the rule is aimed at is named as the thing to avoid",
+      /What must not happen is a heading you supplied because a table looked like it needed one/],
+    // The peer-tables observation survives as EVIDENCE, which is what the measurement supports:
+    // 4 of 48 tables headed, all <h2>, no other table in the document headed at all.
+    ["the rest of the document is evidence for which one it is, not the test itself",
+      /where its other tables sit under headings of their own, this heading is the page's doing, and one table out of forty wearing an <h2> is the sign the wrapper is yours/],
+    ["and where the document is not in front of it, the page decides on its own printing and logs it",
+      /You are shown one page, so where the rest of the document is not in front of you, decide it on what this page prints[\s\S]*?say in the "log" field which you took it to be/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
 // Two rules about the second pass rather than about the page.
 //
 // #132: a re-render regressed heading levels, table cells and semantic markup that the previous
@@ -1068,7 +1216,7 @@ test("the page agent is told what a second pass keeps, and what a suggestion doe
 // fifth bullet and leaving "Four" in place would have the prompt miscount itself.
 test("the explicit-structures list agrees with the count that introduces it", () => {
   const prompt = section("System prompt")!;
-  const NUMBERS: Record<string, number> = { Two: 2, Three: 3, Four: 4, Five: 5, Six: 6, Seven: 7, Eight: 8, Nine: 9, Ten: 10, Eleven: 11 };
+  const NUMBERS: Record<string, number> = { Two: 2, Three: 3, Four: 4, Five: 5, Six: 6, Seven: 7, Eight: 8, Nine: 9, Ten: 10, Eleven: 11, Twelve: 12 };
   const intro = prompt.match(/(\w+) structures are easy to render/);
   assert.ok(intro, "page.md no longer introduces the list of explicit structures");
   const claimed = NUMBERS[intro![1]];
