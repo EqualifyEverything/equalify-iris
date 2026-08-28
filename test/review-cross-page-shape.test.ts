@@ -142,6 +142,29 @@ test("the editor is told a page-broken word is not a defect, and completing one 
   }
 });
 
+// The Reader's half of the same rule, and the reason it is not optional: with EDITOR_SYSTEM now
+// declining to complete a page-broken word, a Reader that reports one has raised an issue nobody may
+// close. An issue the editor does not fix is reported as unresolved, comes back every round, and
+// lands in `unresolved_rate` on GET /v1/quality (`src/store/db.ts`) — the exact cost READER_SYSTEM
+// itself gives as the reason for leaving an unlabelled footer alone. So the clause sits beside the
+// [not legible] / [page not fully transcribed] clauses, which exist for the same reason.
+test("the Reader is told a page-broken sentence is not a defect and not its to report", () => {
+  for (const [what, re] of [
+    ["it is named as neither a markup defect nor a thing to report",
+      /A sentence or a word broken at a page turn is not a defect in the markup, and it is not yours to report/],
+    ["in the shapes the flattened view actually shows",
+      /Where a paragraph ends "public serv-" and the next begins "ices in a State", or ends mid-sentence with the next continuing it in lower case/],
+    ["with the cause given: two pages, two calls that could not see each other",
+      /those are two pages transcribed exactly as they printed, by calls that could not see each other/],
+    // The load-bearing half: the reason is the editor's refusal, so the two prompts have to agree or
+    // one of them is spending a round every time this appears in a scanned document.
+    ["and the reason tied to what the editor will do with such an issue",
+      /The Copy Editor is told to leave both halves as they are and to invent no completion, so an issue naming one is an issue nobody may close: reported again every round, about text that is already right/],
+  ] as [string, RegExp][]) {
+    assert.match(reader, re, `READER_SYSTEM no longer says: ${what}`);
+  }
+});
+
 // The instruction above is only worth giving if the difference is visible in what the Reader
 // receives. It is: the flattened view is where the two shapes stop being the same words.
 test("the two footer shapes are different in the view the Reader is actually given", () => {

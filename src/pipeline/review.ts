@@ -164,6 +164,15 @@ You do not see the source images, so never suggest what a marker stood for, and 
 be deleted — a document that once said a word could not be read, or a page not finished, and now
 says nothing tells every reader that the page arrived whole.
 
+A sentence or a word broken at a page turn is not a defect in the markup, and it is not yours to
+report. Where a paragraph ends "public serv-" and the next begins "ices in a State", or ends
+mid-sentence with the next continuing it in lower case, those are two pages transcribed exactly as
+they printed, by calls that could not see each other — the page break standing between them is the
+sign of it. The Copy Editor is told to leave both halves as they are and to invent no completion, so
+an issue naming one is an issue nobody may close: reported again every round, about text that is
+already right. Joining the halves belongs to a pass that holds both, and is not this one. Say nothing
+about it.
+
 Treat a table that reports [0 rows], a [Field ...] with nothing announced after it, and an
 [Image] [alt missing] as evidence of a real problem. Do NOT report these, which are correct
 markup: [decorative, alt empty] (an empty alt is right for a decorative image); a row with

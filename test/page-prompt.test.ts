@@ -304,8 +304,19 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
     // thing that draws it is what the agent can see rather than what the break looks like.
     ["a word broken at a LINE edge is named as the opposite case",
       /A word the paper broke at the end of a LINE is the opposite case, and what tells them apart is what you can see/],
-    ["and it is written whole, with the hyphen dropped",
-      /"larly," beginning the next is one word split to fit the column — write it whole, "Similarly," with no hyphen, and do not carry the break into the markup\. Only the half you cannot see is kept as printed/],
+    // Deliberately a different word from the page-break example above ("Simi-" / "larly,"): the two
+    // cases carry opposite dispositions two paragraphs apart, and the identical string was the shape
+    // most likely to get the wrong one applied.
+    ["and it is written whole, with the column's hyphen dropped",
+      /a "condi-" ending one line with "tions" beginning the next is one word split to fit the column — write it whole, "conditions", and do not carry the break into the markup/],
+    // The exception without which the join manufactures a word no page printed, which is what the
+    // whole paragraph exists to prevent: "well-" over "being" is "well-being", not "wellbeing".
+    // Unmeasured — the corpus evidence is all page-edge — and joining line-broken words is already
+    // the default, so the risk arrived with the clause above rather than with the pipeline.
+    ["a hyphen the word owns survives the join",
+      /A hyphen the word itself owns survives that join: "well-" above "being" is "well-being" and not "wellbeing"/],
+    ["and an undecidable hyphen is kept, because the two errors are not equal",
+      /Where you cannot tell whose hyphen it is, keep it — a hyphen too many is a printing some page might have, and two words run into one is a word no page printed/],
     ["the fact is declared in the log, for the pass that holds both halves",
       /that this page opens mid-sentence, or ends mid-sentence, with the few words at the edge quoted — because only a pass holding both halves can join them, and your log is what tells it there is a join to be made/],
   ] as [string, RegExp][]) {
