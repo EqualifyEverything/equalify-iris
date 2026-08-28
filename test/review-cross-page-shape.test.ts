@@ -160,9 +160,33 @@ test("the Reader is told a page-broken sentence is not a defect and not its to r
     // one of them is spending a round every time this appears in a scanned document.
     ["and the reason tied to what the editor will do with such an issue",
       /The Copy Editor is told to leave both halves as they are and to invent no completion, so an issue naming one is an issue nobody may close: reported again every round, about text that is already right/],
+    // Without this the rule is unusable in the direction that loses content. The distinguisher is a
+    // page break, and it is invisible in the flattened view the Reader is told to read for reading
+    // order: `flatten` has no case for <hr> or doc-pagebreak, and the bracket vocabulary above lists
+    // no page-break token, so `…public serv-` and `ices in a State…` are adjacent with nothing
+    // between them — indistinguishable from a paragraph one page truncated. A model that cannot see
+    // the sign reads "say nothing" as covering both, and the in-page case is real content loss. So
+    // the clause names the view the sign is actually in, and says what to do when it is absent.
+    ["the sign is named, and the view it is actually in",
+      /What tells you this is the case is a page break between the two halves, and you have to look in the HTML view to find one: it is an <hr> carrying role="doc-pagebreak", it announces nothing, and the flattened view shows the halves adjacent with nothing in between/],
+    ["and no page break between the halves means the loss is inside one page, and reportable",
+      /Where the HTML puts no page break between them, the sentence broke inside one page, which is content that page did not return, and that is a finding of the ordinary kind and yours to make/],
   ] as [string, RegExp][]) {
     assert.match(reader, re, `READER_SYSTEM no longer says: ${what}`);
   }
+});
+
+// The clause above tells the Reader the page break is in the HTML view and not the flattened one,
+// which is only worth saying while it stays true: a [Page break] token in `flatten` would make the
+// instruction send the Reader to the wrong view. So the absence is pinned rather than assumed. If this
+// fails because a token was added — which #248 has a reason to want — the fix is to point the clause
+// at the flattened view, not to delete this test.
+test("the page-break marker really is invisible in the flattened view", () => {
+  const flat = flatten(wrapDocument(
+    '<p>the cost of public serv-</p><hr role="doc-pagebreak" aria-label="Page 8" id="page-8"><p>ices in a State</p>',
+  )).replace(/\s+/g, " ").trim();
+  assert.match(flat, /public serv- ices in a State/);
+  assert.doesNotMatch(flat, /Page 8|doc-pagebreak|\[Page/);
 });
 
 // The instruction above is only worth giving if the difference is visible in what the Reader

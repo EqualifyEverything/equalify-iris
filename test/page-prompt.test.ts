@@ -317,6 +317,12 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
       /A hyphen the word itself owns survives that join: "well-" above "being" is "well-being" and not "wellbeing"/],
     ["and an undecidable hyphen is kept, because the two errors are not equal",
       /Where you cannot tell whose hyphen it is, keep it — a hyphen too many is a printing some page might have, and two words run into one is a word no page printed/],
+    // The paragraph's one-line summary, and the sentence most likely to be read alone in a paragraph
+    // whose whole risk is applying the wrong disposition — so it has to name the right half. The half
+    // you cannot see is on another sheet and is never transcribed at all; what is kept as printed is
+    // your own edge, which is the break whose other half you cannot see.
+    ["the summary names the break, not the half that was never transcribed",
+      /Only a break whose other half is on a sheet you cannot see is kept as printed/],
     ["the fact is declared in the log, for the pass that holds both halves",
       /that this page opens mid-sentence, or ends mid-sentence, with the few words at the edge quoted — because only a pass holding both halves can join them, and your log is what tells it there is a join to be made/],
   ] as [string, RegExp][]) {

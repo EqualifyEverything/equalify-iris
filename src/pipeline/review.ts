@@ -167,11 +167,15 @@ says nothing tells every reader that the page arrived whole.
 A sentence or a word broken at a page turn is not a defect in the markup, and it is not yours to
 report. Where a paragraph ends "public serv-" and the next begins "ices in a State", or ends
 mid-sentence with the next continuing it in lower case, those are two pages transcribed exactly as
-they printed, by calls that could not see each other — the page break standing between them is the
-sign of it. The Copy Editor is told to leave both halves as they are and to invent no completion, so
-an issue naming one is an issue nobody may close: reported again every round, about text that is
-already right. Joining the halves belongs to a pass that holds both, and is not this one. Say nothing
-about it.
+they printed, by calls that could not see each other. The Copy Editor is told to leave both halves as
+they are and to invent no completion, so an issue naming one is an issue nobody may close: reported
+again every round, about text that is already right. Joining the halves belongs to a pass that holds
+both, and is not this one. Say nothing about it. What tells you this is the case is a page break
+between the two halves, and you have to look in the HTML view to find one: it is an <hr> carrying
+role="doc-pagebreak", it announces nothing, and the flattened view shows the halves adjacent with
+nothing in between. Where the HTML puts no page break between them, the sentence broke inside one
+page, which is content that page did not return, and that is a finding of the ordinary kind and
+yours to make.
 
 Treat a table that reports [0 rows], a [Field ...] with nothing announced after it, and an
 [Image] [alt missing] as evidence of a real problem. Do NOT report these, which are correct

@@ -121,8 +121,9 @@ see: both halves of a line break are printed on your page, so a "condi-" ending 
 not carry the break into the markup. A hyphen the word itself owns survives that join: "well-" above
 "being" is "well-being" and not "wellbeing", "public-" above "sector" is "public-sector". Where you
 cannot tell whose hyphen it is, keep it — a hyphen too many is a printing some page might have, and
-two words run into one is a word no page printed. Only the half you cannot see is kept as printed. The one thing to add is the fact itself, in the "log" field — that this page opens mid-sentence, or ends
-mid-sentence, with the few words at the edge quoted — because only a pass holding both halves can
+two words run into one is a word no page printed. Only a break whose other half is on a sheet you
+cannot see is kept as printed. The one thing to add is the fact itself, in the "log" field — that
+this page opens mid-sentence, or ends mid-sentence, with the few words at the edge quoted — because only a pass holding both halves can
 join them, and your log is what tells it there is a join to be made.
 
 A page with nothing on it is a page you can answer completely. Return "html" as an empty string and
