@@ -176,7 +176,11 @@ Twelve structures are easy to render as something that merely looks right, so be
   is no reason to sit higher than the one that follows it — two lines the page introduces parallel
   parts of the same subject with are the same level wherever each of them falls on the page. Where
   the tiers the page prints do not settle it, give the level the content supports and say in the
-  "log" field which headings you weighed against each other.
+  "log" field which headings you weighed against each other. This check reaches only as far as your
+  page: a peer printed on a sheet you were not shown cannot be weighed against, and guessing at one
+  is worse than levelling from the evidence you have. Level it from this page, say in the "log" field
+  that its peers may be elsewhere, and leave it — the pass that reads the assembled document is the
+  one that can see two parallel sections opening at different levels, and it is told to.
   Two questions settle most of this before you count anything. What is under the heading: the steps
   of a procedure belong to the section that procedure's own heading opened, so a step label — Step
   4, B., Second, however the page names it and however large it sets it — is one level below that
@@ -398,13 +402,19 @@ Twelve structures are easy to render as something that merely looks right, so be
   from the caption, is the smaller half of the harm. The larger half is what the wrapper invites: a
   heading is not a name for a table, so a table given a heading INSTEAD of a caption has no
   accessible name at all — and no linter says so, which means a document can pass every check and
-  still hand a reader a table they cannot identify or find again. Where a heading and a caption both
-  look right, the caption is the one that is, every time; where you have written the heading first,
-  the fix is to move those words into <caption>, not to keep both.
-  A heading over a table is right only where the page's own structure prints one: the heading
-  introduces a section of the document, the table is part of what that section holds, and the other
-  tables at that tier sit under headings of their own. One table out of a document's forty wearing an
-  <h2> is the sign that the wrapper came from this agent and not from the page.
+  still hand a reader a table they cannot identify or find again. So where the words over a table are
+  its number and title, that is a caption whichever element you reached for first: give the table the
+  <caption> the page prints — the title's own words, number included — and emit no heading for it.
+  A heading over a table is right where the page's own structure prints one: the heading introduces a
+  section of the document, and the table is part of what that section holds. Keep such a heading, and
+  give the table its <caption> as well — the two then say different things, one naming the section and
+  one naming the table, and neither stands in for the other. What must not happen is a heading you
+  supplied because a table looked like it needed one. The rest of the document is the best evidence of
+  which you are looking at: where its other tables sit under headings of their own, this heading is
+  the page's doing, and one table out of forty wearing an <h2> is the sign the wrapper is yours. You
+  are shown one page, so where the rest of the document is not in front of you, decide it on what this
+  page prints — a title over a table is a caption, a heading that opens a section with a table inside
+  it is a heading — and say in the "log" field which you took it to be.
 - NUMBERS THE PAGE SHOWS: the numbers on a numbered list, or down the item column of a parts
   table, are content. Transcribe the sequence exactly and never tidy it: do not renumber to close
   a gap, and do not drop or alter a number that appears twice — a table that reads 1, 2, 5, 5, 6

@@ -94,6 +94,45 @@ test("what the editor may add is what the Reader's guard defers to", () => {
   assert.match(editor, /Content on pages whose image is NOT attached must be carried over unchanged unless an issue names it/);
 });
 
+// Issue #245's page-break half, and the same page/document split as the rule above. `agents/page.md`
+// now commits a page to transcribing its own broken edge exactly — "public serv-" stays "public
+// serv-", hyphen included — because the marker is the first thing a page emits, so the halves of a
+// split sentence land in two replies and neither can join them (22 of 90 markers in the last bench
+// round stand where a sentence carries on; 2 split a hyphenated word).
+//
+// That guarantee is worth nothing without this clause, which is what the review of the first version
+// of #247 pointed out: the editor sees a whole document, so it sees both halves, and "public serv-"
+// looks exactly like a text defect to fix. Nothing else would stop it — the correction guards
+// measure SHRINKAGE (`isCorrectionShrunken`, src/pipeline/correction.ts), so a document that grew by
+// an invented "ices" passes every gate Iris has, and axe has no rule for a word nobody printed. The
+// fragments exist on main too; what is new is a prompt telling the page to keep them, which makes
+// the editor's half load-bearing.
+test("the editor is told a page-broken word is not a defect, and completing one is a text it may not add", () => {
+  for (const [what, re] of [
+    ["the case is named in the shape the corpus actually produces",
+      /Where a paragraph ends "public serv-" and the next begins "ices in a State", or ends mid-sentence with the next continuing it in lower case/],
+    // Bound to the same "two texts, there is no third" limit the guard above defers to, rather than
+    // stated as a new prohibition of its own.
+    ["completing one is named as the third text, which the editor may not add",
+      /finishing one is the third text you may not add/],
+    ["the cause is given: two replies, and the marker is why the split falls between them",
+      /those halves came off two pages extracted by calls that could not see each other, and the page-break marker between them is why: it is the first thing a page emits, so the split falls between two replies rather than inside either/],
+    // All three moves are forbidden, deletion included: a fragment dropped for reading broken is
+    // text no other page will emit.
+    ["neither half may be completed, rewritten, or deleted",
+      /Do not complete the word, do not rewrite either half into a sentence that reads whole, and do not delete the fragment that looks broken/],
+    ["and the reason is that the completion is a word no page printed",
+      /every word of both halves is a word some page printed, and the completion is a word no page printed/],
+    // Reporting is the editor's out, and it is the same disposition the fidelity rule above uses:
+    // say what you see, change nothing. The join is #248's work, and this clause is what keeps the
+    // text intact until it exists.
+    ["reporting is the disposition, and the join is left to a pass that holds both halves",
+      /Report it and leave the text as it stands: joining them belongs to a pass that holds both halves/],
+  ] as [string, RegExp][]) {
+    assert.match(editor, re, `EDITOR_SYSTEM no longer says: ${what}`);
+  }
+});
+
 // The instruction above is only worth giving if the difference is visible in what the Reader
 // receives. It is: the flattened view is where the two shapes stop being the same words.
 test("the two footer shapes are different in the view the Reader is actually given", () => {

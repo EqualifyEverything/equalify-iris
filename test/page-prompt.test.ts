@@ -105,6 +105,16 @@ test("the page agent's heading-level rule keeps the clauses that make it a rule"
       /being the first of its tier to appear is no reason to sit higher than the one that follows it/],
     ["and where the printed tiers do not settle it, the weighing goes in the log",
       /Where the tiers the page prints do not settle it, give the level the content supports and say in the "log" field which headings you weighed against each other/],
+    // The limit of the check, said out loud rather than left to be discovered: a peer on another
+    // sheet cannot be weighed against, and the cross-page half of this defect belongs to the pass
+    // that reads the assembled document — READER_SYSTEM is told to report "sections of one sort
+    // [that] may open at [Heading 2] on four pages and [Heading 1] on the fifth"
+    // (src/pipeline/review.ts, pinned in test/review-cross-page-shape.test.ts). Without this clause
+    // the rule reads as if one page could settle a document-wide outline.
+    ["the check reaches only as far as this page, and guessing at an unseen peer is worse",
+      /This check reaches only as far as your page: a peer printed on a sheet you were not shown cannot be weighed against, and guessing at one is worse than levelling from the evidence you have/],
+    ["the assembled-document pass is named as the one that sees parallel sections at different levels",
+      /the pass that reads the assembled document is the one that can see two parallel sections opening at different levels, and it is told to/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
@@ -1099,16 +1109,31 @@ test("the page agent's table-naming rule keeps the clauses that make it a rule",
       /a heading is not a name for a table, so a table given a heading INSTEAD of a caption has no accessible name at all/],
     ["and no linter reports that, so the document can pass every check and still be unusable",
       /no linter says so, which means a document can pass every check and still hand a reader a table they cannot identify or find again/],
-    // Which one wins when both look right, plus what to do having already written the heading —
-    // the shape of the fix matters, because "keep both" is what three of the four tables did.
-    ["the caption wins over the heading, and the fix is to move the words into it",
-      /Where a heading and a caption both look right, the caption is the one that is, every time; where you have written the heading first, the fix is to move those words into <caption>, not to keep both/],
+    // What to do having already written the heading. The remedy is stated in terms of the page's
+    // printed title rather than "those words", because the heading's words are often a truncation
+    // of the caption the page prints ("Per Capita Income" against "Table 8.—Per Capita Income for
+    // Selected Income Series, by State, 1959") and moving them verbatim would ship the short form.
+    ["a title over a table is a caption whichever element it was written as, in the page's own words",
+      /So where the words over a table are its number and title, that is a caption whichever element you reached for first: give the table the <caption> the page prints — the title's own words, number included — and emit no heading for it/],
     // Guard: this is not a prohibition on headings above tables, it is a prohibition on inventing
-    // one. The test is the page's own structure, stated so the rule cannot be read as absolute.
+    // one. Stated as a sufficient condition on THIS page's evidence — the review of the first
+    // version caught it phrased as a conjunction whose third term ("the other tables at that tier
+    // sit under headings of their own") is about the rest of the document, which the page agent
+    // cannot see; read as necessary, it made the remedy delete a section heading the paper printed.
     ["a heading over a table is right where the page's own structure prints one",
-      /A heading over a table is right only where the page's own structure prints one: the heading introduces a section of the document, the table is part of what that section holds, and the other tables at that tier sit under headings of their own/],
-    ["one table in forty wearing a heading is the sign the wrapper came from the agent",
-      /One table out of a document's forty wearing an <h2> is the sign that the wrapper came from this agent and not from the page/],
+      /A heading over a table is right where the page's own structure prints one: the heading introduces a section of the document, and the table is part of what that section holds/],
+    // And in that case BOTH exist, which is the clause that stops the remedy from costing the table
+    // its name: a section heading and a caption are not substitutes for one another.
+    ["a genuine section heading is kept and the table still gets its caption",
+      /Keep such a heading, and give the table its <caption> as well — the two then say different things, one naming the section and one naming the table, and neither stands in for the other/],
+    ["what the rule is aimed at is named as the thing to avoid",
+      /What must not happen is a heading you supplied because a table looked like it needed one/],
+    // The peer-tables observation survives as EVIDENCE, which is what the measurement supports:
+    // 4 of 48 tables headed, all <h2>, no other table in the document headed at all.
+    ["the rest of the document is evidence for which one it is, not the test itself",
+      /where its other tables sit under headings of their own, this heading is the page's doing, and one table out of forty wearing an <h2> is the sign the wrapper is yours/],
+    ["and where the document is not in front of it, the page decides on its own printing and logs it",
+      /You are shown one page, so where the rest of the document is not in front of you, decide it on what this page prints[\s\S]*?say in the "log" field which you took it to be/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }

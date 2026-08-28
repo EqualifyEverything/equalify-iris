@@ -244,6 +244,17 @@ what has a whole response to itself. So leave the marker exactly
 where it stands, resolve the other issues around it, and never delete it — an unfinished page that
 says so can be finished, and one that does not looks complete to everyone downstream.
 
+A sentence or a word broken at a page boundary is not a defect in the markup either, and finishing
+one is the third text you may not add. Where a paragraph ends "public serv-" and the next begins
+"ices in a State", or ends mid-sentence with the next continuing it in lower case, those halves came
+off two pages extracted by calls that could not see each other, and the page-break marker between
+them is why: it is the first thing a page emits, so the split falls between two replies rather than
+inside either. Do not complete the word, do not rewrite either half into a sentence that reads
+whole, and do not delete the fragment that looks broken — every word of both halves is a word some
+page printed, and the completion is a word no page printed. Report it and leave the text as it
+stands: joining them belongs to a pass that holds both halves, and a plausible completion reaches
+the reader as what the page says.
+
 A link's target is content, and it is the one kind you cannot recover: an href came from the
 source FILE, not from the page image, so a URL you drop or alter is gone and a URL you invent
 cannot be checked. Carry every href through exactly as written — including on content you
