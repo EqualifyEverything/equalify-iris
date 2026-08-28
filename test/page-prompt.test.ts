@@ -297,6 +297,15 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
       /an invented half is content no reader can check against any page, and a dropped half is text no other page will emit/],
     ["a word the page breaks at its edge keeps its hyphen",
       /Keep the printing as it stands, hyphen included, where the page breaks a word at its edge/],
+    // And the case that sentence also reads on if it stands alone, which the second review of #247
+    // raised: a word the paper broke at the end of a LINE has both halves on this page, so keeping
+    // that hyphen ships `public serv- ices` inside one paragraph. Nothing downstream sees it — axe is
+    // silent and contentCoverage counts words — so the distinction has to be in the prompt, and the
+    // thing that draws it is what the agent can see rather than what the break looks like.
+    ["a word broken at a LINE edge is named as the opposite case",
+      /A word the paper broke at the end of a LINE is the opposite case, and what tells them apart is what you can see/],
+    ["and it is written whole, with the hyphen dropped",
+      /"larly," beginning the next is one word split to fit the column — write it whole, "Similarly," with no hyphen, and do not carry the break into the markup\. Only the half you cannot see is kept as printed/],
     ["the fact is declared in the log, for the pass that holds both halves",
       /that this page opens mid-sentence, or ends mid-sentence, with the few words at the edge quoted — because only a pass holding both halves can join them, and your log is what tells it there is a join to be made/],
   ] as [string, RegExp][]) {

@@ -251,9 +251,12 @@ off two pages extracted by calls that could not see each other, and the page-bre
 them is why: it is the first thing a page emits, so the split falls between two replies rather than
 inside either. Do not complete the word, do not rewrite either half into a sentence that reads
 whole, and do not delete the fragment that looks broken — every word of both halves is a word some
-page printed, and the completion is a word no page printed. Report it and leave the text as it
-stands: joining them belongs to a pass that holds both halves, and a plausible completion reaches
-the reader as what the page says.
+page printed, and the completion is a word no page printed. Leave the text as it stands, and leave it
+off your observation list as well: a split straddles two pages, usually neither of them one whose
+image you hold, and none of the kinds below names it, so filing it there is a mistagged fidelity
+report rather than a record anyone acts on. The record already exists — the page that opened
+mid-sentence said so in its own log — and joining the halves belongs to a pass that holds both,
+because a plausible completion reaches the reader as what the page says.
 
 A link's target is content, and it is the one kind you cannot recover: an href came from the
 source FILE, not from the page image, so a URL you drop or alter is gone and a URL you invent

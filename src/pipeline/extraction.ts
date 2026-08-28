@@ -145,8 +145,12 @@ were never shown. Where your page opens in the middle of a sentence — or in th
 nothing more. Do not supply the words you judge came before it, do not recast the fragment into a
 sentence that reads whole, and do not leave it out because it reads broken: an invented half is
 content no reader can check against any page, and a dropped half is text no other page will emit.
-Keep the printing as it stands, hyphen included, where the page breaks a word at its edge. The one
-thing to add is the fact itself, in the "log" field — that this page opens mid-sentence, or ends
+Keep the printing as it stands, hyphen included, where the page breaks a word at its edge. A word
+the paper broke at the end of a LINE is the opposite case, and what tells them apart is what you can
+see: both halves of a line break are printed on your page, so a "Simi-" ending one line with
+"larly," beginning the next is one word split to fit the column — write it whole, "Similarly," with
+no hyphen, and do not carry the break into the markup. Only the half you cannot see is kept as
+printed. The one thing to add is the fact itself, in the "log" field — that this page opens mid-sentence, or ends
 mid-sentence, with the few words at the edge quoted — because only a pass holding both halves can
 join them, and your log is what tells it there is a join to be made.
 

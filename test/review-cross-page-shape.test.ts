@@ -123,11 +123,20 @@ test("the editor is told a page-broken word is not a defect, and completing one 
       /Do not complete the word, do not rewrite either half into a sentence that reads whole, and do not delete the fragment that looks broken/],
     ["and the reason is that the completion is a word no page printed",
       /every word of both halves is a word some page printed, and the completion is a word no page printed/],
-    // Reporting is the editor's out, and it is the same disposition the fidelity rule above uses:
-    // say what you see, change nothing. The join is #248's work, and this clause is what keeps the
-    // text intact until it exists.
-    ["reporting is the disposition, and the join is left to a pass that holds both halves",
-      /Report it and leave the text as it stands: joining them belongs to a pass that holds both halves/],
+    // The disposition is to leave it alone AND not report it, which is the opposite of the fidelity
+    // rule below and deliberately so: the editor's only reporting channel is `fidelity_observed`,
+    // whose contract excludes this twice over — "Report only pages whose image is attached" (a split
+    // straddles two pages, usually neither attached) and a required `kind` from VERIFY_KINDS, none of
+    // which describes a word broken at a page turn, since nothing is missing or wrong. Told to
+    // "report it" the editor files a mistagged structure_wrong that lands as one
+    // editor_fidelity_observed line with `unattached` incremented. The real record is the page
+    // agent's own log, which is the half #248 can read.
+    ["the disposition is to leave the text alone and off the observation list",
+      /Leave the text as it stands, and leave it off your observation list as well/],
+    ["because the channel excludes it: not an attached page, and no kind names it",
+      /a split straddles two pages, usually neither of them one whose image you hold, and none of the kinds below names it, so filing it there is a mistagged fidelity report rather than a record anyone acts on/],
+    ["the record that does exist is the page agent's log, and the join is a pass that holds both halves",
+      /The record already exists — the page that opened mid-sentence said so in its own log — and joining the halves belongs to a pass that holds both/],
   ] as [string, RegExp][]) {
     assert.match(editor, re, `EDITOR_SYSTEM no longer says: ${what}`);
   }
