@@ -1009,6 +1009,17 @@ echo "$q" | jq -e '.structural_defect_rate > 0 and .structural_defect_rate <= 1'
 echo "$q" | jq -e '.documents_linted != null and .documents_linted >= 0 and .documents_linted <= .documents' >/dev/null \
   && pass "documents_linted is $(echo "$q" | jq -r '.documents_linted'), within 0..$docs" \
   || fail "quality" "documents_linted=$(echo "$q" | jq -r '.documents_linted') against documents=$docs"
+# ...and, when it is smaller, WHICH of the three lint steps failed (#263). All three are
+# always present, zeros included: the workflow prints this sentence only when the field
+# exists, so "measured and none" and "not measured on this deployment" have to be
+# distinguishable, and an absent step would collapse them. The counts sum to at most the
+# documents the rate covers, never more — a step counted per occurrence rather than per
+# document would exceed the failures it is breaking down.
+echo "$q" | jq -e '[.lint_error_where[].where] == ["parse","inject","run"]
+  and ([.lint_error_where[].documents] | all(. >= 0))
+  and ([.lint_error_where[].documents] | add) <= (.documents - .documents_linted)' >/dev/null \
+  && pass "lint_error_where accounts for the unlinted documents ($(echo "$q" | jq -c '[.lint_error_where[] | "\(.where)=\(.documents)"] | join(" ")' | tr -d '"'))" \
+  || fail "quality" "lint_error_where=$(echo "$q" | jq -c '.lint_error_where') against documents=$docs linted=$(echo "$q" | jq -r '.documents_linted')"
 # A round is an EDITOR pass, not a reader pass: the loop returns as soon as the
 # Reader finds nothing, before incrementing, so a document that comes back clean on
 # the first look completes with 0 rounds and that is the good outcome. The mock model
@@ -1037,7 +1048,12 @@ done
 # `inside` compares strings with `contains`, i.e. substring containment, so
 # `["doc"] | inside(["documents"])` is true and any new leaf whose name happens to be a
 # substring of an allowed one would slip through the one check that enforces this.
-allowed='["window_days","documents","since","mean_rounds","unresolved_rate","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","id","impact","share","nodes"]'
+# LEAF names, so a nested field contributes the keys inside it and not its own: the
+# entries of `lint_error_where` add `where` (their `documents` is already allowed).
+# `where` is one of three strings named in `src/store/db.ts`, which is why it is
+# publishable at all — the version of that field carrying the error message would have
+# quoted the markup jsdom choked on.
+allowed='["window_days","documents","since","mean_rounds","unresolved_rate","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","where","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","id","impact","share","nodes"]'
 extra=$(echo "$q" | jq -c --argjson allowed "$allowed" '([paths(scalars) | last] | unique) - $allowed')
 [ "$extra" = "[]" ] \
   && pass "the payload's key set is exactly the documented one (no session id, login or document content)" \

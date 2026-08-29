@@ -145,6 +145,11 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   "table_no_body_rate": 0.005,
   "structural_defect_rate": 0.09,
   "lint_error_rate": 0.01,
+  "lint_error_where": [
+    { "where": "parse", "documents": 0 },
+    { "where": "inject", "documents": 0 },
+    { "where": "run", "documents": 2 }
+  ],
   "documents_linted": 210,
   "editor_truncated_rate": 0.01,
   "editor_truncated_lost_rate": 0.002,
@@ -250,6 +255,19 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   malformed name whether or not it had to go, and `lint_debris` where there is no `assembly` line —
   #257). A run with `malformed_attributes_removed` set and no `lint_error` is a document that used
   to be delivered unchecked.
+* `lint_error_where` — which of the three steps failed on those documents: `parse` (jsdom refused
+  the assembled HTML), `inject` (axe's own source would not evaluate, which is a dependency problem
+  and cannot depend on the document) or `run` (the rule pass threw while walking the document).
+  Always all three entries, including the zeroes, so "measured and none of these" is distinguishable
+  from a deployment too old to record it — the same distinction `documents_linted` preserves for the
+  rule shares. Published because the per-step detail otherwise exists **only** in one session's run
+  log, and a run log cannot answer a question about the deployment: it belongs to a single user's
+  document. #263 reported six documents with no verdict and no way to tell whether the cause was the
+  one #257 had just fixed or a new one, which is how a fixed cause and a live one come to look the
+  same in a weekly report. The counts may sum to **less** than `lint_error_rate × documents`, and the
+  shortfall is documents linted before this was recorded — not a fourth kind of failure. The error
+  message and stack stay out of this endpoint on purpose: a parse failure quotes the markup it choked
+  on, and this response is copied into a public issue.
 * `documents_linted` — how many of `documents` the linter actually examined, i.e. `documents` minus
   the `lint_error_rate` ones. This is the denominator for `rules[].share`, and it is published
   because otherwise that share cannot be read: an unexamined document looks exactly like one where

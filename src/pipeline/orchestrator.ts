@@ -9,6 +9,7 @@ import {
   SIGNAL_TABLE_NO_BODY,
   SIGNAL_STRUCTURAL_DEFECT,
   SIGNAL_LINT_ERROR,
+  lintErrorWhereSignal,
   SIGNAL_EDITOR_TRUNCATED,
   SIGNAL_EDITOR_TRUNCATED_LOST,
   SIGNAL_REVIEW_UNREAD,
@@ -424,6 +425,16 @@ export async function runPipeline(args: {
         // A linter that could not run has no violations to report, which is why its
         // failure is recorded as a signal rather than inferred from an empty list.
         ...(review.lint.error ? [{ code: SIGNAL_LINT_ERROR, count: 1 }] : []),
+        // And which step it failed at, as a second row on the same document (#263). Written
+        // only when the result names a step, so the pair means what it says: the rate above
+        // counts documents with no verdict, and this counts the ones that can say why. A
+        // `LintResult` carrying an error and no `errorWhere` is not a shape `runAxe` produces
+        // — every failure path there goes through `failure()`, which always sets it — so an
+        // unattributed row means a result assembled somewhere else, and inventing a step for
+        // it would be the one thing this field must not do.
+        ...(review.lint.error && review.lint.errorWhere
+          ? [{ code: lintErrorWhereSignal(review.lint.errorWhere), count: 1 }]
+          : []),
         // A round whose whole-body answer was paid for in full and could not be used. Counted
         // per document, not per round: the loop stops at the first one, because the next
         // request would be the same length as the one that did not fit.

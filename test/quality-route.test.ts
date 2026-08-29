@@ -40,6 +40,11 @@ function fakeStore(): { store: Store; state: { calls: number; days: number[] } }
         table_no_body_rate: 0,
         structural_defect_rate: 0,
         lint_error_rate: 0,
+        lint_error_where: [
+          { where: "parse", documents: 0 },
+          { where: "inject", documents: 0 },
+          { where: "run", documents: 0 },
+        ],
         documents_linted: 10,
         editor_truncated_rate: 0,
         editor_truncated_lost_rate: 0,
