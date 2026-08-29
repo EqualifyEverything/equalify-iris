@@ -369,10 +369,25 @@ test("a round that emptied most of the document is refused whole", async () => {
   const shrank = events.find((e) => e.type === "editor_shrank");
   assert.equal(shrank?.data.stage, "patch");
   assert.equal(shrank?.data.deleted, 2, "what a shrink under this contract is made of");
+  assert.equal(shrank?.data.shrunk, 0);
   assert.equal(shrank?.data.of, 4);
   // Reported as a round that ran and changed nothing, not as one that converged: the editor said
   // something and it could not be used.
   assert.equal(events.filter((e) => e.type === "review_converged").length, 0);
+  // And the shape this line is likeliest to be asked about, which `deleted` alone cannot describe:
+  // the floor is only reached when NOTHING was refused (a refusal beside a block that gave content
+  // up is discarded before this), so the commonest reply that lands here empties nothing and returns
+  // blocks with a fifth of their prose in them. `deleted: 0` with no `shrunk` beside it would leave
+  // the line saying where the document went nowhere at all.
+  const summarised = await round(
+    () => ({ edits: [{ block: 1, html: `<p>word</p>` }, { block: 2, html: `<p>other</p>` }] }),
+    long,
+    1,
+  );
+  assert.equal(summarised.result.body, long);
+  const summary = summarised.events.find((e) => e.type === "editor_shrank");
+  assert.equal(summary?.data.deleted, 0);
+  assert.equal(summary?.data.shrunk, 2);
 });
 
 test("an editor that answers with the whole document is still read", async () => {
@@ -491,6 +506,52 @@ test("half a move is not applied: a refusal beside a block that gave content up 
   const trimmed = trimming.events.find((e) => e.type === "editor_patch");
   assert.equal(trimmed?.data.shrunk, 1);
   assert.ok(!("discarded" in (trimmed?.data ?? {})));
+});
+
+test("the half of a move that carries no words counts too: an image or a link leaving a block", async () => {
+  // A source block can give up something that is not prose. `visibleText` throws tags and
+  // attributes away, so a figure that hands back its caption and drops the image compares EQUAL on
+  // the words — and an image with its alt text leaving the deliverable is a worse loss than a
+  // sentence, not a smaller one. Same for a link: the words stay, the destination goes.
+  //
+  // Read with `structureCounts`, which already counts both for this reason (correction.ts: "`<a>` is
+  // counted although `droppedHrefs` already watches URLs … Same for `<img>`, whose alt text has its
+  // own signal in this module and whose disappearance has none").
+  const FIGURED = `<h1>M</h1>\n<figure><img src="a.png" alt="A bar chart of yields"><figcaption>Fig 1. Yields</figcaption></figure>\n<p>Two.</p>\n`;
+  const moved = await round(() => ({
+    edits: [
+      { block: 2, html: `<p>Two.<figure><img src="a.png" alt="A bar chart of yields">` }, // landing, cut off
+      { block: 1, html: `<figure><figcaption>Fig 1. Yields</figcaption></figure>` }, // source, image gone
+    ],
+  }), FIGURED, 1);
+  assert.equal(moved.result.body, FIGURED, "the figure keeps its image");
+  const fig = moved.events.find((e) => e.type === "editor_patch");
+  assert.equal(fig?.data.shrunk, 1, "one image fewer is content given up, though the prose is identical");
+  assert.equal(fig?.data.discarded, "refusal_with_loss");
+  const LINKED = `<h1>M</h1>\n<p>See <a href="#appendix-a">Appendix A</a>.</p>\n<p>Two.</p>\n`;
+  const unlinked = await round(() => ({
+    edits: [
+      { block: 2, html: `<p>Two. See <a href="#appendix-a">Appendix A</a>.` }, // landing, cut off
+      { block: 1, html: `<p>See Appendix A.</p>` }, // source, the same words with nowhere to go
+    ],
+  }), LINKED, 1);
+  assert.equal(unlinked.result.body, LINKED, "the reference keeps its href");
+  assert.equal(unlinked.events.find((e) => e.type === "editor_patch")?.data.discarded, "refusal_with_loss");
+  // And it stays narrow in the direction that matters: the structural fix this contract is FOR must
+  // not read as a loss. Unwrapping a mis-structured block is shorter markup carrying every word,
+  // every image and every link.
+  const WRAPPED = `<h1>M</h1>\n<div><p>See <a href="#page-2">page 2</a>.</p><figure><img src="a.png" alt="A chart"></figure></div>\n<p>Two.</p>\n`;
+  const unwrapped = await round(() => ({
+    edits: [
+      { block: 1, html: `<p>See <a href="#page-2">page 2</a>.</p>\n<figure><img src="a.png" alt="A chart"></figure>` },
+      { block: 2, html: `<p>Two.` }, // a refusal in the same reply, which is what would discard the round
+    ],
+  }), WRAPPED, 1);
+  const unwrap = unwrapped.events.find((e) => e.type === "editor_patch");
+  assert.equal(unwrap?.data.applied, 1);
+  assert.ok(!("shrunk" in (unwrap?.data ?? {})), "fewer bytes, the same document");
+  assert.ok(!("discarded" in (unwrap?.data ?? {})), "so the refusal beside it costs its own block only");
+  assert.match(unwrapped.result.body, /<h1>M<\/h1>\n<p>See <a href="#page-2">page 2<\/a>\.<\/p>/);
 });
 
 test("a reply with neither shape in it is a call that said nothing", async () => {

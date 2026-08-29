@@ -1333,9 +1333,10 @@ function applyEditorPatch(
   // document that no longer mentions it, and the heading it belonged under is left with nothing.
   //
   // BOTH forms the source half can take count, because EDITOR_SYSTEM offers both: the block emptied
-  // (`deleted`), or returned "with what is left of it" — a replacement carrying less prose than the
-  // block it replaces (`shrunk`). A rule that read only the first would let the commoner half of a
-  // move through, since a move usually leaves something behind.
+  // (`deleted`), or returned "with what is left of it" — a replacement carrying less of the document
+  // than the block it replaces (`shrunk`, which reads prose, images and links; see `gaveContentUp`).
+  // A rule that read only the first would let the commoner half of a move through, since a move
+  // usually leaves something behind.
   //
   // So a reply holding a refusal beside either is treated as one that cannot be applied in part,
   // whether or not those edits were actually a pair. Both are ordinary corrections on their own —
@@ -1383,9 +1384,13 @@ function applyEditorPatch(
       text_chars_before: visibleText(body).length,
       text_chars_after: visibleText(patched.body).length,
       floor: EDITOR_SHRINK_FLOOR,
-      // What a shrink under this contract is made of, which the length pairs cannot say: the
-      // blocks the editor emptied.
+      // What a shrink under this contract is made of, which the length pairs cannot say: the blocks
+      // the editor emptied, and the ones it returned with less in them than they had. Both, because
+      // this path is only reached when nothing was refused — so the commonest shape here is a round
+      // of shrinking replacements with `deleted: 0`, and `deleted` alone would leave the line saying
+      // nothing about where the document went.
       deleted: patched.deleted,
+      shrunk: patched.shrunk,
       of: blocks.length,
     });
     return { body, usable: false };

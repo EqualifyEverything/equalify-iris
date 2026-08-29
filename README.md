@@ -845,8 +845,10 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   holding a refusal alongside a block that gave content up — because a move is a pair of edits here,
   so taking the source half and refusing the landing half deletes a paragraph that no later pass can
   miss. Both forms of that source half count, since the prompt offers both: emptied (`deleted`), or
-  returned with what is left of it (`shrunk`, measured on the prose so that unwrapping a
-  mis-structured block is not read as content leaving), and the shrinking one is the commoner. Each
+  returned with what is left of it (`shrunk`), and the shrinking one is the commoner. A shrink is
+  read as the prose, so that unwrapping a mis-structured block is not taken for content leaving,
+  plus the `<img>` and `<a>` counts, because a block that hands back its caption and drops the image
+  gave up something no comparison of words can see. Each
   is an ordinary correction alone, so the rule only fires on a reply that already has a defect in it.
   Both hand the body back and let the loop retry. A model that answers with a whole `html` body anyway is
   still read, and logged as `editor_whole_body`: refusing it would spend the round, and the #174

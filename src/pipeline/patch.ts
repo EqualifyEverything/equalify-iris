@@ -27,7 +27,7 @@
 // the one failure here that no check downstream can see: every edit applied to the wrong block,
 // each replacement well-formed. Copying a number that is written above the block cannot make that
 // mistake.
-import { visibleText } from "./correction.ts";
+import { structureCounts, visibleText } from "./correction.ts";
 import { joinSections, splitBlocks, topLevelComplete, type Section } from "./sections.ts";
 
 // The marker written above each block in the copy of the body the editor is shown. House style
@@ -47,6 +47,28 @@ const BLOCK_MARKER = /<!--\s*@block\s+\d+\s*-->/g;
 export function stripBlockMarkers(html: string): { html: string; markers: number } {
   const found = html.match(BLOCK_MARKER);
   return { html: found ? html.replace(BLOCK_MARKER, "") : html, markers: found?.length ?? 0 };
+}
+
+// Did this replacement hand back less of the document than the block it replaces?
+//
+// Read on the PROSE first, not the bytes: unwrapping a mis-structured block — `<div><p>x</p></div>`
+// to `<p>x</p>` — is shorter markup carrying every word, and counting that as content leaving would
+// report the commonest legitimate structural fix as a loss.
+//
+// But prose is not all a block holds, and the two things it holds that carry no words are the two
+// this loop exists to protect: an `<img>` with its alt text, and an `<a>` with its href. A source
+// block that hands back its figcaption and drops the image is byte for byte a shrink no prose
+// comparison can see — the words are unchanged — and an image leaving the deliverable is a worse
+// loss than a sentence. `structureCounts` reads them with a scanner that steps over quoted
+// attribute values, so `<img alt="see <p> below">` is one image and not also a paragraph.
+//
+// Deliberately NOT every structure count: re-levelling headings, splitting one paragraph into two
+// or turning a `<dl>` into a `<ul>` are the corrections this loop asks for, and each moves a count
+// down without taking anything out of the document.
+function gaveContentUp(before: string, after: string): boolean {
+  if (visibleText(after).length < visibleText(before).length) return true;
+  const [was, now] = [structureCounts(before), structureCounts(after)];
+  return now.images < was.images || now.links < was.links;
 }
 
 export interface BlockEdit {
@@ -81,13 +103,12 @@ export interface PatchReport {
   // and the strip is exact — but the count is the evidence for how well the contract reads, so
   // it goes on the record.
   markers: number;
-  // Applied replacements carrying LESS PROSE than the block they replace. Not an error on its own —
-  // removing a heading the document printed twice is this loop's job, and it shortens a block — but
-  // it is the other half a move can have. The contract offers two ways to say what becomes of the
-  // block content was taken out of: emptied (`deleted`), or returned "with what is left of it",
-  // which is this. The caller needs both to tell whether a reply with a refusal in it may be
-  // applied in part. Counted on the PROSE, so unwrapping a mis-structured block — which loses
-  // bytes and no words — is not mistaken for content leaving.
+  // Applied replacements carrying LESS CONTENT than the block they replace. Not an error on its
+  // own — removing a heading the document printed twice is this loop's job, and it shortens a
+  // block — but it is the other half a move can have. The contract offers two ways to say what
+  // becomes of the block content was taken out of: emptied (`deleted`), or returned "with what is
+  // left of it", which is this. The caller needs both to tell whether a reply with a refusal in it
+  // may be applied in part. See `gaveContentUp` for what counts as less.
   shrunk: number;
 }
 
@@ -160,7 +181,7 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     }
     replacements[at] = html;
     report.applied++;
-    if (visibleText(html).length < visibleText(blocks[at]!.html).length) report.shrunk++;
+    if (gaveContentUp(blocks[at]!.html, html)) report.shrunk++;
   }
   return { ...report, body: joinSections(blocks, replacements) };
 }
