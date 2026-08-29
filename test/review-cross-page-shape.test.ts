@@ -90,8 +90,11 @@ test("what the editor may add is what the Reader's guard defers to", () => {
     "EDITOR_SYSTEM no longer bounds what text it may add, so the Reader's guard has nothing to defer to",
   );
   // And the standing instruction that makes a per-page fix safe at all: pages the editor was not
-  // given an image for are carried over.
-  assert.match(editor, /Content on pages whose image is NOT attached must be carried over unchanged unless an issue names it/);
+  // given an image for are left alone. Since #250 that is also what the answer's shape does — a
+  // block nobody names is delivered as it stands — but the instruction stays, because the two
+  // guard different things: the shape stops a page from being rewritten by accident, and this
+  // stops one from being rewritten on purpose.
+  assert.match(editor, /Content on pages whose image is NOT attached is not yours to change unless an issue names it/);
 });
 
 // Issue #245's page-break half, and the same page/document split as the rule above. `agents/page.md`

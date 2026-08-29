@@ -92,30 +92,29 @@ test("the editor may read the page again, and may do nothing else with the marke
 
 test("the unfinished-page marker is nobody's to resolve in this loop, and the editor is told why", () => {
   // The asymmetry is the whole point of splitting the two paragraphs. Reading a smudge off an
-  // attached image costs a phrase; finishing a page costs the rest of that page ON TOP of the
-  // complete corrected body, and the editor has one response for both. A TruncatedResponseError
-  // is not a size refusal, so review.ts's retry does not catch it — since #143 the round costs
-  // itself rather than the run, and since #165 it is re-made a section at a time by requests
-  // that each see one piece of the document, which cannot finish a page either
-  // (test/review-truncation.test.ts, test/editor-sections.test.ts). An editor told only "resolve
-  // markers where the image is attached" would read this marker as its job.
+  // attached image is a phrase the page shows in a marker's place; finishing a page is a page
+  // transcribed, which is a different pass with different gates on what it returns. An editor
+  // told only "resolve markers where the image is attached" would read this marker as its job.
+  //
+  // The reason given for it has changed with #250, and the old one is why this test names its
+  // rows. Until then the argument was the output ceiling: filling the marker in meant returning
+  // the rest of that page ON TOP of the complete corrected body, which was the one request in the
+  // pipeline that could exceed what a response can hold. The editor is no longer asked for the
+  // complete corrected body — it answers with the blocks it changed — so that argument is now
+  // false where it used to be the strongest thing the paragraph had, and a prompt that kept it
+  // would be telling the editor something it can check and find untrue. What remains is the
+  // argument the [not legible] paragraph already runs on, and it never depended on a ceiling:
+  // words the pipeline delivers as a page's own must come from a pass that transcribes pages.
   for (const [what, re] of [
     ["it is not the editor's to resolve even with the image in hand",
       /A \[page not fully transcribed\] marker is not yours to resolve at all, even with that page's image in front of you/],
-    ["the cost is named: the rest of the page on top of the whole body",
-      /filling it in means returning the rest of that page on top of the complete corrected body — the one request in this pipeline that can exceed what a response can hold/],
-    // The cost of hitting it, stated as it now stands — and it has moved twice. #143 made a
-    // truncated response cost the round rather than the run; #165 made that round be re-made a
-    // section at a time, by requests that each see one piece of the document. So the prompt no
-    // longer says the round is discarded, because it is not, and this string is checked because
-    // EDITOR_SECTION_SYSTEM is built on EDITOR_SYSTEM: a stale sentence here would be carried
-    // verbatim into the salvage of exactly such a round, telling the editor that the round it is
-    // rescuing was thrown away. What is still true is the reason to leave the marker alone: this
-    // reading of the document is over either way, and no section call can finish that page.
-    ["and the consequence of hitting that ceiling is this reading of the document",
-      /hitting that ceiling costs this reading of the document: the round is re-made one section at a time, by requests that each see a piece of the document and not the rest of it, and this is the last round either way/],
-    ["what would resolve it is named, so leaving it is not read as giving up",
-      /Re-extracting that page is what has a whole response to itself/],
+    ["what filling it in would actually be: a page transcribed, which is another pass",
+      /means transcribing the rest of that page from its image — a re-extraction, which is a pass with a whole response for that one page and its own gates on what came back, and not a correction to the markup around it/],
+    // And the harm named as the reader receives it, which is the same harm the paragraph above
+    // names for a guessed word: nothing downstream can tell a transcription from a plausible
+    // paragraph, so the distinction has to hold here or nowhere.
+    ["the harm is that nobody downstream can tell the two apart",
+      /what this one would produce is a paragraph you wrote while looking at a page, delivered where nobody downstream can tell the two apart/],
     ["so it is left standing, and never deleted",
       /leave the marker exactly where it stands, resolve the other issues around it, and never delete it — an unfinished page that says so can be finished, and one that does not looks complete to everyone downstream/],
   ] as [string, RegExp][]) {

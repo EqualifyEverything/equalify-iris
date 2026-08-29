@@ -593,11 +593,43 @@ test("the section prompt keeps every rule of the whole-body one and adds the haz
   // Built on EDITOR_SYSTEM rather than written beside it: a dropped href is just as lost in a
   // section, and two prompts that had to be kept in step would drift.
   assert.ok(EDITOR_SECTION_SYSTEM.startsWith(EDITOR_SYSTEM));
-  assert.match(EDITOR_SECTION_SYSTEM, /THIS SECTION only/);
+  assert.match(EDITOR_SECTION_SYSTEM, /return the corrected version of THIS SECTION whole/);
+  assert.match(EDITOR_SECTION_SYSTEM, /and nothing from outside it/);
   // The failure mode that only exists here: the editor is asked to fix "the issues", some of
   // which are about content it cannot see, and the cheapest way to satisfy an issue about
   // duplicated content is to delete the copy in front of you — which may be the only one left.
   assert.match(EDITOR_SECTION_SYSTEM, /never remove content because it looks duplicated/);
   assert.match(EDITOR_SECTION_SYSTEM, /only when BOTH of them are in this section/);
-  assert.match(EDITOR_SECTION_SYSTEM, /anything you leave out\nis simply gone/);
+  assert.match(EDITOR_SECTION_SYSTEM, /anything you leave out is simply gone/);
+});
+
+test("the section prompt says which of the first half's instructions do not apply", () => {
+  // The half above it is now most of a page about naming blocks and returning only those (#250),
+  // and a section request carries no block markers at all. Left to be inferred, the likeliest
+  // reply to a section call is an edits list whose numbers name nothing — so the override says it
+  // outright. The Reader's language clause took five review rounds on exactly this failure: a
+  // prompt that is true about one request and silent about the other reads as true about both.
+  assert.match(EDITOR_SECTION_SYSTEM, /there are no numbered blocks in this request and no edits list in its answer/);
+  assert.match(EDITOR_SECTION_SYSTEM, /is about\nthe other kind of request/);
+  // And the consequence that makes the difference matter, in the words a section call needs:
+  // under the block contract an unnamed block is delivered as it stands, and here it is lost.
+  assert.match(EDITOR_SECTION_SYSTEM, /Here, content you do not return is content nobody returns/);
+  // The answer's shape, restated after the override rather than left as the first half's.
+  assert.ok(EDITOR_SECTION_SYSTEM.trimEnd().endsWith(`Respond with ONLY JSON: { "html": "<corrected section>" }`));
+});
+
+test("a section call is not sent numbered blocks", async () => {
+  // The other half of the same guarantee, and the half a prompt cannot make: the section text in
+  // the request must carry no `<!-- @block N -->` markers, or the override above is telling the
+  // editor something it can see is untrue about what is in front of it.
+  await withTemp(async (dir) => {
+    const { ctx, rec } = ctxWith(dir);
+    await review(ctx);
+    const editorCalls = rec.calls.filter((c) => c.agent === "copy_editor");
+    assert.match(editorCalls[0].user, /<!-- @block 0 -->/, "the document-level call is numbered");
+    for (const c of editorCalls.slice(1)) {
+      assert.equal(c.system, EDITOR_SECTION_SYSTEM);
+      assert.doesNotMatch(c.user, /@block/);
+    }
+  });
 });

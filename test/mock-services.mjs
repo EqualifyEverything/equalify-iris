@@ -303,12 +303,27 @@ const or = createServer(async (req, res) => {
     // Echo how many page images were attached so the e2e can assert the payload
     // was scoped to the attributed page rather than the whole document.
     const attached = imageParts;
-    content = JSON.stringify({
-      html:
-        `<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n` +
-        `<p>Page marker 1.</p>\n<p>Page marker 2.</p>\n<p>Page marker 3.</p>\n` +
-        `<p>Editor saw ${attached} image(s).</p>`,
-    });
+    const rewritten =
+      `<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n` +
+      `<p>Page marker 1.</p>\n<p>Page marker 2.</p>\n<p>Page marker 3.</p>\n` +
+      `<p>Editor saw ${attached} image(s).</p>`;
+    // Answered in the shape the request actually asks for (issue #250). An ordinary round shows
+    // the body as numbered blocks and wants back only the ones that changed, so the reply is an
+    // `edits` array — and this mock is the only place the e2e drives that code at all, which is
+    // the point: the guarantees only the e2e checks (axe clean on the served document, no internal
+    // comments in the delivered HTML) were being checked against a reply shape the pipeline no
+    // longer asks for. A request with no markers in it is the per-section fallback or the table
+    // join, and neither has blocks to name, so those still answer with a body.
+    const blocks = [...user.matchAll(/<!--\s*@block\s+(\d+)\s*-->/g)].map((m) => Number(m[1]));
+    content = blocks.length
+      ? JSON.stringify({
+          // The whole document rewritten, expressed as a patch: everything into the first block
+          // and the rest emptied. That keeps this scenario what it has always been — a round whose
+          // correction replaces the body, so an in-fragment marker is gone unless something
+          // downstream re-states it — while exercising `applyEditorPatch` on the way.
+          edits: blocks.map((n) => ({ block: n, html: n === blocks[0] ? rewritten : "" })),
+        })
+      : JSON.stringify({ html: rewritten });
   }
   // Truncation: a 200 carrying PARTIAL content plus finish_reason "length" —
   // exactly what a model returns when it stops at the output ceiling. The payload

@@ -12,8 +12,8 @@ import {
 
 // This adapter streams for the same reason the Bedrock one does: a single
 // non-streaming request cannot tell a stalled call from a slow one, so capping total
-// duration kills both, and the review phase's document-level rewrite (whole body in,
-// whole corrected body out) is the call slow enough to be killed. Streaming replaces
+// duration kills both, and the review phase's document-level rewrite (the whole body in,
+// and every block the editor changed back out) is the call slow enough to be killed. Streaming replaces
 // that one cap with limits that describe what actually went wrong.
 //
 // How long the call may produce NOTHING before we give up. Deliberately the old

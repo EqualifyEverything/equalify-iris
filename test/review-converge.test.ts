@@ -1,8 +1,8 @@
 // The review loop's stopping rule, and what it costs to get it wrong.
 //
 // Reader -> Editor -> Reader is the loop, and the editor call is the most expensive
-// thing in a run: the whole body goes in and a whole corrected body comes back, up to
-// max_tokens. Some issues are unresolvable HERE by design and the Reader is told to
+// thing in a run: the whole body goes in, and what comes back is every block the editor
+// changed (#250). Some issues are unresolvable HERE by design and the Reader is told to
 // report them anyway — an undecidable pair of same-worded headings (EDITOR_SYSTEM:
 // "leave both headings exactly as they are"), a [page not fully transcribed] marker that
 // only re-extraction can settle. A document whose remaining issues are those gets the
@@ -67,11 +67,11 @@ async function loop(editorReply: (body: string) => string, maxReviewIterations =
             return { text: JSON.stringify({ issues: ISSUES }) };
           }
           editors++;
-          // The body the editor was actually handed, read back out of its own prompt, so
-          // an "unchanged" reply is the document this round was given rather than a
-          // constant that happens to match.
+          // The document the editor was actually handed, read back out of its own prompt — the
+          // numbered blocks, markers and all, so a reply about block 2 is a reply about the
+          // document this round was given rather than about a constant that happens to match.
           const prompt = messages.map((m) => m.content).join("\n");
-          const given = prompt.match(/## Current document \(body content\)\n([\s\S]*?)\n\n## Issues to fix/);
+          const given = prompt.match(/## Current document \(body content, in numbered blocks\)\n([\s\S]*?)\n\n## Issues to fix/);
           assert.ok(given, "the editor prompt no longer carries the body where this test reads it");
           return { text: editorReply(given[1]) };
         },
@@ -92,9 +92,9 @@ async function loop(editorReply: (body: string) => string, maxReviewIterations =
 const typed = (round: Round, type: string) => round.events.filter((e) => e.type === type);
 
 test("a round that changes nothing ends the loop", async () => {
-  // The editor answers, and answers with the document it was given. At a cap of 3 the
+  // The editor answers, and answers that there is nothing to change. At a cap of 3 the
   // old loop spent two more editor calls and two more full re-reads on the same request.
-  const round = await loop((body) => JSON.stringify({ html: body }));
+  const round = await loop(() => JSON.stringify({ edits: [] }));
   assert.equal(round.editors, 1, "one editor call, not three");
   assert.equal(round.readers, 1, "and no re-read of a document that did not change");
 
@@ -103,8 +103,26 @@ test("a round that changes nothing ends the loop", async () => {
   assert.deepEqual(converged[0].data, { iteration: 1, issues: 1, rounds_left: 2 });
 });
 
+test("an editor that answers with the whole document converges the same way", async () => {
+  // The contract the editor used to be given, still read (#250): a model that hands back a
+  // corrected body instead of a list of edits is answering, and a reply identical to its input
+  // is the same fact about the round as an empty edits list. Pinned because the equivalence is
+  // the whole reason the old shape is still accepted — a model that reverts to it under load
+  // must not cost the loop its stopping rule as well.
+  //
+  // The reply is the body itself rather than what the prompt showed, and the difference is worth
+  // naming: the numbered view puts each block on its own line, so a model that retypes what it
+  // was shown returns a body that differs from the original in whitespace and is a CHANGED round
+  // by every measure this loop has. That is a real cost of answering the old way and it belongs to
+  // the model, not to this code — what is pinned here is that answering the old way still works.
+  const round = await loop(() => JSON.stringify({ html: BODY }));
+  assert.equal(round.editors, 1, "one editor call, not three");
+  assert.equal(typed(round, "review_converged").length, 1);
+  assert.equal(typed(round, "editor_whole_body").length, 1, "and the log says which contract it answered");
+});
+
 test("what a converged round delivers is what the cap would have delivered", async () => {
-  const round = await loop((body) => JSON.stringify({ html: body }));
+  const round = await loop(() => JSON.stringify({ edits: [] }));
   assert.equal(round.result.body, BODY, "the document is the one the editor handed back");
   assert.equal(round.result.unresolved.length, 1, "the issues it stopped on are reported");
   assert.match(round.result.html, /@unresolved/);
@@ -126,7 +144,7 @@ test("a round that changes something keeps the loop going", async () => {
   // The guard has to be about what changed, not about how many issues came back: the
   // Reader here keeps reporting, and the editor keeps editing, so the cap is what stops it.
   let n = 0;
-  const round = await loop(() => JSON.stringify({ html: `<p>edit ${n++}</p>` }));
+  const round = await loop(() => JSON.stringify({ edits: [{ block: 0, html: `<p>edit ${n++}</p>` }] }));
   assert.equal(round.editors, 3, "the cap, not convergence, is what stopped this");
   assert.equal(typed(round, "review_converged").length, 0);
   assert.equal(round.result.iterationsCompleted, 3);
@@ -146,7 +164,21 @@ test("each round says whether it changed the document, and by how much", async (
   // 49 characters of prose, which is under `EDITOR_FLOOR_MIN_TEXT`, and a proportion of 49
   // characters is not a measurement (#174). What the floor does above that size is pinned in
   // test/editor-round-size.test.ts; what this pins is that the numbers are reported either way.
-  const changed = await loop(() => JSON.stringify({ html: "<p>edited</p>" }), 1);
+  // Four blocks in, one replaced and three emptied — which is the patch contract's way of saying
+  // what a whole-body reply of "<p>edited</p>" used to say, and it exercises the deletion path
+  // while it is here.
+  const changed = await loop(
+    () =>
+      JSON.stringify({
+        edits: [
+          { block: 0, html: "<p>edited</p>" },
+          { block: 1, html: "" },
+          { block: 2, html: "" },
+          { block: 3, html: "" },
+        ],
+      }),
+    1,
+  );
   assert.deepEqual(typed(changed, "editor")[0].data, {
     iteration: 1,
     changed: true,
@@ -160,7 +192,7 @@ test("each round says whether it changed the document, and by how much", async (
   // A converged round handed the document back, so every one of these is a measurement of the body
   // it was given. Equal numbers do not say the round converged, though — a reply with nothing
   // usable in it reports the same ones, and `editor_no_output` is what tells those apart.
-  const unchanged = await loop((body) => JSON.stringify({ html: body }), 1);
+  const unchanged = await loop(() => JSON.stringify({ edits: [] }), 1);
   assert.deepEqual(typed(unchanged, "editor")[0].data, {
     iteration: 1,
     changed: false,

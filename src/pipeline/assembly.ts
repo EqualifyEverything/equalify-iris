@@ -205,9 +205,10 @@ export function bodyLang(body: string): string | null {
 //
 // `failedPages` is recorded the same way, and for a reason worth spelling out: the
 // per-page marker `failedPage` writes lives INSIDE a fragment, so it is part of the body
-// handed to the Copy Editor with "return the complete corrected body" — a round that
-// rewrites the document may drop it, leaving a document missing a page with nothing in it
-// to say so, which is exactly what that marker exists to prevent. Injected here, after
+// handed to the Copy Editor — and the editor rewrites blocks of that body, so a round that
+// returns the block this marker sits in may return it without the marker, leaving a document
+// missing a page with nothing in it to say so, which is exactly what that marker exists to
+// prevent. Injected here, after
 // the loop, it is out of the editor's reach for the same reason @unresolved is. The
 // in-body marker stays because it says WHERE the hole is; this one guarantees the
 // document admits there is one.

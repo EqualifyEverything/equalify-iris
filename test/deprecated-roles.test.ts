@@ -268,8 +268,8 @@ test("the strip runs where pages are joined, and reports what it removed", () =>
 // rewrite that has not happened yet, so the loop strips what a round hands back.
 //
 // The harness is test/review-converge.test.ts's, cut down: a Reader that always reports the
-// same issue and an editor whose reply is a function of the body it was given.
-async function loop(editorReply: (body: string) => string, body: string): Promise<{
+// same issue and an editor whose reply is a function of the numbered document it was shown.
+async function loop(editorReply: (shown: string) => string, body: string): Promise<{
   result: Awaited<ReturnType<typeof runReview>>;
   events: { type: string; data: Record<string, unknown> }[];
   editors: number;
@@ -306,7 +306,7 @@ async function loop(editorReply: (body: string) => string, body: string): Promis
           }
           editors++;
           const prompt = messages.map((m) => m.content).join("\n");
-          const given = prompt.match(/## Current document \(body content\)\n([\s\S]*?)\n\n## Issues to fix/);
+          const given = prompt.match(/## Current document \(body content, in numbered blocks\)\n([\s\S]*?)\n\n## Issues to fix/);
           assert.ok(given, "the editor prompt no longer carries the body where this test reads it");
           return { text: editorReply(given[1]) };
         },
@@ -329,11 +329,22 @@ test("a deprecated role the copy editor introduces does not reach the delivered 
   // The role arrives on the first round only, alongside a real edit, so the rounds after it
   // hand back the body they were given and the loop converges — one round that introduced
   // one, and one strip to show for it.
+  // Block 1 is the endnote list (block 0 is the `<h1>`), and the replacement is the list with the
+  // role on it plus a paragraph — one edit standing for two top-level nodes, which is how a fix
+  // that splits a block is written (#250).
   let first = true;
-  const round = await loop((body) => {
-    const html = first ? body.replace('<li id="fn-1">', '<li id="fn-1" role="doc-endnote">') + "\n<p>Note.</p>" : body;
+  const round = await loop((shown) => {
+    assert.match(shown, /<!-- @block 1 -->\n<ol role="doc-endnotes">/, "block 1 is not the endnote list");
+    const edits = first
+      ? [
+          {
+            block: 1,
+            html: '<ol role="doc-endnotes"><li id="fn-1" role="doc-endnote">A note.</li></ol>\n<p>Note.</p>',
+          },
+        ]
+      : [];
     first = false;
-    return JSON.stringify({ html });
+    return JSON.stringify({ edits });
   }, CLEAN_NOTES);
   assert.doesNotMatch(round.result.body, /doc-endnote"/, "the item's deprecated role reached the body");
   assert.doesNotMatch(round.result.html, /doc-endnote"/, "the item's deprecated role reached the document");
@@ -352,10 +363,13 @@ test("a deprecated role the copy editor introduces does not reach the delivered 
 
 // The ordering claim in review.ts: the strip runs before the loop compares bodies, so a round
 // whose only effect was a role the strip removes is a round that changed nothing — which ends
-// the loop instead of buying another whole-body rewrite to undo the same attribute.
+// the loop instead of buying another round to undo the same attribute.
 test("a round whose only change is a role this strips is not credited as a change", async () => {
   const round = await loop(
-    (body) => JSON.stringify({ html: body.replace('<li id="fn-1">', '<li id="fn-1" role="doc-endnote">') }),
+    () =>
+      JSON.stringify({
+        edits: [{ block: 1, html: '<ol role="doc-endnotes"><li id="fn-1" role="doc-endnote">A note.</li></ol>' }],
+      }),
     CLEAN_NOTES,
   );
   assert.equal(round.editors, 1, "the loop should have stopped on the round that changed nothing");

@@ -1,11 +1,16 @@
 // Cutting a document body into pieces small enough that a model can return one of them.
 //
-// The Copy Editor is asked for the complete corrected body, so the length of its answer is a
-// property of the DOCUMENT and not of how much is wrong with it — and a 25-page document's
-// body is simply longer than one response may be (issue #165). What this file provides is the
-// cut: the body split at TOP-LEVEL boundaries into pieces under a character budget, so a round
-// that cannot be answered whole can be answered a section at a time (review.ts, and see
+// A reply the Copy Editor cannot fit in one response is a round that corrects nothing, and a
+// 25-page document reaches that ceiling (issue #165). What this file provides is the cut: the
+// body split at TOP-LEVEL boundaries into pieces under a character budget, so a round that
+// cannot be answered whole can be answered a section at a time (review.ts, and see
 // `splitSections` for the properties the caller relies on).
+//
+// The same cut serves the ordinary round now as well. The editor answers with the blocks it
+// changed rather than the document (#250, patch.ts), and a block is one of these boundaries with
+// nothing packed into it — `splitBlocks` at the bottom of this file. So there is one definition
+// of where a top-level node ends, used by the contract and by the fallback for when the contract
+// still does not fit.
 //
 // Top-level, because that is the only cut a section can be corrected at. A section that ends
 // halfway through a table is not HTML the editor can return "corrected" — it would close the
@@ -232,4 +237,58 @@ export function splitSections(body: string, budget: number): Section[] {
 // section the editor did not answer, or answered unusably) keeps the original text.
 export function joinSections(sections: Section[], corrected: (string | null)[]): string {
   return sections.map((s, i) => s.pre + (corrected[i] ?? s.html)).join("");
+}
+
+// The body as its individual top-level nodes, one Section each, in document order.
+//
+// The same cut as `splitSections` with nothing packed into it, and deliberately the same code
+// path: what `patch.ts` needs to name a block is exactly the boundary the editor's own
+// section fallback already corrects at, and two scans that had to agree about where a top-level
+// node ends would be two scans that eventually did not. `joinSections` therefore works on these
+// as it does on sections, and the identity property holds here too —
+// `splitBlocks(body).map((b) => b.pre + b.html).join("")` is the body, character for character.
+//
+// A budget of 0 is what "do not pack" is: no piece fits with another, so every piece becomes
+// its own group, and the whitespace-only merge below it still folds a gap into its neighbour
+// rather than offering a block with nothing in it to correct.
+export function splitBlocks(body: string): Section[] {
+  return splitSections(body, 0);
+}
+
+// Is `html` a whole number of top-level nodes — nothing left open at the end of it?
+//
+// Asked of a replacement the editor sends back for one block. A reply that ends inside an
+// element is a reply whose extent this code would have to guess at, and splicing it in would
+// close the tags with whatever followed in the document: the failure mode `splitSections` cuts
+// at top-level boundaries to avoid, arriving from the other direction.
+//
+// The `<!---->` trick and the reason for it are `bodyLang`'s (assembly.ts): `cutPoints` drops a
+// boundary that lands on the last character, so a string that ends properly and one whose last
+// element was never closed both come back with no boundary at the end. Scanning with a comment
+// appended makes every real node end fall before the end of the string, and the appended
+// comment's own boundary is the one dropped — so whatever is left after the last boundary is
+// text no element closed.
+//
+// The other end of the same question, and the one a tail check alone misses: an end tag that
+// closes NOTHING. `cutPoints` ignores one, because that is what a parser does with it, so
+// `</figure><p>x</p>` has a clean tail and is a whole number of nodes by the reading above — and
+// splicing it into a block writes an end tag into the document for an element opened nowhere.
+// A parser drops it, so nothing is delivered wrong to a reader, but the delivered BYTES are what
+// `delivered_markup` counts (#240), and one spliced stray reports there as an element whose tags
+// do not balance. It is refused for the reason its mirror image is: this code cannot tell what
+// the editor meant by it, and the block it was about is safe to keep instead.
+//
+// Detected through `cutPoints` rather than by a second scan of the tags — two scanners that
+// disagree about what a top-level node is would be the worse bug. A stray end tag is ignored by
+// the stack and closes nothing, so it becomes a top-level node of its own, and a node that STARTS
+// with `</` is exactly that stray.
+export function topLevelComplete(html: string): boolean {
+  const boundaries = cutPoints(html + "<!---->").filter((p) => p <= html.length);
+  if (html.slice(boundaries.at(-1) ?? 0).trim() !== "") return false;
+  let from = 0;
+  for (const to of boundaries) {
+    if (html.slice(from, to).trimStart().startsWith("</")) return false;
+    from = to;
+  }
+  return true;
 }
