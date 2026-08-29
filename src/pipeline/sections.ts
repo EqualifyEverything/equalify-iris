@@ -268,7 +268,27 @@ export function splitBlocks(body: string): Section[] {
 // appended makes every real node end fall before the end of the string, and the appended
 // comment's own boundary is the one dropped — so whatever is left after the last boundary is
 // text no element closed.
+//
+// The other end of the same question, and the one a tail check alone misses: an end tag that
+// closes NOTHING. `cutPoints` ignores one, because that is what a parser does with it, so
+// `</figure><p>x</p>` has a clean tail and is a whole number of nodes by the reading above — and
+// splicing it into a block writes an end tag into the document for an element opened nowhere.
+// A parser drops it, so nothing is delivered wrong to a reader, but the delivered BYTES are what
+// `delivered_markup` counts (#240), and one spliced stray reports there as an element whose tags
+// do not balance. It is refused for the reason its mirror image is: this code cannot tell what
+// the editor meant by it, and the block it was about is safe to keep instead.
+//
+// Detected through `cutPoints` rather than by a second scan of the tags — two scanners that
+// disagree about what a top-level node is would be the worse bug. A stray end tag is ignored by
+// the stack and closes nothing, so it becomes a top-level node of its own, and a node that STARTS
+// with `</` is exactly that stray.
 export function topLevelComplete(html: string): boolean {
   const boundaries = cutPoints(html + "<!---->").filter((p) => p <= html.length);
-  return html.slice(boundaries.at(-1) ?? 0).trim() === "";
+  if (html.slice(boundaries.at(-1) ?? 0).trim() !== "") return false;
+  let from = 0;
+  for (const to of boundaries) {
+    if (html.slice(from, to).trimStart().startsWith("</")) return false;
+    from = to;
+  }
+  return true;
 }

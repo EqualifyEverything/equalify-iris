@@ -10,7 +10,7 @@ import { stripNestedMain } from "./landmarks.ts";
 import { destroyedBody, EDITOR_SHRINK_FLOOR, structureCounts, visibleText } from "./correction.ts";
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { joinSections, splitSections, type Section } from "./sections.ts";
-import { annotateBlocks, applyBlockEdits, blocksOf, readBlockEdits } from "./patch.ts";
+import { annotateBlocks, applyBlockEdits, blocksOf, readBlockEdits, stripBlockMarkers } from "./patch.ts";
 import { flatten } from "./flatten.ts";
 import { examplesForPrompt } from "./memory.ts";
 import { knownPages, pageIndex, type IndexedPage } from "./pageindex.ts";
@@ -1247,13 +1247,26 @@ async function editorCall(
   // How often this fires is the measurement that says whether the contract reads: a deployment
   // whose editor answers in whole bodies is paying #250's bill in full and is not truncating any
   // less for the new prompt, so it is logged even though nothing about it failed.
-  if (typeof parsed?.html === "string") {
-    ctx.log.event("editor_whole_body", { blocks: blocks.length, chars: parsed.html.length });
+  //
+  // What it hands back is the document it was SHOWN, which under this contract is the annotated
+  // copy — so the markers come out of it here, and how many there were goes on the line. Adopting
+  // them would write Iris's own request scaffolding into the delivered HTML, and it compounds: a
+  // comment is a top-level node, so the next round is shown the markers as blocks in their own
+  // right and the body doubles every round while every round reads as `changed`.
+  let whole = parsed?.html;
+  if (typeof whole === "string") {
+    const { html: clean, markers } = stripBlockMarkers(whole);
+    whole = clean;
+    ctx.log.event("editor_whole_body", {
+      blocks: blocks.length,
+      chars: clean.length,
+      ...(markers ? { markers } : {}),
+    });
   }
   // If the editor returns nothing usable, keep the current body unchanged — and say
   // that is what happened, so the loop does not read a reply it could not use as the
   // editor having decided the document was fine.
-  const corrected = parsed?.html?.trim();
+  const corrected = whole?.trim();
   if (!corrected) {
     ctx.log.event("editor_no_output", { chars: res.text.length });
     return { body, usable: false };
@@ -1304,6 +1317,24 @@ function applyEditorPatch(
 ): Omit<EditorRound, "truncated"> {
   const { edits, unreadable } = readBlockEdits(raw);
   const patched = applyBlockEdits(blocks, edits);
+  const used = patched.applied + patched.deleted + patched.unchanged;
+  const refused = patched.unknown.length + patched.duplicate + patched.incomplete + unreadable;
+  // Which of the two ways this round can be unusable, decided before the line is written so the
+  // log says what became of the round and not only what became of each edit.
+  //
+  // `all_refused`: edits were sent and not one of them could be used — a reply about a document
+  // this is not, or about blocks that were all unfinished.
+  //
+  // `refusal_with_deletion`: a refusal in the same reply as an emptied block. Per-edit refusal is
+  // the right rule for independent edits and the wrong one here, because this contract makes a
+  // MOVE a pair of edits — the block the content lands in, and the block it came from emptied —
+  // and the two halves are one change. Take the emptying and refuse the landing and the content is
+  // simply gone: `destroyedBody` cannot see one paragraph, the next Reader round reads a document
+  // that no longer mentions it, and the heading it belonged under is left with nothing. So a reply
+  // holding both a refusal and a deletion is treated as a reply that cannot be applied in part,
+  // whether or not the two were actually a pair — the cost of being wrong about that is one round,
+  // and the cost of being wrong the other way is in the deliverable.
+  const discarded = used === 0 && refused > 0 ? "all_refused" : refused > 0 && patched.deleted > 0 ? "refusal_with_deletion" : null;
   ctx.log.event("editor_patch", {
     blocks: blocks.length,
     edits: raw.length,
@@ -1319,15 +1350,13 @@ function applyEditorPatch(
     ...(patched.incomplete ? { incomplete: patched.incomplete } : {}),
     ...(patched.markers ? { markers: patched.markers } : {}),
     ...(unreadable ? { unreadable } : {}),
+    ...(discarded ? { discarded } : {}),
   });
-  const used = patched.applied + patched.deleted + patched.unchanged;
-  const refused = patched.unknown.length + patched.duplicate + patched.incomplete + unreadable;
-  // Edits were sent and not one of them could be used: a reply about a document this is not, or
-  // about blocks that were all unfinished. `usable: false` for the same reason an unparseable
-  // reply is one — nothing came back that can be used here — which lets the loop run another
-  // round rather than crediting the unchanged body as a convergence. `edits: []` does not come
-  // through here, because nothing was refused: that is an answer, and it converges.
-  if (used === 0 && refused > 0) return { body, usable: false };
+  // `usable: false` for the same reason an unparseable reply is one — nothing came back that can
+  // be used as this document — which lets the loop run another round rather than crediting the
+  // unchanged body as a convergence. `edits: []` does not come through here, because nothing was
+  // refused: that is an answer, and it converges.
+  if (discarded) return { body, usable: false };
   // #174's floor, on the JOINED body rather than on any one replacement. The patch contract makes
   // a catastrophic loss harder to reach — an untouched block cannot be lost, so only deletions
   // and shrunken replacements can move this — but "harder to reach" is not a guarantee, and the

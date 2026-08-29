@@ -837,11 +837,20 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   and have every replacement applied to the wrong block with each one well-formed — the one failure
   here that nothing downstream could see. A replacement that leaves an element open is refused and
   that block keeps its original text (splicing a fragment in would close its tags with whatever
-  followed); an unknown or repeated block number, an unreadable entry and an echoed marker are each
-  counted on `editor_patch`, so a reply that did not follow the contract says so in the log rather
-  than in the document. A model that answers with a whole `html` body anyway is still read, and
-  logged as `editor_whole_body`: refusing it would spend the round, accepting it costs nothing that
-  refusing would save, and the #174 floor guards that path as it always did. The section fallback
+  followed), and so is one carrying an end tag that closes nothing, which a parser ignores and which
+  would put an unbalanced tag into the delivered bytes; an unknown or repeated block number, an
+  unreadable entry and an echoed marker are each counted on `editor_patch`, so a reply that did not
+  follow the contract says so in the log rather than in the document. Two cases are NOT applied in
+  part, and `discarded` on that line says which: a reply where nothing could be used, and a reply
+  holding a refusal alongside an emptied block — because a move is a pair of edits here, so taking
+  the emptying and refusing the landing deletes a paragraph that no later pass can miss. Both hand
+  the body back and let the loop retry. A model that answers with a whole `html` body anyway is
+  still read, and logged as `editor_whole_body`: refusing it would spend the round, and the #174
+  floor guards that path as it always did. What it does cost is measured on the same line — the
+  document that model was shown carries the markers, so a reply that retypes it brings them back;
+  they are stripped and counted, because delivering them would put Iris's request scaffolding in the
+  HTML and would compound, a comment being a top-level node that becomes a block of its own next
+  round. The section fallback
   (§7.11) stays for the case the contract does not fix — one top-level node bigger than the
   ceiling — and its prompt now says outright that a section request carries no numbered blocks,
   because it is built on the same system prompt and a prompt that is true about one request and

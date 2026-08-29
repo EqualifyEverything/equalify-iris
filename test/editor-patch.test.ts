@@ -108,6 +108,27 @@ test("what is left open at the end of a replacement is not a replacement", () =>
   assert.equal(topLevelComplete(`<p>a<p>b`), false);
 });
 
+test("an end tag that closes nothing is not a replacement either", () => {
+  // The other end of the same question, and one a tail check alone lets through: a stray end tag
+  // is IGNORED by `cutPoints`, because that is what a parser does with it, so the tail is clean
+  // and the markup counts as whole nodes. Splicing it in writes an end tag into the document for
+  // an element opened nowhere. A parser drops it, so a reader is not served anything wrong — but
+  // the delivered BYTES are what `delivered_markup` counts (#240), and one spliced stray reports
+  // there as an element whose tags do not balance, pointing at nothing.
+  //
+  // Not a hypothetical shape: a page answer emitting a stray `</main>` is what landmarks.ts
+  // deletes and counts (#256), so a model returning an end tag for something it never opened is
+  // measured behaviour in this pipeline, not a shape only a fuzzer reaches.
+  assert.equal(topLevelComplete(`</figure><p>x</p>`), false, "at the front, where a parser ignores it");
+  assert.equal(topLevelComplete(`<p>a</p></figure>`), false, "at the back, past the last real node");
+  assert.equal(topLevelComplete(`<p>a</p></div><p>b</p>`), false, "between two whole nodes");
+  // And the legitimate shapes it must not catch: an end tag that closes something the replacement
+  // itself opened is the ordinary case, and `<li>`/`<td>` closing by implication is correct HTML.
+  assert.equal(topLevelComplete(`<div><p>a</p></div>`), true);
+  assert.equal(topLevelComplete(`<ul><li>a<li>b</ul>`), true);
+  assert.equal(topLevelComplete(`<table><tr><td>1<td>2</table>`), true);
+});
+
 // --- the patch ---
 
 const blocks = () => blocksOf(BODY);
@@ -315,6 +336,9 @@ test("edits that could none of them be used are a retry, not a decision", async 
   const { result, events } = await round(() => ({ edits: [{ block: 99, html: `<p>x</p>` }] }), BODY, 2);
   assert.equal(result.body, BODY);
   assert.equal(events.filter((e) => e.type === "editor_patch").length, 2, "every round the cap allows is spent");
+  // Which of the two ways the round was unusable, on the line: what became of the round and not
+  // only what became of each edit.
+  assert.equal(events.find((e) => e.type === "editor_patch")?.data.discarded, "all_refused");
   assert.equal(events.filter((e) => e.type === "review_converged").length, 0);
   // And an empty list is the other case, which is an answer: the editor read the document and
   // said the markup needs nothing.
@@ -369,6 +393,79 @@ test("an editor that answers with the whole document is still read", async () =>
   assert.match(both.result.body, /<p>Edited\.<\/p>/);
   assert.doesNotMatch(both.result.body, /Whole/);
   assert.equal(both.events.find((e) => e.type === "editor_whole_body"), undefined);
+});
+
+test("a whole-body reply that hands back what it was SHOWN does not deliver the markers", async () => {
+  // The likeliest whole-body reply under this contract, and the one the fallback exists for: the
+  // model is shown the document with a marker line above every top-level element and returns that
+  // document. Adopted verbatim it would write Iris's own request scaffolding into the delivered
+  // HTML — the `@source`-leak class — and it compounds, because a comment is a top-level node: the
+  // next round is shown the markers as blocks in their own right, so the body doubles every round,
+  // every round reads as `changed`, and a 4-block document arrives carrying 16 comments.
+  //
+  // A cap of three rounds, because one round cannot tell a strip from a body that happened to
+  // survive intact. Two rounds is what this spends: the second returns what the first settled on,
+  // so the body stops moving and the loop converges — which is the symptom read from the other
+  // side, since a body that doubles every round can never converge and always runs to the cap.
+  const { result, events } = await round((shown) => ({ html: shown }), BODY, 3);
+  assert.doesNotMatch(result.body, /@block/, "no request scaffolding in the delivered body");
+  const whole = events.filter((e) => e.type === "editor_whole_body");
+  assert.equal(whole.length, 2);
+  assert.equal(events.filter((e) => e.type === "review_converged").length, 1);
+  for (const line of whole) {
+    assert.equal(line.data.blocks, 5, "the body is not growing a set of comment blocks each round");
+    // On the record, because how often a model does this is the evidence for how the contract
+    // reads — and a reply that echoed the markers is a reply written against the old one.
+    assert.equal(line.data.markers, 5);
+  }
+  // The one cost of answering the old way that remains, named so nobody reads it as a bug:
+  // `annotateBlocks` separates blocks with a newline and leaves out the whitespace assembly put
+  // between them, so a model retyping what it was shown returns the same nodes with different
+  // gaps around them. Whitespace between blocks, not content.
+  // (Compared trimmed because the body's trailing newline is part of its last block — only the
+  // final block can carry trailing whitespace — and that is the same whitespace fact.)
+  assert.notEqual(result.body, BODY);
+  assert.deepEqual(
+    blocksOf(result.body).map((b) => b.html.trim()),
+    blocksOf(BODY).map((b) => b.html.trim()),
+  );
+});
+
+test("half a move is not applied: a refusal beside a deletion costs the round", async () => {
+  // Per-edit refusal is the right rule for independent edits and the wrong one for a MOVE, which
+  // this contract makes a pair — the block the content lands in, and the block it came from
+  // emptied. Take the emptying and refuse the landing and the content is simply gone: the floor
+  // cannot see one paragraph, the next Reader round reads a document that no longer mentions it,
+  // and the block it was moving out of is left without it.
+  //
+  // So a reply holding both a refusal and a deletion is not applied in part, whether or not those
+  // two edits were actually a pair. Being wrong about that costs one round; being wrong the other
+  // way costs the deliverable.
+  const { result, events } = await round(() => ({
+    edits: [
+      { block: 4, html: `<p>Two. And the list's items.` }, // where the content was to land
+      { block: 2, html: "" }, // and the block it was to come from
+    ],
+  }), BODY, 1);
+  assert.equal(result.body, BODY, "the body that entered the round is what is delivered");
+  assert.match(result.body, /<ul><li>a<\/li>/, "the block the reply emptied still has its content");
+  const patch = events.find((e) => e.type === "editor_patch");
+  assert.equal(patch?.data.deleted, 1, "the counters still say what became of each edit");
+  assert.equal(patch?.data.incomplete, 1);
+  assert.equal(patch?.data.discarded, "refusal_with_deletion");
+  // A retry, not a decision: the loop must not read the untouched body as a convergence.
+  assert.equal(events.filter((e) => e.type === "review_converged").length, 0);
+  // And the rule is narrow. A refusal with no deletion in the same reply is still contained to its
+  // own block — that is the containment the contract is for — and a deletion with no refusal is an
+  // ordinary correction.
+  const contained = await round(() => ({
+    edits: [{ block: 0, html: `<h1>Manual, corrected</h1>` }, { block: 4, html: `<p>Two.` }],
+  }), BODY, 1);
+  assert.match(contained.result.body, /<h1>Manual, corrected<\/h1>/);
+  assert.ok(!("discarded" in (contained.events.find((e) => e.type === "editor_patch")?.data ?? {})));
+  const deleting = await round(() => ({ edits: [{ block: 2, html: "" }] }), BODY, 1);
+  assert.doesNotMatch(deleting.result.body, /<ul>/);
+  assert.ok(!("discarded" in (deleting.events.find((e) => e.type === "editor_patch")?.data ?? {})));
 });
 
 test("a reply with neither shape in it is a call that said nothing", async () => {

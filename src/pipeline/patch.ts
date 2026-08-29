@@ -35,6 +35,19 @@ import { joinSections, splitBlocks, topLevelComplete, type Section } from "./sec
 // written into a delivered document — it exists only in the request.
 const BLOCK_MARKER = /<!--\s*@block\s+\d+\s*-->/g;
 
+// Take the markers back out of text a model returned, and say how many there were.
+//
+// Exported because BOTH shapes of reply need it, and only one of them is a patch. A model that
+// answers with the whole document under this contract answers with the document it was SHOWN —
+// markers and all — and adopting that verbatim writes Iris's own request scaffolding into the
+// delivered HTML. It also compounds: a comment is a top-level node, so the next round's blocks
+// are the markers as well as the content, and the body doubles every round while every round
+// reads as `changed`. Nothing downstream removes these — the strip is the only place they go.
+export function stripBlockMarkers(html: string): { html: string; markers: number } {
+  const found = html.match(BLOCK_MARKER);
+  return { html: found ? html.replace(BLOCK_MARKER, "") : html, markers: found?.length ?? 0 };
+}
+
 export interface BlockEdit {
   block: number;
   html: string;
@@ -107,13 +120,12 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
       report.duplicate++;
       continue;
     }
-    const marked = edit.html.match(BLOCK_MARKER);
-    if (marked) report.markers += marked.length;
     // Stripped before the completeness check, not after: a marker is not markup the check should
     // be reading, and a reply that is complete apart from an echoed comment is a reply this can
     // use. Whitespace left over from a stripped marker is not content either, so a reply that was
     // nothing but markers is the deletion it looks like.
-    const stripped = edit.html.replace(BLOCK_MARKER, "");
+    const { html: stripped, markers } = stripBlockMarkers(edit.html);
+    report.markers += markers;
     const html = stripped.trim() === "" ? "" : stripped;
     if (!topLevelComplete(html)) {
       report.incomplete++;
