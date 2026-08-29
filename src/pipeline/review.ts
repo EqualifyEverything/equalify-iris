@@ -1325,16 +1325,24 @@ function applyEditorPatch(
   // `all_refused`: edits were sent and not one of them could be used — a reply about a document
   // this is not, or about blocks that were all unfinished.
   //
-  // `refusal_with_deletion`: a refusal in the same reply as an emptied block. Per-edit refusal is
-  // the right rule for independent edits and the wrong one here, because this contract makes a
-  // MOVE a pair of edits — the block the content lands in, and the block it came from emptied —
-  // and the two halves are one change. Take the emptying and refuse the landing and the content is
-  // simply gone: `destroyedBody` cannot see one paragraph, the next Reader round reads a document
-  // that no longer mentions it, and the heading it belonged under is left with nothing. So a reply
-  // holding both a refusal and a deletion is treated as a reply that cannot be applied in part,
-  // whether or not the two were actually a pair — the cost of being wrong about that is one round,
-  // and the cost of being wrong the other way is in the deliverable.
-  const discarded = used === 0 && refused > 0 ? "all_refused" : refused > 0 && patched.deleted > 0 ? "refusal_with_deletion" : null;
+  // `refusal_with_loss`: a refusal in the same reply as a block that gave content up. Per-edit
+  // refusal is the right rule for independent edits and the wrong one here, because this contract
+  // makes a MOVE a pair of edits — the block the content lands in, and the block it came from — and
+  // the two halves are one change. Take the source half and refuse the landing half and the content
+  // is simply gone: `destroyedBody` cannot see one paragraph, the next Reader round reads a
+  // document that no longer mentions it, and the heading it belonged under is left with nothing.
+  //
+  // BOTH forms the source half can take count, because EDITOR_SYSTEM offers both: the block emptied
+  // (`deleted`), or returned "with what is left of it" — a replacement carrying less prose than the
+  // block it replaces (`shrunk`). A rule that read only the first would let the commoner half of a
+  // move through, since a move usually leaves something behind.
+  //
+  // So a reply holding a refusal beside either is treated as one that cannot be applied in part,
+  // whether or not those edits were actually a pair. Both are ordinary corrections on their own —
+  // this fires only where a reply ALREADY has a defect in it — so the cost of being wrong about the
+  // pairing is one round, and the cost of being wrong the other way is in the deliverable.
+  const gaveUpContent = patched.deleted > 0 || patched.shrunk > 0;
+  const discarded = used === 0 && refused > 0 ? "all_refused" : refused > 0 && gaveUpContent ? "refusal_with_loss" : null;
   ctx.log.event("editor_patch", {
     blocks: blocks.length,
     edits: raw.length,
@@ -1350,6 +1358,11 @@ function applyEditorPatch(
     ...(patched.incomplete ? { incomplete: patched.incomplete } : {}),
     ...(patched.markers ? { markers: patched.markers } : {}),
     ...(unreadable ? { unreadable } : {}),
+    // Which blocks gave content up, so `refusal_with_loss` says which half of a move it saw. On the
+    // line whenever it happened, not only when the round was discarded: a round of shrinking
+    // replacements that all applied is the ordinary way this contract removes duplicated content,
+    // and how often that happens is worth reading on its own.
+    ...(patched.shrunk ? { shrunk: patched.shrunk } : {}),
     ...(discarded ? { discarded } : {}),
   });
   // `usable: false` for the same reason an unparseable reply is one — nothing came back that can

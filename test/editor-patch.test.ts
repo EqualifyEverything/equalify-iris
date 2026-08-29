@@ -431,16 +431,16 @@ test("a whole-body reply that hands back what it was SHOWN does not deliver the 
   );
 });
 
-test("half a move is not applied: a refusal beside a deletion costs the round", async () => {
+test("half a move is not applied: a refusal beside a block that gave content up costs the round", async () => {
   // Per-edit refusal is the right rule for independent edits and the wrong one for a MOVE, which
-  // this contract makes a pair — the block the content lands in, and the block it came from
-  // emptied. Take the emptying and refuse the landing and the content is simply gone: the floor
-  // cannot see one paragraph, the next Reader round reads a document that no longer mentions it,
-  // and the block it was moving out of is left without it.
+  // this contract makes a pair — the block the content lands in, and the block it came from. Take
+  // the source half and refuse the landing half and the content is simply gone: the floor cannot
+  // see one paragraph, the next Reader round reads a document that no longer mentions it, and the
+  // block it was moving out of is left without it.
   //
-  // So a reply holding both a refusal and a deletion is not applied in part, whether or not those
-  // two edits were actually a pair. Being wrong about that costs one round; being wrong the other
-  // way costs the deliverable.
+  // So a reply holding a refusal beside either form of the source half is not applied in part,
+  // whether or not those two edits were actually a pair. Being wrong about that costs one round;
+  // being wrong the other way costs the deliverable.
   const { result, events } = await round(() => ({
     edits: [
       { block: 4, html: `<p>Two. And the list's items.` }, // where the content was to land
@@ -452,13 +452,30 @@ test("half a move is not applied: a refusal beside a deletion costs the round", 
   const patch = events.find((e) => e.type === "editor_patch");
   assert.equal(patch?.data.deleted, 1, "the counters still say what became of each edit");
   assert.equal(patch?.data.incomplete, 1);
-  assert.equal(patch?.data.discarded, "refusal_with_deletion");
+  assert.equal(patch?.data.discarded, "refusal_with_loss");
   // A retry, not a decision: the loop must not read the untouched body as a convergence.
   assert.equal(events.filter((e) => e.type === "review_converged").length, 0);
-  // And the rule is narrow. A refusal with no deletion in the same reply is still contained to its
-  // own block — that is the containment the contract is for — and a deletion with no refusal is an
-  // ordinary correction.
+  // The OTHER form of the source half, and the commoner one: the prompt offers "with what is left
+  // of it, or `""` if nothing is", so a move usually leaves the block it came from standing with
+  // less in it than before. A rule that read only the emptying would let this through — and this
+  // one is worse to miss, because a shrunken block looks like an ordinary correction on the line.
+  const shrinking = await round(() => ({
+    edits: [
+      { block: 4, html: `<p>Two. And item b.` }, // the landing half, malformed
+      { block: 2, html: `<ul><li>a</li></ul>` }, // the source half, one item lighter
+    ],
+  }), BODY, 1);
+  assert.equal(shrinking.result.body, BODY, "the block that gave an item up still has it");
+  const shrank = shrinking.events.find((e) => e.type === "editor_patch");
+  assert.equal(shrank?.data.shrunk, 1);
+  assert.equal(shrank?.data.deleted, 0, "nothing was emptied, which is why `deleted` alone is not the test");
+  assert.equal(shrank?.data.discarded, "refusal_with_loss");
+  // And the rule is narrow. A refusal beside a replacement that gave nothing up is still contained
+  // to its own block — that is the containment the contract is for — and a block that gave content
+  // up with nothing refused is an ordinary correction.
   const contained = await round(() => ({
+    // Longer than the block it replaces, so no content left the document and there is no half of a
+    // move for the refusal below to be the other side of.
     edits: [{ block: 0, html: `<h1>Manual, corrected</h1>` }, { block: 4, html: `<p>Two.` }],
   }), BODY, 1);
   assert.match(contained.result.body, /<h1>Manual, corrected<\/h1>/);
@@ -466,6 +483,14 @@ test("half a move is not applied: a refusal beside a deletion costs the round", 
   const deleting = await round(() => ({ edits: [{ block: 2, html: "" }] }), BODY, 1);
   assert.doesNotMatch(deleting.result.body, /<ul>/);
   assert.ok(!("discarded" in (deleting.events.find((e) => e.type === "editor_patch")?.data ?? {})));
+  // A shrinking replacement on its own is how this contract removes content the document printed
+  // twice, so it applies and is counted — the count is worth reading whether or not a round was
+  // thrown away.
+  const trimming = await round(() => ({ edits: [{ block: 2, html: `<ul><li>a</li></ul>` }] }), BODY, 1);
+  assert.match(trimming.result.body, /<ul><li>a<\/li><\/ul>/);
+  const trimmed = trimming.events.find((e) => e.type === "editor_patch");
+  assert.equal(trimmed?.data.shrunk, 1);
+  assert.ok(!("discarded" in (trimmed?.data ?? {})));
 });
 
 test("a reply with neither shape in it is a call that said nothing", async () => {

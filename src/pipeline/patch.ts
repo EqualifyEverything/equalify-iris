@@ -27,6 +27,7 @@
 // the one failure here that no check downstream can see: every edit applied to the wrong block,
 // each replacement well-formed. Copying a number that is written above the block cannot make that
 // mistake.
+import { visibleText } from "./correction.ts";
 import { joinSections, splitBlocks, topLevelComplete, type Section } from "./sections.ts";
 
 // The marker written above each block in the copy of the body the editor is shown. House style
@@ -80,6 +81,14 @@ export interface PatchReport {
   // and the strip is exact — but the count is the evidence for how well the contract reads, so
   // it goes on the record.
   markers: number;
+  // Applied replacements carrying LESS PROSE than the block they replace. Not an error on its own —
+  // removing a heading the document printed twice is this loop's job, and it shortens a block — but
+  // it is the other half a move can have. The contract offers two ways to say what becomes of the
+  // block content was taken out of: emptied (`deleted`), or returned "with what is left of it",
+  // which is this. The caller needs both to tell whether a reply with a refusal in it may be
+  // applied in part. Counted on the PROSE, so unwrapping a mis-structured block — which loses
+  // bytes and no words — is not mistaken for content leaving.
+  shrunk: number;
 }
 
 // The body as the editor is shown it: every top-level block preceded by its number.
@@ -109,6 +118,7 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     duplicate: 0,
     incomplete: 0,
     markers: 0,
+    shrunk: 0,
   };
   for (const edit of edits) {
     const at = edit.block;
@@ -150,6 +160,7 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     }
     replacements[at] = html;
     report.applied++;
+    if (visibleText(html).length < visibleText(blocks[at]!.html).length) report.shrunk++;
   }
   return { ...report, body: joinSections(blocks, replacements) };
 }
