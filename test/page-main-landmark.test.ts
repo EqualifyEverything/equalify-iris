@@ -54,7 +54,7 @@ async function rules(body: string): Promise<string[] | null> {
 test("a bare <main> loses its tags and its children are promoted", () => {
   const out = stripNestedMain("<main><h2>Controls</h2><p>Text.</p></main>");
   assert.equal(out.html, "<h2>Controls</h2><p>Text.</p>");
-  assert.deepEqual([out.unwrapped, out.downgraded, out.declined], [1, 0, 0]);
+  assert.deepEqual([out.unwrapped, out.downgraded, out.dropped, out.declined], [1, 0, 0, 0]);
 });
 
 // The reason a `<main>` with attributes is not simply unwrapped. `bodyLang` derives the document's
@@ -64,7 +64,7 @@ test("a bare <main> loses its tags and its children are promoted", () => {
 test("a <main> carrying attributes becomes a <div> and keeps every one of them", () => {
   const out = stripNestedMain('<main id="p3" lang="ko" aria-label="3쪽"><h2>가</h2></main>');
   assert.equal(out.html, '<div id="p3" lang="ko" aria-label="3쪽"><h2>가</h2></div>');
-  assert.deepEqual([out.unwrapped, out.downgraded, out.declined], [0, 1, 0]);
+  assert.deepEqual([out.unwrapped, out.downgraded, out.dropped, out.declined], [0, 1, 0, 0]);
 });
 
 test("the document's derived language survives the downgrade, and can only improve on the unwrap", () => {
@@ -87,7 +87,7 @@ test("a role=main token is dropped on the way to <div>, and any other role is ke
 test("two <main> wrappers in one body are both taken out", () => {
   const out = stripNestedMain("<main><h2>A</h2></main>\n\n<main><h2>B</h2></main>");
   assert.equal(out.html, "<h2>A</h2>\n\n<h2>B</h2>");
-  assert.deepEqual([out.unwrapped, out.downgraded, out.declined], [2, 0, 0]);
+  assert.deepEqual([out.unwrapped, out.downgraded, out.dropped, out.declined], [2, 0, 0, 0]);
 });
 
 // `<main>` cannot legally contain another one, but a model is not a validator, and pairing by depth
@@ -95,18 +95,33 @@ test("two <main> wrappers in one body are both taken out", () => {
 test("a <main> inside a <main> is paired by depth, not by the next end tag", () => {
   const out = stripNestedMain('<main><main lang="ko"><p>가</p></main><p>b</p></main>');
   assert.equal(out.html, '<div lang="ko"><p>가</p></div><p>b</p>');
-  assert.deepEqual([out.unwrapped, out.downgraded, out.declined], [1, 1, 0]);
+  assert.deepEqual([out.unwrapped, out.downgraded, out.dropped, out.declined], [1, 1, 0, 0]);
 });
 
-// There is no correct edit for half a wrapper: the element's extent is whatever the parser decides,
-// and both guesses move content into or out of a landmark. Left alone and counted, which is what
-// makes the enabled axe rules the thing that reports it.
-test("half a wrapper is declined and the string is left exactly as it was", () => {
-  for (const body of ["<main><h2>A</h2>", "<h2>A</h2></main>"]) {
-    const out = stripNestedMain(body);
-    assert.equal(out.html, body, `declined input was rewritten: ${body}`);
-    assert.deepEqual([out.unwrapped, out.downgraded, out.declined], [0, 0, 1]);
-  }
+// There is no correct edit for an unclosed START tag: the element's extent is whatever the parser
+// decides, and both guesses move content into or out of a landmark. Left alone and counted, which is
+// what makes the enabled axe rules the thing that reports it.
+test("an unclosed <main> is declined and the string is left exactly as it was", () => {
+  const out = stripNestedMain("<main><h2>A</h2>");
+  assert.equal(out.html, "<main><h2>A</h2>");
+  assert.deepEqual([out.unwrapped, out.downgraded, out.dropped, out.declined], [0, 0, 0, 1]);
+});
+
+// The mirror half is not a judgement call and is not left: an end tag carries no content and a
+// parser discards this one, so there is nothing to weigh. It is also the one unpaired shape the gate
+// is blind to — and the most damaging, since inside the shell it closes the document's own <main>
+// early and every element after it is delivered OUTSIDE the landmark with no rule reporting it. That
+// escape is older than this file; what would be new is a run-log line promising a violation nobody
+// can find, which is why this one is counted apart from the tags that stay.
+test("a stray </main> is deleted rather than declined, because the gate cannot see it", async () => {
+  const out = stripNestedMain("<h2>A</h2></main><h2>B</h2><p>after</p>");
+  assert.equal(out.html, "<h2>A</h2><h2>B</h2><p>after</p>");
+  assert.deepEqual([out.unwrapped, out.downgraded, out.dropped, out.declined], [0, 0, 1, 0]);
+  // The reason it cannot be left to the gate: axe reports nothing on the shape, so the content
+  // outside the landmark would ship silently.
+  const found = await rules("<h2>A</h2></main><h2>B</h2><p>after</p>");
+  if (found === null) return;
+  assert.deepEqual(found, [], "if axe now reports a stray </main>, this rewrite's argument is weaker, not wrong");
 });
 
 // A partial pairing is not all-or-nothing, and this is the shape that says so: two start tags and
@@ -117,7 +132,7 @@ test("half a wrapper is declined and the string is left exactly as it was", () =
 test("an unmatched start tag does not stop the pair inside it being handled", () => {
   const out = stripNestedMain("<main><main><h2>A</h2></main>");
   assert.equal(out.html, "<main><h2>A</h2>");
-  assert.deepEqual([out.unwrapped, out.downgraded, out.declined], [1, 0, 1]);
+  assert.deepEqual([out.unwrapped, out.downgraded, out.dropped, out.declined], [1, 0, 0, 1]);
 });
 
 test("a body with no <main> comes back byte-identical", () => {
@@ -126,7 +141,7 @@ test("a body with no <main> comes back byte-identical", () => {
   const body = '<h2>Controls</h2><p>A mainsail is not a landmark.</p><hr role="doc-pagebreak" aria-label="Page 2">';
   const out = stripNestedMain(body);
   assert.equal(out.html, body);
-  assert.deepEqual([out.unwrapped, out.downgraded, out.declined], [0, 0, 0]);
+  assert.deepEqual([out.unwrapped, out.downgraded, out.dropped, out.declined], [0, 0, 0, 0]);
 });
 
 test("the tag name is matched on a word boundary, so <mainsail> is untouched", () => {
@@ -149,7 +164,22 @@ test("role= inside another attribute's value is text, not an attribute", () => {
 });
 
 test("only the first spelling of role is read, which is the one a parser sees", () => {
+  // First role is not `main`, so the element is not announcing one and nothing is touched.
   assert.equal(stripNestedMain('<main role="region" role="main"><p>x</p></main>').html, '<div role="region" role="main"><p>x</p></div>');
+});
+
+// The other order is not symmetrical, and this is why the later spellings are dropped rather than
+// left: a parser reads only the first, so removing a `role="main"` in FRONT of a `role="banner"`
+// promotes the banner. The element would then arrive announcing a landmark its page never had,
+// inside the shell's <main>, where `landmark-banner-is-top-level` is `best-practice` and correctly
+// not enabled — a defect swapped for a quieter one.
+test("removing the effective role does not promote the one behind it", async () => {
+  const out = stripNestedMain('<main role="main" role="banner"><h2>A</h2></main>');
+  assert.equal(out.html, "<div><h2>A</h2></div>");
+  assert.deepEqual([out.unwrapped, out.downgraded, out.dropped, out.declined], [0, 1, 0, 0]);
+  const found = await rules(out.html);
+  if (found === null) return;
+  assert.deepEqual(found, [], `the rewritten document is not clean: ${found.join(", ")}`);
 });
 
 // A `<main>` inside a comment is not an element. Counting it would put a `page_main_stripped`
@@ -160,13 +190,13 @@ test("a <main> inside a comment is neither counted nor edited", () => {
   const body = "<!-- <main> --><h2>A</h2>";
   const out = stripNestedMain(body);
   assert.equal(out.html, body);
-  assert.deepEqual([out.unwrapped, out.downgraded, out.declined], [0, 0, 0]);
+  assert.deepEqual([out.unwrapped, out.downgraded, out.dropped, out.declined], [0, 0, 0, 0]);
 });
 
 test("a commented end tag does not close a real <main>, and nothing is edited inside the comment", () => {
   const out = stripNestedMain("<main><p>x</p><!-- </main> --><p>y</p></main>");
   assert.equal(out.html, "<p>x</p><!-- </main> --><p>y</p>");
-  assert.deepEqual([out.unwrapped, out.downgraded, out.declined], [1, 0, 0]);
+  assert.deepEqual([out.unwrapped, out.downgraded, out.dropped, out.declined], [1, 0, 0, 0]);
 });
 
 test("a > inside an attribute value does not end the start tag early", () => {
@@ -349,16 +379,25 @@ test("the reader is told what it cannot see, so it does not report the shell as 
   const flat = READER_SYSTEM.replace(/\s+/g, " ");
   assert.match(flat, /What you are shown is the BODY CONTENT of the delivered document/);
   assert.match(flat, /a <main> that holds everything you can see/);
+  // Stated as `bodyLang`'s actual condition, which is all-or-none: on a body where only SOME
+  // top-level elements carry a `lang`, the derivation is refused and the root is `en`, so the
+  // unlabelled Korean is the failure — the opposite of what a looser "the language they agree on"
+  // reading would tell the Reader to do.
   assert.match(
     flat,
-    /the shell declares the one language every top-level element of the body agrees on, and English only where they gave it nothing else to read/,
-    "the reader must be told how the root language is derived, not that it is English",
+    /the shell declares a language when EVERY top-level element of this body carries that same lang, and English in every other case — including where only some of them carry one/,
+    "the reader must be given bodyLang's all-or-none condition, not a looser paraphrase of it",
   );
-  assert.match(flat, /content in the document's own language needs no lang attribute of its own/);
+  assert.match(flat, /content in the language the document ends up declaring needs no lang attribute of its own/);
   assert.match(
     flat,
-    /A passage in a DIFFERENT language from the rest of the document is the opposite case and still needs one/,
+    /Content in any OTHER language does need one, and that is worth reporting/,
     "the reader must keep its grounds for a language-of-parts report",
+  );
+  assert.match(
+    flat,
+    /because a half-labelled document falls back to English — an unlabelled Korean passage standing next to a labelled one/,
+    "the half-labelled body is the case the looser wording got backwards",
   );
   // The claim that cost the first version of this paragraph a blocking review: it is not English
   // that the document declares, it is whatever its pages agreed on.

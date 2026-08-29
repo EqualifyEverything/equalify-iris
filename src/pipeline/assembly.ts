@@ -401,14 +401,16 @@ export async function runAssembly(
   }
   // Same convention again: logged only when a page had emitted one, so an ordinary run adds no
   // line, and worth a line when it did because the delivered document is now clean and the gate
-  // that would have named it finds nothing. `declined` above zero is the case to read: those
-  // tags were left in place, so the lint's `landmark-no-duplicate-main` should be reporting the
-  // document and this line says why it is.
-  if (mains.unwrapped > 0 || mains.downgraded > 0 || mains.declined > 0) {
+  // that would have named it finds nothing. `declined` above zero is the case to read: an
+  // unclosed `<main>` was left in place, so the lint's `landmark-no-duplicate-main` should be
+  // reporting the document and this line says why it is. `dropped` is the opposite reading — a
+  // stray `</main>` went, and no rule would have reported that one at all.
+  if (mains.unwrapped > 0 || mains.downgraded > 0 || mains.dropped > 0 || mains.declined > 0) {
     ctx.log.event("page_main_stripped", {
       stage: "assembly",
       unwrapped: mains.unwrapped,
       downgraded: mains.downgraded,
+      dropped: mains.dropped,
       declined: mains.declined,
     });
   }

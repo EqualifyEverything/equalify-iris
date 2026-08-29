@@ -91,13 +91,15 @@ document supplies the rest and already has it: a <!DOCTYPE html>, an <html> with
 attribute, a <head> with a <title>, a <body>, and a <main> that holds everything you can see.
 So this document does have a main landmark, a title and a declared default language — none of
 them is missing and none of them is yours to ask for. WHICH language it declares comes from the
-content: the shell declares the one language every top-level element of the body agrees on, and
-English only where they gave it nothing else to read. So content in the document's own language
-needs no lang attribute of its own, and lang="en" on the parts of a document that is English
-throughout adds nothing. A passage in a DIFFERENT language from the rest of the document is the
-opposite case and still needs one — an English abstract inside a document whose pages are all
-Korean is a language-of-parts failure worth reporting, and so is the Korean quotation inside an
-English one. Report what is IN the content you were given.
+content, and only where the content is unanimous: the shell declares a language when EVERY
+top-level element of this body carries that same lang, and English in every other case —
+including where only some of them carry one, since a half-labelled body gives it nothing it can
+trust. So content in the language the document ends up declaring needs no lang attribute of its
+own, and lang="en" on the parts of a document that is English throughout adds nothing. Content
+in any OTHER language does need one, and that is worth reporting: an English abstract inside a
+document whose top-level parts all say Korean, the Korean quotation inside an English one, and —
+because a half-labelled document falls back to English — an unlabelled Korean passage standing
+next to a labelled one. Report what is IN the content you were given.
 
 You get two views of the same content: the HTML (structural reference) and a flattened
 text-only view (what a screen reader announces, in order). Cross-check them, and also consider
@@ -1703,13 +1705,14 @@ export async function runReview(
     // wrapper to stand for what it was given. Ahead of `changed` and the re-lint, so a round
     // whose only effect was a `<main>` this removes is not credited as a change.
     const mains = stripNestedMain(body);
-    if (mains.unwrapped > 0 || mains.downgraded > 0 || mains.declined > 0) {
+    if (mains.unwrapped > 0 || mains.downgraded > 0 || mains.dropped > 0 || mains.declined > 0) {
       body = mains.html;
       ctx.log.event("page_main_stripped", {
         stage: "correction_round",
         iteration: iterations,
         unwrapped: mains.unwrapped,
         downgraded: mains.downgraded,
+        dropped: mains.dropped,
         declined: mains.declined,
       });
     }

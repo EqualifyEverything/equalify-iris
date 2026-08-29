@@ -690,11 +690,16 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   and its children are promoted; a `<main lang="ko" id="p3">` becomes a `<div>` keeping those
   attributes, because unwrapping it would drop the `lang` the document's root declaration is derived
   from or an `id` an `href` elsewhere resolves to — a `<div>` is generic, so the landmark is gone
-  either way. An explicit `role="main"` is the one attribute the downgrade cannot keep. What it
-  declines is half a wrapper: a `<main>` with no `</main>` has no correct edit, since the element's
-  extent is whatever the parser decides, and a `role="main"` on an element that was never a `<main>`
-  is a role a model chose on an element whose own semantics do not cover it — the same judgement the
-  role strip above refuses to make. Both go to the gate instead. All three points are needed for the
+  either way. An explicit `role="main"` is the one attribute the downgrade cannot keep — and any
+  later spelling of `role` goes with it, since removing the first one is what makes the second live.
+  What it declines is a `<main>` with no `</main>`: the element's extent is whatever the parser
+  decides, so both guesses move content into or out of a landmark, and the gate reports it. A stray
+  `</main>` is the reverse and is deleted — a parser discards it, so nothing is being weighed, and it
+  is the one unpaired shape no rule reports, because inside the shell it closes the document's own
+  `<main>` early and everything after it ships outside the landmark with the lint clean. A
+  `role="main"` on an element that was never a `<main>` is left to the gate as well: that is a role a
+  model chose on an element whose own semantics do not cover it, the same judgement the role strip
+  above refuses to make. All three points are needed for the
   usual reason: the assembly join is where extraction's wrappers arrive, an editor round retypes the
   whole body and can introduce one of its own, and a feedback re-run resumes a stored body that was
   written before any of this existed. The prompt is still the primary fix — `agents/page.md` now says the document supplies `<html>`, `<head>`,

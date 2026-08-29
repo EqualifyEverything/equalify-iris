@@ -191,12 +191,13 @@ export async function runPipeline(args: {
       // remove it. Ahead of the re-lint and the diff baseline for the same two reasons as
       // above.
       const priorMains = stripNestedMain(beforeBody);
-      if (priorMains.unwrapped > 0 || priorMains.downgraded > 0 || priorMains.declined > 0) {
+      if (priorMains.unwrapped > 0 || priorMains.downgraded > 0 || priorMains.dropped > 0 || priorMains.declined > 0) {
         beforeBody = priorMains.html;
         log.event("page_main_stripped", {
           stage: "feedback_prior_body",
           unwrapped: priorMains.unwrapped,
           downgraded: priorMains.downgraded,
+          dropped: priorMains.dropped,
           declined: priorMains.declined,
         });
       }

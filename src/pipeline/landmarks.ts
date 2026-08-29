@@ -28,12 +28,18 @@
 // **A body with no `<main>` comes back byte-identical**, which the review loop depends on:
 // it decides a round changed nothing by comparing two body strings (`review_converged`).
 //
-// **What it declines.** A `<main>` with no matching `</main>`, or a stray `</main>` matching
-// no start tag, is left exactly as it is. There is no correct edit for half a wrapper — the
-// element's extent is whatever the parser decides, and both possible guesses move content
-// into or out of a landmark. That residue is what the two axe rules enabled by name in
-// lint.ts are for (`landmark-no-duplicate-main`, `landmark-main-is-top-level`): this rewrite
-// is a string edit and the gate is the check that it worked.
+// **What it declines.** A `<main>` with no matching `</main>` is left exactly as it is. There
+// is no correct edit for half a wrapper — the element's extent is whatever the parser decides,
+// and both possible guesses move content into or out of a landmark. That residue is what the
+// two axe rules enabled by name in lint.ts are for (`landmark-no-duplicate-main`,
+// `landmark-main-is-top-level`): this rewrite is a string edit and the gate is the check that
+// it worked.
+//
+// **The other half is not declined but deleted.** A stray `</main>` closing nothing is dead
+// markup a parser discards, so there is nothing to weigh — and it is the one unpaired shape
+// the gate is blind to, because inside the shell it closes the document's own `<main>` early
+// and everything after it is delivered outside the landmark with no rule reporting a thing.
+// Counted as `dropped`.
 
 // Start tag or end tag, in one pass so they can be paired in document order. Attributes are
 // read as text-or-quoted-string, so a `>` inside an attribute value does not end the tag
@@ -68,9 +74,12 @@ export interface MainStrip {
   unwrapped: number;
   // Pairs rewritten to `<div>` because the start tag carried attributes worth keeping.
   downgraded: number;
-  // Tags left alone because they had no partner. Not a count of pairs — it is a count of
-  // TAGS, and it is the number that says this function did not finish the job, so the gate
-  // is expected to report a duplicate main when it is above zero.
+  // End tags with no start tag, deleted. See the argument at the pop below: this is the one
+  // unpaired shape with an unambiguous edit, and the only one the gate cannot report.
+  dropped: number;
+  // START tags left alone because nothing closed them. It is the number that says this
+  // function did not finish the job, so the gate is expected to report a duplicate main when
+  // it is above zero.
   declined: number;
 }
 
@@ -87,6 +96,9 @@ export interface MainStrip {
 // nothing marking it at all). The enabled axe rules report that shape instead, and the review
 // loop is what answers it.
 function attrsForDiv(attrs: string): string {
+  // Every `role` the tag spells, with the span each one occupies — not just the first, because
+  // of what removing the first one does to the others (below).
+  const roles: { at: number; length: number; gap: string; dq?: string; sq?: string; bare?: string }[] = [];
   let pos = 0;
   while (pos < attrs.length) {
     const m = ATTR_STEP.exec(attrs.slice(pos));
@@ -96,28 +108,37 @@ function attrsForDiv(attrs: string): string {
       pos++;
       continue;
     }
-    const [whole, gap, name, dq, sq, bare] = m;
-    // The FIRST `role` is the only one a parser sees, so this stops at it either way: a second
-    // spelling is already dead, and a valueless `role` has no `main` token to drop.
-    if (name!.toLowerCase() === "role") {
-      const value = dq ?? sq ?? bare;
-      if (value === undefined) return attrs;
-      const tokens = value.split(/\s+/).filter((t) => t.length > 0);
-      const kept = tokens.filter((t) => t.toLowerCase() !== "main");
-      if (kept.length === tokens.length) return attrs;
-      const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : "";
-      const replacement = kept.length === 0 ? "" : `${gap}role=${quote}${kept.join(" ")}${quote}`;
-      // Spliced by offset rather than by `replace`, so a `$` in a surviving token is a character
-      // and not a `$&`-style back-reference.
-      return attrs.slice(0, pos) + replacement + attrs.slice(pos + whole!.length);
+    if (m[2]!.toLowerCase() === "role") {
+      roles.push({ at: pos, length: m[0].length, gap: m[1]!, dq: m[3], sq: m[4], bare: m[5] });
     }
-    pos += whole!.length;
+    pos += m[0].length;
   }
-  return attrs;
+  if (roles.length === 0) return attrs;
+  // The effective role is the first spelling, which is the one a parser reads. A valueless
+  // `role` has no `main` token in it, and neither has `role="region"`: either way there is
+  // nothing to drop and the tag keeps its attribute text exactly.
+  const first = roles[0]!;
+  const value = first.dq ?? first.sq ?? first.bare;
+  const tokens = value === undefined ? [] : value.split(/\s+/).filter((t) => t.length > 0);
+  const kept = tokens.filter((t) => t.toLowerCase() !== "main");
+  if (kept.length === tokens.length) return attrs;
+  const quote = first.dq !== undefined ? '"' : first.sq !== undefined ? "'" : "";
+  const replacement = kept.length === 0 ? "" : `${first.gap}role=${quote}${kept.join(" ")}${quote}`;
+  // And every LATER spelling goes with it. A parser reads only the first, so dropping the rest
+  // changes nothing it would have announced — while LEAVING them promotes one: taking a
+  // `role="main"` out in front of a `role="banner"` makes the banner live, so an element whose
+  // page announced a main arrives announcing a banner instead, inside the shell's `<main>`,
+  // where `landmark-banner-is-top-level` is `best-practice` and correctly not enabled, so
+  // nothing reports it. Spliced from the end backwards so the first role's offset stays valid.
+  let out = attrs;
+  for (const r of roles.slice(1).reverse()) out = out.slice(0, r.at) + out.slice(r.at + r.length);
+  // Spliced by offset rather than by `replace`, so a `$` in a surviving token is a character
+  // and not a `$&`-style back-reference.
+  return out.slice(0, first.at) + replacement + out.slice(first.at + first.length);
 }
 
 export function stripNestedMain(html: string): MainStrip {
-  if (!ANY_MAIN.test(html)) return { html, unwrapped: 0, downgraded: 0, declined: 0 };
+  if (!ANY_MAIN.test(html)) return { html, unwrapped: 0, downgraded: 0, dropped: 0, declined: 0 };
   // One edit per tag, collected with absolute offsets and applied from the end backwards so
   // earlier offsets stay valid.
   type Edit = { at: number; length: number; text: string };
@@ -128,6 +149,7 @@ export function stripNestedMain(html: string): MainStrip {
   const open: { at: number; length: number; attrs: string }[] = [];
   let unwrapped = 0;
   let downgraded = 0;
+  let dropped = 0;
   let declined = 0;
   // Where the comments are, so a tag inside one can be passed over.
   const comments: { at: number; end: number }[] = [];
@@ -144,8 +166,16 @@ export function stripNestedMain(html: string): MainStrip {
     }
     const start = open.pop();
     if (!start) {
-      // A `</main>` closing nothing. Left as it is, and counted.
-      declined++;
+      // A `</main>` closing nothing, which is the one unpaired shape with an unambiguous edit:
+      // an end tag carries no content, and a parser discards this one outright. It is also the
+      // only unpaired shape the gate cannot report, and the most damaging: inside the shell it
+      // closes the document's own `<main>` early, so everything after it is delivered OUTSIDE
+      // the landmark, and no enabled rule sees that (the escape predates this file — a body
+      // with a stray `</main>` ships the same way on `main` — but leaving it counted as
+      // `declined` would promise a violation nobody can find). So it goes, and it is counted
+      // apart from the tags that stay.
+      edits.push({ at: m.index, length: m[0].length, text: "" });
+      dropped++;
       continue;
     }
     if (start.attrs.trim() === "") {
@@ -158,11 +188,13 @@ export function stripNestedMain(html: string): MainStrip {
       downgraded++;
     }
   }
-  // Start tags that were never closed.
+  // Start tags that were never closed. Those DO stay: the element's extent is whatever the
+  // parser decides, both guesses move content into or out of a landmark, and an unclosed
+  // `<main>` is a duplicate the gate reports.
   declined += open.length;
-  if (edits.length === 0) return { html, unwrapped, downgraded, declined };
+  if (edits.length === 0) return { html, unwrapped, downgraded, dropped, declined };
   edits.sort((a, b) => b.at - a.at);
   let out = html;
   for (const e of edits) out = out.slice(0, e.at) + e.text + out.slice(e.at + e.length);
-  return { html: out, unwrapped, downgraded, declined };
+  return { html: out, unwrapped, downgraded, dropped, declined };
 }
