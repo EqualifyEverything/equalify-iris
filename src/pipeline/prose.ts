@@ -296,9 +296,10 @@ function opening(nodes: string[]): { marker: number | null; content: number | nu
   return { marker: null, content: first.i };
 }
 
-// One page's HTML with its order, which is what the page-gap rule is decided on: a page that failed
-// extraction or came back blank contributes no fragment at all, so the only trace of it at this seam
-// is a hole in the numbering.
+// One page's HTML with its order, which is what the page-gap rule is decided on: a page that came
+// back empty contributes no fragment to the body, so the only trace of it at this seam is a hole in
+// the numbering. Not a page that FAILED extraction — that one ships a `@page-failed` comment, so the
+// numbering stays contiguous and the comment declines the boundary as an interruption instead.
 export interface PageHtml {
   order: number;
   html: string;
@@ -410,15 +411,46 @@ export function joinPageBreakProse(pages: PageHtml[]): { pages: string[]; report
 // of hearing "Simi", a page-break announcement, and then "larly". Whether the hyphen can be decided
 // after all is a separate question, and `word_splits` in the run log is what makes it answerable.
 //
-// Both branches trim the whitespace at the seam, and the word-split branch has to: a fragment's `<p>`
+// Both branches close the whitespace at the seam, and the word-split branch HAS to: a fragment's `<p>`
 // is not on one line — pretty-printed HTML is what a model emits, and nothing between the extractor
 // and here collapses it — so the tail arrives as "Simi-\n  ". Left in, the delivered document says
 // "Simi- larly", which is WORSE than the split it replaced: a screen reader still reads "Simi",
-// pause, "larly", and now there is no page-break announcement to explain the pause.
+// pause, "larly", and now there is no page-break announcement to explain the pause. It would also
+// make `word_split_examples` report a closure the document does not contain, which is the one datum
+// that lets a later pass decide the hyphen with evidence.
+//
+// The whitespace is found at the TEXT seam rather than at the string's ends, because a tag may stand
+// between the last word and `</p>`: `<em>Simi-\n  </em>`, or a comment, or the mirror of either at the
+// head's start. Trimming the string's ends leaves the whitespace inside and delivers "Simi- larly"
+// again, and the `<em>` is what decides the word's own emphasis, so it cannot simply be moved.
+// `scan` gives the index of every text character, so what is dropped is exactly the whitespace after
+// the tail's last word and before the head's first — no markup, and nothing a reader receives.
+//
+// One shape is left as it arrives, recorded rather than guarded: `<p>… Simi-<br></p>` delivers
+// "Simi-<br>larly", a line break inside the joined word. Closing it would mean deleting the `<br>`
+// the page emitted, and no input produces the shape — `agents/page.md` steers prose away from `<br>`
+// entirely, so reaching it needs a hyphenated word broken at a page's edge inside verse or an
+// address. A branch nothing can reach is one no test can honestly cover.
 function joinAt(tail: string, head: string, joinedWord: boolean): string {
-  const closed = tail.replace(/\s+$/, "");
-  const rest = head.replace(/^\s+/, "");
+  const closed = closeSeam(tail, "end");
+  const rest = closeSeam(head, "start");
   return joinedWord ? closed + rest : `${closed} ${rest}`;
+}
+
+// The fragment with the whitespace at one end's text seam removed: every text character after the
+// last word (`"end"`) or before the first (`"start"`) goes, and every tag stays where it was.
+function closeSeam(html: string, which: "start" | "end"): string {
+  const chars = scan(html);
+  const wordChars = chars.filter((c) => !/\s/.test(c.ch));
+  const edge = which === "end" ? wordChars.at(-1) : wordChars[0];
+  if (!edge) return html;
+  const drop = new Set(chars.filter((c) => (which === "end" ? c.at > edge.at : c.at < edge.at)).map((c) => c.at));
+  if (drop.size === 0) return html;
+  // Indexed by code unit, which is how `scan` counted: splitting by code point would put an emoji or
+  // a rare CJK character one index out of step with the offsets being dropped.
+  let out = "";
+  for (let i = 0; i < html.length; i += 1) if (!drop.has(i)) out += html[i];
+  return out;
 }
 
 // The word the two halves make, for the log: the last word of the tail and the first of the head,

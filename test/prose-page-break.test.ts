@@ -96,6 +96,25 @@ test("a broken word is closed up on a fragment that is not on one line", () => {
   assert.match(text(pages[1]!), /^Simi-larly, the more populous/);
 });
 
+test("a tag at the seam does not reopen the gap the trim just closed", () => {
+  // The whitespace is found at the TEXT seam, not at the string's ends, because a tag can stand
+  // between the last word and `</p>` — and the `<em>` is what decides that word's own emphasis, so it
+  // cannot simply be moved out of the way. Trimming the string's ends instead leaves the whitespace
+  // inside the element and delivers "Simi- larly" again, reporting a closure the document does not
+  // contain.
+  for (const [tail, head, want] of [
+    ["<p>Only 12 States tax courts. <em>Simi-\n  </em></p>", "<p>larly, few do.</p>", "<em>Simi-</em>larly,"],
+    ["<p>Only 12 States tax courts. Simi-\n<!-- ocr -->\n</p>", "<p>larly, few do.</p>", "Simi-<!-- ocr -->larly,"],
+    ["<p>Only 12 States tax courts. Simi-</p>", "<p><em>\n  larly</em>, few do.</p>", "Simi-<em>larly</em>,"],
+  ] as const) {
+    const { pages, report } = join(page(73, tail), page(74, head));
+    assert.equal(report.wordSplits, 1, tail);
+    assert.ok(pages[1]!.includes(want), `${want} not in ${pages[1]}`);
+    // Nothing a reader receives was dropped, and no markup went with the whitespace.
+    assert.match(text(pages[1]!).replace(/\s+/g, ""), /^Simi-larly,fewdo\.$/);
+  }
+});
+
 test("the emptied paragraph goes rather than shipping as an empty <p>", () => {
   const { pages } = join(page(73, "<p>Receipts follow.</p>", TAIL), page(74, HEAD));
   // The whole of the tail paragraph moved, so nothing of it is left to hold.
