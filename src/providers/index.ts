@@ -114,6 +114,14 @@ export class ProviderRouter {
     // have been. Keeping only the latest would name a number the deployment never asked for.
     // `refused` is an OR for the same reason — it says this call paid a rejected round-trip,
     // and one of two notes carrying it is enough to have paid for it.
+    //
+    // The two numbers are folded independently, which is only sound because every note inside
+    // one `complete` concerns one model: `note.model` is `req.model` throughout, and that is the
+    // `model` on this event. An adapter that ever answered one request by falling back to a
+    // second model would break it — the line would pair one model's `asked` with another's
+    // `stated` and offer the pair as the remedy — and would owe this fold a key by model.
+    // Recorded rather than guarded: nothing emits that shape, and a branch no adapter can
+    // reach is one no test can honestly cover.
     let clamped: { asked: number; stated: number; refused: boolean } | undefined;
     const onNote = (note: ProviderNote): void => {
       switch (note.kind) {
