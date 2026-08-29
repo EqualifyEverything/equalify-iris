@@ -208,10 +208,25 @@ function counted(instances: string[]): StructuralCount {
   };
 }
 
-// The elements that can hold no text of their own, so a `lang` on one can never apply to
-// anything. Only the ones a document body can contain: `<meta>`, `<link>` and `<base>` are
-// head-only, and the shell's head is not a page agent's output.
+// The elements that can hold no text NODES. Only the ones a document body can contain: `<meta>`,
+// `<link>` and `<base>` are head-only, and the shell's head is not a page agent's output.
+//
+// Not the same thing as "no text": four of these carry text in an ATTRIBUTE instead, which is
+// why the check below asks a second question rather than counting everything in this list.
 const VOID_ELEMENTS = ["img", "br", "hr", "input", "area", "col", "embed", "source", "track", "wbr"];
+
+// The attributes that carry text a reader receives, so a `lang` on the element around them is
+// meaningful even though the element holds no text node. HTML scopes `lang` to "the element's
+// contents AND any of the element's attributes that contain text", and the accessible name
+// computed from `alt` (or `value`/`placeholder` on an `<input>`, `label` on a `<track>`) takes its
+// language from here — which is what a screen reader switching voices reads.
+//
+// So `<img alt="Un graphique" lang="fr">` in an English document is correct authoring and is NOT
+// counted. Counting it would be the opposite of the drift this check exists to find, and worse: a
+// maintainer reading the number would be being asked for a prompt change that strips correct
+// language markup off every non-English figure. An `alt=""` image is decorative, has no name to
+// give a language to, and is still counted.
+const TEXT_BEARING_ATTRIBUTES = ["alt", "value", "placeholder", "label", "aria-label", "title"];
 
 // An id reference that names nothing in the delivered document, in the three attributes whose
 // whole function is to name another element: `aria-labelledby`, `aria-describedby`, and `for` on
@@ -241,6 +256,12 @@ const VOID_ELEMENTS = ["img", "br", "hr", "input", "area", "col", "embed", "sour
 // `for` on `<output>` is an id reference too and is not looked at: nothing in this pipeline emits
 // an `<output>`, and reading `for` on anything else — a `<div for="x">`, which is not a reference
 // at all — would manufacture findings.
+//
+// `headers` on a `<td>` is the fourth id reference the pipeline treats as load-bearing
+// (`anchors.ts` renames its tokens alongside the ids), and it is out of this check because the gate
+// already reports it: `td-headers-attr` is `wcag2a`/`wcag131`, so it passes the lint's tag filter
+// and a `headers` naming nothing is a violation the review loop acts on. That is exactly what the
+// three attributes above are not.
 function danglingIdrefs(document: Document): string[] {
   const ids = new Set([...document.querySelectorAll("[id]")].map((e) => e.getAttribute("id")));
   const out: string[] = [];
@@ -290,9 +311,11 @@ function dlWithoutDd(document: Document): string[] {
   return out;
 }
 
-// `lang` on an element that holds no text. Nothing a reader meets changes, which is why this is
-// on its own line as waste rather than harm: the attribute declares the language of an element's
-// text and the element has none, so no announcement, no voice and no verdict differs.
+// `lang` on an element with no text at all — no text node, and nothing text-bearing in an
+// attribute either (see TEXT_BEARING_ATTRIBUTES, which is the difference between this and "a `lang`
+// on a void element"). Nothing a reader meets changes, which is why this is on its own line as
+// waste rather than harm: the attribute declares the language of an element's text and the element
+// has none, so no announcement, no voice and no verdict differs.
 //
 // Worth counting anyway because of where it comes from. It is a symptom of the page contract's
 // language rule being applied by rote (#252, 9 of 108 bench answers, 8 of them from one model),
@@ -303,9 +326,12 @@ function dlWithoutDd(document: Document): string[] {
 // No rule in the gate reports it, and correctly: `lang` is a global attribute, valid on every
 // element including these, so the markup is legal and there is nothing for axe to fail.
 function langOnVoid(document: Document): string[] {
-  return [...document.querySelectorAll(VOID_ELEMENTS.map((e) => `${e}[lang]`).join(", "))].map(
-    (e) => `${e.tagName.toLowerCase()}[lang=${e.getAttribute("lang")}]`,
-  );
+  const out: string[] = [];
+  for (const element of document.querySelectorAll(VOID_ELEMENTS.map((e) => `${e}[lang]`).join(", "))) {
+    if (TEXT_BEARING_ATTRIBUTES.some((attribute) => element.getAttribute(attribute)?.trim())) continue;
+    out.push(`${element.tagName.toLowerCase()}[lang=${element.getAttribute("lang")}]`);
+  }
+  return out;
 }
 
 // A landmark a screen reader announces with nothing inside it: the reader is offered a region in
@@ -322,14 +348,18 @@ function langOnVoid(document: Document): string[] {
 // resolves to nothing is no name: `<section aria-labelledby="nope"></section>` is not announced
 // as a region, so it is one finding (a dangling reference) and not two.
 //
-// Empty means empty to a reader, not empty of nodes: no text, and none of the four things that
-// carry content without carrying words. `<hr>` is not one of them — a page-break marker is
-// furniture, and a region holding nothing but furniture is the defect, not an exception to it.
+// Empty means empty to a reader, not empty of nodes: no text, and nothing that carries content
+// without carrying words — an image, a table, or a form field a reader can land in and operate.
+// `<textarea>` and `<select>` are in that list beside `<input>` though nothing in the pipeline
+// emits one today (the page contract's fill-in block asks for `<input readonly value>`): they cost
+// one selector, and the day that contract grows a dropdown, the alternative is a false finding in
+// a rate. `<hr>` is deliberately NOT one of them — a page-break marker is furniture, and a region
+// holding nothing but furniture is the defect, not an exception to it.
 function emptyLandmarks(document: Document): string[] {
   const out: string[] = [];
   for (const element of document.querySelectorAll("nav, aside, section")) {
     if (element.textContent?.trim()) continue;
-    if (element.querySelector("img, svg, table, input")) continue;
+    if (element.querySelector("img, svg, table, input, textarea, select")) continue;
     if (element.tagName === "SECTION" && !isNamed(element)) continue;
     out.push(element.tagName.toLowerCase());
   }

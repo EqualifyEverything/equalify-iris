@@ -248,9 +248,10 @@ export const SIGNAL_TABLE_NO_BODY = "iris:table-no-body";
 // </dl>` passes `definition-list` outright because the wrapping `<div>` is legal HTML, and an
 // empty `<nav>` breaks no rule at all. So all three ship as `ready_for_review` on a clean lint.
 //
-// A language tag on an element that holds no text is measured beside these three and deliberately
-// NOT counted here: it is wasted output rather than something a reader loses, and folding it in
-// would move a rate that is otherwise about harm. Its incidence stays on the log line.
+// A language tag on an element with no text for it to apply to is measured beside these three and
+// deliberately NOT counted here: it is wasted output rather than something a reader loses, and
+// folding it in would move a rate that is otherwise about harm. Its incidence stays on the log
+// line.
 export const SIGNAL_STRUCTURAL_DEFECT = "iris:structural-defect";
 // axe-core failed to run at all. Recorded because a linter that did not run reports no
 // violations, so without this signal a broken linter would quietly drive every

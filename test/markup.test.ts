@@ -230,6 +230,17 @@ test("a reference that resolves on another page is not dangling, which is why th
   // And `for` is an id reference on a `<label>` and nowhere else. A `<div for="x">` is not a
   // reference at all, and reading it as one would manufacture a finding out of nothing.
   assert.equal(markupReport(wrapDocument(`<div for="nope">Text.</div>`)).structure.danglingIdrefs.count, 0);
+
+  // `headers` is the fourth id reference the pipeline treats as load-bearing (anchors.ts renames its
+  // tokens alongside the ids) and the one attribute deliberately left out of this check, because
+  // unlike the three above the GATE reports it: `td-headers-attr` is wcag2a/wcag131, so it passes
+  // the lint's tag filter and a dangling `headers` is a violation the review loop already acts on.
+  // Pinned rather than argued: if that ever stops being true, this check has a gap.
+  const headers = wrapDocument(
+    `<table><caption>T</caption><tr><th scope="col" id="h1">H</th></tr><tr><td headers="nope">1</td></tr></table>`,
+  );
+  assert.deepEqual((await runAxe(headers)).violations?.map((v) => v.id), ["td-headers-attr"]);
+  assert.equal(markupReport(headers).structure.danglingIdrefs.count, 0);
 });
 
 test("a term list with no definitions is counted, including the shape axe passes", async () => {
@@ -273,7 +284,7 @@ test("lang on an element that holds no text is waste, and nothing else in the pi
   // Legal markup — `lang` is a global attribute — so there is nothing for axe to fail, and the
   // gate is right to be quiet. It is counted because of where it comes from: the page contract's
   // language rule applied by rote (#252), 9 of 108 answers in the bench round, 8 from one model.
-  const body = `<p>Body text.</p>\n<img src="a.png" alt="Un graphique" lang="fr">\n<hr lang="de">\n<p>More.<br lang="es"></p>`;
+  const body = `<p>Body text.</p>\n<img src="a.png" alt="" lang="fr">\n<hr lang="de">\n<p>More.<br lang="es"></p>`;
   const report = markupReport(wrapDocument(body));
   assert.equal(report.structure.langOnVoid.count, 3);
   assert.deepEqual(report.structure.langOnVoid.examples, ["img[lang=fr]", "hr[lang=de]", "br[lang=es]"]);
@@ -284,6 +295,20 @@ test("lang on an element that holds no text is waste, and nothing else in the pi
   // non-English document would report two findings for being correct.
   const legitimate = markupReport(wrapDocument(`<p lang="fr">Bonjour.</p>\n<span lang="de">Guten Tag</span>`));
   assert.equal(legitimate.structure.langOnVoid.count, 0);
+
+  // And the case that makes this a narrower check than "a `lang` on a void element": HTML scopes
+  // `lang` to the element's contents AND its text-bearing attributes, so the language of an
+  // accessible name computed from `alt` comes from here. `<img alt="Un graphique" lang="fr">` in an
+  // English document is correct authoring, and counting it would ask a maintainer for a prompt
+  // change that strips correct language markup off every non-English figure. Same for the text an
+  // `<input>` or a `<track>` carries in an attribute.
+  const named = markupReport(
+    wrapDocument(
+      `<p>Body.</p>\n<img src="a.png" alt="Un graphique" lang="fr">\n` +
+        `<input readonly value="Dupont" lang="fr">\n<img src="b.png" alt="" aria-label="Un logo" lang="fr">`,
+    ),
+  );
+  assert.equal(named.structure.langOnVoid.count, 0, "a language on text a reader receives is not waste");
 });
 
 test("an empty nav or aside is an announced region with nothing in it; an unnamed section is not", () => {
@@ -324,6 +349,19 @@ test("empty means empty to a reader, not empty of nodes", () => {
       .count,
     0,
   );
+  // Every form field a reader can land in and operate, not only `<input>`. Nothing in the pipeline
+  // emits a `<textarea>` or a `<select>` today — the page contract's fill-in block asks for
+  // `<input readonly value>` — so this is the list being right in advance rather than in response
+  // to a delivered document, and the reason it is worth pinning is that this class reaches a rate:
+  // an unnoticed gap here is a false finding in `structural_defect_rate`, not just a log line.
+  for (const field of [`<textarea readonly></textarea>`, `<select><option></option></select>`]) {
+    assert.equal(
+      markupReport(wrapDocument(`<p>Text.</p><section aria-label="Signature">${field}</section>`)).structure
+        .emptyLandmarks.count,
+      0,
+      field,
+    );
+  }
   // A page-break marker is not content. A region holding nothing but furniture is the defect
   // itself, not an exception to it — which is why `<hr>` is not in the list above.
   assert.equal(

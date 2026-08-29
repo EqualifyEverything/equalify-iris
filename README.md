@@ -595,12 +595,14 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
 - **Four more questions are asked in the same pass, about promises the document makes and does not
   keep (issue #255).** These are not malformed markup, which is why they needed their own checks: a
   reference to an `id` no page defines (`aria-labelledby`, `aria-describedby`, `label[for]`), a
-  `<dl>` with terms and no definitions, a `lang` on an element that holds no text, and a `<nav>`,
+  `<dl>` with terms and no definitions, a `lang` on an element with no text for it to apply to
+  (neither a text node nor text in an attribute — `<img alt="Un graphique" lang="fr">` is correct
+  authoring and is not counted, the same image with `alt=""` is), and a `<nav>`,
   `<aside>` or *named* `<section>` with nothing in it. The gate is clean on every one of them, each
   for a different reason — axe reports a dead ARIA reference as `incomplete` rather than a violation
   (`aria-valid-attr-value` is `reviewOnFail`, so it never reaches a rule the review loop acts on),
   `<dl><div><dt>Term</dt></div></dl>` *passes* `definition-list` because the wrapper is legal HTML,
-  `lang` is a global attribute so putting one on an `<img>` breaks nothing, and an empty `<nav>` has
+  `lang` is a global attribute so putting one on an empty `<img>` breaks nothing, and an empty `<nav>` has
   no rule at all. They are reported together as `delivered_structure` in the run log, with the
   elements named, and three of the four are tallied as `iris:structural-defect`. Two decisions are
   worth knowing. The checks run on the **joined** document, not per page, because a reference to an
