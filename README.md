@@ -592,6 +592,24 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   — none that is anything but column headers. Nothing here
   is repaired and no run fails on it: a count with no threshold, on the same argument as
   `internal_links`, until there is enough of a rate to calibrate.
+- **The lint drops attributes whose names no valid markup produces, and counts them (issue #257).**
+  Not tidying: an attribute name beginning with a digit took the entire rule set offline. axe needs a
+  unique CSS path for the elements it reports; where an id is unusable and a similar sibling must be
+  disambiguated it enumerates attributes, and a CSS escape is the hex codepoint, so a name starting
+  `9` escapes to `\39`; jsdom's selector engine compiles selectors into JavaScript source, where
+  `\39` is an octal escape and a SyntaxError in strict mode. One such attribute pair anywhere in a
+  25-page document and there was no verdict on any of it — which happened to six delivered documents,
+  150 pages, every defect on them unexamined. `runAxe` now removes those attributes from **its own
+  copy** of the document before axe walks it; the delivered bytes are untouched, because what a name
+  like `iii\"` was meant to be is a question for the stage that produced it. It is reported rather
+  than only dropped (`malformed_attributes` on the `assembly` line, `lint_debris` elsewhere): the
+  name is the only symptom of a leak whose other three harms — an invalid `role`, a marker
+  announcing the wrong text, an `id` no reference resolves to — are findable only by reading the
+  document (#233, #234). Counted on **every** document rather than only on ones that break, since a
+  number that appears only after a crash cannot answer whether the leak upstream is fixed. Two
+  narrowings: an attribute VALUE beginning with a digit, and an id or class beginning with one, are
+  escaped correctly by the same engine and are left alone; and `<template>` content is reached by
+  neither the strip nor axe, so debris there is uncounted and also harmless.
 - **Colliding ids are namespaced during assembly (§7.7 v1.2).** A page is extracted alone and
   concurrently, so it cannot know that another page also numbered its first footnote 1 — and the
   page prompt asks it to preserve the source numbering. `assembleBody` prefixes the ids that more

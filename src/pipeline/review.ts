@@ -8,7 +8,7 @@ import { wrapDocument } from "./assembly.ts";
 import { stripDeprecatedRoles } from "./roles.ts";
 import { stripNestedMain } from "./landmarks.ts";
 import { destroyedBody, EDITOR_SHRINK_FLOOR, structureCounts, visibleText } from "./correction.ts";
-import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
+import { runAxe, lintErrorFields, lintDebrisFields, type LintResult } from "./lint.ts";
 import { joinSections, splitSections, type Section } from "./sections.ts";
 import { annotateBlocks, applyBlockEdits, blocksOf, readBlockEdits, stripBlockMarkers } from "./patch.ts";
 import { flatten } from "./flatten.ts";
@@ -2060,6 +2060,14 @@ export async function runReview(
     // question a person reading this asks next.
     if (lint.error) {
       ctx.log.event("lint_unavailable", { stage: "correction_round", iteration: iterations, ...lintErrorFields(lint) });
+    }
+    // Its own event rather than a field on a line above, because the only line this stage logs about
+    // its lint is the one that fires when the lint FAILED — and a body carrying debris is now a body
+    // that lints (#257). Per iteration and beside the failure line, because the editor is one of the
+    // two places these can come from: a round that rewrites a block can put a leaked escape into it
+    // as easily as extraction can, and the round it arrived in is the question a reader asks next.
+    if (lint.malformedAttributes) {
+      ctx.log.event("lint_debris", { stage: "correction_round", iteration: iterations, ...lintDebrisFields(lint) });
     }
     // A link the editor dropped is unrecoverable and invisible to every later check
     // in the loop — see droppedHrefs for why this is checked here and in code.

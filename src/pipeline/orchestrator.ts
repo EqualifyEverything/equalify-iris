@@ -23,7 +23,7 @@ import { runAssembly, assembleBody, wrapDocument } from "./assembly.ts";
 import { stripDeprecatedRoles } from "./roles.ts";
 import { stripNestedMain } from "./landmarks.ts";
 import { runReview, type ReviewResult } from "./review.ts";
-import { runAxe, lintErrorFields } from "./lint.ts";
+import { runAxe, lintErrorFields, lintDebrisFields } from "./lint.ts";
 import { learnFromFeedback, proposeAgentUpdatesFromFeedback, scopeFeedback } from "./feedback.ts";
 import { runContribution } from "./contribute.ts";
 import { unresolvedRefs } from "./links.ts";
@@ -250,6 +250,10 @@ export async function runPipeline(args: {
         // step anywhere in the log to chase it by. Reachable on exactly #164's document: its
         // own feedback re-run.
         if (lint.error) log.event("lint_unavailable", { stage: "feedback_relint", ...lintErrorFields(lint) });
+        // Same event and same shape as the review loop's, for the reason `lintErrorFields` is shared:
+        // this path lints a body it did not extract, and debris that read differently here would be
+        // debris nobody greps for (#257).
+        if (lint.malformedAttributes) log.event("lint_debris", { stage: "feedback_relint", ...lintDebrisFields(lint) });
         review = await runReview(ctx, { body: beforeBody, lint, pages: fragments, failedPages });
       }
     } else {

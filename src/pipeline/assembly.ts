@@ -1,4 +1,4 @@
-import { runAxe, lintErrorFields, isKnownLanguage, type LintResult } from "./lint.ts";
+import { runAxe, lintErrorFields, lintDebrisFields, isKnownLanguage, type LintResult } from "./lint.ts";
 import { cutPoints } from "./sections.ts";
 import { namespaceAnchors, type AnchorReport } from "./anchors.ts";
 import { stripDeprecatedRoles, type RoleStrip } from "./roles.ts";
@@ -375,6 +375,13 @@ export async function runAssembly(
     // that has nothing to say is absent, so a field that is present means something.
     ...(lint.violations ? { violations: lint.violations.length } : {}),
     ...lintErrorFields(lint),
+    // Attributes whose names no valid markup produces, taken out of the lint's copy of the document
+    // so that two of them cannot take the check offline for all of it (#257, see runAxe). Reported
+    // because the leak that makes them is otherwise invisible: the same JSON escaping that turns
+    // `aria-label=\"Page iii\"` into an attribute called `iii\"` also puts `\"doc-pagebreak\"` in the
+    // marker's `role` and `\"page-iii\"` in its `id`, so this number on an ordinary run's line is the
+    // earliest symptom of a class of defect that took #233 and #234 to find by reading documents.
+    ...lintDebrisFields(lint),
   });
   // Logged only when the join actually had to do something, so the ordinary run adds
   // no line. `ambiguous` is the one that matters to a human: a reference naming an id
