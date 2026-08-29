@@ -46,6 +46,40 @@ export interface Usage {
   cache_creation_input_tokens?: number;
 }
 
+// A fact an adapter learned while serving one call that only the CALLER can record. Same
+// shape of problem as `onUsage`, and unreportable for the same reason a return value cannot
+// carry it: it is learned mid-call, it is worth having whether the call then succeeds or
+// throws, and the layer that knows the session and writes the run log is the router
+// (providers/index.ts) — an adapter has no logger and should not grow one.
+//
+// A discriminated union with one member today. A union rather than a free-form string so the
+// router's handling is a `switch` a new kind has to be added to, instead of an unknown fact
+// silently becoming a log field nobody declared.
+export type ProviderNote = {
+  // This call ran below the output ceiling its deployment configured, because Bedrock refused
+  // that ceiling for this model and stated a lower one (providers/bedrock.ts, issues #249
+  // and #254).
+  //
+  // This is the run's only record that `providers.<provider>.max_tokens` is wrong for the
+  // model it is pointed at. The retry is what makes the pages arrive, which also means the
+  // config error has no consequence anyone downstream can see: without this the run log shows
+  // one call where two requests were made, a duration covering both, and nothing about the
+  // ceiling — a deployment can run for a month at a number nobody chose, with a dense page
+  // truncating occasionally, and the log will say only that a page truncated.
+  kind: "output_ceiling_clamped";
+  model: string;
+  // The ceiling that was asked for and the one that was granted. Both, because either alone is
+  // unactionable: the pair is what says which way to move `max_tokens` and how far.
+  asked: number;
+  stated: number;
+  // Whether THIS call is the one that learned it, by having a request refused and re-sent. The
+  // condition and its cost are different facts and both are worth having: the condition holds
+  // for every call to a clamped model, while the cost — a rejected round-trip inside one
+  // `complete`, and a `duration_ms` covering two requests — is paid by the first call in a
+  // process and by none after it.
+  refused: boolean;
+};
+
 export interface CompletionRequest {
   capability: Capability;
   messages: Message[];
@@ -58,6 +92,14 @@ export interface CompletionRequest {
   // end, so a call that stalls or truncates — exactly the expensive kind — would
   // report nothing at all if usage only rode the successful return path.
   onUsage?: (usage: Usage) => void;
+  // Called for a fact worth recording that is neither usage nor an error — see ProviderNote.
+  // Called once per occurrence, and deliberately NOT deduplicated the way the adapter's own
+  // stderr warning is: Bedrock says the paragraph about a wrong ceiling once per process
+  // (`warnedCeilings`), because five paragraphs about one config problem read as five problems,
+  // but every call that runs at the clamped ceiling still owes the run log its own line.
+  // Copying that dedup here would put the fact on one `model_call` per process and leave every
+  // document after the first reading clean.
+  onNote?: (note: ProviderNote) => void;
 }
 
 export interface CompletionResult {

@@ -568,3 +568,172 @@ test("an explicit max_tokens is still the ceiling asked for, and still the one c
   );
   assert.match(warnings[0], /providers\.bedrock\.max_tokens is 12345/);
 });
+
+// --- and it is told to the caller, not only to stderr (#254) -----------------------------
+//
+// The warning above is the operator's copy and is deliberately said once per process. The
+// note is the RUN LOG's copy, and the two have opposite dedup rules: a paragraph repeated
+// per page is noise, while a document whose second page silently omits the fact reads as a
+// document that did not hit it. Nothing here asserts what the router does with the note —
+// that seam is test/providers.test.ts.
+//
+// `refused` is what keeps one note doing two jobs honestly: `false` is the CONDITION (this
+// call ran below the configured ceiling), `true` adds the COST (this call had a request
+// refused and re-sent, so its duration covers two).
+
+test("a clamped call tells its caller which ceiling was asked for and which was granted", async () => {
+  // Both dialects, each paired with a model and a refusal that actually occur on it: the
+  // Anthropic body reaches Claude models only, and its rejection is the shorter wording.
+  const cases = [
+    { api: "converse", model: NOVA, refusal: NOVA_REFUSAL, stated: 10_000, done: converseDone },
+    {
+      api: "invoke",
+      model: CLAUDE,
+      refusal: "The maximum tokens you requested exceeds the model limit of 8192",
+      stated: 8_192,
+      done: invokeDone,
+    },
+  ] as const;
+  for (const c of cases) {
+    const bedrock = provider({ default_model: c.model, ...(c.api === "converse" ? { api: c.api } : {}) });
+    assert.equal(bedrock.dialect, c.api);
+    stubAttempts(bedrock, [
+      { throws: validationException(c.refusal) },
+      { events: c.done("<p>page</p>") },
+    ]);
+    const notes: unknown[] = [];
+    const [result] = await capturingWarnings(() =>
+      bedrock.complete(req(c.model, { onNote: (n: unknown) => notes.push(n) })),
+    );
+    assert.equal(result.text, "<p>page</p>", c.api);
+    // Both numbers, because either alone is unactionable: the pair is what says which way to
+    // move `max_tokens` and how far.
+    assert.deepEqual(
+      notes,
+      [{ kind: "output_ceiling_clamped", model: c.model, asked: 32_000, stated: c.stated, refused: true }],
+      c.api,
+    );
+  }
+});
+
+test("every page that runs at a clamped ceiling says so, however quiet stderr has gone", async () => {
+  // The one behaviour the note does NOT share with the warning, and the reason it reports the
+  // condition rather than only the refusal. `warnedCeilings` says the paragraph once per
+  // process on purpose — and `ceilings` remembers the number for just as long, so a note that
+  // only rode the retry would land on ONE `model_call` in the life of a server. Booted a month
+  // ago, that is one clamped call in the first run log and nothing in the thirty documents
+  // since: the "no trace anyone aggregates" this is supposed to fix.
+  //
+  // Page one pays a rejected request and pages two and three do not, which is exactly the
+  // difference `refused` carries.
+  const bedrock = provider({ default_model: NOVA, api: "converse" });
+  stubAttempts(bedrock, [
+    { throws: validationException(NOVA_REFUSAL) },
+    { events: converseDone("<p>page one</p>") },
+    { events: converseDone("<p>page two</p>") },
+    { events: converseDone("<p>page three</p>") },
+  ]);
+  const notes: unknown[][] = [];
+  const [, warnings] = await capturingWarnings(async () => {
+    for (const _ of [1, 2, 3]) {
+      const mine: unknown[] = [];
+      notes.push(mine);
+      await bedrock.complete(req(NOVA, { onNote: (n: unknown) => mine.push(n) }));
+    }
+  });
+  assert.equal(warnings.length, 1, "stderr is still told once");
+  const clamped = (refused: boolean) => ({
+    kind: "output_ceiling_clamped",
+    model: NOVA,
+    asked: 32_000,
+    stated: 10_000,
+    refused,
+  });
+  assert.deepEqual(notes, [[clamped(true)], [clamped(false)], [clamped(false)]]);
+});
+
+test("a call refused twice reports both steps, so the log names the ceiling it ended at", async () => {
+  // The pair the router folds into one span. Reported as two notes rather than one covering
+  // 32000 -> 4096, because that is what happened and the adapter is not the layer that decides
+  // how a run log summarizes it.
+  const bedrock = provider({ default_model: NOVA, api: "converse" });
+  stubAttempts(bedrock, [
+    { throws: validationException(NOVA_REFUSAL) },
+    { throws: validationException("The maximum tokens you requested exceeds the model limit of 4096") },
+  ]);
+  const notes: unknown[] = [];
+  await capturingWarnings(async () => {
+    await assert.rejects(
+      () => bedrock.complete(req(NOVA, { onNote: (n: unknown) => notes.push(n) })),
+      /setting at fault/,
+    );
+  });
+  // Including on the call that then FAILED: a lost page is exactly the one worth knowing ran
+  // into a config ceiling, and a note that only rode the success path would omit it.
+  assert.deepEqual(notes, [
+    { kind: "output_ceiling_clamped", model: NOVA, asked: 32_000, stated: 10_000, refused: true },
+    { kind: "output_ceiling_clamped", model: NOVA, asked: 10_000, stated: 4_096, refused: true },
+  ]);
+});
+
+test("one model's clamp puts no note on another served by the same provider block", async () => {
+  // The condition is per MODEL, like the ceiling it reports. A block serving a Nova on vision
+  // and a Claude on text (`per_capability`) would otherwise mark every Claude call as running
+  // below the deployment's ceiling, which is a config error to go and fix that is not there.
+  const bedrock = provider({ default_model: CLAUDE, api: "converse" });
+  stubAttempts(bedrock, [
+    { throws: validationException(NOVA_REFUSAL) },
+    { events: converseDone("<p>nova page</p>") },
+    { events: converseDone("<p>claude page</p>") },
+  ]);
+  const nova: unknown[] = [];
+  const claude: unknown[] = [];
+  await capturingWarnings(async () => {
+    await bedrock.complete(req(NOVA, { onNote: (n: unknown) => nova.push(n) }));
+    await bedrock.complete(req(CLAUDE, { onNote: (n: unknown) => claude.push(n) }));
+  });
+  assert.equal(nova.length, 1);
+  assert.deepEqual(claude, []);
+});
+
+test("a refusal nothing was clamped from is reported by failing, not by a note", async () => {
+  // Bedrock refusing 32000 while naming a limit of 128000: no lower ceiling was adopted and
+  // nothing was re-sent, so there is no clamp to record. The call throws, and the message
+  // already names the knob — a note here would put `output_ceiling_stated: 128000` on a log
+  // line where 128000 is not a ceiling anyone is running at.
+  const bedrock = provider({ default_model: CLAUDE, api: "converse" });
+  stubAttempts(bedrock, [{ throws: validationException(CLAUDE_REFUSAL) }]);
+  const notes: unknown[] = [];
+  await assert.rejects(
+    () => bedrock.complete(req(CLAUDE, { onNote: (n: unknown) => notes.push(n) })),
+    /setting at fault/,
+  );
+  assert.deepEqual(notes, []);
+});
+
+test("a model that accepts the deployment's ceiling produces no note at all", async () => {
+  // The invariant that keeps the new log fields meaningful: their presence means a ceiling was
+  // lowered. A deployment whose models accept `max_tokens` must never show them.
+  const bedrock = provider({ default_model: CLAUDE, api: "converse" });
+  stubAttempts(bedrock, [{ events: converseDone("<p>page</p>") }]);
+  const notes: unknown[] = [];
+  const [result] = await capturingWarnings(() =>
+    bedrock.complete(req(CLAUDE, { onNote: (n: unknown) => notes.push(n) })),
+  );
+  assert.equal(result.text, "<p>page</p>");
+  assert.deepEqual(notes, []);
+});
+
+test("a caller that passes no onNote is served exactly as before", async () => {
+  // Every caller but the router does this — the adapters are constructed directly in several
+  // tests and in providers/imageLimits.ts's neighbourhood — so the callback being absent has
+  // to be ordinary rather than a crash inside the retry.
+  const bedrock = provider({ default_model: NOVA, api: "converse" });
+  const inputs = stubAttempts(bedrock, [
+    { throws: validationException(NOVA_REFUSAL) },
+    { events: converseDone("<p>page</p>") },
+  ]);
+  const [result] = await capturingWarnings(() => bedrock.complete(req(NOVA)));
+  assert.equal(result.text, "<p>page</p>");
+  assert.equal(inputs.length, 2);
+});
