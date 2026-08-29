@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { markupReport } from "../src/pipeline/markup.ts";
+import { runAxe } from "../src/pipeline/lint.ts";
+import { wrapDocument } from "../src/pipeline/assembly.ts";
 
 // The delivered document's own structure (#240) — the two questions axe cannot be asked,
 // because it lints a tree the parser has already repaired.
@@ -165,4 +167,208 @@ test("a clean document reports nothing to say", () => {
   assert.equal(report.tablesWithoutBody, 0);
   assert.equal(report.tables, 1);
   assert.equal(report.parseError, undefined);
+  // And nothing from the four structural classes either, for the same reason: the whole
+  // `delivered_structure` line is gated on one of them having fired.
+  assert.deepEqual(counts(report), { idrefs: 0, dl: 0, lang: 0, landmarks: 0 });
+});
+
+// The four structural defect classes of #255 — decidable from the delivered HTML, and reported by
+// no rule in the gate. Each test that says "the gate is clean on this" checks it rather than
+// asserting it: `runAxe` on the same document, through the real config, so the day axe starts
+// reporting one of these the suite says so instead of the check quietly becoming redundant.
+
+const counts = (report: ReturnType<typeof markupReport>) => ({
+  idrefs: report.structure.danglingIdrefs.count,
+  dl: report.structure.dlWithoutDd.count,
+  lang: report.structure.langOnVoid.count,
+  landmarks: report.structure.emptyLandmarks.count,
+});
+
+test("an id reference that names nothing is counted, and the gate is clean on all three", async () => {
+  // The three attributes whose whole function is to name another element. Each of these promises a
+  // name and delivers none: the reference resolves to nothing, so the accessible-name computation
+  // yields nothing and the element ships unnamed.
+  const body =
+    `<h1>Title</h1>\n<p>Body text.</p>\n` +
+    `<img src="a.png" alt="A chart" aria-labelledby="chart-note">\n` +
+    `<p aria-describedby="footnote-3">A paragraph.</p>\n` +
+    `<label for="q1">Name</label>\n<input id="real" type="text" aria-label="Name">`;
+  const report = markupReport(wrapDocument(body));
+  assert.equal(report.structure.danglingIdrefs.count, 3);
+  assert.deepEqual(report.structure.danglingIdrefs.examples, [
+    `img[aria-labelledby=chart-note]`,
+    `p[aria-describedby=footnote-3]`,
+    `label[for=q1]`,
+  ]);
+  // Why the check exists rather than a promoted rule or an axe filter: the gate says nothing at
+  // all here. The two ARIA attributes land in `incomplete` (`aria-valid-attr-value` is
+  // `reviewOnFail`), and `<label for>` reaches the `label` rule only when the input has no other
+  // name — this one has `aria-label`, so that rule passes too.
+  const lint = await runAxe(wrapDocument(body));
+  assert.equal(lint.error, undefined);
+  assert.deepEqual(lint.violations, [], "the gate now reports these, so read this check again");
+});
+
+test("a reference that resolves on another page is not dangling, which is why this runs on the join", async () => {
+  // The distinction that makes this a delivered-document check and not the fragment-level one the
+  // bench ran: a page agent writes one page at a time, so a reference to an id defined on page 40
+  // is correct in the document those pages join into. The same argument the issue makes for NOT
+  // checking `href="#x"` at fragment scope applies to these three attributes — at this scope it
+  // holds either way.
+  const joined =
+    `<p>Page one.</p>\n<hr role="doc-pagebreak" aria-label="Page 2">\n` +
+    `<h2 id="appendix-a">Appendix A</h2>\n<p aria-describedby="appendix-a">Refers forward.</p>`;
+  assert.equal(markupReport(wrapDocument(joined)).structure.danglingIdrefs.count, 0);
+
+  // A token list is read a token at a time, because one resolving reference does not excuse the
+  // rest: this element is named by half of what it asked for.
+  const half = `<h2 id="h2">Heading</h2>\n<p aria-labelledby="h2 subtitle">Text.</p>`;
+  const report = markupReport(wrapDocument(half));
+  assert.equal(report.structure.danglingIdrefs.count, 1);
+  assert.deepEqual(report.structure.danglingIdrefs.examples, [`p[aria-labelledby=subtitle]`]);
+
+  // And `for` is an id reference on a `<label>` and nowhere else. A `<div for="x">` is not a
+  // reference at all, and reading it as one would manufacture a finding out of nothing.
+  assert.equal(markupReport(wrapDocument(`<div for="nope">Text.</div>`)).structure.danglingIdrefs.count, 0);
+});
+
+test("a term list with no definitions is counted, including the shape axe passes", async () => {
+  // The bare shape IS reported by the gate — `definition-list`, serious, wcag2a via 1.3.1 — so on
+  // this one the check duplicates it.
+  const bare = wrapDocument(`<p>Body text.</p>\n<dl><dt>Term one</dt><dt>Term two</dt></dl>`);
+  assert.equal(markupReport(bare).structure.dlWithoutDd.count, 1);
+  assert.deepEqual(markupReport(bare).structure.dlWithoutDd.examples, ["dl(2 dt, 0 dd)"]);
+  assert.deepEqual((await runAxe(bare)).violations?.map((v) => v.id), ["definition-list"]);
+
+  // And this is the shape it is here for. HTML allows a `<div>` between a `<dl>` and its
+  // `<dt>`/`<dd>` groups, and axe's rule passes as soon as one is present — measured, a clean
+  // lint on a list of terms with every definition missing.
+  const wrapped = wrapDocument(`<p>Body text.</p>\n<dl><div><dt>Term one</dt></div></dl>`);
+  assert.deepEqual((await runAxe(wrapped)).violations, [], "axe now sees this, so read this check again");
+  assert.equal(markupReport(wrapped).structure.dlWithoutDd.count, 1);
+
+  // A complete list is not a finding in either shape.
+  assert.equal(markupReport(wrapDocument(`<dl><dt>Term</dt><dd>Meaning.</dd></dl>`)).structure.dlWithoutDd.count, 0);
+  assert.equal(
+    markupReport(wrapDocument(`<dl><div><dt>Term</dt><dd>Meaning.</dd></div></dl>`)).structure.dlWithoutDd.count,
+    0,
+  );
+});
+
+test("a nested term list's terms belong to the list they are in", () => {
+  // The mirror of the nested-table scoping above, and the reason the search is not a plain
+  // descendant one: the inner list's `<dd>` must not answer for the outer list's terms.
+  const outerIncomplete = `<dl><dt>Outer term</dt><div><dl><dt>Inner</dt><dd>Inner meaning.</dd></dl></div></dl>`;
+  const report = markupReport(wrapDocument(outerIncomplete));
+  assert.equal(report.structure.dlWithoutDd.count, 1);
+  assert.deepEqual(report.structure.dlWithoutDd.examples, ["dl(1 dt, 0 dd)"], "the outer list, one term");
+
+  // And the other way round: a complete outer list containing an incomplete inner one is one
+  // finding, the inner one.
+  const innerIncomplete = `<dl><dt>Outer</dt><dd>Meaning, with <dl><dt>Inner term</dt></dl> in it.</dd></dl>`;
+  assert.equal(markupReport(wrapDocument(innerIncomplete)).structure.dlWithoutDd.count, 1);
+});
+
+test("lang on an element that holds no text is waste, and nothing else in the pipeline sees it", async () => {
+  // Legal markup — `lang` is a global attribute — so there is nothing for axe to fail, and the
+  // gate is right to be quiet. It is counted because of where it comes from: the page contract's
+  // language rule applied by rote (#252), 9 of 108 answers in the bench round, 8 from one model.
+  const body = `<p>Body text.</p>\n<img src="a.png" alt="Un graphique" lang="fr">\n<hr lang="de">\n<p>More.<br lang="es"></p>`;
+  const report = markupReport(wrapDocument(body));
+  assert.equal(report.structure.langOnVoid.count, 3);
+  assert.deepEqual(report.structure.langOnVoid.examples, ["img[lang=fr]", "hr[lang=de]", "br[lang=es]"]);
+  assert.deepEqual((await runAxe(wrapDocument(body))).violations, [], "a rule now covers this, so read it again");
+
+  // The same attribute on elements that DO hold text is the rule being followed, not broken — and
+  // the shell's own `<html lang>` and labelled `<title>` must never be counted, or every
+  // non-English document would report two findings for being correct.
+  const legitimate = markupReport(wrapDocument(`<p lang="fr">Bonjour.</p>\n<span lang="de">Guten Tag</span>`));
+  assert.equal(legitimate.structure.langOnVoid.count, 0);
+});
+
+test("an empty nav or aside is an announced region with nothing in it; an unnamed section is not", () => {
+  // `<nav>` and `<aside>` are landmarks named or not, so a reader is offered them in the landmark
+  // list, jumps, and arrives at nothing.
+  const report = markupReport(wrapDocument(`<p>Body text.</p>\n<nav></nav>\n<aside>   </aside>`));
+  assert.equal(report.structure.emptyLandmarks.count, 2);
+  assert.deepEqual(report.structure.emptyLandmarks.examples, ["nav", "aside"]);
+
+  // A `<section>` is exposed as a `region` only when it has an accessible name. An unnamed empty
+  // one is a generic container no reader is offered and none can land in — nothing is announced,
+  // so nothing is lost, and counting it would report every stray wrapper in the document.
+  assert.equal(markupReport(wrapDocument(`<p>Text.</p><section></section>`)).structure.emptyLandmarks.count, 0);
+  assert.equal(
+    markupReport(wrapDocument(`<p>Text.</p><section aria-label="Notes"></section>`)).structure.emptyLandmarks.count,
+    1,
+  );
+  assert.equal(
+    markupReport(wrapDocument(`<h2 id="n">Notes</h2><section aria-labelledby="n"></section>`)).structure.emptyLandmarks
+      .count,
+    1,
+  );
+});
+
+test("a name that resolves to nothing is not a name, so that section is one finding and not two", () => {
+  // The interaction between two of the four checks, stated because both readings look defensible:
+  // `<section aria-labelledby="nope">` is not announced as a region at all, so the defect is the
+  // dead reference and nothing else. Counting it twice would make one mistake look like two.
+  const report = markupReport(wrapDocument(`<p>Text.</p>\n<section aria-labelledby="nope"></section>`));
+  assert.deepEqual(counts(report), { idrefs: 1, dl: 0, lang: 0, landmarks: 0 });
+});
+
+test("empty means empty to a reader, not empty of nodes", () => {
+  // A region holding an image holds content: the image has alt text, and a reader who lands there
+  // is given it. Same for a table or a form field.
+  assert.equal(
+    markupReport(wrapDocument(`<p>Text.</p><aside><img src="a.png" alt="A chart"></aside>`)).structure.emptyLandmarks
+      .count,
+    0,
+  );
+  // A page-break marker is not content. A region holding nothing but furniture is the defect
+  // itself, not an exception to it — which is why `<hr>` is not in the list above.
+  assert.equal(
+    markupReport(wrapDocument(`<p>Text.</p><nav><hr role="doc-pagebreak" aria-label="Page 3"></nav>`)).structure
+      .emptyLandmarks.count,
+    1,
+  );
+});
+
+test("markup quoted in an @ marker is a comment, not an element", () => {
+  // Where these four differ from the balance scan above, and the reason they need no stripping of
+  // their own: the `@unresolved` list is model-written prose that quotes markup freely, and the
+  // balance count had to be taught to ignore it. A parser does that already — a comment holds no
+  // elements — so a `<nav></nav>` written inside one is reachable by no selector here.
+  const report = markupReport(
+    wrapDocument(`<p>Body text.</p>`, {
+      unresolved: [`An empty <nav></nav> and an <img lang="fr"> and a <dl><dt>term</dt></dl>, described in prose`],
+    }),
+  );
+  assert.deepEqual(counts(report), { idrefs: 0, dl: 0, lang: 0, landmarks: 0 });
+});
+
+test("the instances are bounded and cut, because they are text out of a user's document", () => {
+  // Same bound and the same reason as the empty-table captions and the lint's malformed attribute
+  // names: an exact count, and enough of the instances to recognise the class.
+  const long = "x".repeat(80);
+  const body =
+    `<p>Body text.</p>\n` +
+    [...Array(7)].map((_, i) => `<p aria-describedby="note-${i}">Paragraph ${i}.</p>`).join("\n") +
+    `\n<p aria-labelledby="${long}">Last.</p>`;
+  const idrefs = markupReport(wrapDocument(body)).structure.danglingIdrefs;
+  assert.equal(idrefs.count, 8, "the count is every instance, not the length of the examples");
+  assert.equal(idrefs.examples.length, 5);
+  assert.deepEqual(idrefs.examples[0], "p[aria-describedby=note-0]");
+  // And the cut, on the one field where a value can be arbitrarily long.
+  const cut = markupReport(wrapDocument(`<p aria-labelledby="${long}">Only.</p>`)).structure.danglingIdrefs.examples[0];
+  assert.equal(cut?.length, 41, "40 characters and the ellipsis that says there was more");
+  assert.match(cut ?? "", /…$/);
+});
+
+test("a document whose parse threw reports zeros that are not a clean bill of health", () => {
+  // The same distinction `parseError` already makes for the table counts (#164). Four zeros beside
+  // a `parse_error` mean the checks never ran; four zeros without one mean the document is clean.
+  const deep = `<div>`.repeat(9000);
+  const report = markupReport(deep);
+  if (report.parseError === undefined) return; // more stack headroom here than the parse needs
+  assert.deepEqual(counts(report), { idrefs: 0, dl: 0, lang: 0, landmarks: 0 });
 });

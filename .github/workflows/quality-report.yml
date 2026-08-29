@@ -226,6 +226,11 @@ jobs:
             # document, and a table with headers and no rows has no axe rule — so the first
             # question is how often they fire on a deployment's real traffic, not what number is
             # too high. The summary prints them either way.
+            #
+            # `structural_defect_rate` (#255) is the newest of these and off on the same terms: a
+            # dangling id reference is `incomplete` to axe and never a violation, a `<div>`-wrapped
+            # term list passes `definition-list`, and an empty `<nav>` breaks no rule, so this is a
+            # first measurement too and the summary is where it belongs until there is a baseline.
             echo "should_run=false" >> "$GITHUB_OUTPUT"
             echo "::error::$BASE/v1/quality returned 200 but not a quality tally. Nothing was measured this week."
             exit 1

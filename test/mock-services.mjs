@@ -262,7 +262,14 @@ const or = createServer(async (req, res) => {
         // break the page-order assertions this same document exists to make.
         (page === 1 && !cleanMarkup
           ? `\n<div>\n<table><caption>Table 1. Revenue by region</caption>\n` +
-            `<thead><tr><th scope="col">Region</th><th scope="col">Revenue</th></tr></thead></table>\n`
+            `<thead><tr><th scope="col">Region</th><th scope="col">Revenue</th></tr></thead></table>\n` +
+            // And one #255 defect, in the same conditional and on page 1 for the same reason: a
+            // reference to an id no page defines. Invisible to the gate in a different way from
+            // the two above — nothing is malformed and nothing was repaired, but axe reports a
+            // dead `aria-describedby` as `incomplete` (`aria-valid-attr-value` is `reviewOnFail`)
+            // and never as a violation, so the run reaches ready_for_review with a clean lint and
+            // a paragraph promising a description that does not exist.
+            `<p aria-describedby="revenue-note">Revenue is described in the note.</p>\n`
           : ``),
       log: "",
       // Only when the e2e has armed it, and only on page 1, so the run yields

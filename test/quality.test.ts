@@ -12,6 +12,7 @@ import {
   SIGNAL_LINKS_UNRESOLVED,
   SIGNAL_MARKUP_UNBALANCED,
   SIGNAL_TABLE_NO_BODY,
+  SIGNAL_STRUCTURAL_DEFECT,
   SIGNAL_LINT_ERROR,
   SIGNAL_REVIEW_UNREAD,
   SIGNAL_ROUNDS,
@@ -63,6 +64,7 @@ test("an empty deployment reports zeroes rather than dividing by zero", () => {
       q.links_unresolved_rate,
       q.markup_unbalanced_rate,
       q.table_no_body_rate,
+      q.structural_defect_rate,
       q.lint_error_rate,
     ]) {
       assert.equal(rate, 0);
@@ -286,6 +288,32 @@ test("markup and empty-table findings are separate rates, because one document c
   });
 });
 
+test("the structural defects are one rate, and per document however many instances fired", () => {
+  withStore((store) => {
+    // Three checks behind one signal, deliberately: the rate answers one question — did this
+    // document ship promising a reader something that is not there — and the split between a
+    // reference to an absent id, a term list with no definitions and an empty landmark is a
+    // diagnosis the run's `delivered_structure` line carries, with the elements named. So a
+    // document with eleven instances across all three classes counts once here, exactly like the
+    // 82-dead-references document above.
+    delivered(store, "a", [{ code: SIGNAL_STRUCTURAL_DEFECT, count: 11 }]);
+    delivered(store, "b", [{ code: SIGNAL_STRUCTURAL_DEFECT, count: 1 }]);
+    delivered(store, "c");
+    delivered(store, "d");
+    const q = store.qualityStats();
+    assert.equal(q.structural_defect_rate, 2 / 4);
+    // And nothing else here moved, which is the argument for the signal existing: axe reports a
+    // dangling id reference as `incomplete` rather than a violation, passes a `<div>`-wrapped term
+    // list, and has no rule for an empty `<nav>`, so both documents lint clean.
+    assert.deepEqual(q.rules, []);
+    assert.equal(q.lint_error_rate, 0);
+    // Not the markup rates either: those are #240's two, measured on the same delivered bytes in
+    // the same pass, and a document can have any of these without the others.
+    assert.equal(q.markup_unbalanced_rate, 0);
+    assert.equal(q.table_no_body_rate, 0);
+  });
+});
+
 test("the window is clamped, and echoed back so a caller sees what it got", () => {
   withStore((store) => {
     delivered(store, "a");
@@ -351,6 +379,7 @@ test("nothing per-session, per-user or per-document is exposed", () => {
         "review_unread_rate",
         "rules",
         "since",
+        "structural_defect_rate",
         "table_no_body_rate",
         "unresolved_rate",
         "window_days",
