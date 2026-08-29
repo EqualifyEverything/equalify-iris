@@ -200,8 +200,14 @@ const ATTRIBUTE_NAME = /^[a-zA-Z_:\u0080-\uffff][-a-zA-Z0-9_:.\u0080-\uffff]*$/;
 // `CSS.escape` and axe's copy only exists inside a window that has already had axe injected into
 // it, which is after the point this has to run. Exported for the test that checks the port and the
 // predicate below against the real engine, name by name.
-export function escapeAttributeName(name: string): string {
+function escapeParts(name: string): { escaped: string; hexEscape: boolean } {
   let out = "";
+  // Whether the escaper EMITTED an escape beginning with a decimal digit, which is what the
+  // predicate below needs and what reading the finished string cannot tell it: a name that already
+  // contains a backslash comes out with `\\` in it, so `aria-label\1` looks exactly like an emitted
+  // escape and is not one. That name compiles fine, and removing it would take the
+  // `aria-valid-attr` finding on it away — the loss the narrow removal exists to avoid.
+  let hexEscape = false;
   for (let i = 0; i < name.length; i++) {
     const c = name.charCodeAt(i);
     if (c === 0) out += "\ufffd";
@@ -213,13 +219,20 @@ export function escapeAttributeName(name: string): string {
     ) {
       // The only branch that emits a HEX escape, and so the only one that can produce the shape
       // the selector engine chokes on. The trailing space terminates the escape.
-      out += `\\${c.toString(16)} `;
+      const hex = c.toString(16);
+      out += `\\${hex} `;
+      // Not every hex escape is one: 0x0a–0x0f render as `a`–`f`, which is a letter and compiles.
+      if (hex[0]! >= "0" && hex[0]! <= "9") hexEscape = true;
     } else if (i === 0 && name.length === 1 && c === 45) out += `\\${name[i]}`;
     else if (c >= 128 || c === 45 || c === 95 || (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122))
       out += name[i];
     else out += `\\${name[i]}`;
   }
-  return out;
+  return { escaped: out, hexEscape };
+}
+
+export function escapeAttributeName(name: string): string {
+  return escapeParts(name).escaped;
 }
 
 // Whether a selector carrying this attribute name is one nwsapi cannot compile — i.e. whether this
@@ -228,13 +241,19 @@ export function escapeAttributeName(name: string): string {
 // nwsapi compiles a selector into JavaScript source and evaluates it with `Function`, whose body is
 // strict, and it splices an attribute name in with its CSS escapes still on it. A backslash
 // followed by a decimal digit is an octal (or non-octal-decimal) escape there, which is a
-// SyntaxError in strict mode — so the test is exactly that shape in the escaped name, and nothing
-// broader. `aria-label\"note\"` compiles; `\31 x` does not.
+// SyntaxError in strict mode — so the test is exactly that shape and nothing broader.
+// `aria-label\"note\"` compiles; `\31 x` does not.
+//
+// Read off what the escaper DID rather than by matching the string it returned, because the two
+// differ on one shape: a backslash already in the name is emitted as `\\`, so `aria-label\1` ends
+// with a backslash followed by a digit without containing an escape. It compiles, no rule set dies
+// on it, and `aria-valid-attr` reports it — so a pattern match here would remove the very kind of
+// name the narrowing is for.
 //
 // Every name outside `ATTRIBUTE_NAME` is debris and gets counted, but only these are REMOVED,
 // because removing an attribute takes rules away with it (see `malformedAttributes`).
 export function breaksSelectorEngine(name: string): boolean {
-  return /\\[0-9]/.test(escapeAttributeName(name));
+  return escapeParts(name).hexEscape;
 }
 // How many of the names are kept, and how much of each. Same bound and the same reason as the node
 // excerpts below: this is content out of a user's document and it goes in a log line. Short,

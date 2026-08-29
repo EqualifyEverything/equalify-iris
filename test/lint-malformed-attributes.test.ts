@@ -136,6 +136,17 @@ test("an attribute a rule reports BECAUSE its name is broken is counted and left
   assert.equal(lint.malformedAttributes, 1, "the debris is still counted, because the leak is still worth knowing");
   assert.equal(lint.malformedAttributesRemoved, undefined, "an attribute a rule reads was taken out of the document");
   assert.deepEqual(lint.malformedAttributeNames, [`aria-label"note"`]);
+
+  // The same rule, on the name that comes closest to looking like one the compiler cannot take: a
+  // backslash immediately before a digit. Escaped, it ends `\\1` — a backslash and a digit, with no
+  // escape in it — so a predicate that read the finished string instead of what the escaper did
+  // would remove this one and lose the finding on it. It is the only shape where those two readings
+  // differ, and this is the end-to-end version of that.
+  const looksEscaped = await runAxe(wrapDocument(`<p>Body.</p>\n<img src="a.png" alt="A chart" aria-label\\1="x">`));
+  assert.equal(looksEscaped.error, undefined, "a selector built from this name did compile after all");
+  assert.deepEqual(looksEscaped.violations?.map((v) => v.id), ["aria-valid-attr"]);
+  assert.equal(looksEscaped.malformedAttributes, 1);
+  assert.equal(looksEscaped.malformedAttributesRemoved, undefined, "a name that compiles was taken out anyway");
 });
 
 test("what gets removed is the escape shape, and that is checked against axe and against nwsapi", async () => {
@@ -176,6 +187,14 @@ test("what gets removed is the escape shape, and that is checked against axe and
     `a&b`,
     `a#b`,
     `a*b`,
+    // A backslash already in the name, immediately before a digit. The escaper emits `\\` for it,
+    // so the finished string ends in a backslash and a digit while containing no escape — the one
+    // shape where reading the escaped text and reading what the escaper did disagree. These compile,
+    // and the first two are names a rule reads, so a predicate that matched the text would remove
+    // exactly what the narrow removal exists to protect.
+    `aria-label\\1`,
+    `data-x\\2`,
+    `a\\9`,
   ];
   for (const name of names) {
     assert.equal(escapeAttributeName(name), escapeSelector(name), `the port disagrees with axe on ${name}`);
