@@ -134,6 +134,41 @@ test("the tag name is matched on a word boundary, so <mainsail> is untouched", (
   assert.equal(stripNestedMain(body).html, body);
 });
 
+// The reason attributes are stepped through from the front of the tag instead of searched: a
+// search for `role` finds one inside another attribute's VALUE and splices it out of that value,
+// which is a silent content edit — the same hazard assembly.ts documents for ` lang=` and avoids
+// the same way.
+test("role= inside another attribute's value is text, not an attribute", () => {
+  const out = stripNestedMain('<main title="see role=main note" id="p1"><p>x</p></main>');
+  assert.equal(out.html, '<div title="see role=main note" id="p1"><p>x</p></div>');
+  // And the real one is still found when it comes after such a value.
+  assert.equal(
+    stripNestedMain('<main title="see role=main note" role="main"><p>x</p></main>').html,
+    '<div title="see role=main note"><p>x</p></div>',
+  );
+});
+
+test("only the first spelling of role is read, which is the one a parser sees", () => {
+  assert.equal(stripNestedMain('<main role="region" role="main"><p>x</p></main>').html, '<div role="region" role="main"><p>x</p></div>');
+});
+
+// A `<main>` inside a comment is not an element. Counting it would put a `page_main_stripped`
+// line in the run log with `declined: 1`, which promises a violation the gate cannot report,
+// because axe does not see comments either. This body carries comments by design (`@page-failed`
+// marks a lost page), so the shape is a live one.
+test("a <main> inside a comment is neither counted nor edited", () => {
+  const body = "<!-- <main> --><h2>A</h2>";
+  const out = stripNestedMain(body);
+  assert.equal(out.html, body);
+  assert.deepEqual([out.unwrapped, out.downgraded, out.declined], [0, 0, 0]);
+});
+
+test("a commented end tag does not close a real <main>, and nothing is edited inside the comment", () => {
+  const out = stripNestedMain("<main><p>x</p><!-- </main> --><p>y</p></main>");
+  assert.equal(out.html, "<p>x</p><!-- </main> --><p>y</p>");
+  assert.deepEqual([out.unwrapped, out.downgraded, out.declined], [1, 0, 0]);
+});
+
 test("a > inside an attribute value does not end the start tag early", () => {
   const out = stripNestedMain('<main title="a > b" id="p1"><p>x</p></main>');
   assert.equal(out.html, '<div title="a > b" id="p1"><p>x</p></div>');
@@ -302,8 +337,30 @@ test("the editor is told the shell exists too, since it retypes the whole body",
 // The Reader reads body content and never saw the shell, so a missing `<main>`, `<title>` or
 // document `lang` is a WCAG requirement it is structurally invited to report against a document
 // that has all three. Its own false claim would cost an editor round.
+//
+// The language half of that has to be stated as the shell's RULE and not as a fact about English,
+// which is what the first version of this paragraph got wrong: `READER_SYSTEM` is a static const,
+// the root language is `bodyLang(body) ?? "en"`, and telling a Reader that the document declares
+// English is false for every document whose pages agree on Korean — and in exactly that document,
+// an unlabelled English abstract IS a 3.1.2 Language-of-Parts failure that only the Reader can
+// report, since axe cannot see a missing `lang` on a part (#163). So the prompt must leave that
+// report available while removing the redundant `lang="en"` ask.
 test("the reader is told what it cannot see, so it does not report the shell as missing", () => {
-  assert.match(READER_SYSTEM, /What you are shown is the BODY CONTENT of the delivered document/);
-  assert.match(READER_SYSTEM, /a <main> that holds everything you can see/);
-  assert.match(READER_SYSTEM, /content in English needs no lang\s*\n?\s*attribute of its own/);
+  const flat = READER_SYSTEM.replace(/\s+/g, " ");
+  assert.match(flat, /What you are shown is the BODY CONTENT of the delivered document/);
+  assert.match(flat, /a <main> that holds everything you can see/);
+  assert.match(
+    flat,
+    /the shell declares the one language every top-level element of the body agrees on, and English only where they gave it nothing else to read/,
+    "the reader must be told how the root language is derived, not that it is English",
+  );
+  assert.match(flat, /content in the document's own language needs no lang attribute of its own/);
+  assert.match(
+    flat,
+    /A passage in a DIFFERENT language from the rest of the document is the opposite case and still needs one/,
+    "the reader must keep its grounds for a language-of-parts report",
+  );
+  // The claim that cost the first version of this paragraph a blocking review: it is not English
+  // that the document declares, it is whatever its pages agreed on.
+  assert.doesNotMatch(flat, /English is what the document declares/);
 });

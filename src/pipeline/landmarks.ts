@@ -44,11 +44,23 @@ const MAIN_TAG = /<main\b((?:[^>"']|"[^"]*"|'[^']*')*)>|<\/main\s*>/gi;
 // matches the word in prose too, and a false positive costs the scan below, which then finds
 // no tag to edit.
 const ANY_MAIN = /<\/?main\b/i;
-// `role` in a start tag's attribute text, in any of the three quoting styles, with the
-// leading whitespace captured so the attribute can be removed WITH its separator rather than
-// leaving `<div  id="x">`. Non-global: only the first `role` exists as far as a parser is
-// concerned, which is the same reading roles.ts and anchors.ts take of a repeated attribute.
-const ROLE_ATTR = /(\s+)role\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i;
+// Comments, so the scan can ignore what is inside them. A `<main>` in a comment is not an
+// element: axe cannot see it, so counting it as `declined` would put a `page_main_stripped`
+// line in the run log promising a violation the gate will never report, and editing inside one
+// (a commented `</main>` paired with a real start tag) is not an edit any parser would agree
+// with. This body carries comments by design — `@page-failed` marks a page extraction lost —
+// so it is a live shape and not a hypothetical one.
+const COMMENT = /<!--[\s\S]*?-->/g;
+// One attribute at the front of what is left of the attribute text: leading whitespace,
+// a name, and optionally a value in any of the three quoting styles. Anchored and stepped
+// through from the start of the tag rather than searched for, because a SEARCH for `role`
+// finds one inside another attribute's value and splices it out of that value —
+// `<main title="see role=main note">` would come back with a `title` reading "see note".
+// That is the same hazard `attrValue` in assembly.ts avoids by reading `lang` this way, and
+// the reason to reuse its shape here rather than invent a second dialect for the same job.
+// The whitespace is captured so the attribute can be removed WITH its separator instead of
+// leaving `<div  id="x">`.
+const ATTR_STEP = /^(\s*)([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]*)))?/;
 
 export interface MainStrip {
   html: string;
@@ -75,18 +87,33 @@ export interface MainStrip {
 // nothing marking it at all). The enabled axe rules report that shape instead, and the review
 // loop is what answers it.
 function attrsForDiv(attrs: string): string {
-  const m = ROLE_ATTR.exec(attrs);
-  if (!m) return attrs;
-  const [whole, gap, dq, sq, bare] = m;
-  const value = dq ?? sq ?? bare ?? "";
-  const tokens = value.split(/\s+/).filter((t) => t.length > 0);
-  const kept = tokens.filter((t) => t.toLowerCase() !== "main");
-  if (kept.length === tokens.length) return attrs;
-  const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : "";
-  const replacement = kept.length === 0 ? "" : `${gap}role=${quote}${kept.join(" ")}${quote}`;
-  // Replaced through a function so a `$` in a surviving token is a character and not a
-  // `$&`-style back-reference.
-  return attrs.replace(whole, () => replacement);
+  let pos = 0;
+  while (pos < attrs.length) {
+    const m = ATTR_STEP.exec(attrs.slice(pos));
+    // Nothing an attribute can begin with: step over one character and keep looking. It cannot
+    // land inside a value, because a value is consumed whole as part of its own attribute.
+    if (!m || m[0].length === 0) {
+      pos++;
+      continue;
+    }
+    const [whole, gap, name, dq, sq, bare] = m;
+    // The FIRST `role` is the only one a parser sees, so this stops at it either way: a second
+    // spelling is already dead, and a valueless `role` has no `main` token to drop.
+    if (name!.toLowerCase() === "role") {
+      const value = dq ?? sq ?? bare;
+      if (value === undefined) return attrs;
+      const tokens = value.split(/\s+/).filter((t) => t.length > 0);
+      const kept = tokens.filter((t) => t.toLowerCase() !== "main");
+      if (kept.length === tokens.length) return attrs;
+      const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : "";
+      const replacement = kept.length === 0 ? "" : `${gap}role=${quote}${kept.join(" ")}${quote}`;
+      // Spliced by offset rather than by `replace`, so a `$` in a surviving token is a character
+      // and not a `$&`-style back-reference.
+      return attrs.slice(0, pos) + replacement + attrs.slice(pos + whole!.length);
+    }
+    pos += whole!.length;
+  }
+  return attrs;
 }
 
 export function stripNestedMain(html: string): MainStrip {
@@ -102,8 +129,14 @@ export function stripNestedMain(html: string): MainStrip {
   let unwrapped = 0;
   let downgraded = 0;
   let declined = 0;
+  // Where the comments are, so a tag inside one can be passed over.
+  const comments: { at: number; end: number }[] = [];
+  COMMENT.lastIndex = 0;
+  for (let c = COMMENT.exec(html); c; c = COMMENT.exec(html)) comments.push({ at: c.index, end: c.index + c[0].length });
+  const commented = (at: number): boolean => comments.some((c) => at >= c.at && at < c.end);
   MAIN_TAG.lastIndex = 0;
   for (let m = MAIN_TAG.exec(html); m; m = MAIN_TAG.exec(html)) {
+    if (commented(m.index)) continue;
     const isStart = m[1] !== undefined;
     if (isStart) {
       open.push({ at: m.index, length: m[0].length, attrs: m[1]! });

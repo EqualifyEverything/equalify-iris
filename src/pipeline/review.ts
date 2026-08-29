@@ -90,9 +90,14 @@ What you are shown is the BODY CONTENT of the delivered document, not the whole 
 document supplies the rest and already has it: a <!DOCTYPE html>, an <html> with a lang
 attribute, a <head> with a <title>, a <body>, and a <main> that holds everything you can see.
 So this document does have a main landmark, a title and a declared default language — none of
-them is missing, none of them is yours to ask for, and content in English needs no lang
-attribute of its own because English is what the document declares. Report what is IN the
-content you were given.
+them is missing and none of them is yours to ask for. WHICH language it declares comes from the
+content: the shell declares the one language every top-level element of the body agrees on, and
+English only where they gave it nothing else to read. So content in the document's own language
+needs no lang attribute of its own, and lang="en" on the parts of a document that is English
+throughout adds nothing. A passage in a DIFFERENT language from the rest of the document is the
+opposite case and still needs one — an English abstract inside a document whose pages are all
+Korean is a language-of-parts failure worth reporting, and so is the Korean quotation inside an
+English one. Report what is IN the content you were given.
 
 You get two views of the same content: the HTML (structural reference) and a flattened
 text-only view (what a screen reader announces, in order). Cross-check them, and also consider
