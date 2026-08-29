@@ -384,23 +384,38 @@ test("the reader is told what it cannot see, so it does not report the shell as 
   // unlabelled Korean is the failure — the opposite of what a looser "the language they agree on"
   // reading would tell the Reader to do.
   //
-  // Unanimity alone is not the condition either, which is what the version before this one still
-  // had wrong: every element's value goes through `preferredTag`, so agreement is on the LANGUAGE
-  // and not on the string (`lang="ko"` next to `lang="kor"` derives `ko`), and a value that is not
-  // a usable tag derives nothing however unanimous it is. Both spellings named below are measured:
-  // a body whose top-level elements all say `lang="Korean"`, and one where they all say
-  // `lang="ko_KR"`, each come back `null` and ship `en`. Told only "unanimous", the Reader would
-  // read that document as declaring Korean and suppress the report on Korean prose that is in fact
-  // being announced in English.
+  // Unanimity alone is not the condition either, which is what two earlier versions had wrong:
+  // every element's value goes through `preferredTag`, so agreement is on the LANGUAGE and not on
+  // the string (`lang="ko"` next to `lang="kor"` derives `ko`), and a value that is not a usable
+  // tag for a real language derives nothing however unanimous it is. All four spellings named in
+  // the prompt are measured against this checkout — `lang="Korean"`, `lang="ko_KR"` and `lang="cn"`
+  // each come back `null` and ship `en`. Told only "unanimous", the Reader would read such a
+  // document as declaring Korean and suppress the report on Korean prose that is in fact being
+  // announced in English.
+  //
+  // And the quantifier is over elements WITH TEXT OF THEIR OWN, not all of them, because
+  // `NO_TEXT_OF_ITS_OWN` (assembly.ts) skips top-level `hr`/`br`/`wbr` — the prescribed
+  // `<hr role="doc-pagebreak">` sits between every pair of pages, so `<section lang="ko">`, that
+  // marker, `<section lang="ko">` derives `ko`. A Reader reading "EVERY element" literally calls
+  // that body half-labelled and infers an English root, which suppresses the language-of-parts
+  // report on the commonest document shape in the system. "Text of its own" and not "void
+  // element": an unlabelled top-level `<img alt="a chart">` IS asked for a language and refuses
+  // the derivation (measured `null`), which is why the prompt names the page-break separators
+  // rather than a class of tags.
   assert.match(
     flat,
-    /the shell declares a language when EVERY top-level element of this body names that same language with a real language tag — ko or kor, never Korean or ko_KR — and English in every other case, including where only some of them carry one/,
-    "the reader must be given bodyLang's whole condition: unanimous, and a usable tag",
+    /the shell declares a language when EVERY top-level element of this body that has text of its own names that same language with a real tag for a real language — ko or kor, never Korean, ko_KR or cn — and English in every other case, including where only some of them carry one/,
+    "the reader must be given bodyLang's whole condition: unanimous among elements that have text, and a usable tag",
   );
   assert.match(
     flat,
-    /including where they agree on something that is not a tag/,
+    /including where they agree on something that is not a language tag/,
     "a unanimous but malformed lang derives nothing, and the reader is told so",
+  );
+  assert.match(
+    flat,
+    /The page-break separators standing between pages hold no text of their own, so they have no language and are not asked for one/,
+    "the marker between every pair of pages must not read as a top-level element that failed to answer",
   );
   assert.match(flat, /content in the language the document ends up declaring needs no lang attribute of its own/);
   assert.match(

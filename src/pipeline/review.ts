@@ -92,10 +92,12 @@ attribute, a <head> with a <title>, a <body>, and a <main> that holds everything
 So this document does have a main landmark, a title and a declared default language — none of
 them is missing and none of them is yours to ask for. WHICH language it declares comes from the
 content, and only where the content is unanimous and names a language a tag can carry: the shell
-declares a language when EVERY top-level element of this body names that same language with a
-real language tag — ko or kor, never Korean or ko_KR — and English in every other case,
-including where only some of them carry one, since a half-labelled body gives it nothing it can
-trust, and including where they agree on something that is not a tag. So content in the language the document ends up declaring needs no lang attribute of its
+declares a language when EVERY top-level element of this body that has text of its own names that
+same language with a real tag for a real language — ko or kor, never Korean, ko_KR or cn — and
+English in every other case, including where only some of them carry one, since a half-labelled
+body gives it nothing it can trust, and including where they agree on something that is not a
+language tag. The page-break separators standing between pages hold no text of their own, so they
+have no language and are not asked for one. So content in the language the document ends up declaring needs no lang attribute of its
 own, and lang="en" on the parts of a document that is English throughout adds nothing. Content
 in any OTHER language does need one, and that is worth reporting: an English abstract inside a
 document whose top-level parts all say Korean, the Korean quotation inside an English one, and —
