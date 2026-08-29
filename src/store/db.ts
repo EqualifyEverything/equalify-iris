@@ -259,6 +259,28 @@ export const SIGNAL_STRUCTURAL_DEFECT = "iris:structural-defect";
 // what `documents_linted` is derived from, i.e. what keeps those rates' denominator
 // meaning "documents this was actually measured on" (#164).
 export const SIGNAL_LINT_ERROR = "iris:lint-error";
+// WHICH of the three steps failed, recorded beside the signal above rather than instead of
+// it: `lint_error_rate` keeps its meaning and its threshold, and this says whether the next
+// occurrence is a cause already fixed or a new one.
+//
+// It is a separate signal because the run log is the only other place the step is written
+// down, and a run log cannot be read to answer a question about the deployment: it belongs
+// to one session, and the sessions here are user uploads (at the reference deployment,
+// student records). #263 was filed on 6 documents with no verdict, and answering "is this
+// the digit-leading attribute name that #257 fixed, or something else" meant reading six
+// people's documents — so it could not be answered at all, which is how a fixed cause and a
+// live one come to look identical in a weekly report.
+//
+// The vocabulary is closed and comes from `LintResult.errorWhere`: three fixed strings, so
+// nothing here can carry text out of a document, which is the constraint on everything this
+// table feeds (see QualityStats). Derived rather than written out as three constants for the
+// reason the block above gives for using constants at all — the recorder and the aggregate
+// query must spell them identically, and one function is the strongest way to say so.
+export const LINT_ERROR_WHERE = ["parse", "inject", "run"] as const;
+export type LintErrorWhere = (typeof LINT_ERROR_WHERE)[number];
+export function lintErrorWhereSignal(where: LintErrorWhere): string {
+  return `${SIGNAL_LINT_ERROR}-${where}`;
+}
 // A correction round's response hit the model's output token ceiling (issue #143).
 // Recorded because the cost of it is invisible in every other rate here: the document
 // ships, its issues go into `iris:unresolved` exactly like issues the editor tried and
@@ -372,6 +394,23 @@ export interface QualityStats {
   structural_defect_rate: number;
   // Share of documents where axe-core could not run.
   lint_error_rate: number;
+  // Which step failed on those documents, one entry per step in `LINT_ERROR_WHERE` order and
+  // ALWAYS all three of them, including the zeroes. A step is absent from this list only on a
+  // deployment too old to record it, so a caller can tell "measured, and none of these" from
+  // "not measured" — the same distinction `documents_linted` exists to preserve one field up,
+  // and the one #164 was about.
+  //
+  // `parse` is jsdom refusing the assembled HTML, `inject` is axe's own source failing to
+  // evaluate (a dependency problem, which cannot depend on the document), `run` is the rule
+  // pass throwing while it walks the document. Those three answers point at three different
+  // fixes, which is why the split is worth a field: the one occurrence anybody has diagnosed
+  // was a `run` failure from an attribute name the selector engine could not compile (#144,
+  // #164, fixed in #257).
+  //
+  // The counts can sum to LESS than `lint_error_rate × documents` and the shortfall is not an
+  // error: a document linted before this was recorded contributes to the rate and to no step.
+  // Reading the shortfall as a fourth kind of failure is the one wrong way to use this field.
+  lint_error_where: { where: LintErrorWhere; documents: number }[];
   // How many of `documents` the linter actually examined — the rest are the
   // `lint_error_rate` ones, on which there is no verdict at all rather than a clean one
   // (#164). This is the denominator `rules[].share` divides by, and it is reported
@@ -1171,6 +1210,12 @@ export class Store {
       table_no_body_rate: rate(SIGNAL_TABLE_NO_BODY),
       structural_defect_rate: rate(SIGNAL_STRUCTURAL_DEFECT),
       lint_error_rate: rate(SIGNAL_LINT_ERROR),
+      // Built from the closed vocabulary rather than from the rows, so a step that did not
+      // occur is a recorded 0 and not a missing entry (see QualityStats.lint_error_where).
+      lint_error_where: LINT_ERROR_WHERE.map((where) => ({
+        where,
+        documents: ours.get(lintErrorWhereSignal(where)) ?? 0,
+      })),
       documents_linted: documentsLinted,
       editor_truncated_rate: rate(SIGNAL_EDITOR_TRUNCATED),
       editor_truncated_lost_rate: rate(SIGNAL_EDITOR_TRUNCATED_LOST),

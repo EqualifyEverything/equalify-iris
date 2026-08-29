@@ -47,6 +47,9 @@ function bearer(header: string | undefined): string | null {
  *   "links_dropped_rate": 0.02, "links_unresolved_rate": 0.11,
  *   "markup_unbalanced_rate": 0.01, "table_no_body_rate": 0.005,
  *   "structural_defect_rate": 0.09, "lint_error_rate": 0.01,
+ *   "lint_error_where": [ { "where": "parse", "documents": 0 },
+ *                         { "where": "inject", "documents": 0 },
+ *                         { "where": "run", "documents": 2 } ],
  *   "documents_linted": 210,
  *   "editor_truncated_rate": 0.01, "editor_truncated_lost_rate": 0.002,
  *   "rules": [ { "id": "heading-order", "impact": "moderate", "documents": 81,
@@ -61,6 +64,13 @@ function bearer(header: string | undefined): string | null {
  * about one person's document, which is why `Store.qualityStats` exposes only their
  * count. Adding a field here that quotes a document would leak it to a public issue
  * through a path no reviewer of the workflow would think to check.
+ *
+ * `lint_error_where` is the shape a new field should follow: it answers "why did the
+ * gate fail" out of a CLOSED vocabulary of three strings that the code names
+ * (`LINT_ERROR_WHERE`), so no value of it can be text from a document. The version of
+ * that field which would have been easier to write — the error message, or its stack —
+ * is exactly the one that could not ship, because a jsdom parse error quotes the markup
+ * it choked on.
  *
  * Guarded by `server.quality_token` rather than by the GitHub user auth every other
  * endpoint uses — see that field for why a per-user credential is the wrong shape for

@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  LINT_ERROR_WHERE,
+  lintErrorWhereSignal,
   MAX_QUALITY_WINDOW_DAYS,
   PUBLIC_QUALITY_MIN_DOCUMENTS,
   SIGNAL_EDITOR_TRUNCATED,
@@ -238,6 +240,112 @@ test("a window where nothing could be linted reports no rule shares rather than 
   });
 });
 
+// #263: the rate said 6 documents could not be linted and nothing said which of the
+// three steps failed, so answering it meant reading session logs that sit beside the
+// documents themselves. These four tests are what make the next occurrence answer it
+// from the endpoint instead.
+test("which lint step failed is reported per step", () => {
+  withStore((store) => {
+    delivered(store, "bad-markup", [
+      { code: SIGNAL_LINT_ERROR, count: 1 },
+      { code: lintErrorWhereSignal("parse"), count: 1 },
+    ]);
+    delivered(store, "bad-axe-1", [
+      { code: SIGNAL_LINT_ERROR, count: 1 },
+      { code: lintErrorWhereSignal("run"), count: 1 },
+    ]);
+    delivered(store, "bad-axe-2", [
+      { code: SIGNAL_LINT_ERROR, count: 1 },
+      { code: lintErrorWhereSignal("run"), count: 1 },
+    ]);
+    delivered(store, "fine");
+
+    const q = store.qualityStats();
+    assert.deepEqual(q.lint_error_where, [
+      { where: "parse", documents: 1 },
+      { where: "inject", documents: 0 },
+      { where: "run", documents: 2 },
+    ]);
+    // The breakdown is a partition of the same documents the rate counts, not an
+    // addition to them: three of four failed, and the steps account for all three.
+    assert.equal(q.lint_error_rate, 3 / 4);
+  });
+});
+
+test("a step nothing failed at reports zero rather than going missing", () => {
+  withStore((store) => {
+    // The distinction the workflow's report depends on. An absent row would let
+    // "`inject` has never failed" and "`inject` is not measured on this deployment"
+    // render identically, and the second is the one that means the report is lying.
+    delivered(store, "fine");
+    const q = store.qualityStats();
+    assert.deepEqual(
+      q.lint_error_where.map((w) => w.where),
+      [...LINT_ERROR_WHERE],
+      "all three steps are always present, in the order the code names them",
+    );
+    for (const w of q.lint_error_where) assert.equal(w.documents, 0);
+  });
+});
+
+test("a step is counted once per document, however many times it failed", () => {
+  withStore((store) => {
+    // Same per-document rule as every rate here, and it comes from the signals table's
+    // primary key rather than from care at the call site: a re-run of the same document
+    // replaces its row. A step counted per occurrence would report more failures than
+    // there were documents and could exceed the rate it is breaking down.
+    delivered(store, "retried", [
+      { code: SIGNAL_LINT_ERROR, count: 1 },
+      { code: lintErrorWhereSignal("run"), count: 1 },
+    ]);
+    delivered(store, "retried", [
+      { code: SIGNAL_LINT_ERROR, count: 1 },
+      { code: lintErrorWhereSignal("run"), count: 1 },
+    ]);
+    const q = store.qualityStats();
+    assert.deepEqual(q.lint_error_where, [
+      { where: "parse", documents: 0 },
+      { where: "inject", documents: 0 },
+      { where: "run", documents: 1 },
+    ]);
+  });
+});
+
+test("a failure recorded before the breakdown existed is a shortfall, not a fourth step", () => {
+  withStore((store) => {
+    // The state every deployment is in the week this ships: documents already in the
+    // window failed to lint and have no step attributed, because nothing was writing
+    // one down when they ran. The steps therefore sum to LESS than the rate, and the
+    // one wrong way to read that gap is as a step the vocabulary is missing.
+    delivered(store, "old-failure", [{ code: SIGNAL_LINT_ERROR, count: 1 }]);
+    delivered(store, "new-failure", [
+      { code: SIGNAL_LINT_ERROR, count: 1 },
+      { code: lintErrorWhereSignal("run"), count: 1 },
+    ]);
+    const q = store.qualityStats();
+    assert.equal(q.lint_error_rate, 2 / 2, "both documents failed the gate");
+    const attributed = q.lint_error_where.reduce((n, w) => n + w.documents, 0);
+    assert.equal(attributed, 1, "and only the one recorded since names a step");
+  });
+});
+
+test("the step breakdown is not mistaken for an axe rule", () => {
+  withStore((store) => {
+    // `iris:`-prefixed codes share one table with axe's rule ids, and the split is by
+    // prefix. A sibling signal added later must land on our side of it, or the public
+    // report grows a rule named after our own plumbing.
+    delivered(store, "broken", [
+      { code: SIGNAL_LINT_ERROR, count: 1 },
+      { code: lintErrorWhereSignal("parse"), count: 1 },
+    ]);
+    const q = store.qualityStats();
+    assert.deepEqual(q.rules, []);
+    // And it does not leave the linted denominator, which subtracts the exact
+    // `iris:lint-error` key rather than anything that starts with it.
+    assert.equal(q.documents_linted, 0);
+  });
+});
+
 test("dropped links are counted per document and per link", () => {
   withStore((store) => {
     delivered(store, "a", [{ code: SIGNAL_LINKS_DROPPED, count: 3 }]);
@@ -374,6 +482,7 @@ test("nothing per-session, per-user or per-document is exposed", () => {
         "links_dropped_rate",
         "links_unresolved_rate",
         "lint_error_rate",
+        "lint_error_where",
         "markup_unbalanced_rate",
         "mean_rounds",
         "review_unread_rate",
@@ -391,6 +500,17 @@ test("nothing per-session, per-user or per-document is exposed", () => {
     assert.deepEqual(store.qualityStats().rules.map((r) => Object.keys(r).sort()), [
       ["documents", "id", "impact", "nodes", "share"],
     ]);
+    // And for the step breakdown, the first nested field here: `where` is one of three
+    // strings the code names, so pinning the keys is what stops a later "and the
+    // message, so we can tell which markup broke it" from being a one-line change.
+    assert.deepEqual(
+      store.qualityStats().lint_error_where.map((w) => Object.keys(w).sort()),
+      [
+        ["documents", "where"],
+        ["documents", "where"],
+        ["documents", "where"],
+      ],
+    );
   });
 });
 
