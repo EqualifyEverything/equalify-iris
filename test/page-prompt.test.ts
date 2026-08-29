@@ -909,8 +909,14 @@ test("the page agent's multilingual rule keeps parity, lang, and the refusal to 
     // unlabelled itself, it drops the whole document back to lang="en" and takes its Korean
     // siblings with it. This is the other half of #163, and the incentive the sentence below
     // has to carry, because a page cannot see what the other pages said.
+    // #252 narrowed the sentence to name the condition it always meant. Four of six benched
+    // models read the unqualified version as covering English pages too, put lang="en" on
+    // everything, and — worse, since the verify pass is handed this file as the contract —
+    // quoted it back as grounds for calling an English page inaccessible for not having it.
+    // The clause that follows the colon is unchanged, because it is the half #163 depends on;
+    // the guard against the over-reading is asserted in test/page-main-landmark.test.ts.
     ["a page wholly in another language carries lang on what it emits, change or no change",
-      /A page wholly in one language changes language nowhere, and is the case that needs the attribute most: put lang on every top-level element you emit for it/],
+      /A page wholly in one language OTHER THAN ENGLISH changes language nowhere, and is the case that needs the attribute most: put lang on every top-level element you emit for it/],
     ["and the reason: the shell's language is derived from the pages, and only if they all say",
       /The document you are writing into takes its language from the pages inside it, and can only do that where they all say what they are: one fragment returned with no lang of its own leaves the whole document declared English, so a Korean page is delivered as English text, pronounced as English/],
     // The declined ask, with all three reasons, since any one of them alone reads as a

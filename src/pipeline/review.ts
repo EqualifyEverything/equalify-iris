@@ -6,6 +6,7 @@ import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseErro
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
 import { stripDeprecatedRoles } from "./roles.ts";
+import { stripNestedMain } from "./landmarks.ts";
 import { destroyedBody, EDITOR_SHRINK_FLOOR, structureCounts, visibleText } from "./correction.ts";
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { joinSections, splitSections } from "./sections.ts";
@@ -84,6 +85,24 @@ export interface ReviewResult {
 export const READER_SYSTEM = `You are the Reader Agent. You review accessible HTML for reading-order problems, semantic
 inconsistencies, duplicated/redundant content, and missed WCAG 2.2 AA requirements. You do NOT
 see source images — you read the document the way a screen-reader user would.
+
+What you are shown is the BODY CONTENT of the delivered document, not the whole of it. The
+document supplies the rest and already has it: a <!DOCTYPE html>, an <html> with a lang
+attribute, a <head> with a <title>, a <body>, and a <main> that holds everything you can see.
+So this document does have a main landmark, a title and a declared default language — none of
+them is missing and none of them is yours to ask for. WHICH language it declares comes from the
+content, and only where the content is unanimous and names a language a tag can carry: the shell
+declares a language when EVERY top-level element of this body that has text of its own names that
+same language with a real tag for a real language — ko or kor, never Korean, ko_KR or cn — and
+English in every other case, including where only some of them carry one, since a half-labelled
+body gives it nothing it can trust, and including where they agree on something that is not a
+language tag. The page-break separators standing between pages hold no text of their own, so they
+have no language and are not asked for one. So content in the language the document ends up declaring needs no lang attribute of its
+own, and lang="en" on the parts of a document that is English throughout adds nothing. Content
+in any OTHER language does need one, and that is worth reporting: an English abstract inside a
+document whose top-level parts all say Korean, the Korean quotation inside an English one, and —
+because a half-labelled document falls back to English — an unlabelled Korean passage standing
+next to a labelled one. Report what is IN the content you were given.
 
 You get two views of the same content: the HTML (structural reference) and a flattened
 text-only view (what a screen reader announces, in order). Cross-check them, and also consider
@@ -227,7 +246,9 @@ You may do whatever it takes to fix the issues: remove duplicated or redundant c
 representation), reorder blocks, fix heading hierarchy, correct labels and table headers, etc.
 Preserve all genuine content and transcribed text; do not invent content. Content on pages whose
 image is NOT attached must be carried over unchanged unless an issue names it. Output ONLY the
-corrected body (no <html>/<head>/<body> wrapper).
+corrected body (no <html>/<head>/<body>/<main> wrapper — the document this body is placed into
+supplies all four, so a <main> of your own would be a second one and would take away the landmark a
+screen-reader user jumps to in order to skip the furniture).
 
 Two headings with the same words at the same level are yours to resolve — whether they sit next to
 each other or with one page's worth of content between them, which is what a title reprinted where
@@ -1677,6 +1698,25 @@ export async function runReview(
         iteration: iterations,
         roles: [...new Set(roles.stripped)].sort(),
         nodes: roles.nodes,
+      });
+    }
+    // A `<main>` the editor introduced, dropped here for the same reason and at the same point
+    // (landmarks.ts, issue #251). This end is not redundant with assembly's: EDITOR_SYSTEM asks
+    // for "the FULL body" and never mentions the shell, so a round that retypes the whole
+    // document is a fresh chance to write one — and on the section path each call is handed a
+    // piece of the document, which is exactly the prompt under which a model reaches for a
+    // wrapper to stand for what it was given. Ahead of `changed` and the re-lint, so a round
+    // whose only effect was a `<main>` this removes is not credited as a change.
+    const mains = stripNestedMain(body);
+    if (mains.unwrapped > 0 || mains.downgraded > 0 || mains.dropped > 0 || mains.declined > 0) {
+      body = mains.html;
+      ctx.log.event("page_main_stripped", {
+        stage: "correction_round",
+        iteration: iterations,
+        unwrapped: mains.unwrapped,
+        downgraded: mains.downgraded,
+        dropped: mains.dropped,
+        declined: mains.declined,
       });
     }
     // `sections` on this line is how a run log tells a round that was answered whole from one

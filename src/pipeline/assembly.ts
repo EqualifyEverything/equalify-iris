@@ -2,6 +2,7 @@ import { runAxe, lintErrorFields, isKnownLanguage, type LintResult } from "./lin
 import { cutPoints } from "./sections.ts";
 import { namespaceAnchors, type AnchorReport } from "./anchors.ts";
 import { stripDeprecatedRoles, type RoleStrip } from "./roles.ts";
+import { stripNestedMain, type MainStrip } from "./landmarks.ts";
 import { joinContinuedTables } from "./tables.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PipelineContext } from "./context.ts";
@@ -36,15 +37,22 @@ export function assembleBody(fragments: Fragment[]): string {
 // rewrite with no judgement in it that no model call should be spent on. It is done on the
 // joined body rather than per page because there is nothing per-page about it, and a body
 // with no such role comes back the same string.
+//
+// A `<main>` a page emitted for itself goes the same way (landmarks.ts, issue #251), and it has
+// to happen after the join for a reason of its own: `wrapDocument` below is what supplies the
+// document's `main`, so whether a fragment's own one is a duplicate is a fact about the
+// assembled document rather than about the page that wrote it.
 export function assembleBodyWithReport(fragments: Fragment[]): {
   body: string;
   anchors: AnchorReport;
   deprecatedRoles: RoleStrip;
+  mains: MainStrip;
 } {
   const ordered = [...fragments].sort((a, b) => a.order - b.order);
   const { pages, report } = namespaceAnchors(ordered.map((f) => ({ order: f.order, innerHtml: f.innerHtml.trim() })));
   const joined = stripDeprecatedRoles(pages.filter((h) => h.length > 0).join("\n\n"));
-  return { body: joined.html, anchors: report, deprecatedRoles: joined };
+  const mains = stripNestedMain(joined.html);
+  return { body: mains.html, anchors: report, deprecatedRoles: joined, mains };
 }
 
 // The language the shell declares, read off the body instead of assumed. `lang="en"` on a document
@@ -319,7 +327,7 @@ export async function runAssembly(
   fragments: Fragment[],
   opts: { unresolved?: string[] } = {},
 ): Promise<AssemblyResult> {
-  const { body: joinedPages, anchors, deprecatedRoles } = assembleBodyWithReport(fragments);
+  const { body: joinedPages, anchors, deprecatedRoles, mains } = assembleBodyWithReport(fragments);
   // A table the source printed across a page break arrives here as two tables, and this is the
   // first moment both halves exist in one string — each page was extracted alone, so the agent that
   // wrote the second half had nothing to append to (#239). The join belongs on THIS side of the
@@ -389,6 +397,21 @@ export async function runAssembly(
       stage: "assembly",
       roles: [...new Set(deprecatedRoles.stripped)].sort(),
       nodes: deprecatedRoles.nodes,
+    });
+  }
+  // Same convention again: logged only when a page had emitted one, so an ordinary run adds no
+  // line, and worth a line when it did because the delivered document is now clean and the gate
+  // that would have named it finds nothing. `declined` above zero is the case to read: an
+  // unclosed `<main>` was left in place, so the lint's `landmark-no-duplicate-main` should be
+  // reporting the document and this line says why it is. `dropped` is the opposite reading — a
+  // stray `</main>` went, and no rule would have reported that one at all.
+  if (mains.unwrapped > 0 || mains.downgraded > 0 || mains.dropped > 0 || mains.declined > 0) {
+    ctx.log.event("page_main_stripped", {
+      stage: "assembly",
+      unwrapped: mains.unwrapped,
+      downgraded: mains.downgraded,
+      dropped: mains.dropped,
+      declined: mains.declined,
     });
   }
   if (anchors.collisions.length > 0 || anchors.ambiguous.length > 0) {

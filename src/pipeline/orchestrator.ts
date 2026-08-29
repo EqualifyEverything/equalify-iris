@@ -21,6 +21,7 @@ import type { InputImage, PipelineContext } from "./context.ts";
 import { runExtraction, reExtractPages } from "./extraction.ts";
 import { runAssembly, assembleBody, wrapDocument } from "./assembly.ts";
 import { stripDeprecatedRoles } from "./roles.ts";
+import { stripNestedMain } from "./landmarks.ts";
 import { runReview, type ReviewResult } from "./review.ts";
 import { runAxe, lintErrorFields } from "./lint.ts";
 import { learnFromFeedback, proposeAgentUpdatesFromFeedback, scopeFeedback } from "./feedback.ts";
@@ -182,6 +183,22 @@ export async function runPipeline(args: {
           stage: "feedback_prior_body",
           roles: [...new Set(priorRoles.stripped)].sort(),
           nodes: priorRoles.nodes,
+        });
+      }
+      // And a `<main>` a page emitted for itself, on the same argument (landmarks.ts, #251):
+      // `saved.body` was assembled by whatever build wrote it, so a body stored before this
+      // existed still carries one, and this path never reaches the assembly that would now
+      // remove it. Ahead of the re-lint and the diff baseline for the same two reasons as
+      // above.
+      const priorMains = stripNestedMain(beforeBody);
+      if (priorMains.unwrapped > 0 || priorMains.downgraded > 0 || priorMains.dropped > 0 || priorMains.declined > 0) {
+        beforeBody = priorMains.html;
+        log.event("page_main_stripped", {
+          stage: "feedback_prior_body",
+          unwrapped: priorMains.unwrapped,
+          downgraded: priorMains.downgraded,
+          dropped: priorMains.dropped,
+          declined: priorMains.declined,
         });
       }
 
