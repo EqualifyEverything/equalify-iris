@@ -209,10 +209,12 @@ test("what gets removed is the escape shape, and that is checked against axe and
     // be retired — read a failure that way before widening anything.
     //
     // The selector axe would have built, and not the bare `[name]` existence form: axe splices an
-    // escaped attribute NAME into `[name="value"]` and nowhere else (three call sites, all of them
-    // `escapeSelector(at.name) + '="' + ...`), and nwsapi treats the two forms differently for a
-    // name ending in a backslash — `[c:\\]` throws, `[c:\\=""]` compiles. Probing the wrong form
-    // would make this test demand the removal of names that lint perfectly well.
+    // escaped attribute NAME into an attribute selector WITH a value and nowhere else — three call
+    // sites, two of them `escapeSelector(at.name) + '="'` and one the ends-with form `+ '$="'`, and
+    // every operator behaves the same on both shapes at issue here. nwsapi treats that against the
+    // existence form differently for a name ending in a backslash: `[c:\\]` throws, `[c:\\=""]`
+    // compiles. Probing the wrong form would make this test demand the removal of names that lint
+    // perfectly well.
     let threw = false;
     try {
       doc.querySelectorAll(`[${escapeAttributeName(name)}=""]`);
