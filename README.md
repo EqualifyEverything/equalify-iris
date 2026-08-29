@@ -120,7 +120,11 @@ from the environment at startup; changes require a restart.
   to the model asks for in the same process, with a warning (once per model) naming
   `max_tokens` as the setting to fix. The cost of the swap is therefore one rejected request
   per call already in flight when the first is refused, and none after that; a request Bedrock
-  never read is not billed.
+  never read is not billed. Because the pages then arrive, the wrong setting has no other
+  consequence anyone downstream can see — so every clamped call also carries
+  `output_ceiling_clamped` on its `model_call` line, with the ceiling asked for and the one
+  granted (§7 of `docs/API.md`). The warning is once per process, the log line is once per
+  call: an aggregate over run logs is the only place a `max_tokens` nobody chose shows up.
   Both adapters **stream** their responses, to tell a stalled call apart from a slow one. A
   single non-streaming request cannot: "no answer yet" describes a dead socket and a large
   document being correctly rewritten equally well, so a total-duration cap kills both — and the

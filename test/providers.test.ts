@@ -995,6 +995,143 @@ test("the field names the adapter emits are the ones diagnostics reads", async (
   assert.equal(d.by_agent.page.cache_read_input_tokens, 1000);
 });
 
+// --- the output-ceiling clamp reaching the run log (#254) --------------------------------
+//
+// The adapter's side of this is test/bedrock-output-ceiling.test.ts, which stops at the
+// `onNote` callback. What is pinned here is the other half of the seam: the router turning
+// those notes into flat fields on `model_call`. Nothing else crosses it — a dropped spread
+// would leave a wrong `providers.bedrock.max_tokens` exactly as invisible as it was before
+// the feature, with both files' unit tests green.
+const CLAMPED_NOVA = "amazon.nova-pro-v1:0";
+const NOVA_CEILING_REFUSAL =
+  "The maximum tokens you requested exceeds the model limit of 10000. " +
+  "Try again with a maximum tokens value that is lower than 10000.";
+
+// A router over one Bedrock block, with the adapter it will use already built and its SDK
+// client scripted by the ceiling each attempt asks for. Scripted that way rather than by
+// attempt number because the point of these tests is which request went out at which
+// ceiling. Returns the `model_call*` events, flat, as RunLog would write them.
+function clampingRouter(
+  block: Record<string, unknown>,
+  refuse: (asked: number) => string | null,
+): { events: { type: string; data: Record<string, unknown> }[]; run: () => Promise<unknown> } {
+  const cfg = {
+    providers: { default: "bedrock", bedrock: block },
+  } as unknown as IrisConfig;
+  const events: { type: string; data: Record<string, unknown> }[] = [];
+  const router = new ProviderRouter(cfg, (type, data) => events.push({ type, data }));
+  const bedrock = (router as unknown as { build(n: string): BedrockProvider }).build("bedrock");
+  (bedrock as unknown as { client: unknown }).client = {
+    send: async (cmd: { input: { inferenceConfig: { maxTokens: number } } }) => {
+      const message = refuse(cmd.input.inferenceConfig.maxTokens);
+      if (message) {
+        const e = new Error(message);
+        e.name = "ValidationException";
+        throw e;
+      }
+      return {
+        stream: (async function* () {
+          yield { contentBlockDelta: { delta: { text: "<p>page</p>" }, contentBlockIndex: 0 } };
+          yield { messageStop: { stopReason: "end_turn" } };
+        })(),
+      };
+    },
+  };
+  return {
+    events,
+    run: () => router.complete("page", "vision", [{ role: "user", content: "hi" }]),
+  };
+}
+
+// The adapter says its paragraph on stderr and these tests are not about that.
+async function quietly<T>(body: () => Promise<T>): Promise<T> {
+  const original = console.warn;
+  console.warn = () => {};
+  try {
+    return await body();
+  } finally {
+    console.warn = original;
+  }
+}
+
+const modelCalls = (events: { type: string; data: Record<string, unknown> }[]) =>
+  events.filter((e) => e.type === "model_call").map((e) => e.data);
+
+test("a clamped call names both ceilings on its model_call line, and every later page does too", async () => {
+  const { events, run } = clampingRouter(
+    { default_model: CLAMPED_NOVA, api: "converse" },
+    (asked) => (asked > 10_000 ? NOVA_CEILING_REFUSAL : null),
+  );
+  await quietly(async () => {
+    for (const _ of [1, 2, 3]) await run();
+  });
+  const calls = modelCalls(events);
+  assert.equal(calls.length, 3);
+  for (const call of calls) {
+    assert.equal(call.ok, true);
+    // The pair an operator acts on: `max_tokens` says 32000, this model grants 10000.
+    assert.equal(call.output_ceiling_clamped, true);
+    assert.equal(call.output_ceiling_asked, 32_000);
+    assert.equal(call.output_ceiling_stated, 10_000);
+    // Flat, like usage: a nested object here would not be summable off the line, and
+    // diagnostics reads these by name.
+    assert.equal(call.model, CLAMPED_NOVA);
+  }
+  // Only the first call paid for the lesson, and `duration_ms` on that one line covers two
+  // requests. That is the whole of what the extra field says, and it is why the fields are not
+  // read as a count of rejected round-trips.
+  assert.equal(calls[0].output_ceiling_refused, true);
+  assert.equal("output_ceiling_refused" in calls[1], false);
+  assert.equal("output_ceiling_refused" in calls[2], false);
+  // The start marker is emitted before the call and cannot know any of this.
+  const started = events.filter((e) => e.type === "model_call_start");
+  assert.equal(started.length, 3);
+  for (const s of started) assert.equal("output_ceiling_clamped" in s.data, false);
+});
+
+test("a call refused twice logs the ceiling it started at and the one it ended at", async () => {
+  // Two notes on one `complete`, and the router keeps the widest span across them. Keeping only
+  // the latest would log `asked: 10000` — a number this deployment never configured — and the
+  // line would stop saying what `max_tokens` is wrong against.
+  const { events, run } = clampingRouter(
+    { default_model: CLAMPED_NOVA, api: "converse" },
+    (asked) =>
+      asked > 10_000
+        ? NOVA_CEILING_REFUSAL
+        : "The maximum tokens you requested exceeds the model limit of 4096",
+  );
+  await quietly(async () => {
+    await assert.rejects(run, /providers\.bedrock\.max_tokens is the setting at fault/);
+  });
+  const calls = modelCalls(events);
+  assert.equal(calls.length, 1, "one complete is one model_call, however many requests it made");
+  // A lost page is the one most worth knowing ran into a config ceiling, so the fields ride the
+  // throwing path too — same reason usage does.
+  assert.equal(calls[0].ok, false);
+  assert.match(String(calls[0].error), /setting at fault/);
+  assert.equal(calls[0].output_ceiling_clamped, true);
+  assert.equal(calls[0].output_ceiling_asked, 32_000);
+  assert.equal(calls[0].output_ceiling_stated, 4_096);
+  assert.equal(calls[0].output_ceiling_refused, true);
+});
+
+test("a deployment whose model accepts its ceiling logs none of these fields", async () => {
+  // What makes the fields worth grepping for: present means a ceiling was lowered. The
+  // reference deployment runs Sonnet 4.6, whose Bedrock ceiling is 128000, so every line in
+  // every run log today must be unchanged by this feature.
+  const { events, run } = clampingRouter(
+    { default_model: "us.anthropic.claude-sonnet-4-6", api: "converse" },
+    () => null,
+  );
+  await run();
+  const [call] = modelCalls(events);
+  assert.equal(call.ok, true);
+  assert.deepEqual(
+    Object.keys(call).filter((k) => k.startsWith("output_ceiling")),
+    [],
+  );
+});
+
 test("normalizeUsage subtracts cache reads and leaves cache writes alone", () => {
   // cached_tokens is specified as a subset of prompt_tokens, so it must come out.
   // Whether cache_write_tokens is also inside it is not documented — subtracting a

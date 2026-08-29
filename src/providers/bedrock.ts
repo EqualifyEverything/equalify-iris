@@ -565,6 +565,22 @@ export class BedrockProvider implements ModelProvider {
       .map((m) => m.content)
       .join("\n\n");
     const asked = this.ceilingFor(req.model);
+    // A call running below the ceiling its deployment configured says so whether or not IT was
+    // the call that found that out (#254). The alternative — reporting only the refusal — puts
+    // the fact on exactly one `model_call` per model per process, because both `ceilings` and
+    // `warnedCeilings` outlive the session: a server booted a month ago would show one clamped
+    // call in its first run log and nothing in the thirty since, which is the "no trace anyone
+    // aggregates" this is meant to fix rather than a fix for it. `refused` is what separates the
+    // cost from the condition — see the notes below.
+    if (asked < this.maxTokens) {
+      req.onNote?.({
+        kind: "output_ceiling_clamped",
+        model: req.model,
+        asked: this.maxTokens,
+        stated: asked,
+        refused: false,
+      });
+    }
     const first: Attempt = { maxTokens: asked, spent: false };
     try {
       return await this.send(req, system, first);
@@ -578,8 +594,23 @@ export class BedrockProvider implements ModelProvider {
       // a number, or it stated one that is not below what was asked, which is a rejection
       // this adapter does not understand well enough to answer. Both still get to say which
       // knob is wrong, which is the half of #249 that matters most on call.
+      //
+      // No note for these two: nothing was clamped and nothing was re-sent, so there is no
+      // second request to make visible, and the `model_call` line already carries `ok: false`
+      // with this error's message — which names `providers.bedrock.max_tokens` outright.
       if (stated === null || stated >= asked) throw outputCeilingRefused(req.model, asked, e);
       this.ceilings.set(req.model, stated);
+      // The run log's own record of the clamp, and the one difference from the warning below
+      // that matters: this fires on EVERY call it happens on, while that paragraph is said once
+      // per process. Two different jobs — the paragraph is for whoever is reading stderr of
+      // whichever process served the run, and this is the fact an aggregate over run logs can
+      // count (#254). Without it the log shows one call where two requests were made, a
+      // duration covering both, and nothing at all about the ceiling.
+      //
+      // `refused: true` is the second of those: this is the call that paid a rejected
+      // round-trip, so its `duration_ms` covers two requests where a later clamped call's
+      // covers one.
+      req.onNote?.({ kind: "output_ceiling_clamped", model: req.model, asked, stated, refused: true });
       // Once per model per process, and said with a flag of its own rather than left to the
       // line above: pages are extracted five at a time (DEFAULT_EXTRACTION_CONCURRENCY), so
       // on a fresh process every call already in flight asks for the deployment's ceiling
@@ -616,6 +647,18 @@ export class BedrockProvider implements ModelProvider {
         const narrower = statedOutputCeiling(again);
         if (narrower !== null && narrower < stated) {
           this.ceilings.set(req.model, narrower);
+          // Reported for the same reason as the first clamp, and with the second pair of
+          // numbers: this call is lost either way, but the number the model named the second
+          // time is the one `max_tokens` is wrong against. The router keeps the widest span
+          // across a call's notes, so the line ends up naming the ceiling the call started at
+          // and the one it ended at rather than only this pair.
+          req.onNote?.({
+            kind: "output_ceiling_clamped",
+            model: req.model,
+            asked: stated,
+            stated: narrower,
+            refused: true,
+          });
           // Said even though this model has been warned about already: the paragraph above
           // told an operator that every later call would ask for `stated`, and that is no
           // longer true. A number in the log the process has stopped using is worse than the

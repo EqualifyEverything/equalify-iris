@@ -1,9 +1,9 @@
 import type { Capability, IrisConfig, ProviderBlock } from "../config.ts";
 import { BedrockProvider } from "./bedrock.ts";
 import { OpenRouterProvider } from "./openrouter.ts";
-import type { CompletionResult, Image, Message, ModelProvider, Usage } from "./types.ts";
+import type { CompletionResult, Image, Message, ModelProvider, ProviderNote, Usage } from "./types.ts";
 
-export type { Image, Message, CompletionResult, Usage } from "./types.ts";
+export type { Image, Message, CompletionResult, ProviderNote, Usage } from "./types.ts";
 
 // The router maps (agent, capability) -> concrete provider + model using the
 // deployment config (PRD §10.3). Providers are constructed lazily so a
@@ -103,6 +103,44 @@ export class ProviderRouter {
     const onUsage = (u: Usage): void => {
       usage = u;
     };
+    // Facts an adapter learned that nothing else can carry: today, a Bedrock model refusing the
+    // deployment's output ceiling and stating its own, which costs a rejected round-trip inside
+    // one `complete` and is otherwise invisible here (#254). A `switch` rather than a spread of
+    // whatever arrives, so a second kind of note has to be given a shape on this line
+    // deliberately instead of becoming a field nobody declared.
+    //
+    // The WIDEST span rather than the last note: a call refused twice reports the ceiling it
+    // started at and the one it ended at, which is the pair that says what `max_tokens` should
+    // have been. Keeping only the latest would name a number the deployment never asked for.
+    // `refused` is an OR for the same reason — it says this call paid a rejected round-trip,
+    // and one of two notes carrying it is enough to have paid for it.
+    let clamped: { asked: number; stated: number; refused: boolean } | undefined;
+    const onNote = (note: ProviderNote): void => {
+      switch (note.kind) {
+        case "output_ceiling_clamped":
+          clamped = {
+            asked: Math.max(clamped?.asked ?? note.asked, note.asked),
+            stated: Math.min(clamped?.stated ?? note.stated, note.stated),
+            refused: (clamped?.refused ?? false) || note.refused,
+          };
+          break;
+      }
+    };
+    // Flat, and read at event time rather than at call time, for the same two reasons as usage:
+    // the run log stays one level deep, and a call that ends by throwing has still learned this.
+    //
+    // `output_ceiling_refused` is present only when true, like `output_ceiling_clamped`: the
+    // fields exist to be grepped for, and a `false` on every clamped line is one more thing to
+    // read past. Absent means the call ran at the lower ceiling without paying to discover it.
+    const ceiling = (): Record<string, number | boolean> =>
+      clamped
+        ? {
+            output_ceiling_clamped: true,
+            output_ceiling_asked: clamped.asked,
+            output_ceiling_stated: clamped.stated,
+            ...(clamped.refused ? { output_ceiling_refused: true } : {}),
+          }
+        : {};
     // Spread flat onto the event, alongside duration_ms, so the run log stays one
     // level deep and `tokens` in diagnostics can be summed straight off it.
     try {
@@ -113,12 +151,14 @@ export class ProviderRouter {
         images: opts.images,
         schema: opts.schema,
         onUsage,
+        onNote,
       });
       this.onEvent?.("model_call", {
         ...meta,
         duration_ms: Date.now() - startedAt,
         ok: true,
         ...(result.usage ?? usage ?? {}),
+        ...ceiling(),
       });
       return result;
     } catch (e) {
@@ -128,6 +168,7 @@ export class ProviderRouter {
         ok: false,
         error: (e as Error).message,
         ...(usage ?? {}),
+        ...ceiling(),
       });
       throw e;
     }
