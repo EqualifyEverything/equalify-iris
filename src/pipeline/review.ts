@@ -9,7 +9,8 @@ import { stripDeprecatedRoles } from "./roles.ts";
 import { stripNestedMain } from "./landmarks.ts";
 import { destroyedBody, EDITOR_SHRINK_FLOOR, structureCounts, visibleText } from "./correction.ts";
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
-import { joinSections, splitSections } from "./sections.ts";
+import { joinSections, splitSections, type Section } from "./sections.ts";
+import { annotateBlocks, applyBlockEdits, blocksOf, readBlockEdits } from "./patch.ts";
 import { flatten } from "./flatten.ts";
 import { examplesForPrompt } from "./memory.ts";
 import { knownPages, pageIndex, type IndexedPage } from "./pageindex.ts";
@@ -239,16 +240,35 @@ Return {"issues": []} when the document is clean.`;
 // test pins both.
 export const EDITOR_SYSTEM = `You are the Copy Editor Agent. You are given an accessible HTML document (body content only),
 a list of issues found by the reviewer, and the source page image(s) for the pages those issues
-were attributed to. Return a corrected version of the FULL body that resolves every issue you can.
+were attributed to. Return the blocks you are CHANGING, and only those.
+
+The document is shown to you as numbered blocks: a comment of the form <!-- @block 7 --> stands
+before each of the body's top-level elements. Those comments are not part of the document — they
+are there so you can name a block instead of retyping the document around it. Every block you do
+not name is delivered exactly as it stands, character for character, so content you are leaving
+alone is already safe and needs nothing from you. Do not return the document. Do not return a
+block whose markup you did not change.
 
 You may do whatever it takes to fix the issues: remove duplicated or redundant content
 (e.g. the same content rendered as both a form and a table — keep the best single
 representation), reorder blocks, fix heading hierarchy, correct labels and table headers, etc.
 Preserve all genuine content and transcribed text; do not invent content. Content on pages whose
-image is NOT attached must be carried over unchanged unless an issue names it. Output ONLY the
-corrected body (no <html>/<head>/<body>/<main> wrapper — the document this body is placed into
+image is NOT attached is not yours to change unless an issue names it. A replacement is body
+content only (no <html>/<head>/<body>/<main> wrapper — the document these blocks are placed into
 supplies all four, so a <main> of your own would be a second one and would take away the landmark a
 screen-reader user jumps to in order to skip the furniture).
+
+An edit is a block's number, copied from the comment above it, and the markup that takes its
+place. That markup replaces the WHOLE block — a block is one top-level element with everything
+inside it — so what you write must be complete markup: whole elements, opened and closed, and
+never a piece of one. A block left open at the end of your replacement cannot be used, and that
+block keeps its original text instead. Say "html": "" to remove a block entirely, which is how
+content the document prints twice goes. Where a fix needs the block to become more than one element
+— a heading lifted out of a section, say — return them all under that one block number. Where it
+moves content from one block to another, name both: the block it lands in with the content in
+place, and the block it came from with what is left of it, or "" if nothing is. Name each block
+once; a second edit for a block already named is discarded. Do not copy the <!-- @block N -->
+comments into what you return.
 
 Two headings with the same words at the same level are yours to resolve — whether they sit next to
 each other or with one page's worth of content between them, which is what a title reprinted where
@@ -277,11 +297,11 @@ one, and it is the string a reader will act on.
 
 A [page not fully transcribed] marker is not yours to resolve at all, even with that page's image in
 front of you. It stands where an extraction could not return the whole of one page, so filling it in
-means returning the rest of that page on top of the complete corrected body — the one request in this
-pipeline that can exceed what a response can hold, and hitting that ceiling costs this reading of the
-document: the round is re-made one section at a time, by requests that each see a piece of the
-document and not the rest of it, and this is the last round either way. Re-extracting that page is
-what has a whole response to itself. So leave the marker exactly
+means transcribing the rest of that page from its image — a re-extraction, which is a pass with a
+whole response for that one page and its own gates on what came back, and not a correction to the
+markup around it. What that pass produces is a transcription of a page; what this one would produce
+is a paragraph you wrote while looking at a page, delivered where nobody downstream can tell the two
+apart. So leave the marker exactly
 where it stands, resolve the other issues around it, and never delete it — an unfinished page that
 says so can be finished, and one that does not looks complete to everyone downstream.
 
@@ -328,9 +348,11 @@ applies winning (content absent from the HTML is content_missing even though it 
 failure; a11y_only is a problem the page's own content does not lose, and alt_quality is a
 description that could be better rather than absent).
 
-Respond with ONLY JSON, with the corrected body first:
-{ "html": "<corrected body content>",
-  "fidelity_observed": [ { "page": 7, "observation": "the second table's third row is absent from the HTML", "kind": "content_missing" } ] }`;
+Respond with ONLY JSON, with the edits first:
+{ "edits": [ { "block": 7, "html": "<h2 id=\\"benefits\\">Benefits</h2>" },
+              { "block": 12, "html": "" } ],
+  "fidelity_observed": [ { "page": 7, "observation": "the second table's third row is absent from the HTML", "kind": "content_missing" } ] }
+Return {"edits": []} when there is nothing in the markup to change.`;
 
 // The same editor, asked for one section of a document instead of the whole of it — because the
 // whole of it did not fit in one response (issue #165, and `correctBySection` below for when
@@ -339,21 +361,35 @@ Respond with ONLY JSON, with the corrected body first:
 // Built on EDITOR_SYSTEM rather than written separately: every content rule above still holds
 // for a section (a dropped href is just as lost, a [not legible] marker just as unresolvable
 // without its page), and two prompts that had to be kept in step would drift. What follows
-// overrides exactly one instruction — "the FULL body" — and adds the one hazard that only
-// exists when the editor cannot see the rest of the document.
+// overrides one instruction — the answer's shape — and adds the one hazard that only exists when
+// the editor cannot see the rest of the document.
+//
+// The override says what does NOT apply, at length, rather than leaving it to be inferred from
+// what this half asks for. EDITOR_SYSTEM's contract is now most of a page of instruction about
+// naming blocks and returning only those, and a section request carries no block markers at all:
+// an editor reading the two halves together has to be told that the first half's answer shape is
+// off, or the likeliest reply is an edits list whose block numbers name nothing (issue #250, and
+// the five rounds READER_SYSTEM's language clause took for the same reason — a prompt that is
+// true about one request and silent about the other reads as true about both).
 export const EDITOR_SECTION_SYSTEM = `${EDITOR_SYSTEM}
 
 ## This request is ONE SECTION of the document
 
 The document was too long for its correction to be returned in a single response, so it has been
-cut at top-level boundaries and each section is corrected on its own. Everything above still
-applies, with one change and one warning.
+cut at top-level boundaries and each section is corrected on its own. Every content rule above
+still applies, with one change to the answer and one warning.
 
-The change: return the corrected version of THIS SECTION only, and nothing from outside it. The
-other sections are being corrected by their own requests and will be joined back around yours in
-order, so anything you repeat from elsewhere would be delivered twice, and anything you leave out
-is simply gone. Do not add a heading, a wrapper or a summary to make the section read as a whole
-document — it is not one, and the sections around it supply what it appears to be missing.
+The change: there are no numbered blocks in this request and no edits list in its answer. Nothing
+in front of you carries a <!-- @block N --> comment, so there is no number to name, and everything
+above about returning only the blocks you changed, emptying one, or leaving the rest alone is about
+the other kind of request. Here, content you do not return is content nobody returns.
+
+So return the corrected version of THIS SECTION whole — the parts you changed and the parts you
+did not — and nothing from outside it. The other sections are being corrected by their own requests
+and will be joined back around yours in order, so anything you repeat from elsewhere would be
+delivered twice, and anything you leave out is simply gone. Do not add a heading, a wrapper or a
+summary to make the section read as a whole document — it is not one, and the sections around it
+supply what it appears to be missing.
 
 The warning: you cannot see the rest of the document, so some of the issues you are given are
 about content that is not in front of you. Fix the ones that are here and return the rest of this
@@ -367,8 +403,8 @@ Respond with ONLY JSON: { "html": "<corrected section>" }`;
 
 // The two markers the page agent writes INTO the body: what it could not read, and what it
 // could not finish. Both sit inside a fragment, which is the position assembly.ts deliberately
-// keeps its own @page-failed marker out of — a round that returns "the complete corrected body"
-// can drop anything in there, and nothing else in the pipeline would notice. `droppedHrefs`
+// keeps its own @page-failed marker out of — a round that rewrites the block a marker sits in can
+// drop it, and nothing else in the pipeline would notice. `droppedHrefs`
 // exists for the same reason one file over; `contentCoverage` strips [...] before comparing
 // words, so a marker the editor deleted costs the document nothing any gate can see, and what
 // ships is the one outcome this rule argues a reader cannot detect: a document that reads as
@@ -990,15 +1026,20 @@ export function capEditorImages(
 // look like the first.
 interface EditorRound {
   body: string;
-  // False when the model returned nothing usable — an unparseable reply, or an empty
-  // `html` — in which case `body` is what went in. Not evidence about what the editor
-  // would do next time, because it never said.
+  // False when the model returned nothing usable — an unparseable reply, an empty `html`, or a
+  // list of edits of which not one could be applied — in which case `body` is what went in. Not
+  // evidence about what the editor would do next time, because it never said.
+  //
+  // An empty edits list is NOT this case: that is the editor answering that the markup needs
+  // nothing, and the loop is entitled to read an unchanged body as a convergence on it.
   usable: boolean;
-  // True when the whole-body response hit the model's output ceiling (issue #143). A third
-  // answer to the same question, and the only one that also says the NEXT round cannot
-  // succeed: the response length is a function of how long the document is, and the document
-  // has not got shorter. The loop must not treat this as the retryable case that
-  // `usable: false` otherwise means.
+  // True when the response hit the model's output ceiling (issue #143). A third answer to the
+  // same question, and the only one that also says the NEXT round cannot succeed — because it
+  // would make the same request against the same body, and whatever did not fit is still there.
+  // Under the block-patch contract (#250) that is a reply carrying one block bigger than the
+  // ceiling, or a reply that answered with a whole document; either way the round after it hits
+  // the same wall. The loop must not treat this as the retryable case that `usable: false`
+  // otherwise means.
   //
   // It no longer implies `usable: false`, which is issue #165: the round is retried a section
   // at a time before it is given up on, so a truncated round can come back with corrections in
@@ -1023,8 +1064,15 @@ function truncation(e: unknown): Record<string, unknown> {
 }
 
 // Document-level correction: the editor sees the whole body + all issues + the
-// source images and returns a corrected document, so it can fix structural
-// problems (dedup, reorder, heading hierarchy) that per-block editing cannot.
+// source images, so it can fix structural problems (dedup, reorder, heading
+// hierarchy) that a view of one block at a time cannot — a duplicate is only
+// visible beside its twin.
+//
+// What it SEES and what it RETURNS are two decisions, and only the first is settled here. It
+// answers with the blocks it changed rather than the document (#250, patch.ts), which is a
+// contract about the reply and takes nothing away from the reading: the whole body is in the
+// request either way. The fallback below cuts the READING down too, and that is the cost of a
+// truncation and the reason it is a fallback.
 //
 // It sees only the images for the pages the Reader attributed issues to. On a
 // 25-page document that is the difference between re-uploading 25 base64 PNGs on
@@ -1069,8 +1117,16 @@ async function runEditor(ctx: PipelineContext, body: string, issues: ReviewIssue
     // round may fail without the document. It is NOT the same case as the size refusal
     // below and must not be retried, either: the refusal is about the request, which
     // Iris can make smaller by dropping images, while a truncation is about the
-    // response, and "return the complete corrected body" is the same length however it
-    // is asked for. The caller stops the loop instead.
+    // response — and the next round would ask the same question about the same body, so
+    // whatever did not fit does not fit then either. The caller stops the loop instead.
+    //
+    // Rarer than it was, and for a reason that does not change what to do about it. Asking for
+    // the blocks that changed instead of the document (#250) takes the length of an ordinary
+    // reply well under the ceiling, so what reaches this line now is a reply carrying one block
+    // that is over it on its own — the largest single top-level node measured across the bench
+    // corpus is around 24,000 tokens, three quarters of the default ceiling on its own, so a
+    // document holding one enormous table still has very little room — or a reply that answered
+    // with the whole document anyway. Both are the same fact about the next round.
     if (isTruncatedResponseError(e)) {
       ctx.log.event("editor_truncated", { attached: selected.length, of: ctx.images.length, ...truncation(e) });
       // The round is not over yet: what cannot be returned in one response can be returned in
@@ -1137,8 +1193,17 @@ async function editorCall(
 ): Promise<Omit<EditorRound, "truncated">> {
   const images = selected.map(loadImage);
   const pageList = selected.map((i) => i.order).join(", ");
+  // The body's own top-level nodes, numbered, and the numbers written into the copy the editor
+  // reads (patch.ts). The blocks are computed from `body` and not from what is sent, so the
+  // markers are not themselves blocks and the numbers survive the round trip.
+  //
+  // It costs the request one comment per block — about 20 bytes each, against a body measured in
+  // tens of thousands — and it is spent on the input side, where a document this size is already
+  // being sent in full every round. What it buys is on the output side, which is where the
+  // ceiling is and where the tokens cost several times as much (#250).
+  const blocks = blocksOf(body);
   const user =
-    `## Current document (body content)\n${body}\n\n` +
+    `## Current document (body content, in numbered blocks)\n${annotateBlocks(blocks)}\n\n` +
     `## Issues to fix\n${issues
       .map((i) => {
         const where = i.pages?.length ? ` (page ${i.pages.join(", ")})` : "";
@@ -1147,8 +1212,8 @@ async function editorCall(
       .join("\n")}\n\n` +
     (images.length
       ? `The source image(s) for page ${pageList} are attached, in that order. ` +
-        `Return the complete corrected body.`
-      : `No source images are available. Return the complete corrected body.`) +
+        `Return only the blocks you are changing.`
+      : `No source images are available. Return only the blocks you are changing.`) +
     feedbackPreamble(ctx);
   const res = await ctx.router.complete(
     "copy_editor",
@@ -1164,11 +1229,27 @@ async function editorCall(
     phase: "review",
     output: res.text,
   });
-  const parsed = extractJson<{ html?: string; fidelity_observed?: unknown }>(res.text);
+  const parsed = extractJson<{ edits?: unknown; html?: string; fidelity_observed?: unknown }>(res.text);
   // Read before the usable check, because an unusable BODY does not make the observations
   // unusable: the editor was looking at the page either way, and a reply this code cannot use
   // as a document is one of the cases where knowing what it saw is worth most.
   logFidelityObserved(ctx, parsed?.fidelity_observed, selected);
+  // The contract this prompt asks for. An `edits` array is the answer even when it is empty —
+  // that is the editor saying the markup needs nothing — so the check is on the field's SHAPE and
+  // not on its contents.
+  if (Array.isArray(parsed?.edits)) return applyEditorPatch(ctx, body, blocks, parsed.edits);
+  // And the contract it used to ask for, still read (issue #250). A model that answers with the
+  // whole body is answering a question this prompt no longer asks, but it is answering: the reply
+  // holds a corrected document, the floor below is the check that decides whether it is one, and
+  // taking it costs nothing that refusing it would save. Refusing would spend the round — and on
+  // a model that reverts to a familiar shape under load, every round of the run.
+  //
+  // How often this fires is the measurement that says whether the contract reads: a deployment
+  // whose editor answers in whole bodies is paying #250's bill in full and is not truncating any
+  // less for the new prompt, so it is logged even though nothing about it failed.
+  if (typeof parsed?.html === "string") {
+    ctx.log.event("editor_whole_body", { blocks: blocks.length, chars: parsed.html.length });
+  }
   // If the editor returns nothing usable, keep the current body unchanged — and say
   // that is what happened, so the loop does not read a reply it could not use as the
   // editor having decided the document was fine.
@@ -1202,6 +1283,72 @@ async function editorCall(
     return { body, usable: false };
   }
   return { body: corrected, usable: true };
+}
+
+// The editor's edits, applied to the body they were about (issue #250).
+//
+// The reply is read as a patch — see patch.ts for what a block is and why the anchor is its
+// position — and the counters this logs are the round's own evidence about the contract: how many
+// blocks a round actually touches is the number the whole change rests on, and it is not knowable
+// from a whole-body reply at all.
+//
+// An empty `edits` array is a usable round that changed nothing, which is exactly what a
+// whole-body reply identical to its input used to be, and the loop reads it the same way
+// (`review_converged`). That equivalence is deliberate: the contract changed the shape of the
+// answer, not what the loop may conclude from it.
+function applyEditorPatch(
+  ctx: PipelineContext,
+  body: string,
+  blocks: Section[],
+  raw: unknown[],
+): Omit<EditorRound, "truncated"> {
+  const { edits, unreadable } = readBlockEdits(raw);
+  const patched = applyBlockEdits(blocks, edits);
+  ctx.log.event("editor_patch", {
+    blocks: blocks.length,
+    edits: raw.length,
+    applied: patched.applied,
+    deleted: patched.deleted,
+    // The five below are absent on an ordinary round, so a line with any of them on it is a
+    // reply that did not follow the contract in some way — and which way is the question a
+    // person reading the log asks next. `unchanged` is not a failure and is here for the cost:
+    // it is output spent to say nothing.
+    ...(patched.unchanged ? { unchanged: patched.unchanged } : {}),
+    ...(patched.unknown.length ? { unknown: patched.unknown } : {}),
+    ...(patched.duplicate ? { duplicate: patched.duplicate } : {}),
+    ...(patched.incomplete ? { incomplete: patched.incomplete } : {}),
+    ...(patched.markers ? { markers: patched.markers } : {}),
+    ...(unreadable ? { unreadable } : {}),
+  });
+  const used = patched.applied + patched.deleted + patched.unchanged;
+  const refused = patched.unknown.length + patched.duplicate + patched.incomplete + unreadable;
+  // Edits were sent and not one of them could be used: a reply about a document this is not, or
+  // about blocks that were all unfinished. `usable: false` for the same reason an unparseable
+  // reply is one — nothing came back that can be used here — which lets the loop run another
+  // round rather than crediting the unchanged body as a convergence. `edits: []` does not come
+  // through here, because nothing was refused: that is an answer, and it converges.
+  if (used === 0 && refused > 0) return { body, usable: false };
+  // #174's floor, on the JOINED body rather than on any one replacement. The patch contract makes
+  // a catastrophic loss harder to reach — an untouched block cannot be lost, so only deletions
+  // and shrunken replacements can move this — but "harder to reach" is not a guarantee, and the
+  // blast radius is the same deliverable it always was: an editor that empties two thirds of the
+  // document's blocks has destroyed it as thoroughly as one that summarised it.
+  if (destroyedBody(body, patched.body)) {
+    ctx.log.event("editor_shrank", {
+      stage: "patch",
+      chars_before: body.length,
+      chars_after: patched.body.length,
+      text_chars_before: visibleText(body).length,
+      text_chars_after: visibleText(patched.body).length,
+      floor: EDITOR_SHRINK_FLOOR,
+      // What a shrink under this contract is made of, which the length pairs cannot say: the
+      // blocks the editor emptied.
+      deleted: patched.deleted,
+      of: blocks.length,
+    });
+    return { body, usable: false };
+  }
+  return { body: patched.body, usable: true };
 }
 
 // One fidelity discrepancy the Copy Editor noticed on a page whose image it had, and was not
@@ -1410,16 +1557,23 @@ async function editorSectionCall(
   return corrected;
 }
 
-// The round again, a section at a time, after the whole-document answer did not fit.
+// The round again, a section at a time, after the answer did not fit.
 //
-// Why this exists: the editor is asked to return the complete corrected body, so the length of
-// its answer follows the length of the DOCUMENT rather than the number of things wrong with it,
-// and a 25-page document is longer than one response may be. Under a fixed ceiling that scales
-// the wrong way — the bigger the document, the more certain it is that its corrections cannot be
-// applied, which is the opposite of where corrections matter most. Two documents of four in one
-// bench round were delivered whole and uncorrected for exactly this reason (issue #165). Cutting
-// the body at top-level boundaries makes the response length a property of the SECTION instead,
-// and a section's size is something this code chooses.
+// Why this exists: the editor used to be asked to return the complete corrected body, so the
+// length of its answer followed the length of the DOCUMENT rather than the number of things wrong
+// with it, and a 25-page document is longer than one response may be. Under a fixed ceiling that
+// scales the wrong way — the bigger the document, the more certain it is that its corrections
+// cannot be applied, which is the opposite of where corrections matter most. Two documents of
+// four in one bench round were delivered whole and uncorrected for exactly this reason (issue
+// #165). Cutting the body at top-level boundaries makes the response length a property of the
+// SECTION instead, and a section's size is something this code chooses.
+//
+// The contract has since taken most of that away: the editor answers with the blocks it changed,
+// so an ordinary reply is a fraction of the document and has no reason to reach the ceiling
+// (#250). This is not dead code for it. A reply can still be too long — one top-level node bigger
+// than the ceiling, or a model that answers with the whole document out of habit — and this path
+// is what stands between that and a document delivered uncorrected. It is the fallback now rather
+// than the salvage of a common case, which is the same code doing a smaller job.
 //
 // What it costs, honestly: one text call per section, on a round that has already paid for a
 // full ceiling of output it could not use. That is roughly one more body's worth of output for
@@ -1701,11 +1855,12 @@ export async function runReview(
       });
     }
     // A `<main>` the editor introduced, dropped here for the same reason and at the same point
-    // (landmarks.ts, issue #251). This end is not redundant with assembly's: EDITOR_SYSTEM asks
-    // for "the FULL body" and never mentions the shell, so a round that retypes the whole
-    // document is a fresh chance to write one — and on the section path each call is handed a
-    // piece of the document, which is exactly the prompt under which a model reaches for a
-    // wrapper to stand for what it was given. Ahead of `changed` and the re-lint, so a round
+    // (landmarks.ts, issue #251). This end is not redundant with assembly's: every reply the
+    // editor sends is body content with no shell around it, so any of them is a fresh chance to
+    // write one — a replacement block that wraps what it was given, and, on the section path, a
+    // whole section, which is exactly the prompt under which a model reaches for a wrapper to
+    // stand for the piece of document it holds. EDITOR_SYSTEM says not to, in the same sentence
+    // it has always said it; this is the end that does not depend on the model reading it. Ahead of `changed` and the re-lint, so a round
     // whose only effect was a `<main>` this removes is not credited as a change.
     const mains = stripNestedMain(body);
     if (mains.unwrapped > 0 || mains.downgraded > 0 || mains.dropped > 0 || mains.declined > 0) {

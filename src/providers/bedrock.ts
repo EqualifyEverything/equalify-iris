@@ -32,8 +32,8 @@ import {
 // this adapter streams. A single non-streaming InvokeModel gives you one datum —
 // "the answer has not arrived yet" — which is equally true of a dead socket and of a
 // large document being correctly rewritten. Capping total duration therefore kills
-// both, and the review phase's document-level rewrite (whole body in, whole
-// corrected body out, up to max_tokens) is slow enough to be the one that dies.
+// both, and the review phase's document-level rewrite (the whole body in, and every
+// block the editor changed back out) is slow enough to be the one that dies.
 // Streaming separates the two cases: work in progress keeps arriving, a stall does
 // not. A healthy stream is never silent for a minute.
 //

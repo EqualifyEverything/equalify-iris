@@ -124,8 +124,8 @@ from the environment at startup; changes require a restart.
   Both adapters **stream** their responses, to tell a stalled call apart from a slow one. A
   single non-streaming request cannot: "no answer yet" describes a dead socket and a large
   document being correctly rewritten equally well, so a total-duration cap kills both — and the
-  review phase's document-level rewrite (whole body in, whole corrected body out) is the call
-  slow enough to be killed. The limits are therefore about *silence*, not duration, and there
+  review phase's document-level rewrite (the whole body in, and every block the editor changed
+  back out) is the call slow enough to be killed. The limits are therefore about *silence*, not duration, and there
   are three of them in both adapters. **120s** to produce anything at all, since before the
   first token a slow call and a dead one look identical and that phase is where the whole
   prompt — a document plus its page images — gets processed. Then **60s** of silence once
@@ -476,9 +476,9 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
   (`GET /v1/sessions/{id}/logs`) rather than in the deliverable. `@unresolved` **is** emitted
   when the review loop stops with issues outstanding — at its iteration cap, on a round that
   changed nothing, or on a round whose response hit the model's output ceiling (§7.11). That
-  last exit adds a second comment, `@editor-truncated`, saying what that round managed: the
-  editor is asked for the whole document, so a round too long to answer is re-made a section at a
-  time, and the comment reports how many sections came back — or, where nothing could be, that
+  last exit adds a second comment, `@editor-truncated`, saying what that round managed: a round
+  too long to answer is re-made a section at a time, and the comment reports how many sections
+  came back — or, where nothing could be, that
   no editor pass ever worked on the issues `@unresolved` lists. A third comment,
   `@lint-unavailable`, is emitted when axe-core could not run on the document at all: nothing in
   it was checked, so an `@unresolved` list that is short — or absent — is not evidence that there
@@ -792,10 +792,11 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   wrongly can leave a real issue unfixed at the iteration cap, while broadening wrongly costs no
   more than the behavior this optimization replaced.
 - **A correction round may not replace the document with a fraction of it, and the floor reads
-  prose.** The Copy Editor is asked for the whole corrected body and its `html` is adopted for the
-  body verbatim, so a reply that answered about one section, or summarised, or quoted the contract
-  back after answering arrives shaped like a corrected document — and the blast radius is the
-  deliverable rather than one page (issue #174). A round that comes back with under half the prose
+  prose.** A reply that answered about one section, or summarised, or quoted the contract back
+  after answering arrives shaped like a corrected document, and the blast radius is the
+  deliverable rather than one page (issue #174). It applies to all three shapes a round can take:
+  the joined result of a patch (a reply that empties most of the document's blocks), the whole
+  body a model hands back under the old contract, and each section on the truncation fallback. A round that comes back with under half the prose
   of the body it was given is now refused, the body that entered is kept, and the loop is free to
   spend another round asking again (`editor_shrank`; the same floor per section, as
   `editor_section_failed` `reason: "shrank"`). Which of the three readings on the `editor` line
@@ -818,6 +819,33 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   is the third path that adopts `html` wholesale and is deliberately still unguarded: it has no
   before-page to compare against, so a floor there is an absolute plausibility check on what a page
   image that carried text may produce, which is #116's question and not this one's.
+- **The Copy Editor answers with the blocks it changed, not the document retyped (issue #250).**
+  Asked for the complete corrected body, the length of the editor's answer was a property of the
+  DOCUMENT rather than of how much was wrong with it: a mean reply of ~26,600 encoded tokens
+  across 34 delivered documents, with 15 of the 34 unable to fit under the ceiling at all, which
+  is the mechanical cause of a 58% `editor_truncated` rate — and a cause no choice of model can
+  move, since a model cannot emit a reply longer than its output ceiling. The blocks a round
+  actually touches come to ~1,211 tokens. So the body is shown to the editor with a
+  `<!-- @block N -->` comment above each of its top-level elements, and the reply is
+  `{ "edits": [ { "block": 7, "html": "..." } ] }` — every block nobody names is delivered byte for
+  byte. `html: ""` deletes a block, which is how content the document prints twice goes; one edit
+  may carry several top-level nodes, which is how a fix splits a block. The anchor is a block
+  POSITION rather than an id because ids do not reach the work: of 73 defect instances in delivered
+  documents, 12 sit on an element with a usable id and none has an ancestor carrying one, since
+  Iris puts ids on what gets linked *to*. And the number is written above the block rather than
+  counted by the editor, because a model counting for itself could be off by one, land in range,
+  and have every replacement applied to the wrong block with each one well-formed — the one failure
+  here that nothing downstream could see. A replacement that leaves an element open is refused and
+  that block keeps its original text (splicing a fragment in would close its tags with whatever
+  followed); an unknown or repeated block number, an unreadable entry and an echoed marker are each
+  counted on `editor_patch`, so a reply that did not follow the contract says so in the log rather
+  than in the document. A model that answers with a whole `html` body anyway is still read, and
+  logged as `editor_whole_body`: refusing it would spend the round, accepting it costs nothing that
+  refusing would save, and the #174 floor guards that path as it always did. The section fallback
+  (§7.11) stays for the case the contract does not fix — one top-level node bigger than the
+  ceiling — and its prompt now says outright that a section request carries no numbered blocks,
+  because it is built on the same system prompt and a prompt that is true about one request and
+  silent about the other reads as true about both.
 - **The flattened screen-reader view must never lose text (§7.8).** `flatten.ts` has two
   consumers, and both fail *silently* when text goes missing: the Reader reviews this view
   instead of the source images, so anything absent from it cannot be reported as an issue; and
