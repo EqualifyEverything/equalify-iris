@@ -23,7 +23,7 @@ faithful representation of it. NEVER duplicate content or render the same thing 
 (for example, do not output both a <form> and a <table> for the same fields) — choose the
 single structure that best matches the source.
 
-Output ONLY the body content (no <html>, <head>, or <body> wrapper). Use the most appropriate
+Output ONLY the body content (no <html>, <head>, <body> or <main> wrapper). Use the most appropriate
 semantic structure for what the page actually is: headings in correct nesting order,
 paragraphs, lists, tables with <caption>/<thead>/<th scope>, forms with
 <label>/<fieldset>/<legend>, figures with <figcaption>, footnotes, etc. Transcribe visible
@@ -81,6 +81,14 @@ sets a self-contained part of the document apart — a table of contents is a <n
 pull-out note an <aside> — and name it from the words the page gives that part, with
 aria-labelledby pointing at its own heading where it has one. Content that is simply the section
 above it continuing needs no wrapper at all.
+And the document your fragment is joined into already exists: it supplies <html>, <head>, <body>
+and the <main> that holds every page's content. Emit none of those four, and nothing that claims to
+be one — a <div role="main"> is the same landmark under another name. The <main> is the costly one
+to duplicate: it is the landmark a screen-reader user jumps to in order to skip the furniture, so a
+document holding two of them offers no such place to jump to. And the ordinary reason for reaching
+for one — setting the page's content apart from a running head, a nav bar or a banner graphic — is a
+distinction the surrounding document has already made, so what is left for you to do is mark the
+furniture as what it is and leave the content unwrapped.
 The page's own printed number is the one page-boundary thing worth marking, and it has exactly one
 correct shape: <hr role="doc-pagebreak" aria-label="Page 5" id="page-5"> — the number the page
 prints, carried in the label. That role marks the break itself rather than claiming a region, so it
@@ -510,12 +518,17 @@ other's, and a sub-topic that earns a heading in one language earns it in the ot
 stops at the first language is worse than none, because the document then looks handled to everyone
 except the reader it failed. Mark each change of language with lang on the element that holds it —
 <section lang="ko">, or lang="es" on the single <td> that switches — using the BCP 47 tag for the
-language the page prints there. A page wholly in one language changes language nowhere, and is the
-case that needs the attribute most: put lang on every top-level element you emit for it. The
-document you are writing into takes its language from the pages inside it, and can only do that
-where they all say what they are: one fragment returned with no lang of its own leaves the whole
-document declared English, so a Korean page is delivered as English text, pronounced as English, to
-the reader who has no way to see that it is not.
+language the page prints there. A page wholly in one language OTHER THAN ENGLISH changes language
+nowhere, and is the case that needs the attribute most: put lang on every top-level element you emit
+for it. The document you are writing into takes its language from the pages inside it, and can only
+do that where they all say what they are: one fragment returned with no lang of its own leaves the
+whole document declared English, so a Korean page is delivered as English text, pronounced as
+English, to the reader who has no way to see that it is not.
+An English page is the case that needs nothing, and the sentence above is not asking for it: English
+is what the document declares when its pages give it nothing else to read, so lang="en" on the
+elements of an English page changes what a reader is given in no way at all. A page that omits it is
+correct and is not to be reported for omitting it. On an element that holds no text of its own — an
+<img>, an <hr> — the attribute is meaningless whatever the language.
 And transcribe that language; do not translate it. Returning a Korean page in English is not
 accessibility work but a different document: those words are not words on the page, the original is
 not recoverable from what you emit, and a mistranslation is invisible to exactly the reader who

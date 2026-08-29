@@ -6,6 +6,7 @@ import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseErro
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
 import { stripDeprecatedRoles } from "./roles.ts";
+import { stripNestedMain } from "./landmarks.ts";
 import { destroyedBody, EDITOR_SHRINK_FLOOR, structureCounts, visibleText } from "./correction.ts";
 import { runAxe, lintErrorFields, type LintResult } from "./lint.ts";
 import { joinSections, splitSections } from "./sections.ts";
@@ -84,6 +85,14 @@ export interface ReviewResult {
 export const READER_SYSTEM = `You are the Reader Agent. You review accessible HTML for reading-order problems, semantic
 inconsistencies, duplicated/redundant content, and missed WCAG 2.2 AA requirements. You do NOT
 see source images — you read the document the way a screen-reader user would.
+
+What you are shown is the BODY CONTENT of the delivered document, not the whole of it. The
+document supplies the rest and already has it: a <!DOCTYPE html>, an <html> with a lang
+attribute, a <head> with a <title>, a <body>, and a <main> that holds everything you can see.
+So this document does have a main landmark, a title and a declared default language — none of
+them is missing, none of them is yours to ask for, and content in English needs no lang
+attribute of its own because English is what the document declares. Report what is IN the
+content you were given.
 
 You get two views of the same content: the HTML (structural reference) and a flattened
 text-only view (what a screen reader announces, in order). Cross-check them, and also consider
@@ -227,7 +236,9 @@ You may do whatever it takes to fix the issues: remove duplicated or redundant c
 representation), reorder blocks, fix heading hierarchy, correct labels and table headers, etc.
 Preserve all genuine content and transcribed text; do not invent content. Content on pages whose
 image is NOT attached must be carried over unchanged unless an issue names it. Output ONLY the
-corrected body (no <html>/<head>/<body> wrapper).
+corrected body (no <html>/<head>/<body>/<main> wrapper — the document this body is placed into
+supplies all four, so a <main> of your own would be a second one and would take away the landmark a
+screen-reader user jumps to in order to skip the furniture).
 
 Two headings with the same words at the same level are yours to resolve — whether they sit next to
 each other or with one page's worth of content between them, which is what a title reprinted where
@@ -1677,6 +1688,24 @@ export async function runReview(
         iteration: iterations,
         roles: [...new Set(roles.stripped)].sort(),
         nodes: roles.nodes,
+      });
+    }
+    // A `<main>` the editor introduced, dropped here for the same reason and at the same point
+    // (landmarks.ts, issue #251). This end is not redundant with assembly's: EDITOR_SYSTEM asks
+    // for "the FULL body" and never mentions the shell, so a round that retypes the whole
+    // document is a fresh chance to write one — and on the section path each call is handed a
+    // piece of the document, which is exactly the prompt under which a model reaches for a
+    // wrapper to stand for what it was given. Ahead of `changed` and the re-lint, so a round
+    // whose only effect was a `<main>` this removes is not credited as a change.
+    const mains = stripNestedMain(body);
+    if (mains.unwrapped > 0 || mains.downgraded > 0 || mains.declined > 0) {
+      body = mains.html;
+      ctx.log.event("page_main_stripped", {
+        stage: "correction_round",
+        iteration: iterations,
+        unwrapped: mains.unwrapped,
+        downgraded: mains.downgraded,
+        declined: mains.declined,
       });
     }
     // `sections` on this line is how a run log tells a round that was answered whole from one

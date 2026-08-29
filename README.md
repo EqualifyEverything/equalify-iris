@@ -534,6 +534,18 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   replacing it. Two consequences worth knowing: a document that used to pass may now spend review
   iterations on heading levels, and `heading-order` can now appear in the quality tally, where it
   has been the worked example in `docs/API.md` §0c all along without once being reportable.
+- **A `<main>` inside the delivered `<main>` is linted for, and removed before it gets there.**
+  `wrapDocument` puts the assembled body inside `<main>`; 18% of page answers across a six-model
+  bench lineup emitted one of their own, which ships a `main` inside a `main` — and that takes away
+  the landmark a screen-reader user jumps to in order to skip the furniture. axe has three rules for
+  it and tags all three `best-practice`, so the WCAG-only filter dropped every one and the gate
+  called the document clean. `landmark-no-duplicate-main` and `landmark-main-is-top-level` are now
+  enabled by name, on the same argument as `heading-order` above. The third, `landmark-unique`, is
+  deliberately left off: measured, it fires on two `<nav>` elements with no accessible name, on two
+  `<aside>`, and on two `<section>` the page names alike — repeatable page furniture, not a defect —
+  and it is quiet on a nested `<main>` that carries a label, so it would cost false positives
+  without covering the case. The rules are a backstop, not the fix: `landmarks.ts` takes the tags
+  out of the body first (below).
 - **Duplicate ids are linted for three separate ways (§7.7 v1.2).** Obsolete as a *conformance
   criterion* is not the same as harmless here: this document is assembled from independently
   extracted pages, so a duplicate id is the specific defect concatenation produces, and it breaks
@@ -673,6 +685,20 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   DPUB's own remedy is to make it a list item — a restructure, not an attribute rewrite. A document
   with no such role comes back byte-identical, which is what the loop's change detection and the
   reserialization caution above both need.
+- **A `<main>` a page emitted for itself is taken out of the body, not reported.** Same division of
+  labour, at the same three points, logged as `page_main_stripped`. A bare `<main>` loses its tags
+  and its children are promoted; a `<main lang="ko" id="p3">` becomes a `<div>` keeping those
+  attributes, because unwrapping it would drop the `lang` the document's root declaration is derived
+  from or an `id` an `href` elsewhere resolves to — a `<div>` is generic, so the landmark is gone
+  either way. An explicit `role="main"` is the one attribute the downgrade cannot keep. What it
+  declines is half a wrapper: a `<main>` with no `</main>` has no correct edit, since the element's
+  extent is whatever the parser decides, and a `role="main"` on an element that was never a `<main>`
+  is a role a model chose on an element whose own semantics do not cover it — the same judgement the
+  role strip above refuses to make. Both go to the gate instead. All three points are needed for the
+  usual reason: the assembly join is where extraction's wrappers arrive, an editor round retypes the
+  whole body and can introduce one of its own, and a feedback re-run resumes a stored body that was
+  written before any of this existed. The prompt is still the primary fix — `agents/page.md` now says the document supplies `<html>`, `<head>`,
+  `<body>` and the `<main>`, which is the fact all six benched models were missing.
 - **A table printed across a page break is rejoined into one table.** Each page is extracted alone,
   so the agent that wrote the second half had one image and the rest of the table was not on it: it
   ships as a fresh `<table>` repeating the header, and a screen-reader user reading down the column

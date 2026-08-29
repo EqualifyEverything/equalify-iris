@@ -430,6 +430,38 @@ export async function runAxe(html: string): Promise<LintResult> {
         // this call, so a rule the tag filter drops is one the weekly report can never
         // raise, however often the output breaks it.
         "heading-order": { enabled: true },
+        // Enabled BY NAME on the same argument again, for the defect #251 measured: 18% of
+        // page answers emit a `<main>` of their own, `wrapDocument` puts the assembled body
+        // inside one, and the result ships a `main` inside a `main` — which takes away the
+        // one landmark a screen-reader user jumps to in order to skip the furniture. axe has
+        // three rules for it and tags all three `best-practice`, so this gate reported the
+        // document clean; measured in this environment, a body of `<main><h2>…</h2></main>`
+        // came back with zero violations before these two lines.
+        //
+        // `landmarks.ts` removes the tags at assembly and after every editor round, so what
+        // reaches here is the residue that rewrite declines: half a wrapper (a `<main>` with
+        // no `</main>`, whose extent is whatever the parser decides), and a `role="main"` on
+        // an element that was never a `<main>`, which is a role a model chose and not this
+        // pipeline's to delete. Same relationship as `duplicate-id` has to the anchor
+        // namespacing above — the rewrite is the fix and the rule is the check that it worked.
+        //
+        // Both rules, because they answer different questions and either can fire alone:
+        // measured, `<div role="main">` in the body trips both, while a `<main>` nested inside
+        // a fragment's own `<section>` is not a duplicate of anything if the strip already
+        // took the other one, and `landmark-main-is-top-level` is what reports it.
+        "landmark-no-duplicate-main": { enabled: true },
+        "landmark-main-is-top-level": { enabled: true },
+        // The third rule axe fires on that document, `landmark-unique`, is deliberately NOT
+        // enabled, and this is the `heading-order` caution one rule over: it is the one that
+        // does not survive contact with a multi-page document. Measured in this environment,
+        // it fires on two `<nav>` elements with no accessible name, on two `<aside>`, and on
+        // two `<section aria-label="Notes">` — a table-of-contents page and a sidebar are
+        // repeatable page furniture, so each of those is ordinary output from a document that
+        // prints the same thing twice, not a defect. It is also unreliable on the case it
+        // would be enabled for: a `<main aria-label="Page 1">` inside the shell's unnamed
+        // `main` has a different accessible name, so the rule stays quiet on exactly the
+        // nested main that carries a label. Two rules that always fire, and no third that
+        // sometimes fires on purpose-built output.
       },
     });
     // `duplicate-id-aria` is the one duplicate-id rule that is still a live WCAG
