@@ -195,6 +195,11 @@ test("what gets removed is the escape shape, and that is checked against axe and
     `aria-label\\1`,
     `data-x\\2`,
     `a\\9`,
+    // A name ENDING in a backslash, which the HTML parser really does produce: `<hr id="a" c:\>`
+    // parses to an attribute called `c:\`. These are the rows that force the probe below to use the
+    // selector form axe actually builds, because nwsapi refuses `[c:\\]` and accepts `[c:\\=""]`.
+    `c:\\`,
+    `z1\\`,
   ];
   for (const name of names) {
     assert.equal(escapeAttributeName(name), escapeSelector(name), `the port disagrees with axe on ${name}`);
@@ -202,9 +207,15 @@ test("what gets removed is the escape shape, and that is checked against axe and
     // the compiler refuses the selector axe would have built from it. If a future jsdom fixes the
     // octal bug, every row here flips to "compiles" and this test is what says the workaround can
     // be retired — read a failure that way before widening anything.
+    //
+    // The selector axe would have built, and not the bare `[name]` existence form: axe splices an
+    // escaped attribute NAME into `[name="value"]` and nowhere else (three call sites, all of them
+    // `escapeSelector(at.name) + '="' + ...`), and nwsapi treats the two forms differently for a
+    // name ending in a backslash — `[c:\\]` throws, `[c:\\=""]` compiles. Probing the wrong form
+    // would make this test demand the removal of names that lint perfectly well.
     let threw = false;
     try {
-      doc.querySelectorAll(`[${escapeAttributeName(name)}]`);
+      doc.querySelectorAll(`[${escapeAttributeName(name)}=""]`);
     } catch {
       threw = true;
     }

@@ -244,6 +244,11 @@ export function escapeAttributeName(name: string): string {
 // SyntaxError in strict mode — so the test is exactly that shape and nothing broader.
 // `aria-label\"note\"` compiles; `\31 x` does not.
 //
+// nwsapi refuses one more shape, deliberately not tested for here: a name ending in a backslash,
+// which `[c:\\]` chokes on. It is out because axe never builds that selector — an escaped attribute
+// name only ever goes into `[name="value"]`, and `[c:\\=""]` compiles — so removing those names
+// would cost findings and rescue nothing. The test probes the `="value"` form for that reason.
+//
 // Read off what the escaper DID rather than by matching the string it returned, because the two
 // differ on one shape: a backslash already in the name is emitted as `\\`, so `aria-label\1` ends
 // with a backslash followed by a digit without containing an escape. It compiles, no rule set dies
