@@ -592,6 +592,24 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   — none that is anything but column headers. Nothing here
   is repaired and no run fails on it: a count with no threshold, on the same argument as
   `internal_links`, until there is enough of a rate to calibrate.
+- **Four more questions are asked in the same pass, about promises the document makes and does not
+  keep (issue #255).** These are not malformed markup, which is why they needed their own checks: a
+  reference to an `id` no page defines (`aria-labelledby`, `aria-describedby`, `label[for]`), a
+  `<dl>` with terms and no definitions, a `lang` on an element with no text for it to apply to
+  (neither a text node nor text in an attribute — `<img alt="Un graphique" lang="fr">` is correct
+  authoring and is not counted, the same image with `alt=""` is), and a `<nav>`,
+  `<aside>` or *named* `<section>` with nothing in it. The gate is clean on every one of them, each
+  for a different reason — axe reports a dead ARIA reference as `incomplete` rather than a violation
+  (`aria-valid-attr-value` is `reviewOnFail`, so it never reaches a rule the review loop acts on),
+  `<dl><div><dt>Term</dt></div></dl>` *passes* `definition-list` because the wrapper is legal HTML,
+  `lang` is a global attribute so putting one on an empty `<img>` breaks nothing, and an empty `<nav>` has
+  no rule at all. They are reported together as `delivered_structure` in the run log, with the
+  elements named, and three of the four are tallied as `iris:structural-defect`. Two decisions are
+  worth knowing. The checks run on the **joined** document, not per page, because a reference to an
+  id a *later* page defines is correct and a per-page scan would report it as dead. And a `lang` on
+  an empty element is measured but deliberately kept **out** of the tally: it is wasted output, not
+  something a reader loses, and mixing it into a rate about harm would move that rate for the wrong
+  reason. Like the two above, nothing here is repaired and no run fails on it.
 - **The lint counts every attribute name no valid markup produces, and removes the few that stop it
   running (issue #257).** Not tidying: an attribute name beginning with a digit took the entire rule
   set offline. axe needs a unique CSS path for the elements it reports; where an id is unusable and a

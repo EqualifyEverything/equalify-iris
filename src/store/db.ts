@@ -233,6 +233,26 @@ export const SIGNAL_MARKUP_UNBALANCED = "iris:markup-unbalanced";
 // cannot be inferred from anything else recorded here: the data was not lost, the split halves
 // are both present, and the document lints clean.
 export const SIGNAL_TABLE_NO_BODY = "iris:table-no-body";
+// Structural promises the delivered document does not keep, which a script can prove without a
+// model reading it (#255): a reference to an id the document does not contain, a term list whose
+// terms have no definitions, and a landmark announced with nothing in it.
+//
+// One signal for three checks, and per INSTANCE, for the same reason as SIGNAL_LINKS_UNRESOLVED
+// above: the rate answers one question — did this document ship promising a reader something that
+// is not there — and which of the three it was is a diagnosis a maintainer reads on the run's
+// `delivered_structure` line, where the offending elements are named too.
+//
+// None of the three is reachable from anything else in this table, and each escapes the lint gate
+// differently: axe reports a dangling `aria-labelledby`/`aria-describedby` as `incomplete` and
+// never as a violation (`aria-valid-attr-value` is `reviewOnFail`), `<dl><div><dt>Term</dt></div>
+// </dl>` passes `definition-list` outright because the wrapping `<div>` is legal HTML, and an
+// empty `<nav>` breaks no rule at all. So all three ship as `ready_for_review` on a clean lint.
+//
+// A language tag on an element with no text for it to apply to is measured beside these three and
+// deliberately NOT counted here: it is wasted output rather than something a reader loses, and
+// folding it in would move a rate that is otherwise about harm. Its incidence stays on the log
+// line.
+export const SIGNAL_STRUCTURAL_DEFECT = "iris:structural-defect";
 // axe-core failed to run at all. Recorded because a linter that did not run reports no
 // violations, so without this signal a broken linter would quietly drive every
 // accessibility rate in this table to zero and read as a fixed deployment. It is also
@@ -339,6 +359,17 @@ export interface QualityStats {
   // parsed tree, because that is what a reader gets. No axe rule covers it, and the captions stay
   // on the deployment: a caption is text out of the user's own document.
   table_no_body_rate: number;
+  // Share of documents delivered with at least one structural promise the document does not keep
+  // (#255) — a reference to an absent id, a term list with no definitions, or an empty landmark.
+  // Three checks under one rate because they fail identically from here: nothing is malformed, so
+  // the lint gate returns clean and the run reaches `ready_for_review` anyway. Which class it was,
+  // and the elements it was on, are in the run's `delivered_structure` line — as is a language tag
+  // on an element with no text, which is measured but is not in this rate (see
+  // SIGNAL_STRUCTURAL_DEFECT).
+  //
+  // Unthresholded, like the two rates above and for the same reason: the first question about a
+  // class nothing could see before is how often it fires on a deployment's real traffic.
+  structural_defect_rate: number;
   // Share of documents where axe-core could not run.
   lint_error_rate: number;
   // How many of `documents` the linter actually examined — the rest are the
@@ -1138,6 +1169,7 @@ export class Store {
       links_unresolved_rate: rate(SIGNAL_LINKS_UNRESOLVED),
       markup_unbalanced_rate: rate(SIGNAL_MARKUP_UNBALANCED),
       table_no_body_rate: rate(SIGNAL_TABLE_NO_BODY),
+      structural_defect_rate: rate(SIGNAL_STRUCTURAL_DEFECT),
       lint_error_rate: rate(SIGNAL_LINT_ERROR),
       documents_linted: documentsLinted,
       editor_truncated_rate: rate(SIGNAL_EDITOR_TRUNCATED),

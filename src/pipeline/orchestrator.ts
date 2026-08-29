@@ -7,6 +7,7 @@ import {
   SIGNAL_LINKS_UNRESOLVED,
   SIGNAL_MARKUP_UNBALANCED,
   SIGNAL_TABLE_NO_BODY,
+  SIGNAL_STRUCTURAL_DEFECT,
   SIGNAL_LINT_ERROR,
   SIGNAL_EDITOR_TRUNCATED,
   SIGNAL_EDITOR_TRUNCATED_LOST,
@@ -326,6 +327,33 @@ export async function runPipeline(args: {
         ...(markup.parseError ? { parse_error: markup.parseError } : {}),
       });
     }
+    // And the four structural defects a script can prove are present, which the gate reports on
+    // none of (#255). Its own line rather than more keys on the one above: those two are the
+    // parser's two sides of one question, these four are separate classes, and a maintainer
+    // reading either wants the other one's zeros out of the way.
+    //
+    // All four counts whenever any of them fired, zeros included, because on this line a zero is
+    // a measurement: it says that class was looked for in this document and is not there. A
+    // document with none of them logs nothing at all, which is the ordinary case.
+    const structure = markup.structure;
+    const found = [structure.danglingIdrefs, structure.dlWithoutDd, structure.langOnVoid, structure.emptyLandmarks];
+    // Three of the four, summed, for the tally below. `langOnVoid` is not in it on purpose.
+    const structuralDefects =
+      structure.danglingIdrefs.count + structure.dlWithoutDd.count + structure.emptyLandmarks.count;
+    if (found.some((f) => f.count)) {
+      log.event("delivered_structure", {
+        dangling_idrefs: structure.danglingIdrefs.count,
+        dl_without_dd: structure.dlWithoutDd.count,
+        lang_on_void: structure.langOnVoid.count,
+        empty_landmarks: structure.emptyLandmarks.count,
+        // Instances, only for the classes that have any. Ids and language tags out of the user's
+        // own document, so they stay here and never reach the tally (see QualityStats).
+        ...(structure.danglingIdrefs.count ? { dangling_idref_examples: structure.danglingIdrefs.examples } : {}),
+        ...(structure.dlWithoutDd.count ? { dl_without_dd_examples: structure.dlWithoutDd.examples } : {}),
+        ...(structure.langOnVoid.count ? { lang_on_void_examples: structure.langOnVoid.examples } : {}),
+        ...(structure.emptyLandmarks.count ? { empty_landmark_elements: structure.emptyLandmarks.examples } : {}),
+      });
+    }
     // Final accessibility lint result, summarized into the PR description on close (§7.13).
     writeFileSync(paths.sessionLint(sessionId), JSON.stringify(review.lint, null, 2));
     if (review.unresolved.length) {
@@ -386,6 +414,13 @@ export async function runPipeline(args: {
         // Tables announced with a header block and nothing under it. Per table, so a document
         // that emitted the same continued header three times reads as three.
         ...(markup.tablesWithoutBody ? [{ code: SIGNAL_TABLE_NO_BODY, count: markup.tablesWithoutBody }] : []),
+        // Structural promises the document does not keep, the three classes summed: a reference to
+        // an absent id, a term list with no definitions, an empty landmark. Summed rather than
+        // recorded apart for the reason given for the links above — the rate is about whether a
+        // reader was promised something absent, and which class it was is on the log line. The
+        // fourth check, a language tag on an element with no text, is out on purpose: wasted
+        // output is not the same kind of finding (see SIGNAL_STRUCTURAL_DEFECT).
+        ...(structuralDefects ? [{ code: SIGNAL_STRUCTURAL_DEFECT, count: structuralDefects }] : []),
         // A linter that could not run has no violations to report, which is why its
         // failure is recorded as a signal rather than inferred from an empty list.
         ...(review.lint.error ? [{ code: SIGNAL_LINT_ERROR, count: 1 }] : []),
