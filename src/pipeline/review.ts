@@ -190,7 +190,10 @@ mid-sentence with the next continuing it in lower case, those are two pages tran
 they printed, by calls that could not see each other. The Copy Editor is told to leave both halves as
 they are and to invent no completion, so an issue naming one is an issue nobody may close: reported
 again every round, about text that is already right. Joining the halves belongs to a pass that holds
-both, and is not this one. Say nothing about it. What tells you this is the case is a page break
+both, and is not this one — the halves you can see are the ones it could not safely join. Say nothing
+about it.
+
+What tells you this is the case is a page break
 between the two halves, and you have to look in the HTML view to find one: it is an <hr> carrying
 role="doc-pagebreak", it announces nothing, and the flattened view shows the halves adjacent with
 nothing in between. Where the HTML puts no page break between them, the page index below is the other sign, and you need
@@ -203,6 +206,15 @@ you cannot place either half — the halves as printed are right, and an issue a
 may close. Only where both halves and the words they break between sit inside one page's own excerpt
 did the sentence break inside a page, and that is content the page did not return: a finding of the
 ordinary kind, and yours to make.
+
+One shape is the exception to that last rule, and it is easy to mistake for a typo: a word with a
+hyphen INSIDE it, "Simi-larly" or "public serv-ices". A page turn split that word and the halves have
+already been put back together, so both of them do sit inside one page's excerpt with nothing between
+them — the page break stands immediately BEFORE the paragraph holding the joined word, not inside it,
+which is the opposite of the sign described above. Do not look for a marker between the halves; the
+hyphen mid-word is itself the sign. It is what the source printed, and it is kept because nothing can
+tell a hyphen printed to fill a line from one that belongs to the word. Say nothing about it, and never
+ask for it to be closed up or for the hyphen to be deleted.
 
 Treat a table that reports [0 rows], a [Field ...] with nothing announced after it, and an
 [Image] [alt missing] as evidence of a real problem. Do NOT report these, which are correct

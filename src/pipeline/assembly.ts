@@ -4,6 +4,7 @@ import { namespaceAnchors, type AnchorReport } from "./anchors.ts";
 import { stripDeprecatedRoles, type RoleStrip } from "./roles.ts";
 import { stripNestedMain, type MainStrip } from "./landmarks.ts";
 import { joinContinuedTables } from "./tables.ts";
+import { joinPageBreakProse, type ProseJoinReport } from "./prose.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PipelineContext } from "./context.ts";
 
@@ -42,17 +43,42 @@ export function assembleBody(fragments: Fragment[]): string {
 // to happen after the join for a reason of its own: `wrapDocument` below is what supplies the
 // document's `main`, so whether a fragment's own one is a duplicate is a fact about the
 // assembled document rather than about the page that wrote it.
+//
+// A sentence the source printed across a page turn is mended here too (prose.ts, issue #248), and
+// this is the one stage that CAN, for two facts that exist here and nowhere downstream. A page that
+// came back empty is dropped from the body and is then visible only as a hole in `order`, and the
+// rule must decline across it — that page may be holding the middle of the sentence. And a page the
+// namespacing had to skip is being delivered byte for byte, which only `report.skipped_pages` says.
+// Everything after this point sees one string with the pages' provenance already spent.
+//
+// A page that FAILED extraction is not one of those facts, which is worth saying because it looks
+// like it should be: it ships a `@page-failed` comment (extraction.ts), so `order` stays contiguous
+// and the comment itself stands between the halves as a node the join declines at.
 export function assembleBodyWithReport(fragments: Fragment[]): {
   body: string;
   anchors: AnchorReport;
   deprecatedRoles: RoleStrip;
   mains: MainStrip;
+  prose: ProseJoinReport;
 } {
   const ordered = [...fragments].sort((a, b) => a.order - b.order);
   const { pages, report } = namespaceAnchors(ordered.map((f) => ({ order: f.order, innerHtml: f.innerHtml.trim() })));
-  const joined = stripDeprecatedRoles(pages.filter((h) => h.length > 0).join("\n\n"));
+  // Empty pages are dropped before the prose join rather than after, so a page that came back with
+  // nothing is a hole in the numbering the join can see — the same shape a failed page leaves, and
+  // it wants the same answer.
+  //
+  // A page the namespacing had to skip is passed through as untouchable: it is being delivered byte
+  // for byte because the parser and its bytes disagree about its structure, and a pass that reads
+  // that structure to find the paragraph at the page's edge would be reading the half of the
+  // disagreement a browser will not honour.
+  const skipped = new Set(report.skipped_pages);
+  const kept = pages
+    .map((html, i) => ({ order: ordered[i]!.order, html, asWritten: skipped.has(ordered[i]!.order) }))
+    .filter((p) => p.html.length > 0);
+  const prose = joinPageBreakProse(kept);
+  const joined = stripDeprecatedRoles(prose.pages.join("\n\n"));
   const mains = stripNestedMain(joined.html);
-  return { body: mains.html, anchors: report, deprecatedRoles: joined, mains };
+  return { body: mains.html, anchors: report, deprecatedRoles: joined, mains, prose: prose.report };
 }
 
 // The language the shell declares, read off the body instead of assumed. `lang="en"` on a document
@@ -328,7 +354,7 @@ export async function runAssembly(
   fragments: Fragment[],
   opts: { unresolved?: string[] } = {},
 ): Promise<AssemblyResult> {
-  const { body: joinedPages, anchors, deprecatedRoles, mains } = assembleBodyWithReport(fragments);
+  const { body: joinedPages, anchors, deprecatedRoles, mains, prose } = assembleBodyWithReport(fragments);
   // A table the source printed across a page break arrives here as two tables, and this is the
   // first moment both halves exist in one string — each page was extracted alone, so the agent that
   // wrote the second half had nothing to append to (#239). The join belongs on THIS side of the
@@ -420,6 +446,33 @@ export async function runAssembly(
       downgraded: mains.downgraded,
       dropped: mains.dropped,
       declined: mains.declined,
+    });
+  }
+  // Logged when at least one page turn looked like a sentence carrying on, joined or not — not on
+  // every multi-page document, since `markers` alone says only that the pages were numbered. The
+  // declines are the half worth reading: `candidates` far above `joined` on a document means the
+  // rule is refusing work it could be doing, and each reason says which refusal it was. `markers`
+  // is here as the denominator, because "13 joins" means nothing without how many turns there were.
+  if (prose.candidates > 0) {
+    ctx.log.event("prose_joined", {
+      stage: "assembly",
+      markers: prose.markers,
+      candidates: prose.candidates,
+      joined: prose.joined,
+      unmarked: prose.unmarked,
+      word_splits: prose.wordSplits,
+      declined_interrupted: prose.declined.interrupted,
+      declined_not_continuing: prose.declined.notContinuing,
+      declined_page_gap: prose.declined.pageGap,
+      declined_no_cut: prose.declined.noCut,
+      declined_attrs_kept: prose.declined.attrsKept,
+      declined_lang_mismatch: prose.declined.langMismatch,
+      declined_as_written: prose.declined.asWritten,
+      declined_too_far: prose.declined.tooFar,
+      // Bounded and only when there were any, like the anchors line's lists: the words a page turn
+      // broke in two are the shape a human checks by eye, and a count of them cannot be checked
+      // against anything.
+      ...(prose.wordSplitExamples.length ? { word_split_examples: prose.wordSplitExamples } : {}),
     });
   }
   if (anchors.collisions.length > 0 || anchors.ambiguous.length > 0) {
