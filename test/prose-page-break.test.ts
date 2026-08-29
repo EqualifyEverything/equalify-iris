@@ -82,6 +82,20 @@ test("a word the printer broke keeps its hyphen and is closed up", () => {
   assert.deepEqual(report.wordSplitExamples, ["Simi-larly,"]);
 });
 
+test("a broken word is closed up on a fragment that is not on one line", () => {
+  // Pretty-printed HTML is what a model emits, and nothing between the extractor and here collapses
+  // it, so the tail arrives as "Simi-\n  ". Left in, the document says "Simi- larly" — WORSE than the
+  // split it replaced, because a screen reader still reads "Simi", pause, "larly", and now there is
+  // no page-break announcement to explain the pause.
+  const { pages, report } = join(
+    page(73, "<p>\n  Only 12 States tax tourist courts. Simi-\n</p>"),
+    page(74, "<p>\n  larly, the more populous States do not tax them at all.\n</p>"),
+  );
+  assert.equal(report.wordSplits, 1);
+  assert.equal(/Simi-\s+larly/.test(pages[1]!), false, "whitespace was left between the halves");
+  assert.match(text(pages[1]!), /^Simi-larly, the more populous/);
+});
+
 test("the emptied paragraph goes rather than shipping as an empty <p>", () => {
   const { pages } = join(page(73, "<p>Receipts follow.</p>", TAIL), page(74, HEAD));
   // The whole of the tail paragraph moved, so nothing of it is left to hold.
@@ -277,6 +291,22 @@ test("a whole unnamed paragraph with no sentence end in it moves entire", () => 
   assert.match(pages[1]!, /<p>the rate for tourist courts varies by county\.<\/p>/);
 });
 
+test("only a few words may cross a marker, so a page cannot empty itself into the next one", () => {
+  // The direction is justified by what it costs a reader following `#page-74`: a few words of page 73
+  // before page 74's own text. A paragraph with no sentence boundary in it moves ENTIRE, which for a
+  // page of unpunctuated prose is that page's whole text delivered after the NEXT page's anchor —
+  // not a few words, and not what the direction was chosen for.
+  const long = `<p>${"the rate for tourist courts and motels ".repeat(20)}</p>`;
+  const { pages, report } = join(page(73, long), page(74, "<p>varies by county.</p>"));
+  assert.equal(report.candidates, 1);
+  assert.equal(report.joined, 0);
+  assert.equal(report.declined.tooFar, 1);
+  assert.match(pages[0]!, /id="page-73">\n<p>the rate for tourist courts/);
+  // And the bound is generous against what it has to allow: a real sentence's tail is nowhere near it.
+  const sentence = `<p>Receipts follow. ${"the rate for tourist courts and motels ".repeat(8)}</p>`;
+  assert.equal(join(page(73, sentence), page(74, "<p>varies by county.</p>")).report.joined, 1);
+});
+
 test("a document with nothing to join comes back byte-identical", () => {
   const pages = [
     page(1, "<h1>Report</h1>", "<p>Receipts are shown below.</p>"),
@@ -312,8 +342,9 @@ test("the join happens in assembly, where a missing page is still visible", () =
 });
 
 test("a page that came back empty is a hole the join declines across", () => {
-  // An empty fragment is dropped from the body, exactly as a failed page's absence is, so the two
-  // reach the join as the same shape and get the same answer.
+  // An empty fragment is dropped from the body (#194), so the only trace of that page is the hole in
+  // the numbering — the fact that exists at this stage and nowhere downstream, and the reason the
+  // join lives here.
   const { prose } = assembleBodyWithReport([
     fragment(73, `${marker(73)}\n<p>Receipts. The rate</p>`),
     fragment(74, "   "),
@@ -322,6 +353,22 @@ test("a page that came back empty is a hole the join declines across", () => {
   assert.equal(prose.candidates, 1);
   assert.equal(prose.joined, 0);
   assert.equal(prose.declined.pageGap, 1);
+});
+
+test("a page that FAILED extraction declines as an interruption, not as a gap", () => {
+  // A failed page is not an absence: `extraction.ts` gives it the `@page-failed` comment, so it is a
+  // fragment, the numbering stays contiguous, and the comment itself is a node standing between the
+  // halves. Same refusal either way; different reason on the log line, and the reason is what an
+  // operator reads.
+  const { prose } = assembleBodyWithReport([
+    fragment(73, `${marker(73)}\n<p>Receipts. The rate</p>`),
+    fragment(74, "<!-- @page-failed 74: extraction failed -->"),
+    fragment(75, `${marker(75)}\n<p>varies by county.</p>`),
+  ]);
+  assert.equal(prose.candidates, 1);
+  assert.equal(prose.joined, 0);
+  assert.equal(prose.declined.pageGap, 0);
+  assert.equal(prose.declined.interrupted, 1);
 });
 
 test("the run log says how many turns there were, how many were joined, and why the rest were not", async () => {

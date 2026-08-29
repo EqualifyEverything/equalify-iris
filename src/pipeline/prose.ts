@@ -24,6 +24,10 @@ import { cutPoints } from "./sections.ts";
 // AFTER the sentence it should open on, which costs that reader the beginning of it. A few words of
 // provenance drift is the cheaper mistake.
 //
+// "A few words" is held to rather than hoped for: `MAX_MOVED_CHARS` bounds what may cross a marker,
+// because the one shape that would move a whole page's text is a paragraph with no sentence boundary
+// in it, and the argument above does not cover that.
+//
 // Nothing is created and nothing is dropped: every character of both halves is delivered, in order,
 // and the only edit is which element holds them. That includes the hyphen a word-split leaves
 // behind — see `joinAt`.
@@ -56,13 +60,18 @@ export interface ProseJoinReport {
   declined: {
     // Something other than a `<p>` stands immediately before the marker — a footnote list, in all
     // 9 of the measured cases. The marker is then not what interrupts the sentence, and moving
-    // text across the notes would reorder the page.
+    // text across the notes would reorder the page. A page that failed extraction lands here too:
+    // its fragment is the `@page-failed` comment, which is exactly such a node.
     interrupted: number;
     // The `<p>` before the marker ends a sentence, so the lowercase start after it is something
     // else: a caption, a continued list item, a line of verse.
     notContinuing: number;
-    // A page between the halves is missing — it failed extraction, or was reported blank — so the
-    // middle of the sentence may be what is missing and these two edges do not meet.
+    // A page between the halves returned nothing at all, so the middle of the sentence may be what
+    // is missing and these two edges do not meet. Narrower than "a page is missing": a page that
+    // FAILED extraction ships a `@page-failed` comment (extraction.ts), which is a node standing
+    // between the halves and declines as `interrupted` above. What reaches here is the page that
+    // came back empty with no marker at all (#194) — dropped from the body, and then visible only
+    // as a hole in the numbering.
     pageGap: number;
     // The tail cannot be cut out without unbalancing markup: the sentence begins inside an inline
     // element that opened earlier in the paragraph, or inside a footnote reference.
@@ -83,6 +92,14 @@ export interface ProseJoinReport {
     // that structure to find the paragraph at its edge is reading the half of the disagreement the
     // browser will not honour, so it keeps its hands off the page entirely.
     asWritten: number;
+    // More text would cross the marker than moving it forward can be justified for. The argument for
+    // that direction is that it costs a reader following `#page-74` a few words of page 73 — and
+    // where the paragraph has no sentence boundary in it at all the WHOLE of it moves, so a page of
+    // unpunctuated prose would deliver its entire text after the next page's anchor, which is not a
+    // few words and not what the direction was chosen for. The bound is on the characters moved
+    // rather than on that shape alone, since a single sentence long enough to reach it costs the
+    // same reader the same thing.
+    tooFar: number;
   };
   // The joined words, for the two the corpus had and any others: a word split across a page turn is
   // the shape worth eyeballing, and the count alone cannot be checked against the document. Text
@@ -93,15 +110,31 @@ export interface ProseJoinReport {
 
 const MAX_EXAMPLES = 5;
 const MAX_EXAMPLE_CHARS = 40;
+// How much text may cross a marker. Generous against what it has to allow — the longest tail in the
+// reference corpus is a fraction of this, and a sentence needing more than 500 characters of it
+// after the last full stop is not a sentence in the prose this runs on — and it is the whole of the
+// guard against the shape the direction was NOT chosen for: a paragraph with no sentence boundary in
+// it moves entire, so without a bound a page of unpunctuated prose ships its text after the next
+// page's anchor. Counted when it bites (`tooFar`), so a corpus that wants a different number says so.
+const MAX_MOVED_CHARS = 500;
 
-export function emptyProseJoin(): ProseJoinReport {
+function emptyProseJoin(): ProseJoinReport {
   return {
     markers: 0,
     candidates: 0,
     joined: 0,
     unmarked: 0,
     wordSplits: 0,
-    declined: { interrupted: 0, notContinuing: 0, pageGap: 0, noCut: 0, attrsKept: 0, langMismatch: 0, asWritten: 0 },
+    declined: {
+      interrupted: 0,
+      notContinuing: 0,
+      pageGap: 0,
+      noCut: 0,
+      attrsKept: 0,
+      langMismatch: 0,
+      asWritten: 0,
+      tooFar: 0,
+    },
     wordSplitExamples: [],
   };
 }
@@ -331,6 +364,13 @@ export function joinPageBreakProse(pages: PageHtml[]): { pages: string[]; report
       report.declined.noCut += 1;
       continue;
     }
+    // Measured on the moved TEXT, not on its markup: what a reader following the next page's anchor
+    // has to listen through before reaching that page is words, and a tail carrying a footnote
+    // reference is mostly tag.
+    if (words(scan(split.tail)).length > MAX_MOVED_CHARS) {
+      report.declined.tooFar += 1;
+      continue;
+    }
     // The whole paragraph would move, and it carries something the move cannot take with it. Its
     // `lang` and `dir` can go, since the paragraph it joins was just held to the same ones.
     if (!split.head.trim() && [...tailAttrs.keys()].some((a) => !TRAVELS.has(a))) {
@@ -369,9 +409,16 @@ export function joinPageBreakProse(pages: PageHtml[]): { pages: string[]; report
 // printed. What the join fixes is the interruption: a reader hears "Simi-larly" as one word instead
 // of hearing "Simi", a page-break announcement, and then "larly". Whether the hyphen can be decided
 // after all is a separate question, and `word_splits` in the run log is what makes it answerable.
+//
+// Both branches trim the whitespace at the seam, and the word-split branch has to: a fragment's `<p>`
+// is not on one line — pretty-printed HTML is what a model emits, and nothing between the extractor
+// and here collapses it — so the tail arrives as "Simi-\n  ". Left in, the delivered document says
+// "Simi- larly", which is WORSE than the split it replaced: a screen reader still reads "Simi",
+// pause, "larly", and now there is no page-break announcement to explain the pause.
 function joinAt(tail: string, head: string, joinedWord: boolean): string {
-  if (joinedWord) return tail + head.replace(/^\s+/, "");
-  return tail.replace(/\s+$/, "") + " " + head.replace(/^\s+/, "");
+  const closed = tail.replace(/\s+$/, "");
+  const rest = head.replace(/^\s+/, "");
+  return joinedWord ? closed + rest : `${closed} ${rest}`;
 }
 
 // The word the two halves make, for the log: the last word of the tail and the first of the head,

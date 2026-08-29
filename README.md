@@ -818,18 +818,24 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   about what a page anchor means rather than a detail — `<hr>` cannot sit inside a `<p>`, so text has
   to cross the marker one way or the other, and moving the tail forward leaves `#page-74` standing
   immediately before a whole sentence, where pulling the next page's head back would land that anchor
-  *after* the sentence it should open on. A word the printer broke **keeps its hyphen** and is closed
+  *after* the sentence it should open on. "A few words" is held to rather than hoped for: at most 500
+  characters may cross a marker, because a paragraph with no sentence boundary in it moves *entire*,
+  and for a page of unpunctuated prose that would be the whole page's text delivered after the next
+  page's anchor — which the argument for the direction does not cover. A word the printer broke
+  **keeps its hyphen** and is closed
   up: nothing at this seam can tell "Simi-" + "larly" from "public-" + "sector", `agents/page.md`
   answers the same wall from the page's side the same way, and dropping it would be the one place this
   pass deleted a character the source printed — so what is fixed is the interruption, and
   `word_splits` in the log is what would let a later pass decide the hyphen with data. What it refuses
   matters more than what it joins, and each refusal is counted: a footnote list between the halves (9
-  of the 22 — the marker is then not what interrupts the sentence), a missing page between them (the
-  middle of the sentence may be what is missing, and only this stage can tell, because a failed page
-  leaves no trace in the body but a hole in the page numbering), a sentence beginning inside an inline
-  element that opened earlier, two paragraphs disagreeing about `lang`, a paragraph carrying an `id`
-  something may refer to, and a page being shipped byte for byte because the parser and its bytes
-  disagree about it. The lowercase test has no signal in Hangul, Chinese, Japanese, Arabic or Hebrew,
+  of the 22 — the marker is then not what interrupts the sentence, and a page that *failed* extraction
+  is the same shape, since its `@page-failed` comment is a node standing between them), a page between
+  them that returned nothing at all (the middle of the sentence may be what is missing, and only this
+  stage can tell, because an empty fragment is dropped from the body and leaves nothing but a hole in
+  the page numbering), a sentence beginning inside an inline element that opened earlier, two
+  paragraphs disagreeing about `lang`, a paragraph carrying an `id` something may refer to, a page
+  being shipped byte for byte because the parser and its bytes disagree about it, and more text than
+  the bound above. The lowercase test has no signal in Hangul, Chinese, Japanese, Arabic or Hebrew,
   so those sentences still ship split — a join missed rather than a join got wrong, and left there
   because the 22 were measured on an English corpus. Logged as `prose_joined`.
 - **A page the document has no content for is reported once, not once per chunk.** Two kinds of

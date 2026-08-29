@@ -45,10 +45,15 @@ export function assembleBody(fragments: Fragment[]): string {
 // assembled document rather than about the page that wrote it.
 //
 // A sentence the source printed across a page turn is mended here too (prose.ts, issue #248), and
-// this is the one stage that CAN: the rule declines a join across a page that is missing, and the
-// only trace a missing page leaves is a hole in `order` — which exists here and nowhere downstream,
-// because a failed page contributes no fragment to the body at all. Everything after this point
-// sees one string with the pages' provenance already spent.
+// this is the one stage that CAN, for two facts that exist here and nowhere downstream. A page that
+// came back empty is dropped from the body and is then visible only as a hole in `order`, and the
+// rule must decline across it — that page may be holding the middle of the sentence. And a page the
+// namespacing had to skip is being delivered byte for byte, which only `report.skipped_pages` says.
+// Everything after this point sees one string with the pages' provenance already spent.
+//
+// A page that FAILED extraction is not one of those facts, which is worth saying because it looks
+// like it should be: it ships a `@page-failed` comment (extraction.ts), so `order` stays contiguous
+// and the comment itself stands between the halves as a node the join declines at.
 export function assembleBodyWithReport(fragments: Fragment[]): {
   body: string;
   anchors: AnchorReport;
@@ -463,6 +468,7 @@ export async function runAssembly(
       declined_attrs_kept: prose.declined.attrsKept,
       declined_lang_mismatch: prose.declined.langMismatch,
       declined_as_written: prose.declined.asWritten,
+      declined_too_far: prose.declined.tooFar,
       // Bounded and only when there were any, like the anchors line's lists: the words a page turn
       // broke in two are the shape a human checks by eye, and a count of them cannot be checked
       // against anything.
