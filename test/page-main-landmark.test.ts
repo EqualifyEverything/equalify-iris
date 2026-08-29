@@ -383,10 +383,24 @@ test("the reader is told what it cannot see, so it does not report the shell as 
   // top-level elements carry a `lang`, the derivation is refused and the root is `en`, so the
   // unlabelled Korean is the failure — the opposite of what a looser "the language they agree on"
   // reading would tell the Reader to do.
+  //
+  // Unanimity alone is not the condition either, which is what the version before this one still
+  // had wrong: every element's value goes through `preferredTag`, so agreement is on the LANGUAGE
+  // and not on the string (`lang="ko"` next to `lang="kor"` derives `ko`), and a value that is not
+  // a usable tag derives nothing however unanimous it is. Both spellings named below are measured:
+  // a body whose top-level elements all say `lang="Korean"`, and one where they all say
+  // `lang="ko_KR"`, each come back `null` and ship `en`. Told only "unanimous", the Reader would
+  // read that document as declaring Korean and suppress the report on Korean prose that is in fact
+  // being announced in English.
   assert.match(
     flat,
-    /the shell declares a language when EVERY top-level element of this body carries that same lang, and English in every other case — including where only some of them carry one/,
-    "the reader must be given bodyLang's all-or-none condition, not a looser paraphrase of it",
+    /the shell declares a language when EVERY top-level element of this body names that same language with a real language tag — ko or kor, never Korean or ko_KR — and English in every other case, including where only some of them carry one/,
+    "the reader must be given bodyLang's whole condition: unanimous, and a usable tag",
+  );
+  assert.match(
+    flat,
+    /including where they agree on something that is not a tag/,
+    "a unanimous but malformed lang derives nothing, and the reader is told so",
   );
   assert.match(flat, /content in the language the document ends up declaring needs no lang attribute of its own/);
   assert.match(
