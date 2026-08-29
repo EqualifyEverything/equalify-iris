@@ -81,9 +81,9 @@ export interface LintResult {
   // whole thing would put a page of jsdom internals in every session's run log.
   errorName?: string;
   errorStack?: string;
-  // Attributes in the linted document whose NAMES no valid markup produces, removed from the
-  // lint's own copy of it before axe ran (see `dropUnusableAttributes`) and counted here.
-  // ABSENT rather than zero on the ordinary document, so a line carrying it means something.
+  // Attributes in the linted document whose NAMES no valid markup produces (see
+  // `malformedAttributes`). ABSENT rather than zero on the ordinary document, so a line carrying it
+  // means something.
   //
   // Reported, not merely dropped, because the name is evidence about a bug one stage earlier and
   // there is no other symptom of it. An attribute called `1\"` is not something a page agent
@@ -93,10 +93,16 @@ export interface LintResult {
   // dead target for every cross-page reference to it (#233, #234, #257). Two of those three are
   // findable only by reading the document; this one is now a number on a log line.
   malformedAttributes?: number;
+  // How many of those had to be taken out of the lint's own copy of the document for axe to run at
+  // all, which is a much smaller number and usually zero (absent when it is). Kept separate because
+  // the two say different things: the count above is a measurement of a leak upstream, and this is
+  // the one fact that makes the linted document differ from the delivered one. A run with this set
+  // is a run that would otherwise have had NO verdict on any page.
+  malformedAttributesRemoved?: number;
   // A bounded sample of the names, on the same argument as `LintNode.examples`: a count says how
   // much debris there is and a name says which leak made it, and the escaping shape is the whole
   // diagnosis. Bounded and cut for the same reason the node excerpts are — these are characters
-  // out of a user's document, and this field is logged.
+  // out of a user's document, and this field is logged. Any that were removed come first.
   malformedAttributeNames?: string[];
 }
 
@@ -183,7 +189,53 @@ export function lintErrorFields(lint: LintResult): Record<string, string> {
 // `9\"` and `1x` are attributes as far as the DOM is concerned, and neither is a name any
 // standard, framework or page agent produces. Nothing accessible is spelled outside this shape:
 // `aria-*`, `data-*`, `xml:lang`, `role`, `for`, `scope` and `headers` all match it.
-const ATTRIBUTE_NAME = /^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/;
+//
+// Non-ASCII is inside the shape, matching the escape algorithm below, which passes every code unit
+// at or above U+0080 through untouched: `data-título` is a legal custom attribute and counting it
+// as debris would put noise into the one number that answers "is the upstream leak fixed?".
+const ATTRIBUTE_NAME = /^[a-zA-Z_:\u0080-\uffff][-a-zA-Z0-9_:.\u0080-\uffff]*$/;
+
+// axe's own `escapeSelector` (node_modules/axe-core/axe.js), which is the CSS.escape algorithm and
+// is what axe puts through the selector engine — ported rather than called because jsdom has no
+// `CSS.escape` and axe's copy only exists inside a window that has already had axe injected into
+// it, which is after the point this has to run. Exported for the test that checks the port and the
+// predicate below against the real engine, name by name.
+export function escapeAttributeName(name: string): string {
+  let out = "";
+  for (let i = 0; i < name.length; i++) {
+    const c = name.charCodeAt(i);
+    if (c === 0) out += "\ufffd";
+    else if (
+      (c >= 1 && c <= 31) ||
+      c === 127 ||
+      (i === 0 && c >= 48 && c <= 57) ||
+      (i === 1 && c >= 48 && c <= 57 && name.charCodeAt(0) === 45)
+    ) {
+      // The only branch that emits a HEX escape, and so the only one that can produce the shape
+      // the selector engine chokes on. The trailing space terminates the escape.
+      out += `\\${c.toString(16)} `;
+    } else if (i === 0 && name.length === 1 && c === 45) out += `\\${name[i]}`;
+    else if (c >= 128 || c === 45 || c === 95 || (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122))
+      out += name[i];
+    else out += `\\${name[i]}`;
+  }
+  return out;
+}
+
+// Whether a selector carrying this attribute name is one nwsapi cannot compile — i.e. whether this
+// name, and not merely a malformed one, is what takes the rule set offline.
+//
+// nwsapi compiles a selector into JavaScript source and evaluates it with `Function`, whose body is
+// strict, and it splices an attribute name in with its CSS escapes still on it. A backslash
+// followed by a decimal digit is an octal (or non-octal-decimal) escape there, which is a
+// SyntaxError in strict mode — so the test is exactly that shape in the escaped name, and nothing
+// broader. `aria-label\"note\"` compiles; `\31 x` does not.
+//
+// Every name outside `ATTRIBUTE_NAME` is debris and gets counted, but only these are REMOVED,
+// because removing an attribute takes rules away with it (see `malformedAttributes`).
+export function breaksSelectorEngine(name: string): boolean {
+  return /\\[0-9]/.test(escapeAttributeName(name));
+}
 // How many of the names are kept, and how much of each. Same bound and the same reason as the node
 // excerpts below: this is content out of a user's document and it goes in a log line. Short,
 // because a name is an identifier and the leaks that produce these are recognisable in a few
@@ -192,50 +244,73 @@ const ATTRIBUTE_NAME = /^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/;
 export const MAX_MALFORMED_NAMES = 3;
 export const MALFORMED_NAME_CHARS = 40;
 
-// Take the attributes no valid markup produces out of the document about to be linted, and say
-// which they were.
+// Count the attributes in the document about to be linted whose names no valid markup produces,
+// and take out the ones that would stop axe running at all.
 //
-// This exists because two of them take the accessibility check offline for the WHOLE document
-// (#257). axe needs a unique CSS path for each element it reports; where an id is unusable and a
-// similar sibling has to be disambiguated it enumerates attributes instead, and a name beginning
-// with a digit escapes to its hex codepoint — `9\"` becomes `\39 \\\"`. nwsapi compiles that
-// selector into JavaScript source, where `\39` is an octal escape, which is a SyntaxError in
-// strict mode. The rule set dies with it: measured on a real corpus, 6 delivered 25-page documents
-// went entirely unlinted — every defect on all 150 pages unexamined — because of an attribute on
-// an `<hr>`. Since #167 that is at least reported as no verdict rather than as a pass, but the
-// document still ships and nothing defended the check itself.
+// The removal exists because two such attributes take the accessibility check offline for the
+// WHOLE document (#257). axe needs a unique CSS path for each element it reports; where an id is
+// unusable and a similar sibling has to be disambiguated it enumerates attributes instead, and a
+// name beginning with a digit escapes to its hex codepoint — `9\"` becomes `\39 \\\"`. nwsapi
+// compiles that selector into JavaScript source, where `\39` is an octal escape, which is a
+// SyntaxError in strict mode. The rule set dies with it: measured on a real corpus, 6 delivered
+// 25-page documents went entirely unlinted — every defect on all 150 pages unexamined — because of
+// an attribute on an `<hr>`. Since #167 that is at least reported as no verdict rather than as a
+// pass, but the document still ships and nothing defended the check itself.
 //
 // It takes TWO such elements, because axe builds the attribute selector only when it must
-// disambiguate, and a digit-leading name, because only those escape to something that looks like
-// an octal escape. In a 25-page document with a page-break marker per page, two corrupted markers
-// is the ordinary case rather than the unlucky one — which is why 6 of the 7 corrupted documents
-// found were unlintable and only one squeaked through.
+// disambiguate. In a 25-page document with a page-break marker per page, two corrupted markers is
+// the ordinary case rather than the unlucky one — which is why 6 of the 7 corrupted documents found
+// were unlintable and only one squeaked through.
+//
+// COUNTED WIDELY, REMOVED NARROWLY, and the gap between the two is the point. Removing an attribute
+// takes the rules that read it away with it, and some rules fire BECAUSE a name is malformed: a
+// page answer that loses one quote (`aria-label"Note"`) is a single attribute named
+// `aria-label"note"`, which `aria-valid-attr` reports — critical, wcag2a, wcag412 — because its
+// matcher is a prefix test on the raw name. Measured on this repo's own `runAxe`: with that
+// attribute removed, a document that failed the gate on a critical WCAG A rule passes it clean,
+// with a number on a log line as the only trace, and `/v1/quality` counts it among
+// `documents_linted` with no rule against it. So removal is limited to the names the selector
+// compiler actually chokes on (`breaksSelectorEngine`, which is the escape shape and nothing
+// broader), and every other malformed name is left where it is and counted. Nothing is given up:
+// a name that escapes to `\<hex>` begins with a digit, a control character or `-`, so it can never
+// be an `aria-` or `data-` attribute, and no rule reads it.
 //
 // Safe because of WHERE it happens: this is the throwaway DOM `runAxe` parsed from a string for
 // its own use, and nothing is ever serialized out of it. The delivered document is the string the
 // caller still holds, and it keeps every byte it had — that this pipeline does not rewrite a
 // user's markup on the way past is the same rule `anchors.ts` declines reserialization for.
 //
-// What the strip does cost is evidence, and this is the reason for reporting it rather than only
+// What a removal does cost is evidence, and that is the reason for reporting rather than only
 // doing it: a violation's `html` excerpt is axe's serialization of the node, and jsdom's serializer
 // does NOT drop these attributes (verified — `<hr 9\"="" id="a">` round-trips through `outerHTML`
-// intact), so before the strip the excerpt was the one place the debris was visible to anybody. A
-// count and a sample of the names replaces that with something a person can grep for.
-function dropUnusableAttributes(document: Document): { count: number; names: string[] } {
+// intact), so before this the excerpt was the one place the debris was visible to anybody. A count
+// and a sample of the names replaces that with something a person can grep for.
+function malformedAttributes(document: Document): { count: number; removed: number; names: string[] } {
   let count = 0;
-  const names: string[] = [];
+  let removed = 0;
+  // Kept apart so the sample can lead with the names that changed what axe was shown; a document
+  // with debris on every page would otherwise fill three slots before reaching the one that
+  // mattered. Each list is bounded on its own, because a name is a string out of a user's document
+  // and there can be thousands of them.
+  const removedNames: string[] = [];
+  const keptNames: string[] = [];
   for (const element of document.querySelectorAll("*")) {
     // Snapshotted, because removing an attribute changes the live list this is walking.
     for (const name of element.getAttributeNames()) {
       if (ATTRIBUTE_NAME.test(name)) continue;
-      element.removeAttribute(name);
       count++;
-      if (names.length < MAX_MALFORMED_NAMES) {
-        names.push(name.length <= MALFORMED_NAME_CHARS ? name : `${name.slice(0, MALFORMED_NAME_CHARS)}…`);
+      const breaks = breaksSelectorEngine(name);
+      if (breaks) {
+        element.removeAttribute(name);
+        removed++;
+      }
+      const into = breaks ? removedNames : keptNames;
+      if (into.length < MAX_MALFORMED_NAMES) {
+        into.push(name.length <= MALFORMED_NAME_CHARS ? name : `${name.slice(0, MALFORMED_NAME_CHARS)}…`);
       }
     }
   }
-  return { count, names };
+  return { count, removed, names: [...removedNames, ...keptNames].slice(0, MAX_MALFORMED_NAMES) };
 }
 
 // The `malformed_attribute*` half of a log line, shared for the reason `lintErrorFields` is: three
@@ -251,6 +326,7 @@ export function lintDebrisFields(lint: LintResult): Record<string, string | numb
   if (!lint.malformedAttributes) return {};
   return {
     malformed_attributes: lint.malformedAttributes,
+    ...(lint.malformedAttributesRemoved ? { malformed_attributes_removed: lint.malformedAttributesRemoved } : {}),
     ...(lint.malformedAttributeNames?.length ? { malformed_attribute_names: lint.malformedAttributeNames } : {}),
   };
 }
@@ -402,11 +478,11 @@ export function isKnownLanguage(subtag: string): boolean {
 // and #164 both saw, and it killed the whole run of the rule set: one such attribute
 // anywhere in a 25-page document and the gate had no answer for any of it.
 //
-// `dropUnusableAttributes` now takes those names out of the lint's own copy of the document
-// before axe walks it, so the gate survives markup it cannot describe (#257) and reports the
-// debris it found instead of a SyntaxError. The reporting below is what remains for whatever
-// fails next: the defence is specific to one cause, and a gate that returns no verdict has to
-// stay chaseable.
+// `malformedAttributes` now takes exactly those names out of the lint's own copy of the
+// document before axe walks it, so the gate survives markup it cannot describe (#257), and
+// counts every malformed name — including the ones it leaves alone, which are the majority and
+// which rules still read. The reporting below is what remains for whatever fails next: the
+// defence is specific to one cause, and a gate that returns no verdict has to stay chaseable.
 //
 // `axe-core` and `jsdom` are pinned to exact versions in package.json rather than
 // carried on a caret range, and this function is the reason. It is a GATE: what it
@@ -432,10 +508,15 @@ export async function runAxe(html: string): Promise<LintResult> {
   // Before axe sees a tree, and reported on every result below — including the failures, since a
   // document that broke the gate some OTHER way is exactly the one whose debris count is worth
   // reading. A `parse` failure above cannot carry it: there is no document to have looked at.
-  const debris = dropUnusableAttributes(dom.window.document);
-  const found: Pick<LintResult, "malformedAttributes" | "malformedAttributeNames"> = debris.count
-    ? { malformedAttributes: debris.count, malformedAttributeNames: debris.names }
-    : {};
+  const debris = malformedAttributes(dom.window.document);
+  const found: Pick<LintResult, "malformedAttributes" | "malformedAttributesRemoved" | "malformedAttributeNames"> =
+    debris.count
+      ? {
+          malformedAttributes: debris.count,
+          ...(debris.removed ? { malformedAttributesRemoved: debris.removed } : {}),
+          malformedAttributeNames: debris.names,
+        }
+      : {};
 
   // The two node fields are `unknown` rather than `string`/`string[]`: they cross a realm
   // boundary out of jsdom and nothing here validates them, so they are narrowed where they are

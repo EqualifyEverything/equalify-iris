@@ -95,9 +95,12 @@ test("the document that used to take the gate offline now lints, and says what i
   assert.equal(lint.error, undefined, "the octal-escape failure is back on the document it was fixed for");
   assert.deepEqual(lint.violations, [], "the gate ran but on a different document than the one handed to it");
   // Both `1x=""` attributes, counted rather than silently dropped: the debris is evidence of a
-  // leak one stage earlier and the count is the only symptom it has. Pinned in full, with the
-  // names and the boundary of what the strip touches, in test/lint-malformed-attributes.test.ts.
+  // leak one stage earlier and the count is the only symptom it has. Removed as well as counted,
+  // which is the narrower thing and the whole reason this document lints now — a digit-leading name
+  // is one the selector compiler cannot take. Pinned in full, with the names and the boundary
+  // between counted and removed, in test/lint-malformed-attributes.test.ts.
   assert.equal(lint.malformedAttributes, 2);
+  assert.equal(lint.malformedAttributesRemoved, 2);
 
   const clean = await runAxe(wrapDocument(COMPILABLE));
   assert.deepEqual(clean.violations, [], "the same document without that attribute lints differently");
