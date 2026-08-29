@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { parse } from "yaml";
 
 // GitHub parses each `run:` block as a single expression and refuses one longer than
@@ -17,7 +17,29 @@ import { parse } from "yaml";
 // added paragraph of issue-body prose spends some of it.
 const MAX_RUN_LENGTH = 21_000;
 
-const DIR = join(import.meta.dirname, "..", ".github", "workflows");
+// A warning band, because the ceiling on its own arrives at the worst moment. Pass/fail at
+// 21,000 means the first PR to discover the limit exists is one editing whichever block is
+// already closest to it, and that PR has to relocate the overflow then and there. The
+// diagnostic below prints every block past this share of the ceiling on every run, so the
+// heads-up arrives while there is still room to act on it. It does not fail: a long block
+// is not a defect, and a test that failed here would be a test asking for prose to be cut
+// from a workflow whose reasoning is the point of it.
+const WARN_AT = 0.85;
+
+// Everything GitHub parses, not just `.github/workflows`. The ceiling applies to any `run:`
+// scalar it reads, and a composite action under `.github/actions/**` would carry those too —
+// that directory does not exist today, which is exactly why scoping the scan to the one
+// place blocks live now would go stale without anything noticing. `.github/ISSUE_TEMPLATE`
+// is swept up harmlessly: an issue form has no `run:` key, so it contributes nothing.
+const DIR = join(import.meta.dirname, "..", ".github");
+
+function yamlFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) return yamlFiles(p);
+    return /\.ya?ml$/.test(e.name) ? [p] : [];
+  });
+}
 
 // Measured on the PARSED value, not on the file's bytes. The difference decides whether
 // this test is true: block-scalar indentation is not part of the string GitHub sees, and
@@ -36,20 +58,27 @@ function runBlocks(node: unknown, path: string[] = []): { path: string; run: str
   return [];
 }
 
-test("no workflow step's run: block is near GitHub's 21,000-character ceiling", () => {
-  const files = readdirSync(DIR).filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"));
-  assert.ok(files.length > 0, "the workflows directory is where this test thinks it is");
+test("no workflow step's run: block is near GitHub's 21,000-character ceiling", (t) => {
+  const files = yamlFiles(DIR);
+  assert.ok(files.length > 0, "the .github tree is where this test thinks it is");
 
   const measured: { where: string; len: number }[] = [];
   for (const file of files) {
-    const doc = parse(readFileSync(join(DIR, file), "utf8"));
+    const doc = parse(readFileSync(file, "utf8"));
     for (const { path, run } of runBlocks(doc)) {
-      measured.push({ where: `${file} ${path}`, len: run.length });
+      measured.push({ where: `${relative(DIR, file)} ${path}`, len: run.length });
     }
   }
-  assert.ok(measured.length > 0, "and the parse found the steps in them");
+  assert.ok(measured.length > 0, "and the parse found the run: blocks in it");
 
   measured.sort((a, b) => b.len - a.len);
+  for (const m of measured) {
+    if (m.len < MAX_RUN_LENGTH * WARN_AT) break;
+    t.diagnostic(
+      `${m.where} is ${m.len} of ${MAX_RUN_LENGTH} characters ` +
+        `(${Math.round((m.len / MAX_RUN_LENGTH) * 100)}%, ${MAX_RUN_LENGTH - m.len} left)`,
+    );
+  }
   for (const m of measured) {
     // The message carries the headroom rather than only the failure, because the
     // interesting number when this trips is how much prose has to come out — or, as
