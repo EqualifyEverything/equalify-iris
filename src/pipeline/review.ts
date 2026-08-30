@@ -1373,7 +1373,8 @@ function applyEditorPatch(
   //
   // BOTH forms the source half can take count, because EDITOR_SYSTEM offers both: the block emptied
   // (`deleted`), or returned "with what is left of it" — a replacement carrying less of the document
-  // than the block it replaces (`shrunk`, which reads prose, images and links; see `gaveContentUp`).
+  // than the block it replaces (`shrunk`, which reads prose, images, links, and the navigable
+  // structure a reader finds content by; see `gaveContentUp`).
   // A rule that read only the first would let the commoner half of a move through, since a move
   // usually leaves something behind.
   //
@@ -1403,6 +1404,13 @@ function applyEditorPatch(
     // replacements that all applied is the ordinary way this contract removes duplicated content,
     // and how often that happens is worth reading on its own.
     ...(patched.shrunk ? { shrunk: patched.shrunk } : {}),
+    // Headings, list items or table rows that stopped existing while every word stayed (#271) — the
+    // loss no other reading on any line can see. Present whether or not the round was discarded, and
+    // whether or not it counted as `shrunk`: only the headings part of it does (see `GATED`), and a
+    // line carrying `navigation_lost` with no `shrunk` beside it is the population that would decide
+    // whether a fall in the other two can ever be read as damage. Nothing on file measures that rate,
+    // so it is collected here before it is acted on.
+    ...(Object.keys(patched.navigation_lost).length ? { navigation_lost: patched.navigation_lost } : {}),
     ...(discarded ? { discarded } : {}),
   });
   // `usable: false` for the same reason an unparseable reply is one — nothing came back that can

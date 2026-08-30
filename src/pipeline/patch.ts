@@ -78,11 +78,81 @@ export function stripBlockMarkers(html: string): { html: string; markers: number
 //
 // Deliberately NOT every structure count: re-levelling headings, splitting one paragraph into two
 // or turning a `<dl>` into a `<ul>` are the corrections this loop asks for, and each moves a count
-// down without taking anything out of the document.
-function gaveContentUp(before: string, after: string): boolean {
-  if (visibleText(after).length < visibleText(before).length) return true;
+// down without taking anything out of the document. Which three ARE read, and why those, is
+// `NAVIGABLE` below.
+const NAVIGABLE = ["headings", "items", "rows"] as const;
+
+export type Navigable = (typeof NAVIGABLE)[number];
+
+// The structures a reader NAVIGATES BY, whose loss is invisible to every other reading (#271).
+//
+// The third case, alongside prose and the two wordless things above. A heading rewritten as a
+// paragraph of the same words, a list flattened into one, a table's rows run together: every word
+// survives, no image or link is touched, the bytes may even grow — and what a screen-reader user
+// lost is the only means they had of finding that content, because the heading list, the "list of
+// N items" announcement and the row-by-row walk are all gone. `agents/page.md` already names this
+// shape as a hazard on the re-extraction pass, in as many words — "a level that moved, a cell's
+// list flattened, a <dl> turned back into paragraphs all arrive as this page's content, and the
+// version that had them right is not kept anywhere" — and the measured evidence for it on the
+// review path is #271: 13 of 151 bench rounds lost headings, 5 of them while losing no text at all.
+//
+// These three and not the other eight, and the other eight are excluded on the same one test that
+// decides which of the three may be READ ON ITS OWN: can a correction this loop ASKS FOR move the
+// count down while every word stays?
+//
+//   - `terms` and `definitions` are out on measurement rather than on principle. The whole-body
+//     round in `runs-231` rewrote a 55-item `<dl>` into list items, moving `terms` 55 -> 3 while its
+//     prose moved 0.3% and every word survived — the round `EDITOR_SHRINK_FLOOR` is placed off.
+//   - `cells` is out because correcting a table's headers is `<td>` -> `<th>`, which takes it down by
+//     exactly the number corrected, and that correction is in EDITOR_SYSTEM by name.
+//   - `paragraphs`, `lists`, `tables` and `captions` are container counts: two of anything the
+//     extractor split across a page turn, merged back into one, is a fall on a round that did its job.
+//
+// `headings` passes that test and is therefore the one that counts as content given up. It is folded
+// across h1-h6 by `structureCounts`, so "fix heading hierarchy" — the re-levelling EDITOR_SYSTEM
+// sanctions by name, and the case the comment above excludes the structure counts for — does not
+// move it at all. What takes it down is a heading that stops being a heading, and no other structure
+// takes over the job: a demoted heading is not the same content announced another way, it is content
+// that has left the outline. The one removal the prompt does sanction — dropping a title the pages
+// reprinted — takes that title's words with it, so it is already a prose shortfall and never reaches
+// this reading at all.
+//
+// `items` and `rows` do NOT pass it, and they are reported rather than read (#271 asked for all
+// three; this is the half of it the evidence does not support). Both are ambiguous in a way
+// `headings` is not, because the content can land in a DIFFERENT announced structure with every word
+// intact: a `<ul>` rewritten as the `<dl>` agents/page.md asks for takes `items` to 0, and a list
+// mis-extracted as a single-column table, corrected, takes `rows` to 0. Read as a loss, each would
+// report a working round as damage. Read as a measurement they are worth having — a list flattened
+// into paragraphs and a table's rows run together are real and are invisible everywhere else — and
+// what would settle whether either can gate is the rate at which a working round moves them, which
+// no round on file measures. `navigation_lost` on `editor_patch` is where that rate now comes from.
+// A grouped total was tried on paper first and does not rescue them: summing the list-ish counts
+// makes `<ul>` -> `<dl>` rise, but it makes the measured `runs-231` round fall.
+//
+// What is NOT claimed, even for headings: that a fall is damage. It is a fall the other readings
+// cannot see, which is a different thing — removing content the document printed twice is this
+// loop's job and reaches `shrunk` as a fall too. `shrunk` has never meant "wrong" (see
+// `PatchReport`), and the gate it feeds fires only where the same reply ALREADY holds a refusal.
+const GATED: readonly Navigable[] = ["headings"];
+// Reported as HOW MANY of each went, not as which kinds fell: one heading gone is a repeated title
+// resolved a little too thoroughly and 84 is a document flattened, the two want different answers,
+// and a name alone cannot tell them apart. It is also the quantity the bench already records
+// (`fidelity.headings_lost`), so the two can be read against each other.
+function gaveContentUp(before: string, after: string): { less: boolean; navigation: Partial<Record<Navigable, number>> } {
+  const prose = visibleText(after).length < visibleText(before).length;
   const [was, now] = [structureCounts(before), structureCounts(after)];
-  return now.images < was.images || now.links < was.links;
+  // Read only where the prose held, and this is the substantive half of the rule rather than an
+  // optimisation. A navigable count falling ALONGSIDE a word loss is the ordinary shape of every
+  // deletion the prompt sanctions, and that block is `shrunk` on the prose alone — so counting it
+  // here as well would put the sanctioned case and the silent one in the same number and leave
+  // neither readable. What this reports is therefore exactly the population no existing signal
+  // covers, which is also the rate #271 says it has no measurement of.
+  const navigation: Partial<Record<Navigable, number>> = {};
+  if (!prose) for (const k of NAVIGABLE) if (now[k] < was[k]) navigation[k] = was[k] - now[k];
+  return {
+    less: prose || GATED.some((k) => navigation[k]) || now.images < was.images || now.links < was.links,
+    navigation,
+  };
 }
 
 export interface BlockEdit {
@@ -124,6 +194,16 @@ export interface PatchReport {
   // left of it", which is this. The caller needs both to tell whether a reply with a refusal in it
   // may be applied in part. See `gaveContentUp` for what counts as less.
   shrunk: number;
+  // Navigable structure that stopped existing while every word stayed, summed over the applied
+  // replacements and kept per kind (#271) — the shape of loss this pipeline had no signal for at
+  // all. Empty on the ordinary round.
+  //
+  // Not simply a breakdown of `shrunk`: `headings` here is always counted there as well, and
+  // `items`/`rows` are reported without counting as content given up, for the reason `GATED` gives.
+  // So a line carrying `navigation_lost` and no `shrunk` is a round that re-expressed a list or a
+  // table — which is the population that decides whether either could ever gate, and the reason
+  // they are on the record before they are believed.
+  navigation_lost: Partial<Record<Navigable, number>>;
 }
 
 // The body as the editor is shown it: every top-level block preceded by its number.
@@ -154,6 +234,7 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     incomplete: 0,
     markers: 0,
     shrunk: 0,
+    navigation_lost: {},
   };
   for (const edit of edits) {
     const at = edit.block;
@@ -195,7 +276,15 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     }
     replacements[at] = html;
     report.applied++;
-    if (gaveContentUp(blocks[at]!.html, html)) report.shrunk++;
+    const gave = gaveContentUp(blocks[at]!.html, html);
+    if (gave.less) report.shrunk++;
+    // Summed across blocks rather than counted per block, because the question a reader of this
+    // number asks is how much of the document's navigation went, and a round moves content between
+    // blocks: two blocks each losing one heading is the same loss to a reader as one block losing
+    // two.
+    for (const [kind, n] of Object.entries(gave.navigation)) {
+      report.navigation_lost[kind as Navigable] = (report.navigation_lost[kind as Navigable] ?? 0) + n;
+    }
   }
   return { ...report, body: joinSections(blocks, replacements) };
 }
