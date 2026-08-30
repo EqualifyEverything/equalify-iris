@@ -168,6 +168,17 @@ function gaveContentUp(before: string, after: string): boolean {
 // Counting them here as well would put the sanctioned case and the silent one in one number and leave
 // neither readable.
 //
+// What the prose condition costs at THIS grain, since it is coarser here than it was per block: one
+// sanctioned deletion anywhere in the reply silences the count for the whole round. A round that drops
+// a reprinted title in one block and demotes a real heading in another logs nothing, and that round is
+// a common one. Accepted rather than narrowed, because at document grain the alternative is not
+// better — two headings are gone, one of them legitimately, and nothing in the counts says which — so
+// reporting the pair would put a sanctioned deletion into the population as silent damage. This number
+// is a sample used to decide whether `items` and `rows` can gate, and for that a filter that
+// under-collects is right where one that over-collects is not: a missed round costs a row, and a
+// wrong row costs the decision. Nothing ships differently either way, because the gate is `shrunk`
+// and that is still read per block — the demoted heading in the second block is caught there.
+//
 // Reported as HOW MANY of each went, not as which kinds fell: one heading gone is a repeated title
 // resolved a little too thoroughly and 84 is a document flattened, the two want different answers, and
 // a name alone cannot tell them apart. It is also the quantity the bench harness records for the 151
