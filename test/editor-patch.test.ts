@@ -10,7 +10,7 @@
 // Why the anchor is a block POSITION. The first form of #250 asked for `{ id, html }` pairs and its
 // own $0 check refuted it: of the 13 defect instances markup.ts's own checks find in those
 // documents, NONE sits on an element with a usable id and none has an ancestor carrying one,
-// because Iris puts ids on what gets linked TO. An id-anchored contract reaches none of the work.
+// because Iris puts ids on what gets linked TO. An id-anchored contract reaches none of those 13.
 // (Corrected figures, #268 — the count this used to quote called a `lang` on a void element a
 // defect whatever text it carried in an attribute; patch.ts's header has the full account.) A block
 // is the cut sections.ts already makes for the truncation fallback, so there is one definition of

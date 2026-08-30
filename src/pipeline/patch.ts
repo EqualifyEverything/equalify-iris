@@ -15,8 +15,9 @@
 // 13 defect instances markup.ts's own checks find across those 34 documents, NONE sits on an
 // element with a usable id and none has an ancestor carrying one. Iris puts ids on the things that
 // get linked TO — page-break markers, cross-reference anchors, footnote items — so content has
-// none above it (`IMG < FIGURE < MAIN < BODY < HTML`). An id-anchored contract reaches none of the
-// work.
+// none above it (`IMG < FIGURE < MAIN < BODY < HTML`). An id-anchored contract reaches none of
+// those 13 — which is a small number, and the smallness is the point: these are what a script can
+// PROVE, so the sentence is about the anchor failing on the work it can be checked against.
 //
 // Those are corrected figures (#268); this paragraph used to read "73 instances, 12 (16%) with a
 // usable id … one defect in six". Two things were wrong with the old count and neither moves the

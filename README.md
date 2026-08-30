@@ -914,7 +914,7 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   *to*. (Those figures were corrected in issue #268; the count this used to quote called a `lang`
   on a void element a defect whatever text it carried in an attribute, and 54 of its 73 instances
   were correct authoring. The correction runs the same way: an id anchor reached one defect in six,
-  and now reaches none.) And the number is written above the block rather than
+  and reaches none of the 13 that survive the recount.) And the number is written above the block rather than
   counted by the editor, because a model counting for itself could be off by one, land in range,
   and have every replacement applied to the wrong block with each one well-formed — the one failure
   here that nothing downstream could see. A replacement that leaves an element open is refused and
