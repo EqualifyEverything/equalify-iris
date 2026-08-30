@@ -73,6 +73,24 @@ const TALLY = {
   editor_truncated_rate: 0.3142857142857143,
   editor_truncated_lost_rate: 0,
   review_unread_rate: 0,
+  // The three #264 added, in a shape consistent with the rest of this tally: 59 of the 70
+  // documents shipped with something open, and the loop reached the cap on none of them.
+  // The exits sum to the 70 documents; the severities are per document and sum past 59,
+  // because one document can carry issues of three severities at once.
+  review_stopped: [
+    { where: "clean", documents: 11 },
+    { where: "unread", documents: 0 },
+    { where: "converged", documents: 55 },
+    { where: "truncated", documents: 4 },
+    { where: "cap", documents: 0 },
+  ],
+  unresolved_severity: [
+    { severity: "high", documents: 6 },
+    { severity: "medium", documents: 40 },
+    { severity: "low", documents: 20 },
+    { severity: "unrated", documents: 0 },
+  ],
+  unfinished_page_rate: 0.2,
   rules: [{ id: "list", impact: "serious", documents: 4, share: 0.0625, nodes: 5 }],
 };
 
@@ -182,6 +200,78 @@ test("a deployment that records no step gets no breakdown sentence, not three ze
   // finding.
   assert.match(body, /had a lint pass that errored instead of running/);
   assert.match(body, /Start with `src\/pipeline\/lint\.ts`/);
+});
+
+test("the unresolved body names the exit each document left by, and what each one asks for", { skip }, () => {
+  // The sentence that replaced a guess. This body used to say it was "worth checking
+  // whether `defaults.max_review_iterations` (3) is simply too low" — advice that the
+  // numbers printed two lines above it already refuted, since 0.886 mean rounds against a
+  // cap of 3 is a budget going unspent. Now the report says which exit, so the reader does
+  // not have to guess and cannot be pointed at the wrong file.
+  const body = renderBody("unresolved");
+  assert.match(body, /\*\*Why the loop stopped:\*\* `clean` 11, `unread` 0, `converged` 55, `truncated` 4, `cap` 0/);
+  assert.match(body, /these sum to 70/, "the count they are read against is printed, not left to be worked out");
+  // The two exits that look identical from outside the loop, told apart with their
+  // opposite remedies attached — which is the whole point of recording the exit.
+  assert.match(body, /`cap` is the only one raising `defaults\.max_review_iterations` can help/);
+  assert.match(body, /`converged` is the editor having been shown the issues/);
+  assert.match(body, /`agents\/copy_editor\.md`/);
+  // And the round budget is never mentioned except as the remedy for `cap`. A reader who
+  // skims this finding must not come away with the old advice.
+  assert.ok(
+    !/too low/.test(body),
+    "the body should no longer suggest the round budget is too low without measuring it",
+  );
+  assert.equal(
+    (body.match(/max_review_iterations/g) ?? []).length,
+    1,
+    "the round budget is named once, beside the one exit it answers",
+  );
+});
+
+test("the unresolved body rates what was left, and says it is not a partition", { skip }, () => {
+  // Severity is what decides whether an 84% rate describes a defect at all: the rate counts
+  // any open issue, and a Reader reporting nits would produce the same number as one
+  // reporting barriers. Printed as documents, with the arithmetic warning attached, because
+  // 6 + 40 + 20 exceeds the 59 documents in the rate and a reader checking the sum would
+  // otherwise conclude the report is broken.
+  const body = renderBody("unresolved");
+  assert.match(body, /\*\*How the Reader rated what was left:\*\* `high` 6, `medium` 40, `low` 20, `unrated` 0 document\(s\)/);
+  assert.match(body, /NOT a partition of the rate above/);
+  assert.match(body, /`high` is the part a reader would call a barrier/);
+  assert.match(body, /`unrated` is the Reader having written something outside the three/);
+  // The floor, which is the one number that says how much of the rate is not ours to fix.
+  assert.match(body, /\*\*The floor:\*\* 20% of documents shipped with a `\[page not fully transcribed\]` marker/);
+  assert.match(body, /cannot finish clean at ANY budget/);
+});
+
+test("a floor measured at zero is printed, and only an unrecorded one is skipped", { skip }, () => {
+  // The case `> 0` would have thrown away, and the most useful one in the report: a
+  // measured 0% says none of the unresolved rate is inherent, so all of it is ours. In jq
+  // only `false` and `null` are falsy, so testing the number itself keeps that sentence.
+  const zero = renderBody("unresolved", { ...TALLY, unfinished_page_rate: 0 });
+  assert.match(zero, /\*\*The floor:\*\* 0% of documents/);
+
+  const { unfinished_page_rate: _omitted, ...older } = TALLY;
+  const absent = renderBody("unresolved", older);
+  assert.ok(!absent.includes("**The floor:**"), "a deployment that never measured it claims nothing");
+});
+
+test("a tally from before #264 renders the unresolved finding without the three breakdowns", { skip }, () => {
+  // Every deployment's state on the week this ships, for the same reason the lint-error
+  // case above has one: the rate is computed from signals written when the run happened, so
+  // no run before this deploys can be broken down after the fact. Five zeroes beside an 84%
+  // rate would read as a contradiction, and "cap 0" specifically would be a false statement
+  // about where those documents stopped.
+  const { review_stopped: _a, unresolved_severity: _b, unfinished_page_rate: _c, ...older } = TALLY;
+  const body = renderBody("unresolved", older);
+  for (const claim of ["**Why the loop stopped:**", "**How the Reader rated what was left:**", "**The floor:**"]) {
+    assert.ok(!body.includes(claim), `${claim} is claimed on a tally that cannot support it`);
+  }
+  // And the finding is still a finding: the rate, the threshold, and the one sentence that
+  // says why the descriptions are not in here.
+  assert.match(body, /84\.3% of 70 documents/);
+  assert.match(body, /Only the \*\*count\*\* is available here/);
 });
 
 test("a step that failed on nothing is still printed, once the field is there", { skip }, () => {

@@ -139,6 +139,19 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   "since": "2026-07-14T00:00:00.000Z",
   "mean_rounds": 1.8,
   "unresolved_rate": 0.07,
+  "unresolved_severity": [
+    { "severity": "high", "documents": 1 },
+    { "severity": "medium", "documents": 4 },
+    { "severity": "low", "documents": 12 },
+    { "severity": "unrated", "documents": 0 }
+  ],
+  "review_stopped": [
+    { "where": "clean", "documents": 197 },
+    { "where": "unread", "documents": 2 },
+    { "where": "converged", "documents": 11 },
+    { "where": "truncated", "documents": 2 },
+    { "where": "cap", "documents": 0 }
+  ],
   "links_dropped_rate": 0.02,
   "links_unresolved_rate": 0.11,
   "markup_unbalanced_rate": 0.01,
@@ -154,6 +167,7 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   "editor_truncated_rate": 0.01,
   "editor_truncated_lost_rate": 0.002,
   "review_unread_rate": 0.01,
+  "unfinished_page_rate": 0.03,
   "rules": [
     { "id": "heading-order", "impact": "moderate", "documents": 81, "share": 0.382, "nodes": 240 }
   ]
@@ -199,6 +213,30 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   raises this rate for a document that is otherwise sound — but only for as many rounds as it takes
   the editor to leave the document alone once, which is what now ends the loop. Read it as what it is — one page
   arrived short, and the document says where.
+  Everything in the two paragraphs above is a claim about a **floor** under this rate, and the two
+  fields that follow, plus `unfinished_page_rate` below, are what measure it. Until #264 nothing did,
+  which is how a threshold of 15% came to be compared against a rate of 84% with no way to tell
+  which part was inherent.
+* `unresolved_severity` — how the Reader rated what was left open, one entry per severity and always
+  all four including the zeroes. **Per document, and not a partition of `unresolved_rate`**: a
+  document with three `low` issues and one `high` is one entry in each of those two, so the counts
+  can sum to more than `unresolved_rate × documents`. This is the field that says whether the rate
+  above describes a defect — it counts documents that shipped with *anything* open, and `high` is
+  the part of it a reader of the document would call a barrier. `unrated` is not a fifth severity
+  but the Reader having written something outside the three, or nothing; the severities are
+  model-written and unvalidated, so anything unrecognised is bucketed there rather than published
+  as found.
+* `review_stopped` — which of the review loop's exits ended each document, one entry per reason and
+  always all five. Recorded for **every** delivered document, so unlike `unresolved_severity` these
+  *are* a partition: the counts sum to `documents`. `clean` is the only exit that re-read the
+  finished document and found nothing; the other four all deliver an `@unresolved` list, and which
+  one it was is which fix is being asked for — `cap` is a config number
+  (`defaults.max_review_iterations`), `converged` is a prompt, `truncated` is an output ceiling,
+  `unread` is a reviewer that could not read part of what it was judging. The `cap`/`converged`
+  split is the one that could not be had before: from outside the loop they are the same shape, and
+  only `cap` is something more rounds would help. A sum **below** `documents` means either
+  documents delivered before this was recorded or an exit added to the loop with no reason attached
+  — never a sixth kind of exit.
 * `links_dropped_rate` — share of documents where an `href` present before the copy editor was
   missing after it.
 * `links_unresolved_rate` — share of documents that shipped with an in-document reference that
@@ -325,6 +363,14 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   comment saying how many windows of how many, and `reader_no_output` in the run log carries the
   reply's size and which of the two ways it failed. A non-zero value is a statement about the reader
   model or its prompt, and the run log's `agentCall` output for that call is where to start.
+* `unfinished_page_rate` — share of documents delivered with a `[page not fully transcribed]` marker
+  still in the body, i.e. documents that **could not** have finished the review loop clean whatever
+  budget they were given. Not a defect rate of its own: the Reader is instructed to report every one
+  of those markers with its page, and nothing in the loop is allowed to resolve one, so each of these
+  documents is a guaranteed member of `unresolved_rate`. This is the measured floor under that rate
+  — subtract it before asking whether a threshold on it is being met. The cause is upstream of
+  everything else here (a page the extractor could not return in full), so a high value is a question
+  about extraction and `max_pages` rather than about review.
 * `rules[]` — axe-core rule ids, **per document**: `documents` is how many documents violated the
   rule and `share` is that over `documents_linted`, with `nodes` (total offending elements) alongside
   rather than folded in. One pathological scan with 400 bad headings is a worse `nodes` and the same

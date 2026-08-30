@@ -1,4 +1,5 @@
 import { extractJson } from "../util/json.ts";
+import type { ReviewStopped } from "../store/db.ts";
 import { VERIFY_KINDS, type VerifyKind } from "./feedback.ts";
 import { mapWithConcurrency } from "../util/concurrency.ts";
 import { MAX_EDITOR_IMAGES } from "../providers/imageLimits.ts";
@@ -78,6 +79,23 @@ export interface ReviewResult {
   // arrives as the first, is delivered as clean, and is counted as clean deployment-wide.
   // An empty `unresolved` is only good news when this is 0.
   unreviewedWindows: number;
+  // Which of this loop's exits ended the run (#264). One of five words, assigned at the
+  // `return`/`break` that took it and nowhere else, so a stop reason is written by the line
+  // that knows it rather than reconstructed afterwards from the other fields — which is
+  // exactly what could not be done: `cap` and `converged` are the same shape from out here
+  // (issues open, no truncation), and they ask for opposite fixes.
+  //
+  // Optional, and left undefined rather than defaulted, for the reason #263 settled on for
+  // `LintResult.errorWhere`: an exit added later without a stop reason must be VISIBLE as an
+  // exit nobody attributed, and inventing one for it is the single thing this field must not
+  // do. `Store.qualityStats` publishes the five counts summing to fewer than the documents,
+  // which is what that looks like from the outside.
+  //
+  // The type comes from store/db.ts because these five words are a published vocabulary
+  // (`REVIEW_STOPPED`), and the recorder, the aggregate query and this loop have to spell them
+  // identically or the rate reads 0% forever. Type-only, so nothing in the pipeline gains a
+  // dependency on the store at runtime.
+  stoppedAt?: ReviewStopped;
 }
 
 // Exported so a test can assert the marker vocabulary it advertises is the one
@@ -436,7 +454,16 @@ Respond with ONLY JSON: { "html": "<corrected section>" }`;
 // that as an option (nothing in EDITOR_SYSTEM writes a marker), which is exactly why an appearance
 // is worth a line: it is the closed enumeration having failed, and the words it replaced are
 // invisible to contentCoverage, which strips [...] before comparing.
-export const BODY_MARKERS = ["[not legible]", "[page not fully transcribed]"] as const;
+// Named separately because one of them is asked for by name elsewhere. A surviving
+// `[page not fully transcribed]` is what the quality tally counts as a document that could not
+// have finished the review loop clean (SIGNAL_UNFINISHED_PAGE): READER_SYSTEM reports every one
+// of them every round and says settling it is nobody's job in this loop. `[not legible]` carries
+// no such guarantee — EDITOR_SYSTEM is given that page's image and asked to resolve it — which
+// is the same asymmetry the paragraph above turns on, so the two are not interchangeable and a
+// positional `BODY_MARKERS[1]` would be the wrong way to say which is meant.
+export const MARKER_NOT_LEGIBLE = "[not legible]";
+export const MARKER_PAGE_INCOMPLETE = "[page not fully transcribed]";
+export const BODY_MARKERS = [MARKER_NOT_LEGIBLE, MARKER_PAGE_INCOMPLETE] as const;
 
 export function markerCounts(body: string): Record<string, number> {
   const out: Record<string, number> = {};
@@ -1803,6 +1830,11 @@ export async function runReview(
   // where that is now said (noContentPages), which is also the only place that can say it: the
   // index it builds is the route the reports came in by.
   const failedPages = initial.failedPages ?? [];
+  // Set by the `return` or `break` that ends the loop, and by nothing else (#264). Deliberately
+  // not initialised: the value has to come from the exit taken, so an exit added without one
+  // leaves it undefined and the deployment's tally shows an unattributed document rather than a
+  // plausible wrong reason. See ReviewResult.stoppedAt.
+  let stoppedAt: ReviewStopped | undefined;
 
   while (iterations <= ctx.maxReviewIterations) {
     const read = await runReader(ctx, body, lint, pages, iterations, failedPages);
@@ -1845,6 +1877,9 @@ export async function runReview(
         // `editorTruncated` is: the field's value is the loop's, and a return that states it
         // itself is a place where the two can come apart.
         unreviewedWindows: lastUnread,
+        // The only exit that re-read the finished document and found nothing, which is the
+        // whole distinction this field carries: every other one delivers `@unresolved`.
+        stoppedAt: "clean",
       };
     }
     // Nothing to correct and no verdict either — the read came back empty because part of it
@@ -1852,8 +1887,18 @@ export async function runReview(
     // editor (inventing an issue to fix would be worse than the silence), so the loop ends
     // here and the document is delivered saying what happened, with `unresolved` empty
     // because nothing was found rather than because nothing is there.
-    if (issues.length === 0) break;
-    if (iterations === ctx.maxReviewIterations) break; // cap reached, issues remain
+    //
+    // `unread` rather than `clean` for the tally, and `read.unread` is non-zero by the guard
+    // above: this is the exit where the deployment has no verdict on the document at all, and
+    // the empty `unresolved` below is the reason it must not be counted as a good one.
+    if (issues.length === 0) {
+      stoppedAt = "unread";
+      break;
+    }
+    if (iterations === ctx.maxReviewIterations) {
+      stoppedAt = "cap"; // cap reached, issues remain
+      break;
+    }
 
     iterations++;
     const before = body;
@@ -1891,7 +1936,10 @@ export async function runReview(
       // issues unresolved. It still counts as a round; it was made and paid for, a full
       // ceiling of output at that, so `iterationsCompleted` reporting it is the honest
       // arithmetic and the `editor_truncated` line beside it is what says it changed nothing.
-      if (!round.usable) break;
+      if (!round.usable) {
+        stoppedAt = "truncated";
+        break;
+      }
     }
     body = round.body;
     // A deprecated role the editor introduced is dropped on the way in, the same way assembly
@@ -2052,13 +2100,25 @@ export async function runReview(
         issues: issues.length,
         rounds_left: ctx.maxReviewIterations - iterations,
       });
+      // The same fact the event carries, in the one place a deployment-wide question can be
+      // asked of it (#264). `rounds_left` above is why the pair matters: this exit and `cap`
+      // are indistinguishable from outside the loop, and only this one means the budget was
+      // there and declined — so raising `max_review_iterations` is an answer to `cap` and to
+      // nothing else. Which is the arithmetic #264 was filed needing.
+      stoppedAt = "converged";
       break;
     }
     // Skipped when nothing changed, because every one of these answers a question about
     // a difference: the lint of an unedited body is the lint already in hand, and a link
     // or marker diff against an identical string is empty by construction.
     if (body === before) {
-      if (lastRound) break;
+      // Reached only by a round that was NOT usable and NOT the last one — the converged exit
+      // above took the answered ones — so a break here is the truncation that set `lastRound`,
+      // and the sections it was made of came back as the text they went in with.
+      if (lastRound) {
+        stoppedAt = "truncated";
+        break;
+      }
       continue;
     }
 
@@ -2108,7 +2168,10 @@ export async function runReview(
     // them would deliver a corrected document with none of them recorded, which is precisely
     // the disclosure the section calls make more likely (each one sees less of the document
     // than a whole-body round does).
-    if (lastRound) break;
+    if (lastRound) {
+      stoppedAt = "truncated";
+      break;
+    }
   }
 
   // Issues remain and the loop has stopped — at the cap, on a round that changed nothing,
@@ -2147,5 +2210,10 @@ export async function runReview(
     editorTruncated,
     editorTruncatedLost,
     unreviewedWindows: lastUnread,
+    // Whichever `break` above got here. Undefined is not a state this loop can reach today —
+    // the cap check fires at `iterations === maxReviewIterations`, one round before the `while`
+    // condition could fail, so every exit is one of the five — and it is left reachable in the
+    // type on purpose, because the exit added by a later change is the one that would need it.
+    stoppedAt,
   };
 }

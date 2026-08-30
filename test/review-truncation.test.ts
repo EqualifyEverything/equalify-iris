@@ -128,6 +128,10 @@ test("a truncated round delivers the document that entered it", async () => {
     // is the round lost in full — the case a threshold is put on, as against a truncation the
     // retry absorbs (`editor-sections.test.ts`, issue #159).
     assert.equal(result.editorTruncatedLost, true);
+    // And the exit the loop left by, for the tally (#264): a document that ships with issues
+    // open because a round could not be completed is a ceiling to raise, not a round budget
+    // to raise and not a prompt to rewrite, and only this says which.
+    assert.equal(result.stoppedAt, "truncated");
     // And the round's issues are reported rather than silently forgotten: the loop's own
     // way of saying a document shipped with known problems.
     assert.deepEqual(result.unresolved.map((i) => i.issue), ISSUES.map((i) => i.issue));
@@ -227,6 +231,7 @@ test("an ordinary round is unchanged", async () => {
     const result = await runReview(ctx, { body: BODY, lint: { ok: true, violations: [] }, pages: PAGES });
     assert.equal(result.editorTruncated, false);
     assert.equal(result.editorTruncatedLost, false, "and neither rate counts a round that fitted");
+    assert.equal(result.stoppedAt, "cap", "a round that fitted ends on the budget, not on a ceiling");
     assert.match(result.body, /Edited/, "the correction was kept");
     assert.doesNotMatch(result.html, /@editor-truncated/);
     assert.equal(rec.events.find((e) => e.type === "editor_truncated"), undefined);

@@ -13,8 +13,13 @@ import {
   SIGNAL_EDITOR_TRUNCATED,
   SIGNAL_EDITOR_TRUNCATED_LOST,
   SIGNAL_REVIEW_UNREAD,
+  reviewStoppedSignal,
   SIGNAL_ROUNDS,
   SIGNAL_UNRESOLVED,
+  SIGNAL_UNFINISHED_PAGE,
+  unresolvedSeverity,
+  unresolvedSeveritySignal,
+  UNRESOLVED_SEVERITY,
   type Store,
 } from "../store/db.ts";
 import { Paths } from "../store/paths.ts";
@@ -24,7 +29,7 @@ import { runExtraction, reExtractPages } from "./extraction.ts";
 import { runAssembly, assembleBody, wrapDocument } from "./assembly.ts";
 import { stripDeprecatedRoles } from "./roles.ts";
 import { stripNestedMain } from "./landmarks.ts";
-import { runReview, type ReviewResult } from "./review.ts";
+import { markerCounts, MARKER_PAGE_INCOMPLETE, runReview, type ReviewResult } from "./review.ts";
 import { runAxe, lintErrorFields, lintDebrisFields } from "./lint.ts";
 import { learnFromFeedback, proposeAgentUpdatesFromFeedback, scopeFeedback } from "./feedback.ts";
 import { runContribution } from "./contribute.ts";
@@ -378,6 +383,12 @@ export async function runPipeline(args: {
       );
     }
 
+    // Pages the extractor could not return in full, as the delivered BODY still says it — not
+    // as the wrapped document does. An unresolved issue about one of these markers quotes the
+    // marker, and those lines are in `review.html`, so counting there would count the Reader's
+    // report of a marker as a second marker (#264).
+    const pageMarkers = markerCounts(review.body)[MARKER_PAGE_INCOMPLETE] ?? 0;
+
     // Record what this document cost us, for the deployment-wide quality tally
     // behind GET /v1/quality (PRD §7.16). Counts and axe rule ids only — never the
     // unresolved issues' text or the dropped URLs, both of which are content from
@@ -399,6 +410,36 @@ export async function runPipeline(args: {
         // rate divides by (see SIGNAL_ROUNDS).
         { code: SIGNAL_ROUNDS, count: review.iterationsCompleted },
         ...(review.unresolved.length ? [{ code: SIGNAL_UNRESOLVED, count: review.unresolved.length }] : []),
+        // And how the Reader rated them, one row per severity that occurs (#264). The rate above
+        // says a document shipped with something open; this says whether that something was a
+        // barrier or a nit, which is the difference between a defect and the floor.
+        //
+        // Counted per severity, so a document with three low issues and one high contributes a
+        // row to each — the rows are not a partition of `unresolved` and `Store.qualityStats`
+        // says so. Bucketed through `unresolvedSeverity` rather than read off the issue,
+        // because the field is model-written and unvalidated: whatever the Reader put there
+        // that is not one of the three lands in `unrated` and no model-chosen string reaches
+        // this table.
+        ...UNRESOLVED_SEVERITY.flatMap((severity) => {
+          const count = review.unresolved.filter((i) => unresolvedSeverity(i.severity) === severity).length;
+          return count ? [{ code: unresolvedSeveritySignal(severity), count }] : [];
+        }),
+        // Which of the loop's exits ended this run, for every document including a clean one —
+        // the five counts are meant to sum to the documents in the window, and that is what
+        // makes a shortfall readable as an exit nobody attributed (#264). Written only when the
+        // loop named one, for the reason the lint step above is: a missing reason is a fact and
+        // a guessed one is not.
+        ...(review.stoppedAt ? [{ code: reviewStoppedSignal(review.stoppedAt), count: 1 }] : []),
+        // The delivered document still says a page was not returned in full, which means it
+        // could not have finished the loop clean however many rounds it got: the Reader raises
+        // the marker every round and the editor is forbidden to resolve it. Per marker, so a
+        // document missing four pages is not one missing one — the floor under `unresolved_rate`
+        // is a document count, but the size of the extraction problem behind it is not.
+        //
+        // Measured on the body that shipped rather than on the marker diff the loop already
+        // logs, because the question is what the reader received: a marker the editor dropped
+        // is a different failure (`editor_markers_changed`) and one this must not count.
+        ...(pageMarkers ? [{ code: SIGNAL_UNFINISHED_PAGE, count: pageMarkers }] : []),
         ...(review.droppedLinks ? [{ code: SIGNAL_LINKS_DROPPED, count: review.droppedLinks }] : []),
         // References in the delivered document that do not land. Counted together here
         // even though the log splits them, because the rate answers one question — did

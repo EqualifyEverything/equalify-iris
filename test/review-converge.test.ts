@@ -43,8 +43,14 @@ interface Round {
 }
 
 // Run the loop against an editor that answers with `editorReply` every time. The Reader
-// always finds the same issue, which is the shape under test: nothing the loop can fix.
-async function loop(editorReply: (body: string) => string, maxReviewIterations = 3): Promise<Round> {
+// answers with the same unfixable issue unless a test says otherwise — which only the
+// stopping-reason tests below need, because the two exits that end a run BEFORE the editor
+// is called are decided entirely by what the Reader said.
+async function loop(
+  editorReply: (body: string) => string,
+  maxReviewIterations = 3,
+  readerReply: () => string = () => JSON.stringify({ issues: ISSUES }),
+): Promise<Round> {
   const dir = mkdtempSync(join(tmpdir(), "iris-converge-"));
   try {
     let readers = 0;
@@ -64,7 +70,7 @@ async function loop(editorReply: (body: string) => string, maxReviewIterations =
         complete: async (agent: string, _cap: string, messages: { content: string }[]) => {
           if (agent === "reader") {
             readers++;
-            return { text: JSON.stringify({ issues: ISSUES }) };
+            return { text: readerReply() };
           }
           editors++;
           // The document the editor was actually handed, read back out of its own prompt — the
@@ -147,6 +153,61 @@ test("a round that changes something keeps the loop going", async () => {
   const round = await loop(() => JSON.stringify({ edits: [{ block: 0, html: `<p>edit ${n++}</p>` }] }));
   assert.equal(round.editors, 3, "the cap, not convergence, is what stopped this");
   assert.equal(typed(round, "review_converged").length, 0);
+  assert.equal(round.result.iterationsCompleted, 3);
+});
+
+// Which exit the loop left by (#264). The tests above establish that the exits behave
+// differently; these pin the word each one records, because from outside the loop two of
+// them are the same document — issues open, nothing truncated — and they ask for opposite
+// fixes. `cap` is the only one more rounds can help; `converged` means the editor was shown
+// the issues and answered "no change", so the remedy is a prompt. A report that cannot tell
+// them apart can only guess, which is how #264 came to lead with `max_review_iterations`
+// against a mean of 0.886 rounds out of 3. The `truncated` exits are pinned where they are
+// driven, in test/review-truncation.test.ts.
+const CLEAN_READ = () => JSON.stringify({ issues: [] });
+
+test("the loop records which of its exits ended the round", async () => {
+  const converged = await loop(() => JSON.stringify({ edits: [] }));
+  assert.equal(converged.result.stoppedAt, "converged");
+
+  let n = 0;
+  const cap = await loop(() => JSON.stringify({ edits: [{ block: 0, html: `<p>edit ${n++}</p>` }] }));
+  assert.equal(cap.result.stoppedAt, "cap");
+
+  // Both of these end before the editor is ever called, and only the Reader's answer
+  // decides which: an empty issue list from a read that came back whole is `clean`, and the
+  // same empty list from a read with a window it could not parse is `unread` — a document
+  // nothing objected to and a document nothing finished reading.
+  const clean = await loop(() => assert.fail("a clean read must not reach the editor"), 3, CLEAN_READ);
+  assert.equal(clean.result.stoppedAt, "clean");
+  assert.equal(clean.result.iterationsCompleted, 0);
+
+  const unread = await loop(() => assert.fail("an unread window must not reach the editor"), 3, () => "not json at all");
+  assert.equal(unread.result.stoppedAt, "unread");
+  assert.equal(unread.result.unreviewedWindows, 1);
+});
+
+test("the cap and a round that changed nothing are one document with two remedies", async () => {
+  // Everything else the report can see about these two runs agrees: the same body, the same
+  // one issue left open, nothing truncated. `stoppedAt` is the only thing that distinguishes
+  // a budget that ran out from an editor that declined.
+  const converged = await loop(() => JSON.stringify({ edits: [] }));
+  let n = 0;
+  const cap = await loop(() => JSON.stringify({ edits: [{ block: 0, html: `<p>edit ${n++}</p>` }] }));
+  for (const round of [converged, cap]) {
+    assert.equal(round.result.unresolved.length, 1);
+    assert.equal(round.result.editorTruncated, false);
+    assert.equal(round.result.unreviewedWindows, 0);
+  }
+  assert.notEqual(converged.result.stoppedAt, cap.result.stoppedAt);
+});
+
+test("a run that spent every round on unusable replies reports the cap, not a convergence", async () => {
+  // The body never changed, so this run looks converged from the body alone — and it is the
+  // opposite: three rounds spent, none of them answered. Reporting it as `converged` would
+  // attribute a broken editor to a prompt that the editor never disagreed with.
+  const round = await loop(() => "not json at all");
+  assert.equal(round.result.stoppedAt, "cap");
   assert.equal(round.result.iterationsCompleted, 3);
 });
 

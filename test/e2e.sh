@@ -1020,6 +1020,35 @@ echo "$q" | jq -e '[.lint_error_where[].where] == ["parse","inject","run"]
   and ([.lint_error_where[].documents] | add) <= (.documents - .documents_linted)' >/dev/null \
   && pass "lint_error_where accounts for the unlinted documents ($(echo "$q" | jq -c '[.lint_error_where[] | "\(.where)=\(.documents)"] | join(" ")' | tr -d '"'))" \
   || fail "quality" "lint_error_where=$(echo "$q" | jq -c '.lint_error_where') against documents=$docs linted=$(echo "$q" | jq -r '.documents_linted')"
+# Which of the review loop's five exits ended each document (#264), and the property that
+# makes the breakdown readable: one exit per delivered document, so these sum to
+# `documents` exactly. Asserted end to end rather than only in test/quality.test.ts because
+# the sum is what a shortfall is read against, and a shortfall is meant to mean "delivered
+# before this was recorded" — an exit in the real pipeline that assigns nothing would look
+# identical, and only a run of the whole pipeline can rule that out.
+echo "$q" | jq -e '[.review_stopped[].where] == ["clean","unread","converged","truncated","cap"]
+  and ([.review_stopped[].documents] | all(. >= 0))
+  and ([.review_stopped[].documents] | add) == .documents' >/dev/null \
+  && pass "review_stopped attributes all $docs document(s) ($(echo "$q" | jq -c '[.review_stopped[] | select(.documents > 0) | "\(.where)=\(.documents)"] | join(" ")' | tr -d '"'))" \
+  || fail "quality" "review_stopped=$(echo "$q" | jq -c '.review_stopped') against documents=$docs — an exit that assigns no stop reason"
+# How the Reader rated what it left open. NOT a partition (one document with a high issue
+# and two low ones is counted in both), so the invariant is the weaker one that matters:
+# an unresolved rate above zero must have severities behind it, and a rate of zero must
+# have none. The two disagreeing means the rate and this breakdown are counting different
+# documents, which would make a `high`-based threshold unsafe to set.
+echo "$q" | jq -e '[.unresolved_severity[].severity] == ["high","medium","low","unrated"]
+  and ([.unresolved_severity[].documents] | all(. >= 0))
+  and ([.unresolved_severity[].documents] | max) <= .documents
+  and ((([.unresolved_severity[].documents] | add) > 0) == (.unresolved_rate > 0))' >/dev/null \
+  && pass "unresolved_severity agrees with unresolved_rate=$(echo "$q" | jq -r '.unresolved_rate') ($(echo "$q" | jq -c '[.unresolved_severity[] | "\(.severity)=\(.documents)"] | join(" ")' | tr -d '"'))" \
+  || fail "quality" "unresolved_severity=$(echo "$q" | jq -c '.unresolved_severity') against unresolved_rate=$(echo "$q" | jq -r '.unresolved_rate')"
+# And the floor under that rate: documents still carrying `[page not fully transcribed]`,
+# which no pass in the loop may resolve. A recorded 0 and a missing key are different
+# claims — the workflow prints the sentence for the first and skips it for the second —
+# so `!= null` is the assertion, not `>= 0`.
+echo "$q" | jq -e '.unfinished_page_rate != null and .unfinished_page_rate >= 0 and .unfinished_page_rate <= 1' >/dev/null \
+  && pass "unfinished_page_rate is $(echo "$q" | jq -r '.unfinished_page_rate'), the measured floor under unresolved_rate" \
+  || fail "quality" "unfinished_page_rate=$(echo "$q" | jq -r '.unfinished_page_rate'), expected a number in 0..1"
 # A round is an EDITOR pass, not a reader pass: the loop returns as soon as the
 # Reader finds nothing, before incrementing, so a document that comes back clean on
 # the first look completes with 0 rounds and that is the good outcome. The mock model
@@ -1052,8 +1081,11 @@ done
 # entries of `lint_error_where` add `where` (their `documents` is already allowed).
 # `where` is one of three strings named in `src/store/db.ts`, which is why it is
 # publishable at all — the version of that field carrying the error message would have
-# quoted the markup jsdom choked on.
-allowed='["window_days","documents","since","mean_rounds","unresolved_rate","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","where","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","id","impact","share","nodes"]'
+# quoted the markup jsdom choked on. `severity` (#264) is publishable for the same reason
+# and needs it more: the Reader WRITES that value, so the store maps anything outside its
+# four words to `unrated` rather than passing it on — an unmapped one would put model prose
+# about someone's document into a public issue.
+allowed='["window_days","documents","since","mean_rounds","unresolved_rate","severity","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","where","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","unfinished_page_rate","id","impact","share","nodes"]'
 extra=$(echo "$q" | jq -c --argjson allowed "$allowed" '([paths(scalars) | last] | unique) - $allowed')
 [ "$extra" = "[]" ] \
   && pass "the payload's key set is exactly the documented one (no session id, login or document content)" \

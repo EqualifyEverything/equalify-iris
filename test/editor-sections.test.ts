@@ -477,6 +477,9 @@ test("a salvaged round is still the loop's last round", async () => {
       "one whole-body call and three sections, and nothing after them",
     );
     assert.equal(result.iterationsCompleted, 1);
+    // The round produced corrections and the loop still ended on the ceiling, so that is what
+    // it records — not the cap it never reached, and not a convergence it never got to test.
+    assert.equal(result.stoppedAt, "truncated");
     // Which is why the issues are reported: nothing re-read the document, so what the Reader
     // found before the corrections is all that is known about it.
     assert.deepEqual(result.unresolved.map((i) => i.issue), ISSUES.map((i) => i.issue));
@@ -514,6 +517,10 @@ test("a round answered piece by piece is not a round that converged", async () =
     const result = await review(ctx);
     assert.equal(result.body, LONG);
     assert.equal(rec.events.find((e) => e.type === "review_converged"), undefined);
+    // Same fact in the quality tally (#264), where it matters more: `converged` there means
+    // "the editor saw the issues and declined", which points at the prompt. This round is a
+    // ceiling, and a deployment counting it as the first would go looking in the wrong file.
+    assert.equal(result.stoppedAt, "truncated");
     assert.equal(rec.events.find((e) => e.type === "editor")?.data.corrected, 3);
     assert.equal(result.editorTruncated, true);
     assert.match(result.html, /@editor-truncated sections 3 of 3/);
