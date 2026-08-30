@@ -622,6 +622,29 @@ test("the corrections this loop asks for are not that, and none of them costs th
   assert.equal(merged.shrunk, 0, "paragraphs 2 -> 1, every word in place");
 });
 
+test("a reorder is two blocks changing places, not a heading lost, and the two readings say so differently", () => {
+  // The grain the measurement is read at, and why it is not the grain `shrunk` is read at.
+  // EDITOR_SYSTEM sanctions "reorder blocks", and under this contract a reorder is a pair of edits:
+  // one block gives the heading up and another takes it. A sum of per-block FALLS would report that
+  // as a heading lost, on a document that kept every one — which is the same class of false positive
+  // the prose condition exists to exclude, and worse here, because this number's whole use is to be
+  // the clean population.
+  const ORDERED = `<h1>Manual</h1>\n<h2>Notes</h2>\n<p>Body text here.</p>\n`;
+  const swapped = applyBlockEdits(blocksOf(ORDERED), [
+    { block: 1, html: `<p>Body text here.</p>` },
+    { block: 2, html: `<h2>Notes</h2>` },
+  ]);
+  // The same words in a different order, which is what a reorder is — so the length the reading
+  // compares is equal while the text is not.
+  assert.equal(visibleText(swapped.body).length, visibleText(ORDERED).length);
+  assert.deepEqual(swapped.navigation_lost, {}, "the document has the heading it started with");
+  // `shrunk` still counts both halves, and that is correct rather than a leftover: its job is to spot
+  // the source half of a move, so that a refusal on the landing half cannot take the heading with it.
+  // Read on the joined body it would be silent here, and a reorder whose landing half was refused
+  // would ship a document with one heading fewer and nothing to say so.
+  assert.equal(swapped.shrunk, 2);
+});
+
 test("a navigable count falling beside a word loss is the sanctioned deletion, and stays out of the new number", async () => {
   // The rule's substantive half. Dropping a title the pages reprinted is the removal EDITOR_SYSTEM
   // spends a paragraph asking for, and it takes that title's words with it — so it is already

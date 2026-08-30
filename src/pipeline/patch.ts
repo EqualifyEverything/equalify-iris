@@ -111,11 +111,21 @@ export type Navigable = (typeof NAVIGABLE)[number];
 // `headings` passes that test and is therefore the one that counts as content given up. It is folded
 // across h1-h6 by `structureCounts`, so "fix heading hierarchy" — the re-levelling EDITOR_SYSTEM
 // sanctions by name, and the case the comment above excludes the structure counts for — does not
-// move it at all. What takes it down is a heading that stops being a heading, and no other structure
-// takes over the job: a demoted heading is not the same content announced another way, it is content
-// that has left the outline. The one removal the prompt does sanction — dropping a title the pages
-// reprinted — takes that title's words with it, so it is already a prose shortfall and never reaches
-// this reading at all.
+// move it at all. What takes it down is a heading that stops being a heading. The one removal the
+// prompt does sanction — dropping a title the pages reprinted — takes that title's words with it, so
+// it is already a prose shortfall and never reaches this reading at all.
+//
+// Where a demoted heading IS the same content announced another way, and the limit of the claim
+// above: EDITOR_SYSTEM also sanctions "correct labels and table headers", and a `<form>` is one
+// block, so a field label the extractor emitted as `<h4>Name</h4>` corrected to
+// `<label for="name">Name</label>` keeps every word and takes `headings` down by one. Same for a
+// heading corrected into a `<caption>`, a `<dt>` or a `<th>` where both sit inside one wrapper block.
+// Not compensated for, deliberately: `structureCounts` does not count `<label>` or `<legend>` at all,
+// so a rule that discounted a `headings` fall wherever `captions`/`terms`/`header_cells` rose would
+// cover three of those four cases and miss the one that is likeliest — and it would be machinery for
+// a shape no round on file has produced. So the cost stands where every other `shrunk` false positive
+// stands: one retried round, and only where the same reply ALREADY holds a refusal. What the
+// measurement below will say, if this happens at all, is how often.
 //
 // `items` and `rows` do NOT pass it, and they are reported rather than read (#271 asked for all
 // three; this is the half of it the evidence does not support). Both are ambiguous in a way
@@ -125,34 +135,51 @@ export type Navigable = (typeof NAVIGABLE)[number];
 // report a working round as damage. Read as a measurement they are worth having — a list flattened
 // into paragraphs and a table's rows run together are real and are invisible everywhere else — and
 // what would settle whether either can gate is the rate at which a working round moves them, which
-// no round on file measures. `navigation_lost` on `editor_patch` is where that rate now comes from.
-// A grouped total was tried on paper first and does not rescue them: summing the list-ish counts
-// makes `<ul>` -> `<dl>` rise, but it makes the measured `runs-231` round fall.
+// no round on file measures. `navigationLost` below is where that rate now comes from. A grouped
+// total was tried on paper first and does not rescue them: summing the list-ish counts makes
+// `<ul>` -> `<dl>` rise, but it makes the measured `runs-231` round fall.
 //
 // What is NOT claimed, even for headings: that a fall is damage. It is a fall the other readings
 // cannot see, which is a different thing — removing content the document printed twice is this
 // loop's job and reaches `shrunk` as a fall too. `shrunk` has never meant "wrong" (see
 // `PatchReport`), and the gate it feeds fires only where the same reply ALREADY holds a refusal.
-const GATED: readonly Navigable[] = ["headings"];
-// Reported as HOW MANY of each went, not as which kinds fell: one heading gone is a repeated title
-// resolved a little too thoroughly and 84 is a document flattened, the two want different answers,
-// and a name alone cannot tell them apart. It is also the quantity the bench already records
-// (`fidelity.headings_lost`), so the two can be read against each other.
-function gaveContentUp(before: string, after: string): { less: boolean; navigation: Partial<Record<Navigable, number>> } {
-  const prose = visibleText(after).length < visibleText(before).length;
+function gaveContentUp(before: string, after: string): boolean {
+  if (visibleText(after).length < visibleText(before).length) return true;
   const [was, now] = [structureCounts(before), structureCounts(after)];
-  // Read only where the prose held, and this is the substantive half of the rule rather than an
-  // optimisation. A navigable count falling ALONGSIDE a word loss is the ordinary shape of every
-  // deletion the prompt sanctions, and that block is `shrunk` on the prose alone — so counting it
-  // here as well would put the sanctioned case and the silent one in the same number and leave
-  // neither readable. What this reports is therefore exactly the population no existing signal
-  // covers, which is also the rate #271 says it has no measurement of.
-  const navigation: Partial<Record<Navigable, number>> = {};
-  if (!prose) for (const k of NAVIGABLE) if (now[k] < was[k]) navigation[k] = was[k] - now[k];
-  return {
-    less: prose || GATED.some((k) => navigation[k]) || now.images < was.images || now.links < was.links,
-    navigation,
-  };
+  return now.images < was.images || now.links < was.links || now.headings < was.headings;
+}
+
+// The navigation the DOCUMENT lost, read on the body the blocks assemble into rather than block by
+// block, and reported per kind (#271).
+//
+// The grain is the whole point, and it is not the grain `shrunk` is read at. `shrunk` asks "did THIS
+// block give content up", because its job is to spot the source half of a move — a heading carried
+// from one block to another leaves the first one poorer, and that is exactly what it should say, so
+// that a refusal on the landing half cannot take the heading with it. Summing those per-block falls
+// would be a different number wearing this one's name: EDITOR_SYSTEM sanctions "reorder blocks", so a
+// heading moved down past a paragraph is one block losing it and another gaining it, and a sum of
+// falls would report a document that kept every heading as having lost one. Read on the joined body,
+// a pure reorder is silent — which it has to be, because this number's whole use is to be the CLEAN
+// population that says whether `items` and `rows` could ever gate.
+//
+// Only where the document's prose did not shorten, for the same reason the per-block rule reads prose
+// first: a structure falling alongside a word loss is the ordinary shape of every deletion the prompt
+// sanctions — a reprinted title dropped takes its own words — and those rounds are already `shrunk`.
+// Counting them here as well would put the sanctioned case and the silent one in one number and leave
+// neither readable.
+//
+// Reported as HOW MANY of each went, not as which kinds fell: one heading gone is a repeated title
+// resolved a little too thoroughly and 84 is a document flattened, the two want different answers, and
+// a name alone cannot tell them apart. It is also the quantity the bench harness records for the 151
+// rounds behind #271 (`fidelity.headings_lost` in equalify-iris-bench's `editorround.mjs`, run
+// `runs-editor-1` — outside this repo, so nothing here can assert on it), which lets the two be read
+// against each other.
+function navigationLost(before: string, after: string): Partial<Record<Navigable, number>> {
+  const lost: Partial<Record<Navigable, number>> = {};
+  if (visibleText(after).length < visibleText(before).length) return lost;
+  const [was, now] = [structureCounts(before), structureCounts(after)];
+  for (const k of NAVIGABLE) if (now[k] < was[k]) lost[k] = was[k] - now[k];
+  return lost;
 }
 
 export interface BlockEdit {
@@ -194,15 +221,16 @@ export interface PatchReport {
   // left of it", which is this. The caller needs both to tell whether a reply with a refusal in it
   // may be applied in part. See `gaveContentUp` for what counts as less.
   shrunk: number;
-  // Navigable structure that stopped existing while every word stayed, summed over the applied
-  // replacements and kept per kind (#271) — the shape of loss this pipeline had no signal for at
-  // all. Empty on the ordinary round.
+  // Navigable structure the DOCUMENT lost while every word stayed, per kind (#271) — the shape of
+  // loss this pipeline had no signal for at all. Empty on the ordinary round.
   //
-  // Not simply a breakdown of `shrunk`: `headings` here is always counted there as well, and
-  // `items`/`rows` are reported without counting as content given up, for the reason `GATED` gives.
-  // So a line carrying `navigation_lost` and no `shrunk` is a round that re-expressed a list or a
-  // table — which is the population that decides whether either could ever gate, and the reason
-  // they are on the record before they are believed.
+  // Not a breakdown of `shrunk`, and not read at the same grain: `shrunk` is per block because its
+  // job is to spot the source half of a move, while this is read on the joined body so that a
+  // sanctioned reorder is silent. See `navigationLost`. A `headings` fall the round did not undo
+  // elsewhere will also be `shrunk`; `items` and `rows` are reported without counting as content
+  // given up at all, so a line carrying `navigation_lost` with no `shrunk` beside it is a round that
+  // re-expressed a list or a table — the population that would decide whether either can ever gate,
+  // on the record before it is believed.
   navigation_lost: Partial<Record<Navigable, number>>;
 }
 
@@ -276,17 +304,12 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     }
     replacements[at] = html;
     report.applied++;
-    const gave = gaveContentUp(blocks[at]!.html, html);
-    if (gave.less) report.shrunk++;
-    // Summed across blocks rather than counted per block, because the question a reader of this
-    // number asks is how much of the document's navigation went, and a round moves content between
-    // blocks: two blocks each losing one heading is the same loss to a reader as one block losing
-    // two.
-    for (const [kind, n] of Object.entries(gave.navigation)) {
-      report.navigation_lost[kind as Navigable] = (report.navigation_lost[kind as Navigable] ?? 0) + n;
-    }
+    if (gaveContentUp(blocks[at]!.html, html)) report.shrunk++;
   }
-  return { ...report, body: joinSections(blocks, replacements) };
+  const body = joinSections(blocks, replacements);
+  // Both sides through `joinSections`, so the two are assembled the same way and the reading cannot
+  // pick up a difference the join itself made. `null` for every block is the body that went in.
+  return { ...report, body, navigation_lost: navigationLost(joinSections(blocks, blocks.map(() => null)), body) };
 }
 
 // The editor's reply, read as edits. Exported for the caller's parse step and for the tests,
