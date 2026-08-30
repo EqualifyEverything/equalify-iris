@@ -161,6 +161,17 @@ let suggestAgent = null;
 // dirty there would be nothing behind that gate. Toggled via POST /__clean-markup.
 let cleanMarkup = false;
 
+// When set, page 2's output ends with a `[page not fully transcribed]` marker, which is what
+// agents/page.md tells the page agent to emit when a page holds more than it can return — the
+// last thing in the fragment, with the "log" field saying what was left. It is the one marker
+// no pass in the review loop may resolve, so a document carrying it cannot finish the loop
+// clean at any budget, and `iris:unfinished-page` (#264) counts it as the measured floor under
+// `unresolved_rate`. Toggled via POST /__unfinished-page, so it lands on one session's document
+// and not on every document in the run. Behind a toggle rather than always on for the reason
+// `__clean-markup` exists: most of this suite's assertions are about documents that ship
+// clean.
+let unfinishedPage = false;
+
 // When set, the Feedback Agent's TASK: classify call fails with a 500 — the first
 // model call of the post-delivery training step. Lets the e2e prove that training
 // which dies takes nothing with it: the document has already been delivered and the
@@ -178,6 +189,11 @@ const or = createServer(async (req, res) => {
     const p = JSON.parse(raw || "{}").page;
     failPage = typeof p === "number" ? p : null;
     return json(res, 200, { fail_page: failPage });
+  }
+  if (req.method === "POST" && new URL(req.url, "http://x").pathname === "/__unfinished-page") {
+    const raw = await readBody(req);
+    unfinishedPage = JSON.parse(raw || "{}").on === true;
+    return json(res, 200, { unfinished_page: unfinishedPage });
   }
   if (req.method === "POST" && new URL(req.url, "http://x").pathname === "/__suggest") {
     const raw = await readBody(req);
@@ -270,8 +286,12 @@ const or = createServer(async (req, res) => {
             // and never as a violation, so the run reaches ready_for_review with a clean lint and
             // a paragraph promising a description that does not exist.
             `<p aria-describedby="revenue-note">Revenue is described in the note.</p>\n`
-          : ``),
-      log: "",
+          : ``) +
+        // Last in the fragment, which is where agents/page.md puts it: "make [page not fully
+        // transcribed] the last thing you emit". Page 2 only, so the delivered document holds
+        // exactly one and the e2e can count it.
+        (unfinishedPage && page === 2 ? `\n<p>[page not fully transcribed]</p>` : ``),
+      log: unfinishedPage && page === 2 ? "Stopped after the second table; the rest of the page is not in the fragment." : "",
       // Only when the e2e has armed it, and only on page 1, so the run yields
       // exactly one dispatch attempt to assert on.
       ...(suggestAgent && page === 1

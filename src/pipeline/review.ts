@@ -2112,9 +2112,13 @@ export async function runReview(
     // a difference: the lint of an unedited body is the lint already in hand, and a link
     // or marker diff against an identical string is empty by construction.
     if (body === before) {
-      // Reached only by a round that was NOT usable and NOT the last one — the converged exit
-      // above took the answered ones — so a break here is the truncation that set `lastRound`,
-      // and the sections it was made of came back as the text they went in with.
+      // Two rounds reach here, and they are told apart by `lastRound` alone. A round that
+      // truncated and was still usable — the section calls rescued something, and what came
+      // back was the text it went in with — is the ceiling, and it stops: the next round would
+      // send the same body whole and hit the same ceiling. A round that was not usable and did
+      // not truncate is the model saying nothing, which is a retry, so it falls to the
+      // `continue`. (An unusable TRUNCATED round already broke above, and an answered round
+      // that changed nothing was taken by the converged exit.)
       if (lastRound) {
         stoppedAt = "truncated";
         break;

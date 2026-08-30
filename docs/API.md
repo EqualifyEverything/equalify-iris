@@ -138,7 +138,7 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   "documents": 212,
   "since": "2026-07-14T00:00:00.000Z",
   "mean_rounds": 1.8,
-  "unresolved_rate": 0.07,
+  "unresolved_rate": 0.061,
   "unresolved_severity": [
     { "severity": "high", "documents": 1 },
     { "severity": "medium", "documents": 4 },
@@ -229,8 +229,12 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
 * `review_stopped` — which of the review loop's exits ended each document, one entry per reason and
   always all five. Recorded for **every** delivered document, so unlike `unresolved_severity` these
   *are* a partition: the counts sum to `documents`. `clean` is the only exit that re-read the
-  finished document and found nothing; the other four all deliver an `@unresolved` list, and which
-  one it was is which fix is being asked for — `cap` is a config number
+  finished document and found nothing. `converged`, `truncated` and `cap` each deliver an
+  `@unresolved` list, so those three are the documents `unresolved_rate` counts — in the example
+  above, 11 + 2 + 0 of 212, which is the 0.061 beside them. `unread` is the one exit that stops with
+  an EMPTY list and is still not clean, which is why it has a rate of its own
+  (`review_unread_rate`) and why the document says so under `@review-unread`. Which exit it was is
+  which fix is being asked for — `cap` is a config number
   (`defaults.max_review_iterations`), `converged` is a prompt, `truncated` is an output ceiling,
   `unread` is a reviewer that could not read part of what it was judging. The `cap`/`converged`
   split is the one that could not be had before: from outside the loop they are the same shape, and
