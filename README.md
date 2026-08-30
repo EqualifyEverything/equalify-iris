@@ -1535,7 +1535,10 @@ the repo would go wrong:
   `.github/scripts/**`, `.github/CODEOWNERS`, `LICENSE`, `infra/**` or `.env*` is converted to a
   draft with a comment saying why, and the job goes red. `.github/scripts/` is on the list because
   a workflow may keep part of itself there: GitHub refuses a `run:` block past 21000 characters, so
-  `issue-triage.yml`'s enforcement step is `.github/scripts/triage-decide.sh`. CI is the sharp case, and it stays forbidden
+  `issue-triage.yml`'s enforcement step is `.github/scripts/triage-decide.sh` and the body of every
+  issue the weekly quality report files is `.github/scripts/quality-body.jq`. One decides whether an
+  issue closes and the other writes public prose about the deployment's own output, which is why the
+  boundary follows the privilege rather than the directory's name. CI is the sharp case, and it stays forbidden
   even though `code-review.yml` now reviews workflow diffs: CI is where this job's own privilege is
   defined — the Bedrock role, `contents: write`, and that allowlist — so a run talked into editing
   it could widen what the next run may do. That is a privilege boundary, not a review gap.
@@ -1681,6 +1684,17 @@ one-line PR with a reviewer. That has a deliberate consequence: `.github/workflo
 triage workflow's forbidden-paths list, so **the automation cannot close one of these issues by
 moving the number that produced it.** If the threshold is what is wrong, say so on the issue and
 change it yourself — that is a better outcome than muting the workflow, and the issue body says so.
+
+The *prose* of those issues — the paragraph that says what a crossed rate means and which file to
+open first — is [`.github/scripts/quality-body.jq`](.github/scripts/quality-body.jq), a jq program
+the job checks out, and it is where to edit an explanation that has gone stale. It is a file for the
+same mechanical reason [`triage-decide.sh`](#closing-duplicate-issues) is: 13,000 characters of
+prose inside a `run:` block had that step at 87% of the 21,000-character ceiling, in the one part of
+this workflow designed to grow. `.github/scripts/**` is on the forbidden-paths list too, so moving
+it there did not hand the automation a way to rewrite what the report says about itself.
+`test/quality-report-workflow.test.ts` renders it for every finding the thresholds can emit on every
+`npm test`, because otherwise a syntax error in it would first be discovered by the Saturday that
+had something to report.
 
 When the measurement itself breaks — endpoint unreachable, token rejected, a 200 that is not a tally
 — the run goes **red**. A quality loop that quietly stops reporting is indistinguishable from a
