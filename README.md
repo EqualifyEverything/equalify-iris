@@ -930,8 +930,16 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   returned with what is left of it (`shrunk`), and the shrinking one is the commoner. A shrink is
   read as the prose, so that unwrapping a mis-structured block is not taken for content leaving,
   plus the `<img>` and `<a>` counts, because a block that hands back its caption and drops the image
-  gave up something no comparison of words can see. Each
+  gave up something no comparison of words can see — and, for the same reason, a heading that stops
+  being a heading with every word left in place, which takes a reader's only means of finding that
+  content while every size on the line says the round was clean. Headings are folded across `h1`-`h6`,
+  so re-levelling one does not move the count. Each of those
   is an ordinary correction alone, so the rule only fires on a reply that already has a defect in it.
+  What the DOCUMENT lost is a separate reading at a separate grain (`navigation_lost` on the same
+  line): headings, list items and table rows counted on the body the blocks assemble into, so that a
+  sanctioned reorder — a heading moved from one block to another — is silent where the per-block
+  reading has to speak. The list items and table rows there are a measurement and do not gate at all,
+  because content leaving one of those can land in another structure a reader can still navigate.
   Both hand the body back and let the loop retry. A model that answers with a whole `html` body anyway is
   still read, and logged as `editor_whole_body`: refusing it would spend the round, and the #174
   floor guards that path as it always did. What it does cost is measured on the same line — the

@@ -25,6 +25,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { annotateBlocks, applyBlockEdits, blocksOf, readBlockEdits } from "../src/pipeline/patch.ts";
+import { visibleText } from "../src/pipeline/correction.ts";
 import { splitBlocks, topLevelComplete } from "../src/pipeline/sections.ts";
 import { EDITOR_SYSTEM, runReview } from "../src/pipeline/review.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
@@ -555,6 +556,128 @@ test("the half of a move that carries no words counts too: an image or a link le
   assert.ok(!("shrunk" in (unwrap?.data ?? {})), "fewer bytes, the same document");
   assert.ok(!("discarded" in (unwrap?.data ?? {})), "so the refusal beside it costs its own block only");
   assert.match(unwrapped.result.body, /<h1>M<\/h1>\n<p>See <a href="#page-2">page 2<\/a>\.<\/p>/);
+});
+
+// --- the loss with no words in it (issue #271) ---
+
+// A document whose whole value to a screen-reader user is in its structure: an outline to jump by,
+// a list announced as having two items, a table walked row by row.
+const OUTLINED = `<h1>Manual</h1>
+<h2>Cleaning the filter</h2>
+<ul><li>Unclip the cover</li><li>Rinse the mesh</li></ul>
+<table><tr><th>Part</th><th>Code</th></tr><tr><td>Filter</td><td>A1</td></tr><tr><td>Cover</td><td>A2</td></tr></table>
+`;
+
+test("a structure a reader navigates by can leave a block with no word leaving with it", () => {
+  // The third shape of loss, after prose and after the two wordless things. Each of these
+  // replacements is a faithful transcription of its block — every word in the same order, and the
+  // last two are LONGER in bytes — and each takes away the only means a reader had of finding that
+  // content: the heading list, the "list, 2 items" announcement, the row-by-row walk.
+  const patched = applyBlockEdits(blocksOf(OUTLINED), [
+    { block: 1, html: `<p>Cleaning the filter</p>` },
+    { block: 2, html: `<p>Unclip the cover</p>\n<p>Rinse the mesh</p>` },
+    { block: 3, html: `<table><tr><th>Part</th><th>Code</th></tr><tr><td>Filter</td><td>A1</td><td>Cover</td><td>A2</td></tr></table>` },
+  ]);
+  assert.equal(patched.applied, 3);
+  // Every one of them is prose-identical, which is the whole point: `text_chars_*` on the `editor`
+  // line, `destroyedBody`'s floor and `shrunk`'s prose reading all say this round was clean.
+  assert.equal(visibleText(OUTLINED), visibleText(patched.body));
+  // Counted per kind and by how many went, summed over the blocks: one heading is a repeated title
+  // resolved too thoroughly, and 84 is a document flattened.
+  assert.deepEqual(patched.navigation_lost, { headings: 1, items: 2, rows: 1 });
+  // Only the heading counts as content given up, and the other two are reported without gating —
+  // `GATED` has the reason, which is that a `<ul>` rewritten as a `<dl>` and a table corrected into
+  // the list it should have been move `items` and `rows` down on rounds that are doing their job.
+  assert.equal(patched.shrunk, 1);
+});
+
+test("the corrections this loop asks for are not that, and none of them costs the round", () => {
+  // The direction that decides whether the reading above is worth having, since a signal that fires
+  // on the work is worse than no signal. Each of these is a correction EDITOR_SYSTEM sanctions by
+  // name or a fix the Reader raises, and each moves some structure count down.
+  const patched = applyBlockEdits(blocksOf(OUTLINED), [
+    // "fix heading hierarchy" — which is why `structureCounts` folds h1-h6 into one number, and why
+    // this reading can be had at all: re-levelling does not move it.
+    { block: 1, html: `<h3>Cleaning the filter</h3>` },
+    // A list rewritten as the definition list `agents/page.md` asks for. This is the one that
+    // decided the shape of the rule: `items` 2 -> 0 with every word in place, on a round that did
+    // exactly what it should — so `items` is reported and not gated. (`terms` is not read at all;
+    // the reverse rewrite is the measured round `EDITOR_SHRINK_FLOOR` is placed off, 55 terms to 3
+    // with the prose moving 0.3%.)
+    { block: 2, html: `<dl><dt>Unclip</dt><dd>the cover</dd><dt>Rinse</dt><dd>the mesh</dd></dl>` },
+    // "correct labels and table headers": `<td>` -> `<th>` takes `cells` down by exactly the number
+    // corrected, so a rule that read cells would fire on every table it fixed.
+    { block: 3, html: `<table><tr><th scope="col">Part</th><th scope="col">Code</th></tr><tr><th scope="row">Filter</th><td>A1</td></tr><tr><th scope="row">Cover</th><td>A2</td></tr></table>` },
+  ]);
+  assert.equal(patched.applied, 3);
+  assert.equal(patched.shrunk, 0, "not one of them may cost the round the rest of its corrections");
+  // The heading is not merely un-gated, it did not move: folding h1-h6 is what makes the reading
+  // above possible at all. The `<dl>` rewrite is reported, and that is all it is.
+  assert.deepEqual(patched.navigation_lost, { items: 2 });
+  // And the container counts, for the same reason: two of anything the extractor split across a page
+  // turn, merged back into one, is a fall on a round that did its job.
+  const merged = applyBlockEdits(blocksOf(`<div><p>One.</p><p>Two.</p></div>\n`), [
+    { block: 0, html: `<p>One. Two.</p>` },
+  ]);
+  assert.equal(merged.shrunk, 0, "paragraphs 2 -> 1, every word in place");
+});
+
+test("a reorder is two blocks changing places, not a heading lost, and the two readings say so differently", () => {
+  // The grain the measurement is read at, and why it is not the grain `shrunk` is read at.
+  // EDITOR_SYSTEM sanctions "reorder blocks", and under this contract a reorder is a pair of edits:
+  // one block gives the heading up and another takes it. A sum of per-block FALLS would report that
+  // as a heading lost, on a document that kept every one — which is the same class of false positive
+  // the prose condition exists to exclude, and worse here, because this number's whole use is to be
+  // the clean population.
+  const ORDERED = `<h1>Manual</h1>\n<h2>Notes</h2>\n<p>Body text here.</p>\n`;
+  const swapped = applyBlockEdits(blocksOf(ORDERED), [
+    { block: 1, html: `<p>Body text here.</p>` },
+    { block: 2, html: `<h2>Notes</h2>` },
+  ]);
+  // The same words in a different order, which is what a reorder is — so the length the reading
+  // compares is equal while the text is not.
+  assert.equal(visibleText(swapped.body).length, visibleText(ORDERED).length);
+  assert.deepEqual(swapped.navigation_lost, {}, "the document has the heading it started with");
+  // `shrunk` still counts both halves, and that is correct rather than a leftover: its job is to spot
+  // the source half of a move, so that a refusal on the landing half cannot take the heading with it.
+  // Read on the joined body it would be silent here, and a reorder whose landing half was refused
+  // would ship a document with one heading fewer and nothing to say so.
+  assert.equal(swapped.shrunk, 2);
+});
+
+test("a navigable count falling beside a word loss is the sanctioned deletion, and stays out of the new number", async () => {
+  // The rule's substantive half. Dropping a title the pages reprinted is the removal EDITOR_SYSTEM
+  // spends a paragraph asking for, and it takes that title's words with it — so it is already
+  // `shrunk` on the prose, and counting it here as well would put the sanctioned case and the silent
+  // one in one number and leave neither readable.
+  const REPRINTED = `<h1>Manual</h1>\n<div><h2>Operation</h2><p>More.</p></div>\n<p>End.</p>\n`;
+  const deduped = await round(() => ({ edits: [{ block: 1, html: `<div><p>More.</p></div>` }] }), REPRINTED, 1);
+  const dedupe = deduped.events.find((e) => e.type === "editor_patch");
+  assert.equal(dedupe?.data.shrunk, 1);
+  assert.ok(!("navigation_lost" in (dedupe?.data ?? {})), "a heading gone with its words is the old signal's business");
+
+  // Whereas the same heading demoted, words intact, reaches the line — on a round that was applied
+  // and not discarded, because a fall here has never meant the round was wrong. How often a WORKING
+  // round does this is the rate #271 has no measurement of, and this is where it comes from.
+  const demoted = await round(() => ({ edits: [{ block: 1, html: `<div><p>Operation</p><p>More.</p></div>` }] }), REPRINTED, 1);
+  const demote = demoted.events.find((e) => e.type === "editor_patch");
+  assert.match(demoted.result.body, /<p>Operation<\/p>/, "applied, not refused");
+  assert.equal(demote?.data.shrunk, 1);
+  assert.deepEqual(demote?.data.navigation_lost, { headings: 1 });
+  assert.ok(!("discarded" in (demote?.data ?? {})));
+
+  // And beside a refusal it is the half of a move that gates, which is what `shrunk` is for: take
+  // the source half of a move and refuse the landing half and the heading is simply gone.
+  const halved = await round(() => ({
+    edits: [
+      { block: 2, html: `<div><p>End.</p><h2>Operation</h2>` }, // landing, left open
+      { block: 1, html: `<div><p>Operation</p><p>More.</p></div>` }, // source, the outline gone
+    ],
+  }), REPRINTED, 1);
+  assert.equal(halved.result.body, REPRINTED, "the round costs itself, not the document");
+  const half = halved.events.find((e) => e.type === "editor_patch");
+  assert.equal(half?.data.discarded, "refusal_with_loss");
+  assert.deepEqual(half?.data.navigation_lost, { headings: 1 }, "on the line whether or not the round survived");
 });
 
 test("a reply with neither shape in it is a call that said nothing", async () => {
