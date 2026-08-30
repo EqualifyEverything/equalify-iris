@@ -4,9 +4,11 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse } from "yaml";
 
 // The jq half of `.github/workflows/quality-report.yml` (PRD §7.16), which turns the
-// `/v1/quality` tally into the body of a public issue.
+// `/v1/quality` tally into the body of a public issue. It lives in
+// `.github/scripts/quality-body.jq`.
 //
 // Worth testing rather than reading, because of WHEN it runs: only on a week a
 // threshold is crossed, in a job nobody is watching. A syntax error in the body
@@ -19,8 +21,14 @@ import { join } from "node:path";
 // unparenthesised `+`, so `{a: "x" + "y"}` is a syntax error where `{a: ("x" + "y")}`
 // is fine. Adding a sentence to one of the six finding bodies is exactly the edit that
 // hits it.
+//
+// The program was inline in the workflow when this file was written, and lifting it out
+// (the `run:` block was at 87% of GitHub's 21,000-character ceiling) is what the two
+// wiring tests at the bottom are for: the program and its caller can now be edited
+// separately, so nothing but a test says they still refer to each other.
 
 const WORKFLOW = join(import.meta.dirname, "..", ".github", "workflows", "quality-report.yml");
+const PROGRAM = join(import.meta.dirname, "..", ".github", "scripts", "quality-body.jq");
 
 function hasJq(): boolean {
   try {
@@ -33,22 +41,11 @@ function hasJq(): boolean {
 
 const skip = hasJq() ? false : "jq not installed";
 
-// The body program, lifted out of the `run:` block by its own delimiters rather than by
-// line number, so moving the step does not silently extract nothing. `'"'"'` is how a
-// literal apostrophe survives single-quoted shell, and jq never sees that form — the
-// shell hands it over as one `'`, so the extraction has to as well or the program under
-// test is not the program that runs.
-function bodyProgram(): string {
-  const lines = readFileSync(WORKFLOW, "utf8").split("\n");
-  const start = lines.findIndex((l) => l.includes("--slurpfile tallyfile /tmp/quality.json '"));
-  assert.ok(start >= 0, "the body step still assembles the issue with --slurpfile");
-  const end = lines.findIndex((l, i) => i > start && l.trim().startsWith("' <<<\"$finding\""));
-  assert.ok(end > start, "and still closes the program by feeding it the finding on stdin");
-  return lines
-    .slice(start + 1, end)
-    .join("\n")
-    .replaceAll(`'"'"'`, "'");
-}
+// The program needs no extraction any more, and that is the whole benefit of the move:
+// `renderBody` below hands jq the same path with the same `-f` the workflow uses. It used
+// to be lifted out of the `run:` block by its delimiters, with every `'"'"'` — how a
+// literal apostrophe survives single-quoted shell — folded back to one `'`, because
+// otherwise the program under test was not the program that ran.
 
 // A tally shaped like the one that produced #263: 6 of 70 documents could not be
 // linted, and 4 of those name the step they failed at.
@@ -117,9 +114,7 @@ const FINDINGS: Record<string, Record<string, unknown>> = {
 function renderBody(key: string, tally: unknown = TALLY): string {
   const dir = mkdtempSync(join(tmpdir(), "iris-qreport-"));
   try {
-    const prog = join(dir, "body.jq");
     const tallyPath = join(dir, "quality.json");
-    writeFileSync(prog, bodyProgram());
     writeFileSync(tallyPath, JSON.stringify(tally));
     return execFileSync(
       "jq",
@@ -135,7 +130,7 @@ function renderBody(key: string, tally: unknown = TALLY): string {
         "tallyfile",
         tallyPath,
         "-f",
-        prog,
+        PROGRAM,
       ],
       { input: JSON.stringify({ key, ...FINDINGS[key] }), encoding: "utf8" },
     );
@@ -161,6 +156,66 @@ test("every finding the thresholds can emit renders a body", { skip }, () => {
     // number in the prose against the response it came from.
     assert.ok(body.includes('"window_days"'), `${key} attaches the tally`);
   }
+});
+
+test("the workflow runs the program this file renders, with every variable it declares", () => {
+  // What the inline version could not get wrong. The program names three variables it
+  // does not define — `$tallyfile`, `$url`, `$cooldown` — and jq resolves those at
+  // COMPILE time, so one added to the program and not to the invocation is not a wrong
+  // issue body, it is no issue at all on the week a threshold is crossed. Derived from
+  // the program rather than listed, so the next variable is covered before it is added.
+  const program = readFileSync(PROGRAM, "utf8");
+  const bound = new Set([...program.matchAll(/\bas \$([A-Za-z_]\w*)/g)].map((m) => m[1]));
+  const free = [...new Set([...program.matchAll(/\$([A-Za-z_]\w*)/g)].map((m) => m[1]))]
+    .filter((v) => !bound.has(v))
+    .sort();
+  assert.deepEqual(free, ["cooldown", "tallyfile", "url"], "the program's inputs changed");
+
+  const yaml = readFileSync(WORKFLOW, "utf8");
+  assert.match(
+    yaml,
+    /-f \.github\/scripts\/quality-body\.jq <<<"\$finding"/,
+    "the filing step still runs this program on the finding",
+  );
+  // Any of the three forms is a definition; which one is the caller's business.
+  for (const v of free) {
+    assert.match(
+      yaml,
+      new RegExp(`--(arg|argjson|slurpfile) ${v} `),
+      `the workflow never supplies \`$${v}\`, so jq will refuse the program`,
+    );
+  }
+});
+
+test("the program is on disk before the step that needs it", () => {
+  // The other thing the move introduced: a `run:` block is always there, and a checked-out
+  // file is there only if something checked it out. Order matters and YAML does not
+  // enforce it, so this reads the steps in sequence — a checkout added after the filing
+  // step would look right in a diff and fail on a filing week.
+  const doc = parse(readFileSync(WORKFLOW, "utf8")) as {
+    jobs: { report: { steps: { name?: string; uses?: string; with?: Record<string, string>; run?: string }[] } };
+  };
+  const steps = doc.jobs.report.steps;
+  const checkout = steps.findIndex((s) => (s.uses ?? "").startsWith("actions/checkout@"));
+  assert.ok(checkout >= 0, "the job no longer checks out the program it runs with -f");
+  assert.match(
+    steps[checkout].with?.["sparse-checkout"] ?? "",
+    /\.github\/scripts/,
+    "the sparse checkout no longer includes the directory the program is in",
+  );
+  const uses = steps.findIndex((s) => (s.run ?? "").includes("quality-body.jq <<<"));
+  assert.ok(uses > checkout, "the program is used before it is fetched");
+
+  // And the compile probe, which is the reason a broken checkout is a loud failure on a
+  // quiet week rather than a silent one on the week the report matters. It carries no
+  // `if:`, deliberately: every other step in this job is conditional.
+  const probe = steps.findIndex((s) => (s.run ?? "").includes("-f .github/scripts/quality-body.jq </dev/null"));
+  assert.ok(probe > checkout && probe < uses, "nothing proves the program arrived");
+  assert.equal(
+    (steps[probe] as { if?: string }).if,
+    undefined,
+    "the probe runs on every run or it is not a probe",
+  );
 });
 
 test("the keys the thresholds emit are the keys the body program answers", { skip }, () => {
