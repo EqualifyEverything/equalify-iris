@@ -747,8 +747,8 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   `role="main"` on an element that was never a `<main>` is left to the gate as well: that is a role a
   model chose on an element whose own semantics do not cover it, the same judgement the role strip
   above refuses to make. All three points are needed for the
-  usual reason: the assembly join is where extraction's wrappers arrive, an editor round retypes the
-  whole body and can introduce one of its own, and a feedback re-run resumes a stored body that was
+  usual reason: the assembly join is where extraction's wrappers arrive, an editor round rewrites blocks of the
+  body and can introduce one of its own, and a feedback re-run resumes a stored body that was
   written before any of this existed. The prompt is still the primary fix — `agents/page.md` now says the document supplies `<html>`, `<head>`,
   `<body>` and the `<main>`, which is the fact all six benched models were missing.
 - **A table printed across a page break is rejoined into one table.** Each page is extracted alone,
