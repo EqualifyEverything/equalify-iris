@@ -815,6 +815,41 @@ echo "$qbout" | grep -q 'Page marker 1' \
   && pass "the queued run produced a complete document" \
   || fail "queued output" "$qbout"
 
+echo "==> 9i. a page that says it is unfinished is the one thing the review loop may not fix"
+# `[page not fully transcribed]` is the marker agents/page.md tells the page agent to emit
+# when a page holds more than it can return, and READER_SYSTEM tells the Reader to report
+# every one and says settling one means re-extracting that page — "which is nobody's job in
+# this loop". So a document carrying one cannot finish the loop clean whatever the round
+# budget is, and it is the measured floor under `unresolved_rate` (#264, `iris:unfinished-page`).
+#
+# Driven end to end because of what the workflow does with the number: the weekly finding
+# prints the floor whenever the field is PRESENT, including at 0%, which is deliberate — a
+# measured 0% says the whole unresolved rate is Iris's to fix. That makes a producer stuck at
+# zero worse than a missing one: it would have the report assert the one thing this metric can
+# get wrong. Nothing but a real run can rule that out.
+#
+# One mock artifact to read past: this document exits the loop `clean`, because the mock Reader
+# answers with an empty issue list whatever it is shown. A real Reader is instructed to report
+# every marker, so on a deployment this same document exits `converged` and is in
+# `unresolved_rate` too. What the mock decides is what the READER says; what is under test here
+# is that the marker survives to the delivered body and is counted from it.
+curl -s -X POST -H 'content-type: application/json' -d '{"on":true}' \
+  "http://localhost:$OR_PORT/__unfinished-page" >/dev/null
+ucreate=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
+  -F "images=@$png;filename=page-001.png" \
+  -F "images=@$png;filename=page-002.png")
+USID=$(echo "$ucreate" | jq -r '.session_id')
+LSID=$USID
+await_ready "run whose second page stopped short"
+curl -s -X POST -H 'content-type: application/json' -d '{"on":false}' \
+  "http://localhost:$OR_PORT/__unfinished-page" >/dev/null
+LSID=""
+uout=$(curl -s "${AUTH[@]}" "$BASE/sessions/$USID/output")
+umarkers=$(echo "$uout" | grep -o '\[page not fully transcribed\]' | wc -l | tr -d ' ')
+[ "$umarkers" = "1" ] \
+  && pass "the marker is delivered as content, once, rather than tidied away" \
+  || fail "unfinished page" "expected 1 marker in the delivered document, found $umarkers"
+
 echo "==> 10. ownership isolation (other endpoints reject unknown id)"
 code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/ses_doesnotexist")
 [ "$code" = "404" ] && pass "unknown session => 404" || fail "isolation" "got $code"
@@ -1020,6 +1055,38 @@ echo "$q" | jq -e '[.lint_error_where[].where] == ["parse","inject","run"]
   and ([.lint_error_where[].documents] | add) <= (.documents - .documents_linted)' >/dev/null \
   && pass "lint_error_where accounts for the unlinted documents ($(echo "$q" | jq -c '[.lint_error_where[] | "\(.where)=\(.documents)"] | join(" ")' | tr -d '"'))" \
   || fail "quality" "lint_error_where=$(echo "$q" | jq -c '.lint_error_where') against documents=$docs linted=$(echo "$q" | jq -r '.documents_linted')"
+# Which of the review loop's five exits ended each document (#264), and the property that
+# makes the breakdown readable: one exit per delivered document, so these sum to
+# `documents` exactly. Asserted end to end rather than only in test/quality.test.ts because
+# the sum is what a shortfall is read against, and a shortfall is meant to mean "delivered
+# before this was recorded" — an exit in the real pipeline that assigns nothing would look
+# identical, and only a run of the whole pipeline can rule that out.
+echo "$q" | jq -e '[.review_stopped[].where] == ["clean","unread","converged","truncated","cap"]
+  and ([.review_stopped[].documents] | all(. >= 0))
+  and ([.review_stopped[].documents] | add) == .documents' >/dev/null \
+  && pass "review_stopped attributes all $docs document(s) ($(echo "$q" | jq -c '[.review_stopped[] | select(.documents > 0) | "\(.where)=\(.documents)"] | join(" ")' | tr -d '"'))" \
+  || fail "quality" "review_stopped=$(echo "$q" | jq -c '.review_stopped') against documents=$docs — an exit that assigns no stop reason"
+# How the Reader rated what it left open. NOT a partition (one document with a high issue
+# and two low ones is counted in both), so the invariant is the weaker one that matters:
+# an unresolved rate above zero must have severities behind it, and a rate of zero must
+# have none. The two disagreeing means the rate and this breakdown are counting different
+# documents, which would make a `high`-based threshold unsafe to set.
+echo "$q" | jq -e '[.unresolved_severity[].severity] == ["high","medium","low","unrated"]
+  and ([.unresolved_severity[].documents] | all(. >= 0))
+  and ([.unresolved_severity[].documents] | max) <= .documents
+  and ((([.unresolved_severity[].documents] | add) > 0) == (.unresolved_rate > 0))' >/dev/null \
+  && pass "unresolved_severity agrees with unresolved_rate=$(echo "$q" | jq -r '.unresolved_rate') ($(echo "$q" | jq -c '[.unresolved_severity[] | "\(.severity)=\(.documents)"] | join(" ")' | tr -d '"'))" \
+  || fail "quality" "unresolved_severity=$(echo "$q" | jq -c '.unresolved_severity') against unresolved_rate=$(echo "$q" | jq -r '.unresolved_rate')"
+# And the floor under that rate: documents still carrying `[page not fully transcribed]`,
+# which no pass in the loop may resolve. Above zero because step 9i put exactly one such
+# document through the pipeline, and that is the half of this only a real run can check —
+# the weekly report prints this sentence whenever the FIELD is present, including at 0%, so
+# a producer stuck at zero would not go quiet: it would have the report assert that the
+# whole unresolved rate is Iris's to fix. A recorded 0 and a missing key are also different
+# claims, which is why `!= null` is asserted rather than only a range.
+echo "$q" | jq -e '.unfinished_page_rate != null and .unfinished_page_rate > 0 and .unfinished_page_rate <= 1' >/dev/null \
+  && pass "unfinished_page_rate is $(echo "$q" | jq -r '.unfinished_page_rate'), measured from the document step 9i delivered" \
+  || fail "quality" "unfinished_page_rate=$(echo "$q" | jq -r '.unfinished_page_rate'), expected the marker from step 9i to be counted"
 # A round is an EDITOR pass, not a reader pass: the loop returns as soon as the
 # Reader finds nothing, before incrementing, so a document that comes back clean on
 # the first look completes with 0 rounds and that is the good outcome. The mock model
@@ -1052,8 +1119,11 @@ done
 # entries of `lint_error_where` add `where` (their `documents` is already allowed).
 # `where` is one of three strings named in `src/store/db.ts`, which is why it is
 # publishable at all — the version of that field carrying the error message would have
-# quoted the markup jsdom choked on.
-allowed='["window_days","documents","since","mean_rounds","unresolved_rate","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","where","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","id","impact","share","nodes"]'
+# quoted the markup jsdom choked on. `severity` (#264) is publishable for the same reason
+# and needs it more: the Reader WRITES that value, so the store maps anything outside its
+# four words to `unrated` rather than passing it on — an unmapped one would put model prose
+# about someone's document into a public issue.
+allowed='["window_days","documents","since","mean_rounds","unresolved_rate","severity","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","where","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","unfinished_page_rate","id","impact","share","nodes"]'
 extra=$(echo "$q" | jq -c --argjson allowed "$allowed" '([paths(scalars) | last] | unique) - $allowed')
 [ "$extra" = "[]" ] \
   && pass "the payload's key set is exactly the documented one (no session id, login or document content)" \

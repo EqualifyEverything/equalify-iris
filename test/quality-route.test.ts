@@ -34,6 +34,19 @@ function fakeStore(): { store: Store; state: { calls: number; days: number[] } }
         since: "2026-01-01T00:00:00.000Z",
         mean_rounds: 1.5,
         unresolved_rate: 0.1,
+        unresolved_severity: [
+          { severity: "high", documents: 0 },
+          { severity: "medium", documents: 0 },
+          { severity: "low", documents: 1 },
+          { severity: "unrated", documents: 0 },
+        ],
+        review_stopped: [
+          { where: "clean", documents: 9 },
+          { where: "unread", documents: 0 },
+          { where: "converged", documents: 1 },
+          { where: "truncated", documents: 0 },
+          { where: "cap", documents: 0 },
+        ],
         links_dropped_rate: 0,
         links_unresolved_rate: 0,
         markup_unbalanced_rate: 0,
@@ -49,6 +62,7 @@ function fakeStore(): { store: Store; state: { calls: number; days: number[] } }
         editor_truncated_rate: 0,
         editor_truncated_lost_rate: 0,
         review_unread_rate: 0,
+        unfinished_page_rate: 0,
         rules: [{ id: "heading-order", impact: "moderate", documents: 4, share: 0.4, nodes: 9 }],
       } satisfies QualityStats;
     },

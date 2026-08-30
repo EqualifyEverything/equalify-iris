@@ -18,7 +18,13 @@ import {
   SIGNAL_LINT_ERROR,
   SIGNAL_REVIEW_UNREAD,
   SIGNAL_ROUNDS,
+  SIGNAL_UNFINISHED_PAGE,
   SIGNAL_UNRESOLVED,
+  REVIEW_STOPPED,
+  reviewStoppedSignal,
+  UNRESOLVED_SEVERITY,
+  unresolvedSeverity,
+  unresolvedSeveritySignal,
   Store,
   type RunSignal,
 } from "../src/store/db.ts";
@@ -346,6 +352,173 @@ test("the step breakdown is not mistaken for an axe rule", () => {
   });
 });
 
+// #264: 84.3% of documents shipped with issues open against a threshold of 15%, and the
+// tally could say nothing about why. `mean_rounds` 0.886 against a cap of 3 said the budget
+// was going unspent, so raising the cap could not have been the answer — but that inference
+// was available only because both numbers happened to be in one report, and it could not say
+// which exit was retiring those documents instead. These six tests are what make the next
+// occurrence answer that from the endpoint.
+test("which exit ended each document is reported per exit, and the exits sum to the documents", () => {
+  withStore((store) => {
+    delivered(store, "fine", [{ code: reviewStoppedSignal("clean"), count: 1 }], 0);
+    delivered(store, "no-verdict", [
+      { code: reviewStoppedSignal("unread"), count: 1 },
+      { code: SIGNAL_REVIEW_UNREAD, count: 2 },
+    ]);
+    delivered(store, "editor-declined", [
+      { code: reviewStoppedSignal("converged"), count: 1 },
+      { code: SIGNAL_UNRESOLVED, count: 1 },
+    ]);
+    delivered(store, "too-long", [
+      { code: reviewStoppedSignal("truncated"), count: 1 },
+      { code: SIGNAL_EDITOR_TRUNCATED, count: 1 },
+      { code: SIGNAL_UNRESOLVED, count: 4 },
+    ]);
+    delivered(store, "out-of-rounds", [
+      { code: reviewStoppedSignal("cap"), count: 1 },
+      { code: SIGNAL_UNRESOLVED, count: 2 },
+    ]);
+
+    const q = store.qualityStats();
+    assert.deepEqual(q.review_stopped, [
+      { where: "clean", documents: 1 },
+      { where: "unread", documents: 1 },
+      { where: "converged", documents: 1 },
+      { where: "truncated", documents: 1 },
+      { where: "cap", documents: 1 },
+    ]);
+    // The property the workflow's body relies on, and the reason `clean` is in the
+    // vocabulary at all: recorded for every delivered document, so the counts partition the
+    // denominator and a shortfall means an exit nobody attributed.
+    assert.equal(
+      q.review_stopped.reduce((n, s) => n + s.documents, 0),
+      q.documents,
+    );
+  });
+});
+
+test("the cap and a round that changed nothing are told apart", () => {
+  withStore((store) => {
+    // The whole point of the field. Both of these documents shipped with issues open and
+    // both are one row of `iris:unresolved`, so every number that existed before said the
+    // same thing about them — while one is asking for a bigger `max_review_iterations` and
+    // the other is asking for a prompt change and would ignore a bigger one.
+    delivered(store, "budget-ran-out", [
+      { code: reviewStoppedSignal("cap"), count: 1 },
+      { code: SIGNAL_UNRESOLVED, count: 3 },
+    ]);
+    delivered(store, "editor-declined", [
+      { code: reviewStoppedSignal("converged"), count: 1 },
+      { code: SIGNAL_UNRESOLVED, count: 3 },
+    ]);
+    const q = store.qualityStats();
+    assert.equal(q.unresolved_rate, 1, "indistinguishable in the rate that files the issue");
+    assert.deepEqual(
+      q.review_stopped.filter((s) => s.documents).map((s) => s.where),
+      ["converged", "cap"],
+      "and distinguishable here, which is the only place the two are",
+    );
+  });
+});
+
+test("an exit nothing took reports zero, and one nobody attributed is a shortfall", () => {
+  withStore((store) => {
+    // The state every deployment is in the week this ships, exactly as for the lint steps
+    // above: documents already in the window have no stop reason because nothing wrote one.
+    // The counts then sum to less than `documents`, and reading that gap as a sixth kind of
+    // exit is the one wrong way to use this field.
+    delivered(store, "before-the-field", [{ code: SIGNAL_UNRESOLVED, count: 1 }]);
+    delivered(store, "after-the-field", [
+      { code: reviewStoppedSignal("converged"), count: 1 },
+      { code: SIGNAL_UNRESOLVED, count: 1 },
+    ]);
+    const q = store.qualityStats();
+    assert.deepEqual(
+      q.review_stopped.map((s) => s.where),
+      [...REVIEW_STOPPED],
+      "all five are always present, in the order the code names them",
+    );
+    assert.equal(
+      q.review_stopped.reduce((n, s) => n + s.documents, 0),
+      1,
+      "and only the document recorded since names an exit",
+    );
+  });
+});
+
+test("the severities of what was left open are counted per document, and are not a partition", () => {
+  withStore((store) => {
+    // A document with one high issue and three low ones is in BOTH severities, so these
+    // deliberately sum to more than the documents the rate counts. Getting this backwards
+    // would make a report claim more documents than the deployment has.
+    delivered(store, "one-barrier-and-some-nits", [
+      { code: SIGNAL_UNRESOLVED, count: 4 },
+      { code: unresolvedSeveritySignal("high"), count: 1 },
+      { code: unresolvedSeveritySignal("low"), count: 3 },
+    ]);
+    delivered(store, "just-a-nit", [
+      { code: SIGNAL_UNRESOLVED, count: 1 },
+      { code: unresolvedSeveritySignal("low"), count: 1 },
+    ]);
+    const q = store.qualityStats();
+    assert.deepEqual(q.unresolved_severity, [
+      { severity: "high", documents: 1 },
+      { severity: "medium", documents: 0 },
+      { severity: "low", documents: 2 },
+      { severity: "unrated", documents: 0 },
+    ]);
+    // Which is the reading #264 was filed needing: the rate says every document shipped
+    // with something open, and one of them shipped with something a reader would call a
+    // barrier.
+    assert.equal(q.unresolved_rate, 1);
+  });
+});
+
+test("a severity the Reader invented lands in `unrated` rather than in the report", () => {
+  // Not a store test: the bucketing is what keeps a model-written string out of a public
+  // issue, and `ReviewIssue.severity` is typed `"low" | "medium" | "high"` while the parse
+  // that produces it checks only that the issue is an object. So the runtime value is
+  // whatever the Reader wrote, and this function is the whole boundary.
+  assert.equal(unresolvedSeverity("high"), "high");
+  assert.equal(unresolvedSeverity("medium"), "medium");
+  assert.equal(unresolvedSeverity("low"), "low");
+  assert.equal(unresolvedSeverity(undefined), "unrated", "an absent severity");
+  assert.equal(unresolvedSeverity("critical"), "unrated", "a plausible word from another vocabulary");
+  assert.equal(unresolvedSeverity("HIGH"), "unrated", "and not case-folded: the contract says lower case");
+  assert.equal(unresolvedSeverity(2), "unrated");
+  assert.equal(
+    unresolvedSeverity("high — the table on page 4 of Jane Doe's transcript is unreadable"),
+    "unrated",
+    "the failure this exists to prevent: prose about a document reaching a public issue",
+  );
+  // And every value it can return is one the aggregate has a column for, or the count
+  // silently goes nowhere.
+  for (const raw of ["high", "medium", "low", undefined, "critical", null, {}]) {
+    assert.ok(UNRESOLVED_SEVERITY.includes(unresolvedSeverity(raw)));
+  }
+});
+
+test("the floor under the unresolved rate is counted per document, and never as a rule", () => {
+  withStore((store) => {
+    // A document whose body still says a page was not returned in full cannot finish the
+    // loop clean at any budget — the Reader reports the marker every round and no pass may
+    // resolve it — so this is the part of `unresolved_rate` that is not ours to fix.
+    delivered(store, "two-pages-short", [
+      { code: SIGNAL_UNFINISHED_PAGE, count: 2 },
+      { code: SIGNAL_UNRESOLVED, count: 2 },
+      { code: reviewStoppedSignal("converged"), count: 1 },
+    ]);
+    delivered(store, "whole", [{ code: reviewStoppedSignal("clean"), count: 1 }], 0);
+    const q = store.qualityStats();
+    assert.equal(q.unfinished_page_rate, 1 / 2, "per document, not per marker");
+    assert.equal(q.unresolved_rate, 1 / 2);
+    // Same guard as the lint steps: an `iris:` code that lost its prefix would be published
+    // as an axe rule Iris fails, and this one names a marker out of a user's document.
+    assert.deepEqual(q.rules, []);
+    assert.equal(q.documents_linted, 2, "and it is not the lint-error key either");
+  });
+});
+
 test("dropped links are counted per document and per link", () => {
   withStore((store) => {
     delivered(store, "a", [{ code: SIGNAL_LINKS_DROPPED, count: 3 }]);
@@ -485,12 +658,15 @@ test("nothing per-session, per-user or per-document is exposed", () => {
         "lint_error_where",
         "markup_unbalanced_rate",
         "mean_rounds",
+        "review_stopped",
         "review_unread_rate",
         "rules",
         "since",
         "structural_defect_rate",
         "table_no_body_rate",
+        "unfinished_page_rate",
         "unresolved_rate",
+        "unresolved_severity",
         "window_days",
       ],
       "the shape is pinned, so a new field is a deliberate decision rather than a drift",
@@ -510,6 +686,19 @@ test("nothing per-session, per-user or per-document is exposed", () => {
         ["documents", "where"],
         ["documents", "where"],
       ],
+    );
+    // And for #264's two, where the pressure is the same and stronger. The obvious next
+    // request of either is an example — "and the issue text, so we can see what `high` meant"
+    // for one, "and which page was short" for the other — and both would put a user's
+    // document in a public issue. `where` and `severity` are publishable only because each is
+    // one of a handful of strings named in src/store/db.ts.
+    assert.deepEqual(
+      store.qualityStats().unresolved_severity.map((s) => Object.keys(s).sort()),
+      UNRESOLVED_SEVERITY.map(() => ["documents", "severity"]),
+    );
+    assert.deepEqual(
+      store.qualityStats().review_stopped.map((s) => Object.keys(s).sort()),
+      REVIEW_STOPPED.map(() => ["documents", "where"]),
     );
   });
 });

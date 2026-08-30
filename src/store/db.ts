@@ -321,6 +321,73 @@ export const SIGNAL_EDITOR_TRUNCATED_LOST = "iris:editor-truncated-lost";
 // exactly the documents where there is no evidence either way. It is the same principle as
 // SIGNAL_LINT_ERROR one signal up: an absent verdict must not count as a good one.
 export const SIGNAL_REVIEW_UNREAD = "iris:review-unread";
+// WHY the review loop stopped, recorded for every delivered document and in the same five
+// words the loop's own exits are (#264). Beside `iris:unresolved` rather than instead of it,
+// for the reason the lint pair above gives: the rate keeps its meaning and this says which
+// remedy it is asking for.
+//
+// It exists because the loop's stopping conditions are not alternatives a reader can weigh —
+// they point at three unrelated fixes, and the aggregate could not tell them apart at all.
+// `cap` is a budget that ran out, whose remedy is one number in the deployment's config.
+// `converged` is the editor having been shown the issues and answered "no change", whose
+// remedy is a prompt, and which the loop treats as final ON PURPOSE (see `review_converged`
+// in pipeline/review.ts: the next round would be the same request about the same body).
+// `truncated` is an output ceiling. Those were previously distinguishable only in a run log,
+// i.e. only by reading one user's document — the same wall #263 hit.
+//
+// Its first use is arithmetic nobody should have to redo: #264 reported
+// `unresolved_rate` 0.843 with `mean_rounds` 0.886 against a cap of 3, so the budget was
+// going unspent on documents that shipped with issues open, and raising the cap could not
+// have helped. That inference is available only because both numbers happened to be in one
+// tally; this field makes it a measurement instead.
+//
+// `clean` is in the vocabulary although `1 - unresolved_rate` almost gives it, and the
+// redundancy is the point: with it the five counts sum to `documents`, so a shortfall means
+// an exit that recorded nothing. See QualityStats.review_stopped for how to read one.
+export const REVIEW_STOPPED = ["clean", "unread", "converged", "truncated", "cap"] as const;
+export type ReviewStopped = (typeof REVIEW_STOPPED)[number];
+export const SIGNAL_REVIEW_STOPPED = "iris:review-stopped";
+export function reviewStoppedSignal(where: ReviewStopped): string {
+  return `${SIGNAL_REVIEW_STOPPED}-${where}`;
+}
+// How the Reader rated the issues that were still open, as a second row per severity on the
+// documents `iris:unresolved` counts (#264). The question it answers is the one that issue
+// asks and could not answer: whether 84% of documents shipping with something open is 84%
+// carrying a barrier, or 84% carrying a nit the loop was right not to churn over.
+//
+// The vocabulary is closed HERE and not by `ReviewIssue`, which is the whole reason this is a
+// function. That type says `"low" | "medium" | "high"`, but nothing enforces it — the issues
+// are parsed out of model JSON with a `typeof issue === "object"` check and no field
+// validation (pipeline/review.ts) — so the value at runtime is whatever the Reader wrote.
+// Publishing it as found would put a model-chosen string in a public issue, which is the one
+// thing this table must never do. Anything unrecognised becomes `unrated`, which is also
+// where an absent severity lands.
+export const UNRESOLVED_SEVERITY = ["high", "medium", "low", "unrated"] as const;
+export type UnresolvedSeverity = (typeof UNRESOLVED_SEVERITY)[number];
+export function unresolvedSeveritySignal(severity: UnresolvedSeverity): string {
+  return `${SIGNAL_UNRESOLVED}-${severity}`;
+}
+export function unresolvedSeverity(raw: unknown): UnresolvedSeverity {
+  const found = UNRESOLVED_SEVERITY.find((s) => s === raw);
+  return found && found !== "unrated" ? found : "unrated";
+}
+// The delivered document still says a page was not returned in full: a
+// `[page not fully transcribed]` marker survived into the body (BODY_MARKERS in
+// pipeline/review.ts). Recorded per marker, only when there is one.
+//
+// This is the floor under `unresolved_rate`, and it is a designed-in floor rather than a
+// defect. READER_SYSTEM instructs the Reader to report every one of those markers with its
+// page, and says in the same paragraph that settling it means re-extracting that page, "which
+// is nobody's job in this loop, so it is reported and left standing". So a document carrying
+// one CANNOT finish the review loop clean, however many rounds it is given: the Reader will
+// raise it again every round, and the editor is forbidden to resolve it.
+//
+// Recorded because a threshold on `unresolved_rate` is meaningless without it. That rate was
+// documented from the start as needing to be "loose enough to live with the inherent floor"
+// (see SIGNAL_EDITOR_TRUNCATED_LOST), and the floor had never been measured — so the number
+// in the workflow is a guess against an unknown, which is how #264 came to be filed at 0.843
+// against 0.15 with no way to tell how much of it was inherent.
+export const SIGNAL_UNFINISHED_PAGE = "iris:unfinished-page";
 
 // One measurement about one delivered document. `count` is a magnitude (nodes for a
 // rule, issues for `iris:unresolved`, rounds for `iris:rounds`) and is never a
@@ -356,6 +423,38 @@ export interface QualityStats {
   // output ceiling. That last case is counted here too, so this is not disjoint from
   // `editor_truncated_rate` below; it is the superset.
   unresolved_rate: number;
+  // How the Reader rated what was left open, one entry per severity in `UNRESOLVED_SEVERITY`
+  // order and ALWAYS all four, zeroes included — the same "measured, and none of these" vs
+  // "not measured" distinction `lint_error_where` keeps below. Per DOCUMENT: a document with
+  // four low issues and one high is one entry in each of those two, so the counts sum to more
+  // than `unresolved_rate × documents` and are not a partition of it.
+  //
+  // This is the field that decides whether `unresolved_rate` describes a defect. The rate
+  // counts documents that shipped with anything open at all, which for a Reader designed to
+  // report a nit is a number with no natural ceiling; `high` is the part of it a reader of the
+  // document would call a barrier. A threshold belongs on this, not on the rate — but not
+  // until there is a window's worth of it to set one from.
+  //
+  // `unrated` is not a fifth severity, it is the Reader having written something outside the
+  // three (or nothing). Read it as measurement noise unless it is large, in which case the
+  // Reader's output contract is what to look at, not the review loop.
+  unresolved_severity: { severity: UnresolvedSeverity; documents: number }[];
+  // Which of the loop's exits ended each document, one entry per value in `REVIEW_STOPPED`
+  // order and always all five (#264). Recorded for every delivered document, so unlike
+  // `unresolved_severity` above these ARE a partition: the counts sum to `documents`.
+  //
+  // A sum BELOW `documents` is the one reading worth spelling out, and it means one of two
+  // things. Either the window includes documents delivered before this was recorded — the same
+  // shortfall `lint_error_where` can show — or an exit was added to the loop and given no
+  // stop reason, which is the failure this field is shaped to make visible rather than
+  // guessable. It is never a sixth kind of exit.
+  //
+  // `clean` is the good value and the only one the loop reaches by re-reading the finished
+  // document and finding nothing. The other four all deliver `@unresolved`, and which one it
+  // was is which fix is being asked for: `cap` a config number, `converged` a prompt,
+  // `truncated` an output ceiling, `unread` a reviewer that could not read part of what it was
+  // judging. See SIGNAL_REVIEW_STOPPED.
+  review_stopped: { where: ReviewStopped; documents: number }[];
   // Share of documents where the Copy Editor dropped at least one link.
   links_dropped_rate: number;
   // Share of documents delivered with at least one in-document reference that does not land:
@@ -436,6 +535,17 @@ export interface QualityStats {
   // neither, which is the case this rate exists for — an empty issue list that is silence
   // rather than a clean bill of health. Read it as the error bar on `unresolved_rate`.
   review_unread_rate: number;
+  // Share of documents delivered with a `[page not fully transcribed]` marker still in the
+  // body, i.e. documents that could not have finished the review loop clean whatever budget
+  // they were given (#264). This is the measured floor under `unresolved_rate`, not a defect
+  // rate of its own: the Reader is instructed to report every such marker and nothing in the
+  // loop is allowed to resolve one, so each of these documents is a guaranteed member of that
+  // numerator. Subtract it before asking whether a threshold on the rate is being met.
+  //
+  // The marker's own cause is upstream of everything this table measures — a page the
+  // extractor could not return in full — so a high value here is a question about extraction
+  // and `max_pages`, not about review. See SIGNAL_UNFINISHED_PAGE.
+  unfinished_page_rate: number;
   rules: {
     id: string;
     impact: string | null;
@@ -1204,6 +1314,18 @@ export class Store {
       since: base.since ?? null,
       mean_rounds: documents ? Number(base.rounds) / documents : null,
       unresolved_rate: rate(SIGNAL_UNRESOLVED),
+      // Both of these are built from their closed vocabulary rather than from the rows, for
+      // the reason given on `lint_error_where` below: a value that did not occur has to be a
+      // recorded 0, or "none of these happened" and "this deployment does not record it" are
+      // the same answer.
+      unresolved_severity: UNRESOLVED_SEVERITY.map((severity) => ({
+        severity,
+        documents: ours.get(unresolvedSeveritySignal(severity)) ?? 0,
+      })),
+      review_stopped: REVIEW_STOPPED.map((where) => ({
+        where,
+        documents: ours.get(reviewStoppedSignal(where)) ?? 0,
+      })),
       links_dropped_rate: rate(SIGNAL_LINKS_DROPPED),
       links_unresolved_rate: rate(SIGNAL_LINKS_UNRESOLVED),
       markup_unbalanced_rate: rate(SIGNAL_MARKUP_UNBALANCED),
@@ -1220,6 +1342,7 @@ export class Store {
       editor_truncated_rate: rate(SIGNAL_EDITOR_TRUNCATED),
       editor_truncated_lost_rate: rate(SIGNAL_EDITOR_TRUNCATED_LOST),
       review_unread_rate: rate(SIGNAL_REVIEW_UNREAD),
+      unfinished_page_rate: rate(SIGNAL_UNFINISHED_PAGE),
       rules,
     };
   }
