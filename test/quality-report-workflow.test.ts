@@ -158,6 +158,22 @@ test("every finding the thresholds can emit renders a body", { skip }, () => {
   }
 });
 
+// The job's steps as GitHub parses them. Read as a sequence rather than grepped, because
+// both wiring tests below are about WHICH step does something: a `run:` block that
+// supplies a variable, or fetches a file, helps only the steps after it and only if it is
+// the step doing the work.
+interface Step {
+  name?: string;
+  if?: string;
+  uses?: string;
+  with?: Record<string, string>;
+  run?: string;
+}
+function reportSteps(): Step[] {
+  const doc = parse(readFileSync(WORKFLOW, "utf8")) as { jobs: { report: { steps: Step[] } } };
+  return doc.jobs.report.steps;
+}
+
 test("the workflow runs the program this file renders, with every variable it declares", () => {
   // What the inline version could not get wrong. The program names three variables it
   // does not define — `$tallyfile`, `$url`, `$cooldown` — and jq resolves those at
@@ -171,20 +187,32 @@ test("the workflow runs the program this file renders, with every variable it de
     .sort();
   assert.deepEqual(free, ["cooldown", "tallyfile", "url"], "the program's inputs changed");
 
-  const yaml = readFileSync(WORKFLOW, "utf8");
-  assert.match(
-    yaml,
-    /-f \.github\/scripts\/quality-body\.jq <<<"\$finding"/,
-    "the filing step still runs this program on the finding",
-  );
-  // Any of the three forms is a definition; which one is the caller's business.
-  for (const v of free) {
-    assert.match(
-      yaml,
-      new RegExp(`--(arg|argjson|slurpfile) ${v} `),
-      `the workflow never supplies \`$${v}\`, so jq will refuse the program`,
-    );
+  // Per CALL SITE, not per file. There are two of them, they are checked separately, and
+  // the whole point is the asymmetry between them: the probe supplying `$foo` says nothing
+  // about the filing step, and a variable added to the program and to the probe alone
+  // would pass a whole-file search while still refusing to compile on the week a threshold
+  // is crossed — which is the exact failure this test is named for.
+  const steps = reportSteps();
+  const callers = [
+    { what: "the filing step", run: steps.find((s) => (s.run ?? "").includes("quality-body.jq <<<"))?.run },
+    { what: "the compile probe", run: steps.find((s) => (s.run ?? "").includes("quality-body.jq </dev/null"))?.run },
+  ];
+  for (const { what, run } of callers) {
+    assert.ok(run, `${what} no longer runs the program`);
+    // Any of the three forms is a definition; which one is the caller's business.
+    for (const v of free) {
+      assert.match(
+        run,
+        new RegExp(`--(arg|argjson|slurpfile) ${v} `),
+        `${what} never supplies \`$${v}\`, so jq will refuse the program`,
+      );
+    }
   }
+  assert.match(
+    callers[0].run ?? "",
+    /-f \.github\/scripts\/quality-body\.jq <<<"\$finding"/,
+    "the filing step still runs this program on the finding, on stdin",
+  );
 });
 
 test("the program is on disk before the step that needs it", () => {
@@ -192,10 +220,7 @@ test("the program is on disk before the step that needs it", () => {
   // file is there only if something checked it out. Order matters and YAML does not
   // enforce it, so this reads the steps in sequence — a checkout added after the filing
   // step would look right in a diff and fail on a filing week.
-  const doc = parse(readFileSync(WORKFLOW, "utf8")) as {
-    jobs: { report: { steps: { name?: string; uses?: string; with?: Record<string, string>; run?: string }[] } };
-  };
-  const steps = doc.jobs.report.steps;
+  const steps = reportSteps();
   const checkout = steps.findIndex((s) => (s.uses ?? "").startsWith("actions/checkout@"));
   assert.ok(checkout >= 0, "the job no longer checks out the program it runs with -f");
   assert.match(
@@ -211,11 +236,7 @@ test("the program is on disk before the step that needs it", () => {
   // `if:`, deliberately: every other step in this job is conditional.
   const probe = steps.findIndex((s) => (s.run ?? "").includes("-f .github/scripts/quality-body.jq </dev/null"));
   assert.ok(probe > checkout && probe < uses, "nothing proves the program arrived");
-  assert.equal(
-    (steps[probe] as { if?: string }).if,
-    undefined,
-    "the probe runs on every run or it is not a probe",
-  );
+  assert.equal(steps[probe].if, undefined, "the probe runs on every run or it is not a probe");
 });
 
 test("the keys the thresholds emit are the keys the body program answers", { skip }, () => {
