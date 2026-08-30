@@ -283,7 +283,10 @@ test("a nested term list's terms belong to the list they are in", () => {
 test("lang on an element that holds no text is waste, and nothing else in the pipeline sees it", async () => {
   // Legal markup — `lang` is a global attribute — so there is nothing for axe to fail, and the
   // gate is right to be quiet. It is counted because of where it comes from: the page contract's
-  // language rule applied by rote (#252), 9 of 108 answers in the bench round, 8 from one model.
+  // language rule applied by rote (#252). The 9 of 108 bench answers that figure comes from is the
+  // count under "any `lang` on a void element"; by the narrower rule this test pins below, it is 0
+  // of those answers and 1 across the corpus's 34 delivered documents (#268). Rote `lang="en"` is
+  // the frequent thing, and the part of it that reaches no text at all is what this reports.
   const body = `<p>Body text.</p>\n<img src="a.png" alt="" lang="fr">\n<hr lang="de">\n<p>More.<br lang="es"></p>`;
   const report = markupReport(wrapDocument(body));
   assert.equal(report.structure.langOnVoid.count, 3);

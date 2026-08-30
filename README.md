@@ -908,9 +908,13 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   `{ "edits": [ { "block": 7, "html": "..." } ] }` — every block nobody names is delivered byte for
   byte. `html: ""` deletes a block, which is how content the document prints twice goes; one edit
   may carry several top-level nodes, which is how a fix splits a block. The anchor is a block
-  POSITION rather than an id because ids do not reach the work: of 73 defect instances in delivered
-  documents, 12 sit on an element with a usable id and none has an ancestor carrying one, since
-  Iris puts ids on what gets linked *to*. And the number is written above the block rather than
+  POSITION rather than an id because ids do not reach the work: of the 13 defect instances the
+  structural checks of `src/pipeline/markup.ts` find in those documents, *none* sits on an element
+  with a usable id and none has an ancestor carrying one, since Iris puts ids on what gets linked
+  *to*. (Those figures were corrected in issue #268; the count this used to quote called a `lang`
+  on a void element a defect whatever text it carried in an attribute, and 54 of its 73 instances
+  were correct authoring. The correction runs the same way: an id anchor reached one defect in six,
+  and now reaches none.) And the number is written above the block rather than
   counted by the editor, because a model counting for itself could be off by one, land in range,
   and have every replacement applied to the wrong block with each one well-formed — the one failure
   here that nothing downstream could see. A replacement that leaves an element open is refused and
