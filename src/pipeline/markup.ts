@@ -21,14 +21,27 @@ import { JSDOM, VirtualConsole } from "jsdom";
 // same reason it was for #234 — one document of four in one round is a class worth seeing, not
 // a rate anyone can calibrate yet.
 //
-// #255 adds four more of the same kind, from the other direction: a bench round measured six
+// #255 adds four more of the same kind, from the other direction: bench rounds measured six
 // models on the Feedback Agent's `verify` task against defects a script can PROVE are present,
-// and the best of them found 6 of 11 instances at 5.76¢ per page. These four are the ones no
+// and in the tie-break between the three of those six still in contention, the best found 6 of 7
+// instances at 5.72¢ a judgement — against 0.54¢ for the cheapest of the three, and $0 for the
+// four checks below. These four are the ones no
 // rule in the gate reports, each measured against this repo's own axe config before it was
 // written (see each check for what the gate does and does not already say). They are structure,
 // so they belong beside the two above rather than in the lint: they are decidable from the
 // bytes, they cost one `querySelectorAll` each, and they are right by construction rather than
 // by measurement — which is the whole argument for not paying a model to guess at them.
+//
+// Those judge figures are corrected ones (#268), and the correction runs AGAINST the argument
+// they support. The published "6 of 11 at 5.76¢" had four instances in its denominator that were
+// correct authoring — a `lang` on a void element carrying text in `alt`, which is exactly what
+// TEXT_BEARING_ATTRIBUTES below excludes — and all three of that tie-break's judges were scored
+// 0/4 for declining to report them. Correcting it moved every judge UP (6/7, 3/7, 2/7) and left
+// the ranking alone, so
+// a model is considerably better at this than the old number said. What remains is cost and
+// certainty rather than a model being bad at the job, and that is enough on its own: these checks
+// find every instance for nothing and are right by construction rather than on average. The 5.76¢
+// was the round's pre-flight price estimate; 5.72¢ is what it spent, per judgement not per page.
 //
 // Three of the four reach the deployment-wide tally as one signal, `iris:structural-defect`, and
 // `lang_on_void` deliberately does not: a language tag on an element holding no text is wasted
@@ -318,10 +331,17 @@ function dlWithoutDd(document: Document): string[] {
 // has none, so no announcement, no voice and no verdict differs.
 //
 // Worth counting anyway because of where it comes from. It is a symptom of the page contract's
-// language rule being applied by rote (#252, 9 of 108 bench answers, 8 of them from one model),
-// and that rule's other failure mode is the expensive one: a `lang` the document does not need
-// on elements that do have text, which changes how a screen reader pronounces them. This is the
-// visible half of a prompt drift whose other half is invisible.
+// language rule being applied by rote, and that rule's other failure mode is the expensive one: a
+// `lang` the document does not need on elements that do have text, which changes how a screen
+// reader pronounces them. This is the visible half of a prompt drift whose other half is invisible.
+//
+// The drift is commoner than this count will ever be, and the two must not be quoted for each
+// other (#268). Read as "any `lang` on a void element", 9 of the bench's 108 page answers carry
+// it, 8 of them from one model (#252) — and of the 55 such instances in its 34 delivered
+// documents, 54 are `<img lang="en" alt="Meta logo">` and `<hr lang="en" aria-label="Page 33">`,
+// which this check excludes on purpose. By the rule above the incidence is 0 of those 108 answers
+// and 1 across those documents. Rote `lang="en"` is the frequent thing; what this line reports is
+// the corner of it where the attribute reaches no text at all.
 //
 // No rule in the gate reports it, and correctly: `lang` is a global attribute, valid on every
 // element including these, so the markup is legal and there is nothing for axe to fail.

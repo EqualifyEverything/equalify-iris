@@ -11,11 +11,25 @@
 // round actually touches at ~1,211 tokens: a twentieth of the answer, and the whole of the work.
 //
 // Why the anchor is a block POSITION and not an id. The first form of #250 asked for
-// `{ id, html }` pairs, and the bench's own $0 check refuted it before a round was paid for: of
-// 73 defect instances that survive into a delivered document, 12 (16%) sit on an element with a
-// usable id and NONE has an ancestor carrying one. Iris puts ids on the things that get linked TO
-// — page-break markers, cross-reference anchors, footnote items — so content has none above it
-// (`IMG < FIGURE < MAIN < BODY < HTML`). An id-anchored contract can address one defect in six.
+// `{ id, html }` pairs, and the bench's own $0 check refuted it before a round was paid for: of the
+// 13 defect instances markup.ts's own checks find across those 34 documents, NONE sits on an
+// element with a usable id and none has an ancestor carrying one. Iris puts ids on the things that
+// get linked TO — page-break markers, cross-reference anchors, footnote items — so content has
+// none above it (`IMG < FIGURE < MAIN < BODY < HTML`). An id-anchored contract reaches none of
+// those 13 — which is a small number, and the smallness is the point: these are what a script can
+// PROVE, so the sentence is about the anchor failing on the work it can be checked against.
+//
+// Those are corrected figures (#268); this paragraph used to read "73 instances, 12 (16%) with a
+// usable id … one defect in six". Two things were wrong with the old count and neither moves the
+// decision. It called a `lang` on a void element a defect whatever else that element carried, so
+// 54 of the 73 were `<img lang="en" alt="Meta logo">` and `<hr lang="en" aria-label="Page 33">` —
+// correct authoring under the narrower rule markup.ts applies, and the population nearly every id
+// in the table came from, since a page marker gets an id and a paragraph does not. And it counted
+// two classes markup.ts deliberately does not: a fragment emitting its own `<main>`, which
+// landmarks.ts fixes rather than counts, and a fragment-level dangling `href="#x"`, which assembly
+// resolves across pages. So 13 and 73 are not the same population — but the correction runs the
+// same way whichever is read, and further: an id-anchored contract that reached one defect in six
+// was worth arguing about, and one that reaches none of them is not.
 //
 // The anchor that does reach the work is already in the codebase: `splitBlocks` (sections.ts)
 // cuts the body at top-level boundaries, which is the same cut the editor's own truncation
