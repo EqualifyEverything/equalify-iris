@@ -376,7 +376,7 @@ export class OpenRouterProvider implements ModelProvider {
         // deliberately — it is not transient, so isTransientNetworkError() rejects
         // it and the loop exits rather than re-billing the same truncation twice.
         if (finishReason === "length") {
-          throw new TruncatedResponseError(this.name, req.model, this.maxTokens, text.length);
+          throw new TruncatedResponseError(this.name, req.model, this.maxTokens, text);
         }
         return { text, model: req.model, provider: this.name, usage: addUsage(spent, usage) };
       } catch (e) {

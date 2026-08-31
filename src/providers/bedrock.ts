@@ -1008,7 +1008,7 @@ export class BedrockProvider implements ModelProvider {
         this.name,
         req.model,
         attempt.maxTokens,
-        text.length,
+        text,
         attempt.maxTokens < this.maxTokens
           ? `That ceiling is ${req.model}'s own, below the ${this.maxTokens} in ` +
               `providers.bedrock.max_tokens, so raising that setting will not move it: this ` +
