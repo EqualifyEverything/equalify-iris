@@ -761,10 +761,26 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   requiring it at the *end* drops 4 of the 18, and requiring the `Table N` stem to repeat drops 8,
   because a second half often keeps the title and loses the number. The predecessor is the
   immediately preceding table in document order in all 18.
-  The **merge** is a Copy Editor call, because the halves do not agree on what to concatenate: two
+  The **merge** needs a Copy Editor call wherever the halves do not agree on what to concatenate: two
   of the 18 pairs declare a different column count from their own first half, 13 repeat a header
   block carrying footnote-*reference* ids that an endnote links back to, and a bracketed unit note
-  is reprinted with the header and belongs in the joined table once. Everything around the ask is
+  is reprinted with the header and belongs in the joined table once. Only three of the editor's six
+  rules hold a judgement, though — the other three are "move these bytes and change nothing" — so the
+  join is **tried in code first** and stands down wherever the judgement is real. Measured on 50 pairs
+  read out of already-delivered documents, 26 join with no model call and no output tokens, and
+  `verifyJoin` refuses none of what the code path produces (#276); the 24 that stand down are 17 whose
+  second half describes its columns differently and 7 carrying an id with nowhere to move to. An id on
+  the dropped half's own `<caption>` or `<table>` element does move, onto the counterpart that survives
+  the join, and only where that counterpart carries no id of its own — two live link targets
+  collapsing onto one element is a choice about which link keeps working, and that choice is the
+  editor's. Both paths go through the same verification and the same splice, and `table_joined` says
+  `by: "code"` or `by: "editor"`, so the ledger can tell a pair the editor was asked about from a pair
+  it was not. Two guards belong to the code path alone, because serializing a table is the one thing
+  here that can lose content where a model reply cannot: a half whose span parses to anything *outside*
+  its own table is declined, since the parser fosters a stray `<p>` out of a `<table>` and `outerHTML`
+  then does not carry it, and a join that would print one id twice is declined as well. Neither is
+  visible to the verification below, which reads columns, header cells, rows and labels and never reads
+  an id. Everything around the ask is
   deterministic: which tables are halves (the caption rule), where their bytes are, whether the
   answer kept the table, and the splice. The body is never reserialized — the halves' source spans
   are found by a depth-counting scan and checked against the parsed DOM, and the reply is spliced in
@@ -806,7 +822,7 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   share a caption and one refusal must not silently cover both. It runs where the pages are joined,
   before the shell and before the lint, so the document the gate cleared and the document the Reader
   reads are the document that ships. Logged as `table_continuations`, `table_joined`,
-  `table_join_failed` and `table_joins_capped`.
+  `table_join_code_declined`, `table_join_failed` and `table_joins_capped`.
 - **A sentence printed across a page break is delivered whole.** Same seam as the table, same reason
   no page could have fixed it, and a different answer: this one needs no model call, because there is
   no judgement in it (issue #248). 22 of 90 page-break markers in the reference corpus stand where a
