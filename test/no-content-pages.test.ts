@@ -75,6 +75,39 @@ test("the Reader is told what a no-content entry is, and that neither kind is it
     // page's image to the round that could restore it.
     ["an unlabelled section means the whole body, and genuinely absent content is a real finding",
       /Where it carries no such label you have the whole body, and content genuinely absent from it — a page the index shows as extracted with nothing of it in the document — is a real finding and yours to make/],
+    // #274: the paragraph above tells the Reader what the label MEANS for a page it cannot
+    // find, and a cheaper model read the label as the finding instead — Haiku 4.5 filed it in
+    // 7 of 163 issues where Sonnet 4.6 filed it in 0 of 197. Each of those buys an editor
+    // call, and the round's images, to work on a document that is not broken.
+    ["the label itself is named as never a defect",
+      /That label is never itself a defect, and neither is the window it describes/],
+    // The three shapes measured, in the order they were quoted on #274: the label reported as
+    // a reading-order issue, the window reported as making the document unverifiable, and
+    // "review the complete document (all 3 windows)" as the suggested fix. The last is the
+    // expensive one — it asks a human to do the review this call was paid for.
+    ["reporting the windowing, and asking for the other windows, are both forbidden",
+      /do not report that the HTML is one window of several, do not report that reading one window leaves the rest unverified, and never ask for the other windows to be reviewed/],
+    // The reason has to be the unclosable-issue one rather than "it is not a defect", because
+    // that is the reason the rest of this prompt gives and the one that survives a model
+    // disagreeing about whether the label is part of the document.
+    ["the cost is named: nothing can close it, so it returns every round",
+      /no edit to the document could close an issue whose subject is this prompt, so it would come back every round/],
+    // A separate shape from the label, and two of Haiku's seven rather than one: `chunk()` is
+    // `s.slice(start, start + CHUNK_BUDGET)`, a raw character window, so a window genuinely
+    // can open mid-sentence. Without the mechanism the prohibition reads as a denial of
+    // something the Reader can see is true.
+    ["the cut edge is explained by how the window is cut, not merely forbidden",
+      /cut by character count rather than at an element or a sentence, so the edges it shares with the windows either side of it may begin or end mid-sentence, mid-word or mid-tag: that edge is the cut, not content the document lost/],
+    // `chunk()` only manufactures INTERIOR seams, so the exemption has to be scoped or it hands
+    // back the one case a single-chunk document depends on: with no label emitted at all, the
+    // Reader is the only check that a body truly ending mid-tag is a defect. Reviewed on #275 —
+    // the first draft said "its first and last lines" and covered the document's real ends too.
+    ["the document's own ends are excluded from the cut-edge exemption",
+      /The document's own opening and its own close are never a cut — where window 1 begins, where the last window ends, and both ends of an unlabelled body are the document as it really is, so a body that ends mid-sentence there is a real finding and yours to make/],
+    // The exemption, because the two reports this must NOT silence are the floor under
+    // `unresolved_rate` and the one page-internal break the Reader is the only check on.
+    ["the marker and a within-page break are exempted by name",
+      /a \[page not fully transcribed\] marker is still reported wherever you meet one, and a break you can see both sides of inside one page's own excerpt is still a real finding/],
   ] as [string, RegExp][]) {
     assert.match(reader, re, `READER_SYSTEM no longer says: ${what}`);
   }
@@ -259,6 +292,11 @@ async function readerRound(opts: {
   pages: IndexedPage[];
   failedPages?: number[];
   issuesFor: (chunk: number) => ReviewIssue[];
+  // Overrides `markedBody`, for the one case that needs a body whose chunk seam does NOT
+  // fall on an element boundary. `markedBody` places a marker at every seam by
+  // construction, which is what makes the other tests readable and what makes it useless
+  // for measuring where `chunk()` actually cuts.
+  body?: string;
 }): Promise<Round> {
   const dir = mkdtempSync(join(tmpdir(), "iris-no-content-"));
   try {
@@ -288,7 +326,7 @@ async function readerRound(opts: {
       },
     } as unknown as PipelineContext;
     const result = await runReview(ctx, {
-      body: markedBody(opts.chunks),
+      body: opts.body ?? markedBody(opts.chunks),
       lint: { ok: true, violations: [] },
       pages: opts.pages,
       failedPages: opts.failedPages,
@@ -404,6 +442,27 @@ test("a body that fits in one chunk carries no window label; a split one labels 
       ["2", "3"],
       ["3", "3"],
     ],
+  );
+});
+
+test("a window can open in the middle of an element, which is the fact the prompt explains", async () => {
+  // `chunk()` is `s.slice(start, start + CHUNK_BUDGET)` — a character window, with no regard
+  // for elements or sentences — so a later window begins partway through whatever tag the
+  // count landed in. #274's third quoted example is a model reporting exactly that as content
+  // loss ("text begins mid-sentence … suggesting content was cut off when this window (3 of 3)
+  // was extracted"), and READER_SYSTEM now says the edge is the cut rather than a defect.
+  //
+  // That sentence is a claim about this function, so it is pinned here: a chunker changed to
+  // split on element boundaries would leave the prompt explaining a shape nothing emits, and
+  // the prohibition would then be denying something the Reader can see is not true.
+  const body = "<p>filler</p>".repeat(2600);
+  const round = await readerRound({ chunks: 2, body, pages: THREE_PAGES, failedPages: [2], issuesFor: () => [] });
+  assert.equal(round.prompts.length, 2, "the body must actually span two windows for this to prove anything");
+  const second = round.prompts[1].match(/## HTML \(window 2 of 2 of the document\)\n```html\n([\s\S]*?)\n```/)?.[1];
+  assert.ok(second, "the second window's HTML section is in the prompt");
+  assert.ok(
+    !second.startsWith("<"),
+    `window 2 must open mid-element for the prompt's explanation to be true, got ${JSON.stringify(second.slice(0, 24))}`,
   );
 });
 
