@@ -77,7 +77,7 @@ function makeCtx(
       sessionFragments: () => fragDir,
     } as unknown as Paths,
     router: {
-      complete: async (agent: string, _cap: string, messages: { role: string; content: string }[]) => {
+      complete: async (_agent: string, _cap: string, messages: { role: string; content: string }[]) => {
         const prompt = messages.map((m) => m.content).join("\n");
         rec.calls.push(prompt);
         // The prompt names the page it is about (`filename: page-002.png`), which is

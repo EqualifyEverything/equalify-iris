@@ -67,25 +67,25 @@ const HIGH_RES_FROM_GENERATION = { major: 4, minor: 7 };
 // above, this one IS enforced at upload (see `imageRejection`).
 const MAX_DIMENSION_PX = 8000;
 
-// Above this many image (or, on Bedrock/Vertex, document) blocks in ONE request, a
-// stricter per-image dimension limit kicks in and oversized images are rejected with
-// an `invalid_request_error` about "many-image requests". Iris used to cross it: a
-// 25-page PDF (util/pdf.ts MAX_PDF_PAGES) was 25 image blocks in the review phase's
-// call, and stayed safe only because those pages are rasterized at 150 DPI, which
-// puts a letter page at 1275x1650 — under the 2000 px the docs prescribe for staying
-// under the limit on all platforms. A 21-page TABLOID PDF broke that assumption
-// (1650x2550 per page, over 2000 and under the 8000 that is enforced) and failed
-// inside the model rather than here.
+// A note on the many-image rule, which this file deliberately does NOT encode as a
+// constant. Above 20 image (or, on Bedrock/Vertex, document) blocks in ONE request, a
+// stricter per-image dimension limit of 2000 px kicks in and oversized images are
+// rejected with an `invalid_request_error` about "many-image requests". Iris used to
+// cross it: a 25-page PDF (util/pdf.ts MAX_PDF_PAGES) was 25 image blocks in the review
+// phase's call, and stayed safe only because those pages are rasterized at 150 DPI,
+// which puts a letter page at 1275x1650 — under the 2000 px the docs prescribe for
+// staying under the limit on all platforms. A 21-page TABLOID PDF broke that assumption
+// (1650x2550 per page, over 2000 and under the 8000 that is enforced) and failed inside
+// the model rather than here.
 //
 // It no longer crosses it: `MAX_EDITOR_IMAGES` below is the only path that ever
-// attached every page to one request, and it is now the smaller number. Neither
-// number here is enforced at upload, and that stays deliberate — the rule applies per
+// attached every page to one request, and it is now the smaller number. Neither of
+// those figures is enforced anywhere, and that stays deliberate — the rule applies per
 // REQUEST, so refusing large-format documents at upload would reject ones that
-// convert fine to pre-empt a call they no longer make. The remaining fix, if a request
-// ever needs more image blocks than this, is on the rasterizing side: render large
-// pages down rather than refuse them.
-export const MANY_IMAGE_THRESHOLD = 20;
-export const MANY_IMAGE_MAX_DIMENSION_PX = 2000;
+// convert fine to pre-empt a call they no longer make. Enforcing it per request would
+// be dead code for the same reason. The remaining fix, if a request ever needs more
+// image blocks than `MAX_EDITOR_IMAGES`, is on the rasterizing side: render large pages
+// down rather than refuse them.
 
 // The most source page images ONE Copy Editor call may carry (pipeline/review.ts).
 //
@@ -102,9 +102,9 @@ export const MANY_IMAGE_MAX_DIMENSION_PX = 2000;
 // at util/pdf.ts's 150 DPI a letter page is ~2.8k and a tabloid page — the largest
 // Iris rasterizes without refusing it — is ~5.6k. Twelve of the latter is ~67k, which
 // leaves well over half of the 200k context window that is the SMALLEST any Claude
-// vision model has for the body, the issue list and the output. It is also under
-// MANY_IMAGE_THRESHOLD, so the stricter per-image dimension rule above never applies
-// to this call either.
+// vision model has for the body, the issue list and the output. It is also under the
+// 20-block many-image threshold noted above, so the stricter per-image dimension rule
+// never applies to this call either.
 //
 // Being wrong here is survivable in both directions, which is why one number is
 // enough: too low costs the editor a page image it might have used (recoverable — the

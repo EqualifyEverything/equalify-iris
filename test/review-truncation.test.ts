@@ -117,7 +117,7 @@ const truncated = (): TruncatedResponseError => new TruncatedResponseError("bedr
 
 test("a truncated round delivers the document that entered it", async () => {
   await withTemp(async (dir) => {
-    const { ctx, rec } = ctxWith(dir, () => truncated());
+    const { ctx } = ctxWith(dir, () => truncated());
     const result = await runReview(ctx, { body: BODY, lint: { ok: true, violations: [] }, pages: PAGES });
 
     // The delivery. Everything that was paid for before this round is in the user's hands.

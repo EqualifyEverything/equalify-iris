@@ -11,9 +11,13 @@ By participating you agree to our [Code of Conduct](CODE_OF_CONDUCT.md).
 - **Report an accessibility barrier** — in the app/demo or in the HTML Iris produces. Use the
   **Accessibility issue** template. These are our highest priority.
 - **Report a bug / request a feature** — use the matching issue template.
-- **Suggest or improve a content agent** — Iris automatically opens `New agent suggestion: <type>`
-  issues when it meets content a specialist agent would handle better. You're welcome to open
-  one yourself, or send a PR adding/improving a file in [`agents/`](agents/).
+- **Improve a prompt** — the agent files are in [`agents/`](agents/), and `agents/page.md`
+  renders every page, so a PR that sharpens it changes the product. (The Reader and Copy Editor
+  prompts are code, in `src/pipeline/review.ts`.) Iris also opens `New agent suggestion: <type>`
+  issues when it meets content a specialist would handle better, and you're welcome to open one
+  yourself — but note that `agents/` is not a directory of content types: a file added for a type
+  the whole-page pass already covers is never loaded (README's "One agent per page, not one per
+  content type" says why). `chartDataAgent.md` is the shape that earns its place.
 - **Code** — bug fixes and improvements via pull request.
 
 A well-written issue may get a pull request without you doing anything else. A scheduled workflow
@@ -52,6 +56,7 @@ Before opening a PR:
 
 ```bash
 npm run typecheck               # tsc --noEmit
+npm test                        # the unit suite (node --test)
 ./test/e2e.sh                   # full API lifecycle against mock GitHub + mock model (needs jq)
 ```
 
@@ -107,5 +112,5 @@ Your PR gets a review from Claude in CI before a maintainer reads it
 ## Architecture (orientation)
 
 `src/pipeline` (extraction → assembly → review), `src/providers` (LLM provider abstraction),
-`src/routes` (the `/v1` API), `src/auth` (GitHub OAuth), `agents/` (the content-agent library).
+`src/routes` (the `/v1` API), `src/auth` (GitHub OAuth), `agents/` (the agent prompt files).
 See [README.md](README.md) and [docs/API.md](docs/API.md).
