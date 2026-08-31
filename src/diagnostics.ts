@@ -534,7 +534,7 @@ export function summarizeRun(
 
   // In-flight detection. Extraction runs several pages concurrently, so more
   // than one call can be open at once and start/end events interleave. Match
-  // them by identity (agent+model+capability) rather than position: each end
+  // them by identity (agent+step+model+capability) rather than position: each end
   // event closes the OLDEST matching open start, which is the same pairing a
   // FIFO queue would produce. `in_flight` reports the longest-waiting open call
   // — the best single answer to "what is this run stuck on?" — and
@@ -543,8 +543,15 @@ export function summarizeRun(
   // round's call that never closed — a process killed mid-flight — is not what THIS run
   // is stuck on, and reporting it as such is the phantom hang again by another route.
   const openCalls: LogEvent[] = [];
+  // `step` is part of the identity, not decoration. Without it, extraction's three feedback
+  // jobs — `verify`, `recheck_binding`, `recheck_sampled` — are all the same agent, model and
+  // capability, and they run across pages concurrently, so page 1's recheck ending would close
+  // page 3's still-open verify and `in_flight` would name the recheck as what the run is stuck
+  // on. Adding it strictly narrows the match and cannot make the `i === -1` fallback newly
+  // reachable: a start and its end spread the same `meta`, so within one run both carry `step`
+  // or neither does.
   const callKey = (e: LogEvent): string =>
-    `${e.agent ?? "?"}|${e.model ?? "?"}|${e.capability ?? "?"}`;
+    `${e.agent ?? "?"}|${e.step ?? "?"}|${e.model ?? "?"}|${e.capability ?? "?"}`;
   for (const e of currentRun) {
     if (e.type === "model_call_start") {
       openCalls.push(e);

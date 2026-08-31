@@ -17,9 +17,19 @@
 // time under it (`by_step`).
 //
 // The tests below assert at the CALL SITES, by driving the real pipeline entry points against a
-// router that records what each one asked for — not by checking that a step string appears
-// somewhere in a file. The two conflations above are each pinned by a test that drives both
-// halves of the pair through ONE recorder, because the claim is about telling them apart.
+// router that records what each one asked for. The two conflations above are each pinned by a test
+// that drives both halves of the pair through ONE recorder, because the claim is about telling them
+// apart.
+//
+// What that covers, exactly, so no one reads more into a green run than is there: nine steps are
+// driven behaviourally — `extract`, `verify`, `correct`, `recheck_sampled`, `feedback_scope`,
+// `read`, `edit`, `edit_section`, `table_join`. The remaining eight — `recheck_binding`,
+// `specialist`, `specialist_merge`, `feedback_learn`, `agent_update`, `agent_regression`,
+// `agent_calibrate`, `contribute` — reach paths that need a multi-page document, a real provider or
+// a training round, and are held only by the source scan in the last test. That scan proves a
+// literal is passed at SOME call site, so it catches a mislabel that leaves a member unused, and
+// test 1 catches a `recheck_binding` ↔ `recheck_sampled` swap; it would NOT catch two of those
+// eight being swapped with each other, since both literals would still be present.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
@@ -377,7 +387,7 @@ test("a log line written before step existed is counted under `?`, not dropped",
 
 test("in_flight and slowest_calls name the step, since that is what a stuck run is asked about", () => {
   // Both calls get a start, and the page call gets its end: an end event with no matching start
-  // closes the oldest open call by design (diagnostics.ts pairs by agent+model+capability and
+  // closes the oldest open call by design (diagnostics.ts pairs by agent+step+model+capability and
   // falls back to the oldest), so a page end with no page start would close the feedback call and
   // report nothing in flight.
   const running = [
@@ -401,6 +411,66 @@ test("in_flight and slowest_calls name the step, since that is what a stuck run 
   } as never);
   assert.equal(d.in_flight?.step, "verify", "`feedback` in flight is a page being checked or a user's feedback routed");
   assert.equal(d.slowest_calls[0].step, "extract");
+});
+
+test("in_flight names the job actually outstanding when two of the same agent's jobs overlap", () => {
+  // The case the previous test sidesteps by using two different agents. Extraction's `verify`,
+  // `recheck_binding` and `recheck_sampled` are all the Feedback Agent, the same resolved model and
+  // the same capability, and they run across pages at `extractionConcurrency` — so two of them open
+  // at once is routine, not contrived. Page 3's verify starts first and is still open; page 1's
+  // recheck starts second and finishes. Pairing on agent+model+capability alone made those two
+  // starts interchangeable, so the recheck's end closed the verify's start and `in_flight` reported
+  // the recheck — naming a finished job as what the run is stuck on, with the wrong `since`.
+  const running = [
+    line({ ts: T(1), type: "model_call_start", agent: "feedback", step: "verify", model: "m", capability: "vision" }),
+    line({
+      ts: T(2),
+      type: "model_call_start",
+      agent: "feedback",
+      step: "recheck_binding",
+      model: "m",
+      capability: "vision",
+    }),
+    line({
+      ts: T(3),
+      type: "model_call",
+      agent: "feedback",
+      step: "recheck_binding",
+      model: "m",
+      capability: "vision",
+      duration_ms: 1000,
+    }),
+  ].join("\n");
+  const d = summarizeRun(running + "\n", {
+    sessionId: "s",
+    status: "running",
+    phase: "extraction",
+    now: Date.parse(T(30)),
+  } as never);
+
+  assert.equal(d.in_flight_count, 1);
+  assert.equal(d.in_flight?.step, "verify", "the recheck ended; the verify is what is outstanding");
+  // The clock too, not just the label: reporting the later start's `since` understates the wait,
+  // which is the number an operator reads to decide a call has hung.
+  assert.equal(d.in_flight?.since, T(1));
+  assert.equal(d.in_flight?.waiting_ms, 29_000);
+});
+
+test("an end still closes something when neither side of the run carried a step", () => {
+  // Narrowing the pairing key must not strand an archived log's calls as phantom hangs: a start and
+  // its end spread the same `meta`, so a pre-#281 log has `step` on neither and both read as `?`.
+  const log = [
+    line({ ts: T(1), type: "model_call_start", agent: "page", model: "m", capability: "vision" }),
+    line({ ts: T(2), type: "model_call", agent: "page", model: "m", capability: "vision", duration_ms: 500 }),
+  ].join("\n");
+  const d = summarizeRun(log + "\n", {
+    sessionId: "s",
+    status: "running",
+    phase: "extraction",
+    now: Date.parse(T(30)),
+  } as never);
+  assert.equal(d.in_flight, null);
+  assert.equal(d.in_flight_count, 0);
 });
 
 // --- the vocabulary and the call sites cannot drift apart ---
