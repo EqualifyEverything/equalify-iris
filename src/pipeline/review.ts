@@ -1105,14 +1105,61 @@ interface EditorRound {
   sections?: { of: number; corrected: number };
 }
 
+// How much of a truncated reply the log keeps at each end. A few hundred characters in all, which
+// is what the question below needs and no more: this is text out of the user's own document.
+const REPLY_EXCERPT = 240;
+
+// Under this contract a reply names one block per edit, so counting the key says how many edits the
+// model got through before the ceiling — the difference between one enormous block and forty small
+// ones. Not authoritative: a model that wrote `'block':` or `block:` counts zero here while
+// `reply_head` plainly shows an edits list, which is why the excerpt is logged beside the count
+// rather than replaced by it.
+const BLOCK_KEY = /"block"\s*:/g;
+
 // What the log line about a truncation says. The ceiling and the size of the response are
 // the two numbers an operator needs — they are the difference between "raise max_tokens"
 // and "this document cannot fit under any ceiling" — and they are on the error when Iris
 // raised it, which is every case except one that lost its prototype on the way here.
+//
+// Plus a short look at the reply itself (issue #277). A round that hits the ceiling produces
+// nothing usable and cannot be asked again, so the fragment was thrown away — and with it the
+// answer to the only question this line leaves open: whether the model answered with the WHOLE
+// DOCUMENT out of habit, which is a prompt problem, or with an `edits` array that genuinely did not
+// fit, which is the block-size problem `patch.ts` describes. The two want different fixes and cost
+// the same $0.73 to observe, so a round paid for once should not have to be paid for again to tell
+// them apart. `reply_head` answers it directly, because the contract asks for the edits first: a
+// patch opens `{"edits":[{"block":`, and a document opens with the document. `reply_tail` is where
+// the model ran out, and `blocks_named` is how many edits it managed on the way.
+//
+// Shared with `editor_section_failed`, where the same three fields read differently in one respect:
+// a section round asks for the section's HTML and not for an edits list, so `blocks_named` is 0
+// there whatever went wrong, and the head is what says whether the model answered about the section
+// it was given. docs/API.md says so on both rows.
+//
+// This is the user's own document coming back, so it stays in the run log on the deployment and
+// **never** reaches `GET /v1/quality` — the same confinement, for the same reason, as
+// `prose_joined`'s `word_split_examples`. Whitespace is folded so the line stays one line, and the
+// two ends are only reported apart when there are two ends: below `2 x REPLY_EXCERPT` the whole
+// fragment is shorter than the excerpt pair, so `reply_head` IS the reply and a tail would repeat
+// it. Absent altogether on a truncation that returned nothing, and on an error that reached here
+// having lost its prototype — there is no fragment to quote in either case.
 function truncation(e: unknown): Record<string, unknown> {
   const message = e instanceof Error ? e.message : String(e);
   if (!(e instanceof TruncatedResponseError)) return { error: message };
-  return { max_tokens: e.maxTokens, chars: e.chars, error: message };
+  const fold = (s: string) => s.replace(/\s+/g, " ").trim();
+  const text = e.text;
+  return {
+    max_tokens: e.maxTokens,
+    chars: e.chars,
+    ...(text === ""
+      ? {}
+      : {
+          reply_head: fold(text.slice(0, REPLY_EXCERPT)),
+          ...(text.length > 2 * REPLY_EXCERPT ? { reply_tail: fold(text.slice(-REPLY_EXCERPT)) } : {}),
+          blocks_named: (text.match(BLOCK_KEY) ?? []).length,
+        }),
+    error: message,
+  };
 }
 
 // Document-level correction: the editor sees the whole body + all issues + the

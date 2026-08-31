@@ -187,8 +187,12 @@ const LONG = PARAS.join("\n\n");
 // 20,000 chars came back before the ceiling cut it, so a section may be 10,000.
 const CHARS = 20_000;
 const BUDGET = Math.floor(CHARS * SECTION_HEADROOM);
+// What came back before the ceiling cut it. Only its LENGTH matters to anything here — that is what
+// the sectioned retry sizes the next request from — but the error carries the fragment itself now
+// (#277), so this is a plausible partial reply padded to length rather than a bare count.
+const partial = (chars: number) => `{"edits":[{"block":3,"html":"<p>`.padEnd(chars, "x");
 const truncated = (chars = CHARS): TruncatedResponseError =>
-  new TruncatedResponseError("bedrock", "sonnet", 32_000, chars);
+  new TruncatedResponseError("bedrock", "sonnet", 32_000, partial(chars));
 
 interface Call {
   agent: string;

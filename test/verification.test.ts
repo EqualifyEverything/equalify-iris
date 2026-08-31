@@ -18,6 +18,11 @@ import type { Paths } from "../src/store/paths.ts";
 import type { PdfLink } from "../src/util/pdf.ts";
 import { TruncatedResponseError } from "../src/providers/types.ts";
 
+// 93,039 characters of a correction came back before the ceiling cut it. The error carries the
+// fragment as well as its length now (#277); nothing on this path reads it, since a correction that
+// truncated is a correction not applied either way.
+const TRUNCATED_REPLY = "<p>cut".padEnd(93_039, "x");
+
 // --- what a correction changed, read off the two fragments --------------------
 
 test("an alt-text refinement is not a change to the page", () => {
@@ -637,7 +642,7 @@ test("a correction that hit the output ceiling costs the correction, not the pag
         html: () => page,
         problems: (o) => (o === 1 ? ["the printed folio is transcribed as visible content", "an unwarranted <section> wrapper"] : []),
         corrected: () => "<p>never reached</p>",
-        correctionThrows: () => new TruncatedResponseError("bedrock", "some-model", 32000, 93039),
+        correctionThrows: () => new TruncatedResponseError("bedrock", "some-model", 32000, TRUNCATED_REPLY),
       }),
     );
     // The page is delivered, whole, as the extraction that succeeded left it.
@@ -715,7 +720,7 @@ test("a links-triggered correction that throws keeps the page that had passed", 
         html: () => page,
         problems: () => [],
         corrected: () => "<p>never reached</p>",
-        correctionThrows: () => new TruncatedResponseError("bedrock", "some-model", 32000, 93039),
+        correctionThrows: () => new TruncatedResponseError("bedrock", "some-model", 32000, TRUNCATED_REPLY),
         links: [link],
       }),
     );

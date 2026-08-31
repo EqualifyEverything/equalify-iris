@@ -136,23 +136,35 @@ export class TruncatedResponseError extends Error {
   readonly model: string;
   readonly maxTokens: number;
   readonly chars: number;
+  // What the model DID emit before the ceiling cut it. Carried rather than dropped, because the
+  // caller cannot ask again — the next round would put the same question to the same model — so
+  // this is the only evidence that will ever exist about why the answer did not fit, and a round
+  // that hits it has already been paid for in full (issue #277). Nothing acts on it: the review
+  // loop logs a short excerpt for a person and treats the round as having produced nothing, which
+  // is the whole point of raising instead of returning the fragment.
+  //
+  // The length is derived from it rather than passed alongside it, so `chars` — which the message
+  // quotes and which `sectionRound` sizes the next request from — cannot disagree with the text it
+  // describes.
+  readonly text: string;
 
   // `note` is for the one case where "raise it" is the wrong instruction: a ceiling the
   // MODEL enforces, below the one the deployment asked for, cannot be raised at all
   // (providers/bedrock.ts, issue #249). Appended rather than replacing the sentence,
   // because `isTruncatedResponseError` matches the fixed part of it and the review loop
   // acts on that.
-  constructor(provider: string, model: string, maxTokens: number, chars: number, note?: string) {
+  constructor(provider: string, model: string, maxTokens: number, text: string, note?: string) {
     super(
       `${provider}: response hit the ${maxTokens}-token output ceiling and was truncated ` +
-        `(${chars} chars returned). Raise providers.${provider}.max_tokens.` +
+        `(${text.length} chars returned). Raise providers.${provider}.max_tokens.` +
         (note ? ` ${note}` : ""),
     );
     this.name = "TruncatedResponseError";
     this.provider = provider;
     this.model = model;
     this.maxTokens = maxTokens;
-    this.chars = chars;
+    this.chars = text.length;
+    this.text = text;
   }
 }
 

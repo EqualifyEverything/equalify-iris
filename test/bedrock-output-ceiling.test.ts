@@ -505,6 +505,11 @@ test("a truncation on a clamped model names the model's ceiling, not the deploym
     await assert.rejects(() => bedrock.complete(req(NOVA)), (e: Error) => {
       assert.ok(e instanceof TruncatedResponseError);
       assert.equal(e.maxTokens, 10_000);
+      // The fragment itself rides along, because the round that produced it cannot be re-asked and
+      // the run log's excerpt of it is the only evidence that will exist (#277). Its length is read
+      // off it rather than passed beside it, so the two cannot disagree.
+      assert.equal(e.text, "<p>cut mid-");
+      assert.equal(e.chars, 11);
       assert.match(e.message, /hit the 10000-token output ceiling/);
       assert.match(e.message, /below the 32000 in providers\.bedrock\.max_tokens/);
       assert.match(e.message, /raising that setting will not move it/);

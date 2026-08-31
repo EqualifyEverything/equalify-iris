@@ -113,7 +113,19 @@ function ctxWith(
   return { ctx, rec };
 }
 
-const truncated = (): TruncatedResponseError => new TruncatedResponseError("bedrock", "sonnet", 32_000, 78_006);
+// 78,006 characters came back before the ceiling cut them off, which is what a real truncated round
+// returned. Two shapes it can have, and the whole of #277's question is which one arrived:
+//
+//  * the contract's own shape, edits first — cut off inside the fortieth, whose block is a table the
+//    model was still emitting rows of. That is the block-size problem `patch.ts` describes.
+//  * the whole document, which the contract does not ask for at all. That is a prompt problem.
+const ROW = `<tr><th scope=\\"row\\">Alabama</th><td>1.0</td><td>2.0</td></tr>`;
+const EDITS = Array.from({ length: 39 }, (_, i) => `{"block":${i + 1},"html":"<p>fixed ${i + 1}</p>"}`).join(",");
+const PATCH_REPLY = `{"edits":[${EDITS},{"block":40,"html":"<table>${ROW.repeat(2_000)}`.slice(0, 78_006);
+const DOCUMENT_REPLY = `{"html":"<h1>Quarterly Report</h1>${"<p>Receipts rose.</p>".repeat(8_000)}`.slice(0, 78_006);
+
+const truncated = (text = PATCH_REPLY): TruncatedResponseError =>
+  new TruncatedResponseError("bedrock", "sonnet", 32_000, text);
 
 test("a truncated round delivers the document that entered it", async () => {
   await withTemp(async (dir) => {
@@ -174,6 +186,51 @@ test("a run that ends this way is not counted as a run that came back clean", as
     // logging `editor` too would make the two indistinguishable in the log.
     assert.equal(rec.events.find((e) => e.type === "editor"), undefined);
   });
+});
+
+test("the reply is quoted at both ends, so the two reasons it did not fit can be told apart", async () => {
+  // The round is discarded and cannot be asked again — the next one would put the same question to
+  // the same model about the same body — so the fragment it returned is the only evidence that will
+  // ever exist about WHY the answer did not fit. Both causes arrive as this same exception with the
+  // same `chars`, and they want different fixes: a reply carrying the whole document is a prompt
+  // problem, and an `edits` array that genuinely did not fit is the block-size problem `patch.ts`
+  // describes (#277). A paid round should not have to be paid for twice to say which.
+  const line = async (reply: string) =>
+    withTemp(async (dir) => {
+      const { ctx, rec } = ctxWith(dir, () => truncated(reply));
+      await runReview(ctx, { body: BODY, lint: { ok: true, violations: [] }, pages: PAGES });
+      const event = rec.events.find((e) => e.type === "editor_truncated");
+      assert.ok(event, "the most expensive line in the log was not written");
+      return event.data;
+    });
+
+  const patch = await line(PATCH_REPLY);
+  // The contract asks for the edits first, so the head is where the shape shows.
+  assert.match(String(patch.reply_head), /^\{"edits":\[\{"block":1,"html":"<p>fixed 1<\/p>"\}/);
+  // The tail is where it ran out: inside a table it was still emitting rows of.
+  assert.match(String(patch.reply_tail), /<th scope=\\"row\\">Alabama<\/th>/);
+  // And how many edits it managed on the way — one enormous block reads differently from forty.
+  assert.equal(patch.blocks_named, 40);
+
+  const whole = await line(DOCUMENT_REPLY);
+  assert.match(String(whole.reply_head), /^\{"html":"<h1>Quarterly Report<\/h1>/);
+  assert.equal(whole.blocks_named, 0, "no edits list at all, which is the prompt problem and not the size one");
+
+  // A few hundred characters in all, at both ends, on both shapes: this is the user's own document
+  // coming back, and it is kept for a person to read rather than as data to act on.
+  for (const data of [patch, whole]) {
+    assert.ok(String(data.reply_head).length <= 240, `head too long: ${String(data.reply_head).length}`);
+    assert.ok(String(data.reply_tail).length <= 240, `tail too long: ${String(data.reply_tail).length}`);
+  }
+
+  // Nothing quoted where there is nothing to quote. A ceiling hit with no text emitted is possible,
+  // and a line reading `reply_head: ""` would say the model answered with nothing when it is this
+  // code that has nothing.
+  const empty = await line("");
+  assert.equal(empty.reply_head, undefined);
+  assert.equal(empty.reply_tail, undefined);
+  assert.equal(empty.blocks_named, undefined);
+  assert.equal(empty.chars, 0, "the length is still stated, because it is the number that says so");
 });
 
 test("the loop stops rather than asking for the same length again", async () => {

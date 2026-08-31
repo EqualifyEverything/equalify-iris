@@ -104,7 +104,10 @@ function makeCtx(
   return { ctx, rec };
 }
 
-const truncated = () => new TruncatedResponseError("bedrock", "claude-test", 32000, 87851);
+// 87,851 characters of a page came back before the ceiling cut it. The fragment rides on the error
+// now (#277) and nothing on this path reads it — a page that truncated is a page lost either way —
+// so what matters here is still the length.
+const truncated = () => new TruncatedResponseError("bedrock", "claude-test", 32000, "<p>cut".padEnd(87_851, "x"));
 const ev = (rec: Recorded, type: string) => rec.events.filter((e) => e.type === type);
 
 test("one page's failure does not take the document with it", async () => {

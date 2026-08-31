@@ -127,6 +127,10 @@ test("a finish_reason of length is rejected, not returned as content", async () 
           // be read by an operator who has never seen the code.
           assert.match(e.message, /output ceiling/);
           assert.match(e.message, /providers\.openrouter\.max_tokens/);
+          // The fragment that did arrive is carried on the error rather than dropped, because the
+          // review loop's log line quotes a few hundred characters of it and the round cannot be
+          // asked again (#277). Both adapters, since either can be the one that truncates.
+          assert.equal((e as TruncatedResponseError).text, "<table><tr><td>cut");
           return true;
         },
       );
@@ -622,6 +626,7 @@ test("truncation is still caught when the stop reason arrives mid-stream", async
       assert.ok(e instanceof TruncatedResponseError, `expected TruncatedResponseError, got ${e.name}`);
       assert.match(e.message, /providers\.bedrock\.max_tokens/);
       assert.equal((e as TruncatedResponseError).chars, 18);
+      assert.equal((e as TruncatedResponseError).text, "<table><tr><td>cut");
       return true;
     },
   );
