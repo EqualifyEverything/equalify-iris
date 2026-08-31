@@ -862,9 +862,11 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   that content went missing at all, and it keeps that licence. **The label is also named as never
   being a defect itself, and so are the window's own cut edges (#274).** Telling the Reader what
   the label means turned out not to be the same as telling it the label is not part of the
-  document: benchmarked in the Reader seat, Claude Haiku 4.5 filed the label as an accessibility
-  problem in 7 of 163 issues where Sonnet 4.6 filed it in 0 of 197, once suggesting the fix was to
-  "review the complete document (all 3 windows)". Each of those costs an editor call, and that
+  document: benchmarked in the Reader seat, Claude Haiku 4.5 filed the windowing apparatus as an
+  accessibility problem in 7 of 163 issues where Sonnet 4.6 filed it in 0 of 197 — three of the
+  seven the label proper, once suggesting the fix was to "review the complete document (all 3
+  windows)"; two the cut edge; one the corpus artefact the filing disclosed; one a `(CONT.)` report
+  too truncated in the log to attribute. Each of those costs an editor call, and that
   round's page images, on a document that is not broken — and since nothing downstream can edit
   the prompt, the issue returns every round. The cut edges are the same shape one step down:
   `chunk()` slices on a character count, so a window can open mid-sentence or mid-tag, which one

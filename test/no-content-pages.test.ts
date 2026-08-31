@@ -92,12 +92,18 @@ test("the Reader is told what a no-content entry is, and that neither kind is it
     // disagreeing about whether the label is part of the document.
     ["the cost is named: nothing can close it, so it returns every round",
       /no edit to the document could close an issue whose subject is this prompt, so it would come back every round/],
-    // A separate shape from the label, and the third example on #274: `chunk()` is
+    // A separate shape from the label, and two of Haiku's seven rather than one: `chunk()` is
     // `s.slice(start, start + CHUNK_BUDGET)`, a raw character window, so a window genuinely
     // can open mid-sentence. Without the mechanism the prohibition reads as a denial of
     // something the Reader can see is true.
     ["the cut edge is explained by how the window is cut, not merely forbidden",
-      /cut by character count rather than at an element or a sentence, so its first and last lines may begin or end mid-sentence, mid-word or mid-tag: that edge is the cut, not content the document lost/],
+      /cut by character count rather than at an element or a sentence, so the edges it shares with the windows either side of it may begin or end mid-sentence, mid-word or mid-tag: that edge is the cut, not content the document lost/],
+    // `chunk()` only manufactures INTERIOR seams, so the exemption has to be scoped or it hands
+    // back the one case a single-chunk document depends on: with no label emitted at all, the
+    // Reader is the only check that a body truly ending mid-tag is a defect. Reviewed on #275 —
+    // the first draft said "its first and last lines" and covered the document's real ends too.
+    ["the document's own ends are excluded from the cut-edge exemption",
+      /The document's own opening and its own close are never a cut — where window 1 begins, where the last window ends, and both ends of an unlabelled body are the document as it really is, so a body that ends mid-sentence there is a real finding and yours to make/],
     // The exemption, because the two reports this must NOT silence are the floor under
     // `unresolved_rate` and the one page-internal break the Reader is the only check on.
     ["the marker and a within-page break are exempted by name",
