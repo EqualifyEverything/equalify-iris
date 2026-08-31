@@ -55,6 +55,7 @@ async function verdict(reply: string): Promise<VerifyVerdict> {
       page,
       { name: "page-001.png", order: 1, path: join(inputDir, "page-001.png"), links: [] },
       [{ html: "<p>x</p>" }],
+      "verify",
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -976,7 +976,7 @@ test("the field names the adapter emits are the ones diagnostics reads", async (
       ],
     }),
     async () => {
-      await router.complete("page", "vision", [{ role: "user", content: "hi" }]);
+      await router.complete("page", "vision", [{ role: "user", content: "hi" }], { step: "extract" });
     },
   );
   const d = summarizeRun(lines.join("\n") + "\n", {
@@ -1044,7 +1044,7 @@ function clampingRouter(
   };
   return {
     events,
-    run: () => router.complete("page", "vision", [{ role: "user", content: "hi" }]),
+    run: () => router.complete("page", "vision", [{ role: "user", content: "hi" }], { step: "extract" }),
   };
 }
 

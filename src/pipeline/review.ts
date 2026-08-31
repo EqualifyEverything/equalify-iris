@@ -888,15 +888,20 @@ async function runReader(
       tail;
     let res;
     try {
-      res = await ctx.router.complete("reader", "text", [
-        { role: "system", content: READER_SYSTEM },
-        // The head is this run's page index and nothing else, so it is the same bytes on
-        // every chunk of every round — declared so the adapter can cache it rather than
-        // charge for it dozens of times (providers/types.ts `cachedPrefix`). Undefined
-        // rather than "" when there is no index, which is a document with no pages to
-        // attribute to: an empty head is not a prefix worth naming.
-        { role: "user", content: user, cachedPrefix: head || undefined },
-      ]);
+      res = await ctx.router.complete(
+        "reader",
+        "text",
+        [
+          { role: "system", content: READER_SYSTEM },
+          // The head is this run's page index and nothing else, so it is the same bytes on
+          // every chunk of every round — declared so the adapter can cache it rather than
+          // charge for it dozens of times (providers/types.ts `cachedPrefix`). Undefined
+          // rather than "" when there is no index, which is a document with no pages to
+          // attribute to: an empty head is not a prefix worth naming.
+          { role: "user", content: user, cachedPrefix: head || undefined },
+        ],
+        { step: "read" },
+      );
     } catch (e) {
       // The first one wins, so the error the round rejects with is the one that
       // actually happened rather than whichever chunk noticed the flag.
@@ -1332,7 +1337,7 @@ async function editorCall(
       { role: "system", content: EDITOR_SYSTEM },
       { role: "user", content: user },
     ],
-    { images },
+    { step: "edit", images },
   );
   ctx.log.agentCall({
     agent: { name: "copy_editor", file: "copy_editor.md", content: EDITOR_SYSTEM, capabilities: ["vision"], sha: null, sessionBuilt: false },
@@ -1675,10 +1680,15 @@ async function editorSectionCall(
   // page image can settle: a [not legible] marker stays where it is, which is what EDITOR_SYSTEM
   // tells the editor to do when the page is not attached, so the loss is bounded to the issues
   // the images were for and is the same trade `editor_images_refused` already makes.
-  const res = await ctx.router.complete("copy_editor", "text", [
-    { role: "system", content: EDITOR_SECTION_SYSTEM },
-    { role: "user", content: user },
-  ]);
+  const res = await ctx.router.complete(
+    "copy_editor",
+    "text",
+    [
+      { role: "system", content: EDITOR_SECTION_SYSTEM },
+      { role: "user", content: user },
+    ],
+    { step: "edit_section" },
+  );
   ctx.log.agentCall({
     agent: {
       name: "copy_editor",

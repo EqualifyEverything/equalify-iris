@@ -88,7 +88,7 @@ async function draftAgent(ctx: PipelineContext, s: Suggestion): Promise<string> 
         content: `Draft an agent for content type "${s.name}". Why a specialist is warranted: ${s.reason}. First seen on "${s.image}".\n\n${ACCESSIBILITY_REQUIREMENTS}`,
       },
     ],
-    { images: img ? [loadImage(img)] : [] },
+    { step: "contribute", images: img ? [loadImage(img)] : [] },
   );
   return res.text.trim();
 }

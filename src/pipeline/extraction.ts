@@ -1979,7 +1979,7 @@ async function renderPage(
       { role: "system", content: pageSystem(agent, lessons) },
       { role: "user", content: user },
     ],
-    { images: [loadImage(img)] },
+    { step: "extract", images: [loadImage(img)] },
   );
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
   const parsed = extractJson<{ html?: string; log?: string; suggested_agent?: { name?: string; reason?: string } }>(res.text);
@@ -2127,7 +2127,7 @@ async function correctPage(
       { role: "system", content: pageSystem(agent, lessons) },
       { role: "user", content: user },
     ],
-    { images: [loadImage(img)] },
+    { step: "correct", images: [loadImage(img)] },
   );
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
   const parsed = extractJson<{ html?: string }>(res.text);
@@ -2173,7 +2173,7 @@ async function runSpecialist(ctx: PipelineContext, agent: AgentSpec, img: InputI
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { images: [loadImage(img)] },
+    { step: "specialist", images: [loadImage(img)] },
   );
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
   const parsed = extractJson<{ no_content?: boolean; html?: string }>(res.text);
@@ -2198,10 +2198,15 @@ async function mergeSpecialist(
     `\`\`\`html\n${fragment}\n\`\`\`\n\n` +
     `Replace the page's existing representation of that content with this specialist fragment; ` +
     `keep everything else unchanged.`;
-  const res = await ctx.router.complete(PAGE_AGENT, "text", [
-    { role: "system", content: MERGE_SYSTEM },
-    { role: "user", content: user },
-  ]);
+  const res = await ctx.router.complete(
+    PAGE_AGENT,
+    "text",
+    [
+      { role: "system", content: MERGE_SYSTEM },
+      { role: "user", content: user },
+    ],
+    { step: "specialist_merge" },
+  );
   ctx.log.agentCall({
     agent: { name: PAGE_AGENT, file: "page.md", content: MERGE_SYSTEM, capabilities: ["text"], sha: null, sessionBuilt: false },
     phase: "extraction",
@@ -2445,7 +2450,7 @@ async function extractPage(
     }
   }
 
-  const verdict = await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml }]);
+  const verdict = await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml }], "verify");
 
   // Whether the page's links arrived is checked here rather than left to the
   // Feedback Agent: it verifies the output against the IMAGE, which is the one place
@@ -2666,7 +2671,7 @@ async function extractPage(
           chars_after: corrected.length,
         });
       } else if (!verifyFailed) {
-        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }]);
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }], "recheck_binding");
         keep = !failedCheck(recheck);
         if (!keep) {
           ctx.log.event("page_links_correction_rejected", {
@@ -2720,7 +2725,7 @@ async function extractPage(
         // taken: it is logged, the slot stays spent (a refund would let a throttled
         // provider be retried once per corrected page, which is the cost this bounds),
         // and the page ships exactly as it would have with no measurement at all.
-        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }]).catch(
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }], "recheck_sampled").catch(
           (e: unknown) => {
             ctx.log.event("page_correction_recheck_failed", {
               image: img.name,

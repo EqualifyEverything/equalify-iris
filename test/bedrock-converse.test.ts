@@ -742,7 +742,7 @@ test("the dialect rides on every model_call, so a bench round says which one pro
   );
   const provider = (router as unknown as { build(n: string): BedrockProvider }).build("bedrock");
   stubConverse(provider, script(done("end_turn", { inputTokens: 4, outputTokens: 5 })));
-  await router.complete("page", "vision", [{ role: "user", content: "hi" }]);
+  await router.complete("page", "vision", [{ role: "user", content: "hi" }], { step: "extract" });
   for (const e of events) {
     assert.equal(e.data.api, "converse", e.type);
     assert.equal(e.data.provider, "bedrock", e.type);
@@ -765,7 +765,7 @@ test("a provider with one API adds no api field, so today's log lines are unchan
     model: "m",
     provider: "openrouter",
   });
-  await router.complete("page", "vision", [{ role: "user", content: "hi" }]);
+  await router.complete("page", "vision", [{ role: "user", content: "hi" }], { step: "extract" });
   assert.ok(events.length > 0);
   for (const data of events) assert.ok(!("api" in data), JSON.stringify(data));
 });

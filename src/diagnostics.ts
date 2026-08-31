@@ -7,6 +7,7 @@ interface LogEvent {
   type?: string;
   phase?: string;
   agent?: string;
+  step?: string;
   model?: string;
   provider?: string;
   capability?: string;
@@ -18,6 +19,19 @@ interface LogEvent {
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
   [k: string]: unknown;
+}
+
+// What a set of model calls cost and took. Shared by `by_agent` and `by_step` so the two
+// splits are the same seven numbers over the same calls, differing only in how they are
+// keyed — a reader comparing them is comparing groupings, never definitions.
+export interface CallTotals {
+  count: number;
+  total_ms: number;
+  max_ms: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
 }
 
 export interface Diagnostics {
@@ -32,6 +46,10 @@ export interface Diagnostics {
   // this reports the longest-waiting one.
   in_flight: null | {
     agent: string;
+    // Which job is waiting, since that is what a stuck run is asked about first and the agent
+    // name does not settle it — `feedback` in flight is a page being checked or a user's
+    // feedback being routed, and only one of those is on the critical path of a delivered page.
+    step: string;
     model: string;
     provider: string;
     capability: string;
@@ -80,19 +98,25 @@ export interface Diagnostics {
   // agent that caches best, which inverts the answer the split exists to give. Keyed as
   // the log line keys them, so the names that cross the adapter/diagnostics seam are the
   // same ones in both places.
-  by_agent: Record<
-    string,
-    {
-      count: number;
-      total_ms: number;
-      max_ms: number;
-      input_tokens: number;
-      output_tokens: number;
-      cache_read_input_tokens: number;
-      cache_creation_input_tokens: number;
-    }
-  >;
-  slowest_calls: { agent: string; model: string; capability: string; duration_ms: number; ok: boolean }[];
+  by_agent: Record<string, CallTotals>;
+  // Per-STEP totals: the same seven numbers, keyed by the job that bought the call rather
+  // than by the agent file that answered it (`PipelineStep` in providers/types.ts).
+  //
+  // This is the split a per-step cost claim has to be read off, and `by_agent` is not it.
+  // One agent serves several jobs, so an agent's row is a sum over jobs and a job's cost can
+  // be spread across rows: extraction's per-page fidelity check books to `feedback`, which
+  // reported the extraction step at 41% of a document when its jobs together are 57.2% (#280),
+  // and the table-join step's whole bill arrived inside `copy_editor` next to the review
+  // round's (#243). Both are unrecoverable from `by_agent` at any effort, because the
+  // information is not in it.
+  //
+  // Kept ALONGSIDE `by_agent` rather than replacing it, because the two answer different
+  // questions and both get asked: `by_agent` is what a deployment reads to decide a
+  // per-agent model override (`providers.per_agent`, which is keyed by agent), and a step
+  // cannot be pointed at a model. Read together they also localize a cost: a step that grew
+  // while its agent's row did not is a step that took work from another one.
+  by_step: Record<string, CallTotals>;
+  slowest_calls: { agent: string; step: string; model: string; capability: string; duration_ms: number; ok: boolean }[];
   errors: { ts: string | null; type: string; message: string }[];
   // What the verify-then-correct loop did, and what it bought.
   //
@@ -510,7 +534,7 @@ export function summarizeRun(
 
   // In-flight detection. Extraction runs several pages concurrently, so more
   // than one call can be open at once and start/end events interleave. Match
-  // them by identity (agent+model+capability) rather than position: each end
+  // them by identity (agent+step+model+capability) rather than position: each end
   // event closes the OLDEST matching open start, which is the same pairing a
   // FIFO queue would produce. `in_flight` reports the longest-waiting open call
   // — the best single answer to "what is this run stuck on?" — and
@@ -519,8 +543,15 @@ export function summarizeRun(
   // round's call that never closed — a process killed mid-flight — is not what THIS run
   // is stuck on, and reporting it as such is the phantom hang again by another route.
   const openCalls: LogEvent[] = [];
+  // `step` is part of the identity, not decoration. Without it, extraction's three feedback
+  // jobs — `verify`, `recheck_binding`, `recheck_sampled` — are all the same agent, model and
+  // capability, and they run across pages concurrently, so page 1's recheck ending would close
+  // page 3's still-open verify and `in_flight` would name the recheck as what the run is stuck
+  // on. Adding it strictly narrows the match and cannot make the `i === -1` fallback newly
+  // reachable: a start and its end spread the same `meta`, so within one run both carry `step`
+  // or neither does.
   const callKey = (e: LogEvent): string =>
-    `${e.agent ?? "?"}|${e.model ?? "?"}|${e.capability ?? "?"}`;
+    `${e.agent ?? "?"}|${e.step ?? "?"}|${e.model ?? "?"}|${e.capability ?? "?"}`;
   for (const e of currentRun) {
     if (e.type === "model_call_start") {
       openCalls.push(e);
@@ -597,6 +628,7 @@ export function summarizeRun(
     active && oldest
       ? {
           agent: oldest.agent ?? "?",
+          step: oldest.step ?? "?",
           model: oldest.model ?? "?",
           provider: oldest.provider ?? "?",
           capability: oldest.capability ?? "?",
@@ -619,10 +651,15 @@ export function summarizeRun(
   const tokens = { input: 0, output: 0, cache_read: 0, cache_write: 0, calls_reported: 0 };
 
   const byAgent: Diagnostics["by_agent"] = {};
-  for (const c of calls) {
-    const k = c.agent ?? "?";
+  const byStep: Diagnostics["by_step"] = {};
+  // One fold, run twice over the same calls under two keys, so `by_agent` and `by_step` cannot
+  // disagree about a call: every total in either is the same arithmetic over the same events.
+  // Summing `by_step` and summing `by_agent` gives the same seven numbers, which is worth being
+  // true by construction — a report that quoted a step's share against a differently-collected
+  // whole would be wrong in a way no reader could see.
+  const fold = (into: Record<string, CallTotals>, key: string, c: LogEvent): void => {
     const cur =
-      byAgent[k] ??
+      into[key] ??
       {
         count: 0,
         total_ms: 0,
@@ -639,7 +676,15 @@ export function summarizeRun(
     cur.output_tokens += c.output_tokens ?? 0;
     cur.cache_read_input_tokens += c.cache_read_input_tokens ?? 0;
     cur.cache_creation_input_tokens += c.cache_creation_input_tokens ?? 0;
-    byAgent[k] = cur;
+    into[key] = cur;
+  };
+  for (const c of calls) {
+    fold(byAgent, c.agent ?? "?", c);
+    // `?` for a call whose line carries no step, which today means a log written before
+    // `step` existed: the router requires one and the type is closed, so a live run cannot
+    // produce it. Named rather than dropped — a bucket that silently omitted those calls
+    // would make `by_step` sum to less than `tokens` on an old log and say nothing about why.
+    fold(byStep, c.step ?? "?", c);
 
     const reported =
       c.input_tokens != null ||
@@ -658,6 +703,10 @@ export function summarizeRun(
     .slice(0, 5)
     .map((c) => ({
       agent: c.agent ?? "?",
+      // The step too, because the five slowest calls are where a reader goes to ask what a
+      // long run was waiting on, and the agent name does not answer it: a slow `copy_editor`
+      // call is a review round or a table join, and those have different remedies.
+      step: c.step ?? "?",
       model: c.model ?? "?",
       capability: c.capability ?? "?",
       duration_ms: c.duration_ms ?? 0,
@@ -998,6 +1047,7 @@ export function summarizeRun(
     },
     tokens,
     by_agent: byAgent,
+    by_step: byStep,
     slowest_calls: slowest,
     errors,
     verification,
