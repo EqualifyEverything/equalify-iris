@@ -223,6 +223,15 @@ test("the reply is quoted at both ends, so the two reasons it did not fit can be
     assert.ok(String(data.reply_tail).length <= 240, `tail too long: ${String(data.reply_tail).length}`);
   }
 
+  // A fragment small enough that the two excerpts would cover it is quoted whole, under the head
+  // alone. The budget is the same either way — never more than two excerpts' worth of the user's
+  // text — and the alternative is a line reporting a head with the fragment's middle and end
+  // silently missing while `chars` says there was more.
+  const short = await line(`{"edits":[{"block":1,"html":"<p>`.padEnd(400, "x"));
+  assert.equal(String(short.reply_head).length, 400, "a 400-character fragment lost characters nothing reported");
+  assert.equal(short.reply_tail, undefined, "and a tail would only repeat part of the head");
+  assert.equal(short.blocks_named, 1);
+
   // Nothing quoted where there is nothing to quote. A ceiling hit with no text emitted is possible,
   // and a line reading `reply_head: ""` would say the model answered with nothing when it is this
   // code that has nothing.

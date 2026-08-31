@@ -1109,11 +1109,17 @@ interface EditorRound {
 // is what the question below needs and no more: this is text out of the user's own document.
 const REPLY_EXCERPT = 240;
 
+// Whether there are two ends worth reporting apart. At or under the pair's width the excerpts would
+// overlap or abut, so the fragment is quoted whole instead — the log never carries more than
+// `2 x REPLY_EXCERPT` characters of it either way.
+const split = (text: string) => text.length > 2 * REPLY_EXCERPT;
+
 // Under this contract a reply names one block per edit, so counting the key says how many edits the
 // model got through before the ceiling — the difference between one enormous block and forty small
-// ones. Not authoritative: a model that wrote `'block':` or `block:` counts zero here while
-// `reply_head` plainly shows an edits list, which is why the excerpt is logged beside the count
-// rather than replaced by it.
+// ones. Not authoritative in either direction: a model that wrote `'block':` or `block:` counts
+// zero here while `reply_head` plainly shows an edits list, and a document that quotes `"block":`
+// in its own text — a transcribed API reference, a JSON sample — counts its own prose. Which is why
+// the excerpt is logged beside the count rather than replaced by it.
 const BLOCK_KEY = /"block"\s*:/g;
 
 // What the log line about a truncation says. The ceiling and the size of the response are
@@ -1132,17 +1138,19 @@ const BLOCK_KEY = /"block"\s*:/g;
 // the model ran out, and `blocks_named` is how many edits it managed on the way.
 //
 // Shared with `editor_section_failed`, where the same three fields read differently in one respect:
-// a section round asks for the section's HTML and not for an edits list, so `blocks_named` is 0
-// there whatever went wrong, and the head is what says whether the model answered about the section
-// it was given. docs/API.md says so on both rows.
+// a section round asks for the section's HTML and not for an edits list, so `blocks_named` is
+// expected to be 0 there and the head is what says whether the model answered about the section it
+// was given. A count above 0 on that row is not noise but the same prompt problem in its other
+// form — a model answering a plain-HTML request in the shape of the whole-document contract.
+// docs/API.md says so on both rows.
 //
 // This is the user's own document coming back, so it stays in the run log on the deployment and
 // **never** reaches `GET /v1/quality` — the same confinement, for the same reason, as
 // `prose_joined`'s `word_split_examples`. Whitespace is folded so the line stays one line, and the
-// two ends are only reported apart when there are two ends: below `2 x REPLY_EXCERPT` the whole
-// fragment is shorter than the excerpt pair, so `reply_head` IS the reply and a tail would repeat
-// it. Absent altogether on a truncation that returned nothing, and on an error that reached here
-// having lost its prototype — there is no fragment to quote in either case.
+// two ends are only reported apart when there are two ends: at or under the excerpt pair's width
+// the fragment fits inside the same budget entire, so `reply_head` IS the reply and a tail would
+// repeat part of it. Absent altogether on a truncation that returned nothing, and on an error that
+// reached here having lost its prototype — there is no fragment to quote in either case.
 function truncation(e: unknown): Record<string, unknown> {
   const message = e instanceof Error ? e.message : String(e);
   if (!(e instanceof TruncatedResponseError)) return { error: message };
@@ -1154,8 +1162,11 @@ function truncation(e: unknown): Record<string, unknown> {
     ...(text === ""
       ? {}
       : {
-          reply_head: fold(text.slice(0, REPLY_EXCERPT)),
-          ...(text.length > 2 * REPLY_EXCERPT ? { reply_tail: fold(text.slice(-REPLY_EXCERPT)) } : {}),
+          // One budget, spent either as two ends or as the whole fragment: a reply short enough
+          // that both excerpts would fit it is quoted entire under `reply_head`, rather than
+          // reported as a head with its middle silently missing.
+          reply_head: fold(text.slice(0, split(text) ? REPLY_EXCERPT : 2 * REPLY_EXCERPT)),
+          ...(split(text) ? { reply_tail: fold(text.slice(-REPLY_EXCERPT)) } : {}),
           blocks_named: (text.match(BLOCK_KEY) ?? []).length,
         }),
     error: message,

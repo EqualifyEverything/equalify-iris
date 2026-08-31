@@ -190,9 +190,16 @@ const BUDGET = Math.floor(CHARS * SECTION_HEADROOM);
 // What came back before the ceiling cut it. Only its LENGTH matters to anything here — that is what
 // the sectioned retry sizes the next request from — but the error carries the fragment itself now
 // (#277), so this is a plausible partial reply padded to length rather than a bare count.
+// The two rounds are asked for different things, so a fixture standing in for a truncated reply is
+// shaped by which round made it: the document round asks for an edits list, a section round asks for
+// that section's HTML back. Using the edits shape for both would make `blocks_named` on
+// `editor_section_failed` say something no section round can say.
 const partial = (chars: number) => `{"edits":[{"block":3,"html":"<p>`.padEnd(chars, "x");
+const partialSection = (chars: number) => `<p id="p9">word9 `.padEnd(chars, "x");
 const truncated = (chars = CHARS): TruncatedResponseError =>
   new TruncatedResponseError("bedrock", "sonnet", 32_000, partial(chars));
+const truncatedSection = (chars: number): TruncatedResponseError =>
+  new TruncatedResponseError("bedrock", "sonnet", 32_000, partialSection(chars));
 
 interface Call {
   agent: string;
@@ -355,7 +362,7 @@ test("a section that cannot be returned either costs that section and nothing el
     // Per-section containment, the same shape as a page that could not be extracted: the
     // section keeps the text it went in with, the rest of the document keeps its corrections.
     const { ctx, rec } = ctxWith(dir, {
-      sectionAnswer: (s) => (s.index === 2 ? truncated(9_000) : `${s.html}\n<p class="fix">fixed ${s.index}</p>`),
+      sectionAnswer: (s) => (s.index === 2 ? truncatedSection(9_000) : `${s.html}\n<p class="fix">fixed ${s.index}</p>`),
     });
     const result = await review(ctx);
 
@@ -368,6 +375,12 @@ test("a section that cannot be returned either costs that section and nothing el
     assert.equal(failed?.data.of, 3);
     assert.equal(failed?.data.reason, "truncated");
     assert.equal(failed?.data.chars, 9_000, "the numbers that say whether a smaller section would have fitted");
+    // And the same excerpt fields the document round writes (#277), which read differently here:
+    // this round asked for the section's HTML, so `blocks_named` is 0 and the head is what says
+    // whether the model was answering about the section it was handed. A count above 0 on this row
+    // would mean the whole-document contract's shape came back to a request that never used it.
+    assert.match(String(failed?.data.reply_head), /^<p id="p9">word9 x+$/);
+    assert.equal(failed?.data.blocks_named, 0);
     const editor = rec.events.find((e) => e.type === "editor");
     assert.equal(editor?.data.corrected, 2, "the count must say how much of the document was reached");
     // Section 2 kept the text it went in with, so its issues had no editor pass at all and no
@@ -421,7 +434,7 @@ test("a section that came back as a sentence about itself keeps the text it went
 
 test("a round where no section came back is exactly the round that used to be discarded", async () => {
   await withTemp(async (dir) => {
-    const { ctx, rec } = ctxWith(dir, { sectionAnswer: () => truncated(9_000) });
+    const { ctx, rec } = ctxWith(dir, { sectionAnswer: () => truncatedSection(9_000) });
     const result = await review(ctx);
     assert.equal(result.body, LONG, "the body that entered the round is what is delivered");
     assert.equal(result.editorTruncated, true);
