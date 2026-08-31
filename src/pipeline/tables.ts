@@ -550,6 +550,22 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
   if (sHeader.length > 0 && headerSignature(srows) !== headerSignature(frows)) {
     return { reason: "header_differs" };
   }
+  // Where there is no block to compare, the WIDTHS still have to agree: a signature is not the only
+  // thing that says how many columns a row may have. A printer that did not reprint the header on
+  // the continued page leaves the signature nothing to read, and without this a four-cell row gets
+  // appended under a three-column `<thead>` — cells with no header, which is the 1.3.1 defect this
+  // stage exists to reduce. `verifyJoin` cannot catch it: `columns_lost` compares the joined table's
+  // widest row against the halves' widest, and the appended row IS the widest. Measured against how
+  // wide the first half ALREADY is rather than against its header block, because a first half whose
+  // own rows already run wider carries a defect this join neither introduced nor deepens. Like
+  // `id_would_collide` below, the corpus never reaches it — every continued page in it reprints its
+  // header, so rule 3 answers first — and that is the point: it costs nothing measured and it covers
+  // the page that does not.
+  const width = (row: Element): number =>
+    [...row.children].reduce((n, c) => n + (Number(c.getAttribute("colspan")) || 1), 0);
+  const fwidth = Math.max(0, ...frows.map(width));
+  if (srows.some((r) => !isHeaderRow(r) && width(r) > fwidth)) return { reason: "columns_differ" };
+
   // Rule 4, before rule 2 below, because what the caption does decides which ids survive. Usually a
   // copy: the first half's caption is the table's title and carries no marker. The exception is the
   // middle piece of a chain, whose caption says "Continued" because it is itself a continued page —
@@ -601,11 +617,6 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
   // imported whole above and brought its id with it.
   if (fcap !== null && !moveId(scap, fcap)) return { reason: "id_would_be_lost" };
 
-  const kept = new Set<string>();
-  for (const id of idsIn(ftab)) kept.add(id);
-  for (const row of srows.filter((r) => !isHeaderRow(r))) for (const id of idsIn(row)) kept.add(id);
-  if (idsIn(stab).some((id) => !kept.has(id))) return { reason: "id_would_be_lost" };
-
   // Rule 6's repeats are judged against the first half's own note rows.
   const fNotes = new Set(frows.filter(isUnitNoteRow).map((r) => normalizeCell(r.textContent ?? "")));
 
@@ -630,14 +641,24 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
     target.appendChild(fdoc.importNode(row, true));
   }
 
-  // Nothing may carry an id twice. A duplicate is a 4.1.1 defect the join itself would have
-  // INTRODUCED, and it is invisible everywhere else: `verifyJoin` does not read ids, and the label
-  // set is matched over cell TEXT. Checked at the end, over the finished table, so it covers the
-  // appended rows, the moved caption id and the moved table id in one read. The corpus never hits it
-  // — the page agent prefixes its anchors with the page number (`p7-fnref-2`), so two halves cannot
-  // collide — which is the point: it costs nothing measured and it covers the day that stops holding.
+  // Both id checks, off the FINISHED table, in one traversal.
+  //
+  // Rule 2's, first, because the appending above is what decides which of the dropped half's ids
+  // actually survived and a check written before it has to PREDICT that. The prediction was wrong for
+  // an id inside a note row rule 6 drops as a repeat: counted as surviving because the row is not a
+  // header row, then dropped with the row, and nothing downstream reads ids. Read after the fact
+  // instead, so what it reports is what the join did.
+  //
+  // Then: nothing may carry an id twice. A duplicate is a 4.1.1 defect the join itself would have
+  // INTRODUCED, and it is invisible everywhere else too — `verifyJoin` does not read ids, and the
+  // label set is matched over cell TEXT. It covers the appended rows, the moved caption id and the
+  // moved table id together. The corpus never hits it — the page agent prefixes its anchors with the
+  // page number (`p7-fnref-2`), so two halves cannot collide — which is the point: it costs nothing
+  // measured and it covers the day that stops holding.
   const all = idsIn(ftab);
-  if (new Set(all).size !== all.length) return { reason: "id_would_collide" };
+  const survived = new Set(all);
+  if (idsIn(stab).some((id) => !survived.has(id))) return { reason: "id_would_be_lost" };
+  if (survived.size !== all.length) return { reason: "id_would_collide" };
   return { html: ftab.outerHTML };
 }
 

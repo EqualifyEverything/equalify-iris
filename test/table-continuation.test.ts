@@ -489,7 +489,7 @@ test("an id with no free counterpart to move to is the editor's", async () => {
 });
 
 test("a footnote anchor in the repeated header block is the editor's", async () => {
-  // 67 of the corpus's 87 dropped ids, 57 of them live: the repeated header block holds the page's
+  // 70 of the corpus's 87 dropped ids, 60 of them live: the repeated header block holds the page's
   // footnote REFERENCE anchors, and rule 3 is what drops that block. Which cell of the surviving block
   // the anchor belongs on is a reading of the table.
   const anchored =
@@ -526,6 +526,49 @@ test("a bracketed unit note the first half prints too is dropped once, and any o
   assert.equal(verifyJoin(pair, joined.html), null, "the note this dropped is a row verifyJoin wants");
 
   assert.deepEqual(joinInCode(onePair(first + other)), { reason: "note_repeat_unclear" });
+});
+
+test("an id inside the note row rule 6 drops has not survived the join", async () => {
+  // Rule 6 and rule 2 meet here: the note repeats on both pages, and each page's copy carries its own
+  // footnote anchor. Dropping the repeat as a duplicate ROW drops the anchor with it, and it is the one
+  // dropped id no other check can reach — the duplicate-id read cannot see an id that is already gone,
+  // and `verifyJoin` never reads an id at all. Which is why rule 2 is read off the FINISHED table
+  // rather than off the rows this function expects to keep: the expectation was wrong here.
+  // Inside the brackets, because that is what makes the two rows the same NOTE: rule 6 matches on the
+  // row's text, and an anchor's digit is part of it.
+  const marked = (page: number) =>
+    noteRow(`[In millions of dollars<sup><a href="#p${page}-fn-1" id="p${page}-fnref-1">1</a></sup>]`);
+  const first = `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody>${marked(7)}${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 5.—Debt—Continued</caption>${HEAD}<tbody>${marked(8)}${dataRow("Vermont")}</tbody></table>`;
+  const pair = onePair(first + second);
+
+  assert.deepEqual(joinInCode(pair), { reason: "id_would_be_lost" });
+  // The two notes ARE the same note, so rule 6 is right about the row; what makes it the editor's is
+  // the anchor. This is the table the drop would have shipped, and the check that refuses a bad merge
+  // calls it sound.
+  const lossy =
+    `<table><caption>Table 5.—Debt</caption>${HEAD}` +
+    `<tbody>${marked(7)}${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`;
+  assert.ok(!lossy.includes("p8-fnref-1"));
+  assert.equal(verifyJoin(pair, lossy), null, "verifyJoin can see a dropped id after all");
+});
+
+test("a second half with no header block is still held to the first half's width", async () => {
+  // Rule 3 has nothing to compare where the continued page did not reprint the header — but the rows
+  // still have to fit. A four-cell row appended under a three-column `<thead>` is a cell with no
+  // header, the 1.3.1 defect this whole stage exists to reduce, and `columns_lost` cannot see it: the
+  // appended row is the widest row in the joined table, so the joined table is not narrower than
+  // either half. Held to how wide the first half already is, not to its header block, because a first
+  // half whose own rows already run wider carries a defect this join did not introduce.
+  const first = `<table><caption>Table 12.—Loans</caption>${HEAD}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  const wide = `<tr><th scope="row">Vermont</th><td>1.0</td><td>1.0</td><td>1.0</td></tr>`;
+  const second = `<table><caption>Table 12.—Loans—Continued</caption><tbody>${wide}</tbody></table>`;
+  const pair = onePair(first + second);
+
+  assert.deepEqual(joinInCode(pair), { reason: "columns_differ" });
+  const widened =
+    `<table><caption>Table 12.—Loans</caption>${HEAD}<tbody>${dataRow("Alabama")}${wide}</tbody></table>`;
+  assert.equal(verifyJoin(pair, widened), null, "verifyJoin can see a widened join after all");
 });
 
 test("a marker that is not wholly inside one text node is the editor's", async () => {

@@ -775,12 +775,14 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   collapsing onto one element is a choice about which link keeps working, and that choice is the
   editor's. Both paths go through the same verification and the same splice, and `table_joined` says
   `by: "code"` or `by: "editor"`, so the ledger can tell a pair the editor was asked about from a pair
-  it was not. Two guards belong to the code path alone, because serializing a table is the one thing
-  here that can lose content where a model reply cannot: a half whose span parses to anything *outside*
-  its own table is declined, since the parser fosters a stray `<p>` out of a `<table>` and `outerHTML`
-  then does not carry it, and a join that would print one id twice is declined as well. Neither is
-  visible to the verification below, which reads columns, header cells, rows and labels and never reads
-  an id. Everything around the ask is
+  it was not. Three guards belong to the code path alone, none of them visible to the verification
+  below, which reads columns, header cells, rows and labels and never reads an id: a half whose span
+  parses to anything *outside* its own table is declined, since the parser fosters a stray `<p>` out of
+  a `<table>` and `outerHTML` then does not carry it — the one thing this path does that can lose
+  content where a model reply cannot; a join that would print one id twice is declined; and so is a
+  continued page whose rows run wider than the first half already is, which is what a page that
+  reprinted no header at all can do, since then there are no two header blocks to compare. Everything
+  around the ask is
   deterministic: which tables are halves (the caption rule), where their bytes are, whether the
   answer kept the table, and the splice. The body is never reserialized — the halves' source spans
   are found by a depth-counting scan and checked against the parsed DOM, and the reply is spliced in
