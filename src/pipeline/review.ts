@@ -851,7 +851,7 @@ async function runReader(
   // guard exists for.
   let failed = false;
   let failure: unknown = null;
-  const perChunk = await mapWithConcurrency(chunks, limit, async (c, i) => {
+  const perChunk = await mapWithConcurrency(chunks, limit, async (c, i): Promise<ReaderWindow> => {
     if (failed) throw failure;
     // Whether this call has the whole body or a window of it, said where the body is handed
     // over. The Reader is told not to report a page as missing on the strength of content it

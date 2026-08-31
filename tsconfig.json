@@ -6,6 +6,12 @@
     "lib": ["ES2023"],
     "types": ["node"],
     "strict": true,
+    // Dead code cannot reaccumulate WITHIN a file. Neither flag reports an unused
+    // `export`, though — not a constant nothing imports, and not a whole module — so
+    // finding those is still a manual sweep over every exported name, and the next
+    // cleanup pass has to do it rather than trust a green typecheck.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
