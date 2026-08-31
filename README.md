@@ -859,7 +859,18 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   that *does* have content is never touched. And the Reader is now told which case it is in: the
   HTML section says `window N of M` when the body was split, and only then is a page whose content
   it cannot find someone else's to read — on a single-chunk document the Reader is the only check
-  that content went missing at all, and it keeps that licence.
+  that content went missing at all, and it keeps that licence. **The label is also named as never
+  being a defect itself, and so are the window's own cut edges (#274).** Telling the Reader what
+  the label means turned out not to be the same as telling it the label is not part of the
+  document: benchmarked in the Reader seat, Claude Haiku 4.5 filed the label as an accessibility
+  problem in 7 of 163 issues where Sonnet 4.6 filed it in 0 of 197, once suggesting the fix was to
+  "review the complete document (all 3 windows)". Each of those costs an editor call, and that
+  round's page images, on a document that is not broken — and since nothing downstream can edit
+  the prompt, the issue returns every round. The cut edges are the same shape one step down:
+  `chunk()` slices on a character count, so a window can open mid-sentence or mid-tag, which one
+  model reported as content lost. Both prohibitions are worth having only because a cheaper Reader
+  is a live option; the current model needed neither, which is exactly how a prompt that misleads
+  the field goes unnoticed.
 - **Copy Editor image payload (§7.9).** When every issue in a round is attributed to a page, the
   editor gets only those pages' images (logged per round as `editor_images`). Attaching every
   page's image on every round is the dominant per-round cost of the review loop — on a 25-page

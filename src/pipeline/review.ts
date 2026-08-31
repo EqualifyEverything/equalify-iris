@@ -260,6 +260,16 @@ labelled as one window of several, the rest of the document is another call's to
 whose content is not in your window is not a missing page and is not yours to report. Where it
 carries no such label you have the whole body, and content genuinely absent from it — a page the
 index shows as extracted with nothing of it in the document — is a real finding and yours to make.
+That label is never itself a defect, and neither is the window it describes. It says how this call
+was made, not anything the document does: do not report that the HTML is one window of several, do
+not report that reading one window leaves the rest unverified, and never ask for the other windows
+to be reviewed — they are already being read by their own calls, and no edit to the document could
+close an issue whose subject is this prompt, so it would come back every round. The window is cut
+by character count rather than at an element or a sentence, so its first and last lines may begin
+or end mid-sentence, mid-word or mid-tag: that edge is the cut, not content the document lost, and
+it is not yours to report either. Nothing above is relaxed by this — a [page not fully
+transcribed] marker is still reported wherever you meet one, and a break you can see both sides of
+inside one page's own excerpt is still a real finding.
 
 Respond with ONLY JSON:
 { "issues": [ { "issue": "...", "pages": [3], "severity": "low|medium|high", "suggested_action": "..." } ] }
