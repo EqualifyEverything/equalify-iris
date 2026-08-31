@@ -26,16 +26,41 @@
 //     row) opens a continued page, and whether it belongs in a joined table is a judgement about
 //     the document rather than about its markup.
 //
-// So the merge itself is asked of the Copy Editor, one pair at a time, and everything around it is
-// deterministic: which tables are halves of one table, where their bytes are, and — the part that
-// makes asking safe — whether the answer kept every row. See `verifyJoin`.
+// So the merge is asked of the Copy Editor wherever one of those judgements is real, and everything
+// around it is deterministic: which tables are halves of one table, where their bytes are, and — the
+// part that makes asking safe — whether the answer kept every row. See `verifyJoin`.
 //
-// Nothing here reserializes the body. `roles.ts` and `anchors.ts` both refuse a whole-body
+// Only three of the six rules the editor is given need a judgement at all, though, and two of them
+// are the bullets above. The other three are "move these bytes and change nothing", so `joinInCode`
+// tries the pair without a model first and stands down wherever the judgement is real. Measured on
+// 50 real pairs read out of already-delivered documents, that is 52% of them at no output tokens,
+// and `verifyJoin` refuses none of what it produces (#276).
+//
+// 52% and not the 62% #276 measured, and the difference is one rule: the filing's id check read the
+// second half's HEADER ROWS, and `querySelectorAll` cannot see an id on the `<table>` or `<caption>`
+// element it is called on. 17 of the 50 pairs carry an id there, 13 of those ids the target of a live
+// `href="#…"` or IDREF in the delivered document, and none of it visible to `verifyJoin`. 8 of the 17
+// join here anyway, because such an id has a surviving counterpart to move onto; the 5 that carry an
+// id on BOTH halves' same element are the whole of the gap between 31 pairs and 26, and they are not
+// a shortfall — two live targets cannot become one element, and the editor is asked because it can
+// renumber what points at them.
+//
+// Nothing here reserializes the BODY. `roles.ts` and `anchors.ts` both refuse a whole-body
 // parse-and-reserialize on purpose, because a round trip moves content out of tables and
 // `review_converged` compares body strings; the same prohibition applies with the same force to a
 // stage that runs before review. This parses only to READ — which tables there are, what their
 // captions and rows say — and edits the body as a string, splicing at spans it has checked against
 // the DOM it read (see `tableSpans`).
+//
+// `joinInCode` is the one thing here that serializes anything, and it is bounded to the table it
+// joins: the first half's element, with the second half's rows appended, written back over the two
+// halves' spans. That is the same blast radius the editor's answer already has — a model reply
+// replaces those same bytes — but a round trip over model-written table markup can lose content
+// where a model reply cannot, because the parser FOSTERS a stray `<p>` inside a `<table>` out of the
+// table, and `outerHTML` then does not carry it. `verifyJoin` cannot see that: it reads columns,
+// header cells, row counts and data-row labels, and hoisted prose is none of those. So the code path
+// declines outright wherever either half's span parses to anything outside its own table, which
+// leaves that pair to the editor exactly as today.
 import { JSDOM, VirtualConsole } from "jsdom";
 import { extractJson } from "../util/json.ts";
 import { isTruncatedResponseError } from "../providers/types.ts";
@@ -393,6 +418,250 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   return null;
 }
 
+// A candidate join that passed: the bytes to splice in, and the joined table as read back.
+interface Checked {
+  reason: null;
+  merged: string;
+  result: TablePiece;
+}
+
+// The verdict on one candidate join and the joined table's own figures, together — because both of
+// them parse the candidate and a parse can throw (see `attempt`). Null means the candidate could not
+// be read at all, which is `read_failed` for this pair and not for the document.
+//
+// Both the code path and the editor path go through here, so they are held to the same bar by
+// construction rather than by two call sites agreeing to. `declined` is the editor's answer to a pair
+// it will not merge; the code path has its own reasons and passes false.
+function checkJoin(
+  pair: ContinuationPair,
+  html: string | null,
+  declined: boolean,
+): { reason: string | null; merged: string; result: TablePiece | null } | null {
+  return attempt(() => {
+    const reason = declined ? "declined" : html === null ? "no_output" : verifyJoin(pair, html);
+    const merged = html?.trim() ?? "";
+    return { reason, merged, result: reason === null ? read(parse(merged).querySelector("table")!) : null };
+  });
+}
+
+// Rule 6's shape: a full-width row whose whole text is a bracketed note, reprinted at the top of a
+// continued page. Matched on the row being a SINGLE cell as well as on the text, so an ordinary data
+// row whose first cell happens to start with a bracket is not eligible to be dropped as a repeat.
+function isUnitNoteRow(row: Element): boolean {
+  const cells = [...row.children];
+  if (cells.length !== 1) return false;
+  return /^\[.*\]$/.test(normalizeCell(cells[0].textContent ?? ""));
+}
+
+// The header block written as a string that changes whenever anything a reader would notice about it
+// changes: every header row's cells in order, each with its tag and its `colspan`. Rule 3 asks which
+// structure describes the rows being kept, and the case where that is a real question is the halves
+// declaring their columns at different DEPTHS or with different spans — 4 of the corpus's 18 pairs.
+// Text alone would call a two-row spanned header equal to the flat one-row header of the other half.
+function headerSignature(rows: Element[]): string {
+  return rows
+    .filter(isHeaderRow)
+    .map((r) =>
+      [...r.children]
+        .map((c) => `${c.tagName}:${c.getAttribute("colspan") ?? 1}:${normalizeCell(c.textContent ?? "")}`)
+        .join("|"),
+    )
+    .join(" // ");
+}
+
+// Every id this element carries or contains. The element ITSELF counts: a `<table id>` or a
+// `<caption id>` on the half being dropped is a link target like any other, and `querySelectorAll`
+// alone would not see it.
+function idsIn(el: Element): string[] {
+  return [el, ...el.querySelectorAll("[id]")].filter((e) => e.id !== "").map((e) => e.id);
+}
+
+// Did this fragment parse to its table and NOTHING else? A `<p>`, or a run of text between two rows,
+// sitting inside a `<table>` is fostered OUT of the table by the HTML parser: it lands beside the
+// table in the tree, and the `outerHTML` of the table does not carry it. This is the only place the
+// code path can see that, because `verifyJoin` is made of columns, header cells, row counts and
+// data-row labels and hoisted prose is none of them. Text is compared as well as elements, so a
+// hoisted sentence is caught and insignificant whitespace is not.
+function onlyTable(doc: Document, table: Element): boolean {
+  if (doc.body.children.length !== 1 || doc.body.children[0] !== table) return false;
+  return normalizeCell(doc.body.textContent ?? "") === normalizeCell(table.textContent ?? "");
+}
+
+// Take the continuation marker out of a caption WITHOUT flattening it: the marker goes from the one
+// text node that carries it and any markup around it is left alone. Assigning `textContent` instead
+// — the obvious way to write this — would drop a `<sup>` footnote reference and the `<a id>` an
+// endnote links back to, which is rule 2's dangling-IDREF case arriving through a different door.
+//
+// True when the caption no longer reads as a continuation, including when it never did. False when
+// the marker is not wholly inside one text node (`Table 5 —<em>Continued</em>`), which is a caption
+// to hand to the editor rather than to guess at; the tried edit is put back first, so the caller
+// gets the caption it passed in.
+function stripMarker(caption: Element): boolean {
+  if (!CONTINUED_CAPTION.test(normalizeCell(caption.textContent ?? ""))) return true;
+  for (const node of [...caption.childNodes]) {
+    if (node.nodeType !== 3) continue; // TEXT_NODE
+    const before = node.nodeValue ?? "";
+    const after = before.replace(/\s*[—–\-(]\s*continued\b\)?\.?/i, "");
+    if (after === before) continue;
+    node.nodeValue = after;
+    if (!CONTINUED_CAPTION.test(normalizeCell(caption.textContent ?? ""))) return true;
+    node.nodeValue = before;
+    return false;
+  }
+  return false;
+}
+
+// Join the two halves with no model call, or say why not.
+//
+// Three of the six rules the editor is given are "move these bytes and change nothing", and this is
+// them: rule 1 (copy every data row from both halves, in order) is an append; rule 2 (keep every id
+// and href) is not touching them; rule 4 (one caption, without the marker) is the FIRST half's
+// caption, which already has none — only the second's carries it; rule 5 (keep the
+// `<th scope="rowgroup">` group labels in place) comes free, because they arrive as ordinary rows in
+// the order they were printed.
+//
+// Rules 3 and 6 ask what the table MEANS, and every decline below is a case where that question is
+// real. Declining is the design and not a shortfall in it: the pair goes to the editor exactly as it
+// did before this path existed, so a decline costs what today costs and a wrong guess would cost a
+// table nothing downstream can see is wrong. On 50 pairs read out of already-delivered documents,
+// 26 join here and `verifyJoin` refuses none of them; the 24 declines are 17 `header_differs` and 7
+// `id_would_be_lost` (#276).
+//
+// A caller must still put the result through `verifyJoin`. Nothing here is trusted on its own —
+// which is the whole reason this is safe to add rather than merely cheap: a bad code join is refused
+// by the same check that already refuses a bad model join, and falls through to the model.
+export function joinInCode(pair: ContinuationPair): { html: string } | { reason: string } {
+  const fdoc = parse(pair.first.html);
+  const sdoc = parse(pair.second.html);
+  const ftab = fdoc.querySelector("table");
+  const stab = sdoc.querySelector("table");
+  if (ftab === null || stab === null) return { reason: "unreadable" };
+  // Before anything is read off them, because what this refuses is content that is no longer INSIDE
+  // the table by the time either half has been parsed. See `onlyTable`.
+  if (!onlyTable(fdoc, ftab) || !onlyTable(sdoc, stab)) return { reason: "content_outside_table" };
+
+  const frows = [...ftab.querySelectorAll("tr")];
+  const srows = [...stab.querySelectorAll("tr")];
+  const sHeader = srows.filter(isHeaderRow);
+
+  // Rule 3. Two identical blocks collapse into one by dropping the copy, and a second half with no
+  // header block at all — the empty header stub in the middle of a three-piece chain — has nothing
+  // to collapse. Anything else is a reading of the table.
+  if (sHeader.length > 0 && headerSignature(srows) !== headerSignature(frows)) {
+    return { reason: "header_differs" };
+  }
+  // Where there is no block to compare, the WIDTHS still have to agree: a signature is not the only
+  // thing that says how many columns a row may have. A printer that did not reprint the header on
+  // the continued page leaves the signature nothing to read, and without this a four-cell row gets
+  // appended under a three-column `<thead>` — cells with no header, which is the 1.3.1 defect this
+  // stage exists to reduce. `verifyJoin` cannot catch it: `columns_lost` compares the joined table's
+  // widest row against the halves' widest, and the appended row IS the widest. Measured against how
+  // wide the first half ALREADY is rather than against its header block, because a first half whose
+  // own rows already run wider carries a defect this join neither introduced nor deepens. Like
+  // `id_would_collide` below, the corpus never reaches it — every continued page in it reprints its
+  // header, so rule 3 answers first — and that is the point: it costs nothing measured and it covers
+  // the page that does not.
+  const width = (row: Element): number =>
+    [...row.children].reduce((n, c) => n + (Number(c.getAttribute("colspan")) || 1), 0);
+  const fwidth = Math.max(0, ...frows.map(width));
+  if (srows.some((r) => !isHeaderRow(r) && width(r) > fwidth)) return { reason: "columns_differ" };
+
+  // Rule 4, before rule 2 below, because what the caption does decides which ids survive. Usually a
+  // copy: the first half's caption is the table's title and carries no marker. The exception is the
+  // middle piece of a chain, whose caption says "Continued" because it is itself a continued page —
+  // shipping that would leave the marker in, and `verifyJoin` refuses it as `still_continued`
+  // because the next pass would otherwise pair the joined table with the table BEFORE it, forever.
+  const fcap = ftab.querySelector("caption");
+  const scap = stab.querySelector("caption");
+  if (fcap !== null) {
+    if (!stripMarker(fcap)) return { reason: "caption_unclear" };
+  } else {
+    // No caption to copy, and `verifyJoin` requires one. The second half's caption minus its marker
+    // is the printed page's own words for this table, so it is still a move rather than an invention
+    // — imported as an ELEMENT, markup, ids and all, for the reason `stripMarker` gives.
+    if (scap === null) return { reason: "no_caption_available" };
+    const made = fdoc.importNode(scap, true) as Element;
+    if (!stripMarker(made) || normalizeCell(made.textContent ?? "") === "") return { reason: "caption_unclear" };
+    ftab.insertBefore(made, ftab.firstChild);
+  }
+
+  // Rule 2, over the WHOLE half being dropped and not only its repeated header block, because the
+  // ids that half carries do not all sit in the same kind of place. Measured over the corpus's 50
+  // pairs, a join that drops the second half wholesale would drop 87 ids, and 73 of them are pointed
+  // at by something in the delivered document — an endnote's back-link, a contents entry, an
+  // `aria-labelledby`. None of that is visible to `verifyJoin`, which reads columns, header cells,
+  // rows and labels and never reads an id.
+  //
+  // Two kinds, with different answers:
+  //
+  //  * An id on the dropped half's own `<caption>` or `<table>` element has a counterpart that
+  //    SURVIVES this join, so the id MOVES onto it. `#table7-continued-label` pointed at the second
+  //    half of table 7; after the join, the joined table's caption is what that half was, so the
+  //    link lands where its text always meant. This is 17 of the 87, 13 of them live, and it is
+  //    mechanical — no reading of the table is involved in knowing that a caption's counterpart is a
+  //    caption. Only onto a counterpart with NO id of its own: two live targets collapsing into one
+  //    element is a choice about which link keeps working, and that choice is the editor's.
+  //  * Anything else has no counterpart, because the markup holding it is what rule 3 and rule 4
+  //    drop: 70 ids in this corpus, 60 of them live — 52 footnote-reference anchors and 15 header
+  //    cells inside the repeated header block, and 3 anchors inside the dropped half's own caption.
+  //    Deciding which cell of the SURVIVING block a footnote anchor belongs on is a reading of the
+  //    table, so the pair goes to the editor.
+  const moveId = (from: Element | null, to: Element | null): boolean => {
+    if (from === null || from.id === "") return true; // nothing to move
+    if (to === null || to.id !== "") return false; // nowhere to put it that is not already a target
+    to.id = from.id;
+    return true;
+  };
+  if (!moveId(stab, ftab)) return { reason: "id_would_be_lost" };
+  // The caption only where the first half HAS one. Where it does not, the second half's caption was
+  // imported whole above and brought its id with it.
+  if (fcap !== null && !moveId(scap, fcap)) return { reason: "id_would_be_lost" };
+
+  // Rule 6's repeats are judged against the first half's own note rows.
+  const fNotes = new Set(frows.filter(isUnitNoteRow).map((r) => normalizeCell(r.textContent ?? "")));
+
+  // Where the second half's rows go: the first half's last `<tbody>`, or the table itself when it
+  // has none. Appending to the element the first half's data rows already live in is what keeps rule
+  // 5's group labels in place. A first half with a `<tfoot>` and no `<tbody>` is declined rather
+  // than appended to — rows written after a `<tfoot>` read as coming after the table's own summary,
+  // which is a change to reading order and not a move of bytes.
+  const bodies = [...ftab.querySelectorAll("tbody")];
+  const target = bodies.length > 0 ? bodies[bodies.length - 1]! : ftab;
+  if (target === ftab && ftab.querySelector("tfoot") !== null) return { reason: "tfoot_no_tbody" };
+
+  for (const row of srows) {
+    if (isHeaderRow(row)) continue; // the duplicate block, dropped by rule 3
+    if (isUnitNoteRow(row)) {
+      // Rule 6 licenses dropping a REPEAT. A bracketed note the first half does not carry says
+      // something about the continued rows, and both keeping it mid-table and dropping it change how
+      // the table reads.
+      if (fNotes.has(normalizeCell(row.textContent ?? ""))) continue;
+      return { reason: "note_repeat_unclear" };
+    }
+    target.appendChild(fdoc.importNode(row, true));
+  }
+
+  // Both id checks, off the FINISHED table, in one traversal.
+  //
+  // Rule 2's, first, because the appending above is what decides which of the dropped half's ids
+  // actually survived and a check written before it has to PREDICT that. The prediction was wrong for
+  // an id inside a note row rule 6 drops as a repeat: counted as surviving because the row is not a
+  // header row, then dropped with the row, and nothing downstream reads ids. Read after the fact
+  // instead, so what it reports is what the join did.
+  //
+  // Then: nothing may carry an id twice. A duplicate is a 4.1.1 defect the join itself would have
+  // INTRODUCED, and it is invisible everywhere else too — `verifyJoin` does not read ids, and the
+  // label set is matched over cell TEXT. It covers the appended rows, the moved caption id and the
+  // moved table id together. The corpus never hits it — the page agent prefixes its anchors with the
+  // page number (`p7-fnref-2`), so two halves cannot collide — which is the point: it costs nothing
+  // measured and it covers the day that stops holding.
+  const all = idsIn(ftab);
+  const survived = new Set(all);
+  if (idsIn(stab).some((id) => !survived.has(id))) return { reason: "id_would_be_lost" };
+  if (survived.size !== all.length) return { reason: "id_would_collide" };
+  return { html: ftab.outerHTML };
+}
+
 // One pair, put to the editor. Null when nothing usable came back — including a decline, which is
 // an answer and not a failure.
 async function joinCall(
@@ -533,6 +802,57 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
     const pair = found.pairs.find((p) => !refused.has(pairKey(p)));
     if (!pair) break;
 
+    // The splice, shared by both paths: the first half's span becomes the joined table and the
+    // second half's span goes. Whatever sat BETWEEN them — a page-break `<hr>`, a `<p>` carrying the
+    // printed page's running head — is left exactly where it is, which is now after the joined
+    // table. Moving it there is a change to reading order and is the honest one available: dropping
+    // it would lose content, and there is no inside of a table for it to sit in.
+    //
+    // `by` is on the line because it is what a cost round has to read: the same repair now arrives
+    // two ways, and the one that spent output tokens is the one worth counting.
+    const splice = (checked: Checked, by: "code" | "editor", editorLog?: string) => {
+      current =
+        current.slice(0, pair.first.start) +
+        checked.merged +
+        current.slice(pair.first.end, pair.second.start) +
+        current.slice(pair.second.end);
+      joined++;
+      ctx.log.event("table_joined", {
+        by,
+        caption: checked.result.caption.slice(0, 200),
+        rows_first: pair.first.rows,
+        rows_second: pair.second.rows,
+        rows_joined: checked.result.rows,
+        chars_before: pair.first.html.length + pair.second.html.length,
+        chars_after: checked.merged.length,
+        ...(editorLog ? { editor_log: editorLog } : {}),
+      });
+    };
+
+    // Code first. `joinInCode` stands down wherever the merge needs a reading of the table, and
+    // whatever it does produce is put through the same `verifyJoin` the editor's answer has to
+    // clear — so this adds no new trust, only a cheaper first attempt at the pairs where the rules
+    // are "move these bytes". The reason it stood down is logged on every pair it did not take,
+    // because the share it takes is the number a later round has to be able to re-measure, and a
+    // round that only sees `table_joined` cannot tell a code join from a paid one.
+    const coded = attempt(() => joinInCode(pair));
+    const codeChecked = coded !== null && "html" in coded ? checkJoin(pair, coded.html, false) : null;
+    if (codeChecked !== null && codeChecked.reason === null) {
+      splice(codeChecked as Checked, "code");
+      continue;
+    }
+    ctx.log.event("table_join_code_declined", {
+      reason:
+        coded === null
+          ? "read_failed"
+          : "reason" in coded
+            ? coded.reason
+            : codeChecked === null
+              ? "read_failed"
+              : `verify:${codeChecked.reason}`,
+      caption: pair.second.caption.slice(0, 200),
+    });
+
     let answer: Awaited<ReturnType<typeof joinCall>>;
     try {
       answer = await joinCall(ctx, pair);
@@ -550,15 +870,11 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
       refused.add(pairKey(pair));
       continue;
     }
-    // The verdict and the joined table's own figures together, because both of them parse the reply
-    // and a parse can throw (see `attempt`). A reply this stage cannot read is a reply it cannot
-    // check, which is `read_failed` for this pair and not for the document: the rest of it is still
-    // joinable and the pass after this one goes on to the next pair.
-    const checked = attempt(() => {
-      const reason = answer.declined ? "declined" : answer.html === null ? "no_output" : verifyJoin(pair, answer.html);
-      const merged = answer.html?.trim() ?? "";
-      return { reason, merged, result: reason === null ? read(parse(merged).querySelector("table")!) : null };
-    });
+    // The rest of the pair's fate is `checkJoin`'s, the same as the code attempt above: a reply this
+    // stage cannot read is a reply it cannot check, which is `read_failed` for this pair and not for
+    // the document — the rest of it is still joinable and the pass after this one goes on to the
+    // next pair.
+    const checked = checkJoin(pair, answer.html, answer.declined);
     const reason = checked === null ? "read_failed" : checked.reason;
     if (checked === null || checked.reason !== null) {
       ctx.log.event("table_join_failed", {
@@ -571,27 +887,7 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
       refused.add(pairKey(pair));
       continue;
     }
-    const { merged, result } = checked as { merged: string; result: TablePiece };
-    // The splice: the first half's span becomes the joined table and the second half's span goes.
-    // Whatever sat BETWEEN them — a page-break `<hr>`, a `<p>` carrying the printed page's running
-    // head — is left exactly where it is, which is now after the joined table. Moving it there is
-    // a change to reading order and is the honest one available: dropping it would lose content,
-    // and there is no inside of a table for it to sit in.
-    current =
-      current.slice(0, pair.first.start) +
-      merged +
-      current.slice(pair.first.end, pair.second.start) +
-      current.slice(pair.second.end);
-    joined++;
-    ctx.log.event("table_joined", {
-      caption: result.caption.slice(0, 200),
-      rows_first: pair.first.rows,
-      rows_second: pair.second.rows,
-      rows_joined: result.rows,
-      chars_before: pair.first.html.length + pair.second.html.length,
-      chars_after: merged.length,
-      ...(answer.log ? { editor_log: answer.log } : {}),
-    });
+    splice(checked as Checked, "editor", answer.log);
   }
   if (pending > 0) {
     ctx.log.event("table_joins_capped", { joined, pending, max: MAX_TABLE_JOINS });
