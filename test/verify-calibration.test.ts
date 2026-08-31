@@ -641,15 +641,16 @@ test("the unjudged flag is on the verdict itself, and absent when there was a ve
       agent,
       img,
       [{ html: "<p>x</p>" }],
+      "verify",
     );
     assert.equal(judged.ok, true);
     assert.equal(judged.unjudged, undefined, "a real verdict carries no flag");
 
-    const nothingToVerify = await verifyAgentOutput(ctxWith("{}"), agent, img, []);
+    const nothingToVerify = await verifyAgentOutput(ctxWith("{}"), agent, img, [], "verify");
     assert.equal(nothingToVerify.ok, true, "still non-blocking");
     assert.equal(nothingToVerify.unjudged, true);
 
-    const garbled = await verifyAgentOutput(ctxWith("no json here"), agent, img, [{ html: "<p>x</p>" }]);
+    const garbled = await verifyAgentOutput(ctxWith("no json here"), agent, img, [{ html: "<p>x</p>" }], "verify");
     assert.equal(garbled.ok, true);
     assert.equal(garbled.unjudged, true);
   } finally {

@@ -461,7 +461,13 @@ export async function calibrateVerifier(
     try {
       // The page's own contract where it has one, so a clean copy is judged against the
       // rules it was written to and not against rules added since.
-      const verdict = await verifyAgentOutput(ctx, page.agent ?? agent, page.image, [{ html: call.html }]);
+      const verdict = await verifyAgentOutput(
+        ctx,
+        page.agent ?? agent,
+        page.image,
+        [{ html: call.html }],
+        "agent_calibrate",
+      );
       return judge(verdict);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);

@@ -10,6 +10,7 @@ import { knownPages, pageIndex } from "./pageindex.ts";
 import { createAgentUpdateIssue, installHintFor } from "../github/issue.ts";
 import { lessonSlug, recordExample, type CorrectionExample, type LessonKind } from "./memory.ts";
 import type { FixtureCase } from "./regression.ts";
+import type { PipelineStep } from "../providers/index.ts";
 
 // Previously imported from github/contributions.ts, which was removed when the
 // contribution model moved from close-time PRs to issues filed during the run.
@@ -171,11 +172,21 @@ function diffPreview(before: string, after: string, maxLines = 80): string {
 // the page agent's per-page output; it is also reused by the regression gate.
 // Non-blocking: returns ok=true when the Feedback Agent is unavailable or returns
 // nothing, so verification never breaks a run.
+// `step` is the CALLER's, not this function's, and that is the whole point of passing it: one
+// function here serves five jobs that cost differently and are worth telling apart — the
+// fidelity check every page buys, the two re-checks of a correction, the calibration harness
+// judging a seeded defect, and the regression gate judging a candidate agent file. Narrowed to
+// those five rather than left open as `PipelineStep`, so the type says which jobs reach this
+// code and a caller cannot file its verify call under something else.
 export async function verifyAgentOutput(
   ctx: PipelineContext,
   agent: AgentSpec,
   img: InputImage,
   blocks: { html: string }[],
+  step: Extract<
+    PipelineStep,
+    "verify" | "recheck_binding" | "recheck_sampled" | "agent_calibrate" | "agent_regression"
+  >,
 ): Promise<VerifyVerdict> {
   const fb = loadFeedbackAgent(ctx);
   if (!fb || blocks.length === 0) return { ok: true, problems: [], kinds: [], untagged: 0, unjudged: true };
@@ -221,7 +232,7 @@ export async function verifyAgentOutput(
       { role: "system", content: fb.content },
       { role: "user", content: user, cachedPrefix: contract },
     ],
-    { images: [loadImage(img)] },
+    { step, images: [loadImage(img)] },
   );
   ctx.log.agentCall({ agent: fb, phase: "extraction", image: img.name, output: res.text });
 
@@ -276,10 +287,15 @@ export async function scopeFeedback(
     `## User feedback\n${feedback}\n\n` +
     `## Pages in this document (extracted HTML, truncated)\n${pageList}`;
 
-  const res = await ctx.router.complete(FEEDBACK_AGENT, "text", [
-    { role: "system", content: fb.content },
-    { role: "user", content: user },
-  ]);
+  const res = await ctx.router.complete(
+    FEEDBACK_AGENT,
+    "text",
+    [
+      { role: "system", content: fb.content },
+      { role: "user", content: user },
+    ],
+    { step: "feedback_scope" },
+  );
   ctx.log.agentCall({ agent: fb, phase: "extraction", output: res.text });
 
   const parsed = extractJson<{ target?: string; pages?: unknown; reason?: string }>(res.text);
@@ -495,7 +511,7 @@ async function reRunAgentOnImage(
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { images: [loadImage(img)] },
+    { step: "agent_regression", images: [loadImage(img)] },
   );
   ctx.log.agentCall({ agent, phase: "review", image: img.name, output: res.text });
   const parsed = extractJson<{ no_content?: boolean; html?: string; fragments?: { html?: string }[] }>(res.text);
@@ -606,7 +622,7 @@ export async function regressionGate(
         failure: `${c.image_file}: only ${(coverage * 100).toFixed(0)}% of the accepted content remained`,
       };
     }
-    const verdict = await verifyAgentOutput(ctx, updatedAgent, img, blocks);
+    const verdict = await verifyAgentOutput(ctx, updatedAgent, img, blocks, "agent_regression");
     return {
       image: c.image_file,
       score,
@@ -753,10 +769,15 @@ export async function proposeAgentUpdatesFromFeedback(
     `## User feedback for this run\n${args.feedback}\n\n` +
     `## The correction the feedback caused (diff of the document body)\n\`\`\`diff\n${correction}\n\`\`\``;
 
-  const res = await ctx.router.complete(FEEDBACK_AGENT, "text", [
-    { role: "system", content: feedbackAgent.content },
-    { role: "user", content: user },
-  ]);
+  const res = await ctx.router.complete(
+    FEEDBACK_AGENT,
+    "text",
+    [
+      { role: "system", content: feedbackAgent.content },
+      { role: "user", content: user },
+    ],
+    { step: "agent_update" },
+  );
   ctx.log.agentCall({ agent: feedbackAgent, phase: "review", output: res.text });
 
   const parsed = extractJson<TrainOutput>(res.text);
@@ -925,10 +946,15 @@ export async function learnFromFeedback(
     `TASK: classify\n\n` +
     `## User feedback\n${args.feedback}\n\n` +
     `## How the document changed this run (diff)\n\`\`\`diff\n${correction}\n\`\`\``;
-  const res = await ctx.router.complete(FEEDBACK_AGENT, "text", [
-    { role: "system", content: fb.content },
-    { role: "user", content: user },
-  ]);
+  const res = await ctx.router.complete(
+    FEEDBACK_AGENT,
+    "text",
+    [
+      { role: "system", content: fb.content },
+      { role: "user", content: user },
+    ],
+    { step: "feedback_learn" },
+  );
   ctx.log.agentCall({ agent: fb, phase: "review", output: res.text });
 
   const parsed = extractJson<ClassifyOutput>(res.text);

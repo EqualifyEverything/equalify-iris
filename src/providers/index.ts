@@ -1,9 +1,17 @@
 import type { Capability, IrisConfig, ProviderBlock } from "../config.ts";
 import { BedrockProvider } from "./bedrock.ts";
 import { OpenRouterProvider } from "./openrouter.ts";
-import type { CompletionResult, Image, Message, ModelProvider, ProviderNote, Usage } from "./types.ts";
+import type {
+  CompletionResult,
+  Image,
+  Message,
+  ModelProvider,
+  PipelineStep,
+  ProviderNote,
+  Usage,
+} from "./types.ts";
 
-export type { Image, Message, CompletionResult, ProviderNote, Usage } from "./types.ts";
+export type { Image, Message, CompletionResult, PipelineStep, ProviderNote, Usage } from "./types.ts";
 
 // The router maps (agent, capability) -> concrete provider + model using the
 // deployment config (PRD §10.3). Providers are constructed lazily so a
@@ -71,12 +79,19 @@ export class ProviderRouter {
   }
 
   // Run a completion for a given agent + capability. The agent declares the
-  // capability; the deployment config decides the provider and concrete model.
+  // capability; the deployment config decides the provider and concrete model; the
+  // caller declares which pipeline step it is spending on.
+  //
+  // `step` lives in `opts` and `opts` is required, rather than `step` becoming a third
+  // positional argument, because `agentName` is a plain string and so is a step name:
+  // three strings in a row is a signature two of whose arguments can be transposed
+  // without a type error, on the very field that exists to keep them apart. Named, a
+  // new call site cannot forget it and cannot get it wrong silently.
   async complete(
     agentName: string,
     capability: Capability,
     messages: Message[],
-    opts: { images?: Image[]; schema?: Record<string, unknown> } = {},
+    opts: { step: PipelineStep; images?: Image[]; schema?: Record<string, unknown> },
   ): Promise<CompletionResult> {
     const { provider: providerName, model } = resolveAgentModel(this.cfg, agentName, capability);
     const provider = this.build(providerName);
@@ -86,8 +101,15 @@ export class ProviderRouter {
     // `api` only when the adapter has more than one (Bedrock: invoke vs converse), so
     // every other provider's log line is unchanged and a bench round on the new dialect
     // says so on every call rather than only in the config that started it.
+    //
+    // `step` sits in `meta` rather than only on the end event, so it is on `model_call_start`
+    // too: the in-flight and failure lines are where it is worth most. A truncated editor
+    // round has already paid for a full ceiling of output, and a stalled page call has
+    // already paid for a prompt carrying an image — those are the calls whose cost most needs
+    // attributing, and they are the ones that never produce a usable answer to attribute by.
     const meta = {
       agent: agentName,
+      step: opts.step,
       capability,
       model,
       provider: providerName,

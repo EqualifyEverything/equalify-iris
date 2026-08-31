@@ -25,6 +25,58 @@ export interface Image {
   media_type: string;
 }
 
+// Which job in the pipeline bought this call.
+//
+// The run log already says which AGENT answered, and that is a different question. An agent
+// file is a contract, and one contract serves several jobs: `feedback` judges a freshly
+// extracted page, re-judges a corrected one, routes user feedback and classifies a lesson,
+// while `copy_editor` runs the review round AND merges tables split across a page break. So
+// `by_agent` in diagnostics cannot price a step. Extraction's per-page fidelity check books
+// to `feedback`, which made the extraction step read as 41% of a document when its jobs
+// together are 57.2% (#280); the same shape hid a whole new step's cost inside the review
+// loop's name when table joins shipped (#243, sprint #246 iteration 13, which nearly
+// published the review loop as having got more expensive).
+//
+// Split finely rather than coarsely, and on purpose: buckets ADD. A reader who wants
+// "extraction" sums the seven extraction steps below, and can. A reader given one
+// `extraction` bucket cannot get the split back out, which is the defect this exists to fix —
+// so where two call sites do different work for different reasons, they get different names
+// even when the same agent answers both.
+//
+// A closed union, and required on every call (providers/index.ts): an optional step would
+// give a new call site a silent `?` bucket, and an unattributed bucket is exactly the thing
+// that hides the answer. Adding a call site means naming its job here.
+export type PipelineStep =
+  // Extraction (src/pipeline/extraction.ts, src/pipeline/feedback.ts)
+  | "extract" // first render of a page image
+  | "verify" // the per-page fidelity check on that render
+  | "correct" // re-render of a page its check rejected
+  // Two re-checks of a corrected page, kept apart because they buy different things and
+  // diagnostics already reports them apart (`verification.rechecks.binding` / `.sampled`).
+  // The binding one runs on a page that PASSED and was re-rendered only to recover a link,
+  // and its verdict decides whether that rewrite ships; the sampled one is bought once per
+  // batch (correction.ts `RECHECKS_PER_BATCH`) and decides nothing. Folding them would put a
+  // measurement that is deliberately capped at ~1% of a document in the same bucket as one
+  // that runs whenever a link needs recovering — which is the whole failure this type exists
+  // to stop.
+  | "recheck_binding"
+  | "recheck_sampled"
+  | "specialist" // a library specialist agent's pass over one page
+  | "specialist_merge" // splicing that specialist's fragment into the page body
+  // Review (src/pipeline/review.ts, src/pipeline/tables.ts)
+  | "read" // the Reader's pass over the assembled document
+  | "edit" // the Copy Editor's whole-document round
+  | "edit_section" // its per-section retry after a round did not fit
+  | "table_join" // merging a table split across a page break
+  // User feedback (src/pipeline/feedback.ts)
+  | "feedback_scope" // deciding which pages a user's feedback is about
+  | "feedback_learn" // classifying a correction into a reusable lesson
+  // Maintenance paths, which a delivered document does not pay for
+  | "agent_update" // drafting a proposed change to an agent file
+  | "agent_regression" // re-running an agent on a fixture to gate that change
+  | "agent_calibrate" // the calibration harness judging a seeded defect
+  | "contribute"; // drafting a brand-new specialist agent
+
 // What a call actually consumed. Named after Anthropic's fields because that is the
 // vocabulary the models themselves report in; other adapters normalize onto it.
 //

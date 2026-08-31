@@ -400,6 +400,29 @@ echo "$diag" | jq -e '.model_calls.count >= 1 and .in_flight == null and (.phase
   && pass "diagnostics: $(echo "$diag" | jq -r '.model_calls.count') model calls timed, in_flight=null, phases=$(echo "$diag" | jq -r '.phase_durations_ms|keys|length')" \
   || fail "diagnostics" "$diag"
 
+# What each call was BOUGHT FOR, on a real run. An agent name is not a step — one agent file
+# serves several jobs, so `by_agent` alone priced extraction at 41% of a document when its jobs
+# together are 57.2% (#280) — so `by_step` keys the same calls by job. Asserted here and not only
+# in unit tests because the failure mode is a call site that forgot to say, and only a whole run
+# through the real router exercises every call site at once.
+echo "$diag" | jq -e '(.by_step | length) >= 2 and (.by_step | has("extract"))' >/dev/null \
+  && pass "diagnostics names the job behind each call ($(echo "$diag" | jq -r '.by_step|keys|join(", ")'))" \
+  || fail "by_step" "$diag"
+# No `?` bucket on a live run. The router requires a step and the type is closed, so the only way
+# to land here is a log line written before the field existed — an archived run, never this one.
+echo "$diag" | jq -e '.by_step | has("?") | not' >/dev/null \
+  && pass "every call on this run said which job it was for" \
+  || fail "by_step unattributed" "$(echo "$diag" | jq -c '.by_step["?"]')"
+# The two splits are the same calls grouped two ways, so they add to the same totals and to
+# `tokens`. A step's share quoted against a differently-collected whole would be wrong in a way
+# no reader of the report could see.
+echo "$diag" | jq -e '
+  ([.by_step[]  | .count] | add) as $sc | ([.by_agent[] | .count] | add) as $ac |
+  ([.by_step[]  | .input_tokens] | add) as $si | ([.by_agent[] | .input_tokens] | add) as $ai |
+  $sc == $ac and $sc == .model_calls.count and $si == $ai and $si == .tokens.input' >/dev/null \
+  && pass "by_step and by_agent add up to each other and to the run's totals" \
+  || fail "by_step totals" "$(echo "$diag" | jq -c '{by_step,by_agent,tokens}')"
+
 # Waits for the session to return to ready_for_review after a feedback re-run.
 #
 # Both of these read the main session unless LSID names another one — step 9e runs a

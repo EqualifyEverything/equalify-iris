@@ -686,7 +686,7 @@ async function joinCall(
       { role: "system", content: TABLE_JOIN_SYSTEM },
       { role: "user", content: user },
     ],
-    {},
+    { step: "table_join" },
   );
   ctx.log.agentCall({
     agent: {

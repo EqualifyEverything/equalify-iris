@@ -279,7 +279,7 @@ test("a real coverage regression is still blocked", async () => {
       agent: string,
       cap: Parameters<typeof inner>[1],
       messages: Parameters<typeof inner>[2],
-      extra?: Parameters<typeof inner>[3],
+      extra: Parameters<typeof inner>[3],
     ) => {
       const user = messages.map((m) => m.content).join("\n");
       if (agent !== "feedback" && /Updated prompt/.test(user) && user.includes("case000.png")) {
@@ -433,7 +433,7 @@ test("a real regression is blocked even when the current prompt flakes on anothe
       agent: string,
       cap: Parameters<typeof inner>[1],
       messages: Parameters<typeof inner>[2],
-      extra?: Parameters<typeof inner>[3],
+      extra: Parameters<typeof inner>[3],
     ) => {
       const user = messages.map((m) => m.content).join("\n");
       if (agent !== "feedback" && /Updated prompt/.test(user)) {
