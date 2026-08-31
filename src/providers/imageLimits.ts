@@ -70,7 +70,10 @@ const MAX_DIMENSION_PX = 8000;
 // A note on the many-image rule, which this file deliberately does NOT encode as a
 // constant. Above 20 image (or, on Bedrock/Vertex, document) blocks in ONE request, a
 // stricter per-image dimension limit of 2000 px kicks in and oversized images are
-// rejected with an `invalid_request_error` about "many-image requests". Iris used to
+// rejected with an `invalid_request_error` about "many-image requests". (The
+// `NORMAL_PAGE_MAX_PX` further down is also 2000 and is a different number: it picks
+// which explanation to print for an oversized page and has nothing to do with this
+// rule. Neither is enforced.) Iris used to
 // cross it: a 25-page PDF (util/pdf.ts MAX_PDF_PAGES) was 25 image blocks in the review
 // phase's call, and stayed safe only because those pages are rasterized at 150 DPI,
 // which puts a letter page at 1275x1650 — under the 2000 px the docs prescribe for
