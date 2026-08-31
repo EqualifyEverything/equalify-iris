@@ -1236,16 +1236,24 @@ test("the page agent is told what a second pass keeps, and what a suggestion doe
 // and the HTML drops is a distinction the reader is no longer given, and nothing downstream can
 // recover it — the Reader Agent never sees the source image (READER_SYSTEM, src/pipeline/review.ts)
 // and no axe rule fires on either shape, so the extraction prompt is the only place the information
-// exists. The ordering clause matters as much as the rule: an underlined heading, an underlined
-// fill-in blank and an underlined <dt> label are already owned by rules above, and a blanket <u>
-// would fight all three.
+// exists. The deference clause matters as much as the rule: an underlined heading, an underlined
+// fill-in blank and an underlined <dt> label are already owned by other rules in this same list, and
+// a blanket <u> would fight all three. It says "elsewhere in this list" and not "above" on purpose —
+// HEADING LEVELS and FOOTNOTES precede this bullet, but NAMED ITEMS AND THEIR EXPLANATIONS (<dt>)
+// and SIGNATURE AND FILL-IN BLOCKS follow it, so "a rule above" was false for two of the three it
+// names. Pinned as the phrase, because position is what will drift.
 test("the page agent is told not to invent a link, and to keep an underline it cannot explain", () => {
   const prompt = normalize(section("System prompt")!);
   for (const [what, re] of [
     ["underlining alone is not evidence of a link",
       /an underline is ink on the page, not a destination\. Underlining alone is never reason to emit an <a>/],
+    // The self-link clause is not decoration. `pageLinkContext` (src/pipeline/links.ts) already
+    // allows a printed URL as an exception and bounds it — "which may link to itself" — and a PDF
+    // with annotations receives both texts in one prompt. Without the bound, this copy reads as
+    // permission to point an <a> around underlined words at a URL printed elsewhere on the page:
+    // a real target, an invented pairing, which is #282 narrowed rather than closed.
     ["the destinations that DO exist are enumerated, so the rule is not a blanket ban on links",
-      /a URL listed for this page under "Links on this page" where that section appears, a URL printed legibly in the text, and the in-document footnote anchors the footnote rule above prescribes/],
+      /a URL listed for this page under "Links on this page" where that section appears, a URL printed legibly in the text — which may link to itself, and to nothing else — and the in-document footnote anchors the footnote rule above prescribes/],
     ["the text survives even when the link does not",
       /the words are transcribed in full and no link is written — what is lost is the link, never the text/],
     // The exact shapes reported, refused by name. `href="#"` is what a model writes when it is
@@ -1257,11 +1265,18 @@ test("the page agent is told not to invent a link, and to keep an underline it c
       /no accessibility gate reports the loss, because a link that goes nowhere is valid markup/],
     ["the underline is preserved, and #283's span precision is kept",
       /wrap the run the page underlines in <u> — that word or phrase and no more, never the sentence around it/],
+    // The cost is stated in the channel where it is real. <u> has no role mapping and NVDA, JAWS
+    // and VoiceOver do not announce it by default, so what a dropped underline costs is the
+    // delivered page's appearance, not something an AT user was getting — and saying so is what
+    // keeps the next clause, that any structural rule outranks <u>, from reading as arbitrary.
     ["what a dropped underline costs is stated, since that is the reported defect",
-      /an underline the page prints and the HTML leaves out is a distinction the document made and the reader is no longer given/],
-    // Without this the new rule fights three older ones on the same ink.
-    ["a rule above wins where the underline is already spoken for",
-      /an underlined line that introduces what follows is a heading, an underlined blank someone is meant to write on is a field in a form, an underlined label standing before its explanation is a <dt>/],
+      /an underline the page prints and the HTML leaves out is a distinction the document made that the delivered page no longer shows/],
+    ["and <u> is not sold as semantics it does not carry",
+      /<u> restores the ink and nothing else: it carries no meaning an assistive technology announces/],
+    // Without this the new rule fights three older ones on the same ink. "elsewhere in this list",
+    // not "above": two of the three are below this bullet (see the comment over this test).
+    ["a rule elsewhere in the list wins where the underline is already spoken for",
+      /whether a rule elsewhere in this list already owns it: an underlined line that introduces what follows is a heading, an underlined blank someone is meant to write on is a field in a form, an underlined label standing before its explanation is a <dt>/],
     ["a rule drawn under nothing is not underlined text",
       /a line ruled across the page under nothing is not underlined text at all/],
     ["<em> is scoped to a convention the page states, so it is not the default reading",
