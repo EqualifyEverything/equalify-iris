@@ -438,6 +438,7 @@ export async function runPipeline(args: {
     // logged loudly, because the silent version of this failure is a quality tally
     // that reads BETTER over time as recording breaks: fewer signals recorded looks
     // exactly like fewer problems found.
+    //
     // What the Reader found on this document's unrewritten extraction output, which is not
     // always this run's own first read. `feedback_iterative` re-reviews the body that was
     // already delivered, so its first read is taken on bytes the copy editor has rewritten —
@@ -448,6 +449,19 @@ export async function runPipeline(args: {
     // IS on extraction's own output and replacing the row is the honest thing to do.
     const firstRead =
       mode === "feedback_iterative" ? store.priorFirstRead(sessionId) : review.firstRead;
+    // Said out loud, because otherwise it is a discrepancy with no explanation anywhere: this
+    // round logged its own `reader` line with the count it just found, and the tally holds a
+    // different number for the same session. Anyone reconciling one session's log against
+    // `/v1/quality` would find a mismatch and nothing to attribute it to. `carried` is the
+    // number kept and `found` the one declined, so the log says which read is which; `carried:
+    // null` is a session that had no first read on record and therefore contributes none.
+    if (mode === "feedback_iterative") {
+      log.event("first_read_carried", {
+        carried: firstRead ? firstRead.issues : null,
+        unread: firstRead ? firstRead.unread : null,
+        found: review.firstRead ? review.firstRead.issues : null,
+      });
+    }
     try {
       store.recordRunSignals(sessionId, [
         // Always, including for a flawless document: this is the denominator every
