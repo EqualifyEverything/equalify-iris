@@ -23,7 +23,7 @@
 //      when every other Reader figure in this repo was measured.
 //
 // The last test is about the cost claim rather than the text. The comment on `READER_JSON_ONLY`
-// says the ~86 prompt tokens it adds are nearly free on the incumbent because they land inside a
+// says the tokens it adds are nearly free on the incumbent because they land inside a
 // cached prefix, and not free on a Reader that gets no cache breakpoint at all — which is the same
 // population where the sentence was measured to buy nothing. Both halves of that are decidable
 // here, so neither is left as an assertion in prose.

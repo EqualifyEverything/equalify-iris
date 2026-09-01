@@ -139,16 +139,19 @@ export interface ReviewResult {
 // It is a fact about the model in the seat, NOT about Readers. `moonshotai.kimi-k2.5` writes 0%
 // prose in its control, so there is nothing here for the sentence to remove and it only removes
 // headroom: 13.6 issues per document down to 8.8, and 6% more per document. The Reader model is
-// a config line (`providers.per_agent.reader`), so this is re-measured on a swap — see the
-// Reader bullet in README's review-phase section for what to measure. Prose share is not a model
+// a config line (`providers.per_agent.reader`), so this is re-measured on a swap — the Reader
+// bullet under "Implementation notes & PRD coverage" in README says what to measure, quote fidelity
+// included, since that is the one metric this arm moved the wrong way. Prose share is not a model
 // trait either and must not be recorded as one: Kimi wrote 0% in one run and 38% in another, at
 // n=5 documents.
 //
-// The prompt side is nearly free on the incumbent and not free off it. ~86 prompt tokens, and
-// `READER_SYSTEM` clears `cacheableSystemPrompt` on a Claude Reader, so they land inside the
-// cached prefix and a warm deployment reads them at 0.1x. A non-Claude Reader gets no breakpoint
-// at all and pays them in full on every chunk of every round — which is the same population
-// where the sentence may be buying nothing.
+// The prompt side is nearly free on the incumbent and not free off it. This sentence is 180
+// characters, and `READER_SYSTEM` clears `cacheableSystemPrompt` on a Claude Reader, so it lands
+// inside the cached prefix and a warm deployment reads it at 0.1x. A non-Claude Reader gets no
+// breakpoint at all and pays it in full on every chunk of every round — which is the same
+// population where the sentence may be buying nothing. The filing's figure for this is +86 prompt
+// tokens, and its unit is PER DOCUMENT (29,747 -> 29,833): the system prompt is re-sent once per
+// window, so a document's cost is the sentence times its window count, not 86 whatever its length.
 //
 // Position is load-bearing: "the JSON object" and "before or after it" have no referent unless
 // the schema is already on the page, so this goes last, after the schema and after the
