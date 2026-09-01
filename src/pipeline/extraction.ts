@@ -2874,8 +2874,13 @@ async function extractPage(
         // And the ceiling it was truncated AT, which since #285 is usually this call's own and not
         // the deployment's. `truncated: true` beside a 32,000-token config used to be enough to
         // name the number; with a per-call cap it is not, and the difference decides whether the
-        // remedy is a config edit or `correctionCeiling`'s multiple. Absent only where the first
-        // pass reported no usage and the call therefore ran uncapped.
+        // remedy is a config edit or `correctionCeiling`'s multiple. Absent where the call ran
+        // uncapped, which is two causes and not one: the first pass reported no usage, so there was
+        // no measurement to cap from, or the page rendered nothing and was delivered blank, whose
+        // correction is a re-render rather than an edit (#294, and the only trigger that reaches it
+        // there is `links`). Both leave the deployment's ceiling as the one that bound the call, so
+        // the remedy on the line is the same; what differs is whether anything here could have
+        // capped it, which is what an operator reading this field is asking.
         ...(ceiling !== undefined ? { ceiling } : {}),
         // What the reply reached, and both of its ends — the evidence that decides the question the
         // `ceiling` above only poses (issue #293). A cap this page hit is either a page that
