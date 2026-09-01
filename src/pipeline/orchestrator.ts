@@ -13,6 +13,8 @@ import {
   SIGNAL_EDITOR_TRUNCATED,
   SIGNAL_EDITOR_TRUNCATED_LOST,
   SIGNAL_REVIEW_UNREAD,
+  SIGNAL_FIRST_READ_ISSUES,
+  SIGNAL_FIRST_READ_UNREAD,
   reviewStoppedSignal,
   SIGNAL_ROUNDS,
   SIGNAL_UNRESOLVED,
@@ -436,12 +438,50 @@ export async function runPipeline(args: {
     // logged loudly, because the silent version of this failure is a quality tally
     // that reads BETTER over time as recording breaks: fewer signals recorded looks
     // exactly like fewer problems found.
+    //
+    // What the Reader found on this document's unrewritten extraction output, which is not
+    // always this run's own first read. `feedback_iterative` re-reviews the body that was
+    // already delivered, so its first read is taken on bytes the copy editor has rewritten —
+    // it normally finds less, and `recordRunSignals` replaces the session's rows, so recording
+    // it would overwrite the real measurement with one biased in exactly the direction this
+    // field exists to detect. Read before that replacement, because afterwards it is gone.
+    // `feedback_reextract` needs no such care: it reassembles from fragments, so its first read
+    // IS on extraction's own output and replacing the row is the honest thing to do.
+    const firstRead =
+      mode === "feedback_iterative" ? store.priorFirstRead(sessionId) : review.firstRead;
+    // Said out loud, because otherwise it is a discrepancy with no explanation anywhere: this
+    // round logged its own `reader` line with the count it just found, and the tally holds a
+    // different number for the same session. Anyone reconciling one session's log against
+    // `/v1/quality` would find a mismatch and nothing to attribute it to. `carried` is the
+    // number kept and `found` the one declined, so the log says which read is which; `carried:
+    // null` is a session that had no first read on record and therefore contributes none.
+    if (mode === "feedback_iterative") {
+      log.event("first_read_carried", {
+        carried: firstRead ? firstRead.issues : null,
+        unread: firstRead ? firstRead.unread : null,
+        found: review.firstRead ? review.firstRead.issues : null,
+      });
+    }
     try {
       store.recordRunSignals(sessionId, [
         // Always, including for a flawless document: this is the denominator every
         // rate divides by (see SIGNAL_ROUNDS).
         { code: SIGNAL_ROUNDS, count: review.iterationsCompleted },
         ...(review.unresolved.length ? [{ code: SIGNAL_UNRESOLVED, count: review.unresolved.length }] : []),
+        // And what the Reader found in the first place, which the row above cannot say: it
+        // counts what shipped still open, so it falls both when the editor fixes more and when
+        // the Reader finds less. Recorded for every document that got a read, ZERO included —
+        // unlike almost everything else here, because this is a mean and a document the Reader
+        // cleared is the observation that keeps it honest (see SIGNAL_FIRST_READ_ISSUES).
+        //
+        // Written only when a read happened, on the `stoppedAt` principle: `firstRead` is
+        // assigned by the read itself, so a 0 here always means a Reader that found nothing
+        // and never a loop that measured nothing.
+        ...(firstRead ? [{ code: SIGNAL_FIRST_READ_ISSUES, count: firstRead.issues }] : []),
+        // And whether that read was answered in full, so the mean has an error bar: a window
+        // with no usable reply raises no issues for a reason that is not the document's. Only
+        // when there is one, since these rows are the exception.
+        ...(firstRead?.unread ? [{ code: SIGNAL_FIRST_READ_UNREAD, count: firstRead.unread }] : []),
         // And how the Reader rated them, one row per severity that occurs (#264). The rate above
         // says a document shipped with something open; this says whether that something was a
         // barrier or a nit, which is the difference between a defect and the floor.

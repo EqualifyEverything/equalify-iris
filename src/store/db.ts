@@ -177,6 +177,50 @@ export const SIGNAL_ROUNDS = "iris:rounds";
 // clean on the very last permitted round looks like, and since the loop can also stop
 // early, a LOW round count no longer implies a document that needed little fixing.
 export const SIGNAL_UNRESOLVED = "iris:unresolved";
+// How many issues the Reader raised on its FIRST read of the document, before any correction
+// round. Recorded for every delivered document, zero included — this is a measurement of the
+// Reader's yield, and a document it found nothing wrong with is the most important 0 in it.
+//
+// It exists because every other number in this tally is downstream of the editor, so nothing
+// here could tell a Reader that stopped finding things from an editor that started fixing them.
+// Those two move `unresolved_rate` the same way, and one of them is the deployment getting
+// better while the other is its review going blind. That is not hypothetical: the
+// model-selection sprint's Reader recommendation (#313) is a priced trade — a cheaper model
+// that reaches 78% of the incumbent's own agreement floor, i.e. roughly one issue in five that
+// would have been raised is not raised — and applying it makes `unresolved_rate` FALL, because
+// a document with nothing found ships with nothing open. A quality tally in which a known
+// quality loss reads as an improvement is worse than no tally, and this is the row that keeps
+// the rate honest: read the two together, and a fall in the rate is only good news while this
+// holds.
+//
+// The FIRST read specifically, and not a sum over the rounds. Every later round reads a body
+// the editor has already rewritten, so a total across rounds measures how many rounds ran as
+// much as what the Reader found — `mean_rounds` varies with the document and with one config
+// number — while the first read is the one read every document gets exactly once, at
+// `max_review_iterations` 1 as well as 20. That is what makes it comparable across
+// deployments and either side of a model swap, which is the whole use.
+//
+// Which is why a feedback re-run does not replace this row, alone among the signals here: a
+// `feedback_iterative` round re-reviews the body that was already delivered, so its own first
+// read is on rewritten bytes and would land here as a smaller number for a reason that has
+// nothing to do with the Reader. `Store.priorFirstRead` and its caller in the orchestrator are
+// that exception; PRD §7.16's re-run bullet names it.
+export const SIGNAL_FIRST_READ_ISSUES = "iris:first-read-issues";
+// How many windows of that first read came back with no usable answer (`ReaderWindow.usable`),
+// recorded only when there is any.
+//
+// The gate on the row above, in the sense SIGNAL_LINT_ERROR is the gate on the rule rows: a
+// read that did not answer about part of the document raises fewer issues for a reason that is
+// not the document's quality, so its count is a floor rather than a measurement. Without this,
+// a swap that made replies less parseable and a swap that made them less thorough are the same
+// fall in one mean — and they are the two failure modes a Reader swap actually has, named apart
+// in #313's own rollback plan.
+//
+// Distinct from SIGNAL_REVIEW_UNREAD, which is about the LAST read, i.e. about the verdict that
+// shipped in `@unresolved`. Both are worth having and they answer different questions: that one
+// asks whether the delivered document was fully judged, this one asks whether the yield figure
+// above can be compared to anything.
+export const SIGNAL_FIRST_READ_UNREAD = "iris:first-read-unread";
 // How many hrefs the Copy Editor dropped while rewriting. Unrecoverable content
 // loss (the href came from the source FILE, not the page image), invisible to every
 // later check in the loop, and previously only a line in one session's log.
@@ -428,6 +472,26 @@ export interface QualityStats {
   // delivered, and on the third it may predate them. A threshold set over the mixture is set
   // over both facts at once.
   unresolved_rate: number;
+  // What the Reader FOUND, as against what survived to be shipped: the mean number of issues
+  // its first read of a document raised, over the documents that recorded one
+  // (SIGNAL_FIRST_READ_ISSUES). This is the one number here that is not downstream of the
+  // editor, and it is what makes `unresolved_rate` readable in a direction it cannot be read
+  // alone: the rate falls both when the editor fixes more and when the Reader finds less, and
+  // only this can say which. A deployment that swaps the Reader for a cheaper model is buying a
+  // fall in this, and should watch it deliberately rather than discover it as good news.
+  //
+  // `documents` is carried beside the mean rather than left to `QualityStats.documents`,
+  // because it is a different denominator: the row is recorded for every delivered document,
+  // so on any window that predates the field this is short — the same shortfall
+  // `review_stopped` can show, and the same reading. Quoting the mean against the window's
+  // document count would be quoting two denominators.
+  //
+  // `unread_documents` is how many of those documents had a first read that did not answer
+  // about part of themselves (SIGNAL_FIRST_READ_UNREAD). It is the mean's error bar: those
+  // documents' counts are floors, so a large share here means a fall in the mean may be a
+  // reviewer that answered less rather than one that found less. `mean` is `null` only when
+  // there is nothing to average.
+  first_read: { documents: number; mean_issues: number | null; unread_documents: number };
   // How the Reader rated what was left open, one entry per severity in `UNRESOLVED_SEVERITY`
   // order and ALWAYS all four, zeroes included — the same "measured, and none of these" vs
   // "not measured" distinction `lint_error_where` keeps below. Per DOCUMENT: a document with
@@ -1254,6 +1318,43 @@ export class Store {
   }
 
   /**
+   * What this session's first read found, as already recorded — read BEFORE
+   * `recordRunSignals` replaces the session's rows, which is the only moment it exists.
+   *
+   * Every other signal in that table is a fact about the document a user was last handed, so
+   * replacing them on a feedback re-run is exactly right (see PRD §7.16 on the re-run). These
+   * two are the exception, because they are facts about the REVIEW rather than the document:
+   * `feedback_iterative` re-reviews the previously delivered body, so its first read is taken
+   * on bytes the copy editor has already rewritten — normally finding less, and pulling the
+   * mean the same way a reviewer going blind would. That is the one reading the field exists
+   * to prevent, arriving from the other direction. So the orchestrator carries this value
+   * forward instead of recording the re-read's, and the row keeps meaning what
+   * `SIGNAL_FIRST_READ_ISSUES` and `docs/API.md` §0c say it means.
+   *
+   * `undefined` when there is none — a session delivered before this was recorded, or one
+   * whose run never got a read. The caller records nothing in that case rather than
+   * substituting the re-read: `first_read.documents` falling short of `documents` is the
+   * documented way this tally says "no such measurement", and a number that is not the first
+   * read is worse than an absent one.
+   */
+  priorFirstRead(sessionId: string): { issues: number; unread: number } | undefined {
+    const rows = this.db
+      .prepare(`SELECT code, count FROM run_signals WHERE session_id = ? AND code IN (?, ?)`)
+      .all(sessionId, SIGNAL_FIRST_READ_ISSUES, SIGNAL_FIRST_READ_UNREAD) as {
+      code: string;
+      count: number;
+    }[];
+    const issues = rows.find((r) => r.code === SIGNAL_FIRST_READ_ISSUES);
+    if (!issues) return undefined;
+    // The unread row is written only when non-zero, so its absence is 0 and not "unknown" —
+    // the issues row above is what says whether a read happened at all.
+    return {
+      issues: Number(issues.count),
+      unread: Number(rows.find((r) => r.code === SIGNAL_FIRST_READ_UNREAD)?.count ?? 0),
+    };
+  }
+
+  /**
    * The deployment-wide quality tally behind `GET /v1/quality` (PRD §7.16).
    *
    * Windowed on purpose — see DEFAULT_QUALITY_WINDOW_DAYS. An all-time rate is the
@@ -1286,6 +1387,19 @@ export class Store {
       )
       .get(SIGNAL_ROUNDS, cutoff) as { documents: number; rounds: number; since: string | null };
     const documents = Number(base.documents);
+
+    // The Reader's yield, which needs a SUM and a COUNT of its own rather than the document
+    // counts `ours` below holds: this is the only `iris:` row whose magnitude is averaged, and
+    // its denominator is the documents that recorded it rather than the window's (see
+    // QualityStats.first_read).
+    const firstRead = this.db
+      .prepare(
+        `SELECT COUNT(*) AS documents, COALESCE(SUM(count), 0) AS issues
+           FROM run_signals
+          WHERE code = ? AND recorded_at >= ?`,
+      )
+      .get(SIGNAL_FIRST_READ_ISSUES, cutoff) as { documents: number; issues: number };
+    const firstReadDocuments = Number(firstRead.documents);
 
     // Our own measurements, keyed by code. COUNT(*) is a document count because of
     // the (session_id, code) primary key.
@@ -1341,6 +1455,14 @@ export class Store {
       since: base.since ?? null,
       mean_rounds: documents ? Number(base.rounds) / documents : null,
       unresolved_rate: rate(SIGNAL_UNRESOLVED),
+      // Divided by its OWN document count, not the window's: a window that predates the signal
+      // has documents with no row, and dividing by `documents` there would report a Reader that
+      // found half as much as it did.
+      first_read: {
+        documents: firstReadDocuments,
+        mean_issues: firstReadDocuments ? Number(firstRead.issues) / firstReadDocuments : null,
+        unread_documents: ours.get(SIGNAL_FIRST_READ_UNREAD) ?? 0,
+      },
       // Both of these are built from their closed vocabulary rather than from the rows, for
       // the reason given on `lint_error_where` below: a value that did not occur has to be a
       // recorded 0, or "none of these happened" and "this deployment does not record it" are

@@ -17,6 +17,8 @@ import {
   SIGNAL_STRUCTURAL_DEFECT,
   SIGNAL_LINT_ERROR,
   SIGNAL_REVIEW_UNREAD,
+  SIGNAL_FIRST_READ_ISSUES,
+  SIGNAL_FIRST_READ_UNREAD,
   SIGNAL_ROUNDS,
   SIGNAL_UNFINISHED_PAGE,
   SIGNAL_UNRESOLVED,
@@ -569,6 +571,166 @@ test("the floor under the unresolved rate is counted per document, and never as 
   });
 });
 
+// --- what the Reader found, as against what shipped open (#313) ---
+//
+// The tally's blind spot before this: every number in it is downstream of the editor, so a
+// Reader that went quieter and an editor that got better arrive as the same thing — a lower
+// `unresolved_rate`. One of those is the deployment improving and the other is its review
+// going blind, and the sprint's Reader recommendation buys the second on purpose.
+
+test("a weaker Reader and a better editor are the same unresolved rate, and not the same first read", () => {
+  withStore((store) => {
+    // Ten documents, four issues found in each, all four fixed: the editor is doing its job.
+    for (let i = 0; i < 10; i++) {
+      delivered(store, `fixed_${i}`, [
+        { code: SIGNAL_FIRST_READ_ISSUES, count: 4 },
+        { code: reviewStoppedSignal("clean"), count: 1 },
+      ]);
+    }
+    const good = store.qualityStats();
+    assert.equal(good.unresolved_rate, 0);
+    assert.equal(good.first_read.mean_issues, 4);
+
+    // Ten more, nothing found in any of them. `unresolved_rate` cannot tell this window from
+    // the one above — both ship with nothing open — and it is the difference between a
+    // pipeline that fixed 40 problems and one that noticed none.
+    withStore((other) => {
+      for (let i = 0; i < 10; i++) {
+        delivered(other, `blind_${i}`, [
+          { code: SIGNAL_FIRST_READ_ISSUES, count: 0 },
+          { code: reviewStoppedSignal("clean"), count: 1 },
+        ]);
+      }
+      const blind = other.qualityStats();
+      assert.equal(blind.unresolved_rate, good.unresolved_rate, "the rate cannot see it");
+      assert.equal(blind.first_read.mean_issues, 0, "and this can");
+    });
+  });
+});
+
+test("a document the Reader cleared is in the mean, because zero is the observation", () => {
+  withStore((store) => {
+    // The mistake this is here to prevent is the natural one: 0 looks like "nothing to
+    // record", so recording only non-zero counts would report 3.0 for a deployment whose
+    // Reader averages 1.0 — and would report the SAME 3.0 after a swap that halved how many
+    // documents get looked at properly.
+    delivered(store, "three", [{ code: SIGNAL_FIRST_READ_ISSUES, count: 3 }]);
+    delivered(store, "clean_a", [{ code: SIGNAL_FIRST_READ_ISSUES, count: 0 }]);
+    delivered(store, "clean_b", [{ code: SIGNAL_FIRST_READ_ISSUES, count: 0 }]);
+    const q = store.qualityStats();
+    assert.equal(q.first_read.documents, 3);
+    assert.equal(q.first_read.mean_issues, 1);
+  });
+});
+
+test("the first read is averaged over the documents that recorded one, not over the window", () => {
+  withStore((store) => {
+    // A window that straddles the day this signal was added: two documents have it, two are
+    // older. Dividing by `documents` would report a Reader finding half as much as it did —
+    // the same shortfall `review_stopped` can show, and the reason the count travels with the
+    // mean instead of being read off QualityStats.documents.
+    delivered(store, "new_a", [{ code: SIGNAL_FIRST_READ_ISSUES, count: 2 }]);
+    delivered(store, "new_b", [{ code: SIGNAL_FIRST_READ_ISSUES, count: 4 }]);
+    delivered(store, "old_a");
+    delivered(store, "old_b");
+    const q = store.qualityStats();
+    assert.equal(q.documents, 4);
+    assert.equal(q.first_read.documents, 2, "the shortfall is reported, not absorbed");
+    assert.equal(q.first_read.mean_issues, 3);
+    // And an empty window is null rather than NaN, for the reason every rate here is guarded:
+    // NaN serializes to `null` anyway, but only after passing through a threshold comparison
+    // as a silent false.
+    withStore((empty) => {
+      assert.equal(empty.qualityStats().first_read.mean_issues, null);
+      assert.equal(empty.qualityStats().first_read.documents, 0);
+    });
+  });
+});
+
+test("a first read that could not answer is the mean's error bar, per document", () => {
+  withStore((store) => {
+    // The two failure modes of a cheaper Reader are "found less" and "answered less", and
+    // they are the same fall in the mean. This one raised two issues and left three windows
+    // unanswered, so its 2 is a floor — counted per document, like every other rate here,
+    // because a mean read against "3 windows" would be read against the wrong denominator.
+    delivered(store, "partial", [
+      { code: SIGNAL_FIRST_READ_ISSUES, count: 2 },
+      { code: SIGNAL_FIRST_READ_UNREAD, count: 3 },
+    ]);
+    delivered(store, "whole", [{ code: SIGNAL_FIRST_READ_ISSUES, count: 6 }]);
+    const q = store.qualityStats();
+    assert.equal(q.first_read.mean_issues, 4);
+    assert.equal(q.first_read.unread_documents, 1, "per document, not per window");
+    // And it is not the LAST read's version of the same question, which is about the verdict
+    // that shipped in `@unresolved`. A document can have either without the other: this one's
+    // first read was partial and its final one was not.
+    assert.equal(q.review_unread_rate, 0);
+    // Nor is either of them an axe rule, which is what a lost `iris:` prefix would publish.
+    assert.deepEqual(q.rules, []);
+  });
+});
+
+test("the first read survives a feedback re-run, because the re-read is of an edited body", () => {
+  withStore((store) => {
+    // The one exemption from the replace-on-re-run rule (PRD §7.16), and the reason for it is
+    // the same reason the field exists. A document-level feedback re-run re-reviews the body
+    // that was already delivered, so its first read sees the copy editor's work and normally
+    // finds LESS — recording it would move the mean in the exact direction a Reader going
+    // blind moves it, on the documents users asked Iris to retry. This is the orchestrator's
+    // sequence: read the prior value, then replace the session's rows with it in place of the
+    // re-read's.
+    delivered(store, "revised", [
+      { code: SIGNAL_FIRST_READ_ISSUES, count: 5 },
+      { code: SIGNAL_FIRST_READ_UNREAD, count: 2 },
+    ]);
+    const prior = store.priorFirstRead("revised");
+    assert.deepEqual(prior, { issues: 5, unread: 2 });
+    delivered(store, "revised", [
+      { code: SIGNAL_FIRST_READ_ISSUES, count: prior!.issues },
+      { code: SIGNAL_FIRST_READ_UNREAD, count: prior!.unread },
+    ]);
+    const q = store.qualityStats();
+    assert.equal(q.documents, 1, "one document, whatever it cost to deliver twice");
+    assert.equal(q.first_read.mean_issues, 5, "the re-read's smaller count is not what is held");
+    assert.equal(q.first_read.unread_documents, 1);
+  });
+});
+
+test("the prior first read is gone once the rows are replaced, which is why it is read first", () => {
+  withStore((store) => {
+    delivered(store, "s", [{ code: SIGNAL_FIRST_READ_ISSUES, count: 3 }]);
+    // `recordRunSignals` deletes the session's rows and re-inserts, so a caller that recorded
+    // before reading has nothing left to carry forward — the ordering in the orchestrator is
+    // load-bearing rather than incidental, and this is the assertion that says so.
+    delivered(store, "s", [{ code: SIGNAL_UNRESOLVED, count: 1 }]);
+    assert.equal(store.priorFirstRead("s"), undefined);
+    assert.equal(store.qualityStats().first_read.documents, 0);
+  });
+});
+
+test("a session with no first read on record carries nothing forward, rather than a substitute", () => {
+  withStore((store) => {
+    // A document delivered before this signal existed, given feedback afterwards. The honest
+    // answer is that it has no first-read measurement: `first_read.documents` short of
+    // `documents` is how this tally says so, and the re-read's count would be a number that is
+    // not what the field means.
+    delivered(store, "old");
+    assert.equal(store.priorFirstRead("old"), undefined);
+    // And an unread count with no issues row is not a read either — the issues row is the one
+    // that says a read happened, which is what lets 0 mean "found nothing".
+    assert.equal(store.priorFirstRead("never_delivered"), undefined);
+  });
+});
+
+test("an unread row that was never written reads as zero, not as unknown", () => {
+  withStore((store) => {
+    // The signal is recorded only when non-zero, so its absence has to mean 0 here — a
+    // carried-forward `undefined` would turn a fully answered read into a missing error bar.
+    delivered(store, "whole", [{ code: SIGNAL_FIRST_READ_ISSUES, count: 0 }]);
+    assert.deepEqual(store.priorFirstRead("whole"), { issues: 0, unread: 0 });
+  });
+});
+
 test("dropped links are counted per document and per link", () => {
   withStore((store) => {
     delivered(store, "a", [{ code: SIGNAL_LINKS_DROPPED, count: 3 }]);
@@ -702,6 +864,7 @@ test("nothing per-session, per-user or per-document is exposed", () => {
         "documents_linted",
         "editor_truncated_lost_rate",
         "editor_truncated_rate",
+        "first_read",
         "links_dropped_rate",
         "links_unresolved_rate",
         "lint_error_rate",
@@ -750,6 +913,15 @@ test("nothing per-session, per-user or per-document is exposed", () => {
       store.qualityStats().review_stopped.map((s) => Object.keys(s).sort()),
       REVIEW_STOPPED.map(() => ["documents", "where"]),
     );
+    // And the Reader's yield, where the pressure is different but no weaker: the obvious next
+    // request of a mean is a distribution, and the obvious way to give it one is a sample —
+    // "the three documents with the most issues", which names documents. The three keys here
+    // are two counts and an average of counts, and nothing about a particular document.
+    assert.deepEqual(Object.keys(store.qualityStats().first_read).sort(), [
+      "documents",
+      "mean_issues",
+      "unread_documents",
+    ]);
   });
 });
 

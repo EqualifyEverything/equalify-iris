@@ -575,6 +575,24 @@ out2=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/output")
 ! echo "$out2" | grep -q 'Revised' \
   && pass "no page re-extracted for document-level feedback" \
   || fail "scope" "a page was re-extracted: $(echo "$out2" | grep -o 'Page marker [0-9]*[^<]*')"
+# And this round's read is not what the quality tally holds for the document (#313): it read a
+# body the Copy Editor had already rewritten, so the earlier count is carried forward. The line
+# exists because this round DID log a `reader` result of its own, and without it a session's log
+# and `/v1/quality` disagree about the number with nothing saying why.
+carried=$(log_field first_read_carried carried)
+# Asserted as a NUMBER, because the two non-numeric answers are the two regressions and neither is
+# an absent value: `log_field` prints an empty string when the event is missing entirely — the line
+# dropped, or the carry reverted so the block never runs — and `none` when it is there with
+# `carried: null`, which is a documented value for a session delivered before the field existed and
+# a defect here, since this session's first run recorded one.
+case "$carried" in
+  '' | *[!0-9]*)
+    fail "first_read" "first_read_carried carried='$carried' on a document-level re-run: '' means no such line in the log at all, 'none' means a null count on a session that has a first read"
+    ;;
+  *)
+    pass "the document's first read was carried across the feedback round (carried=$carried, this round found $(log_field first_read_carried found))"
+    ;;
+esac
 
 echo "==> 9b. POST /v1/sessions/{id}/feedback (source-level => re-extract page 2)"
 # Content-level feedback the review loop structurally cannot fix: the Reader never
@@ -1259,6 +1277,28 @@ echo "$q" | jq -e '[.unresolved_severity[].severity] == ["high","medium","low","
   and ((([.unresolved_severity[].documents] | add) > 0) == (.unresolved_rate > 0))' >/dev/null \
   && pass "unresolved_severity agrees with unresolved_rate=$(echo "$q" | jq -r '.unresolved_rate') ($(echo "$q" | jq -c '[.unresolved_severity[] | "\(.severity)=\(.documents)"] | join(" ")' | tr -d '"'))" \
   || fail "quality" "unresolved_severity=$(echo "$q" | jq -c '.unresolved_severity') against unresolved_rate=$(echo "$q" | jq -r '.unresolved_rate')"
+# What the Reader FOUND, which is the one number here that is not downstream of the editor
+# (#313). Its invariant is the same one `review_stopped` has and for the same reason: the row is
+# written for every delivered document, zero included, so on a window where every document
+# recorded one these two counts are equal and a shortfall means "delivered before the field
+# existed". Only a real run can check that, and the way it breaks is the way every producer here
+# breaks — a mean that quietly covers half the documents reads as a Reader finding half as much.
+#
+# The mean is asserted at exactly 0, which is a statement about this mock and a sharp check on
+# the one subtle part of the field. The mock Reader finds nothing on a first read; the only read
+# in this whole script that finds anything is the feedback round of step 9c, which re-reviews a
+# body the Copy Editor has already rewritten — and that is precisely the read this signal must
+# not hold, because a re-read of corrected bytes finds less and would move the mean the same way
+# a Reader going blind moves it. So a non-zero mean here is not good news: it means a feedback
+# round's read reached the row (`Store.priorFirstRead` and its caller in the orchestrator are
+# what stop it). A shortfall in the count is the other failure and the commoner one — dropping
+# the carry-forward entirely takes this to `documents: 8` against 10, which is how this check
+# was verified.
+echo "$q" | jq -e '.first_read.documents == .documents
+  and .first_read.mean_issues != null and .first_read.mean_issues == 0
+  and .first_read.unread_documents == 0' >/dev/null \
+  && pass "first_read covers all $docs document(s), and holds each one's FIRST read (mean $(echo "$q" | jq -r '.first_read.mean_issues'), all windows answered)" \
+  || fail "quality" "first_read=$(echo "$q" | jq -c '.first_read') against documents=$docs — either the Reader's yield is not reaching the tally, or a feedback round's re-read of an edited body is being recorded as one"
 # And the floor under that rate: documents still carrying `[page not fully transcribed]`,
 # which no pass in the loop may resolve. Above zero because step 9i put exactly one such
 # document through the pipeline, and that is the half of this only a real run can check —
@@ -1304,8 +1344,11 @@ done
 # quoted the markup jsdom choked on. `severity` (#264) is publishable for the same reason
 # and needs it more: the Reader WRITES that value, so the store maps anything outside its
 # four words to `unrated` rather than passing it on — an unmapped one would put model prose
-# about someone's document into a public issue.
-allowed='["window_days","documents","since","mean_rounds","unresolved_rate","severity","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","where","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","unfinished_page_rate","id","impact","share","nodes"]'
+# about someone's document into a public issue. `mean_issues` and `unread_documents` (#313) are
+# the leaves of `first_read`, and are two counts and an average of counts — the obvious next
+# request of a mean is a distribution, and the obvious way to give it one is a sample, which
+# would name documents.
+allowed='["window_days","documents","since","mean_rounds","unresolved_rate","mean_issues","unread_documents","severity","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","where","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","unfinished_page_rate","id","impact","share","nodes"]'
 extra=$(echo "$q" | jq -c --argjson allowed "$allowed" '([paths(scalars) | last] | unique) - $allowed')
 [ "$extra" = "[]" ] \
   && pass "the payload's key set is exactly the documented one (no session id, login or document content)" \

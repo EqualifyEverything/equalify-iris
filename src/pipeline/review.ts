@@ -91,6 +91,27 @@ export interface ReviewResult {
   // arrives as the first, is delivered as clean, and is counted as clean deployment-wide.
   // An empty `unresolved` is only good news when this is 0.
   unreviewedWindows: number;
+  // What the FIRST read of the document came to, before any correction round: how many issues
+  // it raised, and how many of its windows it had no usable answer for.
+  //
+  // The one measurement this loop returns that is about the Reader rather than about the
+  // document that shipped. Everything else here is downstream of the editor, so a Reader that
+  // stopped finding things and an editor that started fixing them arrive identically — as an
+  // empty `unresolved` — and they are opposite facts. The deployment-wide reading is in
+  // store/db.ts (SIGNAL_FIRST_READ_ISSUES): a cheaper Reader is BOUGHT with a fall in this, so
+  // the fall in `unresolved_rate` that comes with it is not the improvement it resembles.
+  //
+  // The first read and not the last, unlike `unresolved` and `unreviewedWindows` above, because
+  // this is the only read taken on the body every document is guaranteed to have — extraction's
+  // output, unrewritten — and therefore the only one comparable between two documents or two
+  // models. `unread` travels with it rather than being folded into the count, because a window
+  // with no answer makes the count a floor and the two failure modes of a weaker Reader are
+  // exactly "found less" and "answered less".
+  //
+  // Optional for the reason `stoppedAt` is: it is assigned by the read that happened, so a loop
+  // that somehow ran no read at all reports no measurement instead of a confident 0 — and a
+  // fabricated 0 here would be a clean document in the aggregate.
+  firstRead?: { issues: number; unread: number };
   // Which of this loop's exits ended the run (#264). One of five words, assigned at the
   // `return`/`break` that took it and nowhere else, so a stop reason is written by the line
   // that knows it rather than reconstructed afterwards from the other fields — which is
@@ -2246,6 +2267,10 @@ export async function runReview(
   // about the body that is being delivered, which a later round re-read in full.
   let lastUnread = 0;
   let lastWindows = 0;
+  // And the FIRST read's, which is a different question and is why this is not `lastIssues`
+  // read at round 0: see ReviewResult.firstRead. Set by the first read to complete and never
+  // reassigned, so it survives every exit below without each of them having to know about it.
+  let firstRead: { issues: number; unread: number } | undefined;
   let droppedLinks = 0;
   let editorTruncated = false;
   let editorTruncatedLost = false;
@@ -2286,6 +2311,10 @@ export async function runReview(
     lastIssues = issues;
     lastUnread = read.unread;
     lastWindows = read.windows;
+    // Not `if (iterations === 0)`: the counter is the editor's round number and the day it
+    // starts at 1, or a read is added ahead of the loop, this would silently start measuring a
+    // different read. "The first one that landed" is the fact wanted, so it is the condition.
+    firstRead ??= { issues: issues.length, unread: read.unread };
     // `unread` only when there is any, so an ordinary round's line is the one it always was.
     ctx.log.event("reader", {
       iteration: iterations,
@@ -2327,6 +2356,10 @@ export async function runReview(
         // `editorTruncated` is: the field's value is the loop's, and a return that states it
         // itself is a place where the two can come apart.
         unreviewedWindows: lastUnread,
+        // Which on this exit is `{ issues: 0, unread: 0 }` on the first round and something
+        // else on any later one — the document read clean AFTER correction, and how much the
+        // Reader found in the first place is exactly what this field is for.
+        firstRead,
         // The only exit that re-read the finished document and found nothing, which is the
         // whole distinction this field carries: every other one delivers `@unresolved`.
         stoppedAt: "clean",
@@ -2685,6 +2718,7 @@ export async function runReview(
     editorTruncated,
     editorTruncatedLost,
     unreviewedWindows: lastUnread,
+    firstRead,
     // Whichever `break` above got here. Undefined is not a state this loop can reach today —
     // the cap check fires at `iterations === maxReviewIterations`, one round before the `while`
     // condition could fail, so every exit is one of the five — and it is left reachable in the

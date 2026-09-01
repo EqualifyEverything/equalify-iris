@@ -267,6 +267,17 @@ jobs:
             # question is how often they fire on a deployment's real traffic, not what number is
             # too high. The summary prints them either way.
             #
+            # `first_read` (#313) is off this line too, and it is the case where the rule costs
+            # something: it is the one field that says whether a fall in `unresolved_rate` was the
+            # editor fixing more or the reviewer finding less, so it is exactly what a reader of an
+            # `unresolved_rate` issue wants beside the number. But quoting it in that body would
+            # require demanding it here, and demanding it stops the whole run against any
+            # deployment that has not yet caught up with this commit — over a field with no
+            # baseline to compare against and no threshold. The summary prints the entire payload,
+            # so it reaches a person weekly meanwhile; once there are a few weeks of it, the commit
+            # that thresholds or quotes it adds it to this line, and `docs/models.md` §3 is where
+            # the reason to look at it is written down.
+            #
             # `structural_defect_rate` (#255) is the newest of these and off on the same terms: a
             # dangling id reference is `incomplete` to axe and never a violation, a `<div>`-wrapped
             # term list passes `definition-list`, and an empty `<nav>` breaks no rule, so this is a

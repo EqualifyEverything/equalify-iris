@@ -36,6 +36,12 @@ priced spend, adding to 100% **before rounding** (44.485 + 24.993 + 17.959 + 12.
 printed adds to 100.1). They are **shares, not prices**; see §6 before quoting a dollar figure
 forward.
 
+The `reader` swap is the one with a quality cost that is *paid rather than avoided*, and the
+deployment's own numbers will not show it as a cost: about one issue in five that would have been
+raised is not raised, and a document with nothing found ships with nothing open, so
+`unresolved_rate` in `/v1/quality` **falls** when this line is applied. Watch
+`first_read.mean_issues` beside it (§3, and `docs/API.md` §0c).
+
 Both recommendations are one line each:
 
 ```yaml
@@ -212,6 +218,22 @@ having, but Iris would have to sample each window twice *and* dedupe by anchor;
 `dedupeNoContentIssues` (`src/pipeline/review.ts`) does not do that — it is scoped to no-content
 reports. Applied without that step, the second pass sends the editor duplicate findings and the
 89% does not hold.
+
+**Applying this swap makes the deployment's quality numbers improve, and that is the trap.** 78% of
+the floor means roughly one issue in five that the incumbent would have raised is not raised, and an
+issue that is never raised is never left open: the document ships with an empty `@unresolved` list
+and a `clean` exit, which is the same reading a document gets when the editor fixed everything. So
+`unresolved_rate`, `unresolved_severity` and the `clean`/`converged` split all move in the direction
+`.github/workflows/quality-report.yml` treats as good, and #264 — an open issue about that rate
+being too high — would appear to have been answered by paying less. The number that does not move
+that way is `first_read.mean_issues` in `/v1/quality` (`docs/API.md` §0c, PRD §7.16 v1.10): issues
+raised by the review's first read, per document, recorded before any of them were fixed. Read it
+across the swap, with `first_read.unread_documents` next to it — a fall in the mean with that count
+rising is a reviewer that could not answer, and a fall with it flat is a reviewer that found less,
+which is the loss this table has priced. The bench figure and the deployment's figure are not the
+same measurement (20 stitched documents against a reference issue set, versus every document a
+deployment converts), so the check is a change of level across the config edit, not a number to
+compare with 78%.
 
 **Kimi ×2 beats haiku ×2 on both axes at once** — more agreement for less money — so haiku is not
 on the frontier for this agent at either pass count.

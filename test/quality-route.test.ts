@@ -34,6 +34,7 @@ function fakeStore(): { store: Store; state: { calls: number; days: number[] } }
         since: "2026-01-01T00:00:00.000Z",
         mean_rounds: 1.5,
         unresolved_rate: 0.1,
+        first_read: { documents: 10, mean_issues: 1.4, unread_documents: 0 },
         unresolved_severity: [
           { severity: "high", documents: 0 },
           { severity: "medium", documents: 0 },
