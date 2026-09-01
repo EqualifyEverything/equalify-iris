@@ -888,9 +888,55 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   round's page images, on a document that is not broken — and since nothing downstream can edit
   the prompt, the issue returns every round. The cut edges are the same shape one step down:
   `chunk()` slices on a character count, so a window can open mid-sentence or mid-tag, which one
-  model reported as content lost. Both prohibitions are worth having only because a cheaper Reader
-  is a live option; the current model needed neither, which is exactly how a prompt that misleads
-  the field goes unnoticed.
+  model reported as content lost. Both prohibitions were written because a Reader swap is a live
+  option and this is how a prompt that misleads the field goes unnoticed — but not because the risk
+  belongs to the cheaper model, which is what the measurement below took away.
+  **The incumbent is not exempt, and reading it as exempt is what one run of a noisy behaviour
+  looks like.** Re-measured on a sha that already contains this paragraph, over 20
+  documents (18 of them long enough to be windowed, 45 windows) and two runs of the identical
+  prompt, violations per multi-window document: **`gpt-5.6-luna` 0.00** (0 and 0), **the incumbent
+  `claude-sonnet-4-6` 0.03** (0 then 1), **`kimi-k2.5` 0.25** (6 then 3), **`claude-haiku-4-5`
+  0.31** (6 then 5). One violation against eleven over the same 36 document-runs, on models given
+  the same instruction. Stated as counts and not as a ratio, because the incumbent's is 1: a single
+  run cannot tell 0 from 1, and #274's "0 of 197" is therefore a sample rather than a property.
+  The behaviour is not equally noisy across models — Haiku reproduces itself closely (6 and 5, and
+  the cut edge is the shape both times), while Kimi's own spread, 6 to 3, is larger than the
+  incumbent's entire count. Four more models file 0 violations and never mention a window at all,
+  on one run each: `pixtral-large-2502` (231 issues), `gemma-3-27b-it` (111), `nova-2-lite` (75),
+  `qwen3-vl` (11). Read the last two as silence rather than compliance, but `pixtral-large` files
+  more issues than the incumbent's 187 in the same round, so it is a second credible zero on half
+  the evidence. **Compliance does not track price, in either direction**, which is the part to
+  carry into a swap: over the same two rounds Luna costs **$0.0196** per document at 0.00,
+  `kimi-k2.5` **$0.0218** at 0.25, `claude-haiku-4-5` **$0.0370** at 0.31 — the worst violator, at
+  a third of the incumbent's price — and the incumbent **$0.1057** at 0.03, while `pixtral-large`
+  files 0 at **$0.0721**, dearer than Haiku on one round, its price as much a single sample as its
+  zero. So "a cheaper Reader is the risk" is not the rule and neither is its inverse; the number has
+  to be measured per candidate (#301).
+  **More prompt text is not the remedy, and the evidence is inside the violations.** In the
+  clearest cases the model states the rule correctly and files anyway, in the same issue: the
+  incumbent identified a seam as an interior one — "this is the document's window boundary edge and
+  not the document's own close" — and then asked that window 2 be verified, which is the specific
+  thing this paragraph forbids, while Kimi put "window boundaries are not document defects" in the
+  `suggested_action` of an issue whose entire content was the label. The failure is not
+  comprehension, so the wording stays as it is. A keyword filter on "window" would be worse than
+  the problem, for the reason the exemption exists: the same sentence, "ends mid-sentence", is a
+  violation at an interior seam and a *required* finding at the last window's end — which the
+  incumbent's other run got right. The code-side prose filter stays declined on its own measured
+  ground (prose matching fails at 2%, and its false positives delete real findings).
+  **What this asks of a Reader swap** is that the count travel with it, because it is a recurring
+  charge: every violation reaches the Copy Editor as work on a document that is not broken, no edit
+  can change Iris's prompt, so the issue is filed again next round. Compare **violations per
+  multi-window document** — not per issue, since a model that files more issues is not thereby less
+  compliant, and not per document, since a corpus of short bodies cannot show the defect at all (a
+  single-chunk body carries no label; `test/no-content-pages.test.ts` pins that) — over **two runs,
+  not one**. It costs nothing once a round exists: `node windowviol.mjs <round>` in
+  `equalify-iris-bench`, which prints every row so the classification can be argued with. The
+  figures above are its two rounds `runs-reader-probe` and `runs-reader-selfagree`, both at Iris
+  `158e3d9`, re-derived here rather than quoted — which is how the Haiku row gained its second run.
+  The $/doc figures are those rounds' `usd` over their succeeded documents, so both halves of the
+  price-and-compliance sentence come from one pair of rounds — but a model's price spans exactly the
+  rounds its violation count does, so the four one-run models are one sample on both axes, `$0.0721`
+  included.
 - **The Reader replies with JSON and nothing else, and that sentence is tuned to the model in the
   seat.** `READER_SYSTEM` has always ended "Respond with ONLY JSON:", and the incumbent narrated
   anyway: 40% of the characters it wrote sat outside the JSON envelope, over 5 documents. Nothing
@@ -913,7 +959,8 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   means re-measuring this**, and prose share is not a model trait to look up — the same model wrote
   0% in one run and 38% in another at n=5 documents. **What to re-measure**, then: prose share,
   output tokens per document, issues per document, quote fidelity, and the same prompt run twice so
-  the reproduction figures have a floor. The prompt side of the trade is one 180-character sentence
+  the reproduction figures have a floor. Violations per multi-window document (#301) is part of the
+  same swap and wants the same two runs, so measure it here rather than separately. The prompt side of the trade is one 180-character sentence
   that rides inside the cached prefix on a Claude Reader and is paid in full on every chunk of every
   round on one that gets no breakpoint — the same population where it may buy nothing. (The filing
   measured that as +86 prompt tokens **per document**, 29,747 → 29,833, which is the sentence sent
