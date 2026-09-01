@@ -446,7 +446,9 @@ export interface QualityStats {
   unresolved_severity: { severity: UnresolvedSeverity; documents: number }[];
   // Which of the loop's exits ended each document, one entry per value in `REVIEW_STOPPED`
   // order and always all five (#264). Recorded for every delivered document, so unlike
-  // `unresolved_severity` above these ARE a partition: the counts sum to `documents`.
+  // `unresolved_severity` above these ARE a partition — of the documents that recorded one,
+  // which is every document on a window that postdates the field and fewer than `documents`
+  // on any window that does not. The next paragraph is that case, and it is the usual one.
   //
   // A sum BELOW `documents` is the one reading worth spelling out, and it means one of two
   // things. Either the window includes documents delivered before this was recorded — the same

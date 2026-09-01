@@ -328,6 +328,13 @@ test("a breakdown that covers part of the window says so, and refuses to be scal
   assert.match(body, /these describe 7 of the 70 documents above and NOT the window/);
   assert.match(body, /the other 63 were delivered before this breakdown was recorded/);
   assert.match(body, /do not scale up to the rate/);
+  // And it says which numbers it governs, because the paragraphs after the split are NOT over
+  // the attributed documents: `unfinished_page_rate` below is `count / documents` over the whole
+  // window, and its own instruction is to subtract it from `unresolved_rate`. A reader who took
+  // "the shares below" literally and rescaled the floor by 77/7 first would get it an order of
+  // magnitude wrong — the exact mistake this paragraph exists to prevent.
+  assert.match(body, /both over all 70 documents/);
+  assert.match(body, /do not rescale it first/);
   // And the gap is still not an exit. The old body said this about a shortfall and it is the
   // one wrong way to read one.
   assert.match(body, /not a sixth kind of exit/);
