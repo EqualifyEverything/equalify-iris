@@ -336,8 +336,9 @@ test("a breakdown that covers part of the window says so, and refuses to be scal
   assert.match(body, /both over all 70 documents/);
   assert.match(body, /do not rescale it first/);
   // And the gap is still not an exit. The old body said this about a shortfall and it is the
-  // one wrong way to read one.
-  assert.match(body, /not a sixth kind of exit/);
+  // one wrong way to read one — asserted WITH its subject, because the sentence above was
+  // inserted between the two and left "They" pointing at the two fields it had just named.
+  assert.match(body, /Those 63 are not a sixth kind of exit/);
   // And the reading that made the live report's `cap` count mean something other than what it
   // looks like: three documents exited at the cap while `mean_rounds` was exactly 1.0, which is
   // only possible if that deployment's cap is 1 — so `cap` there was one round spent, not three.
