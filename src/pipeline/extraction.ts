@@ -1954,6 +1954,92 @@ interface PageRender {
   html: string;
   log: string;
   suggestion?: { name: string; reason: string };
+  // What the first pass spent producing this page, which is the correction pass's estimate of
+  // its own size (`correctionCeiling`). Optional because it is the provider's number, not this
+  // file's: an adapter that reports no usage leaves it undefined and the correction runs uncapped,
+  // exactly as it did before. Never inferred from the HTML — a length is not a token count, and a
+  // wrong estimate here truncates a correction that would have worked.
+  outputTokens?: number;
+}
+
+// The output ceiling for a correction call, or undefined for "whatever the deployment allows".
+//
+// A correction is the one page call whose size is known before it is made: it is handed a page
+// and asked to return that page with named problems fixed, so its reply should be about as long
+// as the reply it is correcting. The deployment's ceiling is 32,000 tokens, which for this call
+// is not a safety limit but a budget for a runaway — and a runaway here is pure loss, because the
+// pipeline discards a truncated correction and ships the page it already had (`page_correction_failed`,
+// `chars_kept`). Issue #285 is one: 32,000 tokens of output on a page whose first pass spent 6,233,
+// $0.48 of output for text nothing read, and a `TruncatedResponseError` advising an operator to
+// RAISE `max_tokens` — which would only buy a larger discarded reply.
+//
+// Every term measured, none assumed. The multiple and the floor over the 111 correction attempts in
+// the bench's `runs-extract100-1` (two arms, 100 pages each, sonnet-4-6 and gpt-5.6-luna;
+// `page_corrected` and `page_correction_failed` paired with the page calls in the same run logs):
+//
+//   * `2 x` the first pass, because the ratio of a correction's output to its first pass's is
+//     tightly held around 1: median 1.01x, p90 1.33x, max 5.01x over 110 successful corrections.
+//     A multiple is the right shape and a *character* ratio is not — chars-before/4 as a predictor
+//     has a median of 1.92x and a maximum of 33.12x, which is a cap that either cuts successes or
+//     saves nothing.
+//   * the 4,000-token FLOOR, because the 5.01x tail is entirely small pages: every success above
+//     3x had a first pass under 1,000 output tokens, and at 1,000 or more the worst case is 1.65x.
+//     Without the floor, `acir-p001` on the luna arm (314 tokens, then 1,573) is cut. With it, the
+//     cap cuts 0 of 110 and the tightest margin is 1.30x (`acir-p075`: 3,929 emitted, cap 5,094).
+//   * `growth`, for the case the corpus cannot speak to: a specialist merge can hand the
+//     correction a document larger than the render whose tokens are being doubled
+//     (`dispatchSpecialist` in extractPage), and a correction has to be able to re-emit what it
+//     was given. A document k times longer needs about k times the tokens, so the multiple is
+//     scaled by k rather than a second term being added in characters.
+//
+//     In characters is what this was first written as — `handedBackChars / 4` as a third floor —
+//     and it could not do the job, which is worth recording because the shape is tempting. A
+//     character count converts to tokens at a rate nothing here knows. Measured over every page
+//     reply in both run sets whose HTML and token count can both be recovered (390 of 458:
+//     `runs-extract-1`, 7 models on an 11-page document, plus `runs-extract100-1`), HTML came out
+//     at a median of 2.31 characters per output token, and on the pages long enough for such a
+//     term to bind at all (over 4,000 characters) as few as 1.09. `/ 4` therefore provides a
+//     quarter to a half of the tokens the same HTML actually costs — it under-provides for 356 of
+//     those 390 replies, and `/ 3` for 279 — and a term that binds only when it is the largest is,
+//     by construction, too low exactly where it decides the cap. The divisor that survives the
+//     corpus is about 1, which is not a conservative constant but a different rule.
+//
+//     `growth` needs no constant: it is a ratio of two lengths, and it converts to tokens through
+//     THIS page's own first pass, which is the measurement the 2x already rests on. Being >= 1 it
+//     can only ever raise a cap, so the counts above still hold, and the corpus says it is almost
+//     always 1: of the 184 correction attempts across both run sets, 147 have a first-pass length
+//     to compare against, 146 of those were handed back no more than the render itself, and one
+//     merge grew it by 8% (`acir-p030`, sonnet arm: 8,287 -> 8,960 characters and a first pass of
+//     4,461 tokens, so a cap of 9,647 where the unscaled multiple would have given 8,922).
+//
+// On the one runaway this bounds the loss at 12,466 tokens rather than 32,000 — $0.187 of output
+// instead of $0.480 — for an identical outcome (no specialist ran on that page, so growth is 1),
+// and the error it throws now says the cap is this caller's rather than sending someone to the
+// deployment's config (providers/bedrock.ts, `truncationRemedy`). What it does NOT claim is that
+// the correction would then have succeeded: nothing measured here can say that, and a cap is a
+// bound on a failure's cost, not a fix for it.
+export const CORRECTION_CEILING_MULTIPLE = 2;
+export const CORRECTION_CEILING_FLOOR = 4000;
+// One object and one number rather than three numbers: `outputTokens`, `chars` and
+// `handedBackChars` are three counts of the same page whose transposition would type-check and
+// would be silent — swapping the two lengths turns `growth` upside down, and a cap that shrinks
+// when the document grows is the failure this exists to prevent.
+export function correctionCeiling(
+  firstPass: { outputTokens?: number; chars: number },
+  handedBackChars: number,
+): number | undefined {
+  // No number, no cap. The alternative — a ceiling derived from the character count alone — is a
+  // guess about a provider's tokenizer standing in for a measurement, on the path where getting it
+  // wrong throws away a correction that was about to work.
+  if (!firstPass.outputTokens || firstPass.outputTokens <= 0) return undefined;
+  // Never below 1: a correction handed LESS than the render produced is the ordinary case (the
+  // fragment is unwrapped and trimmed), and reading that as "this page needs fewer tokens than it
+  // took" would tighten every cap on the corpus the multiple was measured against.
+  const growth = firstPass.chars > 0 ? Math.max(1, handedBackChars / firstPass.chars) : 1;
+  return Math.max(
+    Math.ceil(CORRECTION_CEILING_MULTIPLE * growth * firstPass.outputTokens),
+    CORRECTION_CEILING_FLOOR,
+  );
 }
 
 // Everything the page agent is told that is NOT about the page in front of it: its own
@@ -2076,7 +2162,7 @@ async function renderPage(
       // page 14 begins here. The prompt forbids exactly that and the paragraph at `blankDeclaration`
       // has the reasoning; a blank page that DID print its folio loses an anchor to nothing, which is
       // the cheaper mistake. The markup is on the log line above either way.
-      return { html: "", log: parsed?.log ?? "" };
+      return { html: "", log: parsed?.log ?? "", outputTokens: res.usage?.output_tokens };
     }
     const shape = replyShape(res.text, parsed);
     // A declaration the veto refused is recorded as the refusal it is, with the words that did it:
@@ -2110,6 +2196,9 @@ async function renderPage(
     html,
     log: parsed?.log ?? "",
     suggestion: sa?.name ? { name: sa.name, reason: sa.reason ?? "" } : undefined,
+    // Read off the result rather than through the router's `onUsage`, because this is the
+    // surviving path: a render that threw has no page to correct.
+    outputTokens: res.usage?.output_tokens,
   };
 }
 
@@ -2122,6 +2211,12 @@ async function correctPage(
   previous: string,
   problems: string[],
   lessons: string,
+  // The output ceiling this call asks for, from `correctionCeiling`, or undefined for whatever the
+  // deployment allows. Computed by the caller rather than here so the number asked for and the
+  // number on `page_correction_failed` are one number and cannot drift apart. Asked for is not
+  // always sent: an adapter lowers it to the deployment's ceiling if it is higher, and never the
+  // other way round — see the call site for what a larger number on that log line means.
+  maxOutputTokens?: number,
 ): Promise<string | null> {
   // The link list is repeated here, not just in the first pass: a dropped link is one
   // of the problems this pass exists to fix, and it cannot re-attach a URL it can no
@@ -2153,7 +2248,12 @@ async function correctPage(
       { role: "system", content: pageSystem(agent, lessons) },
       { role: "user", content: user },
     ],
-    { step: "correct", images: [loadImage(img)] },
+    {
+      step: "correct",
+      images: [loadImage(img)],
+      // The one capped call in the pipeline (#285).
+      maxOutputTokens,
+    },
   );
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
   const parsed = extractJson<{ html?: string }>(res.text);
@@ -2459,7 +2559,7 @@ async function extractPage(
   sampler: RecheckSampler,
   previous?: string,
 ): Promise<PageOutcome> {
-  const { html, log, suggestion } = await renderPage(ctx, pageAgent, img, lessons, previous);
+  const { html, log, suggestion, outputTokens } = await renderPage(ctx, pageAgent, img, lessons, previous);
   let innerHtml = html;
   let logNote = log;
   let dispatched = false;
@@ -2602,7 +2702,26 @@ async function extractPage(
     // will truncate again, and the retry would buy a second full ceiling of output to prove
     // it (the providers agree — `TruncatedResponseError` is thrown from inside their retry
     // loops precisely so it is not re-billed).
-    const attempt = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons).then(
+    // What this call may spend on output, bounded by what the first pass spent (#285). Computed
+    // here, from `before`, so the number this caller ASKED for is the number the failure line below
+    // reports — a cap an operator cannot read off the log is a cap they will debug as a config
+    // problem, which is the mistake this whole change is about.
+    //
+    // Asked for, and not necessarily sent: `growth` has no upper bound, so a merge that grew the
+    // page enough can compute a ceiling above `providers.<provider>.max_tokens`, and the adapters
+    // take the smaller of the two (`Math.min` in bedrock.ts and openrouter.ts — a caller may lower
+    // a call's ceiling and never raise it). A `ceiling` on the line below that is larger than the
+    // deployment's is therefore a call the DEPLOYMENT bounded, and the error on that same line says
+    // so: the truncation message names the config, because the config is what bound it. Clamping
+    // this number to make the two agree is not available here — the provider's ceiling is the
+    // adapter's to know, and re-deriving it in the pipeline is how it comes to disagree.
+    //
+    // `html`, not `innerHtml`, is what `outputTokens` bought: `innerHtml` is what a specialist may
+    // have merged into it since, and it is the pair (tokens, the length they produced) that gives
+    // this page its own characters-per-token. Handing the same string as both would make `growth`
+    // 1 by definition and quietly delete the term.
+    const ceiling = correctionCeiling({ outputTokens, chars: html.length }, before.length);
+    const attempt = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons, ceiling).then(
       (html) => ({ html, error: null as unknown }),
       (error: unknown) => ({ html: null, error }),
     );
@@ -2622,6 +2741,12 @@ async function extractPage(
         // model wrote an essay where a page was asked for — a 32,000-token correction of a
         // 17,721-character page is not a rewrite of it.
         truncated: isTruncatedResponseError(attempt.error),
+        // And the ceiling it was truncated AT, which since #285 is usually this call's own and not
+        // the deployment's. `truncated: true` beside a 32,000-token config used to be enough to
+        // name the number; with a per-call cap it is not, and the difference decides whether the
+        // remedy is a config edit or `correctionCeiling`'s multiple. Absent only where the first
+        // pass reported no usage and the call therefore ran uncapped.
+        ...(ceiling !== undefined ? { ceiling } : {}),
         // What the page kept, so the log shows this was a page retained and not a page lost.
         chars_kept: before.length,
       });
