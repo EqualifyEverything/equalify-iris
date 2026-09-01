@@ -120,7 +120,7 @@ from the environment at startup; changes require a restart.
   example configs had carried an unroutable key, `config.example.yaml` a `table` no call site
   has ever dispatched and prd.md §10.3 an `image_analysis` that went with the triage step it
   named. **Which model to put on which agent, measured**: each agent's share of the bill, the
-  one agent whose cheaper model measured no worse (`page`) and the one where the cheaper model
+  one agent whose cheaper model measured no NET loss (`page`) and the one where the cheaper model
   is a priced trade (`reader`, 78% of the incumbent's own agreement floor for −77%), and what
   every figure was measured at — **[docs/models.md](docs/models.md)**.
   Each provider also takes `max_tokens` (default 32000), the per-call **output** ceiling. A
@@ -382,7 +382,7 @@ To prove the endpoints work end-to-end (mock GitHub + mock model, no credentials
 `./test/e2e.sh`.
 
 Which model to run each agent on, what each one costs, and the two cheaper swaps — one measured no
-worse, one a priced trade: **[docs/models.md](docs/models.md)**.
+net loss, one a priced trade: **[docs/models.md](docs/models.md)**.
 
 Example — create a session (order of `images` parts is the processing order, §9.2):
 
