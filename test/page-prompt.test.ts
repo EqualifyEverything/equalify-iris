@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { DEFAULT_PAGE_PROMPT } from "../src/pipeline/extraction.ts";
+import { pageLinkContext } from "../src/pipeline/links.ts";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pageMd = readFileSync(join(repoRoot, "agents", "page.md"), "utf8");
@@ -1218,11 +1219,106 @@ test("the page agent is told what a second pass keeps, and what a suggestion doe
   }
 });
 
+// #282 and #283, both auto-filed from one session (ses_01M1CYQP5HKMZQK1GZQCS20AH1) and both real:
+// "Items that were underlined were translated to links. They contained no link." and "Underlines in
+// the original pdf did not get the <u> HTML element." As filed they contradict each other — #283
+// permits `<a href>` with "a placeholder" where a URL is illegible, which is exactly the invented
+// href #282 was reported for — so one rule answers both, and the halves are pinned separately here
+// because either could be lost on its own.
+//
+// The prohibition half had to go in THIS prompt rather than beside the link instruction it
+// duplicates, and the reason is the next test: `pageLinkContext` already says "Do not invent links
+// for anything not listed", but that section is emitted only when the source file HAS link
+// annotations, which is never true of an image upload and was not true of the reported page. The
+// one instruction against inventing a link was absent in exactly the case that produces one.
+//
+// The affirmative half is a fidelity rule, not a styling preference: an underline the page prints
+// and the HTML drops is a distinction the reader is no longer given, and nothing downstream can
+// recover it — the Reader Agent never sees the source image (READER_SYSTEM, src/pipeline/review.ts)
+// and no axe rule fires on either shape, so the extraction prompt is the only place the information
+// exists. The deference clause matters as much as the rule: an underlined heading, an underlined
+// fill-in blank and an underlined <dt> label are already owned by other rules in this same list, and
+// a blanket <u> would fight all three. It says "elsewhere in this list" and not "above" on purpose —
+// HEADING LEVELS and FOOTNOTES precede this bullet, but NAMED ITEMS AND THEIR EXPLANATIONS (<dt>)
+// and SIGNATURE AND FILL-IN BLOCKS follow it, so "a rule above" was false for two of the three it
+// names. Pinned as the phrase, because position is what will drift.
+test("the page agent is told not to invent a link, and to keep an underline it cannot explain", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["underlining alone is not evidence of a link",
+      /an underline is ink on the page, not a destination\. Underlining alone is never reason to emit an <a>/],
+    // The self-link clause is not decoration. `pageLinkContext` (src/pipeline/links.ts) already
+    // allows a printed URL as an exception and bounds it — "which may link to itself" — and a PDF
+    // with annotations receives both texts in one prompt. Without the bound, this copy reads as
+    // permission to point an <a> around underlined words at a URL printed elsewhere on the page:
+    // a real target, an invented pairing, which is #282 narrowed rather than closed.
+    ["the destinations that DO exist are enumerated, so the rule is not a blanket ban on links",
+      /a URL listed for this page under "Links on this page" where that section appears, a URL printed legibly in the text — which may link to itself, and to nothing else — and the in-document footnote anchors the footnote rule above prescribes/],
+    ["the text survives even when the link does not",
+      /the words are transcribed in full and no link is written — what is lost is the link, never the text/],
+    // The exact shapes reported, refused by name. `href="#"` is what a model writes when it is
+    // asked for the shape of a link and has no target (`empty` in src/pipeline/links.ts).
+    ["the invented shapes are named, including href=\"#\"",
+      /An <a href="#">, or an href built out of the underlined words or a guessed address, announces a destination that does not exist/],
+    // Why no later pass catches it: this is the argument for the rule being here at all.
+    ["and that no gate reports it, because a dead link is valid markup",
+      /no accessibility gate reports the loss, because a link that goes nowhere is valid markup/],
+    ["the underline is preserved, and #283's span precision is kept",
+      /wrap the run the page underlines in <u> — that word or phrase and no more, never the sentence around it/],
+    // The cost is stated in the channel where it is real. <u> has no role mapping and NVDA, JAWS
+    // and VoiceOver do not announce it by default, so what a dropped underline costs is the
+    // delivered page's appearance, not something an AT user was getting — and saying so is what
+    // keeps the next clause, that any structural rule outranks <u>, from reading as arbitrary.
+    ["what a dropped underline costs is stated, since that is the reported defect",
+      /an underline the page prints and the HTML leaves out is a distinction the document made that the delivered page no longer shows/],
+    ["and <u> is not sold as semantics it does not carry",
+      /<u> restores the ink and nothing else: it carries no meaning an assistive technology announces/],
+    // Without this the new rule fights three older ones on the same ink. "elsewhere in this list",
+    // not "above": two of the three are below this bullet (see the comment over this test).
+    ["a rule elsewhere in the list wins where the underline is already spoken for",
+      /whether a rule elsewhere in this list already owns it: an underlined line that introduces what follows is a heading, an underlined blank someone is meant to write on is a field in a form, an underlined label standing before its explanation is a <dt>/],
+    ["a rule drawn under nothing is not underlined text",
+      /a line ruled across the page under nothing is not underlined text at all/],
+    ["<em> is scoped to a convention the page states, so it is not the default reading",
+      /Use <em> instead only where the page itself says its underline marks emphasis/],
+    // The symmetric fault, which #283's "preserve the underline" invites on its own.
+    ["and an underline is never added where the page prints none",
+      /add an underline nowhere the page does not print one — inventing one is the same fault as inventing a link/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// Why the rule above cannot live where the same instruction already exists. `pageLinkContext`
+// carries "Do not invent links for anything not listed", and it is the better place for it — it
+// names the URLs — but it returns an EMPTY section for a page with no link annotations, which is
+// every image upload and every PDF whose underlines are typographic rather than hyperlinks. So the
+// deployment's only guard against an invented href was conditional on the page having real links to
+// list, and absent precisely where a model invents one. Asserted as the coupling rather than as two
+// separate facts: a future change that starts emitting the section unconditionally can delete the
+// second half of this test on purpose, and one that moves the prohibition back out of the base
+// prompt fails the first.
+test("the no-invented-link rule holds on a page with no link annotations at all", () => {
+  assert.equal(pageLinkContext([]).section, "", "a page with no links sends no link section");
+  assert.equal(pageLinkContext().section, "", "and neither does an image upload, which has no links field");
+  for (const [label, text] of [
+    ["agents/page.md", normalize(section("System prompt")!)],
+    ["DEFAULT_PAGE_PROMPT", normalize(DEFAULT_PAGE_PROMPT)],
+  ] as const) {
+    assert.match(
+      text,
+      /Underlining alone is never reason to emit an <a>/,
+      `${label} must carry the no-invented-link rule itself: the link section that says the same ` +
+        `thing is emitted only for a page whose source file supplied link annotations`,
+    );
+  }
+});
+
 // The list of explicit structures is introduced by its own count, so adding a
 // fifth bullet and leaving "Four" in place would have the prompt miscount itself.
 test("the explicit-structures list agrees with the count that introduces it", () => {
   const prompt = section("System prompt")!;
-  const NUMBERS: Record<string, number> = { Two: 2, Three: 3, Four: 4, Five: 5, Six: 6, Seven: 7, Eight: 8, Nine: 9, Ten: 10, Eleven: 11, Twelve: 12 };
+  const NUMBERS: Record<string, number> = { Two: 2, Three: 3, Four: 4, Five: 5, Six: 6, Seven: 7, Eight: 8, Nine: 9, Ten: 10, Eleven: 11, Twelve: 12, Thirteen: 13, Fourteen: 14 };
   const intro = prompt.match(/(\w+) structures are easy to render/);
   assert.ok(intro, "page.md no longer introduces the list of explicit structures");
   const claimed = NUMBERS[intro![1]];

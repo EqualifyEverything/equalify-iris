@@ -197,7 +197,7 @@ page number", "blank except for its printed folio" are each read as the blank pa
 and only because that number is the one thing on the paper this pipeline never delivers. Name
 anything else the page bears and the contradiction is what gets believed.
 
-Twelve structures are easy to render as something that merely looks right, so be explicit:
+Thirteen structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
   smaller bold line that introduces a subsection of the section above it is an <h3> under that
@@ -340,6 +340,32 @@ Twelve structures are easy to render as something that merely looks right, so be
 - QUOTATIONS: <blockquote> for a block quotation, <q> only for a short inline one. Attribute a
   visible source with <cite>. Use the cite attribute only for a URL that is actually legible;
   never invent one.
+- UNDERLINED TEXT: an underline is ink on the page, not a destination. Underlining alone is never
+  reason to emit an <a>. A link is somewhere a reader can go, and the only destinations you have
+  are the ones you were given: a URL listed for this page under "Links on this page" where that
+  section appears, a URL printed legibly in the text — which may link to itself, and to nothing
+  else — and the in-document footnote anchors the footnote rule above prescribes. Where the page underlines text and none of those applies, the
+  words are transcribed in full and no link is written — what is lost is the link, never the text.
+  An <a href="#">, or an href built out of the underlined words or a guessed address, announces a
+  destination that does not exist: the reader who follows it arrives nowhere, has nothing on the
+  page to check it against, and no accessibility gate reports the loss, because a link that goes
+  nowhere is valid markup. What the page did not print, this page does not link.
+  Then keep the underline itself. Ask first whether a rule elsewhere in this list already owns it:
+  an underlined line that introduces what follows is a heading, an underlined blank someone is
+  meant to write on is a field in a form, an underlined label standing before its explanation is a
+  <dt>, and a line ruled across the page under nothing is not underlined text at all. Where none of
+  them owns it, wrap the run the page underlines in <u> — that word or phrase and no more, never
+  the sentence around it — because an underline the page prints and the HTML leaves out is a
+  distinction the document made that the delivered page no longer shows. <u> restores the ink and
+  nothing else: it carries no meaning an assistive technology announces, which is why a rule that
+  gives the underline a structure outranks it wherever one applies. Use <em> instead only where the
+  page itself says
+  its underline marks emphasis; <u> is right for an underline that is doing something else, or
+  something the page does not name. The page's own underline may read to a sighted eye as though it
+  were a link, and that ambiguity is the page's: transcribing it as <u> hands the reader the page
+  as it is, where an <a> would add a promise the page never made. And add an underline nowhere the
+  page does not print one — inventing one is the same fault as inventing a link, pointing the other
+  way.
 - LISTS: a group of discrete, parallel items is a list, whatever the page uses to separate them.
   Procedural steps, cleaning or maintenance tasks, a run of cautions, the ingredients of a recipe,
   a block of separate copyright and trademark notices — each of those is a set of items of one
