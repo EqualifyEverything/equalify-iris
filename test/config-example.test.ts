@@ -171,10 +171,17 @@ test("the commented per_agent examples load if an operator uncomments them", () 
   const page = resolveAgentModel(providers, "page", "vision");
   assert.equal(page.provider, "bedrock", "the bare-string override did not route the agent");
   assert.ok(page.model.startsWith("us."), `page resolved to ${page.model}`);
-  // `table: { model: … }` — a model pinned without naming a provider stays on the default one.
-  const table = resolveAgentModel(providers, "table", "vision");
-  assert.equal(table.provider, "openrouter");
-  assert.match(table.model, /^[a-z0-9-]+\//);
+  // `copy_editor: { model: … }` — a model pinned without naming a provider stays on the
+  // default one. This line used to read `table:`, and the assertion passed, which is how the
+  // example survived: `resolveAgentModel` answers for any name, so proving an override
+  // RESOLVES proves nothing about whether anything dispatches it. No call site has ever
+  // passed "table" (the join is a `copy_editor` call, pipeline/tables.ts), so what this
+  // assertion demonstrated was the silent fallback rather than the override. The agent names
+  // are pinned against the call sites in "every per_agent key any example names is an agent
+  // Iris dispatches" below; this test keeps its own job, which is the three override FORMS.
+  const editor = resolveAgentModel(providers, "copy_editor", "vision");
+  assert.equal(editor.provider, "openrouter");
+  assert.match(editor.model, /^[a-z0-9-]+\//);
   // `reader: { provider, model }` — both at once.
   const reader = resolveAgentModel(providers, "reader", "text");
   assert.equal(reader.provider, "bedrock");

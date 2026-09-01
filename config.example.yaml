@@ -168,11 +168,18 @@ providers:
   # than the page agent, so verification doesn't share the generator's blind spots
   # (recommended) — which is why the `page:` line here routes rather than upgrades. An
   # example naming one model on both would illustrate the pairing away.
+  # Every key below is an agent from the list above, and that is not cosmetic: an entry
+  # naming anything else is IGNORED — the call falls through to the provider's own model,
+  # so the swap does not happen and nothing in the run says so. This block used to offer
+  # a `table:` line; there has never been a table agent, and it silently did nothing.
   # per_agent:
   #   page: bedrock                                 # one agent on the other provider, at ITS model
-  #   table: { model: anthropic/claude-opus-4.7 }    # stronger model, same provider
+  #   copy_editor: { model: anthropic/claude-opus-4.7 }   # stronger model, same provider
   #   reader: { provider: bedrock, model: us.anthropic.claude-haiku-4-5-20251001-v1:0 }
   #   feedback: { model: anthropic/claude-opus-4.7 }
+  # `copy_editor` is one line for two jobs — the review round and the merge of a table
+  # split across a page break — so they cannot be put on different models. Boot warns
+  # about a key it cannot route (config.ts `perAgentKeyWarning`).
 
   # WHICH MODEL. Both provider blocks below name Sonnet 4.6, because it is the only
   # model any number this project publishes was measured on. The reference deployment
