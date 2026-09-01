@@ -1253,12 +1253,16 @@ unjudged recheck never appears — it logs `ok: true` and names nothing. This is
 to be read all along: they were in `errors` under the word `"unknown"` (issue #296).
 Bounded, which nothing else in this payload needs to be: every other field here is a count, and these
 entries are model prose, so they are the one part that grows with what the documents needed. At most
-**20** verdicts, each `message` at most **600** characters with a `…` where it was cut, and
-`verdicts_omitted` says how many the cap left out — a capped list is never a short one read as whole.
-Neither bound can engage on a default deployment: `recheck_sample_size` is 1, so a run supplies at
-most one of these, and a page's verdict is one or two sentences (the one that prompted #296 is 250
-characters). They engage at a **census**, where the list has stopped being per-page news and become an
-audit — and `GET /v1/sessions/{id}/logs` holds every verdict in full, uncut and uncapped.
+**20** verdicts, each `message` cut at **600** characters with a `…` marking the cut (so a cut message
+is 601 characters, the mark being extra), and `verdicts_omitted` says how many the cap left out — a
+capped list is never a short one read as whole. The two populations reach that cap at very different
+rates, and the sampled one effectively never does: `recheck_sample_size` is 1 by default, so a run
+supplies at most one sampled failure. The binding recheck is **not** sampled — it runs on every page
+that passed its check and had a link or alt rewritten — so a link-heavy document can refuse more than
+twenty rewrites inside one round on default config, and the cap engages there. That is the run worth
+capping: twenty refusals plus a count of the rest says the rewrite path is losing content
+systematically as well as fifty verbatim would. `GET /v1/sessions/{id}/logs` holds every verdict in
+full, uncut and uncapped.
 
 `rejected: 0` over a whole round is the expected reading of a healthy one, not a gate that accepts
 everything. The only rejection that applies on every trigger is the shrink floor — a correction that

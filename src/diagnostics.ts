@@ -438,8 +438,8 @@ export interface Diagnostics {
       // unjudged recheck is absent by construction — it logs `ok: true`.
       //
       // Bounded, and `verdicts_omitted` is how many the bound left out — see `MAX_VERDICTS`
-      // for why a cap exists here and nowhere else in this file, and why it cannot engage on
-      // a default deployment. The omitted ones are in log.jsonl in full.
+      // for why a cap exists here and nowhere else in this file, and which of the two
+      // populations can actually reach it. The omitted ones are in log.jsonl in full.
       failures: { ts: string | null; page: number | null; binding: boolean | null; message: string }[];
       verdicts_omitted: number;
     };
@@ -563,20 +563,25 @@ const ms = (a?: string, b?: string): number =>
 // grows with what the document needed rather than with the shape of the run — which is the
 // growth `errors` did not have when the same entry was 7 characters of `"unknown"` (#296).
 //
-// Both bounds are derived from the default deployment rather than picked. `MAX_VERDICTS` is
-// 20 because the default `recheck_sample_size` is 1, so a run supplies at most one of these
-// and a session would need twenty feedback rounds of failing corrections to reach the cap: at
-// the default this never engages, and it engages only at a census — where the list has stopped
-// being per-page news and become an audit, which belongs in log.jsonl and is complete there.
+// `MAX_VERDICTS` is 20, which is generous against the SAMPLED population and not against the
+// binding one — and it is worth being exact about that, because the two grow differently.
+// `recheck_sample_size` defaults to 1, so sampled failures accrue at most one per run and a
+// session would need twenty rounds of them to fill this. The binding recheck is not sampled:
+// extraction.ts runs it on every page that PASSED its check and had a link or alt rewritten,
+// so a link-heavy document can refuse more than twenty rewrites inside one round on default
+// config. This cap therefore engages on a real run, and what it engages on is exactly the run
+// worth capping — twenty refusals with a count of the rest says "the rewrite path is losing
+// content systematically" as well as fifty verbatim would, and log.jsonl holds all fifty.
 // `verdicts_omitted` says how many were left out, so a capped list is never a short one read
 // as whole, on the same terms as `calls_reported` beside `tokens`.
 //
 // `MAX_VERDICT_CHARS` is 600 because a verdict about one page is one or two sentences — the
 // one that prompted #296 is 250 characters — while the number of problems in the array is the
 // model's to choose, so the JOIN is what has no bound. Wide enough to hold a real two-problem
-// verdict whole, and the cut is marked. Deliberately not the 40 of markup.ts `MAX_EXAMPLES`:
-// that bound is for recognising a CLASS of defect from five instances of it, and this one has
-// to carry a specific page's diagnosis intact, which is the whole reason the prose is here.
+// verdict whole, and the cut is marked (so a cut message is 601 characters, the mark being
+// extra). Deliberately not markup.ts's 40 (`MAX_EXAMPLE_CHARS`): that pair bounds five
+// instances at 40 characters each to recognise a CLASS of defect, and this one has to carry a
+// specific page's diagnosis intact, which is the whole reason the prose is here.
 const MAX_VERDICTS = 20;
 const MAX_VERDICT_CHARS = 600;
 

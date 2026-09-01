@@ -872,16 +872,19 @@ test("a recheck that does not say which population it belongs to still says what
 
 test("the verdict list is bounded, and says how much it left out", () => {
   // The one part of this payload that grows as model PROSE rather than as a count, so it is
-  // the one part with a cap. Which cannot engage on a default deployment — one sample per run
-  // means twenty rounds of failing corrections to reach it — and engages at a census, where
-  // the list has stopped being per-page news and become an audit that log.jsonl holds whole.
+  // the one part with a cap. Reachable on default config, and by the binding population rather
+  // than the sampled one: `recheck_sample_size` is 1, but the binding recheck runs on every
+  // page that passed and had a link or alt rewritten, so a link-heavy document can refuse more
+  // than twenty rewrites in one round. Which is the run worth capping.
   //
   // Disclosed rather than silent: a list that quietly stopped growing would be read as the
   // run's complete account of what shipped wrong, which is the opposite of what it is.
+  // So the fixture is that run: twenty-five binding refusals in one round, not twenty-five
+  // sampled ones the default config could not produce.
   const events = [{ ts: T(0), type: "run_start" } as Record<string, unknown>];
   for (let p = 1; p <= 25; p++) {
     events.push({ ts: T(p), type: "page_correction_recheck", image: `p${p}.png`, page: p, ok: false,
-      problems: [`page ${p} is still missing a table row`], binding: false });
+      problems: [`page ${p} link rewrite dropped the destination`], binding: true });
   }
   events.push({ ts: T(26), type: "run_complete" });
   const d = summarizeRun(log(...events), done(Date.parse(T(26))));
@@ -892,9 +895,10 @@ test("the verdict list is bounded, and says how much it left out", () => {
   // that kept the tail would drop the former for the latter.
   assert.equal(d.verification.rechecks.failures[0].page, 1);
   assert.equal(d.verification.rechecks.failures[19].page, 20);
-  // And the counts are untouched by the cap: 25 samples failed, whatever the list carries.
-  assert.equal(d.verification.rechecks.sampled, 25);
-  assert.equal(d.verification.rechecks.sampled_ok, 0);
+  // And the counts are untouched by the cap: 25 rechecks failed, whatever the list carries.
+  assert.equal(d.verification.rechecks.binding, 25);
+  assert.equal(d.verification.rechecks.binding_ok, 0);
+  assert.equal(d.verification.rechecks.sampled, 0);
 });
 
 test("a verdict longer than the payload will carry is cut, and marked", () => {
