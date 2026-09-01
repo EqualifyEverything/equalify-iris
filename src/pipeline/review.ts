@@ -110,6 +110,59 @@ export interface ReviewResult {
   stoppedAt?: ReviewStopped;
 }
 
+// The last thing the Reader is told, appended to the END of `READER_SYSTEM` below — and the
+// only sentence in that prompt about the REPLY rather than about the document.
+//
+// `READER_SYSTEM` already ends "Respond with ONLY JSON:", and the incumbent narrated anyway:
+// measured over 5 documents on `us.anthropic.claude-sonnet-4-6`, 40% of the characters it wrote
+// sat outside the JSON envelope. Nothing caught it because nothing was looking — `extractJson`
+// takes the LAST envelope in a reply (#173), so a preamble parses fine, no call fails, and no
+// line in the log says a third of the step's output was prose. It is billed at output rates on
+// every chunk of every round. So this is not a new instruction; it is the existing one made
+// enforceable, and it is APPENDED rather than merged into that line so that nothing already
+// measured in this prompt is edited (#299).
+//
+// Measured: output 3,635 -> 2,574 tokens per document (-29%), $/doc -13%, prose 40% -> 0%. And
+// it finds MORE rather than less, which is the part that decides it — 12.6 issues per document
+// against the control's 10.8, 129 quoted spans against 96, 11 high-severity against 7, and a
+// finding's cited page matches the page order 93% of the time against 84%, with citations
+// matching neither the order nor a printed folio falling from 15% to 2%. Quote fidelity is
+// marginally worse (90% of quoted spans found in the document against 93%); off-document
+// references are 0 in both.
+//
+// Read those against the right floor or this round reads as a loss. Two runs of the IDENTICAL
+// prompt over the identical documents reproduce only 57% of each other's quote-anchored findings
+// (69% the other way): the Reader does not reproduce itself, so the terse arm reproducing the
+// control at 61% is not 39% damage, it is marginally better than the control's own repeat.
+// Without that repeat arm, one sentence would look like it had cost a third of the findings.
+//
+// It is a fact about the model in the seat, NOT about Readers. `moonshotai.kimi-k2.5` writes 0%
+// prose in its control, so there is nothing here for the sentence to remove and it only removes
+// headroom: 13.6 issues per document down to 8.8, and 6% more per document. The Reader model is
+// a config line (`providers.per_agent.reader`), so this is re-measured on a swap — see the
+// Reader bullet in README's review-phase section for what to measure. Prose share is not a model
+// trait either and must not be recorded as one: Kimi wrote 0% in one run and 38% in another, at
+// n=5 documents.
+//
+// The prompt side is nearly free on the incumbent and not free off it. ~86 prompt tokens, and
+// `READER_SYSTEM` clears `cacheableSystemPrompt` on a Claude Reader, so they land inside the
+// cached prefix and a warm deployment reads them at 0.1x. A non-Claude Reader gets no breakpoint
+// at all and pays them in full on every chunk of every round — which is the same population
+// where the sentence may be buying nothing.
+//
+// Position is load-bearing: "the JSON object" and "before or after it" have no referent unless
+// the schema is already on the page, so this goes last, after the schema and after the
+// clean-document line. test/reader-json-only.test.ts pins the place and the bytes, because what
+// was measured was these bytes in this place.
+//
+// Limits, from the filing: 5 documents, 2 models, one repeat, and the 57% floor is itself a
+// single measurement with no interval of its own. The corpus stitches three source PDFs into each
+// document, so some of the findings this arm added are models correctly noticing that — every arm
+// saw the identical document, so the comparison holds either way.
+export const READER_JSON_ONLY =
+  "Your entire reply must be the JSON object and nothing else. Do not write any reasoning, " +
+  "preamble, commentary or summary before or after it. Do the thinking without writing it down.";
+
 // Exported so a test can assert the marker vocabulary it advertises is the one
 // `flatten` actually emits: a marker the prompt promises but the code never produces
 // teaches the Reader to expect something that will not appear.
@@ -288,7 +341,9 @@ inside one page's own excerpt is still a real finding.
 
 Respond with ONLY JSON:
 { "issues": [ { "issue": "...", "pages": [3], "severity": "low|medium|high", "suggested_action": "..." } ] }
-Return {"issues": []} when the document is clean.`;
+Return {"issues": []} when the document is clean.
+
+${READER_JSON_ONLY}`;
 
 // Exported for the same reason READER_SYSTEM is: the two halves of the duplicate-heading
 // rule have to agree — the Reader classifies the pair and the editor resolves it — and a

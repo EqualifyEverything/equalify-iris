@@ -891,6 +891,29 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   model reported as content lost. Both prohibitions are worth having only because a cheaper Reader
   is a live option; the current model needed neither, which is exactly how a prompt that misleads
   the field goes unnoticed.
+- **The Reader replies with JSON and nothing else, and that sentence is tuned to the model in the
+  seat.** `READER_SYSTEM` has always ended "Respond with ONLY JSON:", and the incumbent narrated
+  anyway: 40% of the characters it wrote sat outside the JSON envelope, over 5 documents. Nothing
+  could see it, which is why it lasted — `extractJson` takes the *last* envelope in a reply, so a
+  preamble parses, no call fails, and no log line says that a third of the step's output was prose
+  billed at output rates. One appended sentence removes all of it: **output tokens −29%** (3,635 →
+  2,574 per document), **$/doc −13%**, prose 40% → 0%, and it finds **more** rather than less —
+  12.6 issues per document against 10.8, 129 quoted spans against 96, and a finding's cited page
+  matching the page order 93% of the time against 84% (citations matching neither the order nor a
+  printed folio: 15% → 2%). The comparison needs its floor stated or it reads backwards: two runs of
+  the *identical* prompt over the identical documents reproduce only **57%** of each other's
+  quote-anchored findings, so the terse arm reproducing the control at 61% is not damage — the
+  Reader does not reproduce itself to begin with (#299).
+  **The saving is a property of the model in the seat, not of the prompt**, and that is the part to
+  carry forward. On a model whose control already writes 0% prose the same sentence has nothing to
+  remove and takes away headroom instead: `kimi-k2.5` drops from 13.6 issues per document to 8.8 and
+  costs 6% more. Since the Reader is one config line (`providers.per_agent.reader`), **swapping it
+  means re-measuring this**, and prose share is not a model trait to look up — the same model wrote
+  0% in one run and 38% in another at n=5 documents. The prompt side of the trade is ~86 tokens
+  that ride inside the cached prefix on a Claude Reader and are paid in full on every chunk of every
+  round on one that gets no breakpoint, which is the same population where the sentence may buy
+  nothing. The effect of any change here is visible without new instrumentation:
+  `by_step.review.output_tokens` in the run's diagnostics is the number that moved.
 - **Copy Editor image payload (§7.9).** When every issue in a round is attributed to a page, the
   editor gets only those pages' images (logged per round as `editor_images`). Attaching every
   page's image on every round is the dominant per-round cost of the review loop — on a 25-page
