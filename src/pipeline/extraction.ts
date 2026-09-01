@@ -16,6 +16,7 @@ import {
   type RecheckSampler,
 } from "./correction.ts";
 import { examplesForPrompt } from "./memory.ts";
+import { altTexts, genericAltProblem, genericAlts } from "./alt.ts";
 import { missingLinkProblem, missingLinks, pageLinkContext, unexpectedHrefs } from "./links.ts";
 import { STANDARD as STANDARD_AGENTS, isStandardType, logicalType } from "./contribute.ts";
 import { isTruncatedResponseError } from "../providers/types.ts";
@@ -2589,6 +2590,20 @@ async function extractPage(
     ctx.log.event("page_links_missing", { image: img.name, links: missing.map((l) => l.href) });
   }
 
+  // And whether any image on the page was described with a placeholder instead of a
+  // description, checked here for the same reason and on the same terms: it has an exact answer,
+  // it costs nothing, and it runs on every page rather than on the ones a sampled verifier
+  // happens to look at. The difference from a missing link is which way the model fails — a
+  // dropped link is invisible to the Feedback Agent, while a gutted alt is something the
+  // DEPLOYED verifier catches 6 times out of 6 and the cheap ones catch 0–2 times out of 6
+  // (#290, and see alt.ts for the whole table). So this is not a blind spot being covered, it is
+  // a capability being moved off the model's bill: it is the one defect class where dropping the
+  // verifier to a cheaper model costs real detection, and a free rule is what buys it back.
+  const generic = genericAlts(innerHtml);
+  if (generic.length) {
+    ctx.log.event("page_generic_alt", { image: img.name, page: img.order, alts: generic });
+  }
+
   // page_verify_ok / page_verify_failed report the Feedback Agent's verdict and
   // nothing else, exactly as they did before links existed — a missing link is not
   // part of that verdict, and folding it in would make the two events mean different
@@ -2641,6 +2656,14 @@ async function extractPage(
     // this count over a fleet rather than over an 11-page corpus. So this event decides
     // nothing and costs nothing: the page ships exactly as it did.
     //
+    // #290's placeholder-alt rule is not a reversal of that, and the difference is the whole
+    // reason it is a code check: what is refused above is buying a page call on the verifier's
+    // OPINION that a description could be better, which it volunteers on request and which has
+    // no exact answer. What is bought below is a placeholder — an alt that is one word for the
+    // medium — which is decidable from the bytes, costs nothing to find, and fires on 0 of the
+    // 1,064 alts in the bench corpus, so it is not a share of the bill at all. If the verifier
+    // ever names an `alt_quality` problem that IS a placeholder, the free rule has it already.
+    //
     // Only the first verdict, which is the one that decides whether a correction is bought.
     // A recheck's own disagreement is already readable on its line, since
     // `page_correction_recheck` carries both its `ok` and its `problems`.
@@ -2665,13 +2688,23 @@ async function extractPage(
   const problems = [
     ...(verifyFailed ? verdict.problems : []),
     ...missing.map(missingLinkProblem),
+    ...generic.map(genericAltProblem),
   ];
   if (problems.length) {
-    // What the correction was asked to fix, for the event below. Both triggers can fire
-    // on one page, and they cost the same call but mean different things: a link the
-    // model dropped is an exact, code-checked miss, while a fidelity problem is the
-    // Feedback Agent's judgement.
-    const trigger = verifyFailed ? (missing.length ? "both" : "verify") : "links";
+    // What the correction was asked to fix, for the event below. Any of the three can fire on one
+    // page, and they cost the same call but mean different things: a link the model dropped and a
+    // placeholder alt are exact, code-checked misses, while a fidelity problem is the Feedback
+    // Agent's judgement.
+    //
+    // `both` is more than one source, which is what it has always counted — until #290 there
+    // were two sources, so every line an old log calls `both` is still one, and no reading of an
+    // old log changes. What it no longer does is name WHICH pair, and that is on purpose rather
+    // than traded away: the alternative is seven buckets for three sources, and the per-source
+    // detail is already exact on `page_links_missing` and `page_generic_alt`, both keyed by the
+    // same `image` as this line.
+    const sources = [verifyFailed ? "verify" : null, missing.length ? "links" : null, generic.length ? "alt" : null]
+      .filter((s): s is string => s !== null);
+    const trigger = sources.length > 1 ? "both" : sources[0];
     const before = innerHtml.trim();
     // A correction that cannot complete costs the CORRECTION, not the page.
     //
@@ -2794,13 +2827,16 @@ async function extractPage(
     }
     if (corrected && corrected !== before) {
       // A page that PASSED its fidelity check is being re-rendered here only to
-      // recover a link, so the rewrite has to earn the standing the original already
-      // had: it is verified in turn, and a rewrite that lost something is discarded
-      // in favour of the fragment that was known to be good. A link is additive, and
-      // paying for it with the structure of a page that already checked out — a
-      // heading level, a `<th scope>` — would make the document worse than it was
-      // before this feature. When the check had already failed, the original has no
-      // standing to protect and the correction is accepted as it always was.
+      // recover a link, or to replace a placeholder alt, so the rewrite has to earn the
+      // standing the original already had: it is verified in turn, and a rewrite that lost
+      // something is discarded in favour of the fragment that was known to be good. Both of
+      // those repairs are LOCAL — one href, one attribute — and paying for either with the
+      // structure of a page that already checked out (a heading level, a `<th scope>`) would
+      // make the document worse than it was before the feature. Which is why #290's check
+      // lands here rather than as its own pass: a page that passed and has a gutted alt gets
+      // this protection for free, from code that was already written for the link case. When
+      // the check had already failed, the original has no standing to protect and the
+      // correction is accepted as it always was.
       //
       // Before either of those: a correction may change a page and may not delete one. A reply
       // that comes back at a fraction of the size it was given has not corrected the page, and
@@ -2825,9 +2861,19 @@ async function extractPage(
         recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }], "recheck_binding");
         keep = !failedCheck(recheck);
         if (!keep) {
+          // Named `page_links_correction_rejected` since before there was anything else on this
+          // branch, and kept: it is the rejection of a correction bought for a page that had
+          // PASSED, and renaming it would split one measurement across two event names in a log
+          // that is read across rounds. `trigger` is what says which repair was refused — `links`
+          // reads exactly as it always did, and `alt` or `both` is a line no older log holds.
           ctx.log.event("page_links_correction_rejected", {
             image: img.name,
+            trigger,
             links: missing.map((l) => l.href),
+            // The placeholder alts that bought the call, for the same reason `links` names the
+            // hrefs: without them a rejected alt correction is a line saying a good page was
+            // re-rendered for nothing and not saying what for.
+            ...(generic.length ? { alts: generic } : {}),
             problems: recheck.problems,
           });
         }
@@ -2941,6 +2987,14 @@ async function extractPage(
           // for, and reading it as "one problem in, one out" hid that.
           problems_before: verifyFailed ? verdict.problems.length : 0,
           links_before: missing.length,
+          // The third share of the same bill (#290). Kept apart from `problems_before` for the
+          // reason `links_before` is: `problems_after` is the Feedback Agent's verdict on the
+          // corrected fragment, and a placeholder alt going in was found by code, so folding it
+          // into the before-count would make a page with one fidelity problem and two gutted alts
+          // read as three-in-one-out — a correction that fixed nothing, logged as converging.
+          // Whether the alts came back is answered exactly and for free by
+          // `page_generic_alt_unrecovered`, not by this verdict.
+          alt_before: generic.length,
           problems_after: recheck.problems.length,
           // The same two sides as kinds (issue #182), which is what turns "the recheck did
           // not pass" into an answer about the CORRECTION: `content_missing` going in and
@@ -2989,6 +3043,23 @@ async function extractPage(
         const stillMissing = missingLinks(img.links, innerHtml);
         if (stillMissing.length) {
           ctx.log.event("page_links_unrecovered", { image: img.name, links: stillMissing.map((l) => l.href) });
+        }
+        // The same question about the placeholder alts, and the reason this rule is worth having
+        // over a model that finds the same defect: the check that raised the complaint can be run
+        // again on the answer, exactly and for nothing. So "the free rule found something" and
+        // "the free rule got it fixed" are separable, which is the pair a decision about the
+        // verifier's model actually needs (#290, #246). Only when the correction was bought for an
+        // alt in the first place — re-reporting a page whose alts were never a complaint would put
+        // this rule's failures and the page agent's ordinary output in one count.
+        if (generic.length) {
+          const stillGeneric = genericAlts(innerHtml);
+          if (stillGeneric.length) {
+            ctx.log.event("page_generic_alt_unrecovered", {
+              image: img.name,
+              page: img.order,
+              alts: stillGeneric,
+            });
+          }
         }
       }
     }
@@ -3076,7 +3147,32 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
   const failedPages = outcomes.filter((o) => o.failed).map((o) => o.fragment.order);
   // Always logged, including the zero case, so "no page failed" and "this run predates
   // per-page containment" are not the same observation in a log.
-  ctx.log.event("extraction_complete", { pages: fragments.length, failed: failedPages });
+  ctx.log.event("extraction_complete", {
+    pages: fragments.length,
+    failed: failedPages,
+    // The generic-alt rule over the fragments the document is assembled FROM, which is a different
+    // question from the per-page `page_generic_alt` above: this one is asked after any correction,
+    // so a non-zero `alts_generic` here is a placeholder this step could not repair.
+    //
+    // Deliberately not read as what shipped, and the distinction is not pedantic: the review loop
+    // runs after this line and rewrites the assembled document a top-level block at a time
+    // (`applyBlockEdits`), replacing a block's markup wholesale — `<img>` and its `alt` with it —
+    // so a copy-edit round that guts an alt ships a placeholder these counts never saw. The
+    // delivered bytes are measured where every other claim about them is, on the file the caller
+    // receives (`delivered_alt`, orchestrator.ts).
+    //
+    // Present at zero on every run for the reason `failed` is — a class that is only ever reported when it
+    // fires cannot distinguish "it never happened" from "the check never ran", and this rule's
+    // whole claim is that it fires on nothing Iris writes (0 of 1,064 alts in the bench corpus,
+    // #290). A count that prints 0 is the thing that can be seen to be working.
+    //
+    // `alts_checked` is the denominator, and it is the number that makes the zero readable: a run
+    // whose pages hold no images at all reports 0 of 0, which says nothing about the rule, and a
+    // run reporting 0 of 40 says something. Free either way — one regex over strings already in
+    // memory.
+    alts_checked: fragments.reduce((n, f) => n + altTexts(f.innerHtml).length, 0),
+    alts_generic: fragments.reduce((n, f) => n + genericAlts(f.innerHtml).length, 0),
+  });
 
   // Nothing was extracted. Containment trades a thrown run for the pages that DID
   // work, and with none of them there is nothing to trade: assembly and the review
@@ -3233,6 +3329,14 @@ export async function reExtractPages(
   ctx.log.event("reextract_complete", {
     pages: outcomes.filter((o) => !o.failed).map((o) => o.fragment.order).sort((a, b) => a - b),
     ...(keptPrior.length ? { failed: keptPrior } : {}),
+    // Over the WHOLE document this round delivers, not the pages it re-ran, which is what makes
+    // it comparable with the same two fields on `extraction_complete`: `fragments` here is the
+    // prior round's pages with the re-extracted ones substituted in, so a feedback round reports
+    // the same denominator as the first round did rather than a count of the subset it touched.
+    // Without that a session's log would read as the alt corpus shrinking every time a client
+    // sends feedback (#290).
+    alts_checked: fragments.reduce((n, f) => n + altTexts(f.innerHtml).length, 0),
+    alts_generic: fragments.reduce((n, f) => n + genericAlts(f.innerHtml).length, 0),
   });
   return { fragments, suggestions, failedPages, recovered };
 }

@@ -167,7 +167,14 @@ test("every page failing is a failed run, not an empty document", async () => {
       assert.match(e.message, /max_tokens/);
       return true;
     });
-    assert.deepEqual(ev(rec, "extraction_complete")[0].data, { pages: 3, failed: [1, 2, 3] });
+    assert.deepEqual(ev(rec, "extraction_complete")[0].data, {
+      pages: 3,
+      failed: [1, 2, 3],
+      // No `<img>` in these fixtures, so 0 of 0 — a run that checked nothing rather than a run
+      // whose alts were clean. The distinction is why the denominator is on the line (#290).
+      alts_checked: 0,
+      alts_generic: 0,
+    });
     assert.equal(ev(rec, "extraction_failed").length, 1, "the log says why the run ended, not just that a page did");
   });
 });
@@ -212,7 +219,7 @@ test("a whole run logs an empty failed list rather than no list", async () => {
     const { ctx, rec } = makeCtx(dir, 2, [], truncated);
     const { failedPages } = await runExtraction(ctx);
     assert.deepEqual(failedPages, []);
-    assert.deepEqual(ev(rec, "extraction_complete")[0].data, { pages: 2, failed: [] });
+    assert.deepEqual(ev(rec, "extraction_complete")[0].data, { pages: 2, failed: [], alts_checked: 0, alts_generic: 0 });
   });
 });
 
@@ -323,7 +330,12 @@ test("a re-extraction cannot blank a page the document has content for", async (
     assert.equal(refused[0].data.chars_kept, "<p>prior 2</p>".length);
     assert.equal(ev(rec, "page_blank").length, 0, "nothing recorded the page as blank");
     assert.equal(ev(rec, "page_extraction_failed")[0].data.kept, "prior");
-    assert.deepEqual(ev(rec, "reextract_complete")[0].data, { pages: [3], failed: [2] });
+    assert.deepEqual(ev(rec, "reextract_complete")[0].data, {
+      pages: [3],
+      failed: [2],
+      alts_checked: 0,
+      alts_generic: 0,
+    });
   });
 });
 
@@ -373,7 +385,7 @@ test("a source whose every page is blank is a failed run, not an empty document"
     // many pages were blank, which is a statement about the source that an empty file is not.
     const { ctx, rec } = makeCtx(dir, 3, [], truncated, () => BLANK);
     await assert.rejects(runExtraction(ctx), /3 of 3 source pages were reported blank/);
-    assert.deepEqual(ev(rec, "extraction_complete")[0].data, { pages: 3, failed: [] });
+    assert.deepEqual(ev(rec, "extraction_complete")[0].data, { pages: 3, failed: [], alts_checked: 0, alts_generic: 0 });
     assert.deepEqual(ev(rec, "extraction_failed")[0].data, {
       pages: 0,
       blank: 3,
@@ -400,7 +412,12 @@ test("a page that threw is not counted among the pages re-extracted", async () =
   await withTemp(async (dir) => {
     const { ctx, rec } = makeCtx(dir, 3, [2], truncated);
     await reExtractPages(ctx, [prior(1), prior(2), prior(3)], [2, 3]);
-    assert.deepEqual(ev(rec, "reextract_complete")[0].data, { pages: [3], failed: [2] });
+    assert.deepEqual(ev(rec, "reextract_complete")[0].data, {
+      pages: [3],
+      failed: [2],
+      alts_checked: 0,
+      alts_generic: 0,
+    });
   });
 });
 

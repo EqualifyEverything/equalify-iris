@@ -267,6 +267,17 @@ const or = createServer(async (req, res) => {
         // here to prove the orchestrator MEASURES it, and the repetition is what proves
         // the two units apart — three references, one id.
         `<p><a href="#appendix-a">See Appendix A</a></p>` +
+        // Two images per page, and both of them CORRECT, which is what makes them worth
+        // having here: the generic-alt rule (#290) claims to fire on nothing this pipeline
+        // writes, and a rule that only ever reports when it fires cannot be seen to have
+        // run. So the e2e reads `extraction_complete.alts_checked` as the denominator of
+        // that zero — one real description per page, plus a decorative `alt=""` that must
+        // NOT be in the denominator, since an empty alt is a decision rather than a
+        // missing one. The per-page correction path is covered by unit tests instead: a
+        // placeholder here would buy a page call on every run and put a correction in the
+        // log that every other assertion in this file would have to know about.
+        `\n<img src="chart.png" alt="Bar chart of revenue by region, rising each quarter">\n` +
+        `<img src="rule.png" alt="">` +
         // The #240 defects, on page 1 only so the counts are exact. Both are invisible to
         // the lint gate by construction, which is the whole point of measuring them on the
         // delivered bytes: the parser closes the `<div>` at end of document before axe sees
@@ -333,6 +344,14 @@ const or = createServer(async (req, res) => {
     const rewritten =
       `<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n` +
       `<p>Page marker 1.</p>\n<p>Page marker 2.</p>\n<p>Page marker 3.</p>\n` +
+      // A placeholder where a description belongs, written by the ONE component that can put one
+      // into a delivered document after the page agents are finished with it (#290). Every page's
+      // own images are described properly above, so this is the only reason the run's
+      // `delivered_alt` line can exist — which is what makes that line a measurement of the
+      // delivered bytes rather than a second copy of `extraction_complete.alts_generic`. Deliberate
+      // like page 1's unclosed `<div>`: axe passes it (`image-alt` asks only whether the attribute
+      // is present), so nothing else in the run can see it.
+      `<img src="chart.png" alt="image">\n` +
       `<p>Editor saw ${attached} image(s).</p>`;
     // Answered in the shape the request actually asks for (issue #250). An ordinary round shows
     // the body as numbered blocks and wants back only the ones that changed, so the reply is an

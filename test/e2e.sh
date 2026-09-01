@@ -351,6 +351,17 @@ echo "$xs" | jq -e '.recheck_sample_size == 1 and (.recheck_thresholds | length)
   && pass "one slot, on a page of this batch (threshold $(echo "$xs" | jq -r '.recheck_thresholds[0]') of $(echo "$xs" | jq -r '.pages'))" \
   || fail "recheck sample" "$xs"
 
+# The generic-alt rule over what shipped (#290). This is the signal whose absence is least
+# readable of any in the pipeline: it is expected to find NOTHING, so a rule that silently stopped
+# running and a document with no placeholder in it produce the same log. Hence the denominator —
+# each mock page carries one real description and one decorative `alt=""`, so a run that checked
+# every page reads 3, a run that checked one reads 1, and a rule that never ran reads 0. The
+# empty alt must stay out of that count: it is a decision, not a missing description.
+xc=$(echo "$logs" | jq -c 'select(.type == "extraction_complete")')
+echo "$xc" | jq -e '.alts_checked == 3 and .alts_generic == 0' >/dev/null \
+  && pass "every page's alt text was checked and none of it is a placeholder ($(echo "$xc" | jq -r '.alts_generic') of $(echo "$xc" | jq -r '.alts_checked'))" \
+  || fail "generic alt" "$xc"
+
 # The in-document references in what shipped (#234). Every page's mock output links to
 # #appendix-a and no page defines it, so this asserts the whole measurement path — the
 # check runs on the delivered bytes, the event carries both units, and the ids are the
@@ -527,6 +538,23 @@ echo "$out4" | grep -q 'Editor saw 1 image(s)' \
 echo "$out4" | grep -q '@unresolved' && echo "$out4" | grep -q 'page 2' \
   && pass "unresolved issues record their source page" \
   || fail "unresolved attribution" "$(echo "$out4" | grep -A3 '@unresolved')"
+# And the placeholder alt this round's editor wrote is caught on the delivered bytes (#290).
+# This is the whole reason `delivered_alt` exists apart from `extraction_complete.alts_generic`:
+# the pages described their images properly, so extraction is clean, and the review loop replaced
+# the body afterwards. Only a check on the file the caller receives can see it.
+flog=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/logs")
+da=$(echo "$flog" | jq -c 'select(.type == "delivered_alt")' | tail -1)
+echo "$da" | jq -e '.checked == 1 and .generic == 1 and .examples == ["image"]' >/dev/null \
+  && pass "a placeholder alt a copy-edit round wrote is reported on the delivered bytes ($da)" \
+  || fail "delivered alt" "${da:-no delivered_alt event in the run log}"
+# The distinction stated as an assertion rather than a comment: the same run's extraction was
+# clean, so a check reading the fragments would have passed this document.
+echo "$flog" | jq -e -s 'map(select(.type=="extraction_complete")) | all(.alts_generic == 0)' >/dev/null \
+  && pass "and extraction said nothing, which is why the fragments could not be the instrument" \
+  || fail "delivered alt" "$(echo "$flog" | jq -c 'select(.type=="extraction_complete")')"
+echo "$out4" | grep -q 'alt="image"' \
+  && pass "the placeholder really is in the document that was served, not only in the log" \
+  || fail "delivered alt" "the served document holds no alt=\"image\""
 
 echo "==> 9d. a truncated model response fails the run instead of shipping partial HTML"
 # A response that stops at the output-token ceiling arrives as a 200 with partial
@@ -845,6 +873,13 @@ echo "$qlog" | jq -e 'select(.type=="internal_links")' >/dev/null \
 echo "$qlog" | jq -e 'select(.type=="delivered_structure")' >/dev/null \
   && fail "delivered structure gate" "a clean document logged delivered_structure: $(echo "$qlog" | jq -c 'select(.type=="delivered_structure")')" \
   || pass "a clean document says nothing about its structure either"
+# And the third of these lines (#290). B ran with no feedback, so no copy-edit round touched its
+# body and every alt in it is the page agent's own description — the ordinary document, which must
+# be silent here. Its `alts_checked` on `extraction_complete` is the unconditional half, so this
+# silence cannot be a check that never ran.
+echo "$qlog" | jq -e 'select(.type=="delivered_alt")' >/dev/null \
+  && fail "delivered alt gate" "a document with no placeholder alt logged delivered_alt: $(echo "$qlog" | jq -c 'select(.type=="delivered_alt")')" \
+  || pass "a document whose alt text is all descriptions says nothing about it"
 curl -s -X POST -H 'content-type: application/json' -d '{"clean":false}' \
   "http://localhost:$OR_PORT/__clean-markup" >/dev/null   # back to the defective page
 
