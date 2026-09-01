@@ -2701,9 +2701,18 @@ async function extractPage(
     // it (the providers agree — `TruncatedResponseError` is thrown from inside their retry
     // loops precisely so it is not re-billed).
     // What this call may spend on output, bounded by what the first pass spent (#285). Computed
-    // here, from `before`, so the number sent to the provider is the number the failure line below
+    // here, from `before`, so the number this caller ASKED for is the number the failure line below
     // reports — a cap an operator cannot read off the log is a cap they will debug as a config
     // problem, which is the mistake this whole change is about.
+    //
+    // Asked for, and not necessarily sent: `growth` has no upper bound, so a merge that grew the
+    // page enough can compute a ceiling above `providers.<provider>.max_tokens`, and the adapters
+    // take the smaller of the two (`Math.min` in bedrock.ts and openrouter.ts — a caller may lower
+    // a call's ceiling and never raise it). A `ceiling` on the line below that is larger than the
+    // deployment's is therefore a call the DEPLOYMENT bounded, and the error on that same line says
+    // so: the truncation message names the config, because the config is what bound it. Clamping
+    // this number to make the two agree is not available here — the provider's ceiling is the
+    // adapter's to know, and re-deriving it in the pipeline is how it comes to disagree.
     //
     // `html`, not `innerHtml`, is what `outputTokens` bought: `innerHtml` is what a specialist may
     // have merged into it since, and it is the pair (tokens, the length they produced) that gives
