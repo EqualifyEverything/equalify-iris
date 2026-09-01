@@ -170,17 +170,22 @@ providers:
   # example naming one model on both would illustrate the pairing away.
   # Every key below is an agent from the list above, and that is not cosmetic: an entry
   # naming anything else is IGNORED — the call falls through to the provider's own model,
-  # so the swap does not happen and nothing in the run says so. This block used to offer
-  # a `table:` line; there has never been a table agent, and it silently did nothing.
+  # so the swap does not happen. This block used to offer a `table:` line; there has never
+  # been a table agent, and it silently did nothing. Two things say so now, one at each
+  # end: boot warns about a key it cannot route (config.ts `perAgentKeyWarning`), and
+  # diagnostics reports `models` per agent, so `by_agent.page.models` on a finished run
+  # names the model that agent actually answered on. The warning before, the evidence after.
+  # A `model:` with no `provider:` resolves against `default` above, and nothing checks that
+  # the id belongs there: a Bedrock model id on an OpenRouter deployment fails on every call
+  # of the run. Name both when you pin a model that was measured on the other provider.
   # per_agent:
   #   page: bedrock                                 # one agent on the other provider, at ITS model
   #   copy_editor: { model: anthropic/claude-opus-4.7 }   # stronger model, same provider
   #   reader: { provider: bedrock, model: us.anthropic.claude-haiku-4-5-20251001-v1:0 }
   #   feedback: { model: anthropic/claude-opus-4.7 }
   # `copy_editor` is one line for two jobs — the review round and the merge of a table
-  # split across a page break — so they cannot be put on different models. Boot warns
-  # about a key it cannot route (config.ts `perAgentKeyWarning`). Which model is worth
-  # putting on which agent, with the prices each was measured at: docs/models.md.
+  # split across a page break — so they cannot be put on different models. Which model is
+  # worth putting on which agent, with the prices each was measured at: docs/models.md.
 
   # WHICH MODEL. Both provider blocks below name Sonnet 4.6, because it is the model
   # every number this project publishes about a WHOLE RUN was measured on. The reference
@@ -249,7 +254,13 @@ providers:
     # best left that way: a cache read bills at a tenth of the input rate, so on a
     # 25-page document the page agent's prompt is paid for once instead of 25 times,
     # and nothing about the output changes. Iris decides per call whether the prefix is
-    # long enough to be worth it (src/providers/promptCache.ts).
+    # long enough to be worth it AND whether this model can be asked at all
+    # (src/providers/promptCache.ts): an id it cannot read as a Claude model of a caching
+    # generation gets no breakpoint, so a `per_agent` swap to another vendor's model turns
+    # caching off for that agent whatever this setting says. Priced rather than guessed —
+    # docs/models.md §2 measures it on the largest such swap, where the incumbent had 84.8%
+    # of its prompt served from cache and the swap still won: the loss is inside the saving,
+    # not on top of it.
     #
     # It is not free in every case, which is why the numbers are worth reading rather
     # than assuming: a WRITE bills at 1.25x, so an agent called only once in a run pays

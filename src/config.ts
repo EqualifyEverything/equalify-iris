@@ -563,10 +563,13 @@ const DISPATCHED_AGENTS = ["page", "reader", "copy_editor", "feedback", "builder
 // The same asymmetry as the two warnings above, and the most expensive instance of it,
 // because this key is the whole model-selection surface: an unrecognized agent name is
 // ignored and every call falls through the ordinary chain to the provider's own model, so
-// an operator who wrote one gets the deployment they already had. Nothing downstream says
-// so. `by_agent` reports the agents that ran, never the override that did not match one,
-// and the run costs and succeeds — the failure is a model that was not swapped, which
-// looks exactly like a model that was.
+// an operator who wrote one gets the deployment they already had. The run costs and succeeds,
+// and this warning is the only thing that names the key: `by_agent` reports the agents that
+// ran and never the override that matched none of them, so a key nobody reads is invisible
+// there. What it does now report is `models` per agent, which is the other half of the same
+// question and answers it from the other end — the failure is a model that was not swapped,
+// and the row for that agent names the model it actually ran on. Warning at boot is still
+// worth more than that: it says which key is wrong, before the run is paid for.
 //
 // It is how `config.example.yaml` came to invite `table:` and prd.md §10.3 to show
 // `image_analysis:` — both relics of the per-content-type fan-out prd.md §7.4 v1.2

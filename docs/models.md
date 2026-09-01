@@ -45,7 +45,7 @@ providers:
     reader: { provider: bedrock, model: moonshotai.kimi-k2.5 }
 ```
 
-## 1. The knob, and the way it fails
+## 1. The knob, and the ways it fails
 
 `resolveAgentModel` (`src/providers/index.ts`) resolves a model from **agent name and capability
 only**. The `{ step }` on a `router.complete` call is telemetry — it feeds `by_step` in
@@ -54,7 +54,7 @@ dispatches:
 
 | agent | dispatched from | job |
 |---|---|---|
-| `page` | `src/pipeline/extraction.ts` | the page → HTML pass, and the correction of a page that failed verify |
+| `page` | `src/pipeline/extraction.ts` | the page → HTML pass, the correction of a page that failed verify, and the merge of a specialist's fragment back into the page |
 | `reader` | `src/pipeline/review.ts` | reads the assembled document and reports issues |
 | `copy_editor` | `src/pipeline/review.ts`, `src/pipeline/tables.ts` | applies the review, and merges a table split across a page break |
 | `feedback` | `src/pipeline/feedback.ts` | VERIFY / CLASSIFY / TRAIN — the judge |
@@ -64,14 +64,34 @@ plus any specialist named by a page suggestion, whose key is the file stem in `a
 (`chartDataAgent` is the only one shipped). `copy_editor` is **one line for two jobs**, so the
 review round and the table merge cannot be put on different models.
 
-**A key naming anything else is ignored, and nothing in the run says so.** The call finds no
-override and falls through to the provider's own `per_capability`/`default_model`; the run
-succeeds at the price it would have cost anyway, and `by_agent` reports the agents that *ran*, so
-it cannot tell a model that was never swapped from one that was. This matters most to exactly the
-reader of this document: **a typo in a swap reads as "the cheaper model did not save anything."**
-Boot warns about a key it cannot route (`perAgentKeyWarning`, `src/config.ts`) — check the log
-line once after editing, and note that it warns rather than refuses, because a specialist's name
-is a file on disk and the valid set is therefore open.
+**A key naming anything else is ignored, and the run does not fail.** The call finds no override
+and falls through to the provider's own `per_capability`/`default_model`, so the document arrives
+at the price it would have cost anyway. This matters most to exactly the reader of this document:
+**an unchecked typo in a swap reads as "the cheaper model did not save anything."** Two things say
+otherwise, and neither is the run stopping, so a swap has to be checked rather than assumed. Boot
+warns about a key it cannot route (`perAgentKeyWarning`, `src/config.ts`) — check the log line once
+after editing, and note that it warns rather than refuses, because a specialist's name is a file on
+disk and the valid set is therefore open. Afterwards, diagnostics names the model each agent ran on
+(below).
+
+**A model id belongs to a provider, and nothing checks that it belongs to yours.** An override
+that sets only `model:` keeps `providers.default` and passes the id through as written
+(`resolveAgentModel` again). `moonshotai.kimi-k2.5` is a **Bedrock** id, so that one line on a
+deployment whose default provider is OpenRouter sends it to OpenRouter, which does not have it.
+That one fails loudly rather than silently — but it fails on every call of the run, so it is worth
+not writing. Both snippets in this document name `provider:` as well as `model:` for that reason,
+and they name it even where the deployment's default is already `bedrock`: the line then says which
+price sheet its numbers came from.
+
+**How to tell afterwards whether the swap happened.** Diagnostics reports `models` per agent —
+`by_agent.<agent>.models` names the model ids that answered that agent's calls (`GET
+/v1/sessions/{id}/diagnostics`, docs/API.md §7b). A `page` row still naming the incumbent after an
+edit is a swap that did not take effect; the boot warning says which key is wrong beforehand, and
+this says what actually ran. One id is the ordinary case, and more than one is not a defect:
+resolution keys on capability too, so a provider's `per_capability` block can put one agent on two
+models deliberately — which is also how a swap reaches a call site no round has measured. The
+`page` entry moves all three of the call sites in the table above, and the round in §2 covers two
+of them; the specialist merge is a `text` call and the corpus produced no specialist calls at all.
 
 ## 2. `page` — the largest line on the bill
 
@@ -117,8 +137,37 @@ one column: the incumbent judge flags its **accessibility** output on 10 of 11 p
 Kimi's 7 and the incumbent's own 8 — the worst of any arm but gemma. On an accessibility product
 the cheapest arm that gets the prose right is not the cheapest arm that does the job.
 
-Kimi is the only non-incumbent arm that is at-or-better than the incumbent on every axis measured
-at once: recall, first-pass rate, and three of the judge's four kinds.
+Kimi is the only non-incumbent arm at-or-better than the incumbent on recall, first-pass rate and
+three of the judge's four kinds at once. `structure_wrong` is the fourth, and Kimi is worse on it
+(9 against 7); "no net loss" above means that trade and not a clean sweep.
+
+**The −56% is measured against an incumbent that had its prompt cache, and the swap gives that
+up.** `cacheableSystemPrompt` (`src/providers/promptCache.ts`) returns false for any id it cannot
+read as a Claude model, so a non-Claude `page` model gets no breakpoint at all — not on
+`agents/page.md`, not on anything else that call sends twice. The round's own call lines show both
+sides of it: across the incumbent arm's 21 page calls, **283,290 of its 333,958 prompt tokens
+(84.8%) were billed as cache reads** at a tenth of the input rate, while Kimi's 21 carried
+**351,841 input tokens and no cache reads at all**. Priced from those lines the incumbent arm is
+$0.6722 and Kimi $0.2944 — $0.0611 and $0.0268 a page, which is where the table above gets its two
+figures. The lost breakpoint is therefore **already inside the −56%**, and that is the most
+conservative of the three comparisons this round supports:
+
+| the incumbent priced… | $/pg | Kimi against it |
+|---|---|---|
+| as billed, on a warm cache — what this section reports | $0.0611 | **−56%** |
+| cold start: one write of the 13,490-token prefix it reused | $0.0657 | −59% |
+| with no cache at all | $0.1306 | −79% |
+
+The middle row exists because the incumbent arm recorded **0 cache-creation tokens** — it inherited
+a warm prefix from an earlier round inside the TTL, so its price leaves out the one write a first
+run pays. Both residuals move the same way, so a deployment should expect the swap to save at least
+what is published here and possibly more.
+
+Free to re-derive, and worth re-deriving before quoting: the numbers are the `model_call` lines with
+`agent: "page"` in `runs-extract-ad3e7a6/logs/<model>__p1-11.jsonl`, summed over
+`input_tokens`, `output_tokens`, `cache_read_input_tokens` and `cache_creation_input_tokens` and
+priced with the bench's own `src/pricing.mjs` against `rates-bedrock.json`. A live deployment reads
+the same four counts per agent out of `by_agent` (§1).
 
 **What this does not establish.** Recall is over 9 scored pages — the two `acir-scan` pages are
 pure scans carrying `truth_words: 0` by design, and every arm produced a judge-rejected page on

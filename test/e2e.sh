@@ -517,6 +517,22 @@ echo "$diag" | jq -e '
   $sc == $ac and $sc == .model_calls.count and $si == $ai and $si == .tokens.input' >/dev/null \
   && pass "by_step and by_agent add up to each other and to the run's totals" \
   || fail "by_step totals" "$(echo "$diag" | jq -c '{by_step,by_agent,tokens}')"
+# WHICH MODEL each agent ran on, on a real run. `providers.per_agent` is the only knob that
+# picks a model, and a key naming no dispatched agent is ignored rather than refused (#310), so
+# a swap that never took effect used to look exactly like a cheaper model that saved nothing:
+# the seven numbers were identical either way. Here, because the whole run goes through the real
+# router, every agent's row has to name the model it was actually called with, and the union
+# over `by_agent` has to be the set of models the run's own call lines carry — a row assembled
+# from anything but those lines could disagree, and that is the failure worth catching.
+logmodels=$(echo "$logs" | jq -s -c '[.[] | select(.type == "model_call") | .model] | unique')
+# `$m` non-empty first, because two empty lists compare equal: a run that made no calls, or a
+# `.model` field that had been renamed away, would otherwise pass this without proving anything.
+echo "$diag" | jq -e --argjson m "$logmodels" '
+  ($m | length) > 0
+  and ([.by_agent[] | .models] | flatten | unique) == $m
+  and ([.by_agent[] | select((.count > 0) and (.models | length) == 0)] | length) == 0' >/dev/null \
+  && pass "every agent's row names the model it ran on ($(echo "$diag" | jq -r '.by_agent | to_entries | map("\(.key)=\(.value.models|join("+"))") | join(", ")'))" \
+  || fail "by_agent models" "$(echo "$diag" | jq -c '.by_agent')"
 
 # Waits for the session to return to ready_for_review after a feedback re-run.
 #

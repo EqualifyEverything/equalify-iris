@@ -107,6 +107,31 @@ test("the real agent prompts clear the bar on the model this repo runs", () => {
   }
 });
 
+test("the model docs/models.md recommends for `page` gets no breakpoint, which is what makes its arithmetic honest", () => {
+  // docs/models.md §2 recommends swapping the page agent to a cheaper model and states that the
+  // −56% is measured against an incumbent whose prompt was 84.8% cache reads — so the breakpoint
+  // this agent loses is INSIDE the published saving rather than a cost on top of it. That
+  // sentence holds only while the recommended id is one this function declines. Teach
+  // `cacheableSystemPrompt` another vendor and the swap keeps its cache, the comparison changes
+  // shape, and the paragraph has to be re-read instead of left standing — which is what this
+  // fails for. Read out of the document so the pin follows the recommendation rather than
+  // naming a model of its own.
+  const doc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "docs", "models.md"), "utf8");
+  const named = doc.match(/^\s*page: \{ provider: \w+, model: (\S+) \}$/m);
+  assert.ok(named, "docs/models.md no longer recommends a `page` model in the shape this reads");
+  const recommended = named[1]!;
+  const page = readAgent("page.md");
+  assert.equal(
+    claudeFamily(recommended),
+    null,
+    `${recommended} now reads as a Claude family, so §2's cache paragraph is describing a different swap`,
+  );
+  assert.equal(cacheableSystemPrompt(recommended, page), false);
+  // And the incumbent it is priced against does get one, or the round was not the comparison
+  // §2 says it was.
+  assert.equal(cacheableSystemPrompt("us.anthropic.claude-sonnet-4-6", page), true);
+});
+
 test("an operator can turn caching off, and only an explicit off counts", () => {
   assert.equal(promptCacheEnabled({}), true);
   assert.equal(promptCacheEnabled({ prompt_cache: true }), true);
