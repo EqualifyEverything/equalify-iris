@@ -619,6 +619,19 @@ test("the delivered marker does not blame the ceiling for a boundary Iris chose"
   assert.match(ceiling, /ceiling partway through/);
   assert.doesNotMatch(ceiling, /set aside here rather than by the ceiling/);
   assert.doesNotMatch(ceiling, /BACKWARDS/);
+  // And where the remainder could not be sectioned at all — `correctBySection` declining it as
+  // indivisible, or as too many sections — the warning still belongs, because the duplicate comes
+  // from the landing edit shipping while the source block keeps what it had. What must not survive
+  // is its reason: nothing was asked for again there, so nothing "saw only the text from that point
+  // on". Same defect as the ceiling wording, one paragraph over.
+  const unsectioned = wrapDocument("<p>body</p>", {
+    editorTruncated: true,
+    editorSalvaged: { edits: 4, blocks: 5, of: 24, cutBack: true },
+  });
+  assert.match(unsectioned, /could not be asked for again a section at a\n {2}time/);
+  assert.match(unsectioned, /content BACKWARDS into the part above/);
+  assert.match(unsectioned, /because nothing read that text\n {2}again at all/);
+  assert.doesNotMatch(unsectioned, /what was asked for\n {2}again saw only/);
   // Both are still the same marker about the same two halves of a document.
   for (const html of [chose, ceiling]) {
     assert.match(html, /@editor-truncated blocks 5 of 24/);

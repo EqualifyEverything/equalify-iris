@@ -2348,7 +2348,11 @@ export async function runReview(
   // And what the truncated reply itself corrected before the ceiling cut it (#295). Read beside
   // `editorSections` everywhere: the sections of a salvaged round are the sections of what this did
   // not cover, so either number alone describes a different round from the one that ran.
-  let editorSalvaged: { edits: number; blocks: number; of: number } | undefined;
+  // `cutBack` is required here rather than optional, and that is the point of stating the type at
+  // all: `wrapDocument` takes it optionally, so a site that rebuilt this literal without it would
+  // deliver the ceiling's wording for a boundary Iris chose, with a clean typecheck. Required, that
+  // is a compile error instead of a marker that lies.
+  let editorSalvaged: { edits: number; blocks: number; of: number; cutBack: boolean } | undefined;
   // The page index is built from the fragments as they entered review. Pages are
   // deliberately NOT re-indexed as the editor rewrites the body: the index exists
   // to attribute content to a SOURCE page, and the source doesn't change.

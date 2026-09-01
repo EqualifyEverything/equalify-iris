@@ -302,12 +302,20 @@ function salvagedNote(
   // The trade, told to the one person who can act on it. Not hedged into the paragraph above,
   // because "may appear twice" is a thing to go and look at rather than a thing to be reassured
   // about, and this marker is the only notice of it: the run itself is over.
+  //
+  // Its last clause is the reason nothing found the duplicate, and there are two of them — the
+  // remainder was asked for again and the request could not see the part above it, or the remainder
+  // could not be asked for again at all. The warning is equally true either way, since a duplicate
+  // comes from the landing edit shipping while the source block keeps what it had; only the
+  // explanation differs, and the sectioned one names a call that on the second route never happened.
   const duplicate = !salvaged.cutBack
     ? ""
     : `  Worth a look, and nothing later in this run could do it: if that change was carrying\n` +
       `  content BACKWARDS into the part above that was kept, then the content is in this document\n` +
-      `  twice — once where it was moved to, once where it started — because what was asked for\n` +
-      `  again saw only the text from that point on and could not know about the copy above it.\n` +
+      `  twice — once where it was moved to, once where it started — because ` +
+      (sections
+        ? `what was asked for\n` + `  again saw only the text from that point on and could not know about the copy above it.\n`
+        : `nothing read that text\n` + `  again at all, and no pass in this run sees the two places at once.\n`) +
       `  Losing that content silently was the alternative, so it was left where it can be seen.\n`;
   return (
     head +
