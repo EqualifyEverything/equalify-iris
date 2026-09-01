@@ -173,8 +173,11 @@ export interface Diagnostics {
     // skip, where those pages were verified and counted in `pages_verified` exactly as they are now.
     //
     // Calls not bought, which is money not spent only where there was a verifier to spend it on: a run
-    // with no Feedback Agent loaded skips the blank page's call too and saves nothing by it, and the
-    // pair that says so is `pages_unjudged == pages_verified`. The flag deliberately does not depend
+    // with no Feedback Agent loaded skips the blank page's call too and saves nothing by it.
+    // `pages_unjudged == pages_verified` is consistent with that run and does not identify it — the
+    // same equality comes out of a run whose verifier loaded and whose every reply failed to parse,
+    // where the calls were bought — so the thing to read is the calls: `by_step.verify.count` below is
+    // 0 where no verdict was bought at all. The flag deliberately does not depend
     // on whether the agent loaded — it would make one field mean two things, and it would put a disk
     // check in the extraction path to decide a label.
     pages_skipped_blank: number;

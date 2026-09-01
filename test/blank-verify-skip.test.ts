@@ -37,6 +37,9 @@ interface Recorded {
   // Every model call, as `${step}:${page}` — the two facts a saving is counted in. `step` and not
   // the agent name: the verify call and the correction recheck are the same agent (#281).
   calls: string[];
+  // The output ceiling each `correct` call asked for, in order. Only the correction is capped
+  // (#285), and on a blank page there is no first pass to take a cap from.
+  caps: (number | undefined)[];
 }
 
 const BLANK = JSON.stringify({ html: "", log: "This page is blank." });
@@ -93,11 +96,12 @@ function makeCtx(
         _agent: string,
         _cap: string,
         messages: { role: string; content: string }[],
-        o: { step: string },
+        o: { step: string; maxOutputTokens?: number },
       ) => {
         const user = messages.find((m) => m.role === "user")?.content ?? "";
         const order = orderOf(user);
         rec.calls.push(`${o.step}:${order}`);
+        if (o.step === "correct") rec.caps.push(o.maxOutputTokens);
         if (user.includes("TASK: verify")) {
           const problems = (opts.problems ?? (() => []))(order);
           return { text: JSON.stringify({ faithful: problems.length === 0, accessible: true, problems }) };
@@ -105,7 +109,10 @@ function makeCtx(
         if (user.includes("had fidelity/accessibility problems")) {
           return { text: (opts.correct ?? ((o2: number) => JSON.stringify({ html: `<p>fixed ${o2}</p>` })))(order) };
         }
-        return { text: render(order) };
+        // `usage` on the render and nowhere else, because the correction's cap is derived from what
+        // the FIRST pass spent (#285): without it every cap is `undefined` for the uninteresting
+        // reason that nothing was measured, and the caps asserted below would say nothing.
+        return { text: render(order), usage: { output_tokens: 40 } };
       },
     },
     log: {
@@ -140,7 +147,7 @@ const fold = (rec: Recorded) =>
 
 test("a page declared blank is not verified, and the run says so rather than reporting a pass", async () => {
   await withTemp(async (dir) => {
-    const rec: Recorded = { events: [], calls: [] };
+    const rec: Recorded = { events: [], calls: [], caps: [] };
     const { fragments } = await runExtraction(makeCtx(dir, rec));
     // The saving: three pages extracted, two verified.
     assert.deepEqual(rec.calls.filter((c) => c.startsWith("extract:")).sort(), ["extract:1", "extract:2", "extract:3"]);
@@ -173,7 +180,7 @@ test("a page declared blank is not verified, and the run says so rather than rep
 
 test("the skipped page is counted, so a saving cannot be read as a broken verifier", async () => {
   await withTemp(async (dir) => {
-    const rec: Recorded = { events: [], calls: [] };
+    const rec: Recorded = { events: [], calls: [], caps: [] };
     await runExtraction(makeCtx(dir, rec));
     const { verification, pages_blank } = fold(rec);
     // A subset of a subset: the blank page is still in `pages_verified`, so the number every
@@ -188,15 +195,18 @@ test("the skipped page is counted, so a saving cannot be read as a broken verifi
     // decision this pipeline made and the other two are a verifier that could not be loaded.
     //
     // So `pages_skipped_blank` is a count of calls not bought, and it is only a count of MONEY not
-    // spent where there was a verifier to spend it on — on this run there was not, and the pair that
-    // says so is `pages_unjudged == pages_verified`. Making the flag conditional on a loaded Feedback
-    // Agent was the alternative and it is worse: it would make the field mean two things at once and
-    // put a disk check in extraction.ts to decide a label.
+    // spent where there was a verifier to spend it on — on this run there was not. The equality
+    // `pages_unjudged == pages_verified` is consistent with that and does not prove it: a run whose
+    // Feedback Agent loaded and whose every verify reply failed to parse produces the same two
+    // numbers with the calls bought and paid for. What settles it is that no verify call was made at
+    // all, which is asserted below and is `by_step.verify` on a real run's diagnostics. Making the
+    // flag conditional on a loaded Feedback Agent was the alternative and it is worse: it would make
+    // the field mean two things at once and put a disk check in extraction.ts to decide a label.
     //
     // Its own directory, not this one: `makeCtx` writes `agents/feedback.md` and cannot unwrite it,
     // so a second context built over the same temp dir would still find the first one's Feedback
     // Agent and verify two of the three pages.
-    const none: Recorded = { events: [], calls: [] };
+    const none: Recorded = { events: [], calls: [], caps: [] };
     await withTemp(async (bare) => runExtraction(makeCtx(bare, none, { feedback: false })));
     const broken = fold(none).verification;
     assert.equal(broken.pages_verified, 3);
@@ -215,7 +225,7 @@ test("a blank page the FILE says has a link on it is still corrected, without th
     // carries a link annotation for it, so the document itself contradicts the declaration. That
     // comparison is exact, costs nothing, and is not the Feedback Agent's to make — it verifies
     // against the IMAGE, where a link target does not appear at all.
-    const rec: Recorded = { events: [], calls: [] };
+    const rec: Recorded = { events: [], calls: [], caps: [] };
     const link: PdfLink = { text: "Annual Report", href: "https://example.gov/report.pdf" };
     const { fragments } = await runExtraction(
       makeCtx(dir, rec, {
@@ -238,6 +248,14 @@ test("a blank page the FILE says has a link on it is still corrected, without th
     // that came back from a wrong blank declaration is the one page here that gets TWO verdicts'
     // worth of scrutiny, and the skip did not reduce it to none.
     assert.equal(rec.calls.includes("recheck_binding:2"), true);
+    // That re-render asks for no output ceiling of its own, and this is the one repair where that
+    // matters. The correction cap is `2x` the first pass with a 4,000-token floor (#285), and a
+    // page declared blank rendered NOTHING: the cap would be the bare floor, about 16,000
+    // characters of HTML on the measured 2.31 chars/token, which is less than one dense page (this
+    // corpus has a 17,721-character one). A truncated reply is discarded, so a cap taken from the
+    // reply that got the page wrong would lose the page in exactly the case the skip above relies
+    // on this repair to catch. A first pass is bounded by the deployment, and this is a first pass.
+    assert.deepEqual(rec.caps, [undefined], "the blank page's re-render is not capped by its own empty render");
   });
 });
 
@@ -246,7 +264,7 @@ test("a page with content on it is verified exactly as it always was", async () 
     // The regression the skip could plausibly cause: `blank` is a flag on a render, and a flag read
     // one page too widely would stop verifying the document. Two of these pages are ordinary and
     // one of them fails its check, which is the path the skip must not touch.
-    const rec: Recorded = { events: [], calls: [] };
+    const rec: Recorded = { events: [], calls: [], caps: [] };
     await runExtraction(
       makeCtx(dir, rec, {
         render: good,
@@ -257,6 +275,10 @@ test("a page with content on it is verified exactly as it always was", async () 
     assert.equal(of(rec, "page_verify_ok").length, 2);
     assert.deepEqual(of(rec, "page_verify_failed").map((e) => e.image), ["page-003.png"]);
     assert.equal(rec.calls.filter((c) => c.startsWith("correct:")).length, 1);
+    // And the other side of the uncapped blank re-render above: an ordinary page's correction is
+    // still capped from its own first pass, which is the whole of #285. Only a page that rendered
+    // nothing is exempt.
+    assert.equal(typeof rec.caps[0], "number", "a page with content still caps its correction");
     const { verification } = fold(rec);
     assert.equal(verification.pages_skipped_blank, 0, "no page was declared blank, so nothing was skipped");
     assert.equal(verification.pages_unjudged, 0);

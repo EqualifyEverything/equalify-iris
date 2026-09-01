@@ -2830,7 +2830,21 @@ async function extractPage(
     // have merged into it since, and it is the pair (tokens, the length they produced) that gives
     // this page its own characters-per-token. Handing the same string as both would make `growth`
     // 1 by definition and quietly delete the term.
-    const ceiling = correctionCeiling({ outputTokens, chars: html.length }, before.length);
+    //
+    // A page that rendered as NOTHING is the one case where the first pass bounds nothing, so it
+    // gets no caller ceiling at all. `correctionCeiling` cannot tell that page apart from a first
+    // pass whose length is merely unknown — both arrive as `chars: 0`, and for an unknown length
+    // scaling by 1 is right — but the caller can, and here the emptiness is a measurement. Such a
+    // page is a page declared blank (nothing else empty survives to a correction), and its
+    // correction is not an edit of a page: it is a re-render of the page from the image, which is a
+    // first pass, and first passes are bounded by the deployment rather than by a caller. Left to
+    // the floor it was 4,000 tokens — roughly 16,000 characters of HTML, where this file's own
+    // worked example of a dense page is 17,721 — so a dense page wrongly declared blank whose file
+    // carries a link annotation would have its one free repair truncated and ship empty. That
+    // repair is the safety net the skip above rests on, so capping it at a bound taken from the
+    // reply that got the page wrong is the wrong side of #285's own argument (the cap exists to
+    // bound a runaway, and this call has nothing to run away from being asked to produce).
+    const ceiling = html === "" ? undefined : correctionCeiling({ outputTokens, chars: html.length }, before.length);
     const attempt = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons, ceiling).then(
       (html) => ({ html, error: null as unknown }),
       (error: unknown) => ({ html: null, error }),
