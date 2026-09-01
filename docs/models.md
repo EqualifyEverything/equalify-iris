@@ -8,9 +8,10 @@ it cost" — the outcome of the model-selection sprint tracked in
 [#311](https://github.com/EqualifyEverything/equalify-iris/issues/311).
 
 Two of the five agents have a cheaper model worth putting on them, and **the two are not the same
-kind of decision**: on `page` the cheaper model measured at-or-better on every axis at once, while
-on `reader` it is a priced trade — 78% of the incumbent's own agreement floor for 77% less money.
-Read §3 before applying the second one. Two agents were left alone for a measured reason worth
+kind of decision**: on `page` the cheaper model measured at-or-better on cost, word recall,
+first-pass rate and three of the judge's four defect kinds (it is `structure_wrong` that is not,
+9 against 7 across 11 pages — §2), while on `reader` it is a priced trade — 78% of the incumbent's
+own agreement floor for 77% less money. Read §2 and §3 before applying either. Two agents were left alone for a measured reason worth
 reading before benchmarking them again, and one has never been measured at all — for a reason that
 is also worth knowing (§4).
 
@@ -23,7 +24,7 @@ design and one is superseded outright — §6 says which. The reference deployme
 
 | agent | share of the model bill | recommendation |
 |---|---|---|
-| `page` | **44.5%** | **swap to `moonshotai.kimi-k2.5`** — no measured quality loss, −56% of this agent's spend |
+| `page` | **44.5%** | **swap to `moonshotai.kimi-k2.5`** — no net quality loss (§2 for the one defect kind that rose), −56% of this agent's spend |
 | `copy_editor` | 25.0% | keep. The wins here were code, not a model |
 | `feedback` | 18.0% | keep. It is the oracle every other number is scored against |
 | `reader` | 12.6% | **swap to `moonshotai.kimi-k2.5`** — 78% of the incumbent's own agreement floor at −77% |
