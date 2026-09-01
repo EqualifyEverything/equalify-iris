@@ -130,6 +130,19 @@ function cutReply(blocks: number[], opts: { closed?: boolean; chars?: number } =
   return new TruncatedResponseError("bedrock", "sonnet", 32_000, text);
 }
 
+// The same reply, with the html of each edit given rather than derived — for the edits `fixed` will
+// not make: an emptied block, and one handed back with less prose in it than it had. Cut inside the
+// entry after the last one named, exactly as `cutReply` cuts, so the two fixtures differ in what the
+// edits SAY and in nothing else.
+function cutReplyOf(entries: { block: number; html: string }[], opts: { closed?: boolean } = {}): TruncatedResponseError {
+  const head = `{"edits":[${entries.map((x) => JSON.stringify(x)).join(",")}`;
+  const next = Math.max(...entries.map((x) => x.block)) + 1;
+  const text = opts.closed
+    ? `${head}],"fidelity_observed":["the table figures are as printed`.padEnd(CHARS, "x")
+    : `${head},{"block":${next},"html":"<p id="p`.padEnd(CHARS, "x");
+  return new TruncatedResponseError("bedrock", "sonnet", 32_000, text);
+}
+
 interface Call {
   agent: string;
   system: string;
@@ -425,37 +438,230 @@ test("a remainder short enough to ask for in one call is asked for in one call",
   });
 });
 
-test("a block that gave content up refuses the whole prefix", async () => {
+// --- the block that gave content up ---
+//
+// The strictest rule here, and the one the contract forces. A MOVE is a pair of edits — the block the
+// content came from and the block it lands in — so a cut between the two halves would take the source
+// half alone and delete content nothing downstream can miss. Under the ordinary contract that fires
+// only where the reply already holds a refusal; here the CUT is the refusal, of everything after it.
+//
+// What it costs is where it changed (#317): the rule ends the claim at that block instead of refusing
+// the reply, because refusing it re-requested every block in sections — 148 of them on the round that
+// filed it — to avoid applying one edit. The two tests below are the two positions the loss can be
+// in, and they are the whole rule: anywhere after the first claimed block there is a prefix to keep,
+// and at the first there is not.
+const emptied = (i: number) => ({ block: i, html: "" });
+// Less prose than the block had, which is `gaveContentUp`'s other case and the one a move actually
+// produces: the block comes back "with what is left of it" rather than empty.
+const shrank = (i: number) => ({ block: i, html: `<p id="p${i + 1}">word${i + 1}</p>` });
+
+for (const [kind, lossy] of [
+  ["emptied", emptied],
+  ["shrunk", shrank],
+] as const) {
+  test(`a block ${kind} before the cut ends the claim there, and the rest is asked for again`, async () => {
+    await withTemp(async (dir) => {
+      // Block 0 corrected by the whole-document call, block 1 losing content, and the cut inside
+      // block 2. So the claim stops at 1: block 0 keeps the stronger call's correction, and block 1
+      // — with whatever a move may have taken out of it still in place — heads the remainder.
+      const { ctx, rec } = ctxWith(dir, { reply: () => cutReplyOf([{ block: 0, html: fixed(0) }, lossy(1)]) });
+      const result = await review(ctx);
+
+      const remainder = BLOCKS.slice(1).map((b) => b.pre + b.html).join("");
+      const salvaged = rec.events.find((e) => e.type === "editor_salvaged");
+      assert.equal(salvaged?.data.reached, 1, "the claim was cut back to the block that lost content");
+      assert.equal(salvaged?.data.lost_at, 1);
+      assert.equal(salvaged?.data.dropped, 1, "the loss-bearing edit is one of the two the reply read");
+      assert.equal(salvaged?.data.edits, 2, "and the line still says how many the reply managed");
+      assert.equal(salvaged?.data.applied, 1);
+      assert.equal(salvaged?.data.rest, remainder.length);
+      assert.equal(rec.events.find((e) => e.type === "editor_salvage_declined"), undefined);
+
+      // The kept half: block 0 carries the whole-document call's own correction.
+      assert.ok(result.body.includes(fixed(0)), "the safe prefix was not applied");
+      // The refused half: block 1 has every word it went in with, which is the point of the rule.
+      // Nothing that came back with less in it reached the document.
+      assert.ok(result.body.includes(PARAS[1]!), "the block that gave content up did not keep its content");
+      if (lossy(1).html !== "") {
+        assert.ok(!result.body.includes(lossy(1).html), "the replacement that gave content up reached the document");
+      }
+
+      // And it is the remainder the section calls are over — from block 1, not from block 2 — so the
+      // block whose edit was dropped is re-corrected by a call that sees it whole.
+      const started = rec.events.find((e) => e.type === "editor_sections");
+      assert.equal(started?.data.covers, "remainder");
+      assert.equal(started?.data.chars, remainder.length);
+      const sections = rec.calls.filter((c) => c.system === EDITOR_SECTION_SYSTEM);
+      assert.equal(sections.length, splitSections(remainder, BUDGET).length);
+      // Never more section calls than refusing the reply outright would have made: the sections are
+      // packed in document order, so a suffix of the body cannot need more of them than the body.
+      // Not FEWER here either, and that is the honest shape of the saving — one block out of 24 does
+      // not move a 10,000-character packing, and a retreat this early is worth the edits it keeps and
+      // nothing more. The fixture at the top of this file is where the count actually falls.
+      assert.ok(sections.length <= splitSections(LONG, BUDGET).length, "a retreat must not cost MORE section calls");
+      assert.match(askedSection(sections[0]!.user).html, /id="p2"/);
+      assert.ok(!askedSection(sections[0]!.user).html.includes(`id="p1"`), "block 0 was paid for twice");
+    });
+  });
+}
+
+test("the claim stops at the FIRST block that lost content, not the last", async () => {
   await withTemp(async (dir) => {
-    // The strictest rule here, and the one the contract forces. A MOVE is a pair of edits — the
-    // block the content came from and the block it lands in — so a cut between the two halves would
-    // take the source half alone and delete content nothing downstream can miss. Under the ordinary
-    // contract that fires only where the reply already holds a refusal; here the CUT is the refusal,
-    // of everything after it, so an emptied block gives up the salvage rather than the content.
-    const emptied = new TruncatedResponseError(
-      "bedrock",
-      "sonnet",
-      32_000,
-      `{"edits":[${JSON.stringify({ block: 0, html: fixed(0) })},{"block":1,"html":""},{"block":2,"html":"<p id="p`.padEnd(
-        CHARS,
-        "x",
-      ),
+    // Two losses, and the reply's other edits on both sides of them. Only the blocks in front of the
+    // earlier one are safe: an edit past it may be the landing half of a move whose source half is
+    // one of the two, and applying it while its pair stays where it is puts the content in twice.
+    const reply = () =>
+      cutReplyOf([{ block: 0, html: fixed(0) }, shrank(3), { block: 5, html: fixed(5) }, emptied(9)]);
+    const { ctx, rec } = ctxWith(dir, { reply });
+    const result = await review(ctx);
+
+    const salvaged = rec.events.find((e) => e.type === "editor_salvaged");
+    assert.equal(salvaged?.data.lost_at, 3);
+    assert.equal(salvaged?.data.reached, 3);
+    assert.equal(salvaged?.data.dropped, 3, "the two losses and the edit between them");
+    assert.equal(salvaged?.data.applied, 1);
+    assert.ok(result.body.includes(fixed(0)), "the one safe edit was not applied");
+    assert.ok(!result.body.includes(shrank(3).html), "a block that gave content up was applied anyway");
+    assert.ok(!result.body.includes(fixed(5)), "an edit past the first loss was applied");
+    for (const i of [3, 5, 9]) {
+      assert.ok(result.body.includes(PARAS[i]!), `block ${i} did not keep the text it went in with`);
+    }
+  });
+});
+
+test("a claim cut back late costs fewer section calls, which is the money in it", async () => {
+  await withTemp(async (dir) => {
+    // #317's shape at this fixture's scale: a reply that walked most of the document and lost content
+    // near the end of what it reached. Refusing it re-requests all 24 blocks; ending the claim at the
+    // loss re-requests 6, and the 18 edits in front of it ship as the whole-document call made them.
+    const named = Array.from({ length: 18 }, (_, i) => ({ block: i, html: fixed(i) }));
+    const { ctx, rec } = ctxWith(dir, { reply: () => cutReplyOf([...named, shrank(18)]) });
+    const result = await review(ctx);
+
+    const remainder = BLOCKS.slice(18).map((b) => b.pre + b.html).join("");
+    const salvaged = rec.events.find((e) => e.type === "editor_salvaged");
+    assert.equal(salvaged?.data.lost_at, 18);
+    assert.equal(salvaged?.data.applied, 18);
+    assert.equal(salvaged?.data.dropped, 1);
+    const sections = rec.calls.filter((c) => c.system === EDITOR_SECTION_SYSTEM);
+    assert.equal(sections.length, splitSections(remainder, BUDGET).length);
+    assert.ok(
+      sections.length < splitSections(LONG, BUDGET).length,
+      `refusing this reply would have made ${splitSections(LONG, BUDGET).length} section calls, this made ${sections.length}`,
     );
-    const { ctx, rec } = ctxWith(dir, { reply: () => emptied });
+    for (const { block } of named) {
+      assert.ok(result.body.includes(fixed(block)), `block ${block}'s own correction is missing`);
+    }
+    assert.ok(result.body.includes(PARAS[18]!), "the block that gave content up did not keep its content");
+  });
+});
+
+test("a COMPLETE patch that lost content is cut back too, and then it does have a remainder", async () => {
+  await withTemp(async (dir) => {
+    // The one shape the retreat changes control flow for: before it, a reply whose edits list closed
+    // covered the document by definition, left `rest` at 0 and made no section call at all. A loss in
+    // it now ends the claim like any other, so a complete patch reaches the section path — and the
+    // document is told it was cut back rather than passed whole, which is the distinction the marker
+    // exists for.
+    const reply = () =>
+      cutReplyOf([{ block: 0, html: fixed(0) }, shrank(10), { block: 20, html: fixed(20) }], { closed: true });
+    const { ctx, rec } = ctxWith(dir, { reply });
+    const result = await review(ctx);
+
+    const remainder = BLOCKS.slice(10).map((b) => b.pre + b.html).join("");
+    const salvaged = rec.events.find((e) => e.type === "editor_salvaged");
+    assert.equal(salvaged?.data.closed, true, "the edits list did finish");
+    assert.equal(salvaged?.data.lost_at, 10);
+    assert.equal(salvaged?.data.reached, 10, "a closed reply's claim is the document, until a loss cuts it");
+    assert.equal(salvaged?.data.dropped, 2);
+    assert.equal(salvaged?.data.rest, remainder.length, "a closed reply with a retreat in it has a remainder");
+    assert.ok(rec.calls.some((c) => c.system === EDITOR_SECTION_SYSTEM), "the remainder was never asked for");
+    assert.equal(rec.events.find((e) => e.type === "editor_sections")?.data.covers, "remainder");
+    // Which the delivered document says in the terms it says everything else: the boundary between
+    // the two kinds of correction, and NOT the sentence a complete patch earns.
+    assert.match(result.html, /@editor-truncated blocks 10 of 24/);
+    assert.doesNotMatch(result.html, /nothing was left to ask/);
+    // And it does not tell this reader the ceiling fell at block 10, which on THIS reply is the one
+    // thing that did not happen there: the edits list ran to the end and closed.
+    assert.match(result.html, /set aside here rather than by the ceiling/);
+    assert.doesNotMatch(result.html, /ceiling partway through/);
+    assert.ok(result.body.includes(fixed(0)));
+    assert.ok(!result.body.includes(fixed(20)), "an edit past the loss was applied");
+    assert.ok(result.body.includes(PARAS[10]!), "the block that gave content up did not keep its content");
+  });
+});
+
+test("the delivered marker does not blame the ceiling for a boundary Iris chose", () => {
+  // The marker is written from `editorSalvaged`, and `blocks` alone cannot tell the two boundaries
+  // apart: on a retreat the reply answered PAST it — as far as the whole document — and Iris stopped
+  // believing it there. A reader told "the answer hit the ceiling partway through" at that block
+  // would go looking for a longer reply that exists, and would not know to look for the duplicate the
+  // rule accepts. Both readings are pinned here because only one of them is a claim about the model.
+  const chose = wrapDocument("<p>body</p>", {
+    editorTruncated: true,
+    editorSalvaged: { edits: 4, blocks: 5, of: 24, cutBack: true },
+    editorSections: { of: 3, corrected: 3 },
+  });
+  assert.match(chose, /set aside here rather than by the ceiling/);
+  assert.match(chose, /taken only as far as that change/);
+  assert.doesNotMatch(chose, /ceiling partway through/);
+  // The trade, in the only place a person who has the document is told about it: the run is over, so
+  // no later pass can find it and no log line reaches them.
+  assert.match(chose, /content BACKWARDS into the part above/);
+  assert.match(chose, /twice — once where it was moved to/);
+  // Where the ceiling really is the boundary, the marker says so and has nothing to warn about: the
+  // reply's edits stop where it stops, so no pair of a move can be split by anything Iris did.
+  const ceiling = wrapDocument("<p>body</p>", {
+    editorTruncated: true,
+    editorSalvaged: { edits: 4, blocks: 5, of: 24, cutBack: false },
+    editorSections: { of: 3, corrected: 3 },
+  });
+  assert.match(ceiling, /ceiling partway through/);
+  assert.doesNotMatch(ceiling, /set aside here rather than by the ceiling/);
+  assert.doesNotMatch(ceiling, /BACKWARDS/);
+  // And where the remainder could not be sectioned at all — `correctBySection` declining it as
+  // indivisible, or as too many sections — the warning still belongs, because the duplicate comes
+  // from the landing edit shipping while the source block keeps what it had. What must not survive
+  // is its reason: nothing was asked for again there, so nothing "saw only the text from that point
+  // on". Same defect as the ceiling wording, one paragraph over.
+  const unsectioned = wrapDocument("<p>body</p>", {
+    editorTruncated: true,
+    editorSalvaged: { edits: 4, blocks: 5, of: 24, cutBack: true },
+  });
+  assert.match(unsectioned, /could not be asked for again a section at a\n {2}time/);
+  assert.match(unsectioned, /content BACKWARDS into the part above/);
+  assert.match(unsectioned, /because nothing read that text\n {2}again at all/);
+  assert.doesNotMatch(unsectioned, /what was asked for\n {2}again saw only/);
+  // Both are still the same marker about the same two halves of a document.
+  for (const html of [chose, ceiling]) {
+    assert.match(html, /@editor-truncated blocks 5 of 24/);
+    assert.match(html, /3 of 3 sections came back corrected/);
+    assert.match(html, /named 4 of them/);
+  }
+});
+
+test("a loss in the first block the reply claimed leaves no prefix to keep", async () => {
+  await withTemp(async (dir) => {
+    // Nothing to retreat TO. The safe part of the claim is empty, so this is the case where the rule
+    // still gives the whole reply up, and the round takes the route it took before any of it existed.
+    const { ctx, rec } = ctxWith(dir, { reply: () => cutReplyOf([emptied(0), { block: 1, html: fixed(1) }]) });
     const result = await review(ctx);
 
     const declined = rec.events.find((e) => e.type === "editor_salvage_declined");
     assert.equal(declined?.data.reason, "loss_before_cut");
+    assert.equal(declined?.data.lost_at, 0);
     assert.equal(declined?.data.deleted, 1);
+    assert.equal(declined?.data.applied, 1, "the counts are the whole claim's, not the retreat's");
     assert.equal(declined?.data.reached, 2);
+    assert.equal(declined?.data.dropped, undefined, "nothing was applied, so nothing is the complement of it");
     assert.equal(rec.events.find((e) => e.type === "editor_salvaged"), undefined);
-    // Which leaves the round exactly where it was before any of this existed: the WHOLE body is
-    // asked for a section at a time, and no block keeps a correction from the refused prefix.
+    // The WHOLE body is asked for a section at a time, and no block keeps a correction from the
+    // refused prefix.
     const started = rec.events.find((e) => e.type === "editor_sections");
     assert.equal(started?.data.chars, LONG.length);
     assert.equal(started?.data.covers, undefined, "an ordinary sectioned round's line is the one it always was");
-    assert.ok(!result.body.includes(fixed(0)), "a refused prefix must not leave half of itself behind");
-    assert.ok(result.body.includes(PARAS[1]!), "the emptied block still has its content");
+    assert.ok(!result.body.includes(fixed(1)), "a refused prefix must not leave part of itself behind");
+    assert.ok(result.body.includes(PARAS[0]!), "the emptied block still has its content");
   });
 });
 

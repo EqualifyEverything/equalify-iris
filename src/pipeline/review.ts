@@ -1278,7 +1278,12 @@ interface EditorRound {
   // rather than folded into `sections`: the corrections in the delivered body came from the round's
   // own answer, at the length that answer was billed for, instead of from calls made afterwards
   // that could see neither the whole document nor its pages.
-  salvaged?: { edits: number; blocks: number; of: number };
+  // `cutBack` is #317's retreat: `blocks` stops where the reply gave content up rather than where
+  // the ceiling stopped it, so the reply itself answered about MORE of the document than `blocks`
+  // says — up to all of it. Only the delivered marker needs the distinction, and it needs it
+  // because the sentence it would otherwise write ("the answer hit the ceiling partway through")
+  // is the one thing that did not happen at that boundary.
+  salvaged?: { edits: number; blocks: number; of: number; cutBack: boolean };
 }
 
 // Under this contract a reply names one block per edit, so counting the key says how many edits the
@@ -1903,9 +1908,32 @@ async function editorSectionCall(
 // cut between the two halves would take the source half alone, which deletes content nothing
 // downstream can miss (`applyEditorPatch`, and #250's `refusal_with_loss`). Under the ordinary
 // contract that rule fires only where the reply already holds a refusal; here the CUT is the
-// refusal, of everything after it, so any block that gave content up refuses the whole salvage.
-// The cost of being wrong about the pairing is what it is there: this round takes the long way
-// round, exactly as it did before this existed.
+// refusal, of everything after it, so a block that gave content up ends the claim there.
+//
+// ENDS it, rather than refusing the whole reply, since #317. That issue's round is what changed it:
+// the salvage fired twice on a 100-page round and declined both times over one block and two, and
+// the fallback then re-requested all 148 and all 132 blocks in 6 and 5 section calls at $0.2243
+// each — while the whole-document reply that had already been paid for held 6 and 7 edits made by a
+// call that could see every block and the page images. Retreating to the first block that gave
+// content up keeps the safety argument above intact and costs nothing extra: the loss-bearing edit
+// is not applied, that block and everything after it become the remainder, and the remainder is
+// asked for by the same section calls that would have covered the whole body anyway — never more of
+// them than before, and fewer whenever the loss is not in the first blocks.
+//
+// What the retreat DOES risk is worth naming, because it is not nothing and nothing in this run
+// takes it back. A move that carries content BACKWARDS — landing half before the cut, source half at
+// or after it — leaves the landing edit applied and the source block untouched, so the content is
+// duplicated rather than lost, and it SHIPS that way: a truncated round is the loop's last round
+// (`lastRound` in `runReview`), so there is no further read and no further document-level call, and
+// the section calls over the remainder are handed the remainder alone, so the section holding the
+// source block cannot know the content is now also in the prefix. What can see it is a feedback
+// re-run (PRD §7.12), which is the user's action and not this loop's.
+//
+// The trade is still the right way round, and this is the whole of the argument for it: a deletion is
+// invisible in the delivered document and permanent, while a duplicate is in the delivered document
+// where a reader, a re-run and the next round of anything can find it. `lost_at` on the log line is
+// what makes the rate countable, since nothing else in the pipeline can say how often a retreat
+// happened — and it is a rate worth watching precisely because the remedy is a re-run.
 //
 // What it returns is the document in two pieces, because the second half of #295 is not to pay for
 // the first half twice: `prefix` is the part of the body the reply reached, corrected, and `rest`
@@ -1917,7 +1945,7 @@ function salvageRound(
   ctx: PipelineContext,
   body: string,
   e: unknown,
-): { prefix: string; rest: string; edits: number; reached: number; of: number } | null {
+): { prefix: string; rest: string; edits: number; reached: number; of: number; lostAt: number | null } | null {
   // Nothing to read: an error that lost its prototype on the way here (see
   // `isTruncatedResponseError`), or a truncation that returned no text at all — which is a real
   // shape, and the one the `EMPTY_REPLY` note on the message is about.
@@ -1944,7 +1972,7 @@ function salvageRound(
     });
     // `body` and not a re-join of `blocks`: the two are the same string by `splitBlocks`'s identity
     // property, and the original is the one nothing can have rounded.
-    return { prefix: body, rest: "", edits: 0, reached: blocks.length, of: blocks.length };
+    return { prefix: body, rest: "", edits: 0, reached: blocks.length, of: blocks.length, lostAt: null };
   }
   // Two different failures, and the log says which: a reply with no edits list in it at all is the
   // model answering in some other shape — the whole document, or prose about the document, which is
@@ -2003,38 +2031,65 @@ function salvageRound(
     });
     return null;
   }
-  const reached = read.closed ? blocks.length : Math.max(...named) + 1;
+  const claimed = read.closed ? blocks.length : Math.max(...named) + 1;
+  // What the reply's own edits do to the blocks it claimed, asked before anything is kept: the
+  // answer decides how much of the claim survives. Applied to a copy that is thrown away when it
+  // does, which costs one join of a body already in memory and is the only way to learn WHERE the
+  // loss is — `gaveContentUp` is a comparison between a block and its replacement, so there is no
+  // reading of the reply alone that could tell.
+  const proposed = applyBlockEdits(blocks.slice(0, claimed), edits);
+  // The move-pair rule above, as a position rather than a veto: the first block that gave content
+  // up is where the claim stops. `null` when none did, and then the claim stands whole.
+  //
+  // The minimum and not the head of the list, because a reply whose edits list CLOSED is under no
+  // ordering obligation — `ordered` is only checked when it did not — so the first block in
+  // document order is not necessarily the first edit that lost something.
+  //
+  // #174's whole-body floor is NOT read here as well, and it is worth saying why rather than leaving
+  // a guard that cannot fire. `shrunk` is `gaveContentUp` on each named block, which is any loss of
+  // visible text at all, and a block nobody named comes back byte for byte — so a prefix that ends
+  // before every block on this list cannot have less text in it than it went in with. The floor is a
+  // halving of the whole; the rule above it is stricter than the floor everywhere the floor could
+  // apply.
+  const lostAt = proposed.lost.length ? Math.min(...proposed.lost) : null;
+  const reached = lostAt ?? claimed;
   // The identity property `splitBlocks` guarantees — every block's `pre` and `html` concatenated is
   // the body, character for character — is what makes this split exact: the tail of the body from
   // the first unreached block is `rest`, and the blocks before it are what the reply was about, put
   // back together the same way (`applyBlockEdits` joins through `joinSections`).
   const rest = blocks.slice(reached).map((b) => b.pre + b.html).join("");
-  const patched = applyBlockEdits(blocks.slice(0, reached), edits);
+  // The retreat re-applies over the shorter prefix rather than trimming the joined body, because the
+  // two are not the same operation: an edit naming a block at or past the cut must not be applied at
+  // all, and `joinSections` has already spliced it in by the time there is a body to trim. Every
+  // edit kept here was applied once already without giving content up, so this pass cannot produce a
+  // `lost` of its own — which is why nothing below re-checks for one.
+  const keep = lostAt === null ? edits : edits.filter((x) => x.block < reached);
+  const patched = lostAt === null ? proposed : applyBlockEdits(blocks.slice(0, reached), keep);
   const used = patched.applied + patched.deleted + patched.unchanged;
   // `unknown` and `unreadable` are 0 by the guard above and are not summed in: a count that cannot
   // be non-zero on this line would read as a claim that it can be.
   const refused = patched.duplicate + patched.incomplete;
-  // Two ways this is given up on, and the second is the move-pair rule above: a block emptied or
-  // handed back with less in it than it had may be the source half of a move whose landing half is
-  // past the cut.
+  // Two ways this is given up on entirely, and they are one condition read against the retreat.
+  // Nothing was applied because every edit was refused for its own reasons — a contradicted block, a
+  // reply ending inside an element — or because the retreat left nothing in front of it to apply:
+  // the loss is in the first block the reply claimed, or in the first one it named. Either way there
+  // is no correction to keep, and covering the blocks would claim an answer nothing was applied to.
   //
-  // #174's whole-body floor is NOT read here as well, and it is worth saying why rather than leaving
-  // a guard that cannot fire. `shrunk` is `gaveContentUp` on each named block, which is any loss of
-  // visible text at all, and a block nobody named comes back byte for byte — so this prefix cannot
-  // have less text in it than it went in with unless one of these two counts is already non-zero.
-  // The floor is a halving of the whole; the rule above it is stricter than the floor everywhere the
-  // floor could apply.
-  const gave = patched.deleted > 0 || patched.shrunk > 0;
-  const declined = used === 0 ? "all_refused" : gave ? "loss_before_cut" : null;
+  // The counts on the line are the WHOLE claim's, not the retreat's, because that is what a reader
+  // told the salvage was abandoned needs: what the reply did to the blocks it reached, and where the
+  // first loss in it was. `dropped` is left off — nothing was applied, so there is no partial
+  // application for it to be the complement of.
+  const declined = used === 0 ? (lostAt === null ? "all_refused" : "loss_before_cut") : null;
   if (declined) {
     ctx.log.event("editor_salvage_declined", {
       reason: declined,
       edits: edits.length,
-      applied: patched.applied,
-      ...(patched.deleted ? { deleted: patched.deleted } : {}),
-      ...(patched.shrunk ? { shrunk: patched.shrunk } : {}),
-      ...(refused ? { refused } : {}),
-      reached,
+      applied: proposed.applied,
+      ...(proposed.deleted ? { deleted: proposed.deleted } : {}),
+      ...(proposed.shrunk ? { shrunk: proposed.shrunk } : {}),
+      ...(proposed.duplicate + proposed.incomplete ? { refused: proposed.duplicate + proposed.incomplete } : {}),
+      ...(lostAt === null ? {} : { lost_at: lostAt }),
+      reached: claimed,
       of: blocks.length,
       chars: e.chars,
     });
@@ -2046,6 +2101,12 @@ function salvageRound(
   // that says whether this is a rescue or a rounding error. `closed` marks the reply whose edits
   // list finished: a complete patch that hit the ceiling on its way out of the envelope, which
   // needs no sections at all.
+  //
+  // `lost_at` and `dropped` are the retreat (#317), present only when there was one: the block the
+  // claim was cut back to, and how many of the reply's edits were left unapplied because they named
+  // it or a block behind it. A `closed` reply with a `lost_at` is the one combination that reads
+  // oddly and is real — the patch was complete and part of it is still being re-asked for — so the
+  // remainder is not empty there and `rest` says so.
   ctx.log.event("editor_salvaged", {
     edits: edits.length,
     applied: patched.applied,
@@ -2054,12 +2115,13 @@ function salvageRound(
     ...(patched.markers ? { markers: patched.markers } : {}),
     ...(Object.keys(patched.navigation_lost).length ? { navigation_lost: patched.navigation_lost } : {}),
     ...(read.closed ? { closed: true } : {}),
+    ...(lostAt === null ? {} : { lost_at: lostAt, dropped: edits.length - keep.length }),
     reached,
     of: blocks.length,
     chars: e.chars,
     rest: rest.length,
   });
-  return { prefix: patched.body, rest, edits: used, reached, of: blocks.length };
+  return { prefix: patched.body, rest, edits: used, reached, of: blocks.length, lostAt };
 }
 
 // The round again, a section at a time, after the answer did not fit.
@@ -2226,7 +2288,10 @@ async function sectionRound(
       // The editor said something usable about this document, and it is in the delivered body.
       usable: true,
       truncated: true,
-      salvaged: { edits: rescued.edits, blocks: rescued.reached, of: rescued.of },
+      // `cutBack` travels with it because the delivered marker is written from this and would
+      // otherwise blame the ceiling for a boundary Iris chose (`salvagedNote`): on a retreat the
+      // reply reached FURTHER than `blocks` says, and on a `closed` retreat it reached the end.
+      salvaged: { edits: rescued.edits, blocks: rescued.reached, of: rescued.of, cutBack: rescued.lostAt !== null },
       ...(sectioned ? { sections: { of: sectioned.of, corrected: sectioned.corrected } } : {}),
     };
   }
@@ -2283,7 +2348,11 @@ export async function runReview(
   // And what the truncated reply itself corrected before the ceiling cut it (#295). Read beside
   // `editorSections` everywhere: the sections of a salvaged round are the sections of what this did
   // not cover, so either number alone describes a different round from the one that ran.
-  let editorSalvaged: { edits: number; blocks: number; of: number } | undefined;
+  // `cutBack` is required here rather than optional, and that is the point of stating the type at
+  // all: `wrapDocument` takes it optionally, so a site that rebuilt this literal without it would
+  // deliver the ceiling's wording for a boundary Iris chose, with a clean typecheck. Required, that
+  // is a compile error instead of a marker that lies.
+  let editorSalvaged: { edits: number; blocks: number; of: number; cutBack: boolean } | undefined;
   // The page index is built from the fragments as they entered review. Pages are
   // deliberately NOT re-indexed as the editor rewrites the body: the index exists
   // to attribute content to a SOURCE page, and the source doesn't change.

@@ -244,7 +244,19 @@ export function bodyLang(body: string): string | null {
 // remainder by construction (`salvageRound`'s closed-empty return, where `used === 0` on the ordinary
 // path is `all_refused` and declines) — but a zero-edit prefix with a corrected tail would be a
 // document this paragraph describes wrongly, and the three paragraphs below describe it correctly.
-function salvagedNote(salvaged: { edits: number; blocks: number; of: number }, sections?: { of: number; corrected: number }): string {
+//
+// `cutBack` (#317) changes the FIRST paragraph, because on a retreat the boundary is not the
+// ceiling's. The reply answered past `blocks` — possibly to the end of the document, where its edits
+// list closed — and Iris stopped there instead, at the first change that would have taken content
+// out of a block. "The answer hit the ceiling partway through" is then the one thing that did not
+// happen at that point, which is the same distinction the zero-edit paragraph above exists to make.
+// It also earns a fourth paragraph: the trade the retreat accepts is a possible DUPLICATE, and this
+// marker is the only place a person reading the document is told where to look for one, since no
+// later pass in the run can see it (`salvageRound`, PRD §7.11 v1.11).
+function salvagedNote(
+  salvaged: { edits: number; blocks: number; of: number; cutBack?: boolean },
+  sections?: { of: number; corrected: number },
+): string {
   const head = `\n<!-- @editor-truncated blocks ${salvaged.blocks} of ${salvaged.of}`;
   if (salvaged.edits === 0 && !sections) {
     return (
@@ -261,12 +273,21 @@ function salvagedNote(salvaged: { edits: number; blocks: number; of: number }, s
       `  for the ceiling and the size of the response.\n-->`
     );
   }
-  const opening =
-    `  A correction round could not be completed in one response: the copy editor is asked for\n` +
-    `  the whole document, and the answer hit the model's output ceiling partway through. What it\n` +
-    `  had already said was read and kept: it answered about the first ${salvaged.blocks} of this\n` +
-    `  document's ${salvaged.of} top-level blocks and named ${salvaged.edits} of them, with the whole document\n` +
-    `  in view.\n`;
+  const opening = salvaged.cutBack
+    ? `  A correction round could not be completed in one response: the copy editor is asked for\n` +
+      `  the whole document, and the answer hit the model's output ceiling. What it had already\n` +
+      `  said was read, and then part of that was set aside here rather than by the ceiling: its\n` +
+      `  next change would have left one of this document's blocks holding less than it came in\n` +
+      `  with, which is also how the first half of a MOVE looks once the ceiling has cut off the\n` +
+      `  half that puts the content back. Rather than drop text on that reading, the round was\n` +
+      `  taken only as far as that change: it answered about the first ${salvaged.blocks} of this\n` +
+      `  document's ${salvaged.of} top-level blocks and named ${salvaged.edits} of them, with the whole document\n` +
+      `  in view.\n`
+    : `  A correction round could not be completed in one response: the copy editor is asked for\n` +
+      `  the whole document, and the answer hit the model's output ceiling partway through. What it\n` +
+      `  had already said was read and kept: it answered about the first ${salvaged.blocks} of this\n` +
+      `  document's ${salvaged.of} top-level blocks and named ${salvaged.edits} of them, with the whole document\n` +
+      `  in view.\n`;
   const rest =
     salvaged.blocks >= salvaged.of
       ? `  The reply named its last block before the ceiling cut it, so nothing was left to ask\n` +
@@ -278,11 +299,30 @@ function salvagedNote(salvaged: { edits: number; blocks: number; of: number }, s
           `  section that did not come back is the text that entered the round.\n`
         : `  The remaining ${salvaged.of - salvaged.blocks} blocks could not be asked for again a section at a\n` +
           `  time, so they are the text that entered the round, uncorrected.\n`;
+  // The trade, told to the one person who can act on it. Not hedged into the paragraph above,
+  // because "may appear twice" is a thing to go and look at rather than a thing to be reassured
+  // about, and this marker is the only notice of it: the run itself is over.
+  //
+  // Its last clause is the reason nothing found the duplicate, and there are two of them — the
+  // remainder was asked for again and the request could not see the part above it, or the remainder
+  // could not be asked for again at all. The warning is equally true either way, since a duplicate
+  // comes from the landing edit shipping while the source block keeps what it had; only the
+  // explanation differs, and the sectioned one names a call that on the second route never happened.
+  const duplicate = !salvaged.cutBack
+    ? ""
+    : `  Worth a look, and nothing later in this run could do it: if that change was carrying\n` +
+      `  content BACKWARDS into the part above that was kept, then the content is in this document\n` +
+      `  twice — once where it was moved to, once where it started — because ` +
+      (sections
+        ? `what was asked for\n` + `  again saw only the text from that point on and could not know about the copy above it.\n`
+        : `nothing read that text\n` + `  again at all, and no pass in this run sees the two places at once.\n`) +
+      `  Losing that content silently was the alternative, so it was left where it can be seen.\n`;
   return (
     head +
     `\n` +
     opening +
     rest +
+    duplicate +
     `  The review loop then stopped, so any issues listed below are the ones found BEFORE all of\n` +
     `  this and were not looked for again; some may already be fixed. See the run log\n` +
     `  (editor_truncated, editor_salvaged, editor_sections) for the ceiling, the size of the\n` +
@@ -322,7 +362,9 @@ function salvagedNote(salvaged: { edits: number; blocks: number; of: number }, s
 // the sections of what was LEFT, not of the document. Said as blocks because that is the unit the
 // editor answers in: `blocks 17 of 24` is where the reply stopped, and it is also the boundary
 // between the two kinds of correction in the document below, which is the thing a reader chasing a
-// problem across it needs to know.
+// problem across it needs to know. `cutBack` says that boundary was Iris's and not the ceiling's
+// (#317) — the reply answered further and was believed only this far — which the marker has to say
+// out loud, since a reader told the ceiling stopped it there would go looking for a longer reply.
 // `lintUnavailable` is the fourth statement of the same kind, and the one that is about
 // the CHECKING rather than about the content: axe-core could not run on this document, so
 // nothing here has been through the accessibility gate at all. It belongs in the document
@@ -343,7 +385,7 @@ export function wrapDocument(
     failedPages?: number[];
     editorTruncated?: boolean;
     editorSections?: { of: number; corrected: number };
-    editorSalvaged?: { edits: number; blocks: number; of: number };
+    editorSalvaged?: { edits: number; blocks: number; of: number; cutBack?: boolean };
     lintUnavailable?: string;
     reviewUnread?: { windows: number; of: number };
   } = {},
