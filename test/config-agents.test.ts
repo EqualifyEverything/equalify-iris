@@ -207,16 +207,26 @@ test("every per_agent key any example names is an agent Iris dispatches", () => 
       const indent = b[1]!.length;
       const commented = Boolean(b[2]);
       for (const raw of lines.slice(i + 1)) {
-        if (raw.trim() === "") continue;
-        // Commentedness has to match: a `#` line under a live key is prose about the block,
-        // not an entry in it (prd.md's "# everything else uses default").
+        // A COMMENTED block is the contiguous run of comment lines, because that run is what
+        // an operator uncomments as a unit — so prose inside it is skipped rather than ending
+        // the block, and only a blank line or live YAML closes it. config.example.yaml's block
+        // ends with three prose lines about `copy_editor`, and an entry written after that
+        // paragraph is still an entry the operator would uncomment; stopping at the prose would
+        // leave it unchecked while this test passed.
+        //
+        // A LIVE block is stricter: real YAML cannot put prose between two entries, so the
+        // first line that is not an entry ends it (prd.md's `# everything else uses default`
+        // is a comment about the block, not a member of it).
         const isComment = /^\s*#/.test(raw);
-        if (isComment !== commented) break;
+        if (commented) {
+          if (!isComment) break;
+        } else if (raw.trim() === "" || isComment) break;
         const line = commented ? raw.replace(/^(\s*)#\s?/, "$1") : raw;
         const m = line.match(/^(\s+)([A-Za-z_][A-Za-z0-9_]*)\s*:/);
-        // Anything at or above the key's own indent has left the block, and prose under it
-        // does not parse as `key:` at all.
-        if (!m || m[1]!.length <= indent) break;
+        if (m === null || m[1]!.length <= indent) {
+          if (commented) continue;
+          break;
+        }
         found++;
         assert.ok(
           known.has(m[2]!),
