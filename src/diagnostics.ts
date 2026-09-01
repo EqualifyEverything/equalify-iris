@@ -267,11 +267,18 @@ export interface Diagnostics {
     // discarding it would ship the fragment that already failed the same verifier.
     results: { kept: number; rejected: number; identical: number; empty: number; failed: number };
     // Why each correction ran: `verify` is a page the Feedback Agent rejected, `links` is a
-    // page that passed and lost a link the code found in the PDF, `both` is one that did
-    // each. These are the split that makes `corrections` readable as a bill — a `links`
-    // correction is a page call with no verify failure behind it, so a consumer reading
-    // `verify_failed` as the number of extra page calls undercounts by `links`.
-    triggers: { verify: number; links: number; both: number };
+    // page that passed and lost a link the code found in the PDF, `alt` is a page that passed
+    // and described an image with a placeholder instead of a description (pipeline/alt.ts,
+    // #290), and `both` is one with more than one of those. These are the split that makes
+    // `corrections` readable as a bill — a `links` or `alt` correction is a page call with no
+    // verify failure behind it, so a consumer reading `verify_failed` as the number of extra
+    // page calls undercounts by both of them.
+    //
+    // `alt` is expected to be 0 on a healthy run, and that is the point of counting it: the
+    // rule flags nothing in Iris's own output (0 of 1,064 alts across the bench corpus), so a
+    // non-zero here is either a page agent that has started writing placeholders or a
+    // regression in the rule, and both are worth a look. It is not a cost line at that rate.
+    triggers: { verify: number; links: number; alt: number; both: number };
     // What the corrections that DID change something changed, as observed on the two
     // fragments rather than claimed by the verdict (pipeline/correction.ts). Not a
     // partition: a re-render that rebuilds a table counts under both `text` and
@@ -467,8 +474,10 @@ function parse(logText: string): LogEvent[] {
 // attributed to nothing rather than inventing a bucket for it.
 const CORRECTION_RESULTS = ["kept", "rejected", "identical", "empty", "failed"] as const;
 
-// And why it ran. A closed list for the same reason, and read off the same event.
-const CORRECTION_TRIGGERS = ["verify", "links", "both"] as const;
+// And why it ran. A closed list for the same reason, and read off the same event. `alt` since
+// #290; `both` has always meant more than one source, so adding a third source does not change
+// what an old log's `both` counted.
+const CORRECTION_TRIGGERS = ["verify", "links", "alt", "both"] as const;
 
 // What the Feedback Agent said was wrong with a page (`page_verify_failed`'s `kinds`).
 // Declared here rather than imported from pipeline/feedback.ts, like the two lists above
@@ -779,7 +788,7 @@ export function summarizeRun(
     },
     corrections: 0,
     results: { kept: 0, rejected: 0, identical: 0, empty: 0, failed: 0 },
-    triggers: { verify: 0, links: 0, both: 0 },
+    triggers: { verify: 0, links: 0, alt: 0, both: 0 },
     effects: { alt_only: 0, text: 0, attrs: 0, structure: 0, text_grew: 0, text_shrank: 0 },
     rechecks: {
       sampled: 0,

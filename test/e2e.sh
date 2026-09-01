@@ -351,6 +351,17 @@ echo "$xs" | jq -e '.recheck_sample_size == 1 and (.recheck_thresholds | length)
   && pass "one slot, on a page of this batch (threshold $(echo "$xs" | jq -r '.recheck_thresholds[0]') of $(echo "$xs" | jq -r '.pages'))" \
   || fail "recheck sample" "$xs"
 
+# The generic-alt rule over what shipped (#290). This is the signal whose absence is least
+# readable of any in the pipeline: it is expected to find NOTHING, so a rule that silently stopped
+# running and a document with no placeholder in it produce the same log. Hence the denominator —
+# each mock page carries one real description and one decorative `alt=""`, so a run that checked
+# every page reads 3, a run that checked one reads 1, and a rule that never ran reads 0. The
+# empty alt must stay out of that count: it is a decision, not a missing description.
+xc=$(echo "$logs" | jq -c 'select(.type == "extraction_complete")')
+echo "$xc" | jq -e '.alts_checked == 3 and .alts_generic == 0' >/dev/null \
+  && pass "every page's alt text was checked and none of it is a placeholder ($(echo "$xc" | jq -r '.alts_generic') of $(echo "$xc" | jq -r '.alts_checked'))" \
+  || fail "generic alt" "$xc"
+
 # The in-document references in what shipped (#234). Every page's mock output links to
 # #appendix-a and no page defines it, so this asserts the whole measurement path — the
 # check runs on the delivered bytes, the event carries both units, and the ids are the
