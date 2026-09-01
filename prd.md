@@ -1152,8 +1152,8 @@ Example deployment config (`config.yaml`) — this illustrates the *shape* of th
 providers:
   default: openrouter
   per_agent:
-    image_analysis: bedrock      # specific provider for the triage agent
-    table: openrouter
+    page: bedrock                # one agent on the other provider, at ITS model
+    copy_editor: openrouter
     # everything else uses default
 
 openrouter:
@@ -1167,6 +1167,8 @@ bedrock:
   region: us-east-2
   default_model: us.anthropic.claude-sonnet-4-6
 ```
+
+**Amended (v1.1): the keys under `per_agent` are the agents Iris dispatches, and an entry naming anything else is ignored.** The block above illustrates which keys exist, and it named two that do not — both of them relics of the per-content-type fan-out the v1.2 amendment to §7.4 withdrew, and each stale in a different way. `image_analysis` was real: it was the triage agent's name (`src/pipeline/triage.ts`), and it went when that file did. `table` never was — no call site has ever dispatched it, so it was a key from the withdrawn diagram rather than one that stopped working. Both readings of the block promise a lever that is not there, and the second is the more inviting of the two: `config.example.yaml` offered a commented `table:` line described as the way to put a stronger model on the table join, and the merge of a table split across a page break is a **Copy Editor** call (§7.9), sharing that agent's entry with the review round — so the join has no line of its own and the two cannot be put on different models. Neither file was corrected when the fan-out went, because nothing checks a key here against a call site: `resolveAgentModel` looks an override up by agent name and, finding none, falls back through the provider's `per_capability` to its `default_model`, so an unrecognized name is not an error and produces no line anywhere — the calls go out on the model they would have used anyway. That is the one failure mode this key has, and it is invisible in exactly the way that matters, since a model that was never swapped is indistinguishable in the logs, the costs and `by_agent` from one that was. The agents dispatched today are `page`, `reader`, `copy_editor`, `feedback` and `builder`, plus any specialist the page agent names, whose name is the file stem of a `.md` in `agents_dir` (§7.4 v1.2) and so cannot be enumerated in advance. Startup therefore **warns** rather than refusing, naming the keys it cannot route and listing the ones it can.
 
 The system reads this config at startup; changes require a restart in v1. Hot-reload is out of scope.
 

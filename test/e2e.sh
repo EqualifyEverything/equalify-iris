@@ -91,6 +91,17 @@ providers:
       vision: mock-model
       structured_output: mock-model
       text: mock-model
+  # Three overrides that all resolve to the same mock model, so none of them changes what
+  # this script exercises. They are here for the boot check in step 1a, one per way a key
+  # can be judged: \`reader\` is dispatched from a call site, \`chartDataAgent\` is routable
+  # only because a file of that name is in \`agents_dir\`, and \`table\` is neither. Nothing
+  # else distinguishes them — same provider, same model, no error, no log line, nothing in
+  # \`by_agent\` — which is the defect this is guarding. The specialist earns its line: it
+  # is what fails if the boot check is handed some other readable directory.
+  per_agent:
+    reader: openrouter
+    chartDataAgent: openrouter
+    table: openrouter
 defaults:
   max_review_iterations: 1
   extraction_concurrency: 4
@@ -136,6 +147,44 @@ Raise BOOT_TIMEOUT if this runner is just slow."
 fi
 curl -sf "$BASE/health" | jq -e '.status=="ok"' >/dev/null \
   && pass "health ok (booted in ${boot_elapsed}s)" || fail "health" "no ok"
+
+echo "==> 1a. a per_agent key naming no agent is reported at boot"
+# The config above puts `table:` under `providers.per_agent`. Nothing dispatches that name,
+# so `resolveAgentModel` finds no override and the call takes the provider's own model: the
+# run succeeds, costs what it would have cost, and no request-time signal anywhere says the
+# swap did not happen. Startup is the only place it can be said, and this is the only test
+# that boots the real server to hear it — the unit tests call `perAgentKeyWarning` directly,
+# which cannot catch src/index.ts handing it the wrong directory (a mistake that typechecks
+# and silently disarms the warning for every deployment).
+#
+# Both halves read the KEY LIST rather than the whole log or the whole warning line: the
+# sentence goes on to name every routable agent as the way out, so `reader` appears in it
+# legitimately. The keys are the quoted names before "which Iris does not", and nothing is
+# assumed about their order.
+#
+# `|| true` because the missing warning is the regression this step exists to report: under
+# `set -euo pipefail` a grep that matches nothing makes the assignment fail, and the script
+# would exit here with no ✗ line, no server log dumped (`fail` is its only caller) and every
+# later step's result lost — an unexplained early exit instead of this check failing. Same
+# reason as the `if grep` at the alt-text step below.
+named=$(grep 'per_agent names' "$LOG" | sed 's/, which Iris does not.*//' || true)
+case "$named" in
+  *'"table"'*) pass "boot names the unroutable key" ;;
+  *) fail "per_agent warning" \
+       "nothing in $LOG reports \"table\" as a key Iris cannot route. Line: ${named:-<none>}" ;;
+esac
+# And the routable keys are not reported as broken, or the warning is noise on every boot.
+for agent in reader chartDataAgent; do
+  case "$named" in
+    *"\"$agent\""*)
+      fail "per_agent warning" \
+        "boot reported \"$agent\" as unroutable; this deployment can route it. Line: $named" ;;
+  esac
+done
+# chartDataAgent is routable only via agents_dir, so this pair is also what proves src/index.ts
+# passes the agents directory: any other readable path resolves the same table warning while
+# calling the shipped specialist an unknown agent.
+pass "the agents it can route are not named among them"
 
 echo "==> 1b. GET /v1/limits (what an upload may be, no token)"
 # Deliberately WITHOUT "${AUTH[@]}": the browser app states the file limits on its

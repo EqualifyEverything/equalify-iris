@@ -8,6 +8,7 @@ import {
   bundledAppWarning,
   clientIdWarning,
   loadConfig,
+  perAgentKeyWarning,
   promptCacheTtlWarning,
 } from "./config.ts";
 import { Store } from "./store/db.ts";
@@ -43,6 +44,12 @@ if (ttlWarning) console.warn(`WARNING: ${ttlWarning}`);
 // only symptom is that the deployment is on the path it was trying to leave.
 const apiWarning = bedrockApiWarning(cfg.providers);
 if (apiWarning) console.warn(`WARNING: ${apiWarning}`);
+
+// And an override that names no agent, which is the same failure on the one key that
+// decides which model runs: the entry is ignored, the call takes the provider's own model,
+// and a model that was never swapped is indistinguishable from one that was.
+const agentKeyWarning = perAgentKeyWarning(cfg.providers.per_agent, cfg.storage.agents_dir);
+if (agentKeyWarning) console.warn(`WARNING: ${agentKeyWarning}`);
 
 // What that switch made reachable: a vision model this build has no image limits for.
 // Everything still runs, on the conservative defaults — but the limits it publishes are

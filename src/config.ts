@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import { parse } from "yaml";
 // Type-only: config decides what `trust proxy` becomes, and applyTrustProxy below has to
 // hand it to the app to find out whether Express will take it.
@@ -542,6 +542,88 @@ export function bedrockApiWarning(providers: IrisConfig["providers"]): string | 
     `Nothing downstream will report that: both APIs return the same text through the same ` +
     `interface, so a deployment that meant to be testing ConverseStream would be measuring ` +
     `the path it already had.`
+  );
+}
+
+// The agents `providers.per_agent` can actually route, as literals, because config cannot
+// read the call sites that dispatch them. Each one is the first argument of a
+// `router.complete` call: `page` (extraction's extract, correct and specialist-merge
+// passes), `reader` and `copy_editor` (the review round, and the table join, which shares
+// the copy editor's entry), `feedback` (every verify, recheck and feedback-round call) and
+// `builder` (drafting a specialist agent for a contribution).
+//
+// A hand list in a file that cannot check itself, so test/config-agents.test.ts derives the
+// same set from the `router.complete` call sites in src/ and fails if the two disagree.
+// That is the coupling worth pinning: the list going stale is how the examples this warning
+// exists to catch went wrong in the first place.
+const DISPATCHED_AGENTS = ["page", "reader", "copy_editor", "feedback", "builder"] as const;
+
+// A boot-time warning for a `providers.per_agent` key that names no agent Iris dispatches.
+//
+// The same asymmetry as the two warnings above, and the most expensive instance of it,
+// because this key is the whole model-selection surface: an unrecognized agent name is
+// ignored and every call falls through the ordinary chain to the provider's own model, so
+// an operator who wrote one gets the deployment they already had. Nothing downstream says
+// so. `by_agent` reports the agents that ran, never the override that did not match one,
+// and the run costs and succeeds — the failure is a model that was not swapped, which
+// looks exactly like a model that was.
+//
+// It is how `config.example.yaml` came to invite `table:` and prd.md §10.3 to show
+// `image_analysis:` — both relics of the per-content-type fan-out prd.md §7.4 v1.2
+// withdrew, and stale in different ways: `image_analysis` was the triage agent and went
+// with `pipeline/triage.ts`, while `table` was never dispatched by anything. The table
+// join in particular reads as though it has its own line, and it does not: it is a
+// `copy_editor` call (pipeline/tables.ts), so the join and the review round cannot be put
+// on different models. An example is where an operator starts, and both were no-ops.
+//
+// Warned rather than refused, and the reason is the specialist path: `loadAgent` takes an
+// agent's name from the basename of any `.md` in `agents_dir`, which is a git checkout
+// that gains files from upstream, and extraction dispatches one by name off a page's
+// `suggested_agent`. So the set of valid keys is open, and this reads the directory to
+// find today's members rather than pretending five names is all of them. An unreadable
+// or unconfigured `agents_dir` warns about nothing: the directory is the more likely
+// thing to be wrong, and a warning naming every agent as unknown would be noise.
+export function perAgentKeyWarning(
+  perAgent: IrisConfig["providers"]["per_agent"],
+  agentsDir: string,
+): string | undefined {
+  const keys = Object.keys(perAgent ?? {});
+  if (keys.length === 0) return undefined;
+
+  const known = new Set<string>(DISPATCHED_AGENTS);
+  let library: string[] = [];
+  try {
+    library = readdirSync(agentsDir)
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => basename(f, ".md"));
+  } catch {
+    return undefined; // no readable agents dir — see above
+  }
+  for (const name of library) known.add(name);
+
+  const unknown = keys.filter((k) => !known.has(k));
+  if (unknown.length === 0) return undefined;
+
+  // The two routable sets are named separately rather than as one list with a tail clause,
+  // because the whole question this sentence answers is whether a name came from the code or
+  // from a directory the operator controls — and any single list has to be sorted, which puts
+  // a specialist wherever its name happens to fall.
+  const dispatched = new Set<string>(DISPATCHED_AGENTS);
+  const specialists = [...new Set(library.filter((n) => !dispatched.has(n)))].sort();
+  const where = `, and any agent file in ${agentsDir} (${
+    specialists.length > 0 ? `currently ${specialists.join(", ")}` : "which currently holds none"
+  })`;
+  return (
+    `providers.per_agent names ${unknown.map((k) => `"${k}"`).join(", ")}, which Iris does not ` +
+    `dispatch. Those entries are ignored: the calls fall through to the provider's own model, so ` +
+    `the swap they were written for does not happen and no log line reports that it did not. ` +
+    `The agents this deployment can route are ${DISPATCHED_AGENTS.join(", ")}${where}.` +
+    // Only where it answers the key in hand. Said unconditionally it is a sentence about
+    // tables attached to a typo.
+    (unknown.includes("table")
+      ? ` There is no table agent: joining a table split across a page break is a copy_editor ` +
+        `call, and it shares that agent's entry with the review round.`
+      : "")
   );
 }
 

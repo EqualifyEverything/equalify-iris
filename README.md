@@ -109,6 +109,17 @@ from the environment at startup; changes require a restart.
   set per provider (`default_model` + `per_capability`), and can be overridden **per agent** via
   `providers.per_agent` — either a string (provider only) or `{ provider, model }`. Resolution
   falls back: per-agent model → provider `per_capability` → provider `default_model`.
+  **The key has to be an agent Iris dispatches, and getting it wrong is silent**: an
+  unrecognized name simply finds no override and takes that same fallback, so the swap does
+  not happen, the run succeeds, and nothing in the logs or in `by_agent` distinguishes a
+  model that was never changed from one that was. The agents are `page`, `reader`,
+  `copy_editor`, `feedback`, `builder`, and any specialist file in `agents/`; there is no
+  `table` key, because joining a table split across a page break is a `copy_editor` call and
+  shares that agent's entry with the review round. Boot warns about a key it cannot route
+  (`perAgentKeyWarning`), which is the only place it can be said — both of this repo's own
+  example configs had carried an unroutable key, `config.example.yaml` a `table` no call site
+  has ever dispatched and prd.md §10.3 an `image_analysis` that went with the triage step it
+  named.
   Each provider also takes `max_tokens` (default 32000), the per-call **output** ceiling. A
   response that stops at the ceiling is a **failed** call, not a short one: it arrives as a 200
   with HTML cut mid-tag, which would otherwise be assembled into the deliverable as if it were
