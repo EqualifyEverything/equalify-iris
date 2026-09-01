@@ -891,27 +891,38 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   model reported as content lost. Both prohibitions were written because a Reader swap is a live
   option and this is how a prompt that misleads the field goes unnoticed — but not because the risk
   belongs to the cheaper model, which is what the measurement below took away.
-  **The incumbent is not exempt, and reading it as exempt is what one run of a noisy behaviour
-  looks like.** Re-measured on a sha that already contains this paragraph, over 20
-  documents (18 of them long enough to be windowed, 45 windows) and two runs of the identical
-  prompt, violations per multi-window document: **`gpt-5.6-luna` 0.00** (0 and 0), **the incumbent
-  `claude-sonnet-4-6` 0.03** (0 then 1), **`kimi-k2.5` 0.25** (6 then 3), **`claude-haiku-4-5`
-  0.31** (6 then 5). One violation against eleven over the same 36 document-runs, on models given
-  the same instruction. Stated as counts and not as a ratio, because the incumbent's is 1: a single
-  run cannot tell 0 from 1, and #274's "0 of 197" is therefore a sample rather than a property.
-  The behaviour is not equally noisy across models — Haiku reproduces itself closely (6 and 5, and
-  the cut edge is the shape both times), while Kimi's own spread, 6 to 3, is larger than the
-  incumbent's entire count. Four more models file 0 violations and never mention a window at all,
-  on one run each: `pixtral-large-2502` (231 issues), `gemma-3-27b-it` (111), `nova-2-lite` (75),
-  `qwen3-vl` (11). Read the last two as silence rather than compliance, but `pixtral-large` files
-  more issues than the incumbent's 187 in the same round, so it is a second credible zero on half
-  the evidence. **Compliance does not track price, in either direction**, which is the part to
-  carry into a swap: over the same two rounds Luna costs **$0.0196** per document at 0.00,
-  `kimi-k2.5` **$0.0218** at 0.25, `claude-haiku-4-5` **$0.0370** at 0.31 — the worst violator, at
-  a third of the incumbent's price — and the incumbent **$0.1057** at 0.03, while `pixtral-large`
-  files 0 at **$0.0721**, dearer than Haiku on one round, its price as much a single sample as its
-  zero. So "a cheaper Reader is the risk" is not the rule and neither is its inverse; the number has
-  to be measured per candidate (#301).
+  **The incumbent is not exempt — and one pair of runs locates a model, it does not give it a
+  rate.** Violations per multi-window document over 20 documents (18 of them long enough to be
+  windowed, 45 windows) and two runs of the identical prompt, measured at both Reader prompts this
+  repo has shipped: `158e3d9`, and the current `e842faa`, whose *Reader prompt* differs from it only
+  by the appended sentence in the bullet below (the builds are four commits apart; the provenance
+  paragraph below says why that does not reach these figures). **At `158e3d9`:** `gpt-5.6-luna` **0.00** (0 and 0), the incumbent
+  `claude-sonnet-4-6` **0.03** (0 then 1), `kimi-k2.5` **0.25** (6 then 3), `claude-haiku-4-5`
+  **0.31** (6 then 5). **At `e842faa`,** same corpus and same design: Luna **0.00** (0 and 0), the
+  incumbent **0.14** (4 then 1), Kimi **0.08** (1 then 2), Haiku **0.28** (5 then 5). The thesis is
+  stronger at the shipped prompt — the incumbent is second-worst of four rather than nearly clean —
+  but the arithmetic that carried it is gone: it is five violations against thirteen over the same
+  36 document-runs, and the incumbent's five is *more* than Kimi's three (#308).
+  **The prompt change is not the lever, which is what four models measured at both shas are for.**
+  All four were given the same appended sentence. The incumbent rose by four violations, Kimi fell
+  by six, Haiku fell by one and Luna did not move. There is no common direction, and every per-model shift is
+  the size of that model's own spread between two runs of the *identical* prompt: Kimi's two runs at
+  `158e3d9` differ by 3 violations, the incumbent's two at `e842faa` by 3. So a pair of runs resolves
+  a model to within a few events on 18 windowed documents, and no more than that — which is also why
+  #274's "0 of 197" was a sample rather than a property. What does reproduce is what has four runs
+  behind it: **Haiku is the worst violator at both prompts** (6, 5, 5, 5) and **Luna files none at
+  either** (0, 0, 0, 0). Four more models file 0 violations and never mention a window at all, on
+  one run each at `158e3d9`: `pixtral-large-2502` (231 issues), `gemma-3-27b-it` (111), `nova-2-lite`
+  (75), `qwen3-vl` (11). Read the last two as silence rather than compliance, but `pixtral-large`
+  files more issues than the incumbent's 187 in the same round, so it is a second credible zero on a
+  quarter of the evidence. **Compliance does not track price, in either direction**, which is the
+  part to carry into a swap, and it reads more sharply at the shipped prompt than it did before: the
+  cheapest model in the field is the most compliant (Luna **$0.0165** per document at 0.00), the
+  second-cheapest is the worst (Haiku **$0.0358** at 0.28), and the dearest sits between them (the
+  incumbent **$0.0931** at 0.14), with Kimi at **$0.0207** and 0.08. `pixtral-large` files 0 at
+  **$0.0721** — dearer than Haiku, and still one round at `158e3d9`, its price as much a single
+  sample as its zero. So "a cheaper Reader is the risk" is not the rule and neither is its inverse;
+  the number has to be measured per candidate (#301).
   **More prompt text is not the remedy, and the evidence is inside the violations.** In the
   clearest cases the model states the rule correctly and files anyway, in the same issue: the
   incumbent identified a seam as an interior one — "this is the document's window boundary edge and
@@ -923,6 +934,23 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   violation at an interior seam and a *required* finding at the last window's end — which the
   incumbent's other run got right. The code-side prose filter stays declined on its own measured
   ground (prose matching fails at 2%, and its false positives delete real findings).
+  **The same behaviour has a wider form that is not about windows and is not about this prompt: an
+  issue whose own `suggested_action` says nothing needs doing.** Per document, counting issues rather
+  than documents, over the same four rounds: Kimi **1.10, 0.70, 1.25, 0.75** — roughly one per
+  document at both prompts, 6%–9% of everything it files — the incumbent **0.00, 0.05** at `158e3d9`
+  and **0.30, 0.05** at `e842faa`, Haiku **0.20, 0.25** then **0.15, 0.10**, and Luna **0.00** in all
+  four. It is a standing charge on the models that do it, largest by an order of magnitude on the
+  candidate these bullets measure most often, and it is *not* an effect of the appended
+  sentence: Kimi's rate is unchanged across the two prompts, Haiku's falls, Luna's stays at zero, and
+  the incumbent's rise is 6 issues in one run against 1 in the other (#307). Adding a clause that
+  says a discarded observation is not written down anywhere — not as reasoning and not as an issue
+  asking for no change — is a plausible fix and is *not* in the prompt, because the case for it rests
+  on a per-model rate that one pair of runs cannot resolve, and because changing these bytes restales
+  every Reader figure on this page. What would settle it: the clause as an arm against the shipped
+  prompt, two runs each, on the incumbent and Kimi, scoring self-cancelling issues per document
+  alongside issues per document so a drop in the first is not bought with a drop in the second.
+  `node selfcancel.mjs <rounds> --rows` prints every match; its detector is a text heuristic rather
+  than one of Iris's predicates, which is why it prints them.
   **What this asks of a Reader swap** is that the count travel with it, because it is a recurring
   charge: every violation reaches the Copy Editor as work on a document that is not broken, no edit
   can change Iris's prompt, so the issue is filed again next round. Compare **violations per
@@ -930,13 +958,28 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   compliant, and not per document, since a corpus of short bodies cannot show the defect at all (a
   single-chunk body carries no label; `test/no-content-pages.test.ts` pins that) — over **two runs,
   not one**. It costs nothing once a round exists: `node windowviol.mjs <round>` in
-  `equalify-iris-bench`, which prints every row so the classification can be argued with. The
-  figures above are its two rounds `runs-reader-probe` and `runs-reader-selfagree`, both at Iris
-  `158e3d9`, re-derived here rather than quoted — which is how the Haiku row gained its second run.
-  The $/doc figures are those rounds' `usd` over their succeeded documents, so both halves of the
-  price-and-compliance sentence come from one pair of rounds — but a model's price spans exactly the
-  rounds its violation count does, so the four one-run models are one sample on both axes, `$0.0721`
-  included.
+  `equalify-iris-bench`, which prints every row so the classification can be argued with. **Every
+  figure above is labelled with the Iris sha it was measured at, because that is how the first
+  version of this bullet went stale within the hour:** it was committed with figures from
+  `runs-reader-probe` and `runs-reader-selfagree`, both at `158e3d9`, fifty minutes after `e842faa`
+  changed `READER_SYSTEM` — the change the bullet below asks to have this very count re-measured on
+  (#308). The `e842faa` figures are `runs-reader-newsha` and `runs-reader-newsha2`; all four rounds
+  are re-derived here rather than quoted.
+  The published $/doc figures are `runs-reader-newsha` and `runs-reader-newsha2`'s `usd` over their
+  succeeded documents — the same pair as the `e842faa` violation counts, so both halves of the
+  price-and-compliance sentence come from one pair of rounds, and a model's price spans exactly the
+  rounds its violation count does. That leaves the four one-run models as one sample on both axes,
+  `$0.0721` included, still at `158e3d9`. **These prices meter the Reader and nothing else**, which is
+  what makes a price comparison across two shas an A/B on the prompt rather than on the four commits
+  between them: every priced call in all five rounds is `agent: reader`, `step: read` — 945 of them,
+  with no extraction, editor or verify call in any round. The harness drives `runReview` with
+  `ctx.maxReviewIterations = 0`, and that is the part doing the work: `runReview` calls `runEditor`
+  whenever the Reader returns issues, which on these rounds is every document, so it is the cap that
+  breaks the loop before the editor, not the entry point.
+  The four commits between the two shas do touch this file, but on the editor path — #295 and
+  #300's truncation salvage — and the only change they make to `READER_SYSTEM` itself is the append,
+  which is the one line of `git diff 158e3d9 e842faa -- src/pipeline/review.ts` that lands inside the
+  template.
 - **The Reader replies with JSON and nothing else, and that sentence is tuned to the model in the
   seat.** `READER_SYSTEM` has always ended "Respond with ONLY JSON:", and the incumbent narrated
   anyway: 40% of the characters it wrote sat outside the JSON envelope, over 5 documents. Nothing
@@ -946,7 +989,16 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   2,574 per document), **$/doc −13%**, prose 40% → 0% of characters — and, in the unit the
   re-measure list below asks for, **91% → 0% of replies** (10 of 11 narrating in the control, 0 of 11
   in the treated arm, over the same five documents). Both units are given because a swap is told to
-  record the second one. It also
+  record the second one.
+  **The incumbent's half of this reproduces at eight times the size**, measured at the shipped prompt
+  against the old one over 20 documents and two runs per side: output **2,698 → 1,778** tokens per
+  document (**−34%**), **$/doc −13.2%** ($0.1072 → $0.0931), and prose **0.0% over 90 replies** — not
+  one character outside the envelope, by Iris's own `extractJson`, with `` ```json `` fences excluded.
+  The
+  margin is what makes it a result rather than a draw: the incumbent's two runs at the shipped prompt
+  price within **1.5%** of each other, so −13% is many times its round-to-round spread. Issues per
+  document did not move (**9.93 → 10.28**, and the old prompt's three rounds — 9.35, 9.70, 10.75 —
+  bracket both new ones) (#307). It also
   finds **more** rather than less —
   12.6 issues per document against 10.8, 129 quoted spans against 96, and a finding's cited page
   matching the page order 93% of the time against 84% (citations matching neither the order nor a
@@ -957,16 +1009,28 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   each other's quote-anchored findings, so the terse arm reproducing the control at 61% is not damage
   — the Reader does not reproduce itself to begin with (#299).
   **The saving is a property of the model in the seat, not of the prompt**, and that is the part to
-  carry forward: the same sentence takes `kimi-k2.5` from 13.6 issues per document to 8.8 and costs
-  6% more. **The reason first given for that was wrong, and correcting it changes which number a
-  swap should record.** This bullet said Kimi's control "already writes 0% prose", from a 5-document
+  carry forward — but the figure this bullet gave for the other seat was measured at five documents
+  and does not survive forty, in either direction. It said the sentence takes `kimi-k2.5` from **13.6
+  issues per document to 8.8** at **6% more** per document: fewer findings for more money. Over 20
+  documents and two runs per side it is **11.75 → 12.80** issues per document at **−5.0%** $/doc, both
+  signs reversed. Neither reading is the one to carry forward, because both changes are smaller than
+  Kimi's own spread between two runs of the *identical* prompt: its issues per document are 13.8 and
+  9.7 at the old prompt, 13.45 and 12.15 at the shipped one, and those two shipped runs price 8%
+  apart. **The measured answer on Kimi is that neither its finding count nor its price moved
+  resolvably** — the trade the old figures described, and the better trade their reversal describes,
+  are both inside the noise (#307).
+  **The reason first given for the "property of the seat" claim was wrong too, and correcting it
+  changes which number a swap should record.** This bullet said Kimi's control "already writes 0% prose", from a 5-document
   draw. Re-asked at 20 and 50 documents over the same persisted replies, Kimi's character share is
   **38.8%, 30.0% and 9.6%** across three rounds — never 0%, and in one round higher than the
   incumbent's 36.1% over the same documents, so the claim inverted rather than merely wobbled
   (#305). And in the deciding round Kimi's *treated* arm wrote **more** prose than its control, not
   less: **1 of 11 replies narrating in the treated arm, 0 of 11 in the control**, and that one reply
   carried 51% of the treated arm's characters. The sentence did not suppress prose on that model; the
-  number simply moved with one reply.
+  number simply moved with one reply. At forty documents the same holds with the sentence *shipped*:
+  Kimi's prose is **23.8% of characters in one run of 45 replies** — two replies, one of them 98% —
+  and **0.0%** in the other. Where the incumbent goes to 0.0% over 90 replies and stays there, Kimi's
+  share is decided by whether the run caught one of its rare narrating replies, prohibition or not.
   The 40% for the incumbent replicates: **33.0%–40.4%** over **202 replies** written, four
   rounds and two ways of cutting the same corpus — 201 of them classified, since one parses only
   through Iris's repair path, so its envelope's span cannot be pinned and it is excluded from the
@@ -998,11 +1062,14 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   regardless of which unit you record.
   Then output tokens per document, issues per document, quote fidelity, and the same
   prompt run twice so the reproduction figures have a floor. Violations per multi-window document
-  (#301) is part of the same swap and wants the same two runs, so measure it here rather than
-  separately. All of it is free once a round exists — every Reader round persists its raw replies,
+  (#301) and self-cancelling issues per document (#307) are part of the same swap and want the same
+  two runs, so measure them here rather than separately — the second one because it is a per-model
+  charge on the Copy Editor, not a property of this prompt.
+  All of it is free once a round exists — every Reader round persists its raw replies,
   and `node proseshare.mjs <round>` in `equalify-iris-bench` locates the envelope with Iris's own
   `extractJson` rather than a regex. The figures here are its four rounds `runs-reader-selfagree`,
-  `runs-reader-probe`, `runs-reader-third` and `runs-reader-persource`, at Iris `158e3d9`; the two
+  `runs-reader-probe`, `runs-reader-third` and `runs-reader-persource`, at Iris `158e3d9`, and the
+  n=40 figures are `runs-reader-newsha` and `runs-reader-newsha2` at `e842faa`; the two
   arms of the trade — control and treated, each labelled, in both units — are the five documents of
   `runs-reader-ablate2`, which is the round the sentence was decided on and the only one holding a
   treated arm. A
