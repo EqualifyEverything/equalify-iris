@@ -428,6 +428,22 @@ echo "$diag" | jq -e '.model_calls.count >= 1 and .in_flight == null and (.phase
   && pass "diagnostics: $(echo "$diag" | jq -r '.model_calls.count') model calls timed, in_flight=null, phases=$(echo "$diag" | jq -r '.phase_durations_ms|keys|length')" \
   || fail "diagnostics" "$diag"
 
+# `errors` is failures of the run, and a second verdict on a corrected page is not one (#296).
+# Asserted against the log rather than against a fixed number, so this holds whether or not the
+# mock verifier failed a recheck on this run: every `ok: false` recheck line has exactly one entry
+# in `rechecks.failures`, none of them is in `errors`, and each carries prose. That last part is
+# what actually broke — the entry was present all along and read `message: "unknown"`, because it
+# looked for `error` on a line that carries `problems` — so an empty message here is the defect
+# back, and only a real run proves the reader and the emitter agree about the field name.
+nrf=$(echo "$logs" | jq -s '[.[] | select(.type == "page_correction_recheck" and .ok == false)] | length')
+echo "$diag" | jq -e --argjson n "$nrf" '
+  (.verification.rechecks.failures | type) == "array"
+  and (.verification.rechecks.failures | length) == $n
+  and ([.verification.rechecks.failures[] | select((.message | length) > 0)] | length) == $n
+  and ([.errors[] | select(.type == "page_correction_recheck")] | length) == 0' >/dev/null \
+  && pass "recheck verdicts are reported as measurements, not errors ($nrf failing, $(echo "$diag" | jq -r '.errors | length') error(s))" \
+  || fail "rechecks.failures" "$(echo "$diag" | jq -c '{errors, failures: .verification.rechecks.failures}')"
+
 # What each call was BOUGHT FOR, on a real run. An agent name is not a step — one agent file
 # serves several jobs, so `by_agent` alone priced extraction at 41% of a document when its jobs
 # together are 57.2% (#280) — so `by_step` keys the same calls by job. Asserted here and not only

@@ -430,6 +430,8 @@ test("the verification tally counts what was checked, corrected and re-checked",
     sampled: 1, sampled_ok: 1, sampled_unjudged: 0,
     sampled_problems_before: 1, sampled_problems_after: 0,
     binding: 0, binding_ok: 0, binding_unjudged: 0,
+    // The sample cleared, so there is no verdict to carry: this list holds the failing ones.
+    failures: [],
   });
   assert.equal(d.verification.pages_unjudged, 0, "every page here carried a real verdict");
 });
@@ -638,7 +640,14 @@ test("a correction that bought nothing is counted apart from one that was kept",
     sampled: 0, sampled_ok: 0, sampled_unjudged: 0,
     sampled_problems_before: 0, sampled_problems_after: 0,
     binding: 1, binding_ok: 0, binding_unjudged: 0,
+    // What the refused rewrite lost, in the verifier's own words, which is the reading a
+    // count of one cannot give. `binding: true` is what says the page shipped as it was
+    // rather than shipping still wrong (issue #296).
+    failures: [{ ts: T(3), page: 3, binding: true, message: "a heading level was lost" }],
   });
+  // And out of `errors`, which is now failures only: this run had none. A verdict that names
+  // a problem is a measurement, and the refusal it drove is the loop working.
+  assert.deepEqual(d.errors, []);
 });
 
 test("a log from before these events reports zeros, not absences", () => {
@@ -672,11 +681,15 @@ test("a log from before these events reports zeros, not absences", () => {
     sampled: 0, sampled_ok: 0, sampled_unjudged: 0,
     sampled_problems_before: 0, sampled_problems_after: 0,
     binding: 0, binding_ok: 0, binding_unjudged: 0,
+    // Present and empty on a log that never wrote a verdict, like every count beside it: an
+    // empty list is a run with no failing recheck, and an absent field is a consumer guessing.
+    failures: [],
   });
   assert.deepEqual(summarizeRun("", done(Date.parse(T(0)))).verification.rechecks, {
     sampled: 0, sampled_ok: 0, sampled_unjudged: 0,
     sampled_problems_before: 0, sampled_problems_after: 0,
     binding: 0, binding_ok: 0, binding_unjudged: 0,
+    failures: [],
   });
 });
 
@@ -703,10 +716,13 @@ test("a log from before the prose sizes and the problem counts leaves both sums 
     alt_only: 0, text: 1, attrs: 0, structure: 1, text_grew: 0, text_shrank: 0,
   });
   // A sample was taken and it failed; how far it got is not in this log and is not invented.
+  // What it FOUND is on the line either way, and a line too old to carry the counts still
+  // carries the prose — which is the case that makes this list worth having beside them.
   assert.deepEqual(d.verification.rechecks, {
     sampled: 1, sampled_ok: 0, sampled_unjudged: 0,
     sampled_problems_before: 0, sampled_problems_after: 0,
     binding: 0, binding_ok: 0, binding_unjudged: 0,
+    failures: [{ ts: T(2), page: 1, binding: false, message: "a table row is still missing" }],
   });
 });
 
@@ -742,9 +758,108 @@ test("a recheck nothing judged is counted apart from a rewrite that was checked"
     sampled: 1, sampled_ok: 1, sampled_unjudged: 1,
     sampled_problems_before: 0, sampled_problems_after: 0,
     binding: 3, binding_ok: 3, binding_unjudged: 1,
+    // An unjudged recheck is not a failing one: nothing looked, so it logs `ok: true` and
+    // names nothing, and an entry here would be a page reported wrong on no evidence.
+    failures: [],
   });
   assert.equal(
     d.verification.rechecks.binding_ok - d.verification.rechecks.binding_unjudged, 2,
     "two binding rechecks were judged and both passed",
   );
+});
+
+test("a measurement coming back negative is not one of the run's errors", () => {
+  // Issue #296, both halves at once, on the shape the deployment actually produced: a sampled
+  // recheck that failed on page 21 and a genuine provider failure in the same run. `errors`
+  // used to hold both, and told them apart only by the recheck's `message` reading "unknown"
+  // — it reads `error`, and this event carries its diagnosis under `problems`. So the run that
+  // was sound and the run that lost a call were the same shape to anyone reading the field
+  // that says whether a run is sound. 31 of 31 rechecks on disk were this case.
+  const problem =
+    "The alt text places Mississippi in the dotted-pattern category but the map shows it with" +
+    " the solid-dark fill.";
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_corrected", image: "p21.png", page: 21, result: "kept", trigger: "verify",
+      problems: 1 },
+    { ts: T(2), type: "page_correction_recheck", image: "p21.png", page: 21, ok: false,
+      problems: [problem], problems_before: 1, problems_after: 1, kinds_after: ["content_wrong"],
+      binding: false },
+    // The failure a reader of `errors` is looking for, in the same run.
+    { ts: T(3), type: "model_call", agent: "copy_editor", step: "review", model: "m", provider: "p",
+      capability: "text", duration_ms: 900, ok: false,
+      error: "bedrock: response hit the 32000-token output ceiling and was truncated" },
+    { ts: T(4), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(4))));
+  assert.deepEqual(d.errors, [
+    { ts: T(3), type: "model_call", message: "bedrock: response hit the 32000-token output ceiling and was truncated" },
+  ]);
+  // Nothing in `errors` says "unknown" any more, and nothing in it is a measurement.
+  assert.equal(d.errors.filter((x) => x.message === "unknown").length, 0);
+  assert.equal(d.errors.filter((x) => x.type === "page_correction_recheck").length, 0);
+  // And the diagnosis did not go with it. `page` is on the entry because a run can fail
+  // several rechecks and the prose is about one page: a consumer matching on type alone
+  // reported the first one's words for every page.
+  assert.deepEqual(d.verification.rechecks.failures, [
+    { ts: T(2), page: 21, binding: false, message: problem },
+  ]);
+  // The counts are untouched by the move — this is still one sample that did not clear.
+  assert.equal(d.verification.rechecks.sampled, 1);
+  assert.equal(d.verification.rechecks.sampled_ok, 0);
+});
+
+test("a verdict with several problems says how many, and one the log garbled says so", () => {
+  // The message is the problems in FULL, because no order is claimed among them and the
+  // dropped one is as likely as any to be why the page is wrong — with a count in front, so
+  // "a correction left one problem behind" and "it left four" are not the same-looking string.
+  //
+  // And the shapes a hand-edited or older log can present. `problems` missing entirely, and
+  // `problems` holding something that is not a string, both have to produce a sentence: the
+  // point of this field is that a reader never has to open log.jsonl to find out what a page
+  // failed on, and `message: undefined` would send them there for the worst reason.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_correction_recheck", image: "a.png", page: 1, ok: false,
+      problems: ["the table lost its header row", "the caption is gone", "  "], binding: false },
+    { ts: T(2), type: "page_correction_recheck", image: "b.png", page: 2, ok: false, binding: true },
+    { ts: T(3), type: "page_correction_recheck", image: "c.png", page: 3, ok: false,
+      problems: [{ text: "a heading level was lost" }], binding: true },
+    { ts: T(4), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(4))));
+  assert.deepEqual(d.verification.rechecks.failures.map((f) => f.message), [
+    "2 problems: the table lost its header row | the caption is gone",
+    "no problems on the line",
+    "no problems on the line",
+  ]);
+  // Which is a different string from a verdict that named something, so a reader can tell a
+  // page with no diagnosis from a page whose diagnosis was one blank entry.
+  assert.equal(d.verification.rechecks.failures[0].message.startsWith("2 problems"), true);
+});
+
+test("a recheck that does not say which population it belongs to still says what is wrong", () => {
+  // The counts put a line with a non-boolean `binding` in neither bucket, deliberately:
+  // guessing a population distorts a rate. What that line failed to say is which rate it
+  // belongs in, though, and not what is wrong with the page — so the verdict is kept, marked
+  // `binding: null`, rather than being the one failing recheck this file cannot report.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_correction_recheck", image: "a.png", page: 1, ok: false,
+      problems: ["a column of the table is missing"], binding: "false" },
+    // And a line with no page on it at all, which is a fact about the verdict and not a
+    // reason to drop it.
+    { ts: T(2), type: "page_correction_recheck", image: "b.png", ok: false,
+      problems: ["the figure has no description"], binding: false },
+    { ts: T(3), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(3))));
+  assert.deepEqual(d.verification.rechecks.failures, [
+    { ts: T(1), page: 1, binding: null, message: "a column of the table is missing" },
+    { ts: T(2), page: null, binding: false, message: "the figure has no description" },
+  ]);
+  // The first is in neither count, as it always was: two failing verdicts, one sample.
+  assert.equal(d.verification.rechecks.sampled, 1);
+  assert.equal(d.verification.rechecks.binding, 0);
+  assert.deepEqual(d.errors, []);
 });
