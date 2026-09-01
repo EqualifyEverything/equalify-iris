@@ -232,6 +232,20 @@ export interface PatchReport {
   // left of it", which is this. The caller needs both to tell whether a reply with a refusal in it
   // may be applied in part. See `gaveContentUp` for what counts as less.
   shrunk: number;
+  // WHICH blocks those were: every block this emptied or handed back with less in it than it had,
+  // i.e. the union of `deleted` and `shrunk` as block numbers. Not a third count and not a
+  // breakdown — the two counts above are still the reading for a whole round — but the position
+  // a caller applying only PART of a reply has to have (#317).
+  //
+  // Kept as numbers for the same reason `unknown` is: the one caller that reads it needs the
+  // EARLIEST of them, because a reply cut partway through its list may be applied up to the first
+  // block that gave content up and no further (`salvageRound`, pipeline/review.ts). A count cannot
+  // answer "up to where", and deriving it from `deleted + shrunk` is not possible at all.
+  //
+  // In the order the edits were read, which is not necessarily block order — a reply whose list
+  // closed may name its blocks in any order — so a caller wanting the first block takes the
+  // minimum rather than the head.
+  lost: number[];
   // Navigable structure the DOCUMENT lost while every word stayed, per kind (#271) — the shape of
   // loss this pipeline had no signal for at all. Empty on the ordinary round.
   //
@@ -273,6 +287,7 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     incomplete: 0,
     markers: 0,
     shrunk: 0,
+    lost: [],
     navigation_lost: {},
   };
   for (const edit of edits) {
@@ -299,6 +314,7 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     if (html === "") {
       replacements[at] = "";
       report.deleted++;
+      report.lost.push(at);
       continue;
     }
     if (html.trim() === blocks[at]!.html.trim()) {
@@ -315,7 +331,10 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     }
     replacements[at] = html;
     report.applied++;
-    if (gaveContentUp(blocks[at]!.html, html)) report.shrunk++;
+    if (gaveContentUp(blocks[at]!.html, html)) {
+      report.shrunk++;
+      report.lost.push(at);
+    }
   }
   const body = joinSections(blocks, replacements);
   // Both sides through `joinSections`, so the two are assembled the same way and the reading cannot

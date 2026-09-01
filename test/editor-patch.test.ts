@@ -164,6 +164,27 @@ test("an emptied block is how duplicated content goes", () => {
   assert.equal(applyBlockEdits(blocks(), [{ block: 2, html: "  \n" }]).deleted, 1);
 });
 
+test("which blocks gave content up, and not only how many", () => {
+  // The counts say a round lost content somewhere; `lost` says where, which is what a caller applying
+  // only PART of a reply has to know (#317: a truncated reply may be applied up to the first block
+  // that gave content up and no further, `salvageRound`). Both kinds are in it — the block emptied and
+  // the block handed back with less prose than it had — because either can be the source half of a
+  // move, which is the distinction the caller is reading it for.
+  const patched = applyBlockEdits(blocks(), [
+    { block: 4, html: `<p>Two, corrected and longer.</p>` },
+    { block: 2, html: "" },
+    { block: 1, html: `<p>1</p>` },
+  ]);
+  assert.equal(patched.deleted, 1);
+  assert.equal(patched.shrunk, 1);
+  // In the order the edits were read, not block order: a reply whose list closed is under no ordering
+  // obligation, so a caller wanting the earliest block takes the minimum rather than the head.
+  assert.deepEqual(patched.lost, [2, 1]);
+  // And empty when nothing did, so its length is the question "did this reply lose anything" asked
+  // once rather than as a sum of two counts.
+  assert.deepEqual(applyBlockEdits(blocks(), [{ block: 4, html: `<p>Two, corrected.</p>` }]).lost, []);
+});
+
 test("one edit may return several blocks, which is how a fix splits one", () => {
   // A heading lifted out of a section, a run of paragraphs where a list belongs: the corrections
   // this loop exists for change how many top-level nodes there are, so a replacement is one or
