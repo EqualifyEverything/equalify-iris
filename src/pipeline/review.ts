@@ -122,7 +122,9 @@ export interface ReviewResult {
 // enforceable, and it is APPENDED rather than merged into that line so that nothing already
 // measured in this prompt is edited (#299).
 //
-// Measured: output 3,635 -> 2,574 tokens per document (-29%), $/doc -13%, prose 40% -> 0%. And
+// Measured: output 3,635 -> 2,574 tokens per document (-29%), $/doc -13%, prose 40% -> 0% of
+// characters and 91% -> 0% of REPLIES (10 of 11 narrating, then 0 of 11, over the same five
+// documents) — both units, because the re-measure list below asks for the second one. And
 // it finds MORE rather than less, which is the part that decides it — 12.6 issues per document
 // against the control's 10.8, 129 quoted spans against 96, 11 high-severity against 7, and a
 // finding's cited page matches the page order 93% of the time against 84%, with citations
@@ -140,11 +142,14 @@ export interface ReviewResult {
 // recorded here, which was "`moonshotai.kimi-k2.5` writes 0% prose in its control". That does not
 // reproduce (#305). Over 157 replies and three rounds Kimi's character share is 38.8%, 30.0% and
 // 9.6%, never 0%, and in one round its 38.8% is HIGHER than the incumbent's 36.1% over the same
-// documents — so the claim was not just a small sample, it inverts. The cause is the shape of the
-// distribution rather than the size of the draw: Kimi's median reply is a bare envelope in all
-// three rounds and it narrates in 7-16% of its replies, but when it does it goes to 87-99% prose,
-// so an aggregate is decided by whether the draw caught one of those. The incumbent narrates in
-// 67-75% of its replies, which is why 5 documents were enough to see its 40%.
+// documents — so the claim was not just a small sample, it inverts. In the deciding round itself
+// Kimi's TREATED arm wrote more prose than its control, 1 of 11 replies against 0 of 11, that one
+// reply carrying 51% of the arm's characters: the sentence did not suppress prose on that model,
+// the number moved with one reply. The cause is the shape of the distribution rather than the size
+// of the draw: Kimi's median reply is a bare envelope in all three rounds and it narrates in 7-16%
+// of its replies, but when it does it goes to 87-99% prose, so an aggregate is decided by whether
+// the draw caught one of those. The incumbent narrates in 67-75% of its replies, which is why 5
+// documents were enough to see its 40%.
 //
 // What survives is the half that makes this sentence buy Kimi little: ITS MEDIAN REPLY IS ALREADY
 // PROSE-FREE, so most windows have nothing here to remove. The measured outcome is unchanged
@@ -154,10 +159,13 @@ export interface ReviewResult {
 // included, since that is the one metric this arm moved the wrong way. Record the SHARE OF REPLIES
 // THAT CONTAIN ANY PROSE rather than the share of characters: the reply share separates these two
 // models in every round measured (67-75% against 7-16%) where their character shares overlap, and
-// it is what the intervention acts on. It is NOT a cheaper measurement — resampled at 5 documents
-// its band is about twice as wide in points as the character share's (35-50 against 21-24) and the
-// same fraction of its own level — so what it buys is a figure that holds from round to round, not
-// one that holds at n=5. Neither form is a model trait to look up.
+// it is what the intervention acts on. It is NOT the cheaper measurement, and the two statistics
+// fail at n=5 differently rather than one being tighter: resampled at 5 documents the reply share's
+// band is WIDER in points on the incumbent (35-50 against 21-24) and NARROWER on Kimi (20-30
+// against 26-66). What they share is the failure on the model in question — the reply share still
+// reads 0% for Kimi in 12-48% of draws against the character share's 40-46%. So the reply share
+// buys a figure that holds from round to round and buys nothing at n=5; measure two runs of twenty
+// documents whichever unit is recorded. Neither form is a model trait to look up.
 //
 // The prompt side is nearly free on the incumbent and not free off it. This sentence is 180
 // characters, and `READER_SYSTEM` clears `cacheableSystemPrompt` on a Claude Reader, so it lands
