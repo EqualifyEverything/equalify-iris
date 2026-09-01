@@ -238,9 +238,15 @@ export function bodyLang(body: string): string | null {
 // reached in what the model wrote afterwards. That document is unchanged because the editor found
 // nothing to change, which is not what "a round could not be completed" means, so it says so in its
 // own words rather than as `named 0 of them`.
+//
+// That paragraph says no part of the document was asked for again, so it is conditional on there
+// being no sections as well as no edits. The one route that produces `edits: 0` today leaves no
+// remainder by construction (`salvageRound`'s closed-empty return, where `used === 0` on the ordinary
+// path is `all_refused` and declines) — but a zero-edit prefix with a corrected tail would be a
+// document this paragraph describes wrongly, and the three paragraphs below describe it correctly.
 function salvagedNote(salvaged: { edits: number; blocks: number; of: number }, sections?: { of: number; corrected: number }): string {
   const head = `\n<!-- @editor-truncated blocks ${salvaged.blocks} of ${salvaged.of}`;
-  if (salvaged.edits === 0) {
+  if (salvaged.edits === 0 && !sections) {
     return (
       head +
       `\n` +

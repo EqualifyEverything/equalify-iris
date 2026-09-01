@@ -26,6 +26,7 @@ import {
   SECTION_HEADROOM,
   type ReviewIssue,
 } from "../src/pipeline/review.ts";
+import { wrapDocument } from "../src/pipeline/assembly.ts";
 import { TruncatedResponseError } from "../src/providers/types.ts";
 import type { InputImage, PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
@@ -386,6 +387,23 @@ test("an edits list that closed empty is the editor passing the document, not lo
     assert.doesNotMatch(result.html, /named 0 of them/);
     assert.doesNotMatch(result.html, /asked for again a section at a time/);
   });
+});
+
+test("a zero-edit prefix with a corrected tail is not told it was passed whole", () => {
+  // The paragraph above says no part of the document was asked for again, so it belongs only to a
+  // salvage that left no remainder — which is the only route to `edits: 0` today, because a prefix
+  // whose every edit was refused declines as `all_refused` instead. This pins the marker against a
+  // future route rather than against a reply: a document whose tail WAS corrected a section at a
+  // time must not be described as one the editor read and passed.
+  const html = wrapDocument("<p>body</p>", {
+    editorTruncated: true,
+    editorSalvaged: { edits: 0, blocks: 5, of: 24 },
+    editorSections: { of: 3, corrected: 3 },
+  });
+  assert.match(html, /@editor-truncated blocks 5 of 24/);
+  assert.match(html, /3 of 3 sections came back corrected/);
+  assert.doesNotMatch(html, /listed no changes to make/);
+  assert.doesNotMatch(html, /no part of it was asked for again/);
 });
 
 test("a remainder short enough to ask for in one call is asked for in one call", async () => {
