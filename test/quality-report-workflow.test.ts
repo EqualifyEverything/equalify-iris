@@ -286,7 +286,11 @@ test("the unresolved body names the exit each document left by, and what each on
   // not have to guess and cannot be pointed at the wrong file.
   const body = renderBody("unresolved");
   assert.match(body, /\*\*Why the loop stopped:\*\* `clean` 11, `unread` 0, `converged` 55, `truncated` 4, `cap` 0/);
-  assert.match(body, /these sum to 70/, "the count they are read against is printed, not left to be worked out");
+  assert.match(
+    body,
+    /these describe 70 of the 70 documents above, which is all of them/,
+    "the count they are read against is printed, not left to be worked out",
+  );
   // The two exits that look identical from outside the loop, told apart with their
   // opposite remedies attached — which is the whole point of recording the exit.
   assert.match(body, /`cap` is the only one raising `defaults\.max_review_iterations` can help/);
@@ -303,6 +307,51 @@ test("the unresolved body names the exit each document left by, and what each on
     1,
     "the round budget is named once, beside the one exit it answers",
   );
+});
+
+test("a breakdown that covers part of the window says so, and refuses to be scaled up", { skip }, () => {
+  // The live deployment's first report of this field: 7 of 77 documents had an exit recorded,
+  // because the field is written when a run happens and a 30-day window holds runs from before
+  // it existed. The rate is over all 77 and the split is over 7, so the two are different
+  // denominators — and a reader who multiplied the split up to the rate would be inventing 70
+  // documents' exits. The counts alone cannot say that; the sentence has to.
+  const body = renderBody("unresolved", {
+    ...TALLY,
+    review_stopped: [
+      { where: "clean", documents: 2 },
+      { where: "unread", documents: 0 },
+      { where: "converged", documents: 0 },
+      { where: "truncated", documents: 2 },
+      { where: "cap", documents: 3 },
+    ],
+  });
+  assert.match(body, /these describe 7 of the 70 documents above and NOT the window/);
+  assert.match(body, /the other 63 were delivered before this breakdown was recorded/);
+  assert.match(body, /do not scale up to the rate/);
+  // And the gap is still not an exit. The old body said this about a shortfall and it is the
+  // one wrong way to read one.
+  assert.match(body, /not a sixth kind of exit/);
+  // And the reading that made the live report's `cap` count mean something other than what it
+  // looks like: three documents exited at the cap while `mean_rounds` was exactly 1.0, which is
+  // only possible if that deployment's cap is 1 — so `cap` there was one round spent, not three.
+  // The tally cannot carry the config, so the body says to derive it.
+  assert.match(body, /check what the cap on this deployment actually IS before assuming the default of 3/);
+});
+
+test("the unresolved body splits the rate by what the open list is about", { skip }, () => {
+  // The finding #264 was filed for: `unresolved_rate` counts a document that was re-read and
+  // still had problems, and a document whose list may predate the bytes that shipped, as one
+  // number. The loop re-reads at the top of every round, so `cap` and `converged` are the first
+  // kind and `truncated` is the second — 55 and 4 in this tally. Printed as counts rather than
+  // left to the reader to add, because the whole complaint was that the report made them guess.
+  const body = renderBody("unresolved");
+  assert.match(body, /\*\*What the open list is a statement about:\*\*/);
+  assert.match(body, /55 document\(s\) here are that/, "cap + converged, the part that is about the document");
+  assert.match(body, /those 4 over-report on purpose/, "truncated, the part that is about the round");
+  assert.match(body, /`src\/pipeline\/review\.ts`/, "and where the reason for that is written down");
+  // The reason the threshold has not been split as well: the two halves want different numbers
+  // and there is not yet a fully attributed window to set either from.
+  assert.match(body, /One threshold over both cannot be set honestly/);
 });
 
 test("the unresolved body rates what was left, and says it is not a partition", { skip }, () => {

@@ -502,6 +502,17 @@ test("a salvaged round is still the loop's last round", async () => {
     // found before the corrections is all that is known about it.
     assert.deepEqual(result.unresolved.map((i) => i.issue), ISSUES.map((i) => i.issue));
     assert.match(result.html, /@unresolved/);
+    // "Nothing re-read the document" as a measurement rather than as a comment, because it is the
+    // one thing that makes `truncated` a different fact from `cap` and `converged` in the quality
+    // tally (#264): on those the last read was of the delivered bytes, so an open issue is an open
+    // issue, and here the corrections that shipped were never shown to a Reader. Which means the
+    // list over-reports by an unknown amount — deliberately, since the alternative is a document
+    // that claims to be finished.
+    assert.match(result.body, /fixed 1/, "a correction from the section calls is in what shipped");
+    assert.ok(
+      rec.calls.filter((c) => c.agent === "reader").every((c) => !/fixed 1/.test(c.user)),
+      "and no Reader pass was ever given a body containing it",
+    );
   });
 });
 

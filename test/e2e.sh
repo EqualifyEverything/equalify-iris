@@ -1141,6 +1141,18 @@ echo "$q" | jq -e '[.review_stopped[].where] == ["clean","unread","converged","t
   and ([.review_stopped[].documents] | add) == .documents' >/dev/null \
   && pass "review_stopped attributes all $docs document(s) ($(echo "$q" | jq -c '[.review_stopped[] | select(.documents > 0) | "\(.where)=\(.documents)"] | join(" ")' | tr -d '"'))" \
   || fail "quality" "review_stopped=$(echo "$q" | jq -c '.review_stopped') against documents=$docs — an exit that assigns no stop reason"
+# And the arithmetic that makes those exits a split OF `unresolved_rate` rather than a second
+# breakdown standing beside it (#264). Three of the five deliver an `@unresolved` list and two
+# do not, so on this window — where every document named its exit — the three sum to the
+# documents in the rate. That is what licenses the weekly report reading `cap` + `converged` as
+# the part of the rate that is a statement about the delivered document and `truncated` as the
+# part that is a statement about the round. Only a real run can check it: the store test asserts
+# the same equality over signals written by hand, and the way this breaks is a pipeline that
+# records an exit and an unresolved list that disagree.
+echo "$q" | jq -e '([.review_stopped[] | select(.where == "cap" or .where == "converged" or .where == "truncated") | .documents] | add)
+  == ((.unresolved_rate * .documents) | round)' >/dev/null \
+  && pass "the exits that ship an open list are the $(echo "$q" | jq -r '(.unresolved_rate * .documents) | round') document(s) in unresolved_rate" \
+  || fail "quality" "cap+converged+truncated=$(echo "$q" | jq -r '[.review_stopped[] | select(.where == "cap" or .where == "converged" or .where == "truncated") | .documents] | add') against unresolved_rate × documents=$(echo "$q" | jq -r '(.unresolved_rate * .documents) | round') — the split does not describe the rate"
 # How the Reader rated what it left open. NOT a partition (one document with a high issue
 # and two low ones is counted in both), so the invariant is the weaker one that matters:
 # an unresolved rate above zero must have severities behind it, and a rate of zero must

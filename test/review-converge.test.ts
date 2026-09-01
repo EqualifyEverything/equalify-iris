@@ -38,6 +38,11 @@ const ISSUES = [
 interface Round {
   readers: number;
   editors: number;
+  // What each Reader pass was given, in order. Kept because the question "was the document that
+  // shipped ever read" cannot be answered from a call count (#264): the loop reads at the top of
+  // every round, so the LAST of these is the body the exit delivered — on every exit but a
+  // truncation, where the editor changed the body after it.
+  readerPrompts: string[];
   events: { type: string; data: Record<string, unknown> }[];
   result: Awaited<ReturnType<typeof runReview>>;
 }
@@ -55,6 +60,7 @@ async function loop(
   try {
     let readers = 0;
     let editors = 0;
+    const readerPrompts: string[] = [];
     const events: { type: string; data: Record<string, unknown> }[] = [];
     const ctx = {
       sessionId: "ses_test",
@@ -71,6 +77,7 @@ async function loop(
         complete: async (agent: string, _cap: string, messages: { content: string }[]) => {
           if (agent === "reader") {
             readers++;
+            readerPrompts.push(messages.map((m) => m.content).join("\n"));
             return { text: readerReply() };
           }
           editors++;
@@ -90,7 +97,7 @@ async function loop(
     } as unknown as PipelineContext;
 
     const result = await runReview(ctx, { body: BODY, lint: { ok: true, violations: [] } });
-    return { readers, editors, events, result };
+    return { readers, editors, readerPrompts, events, result };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -186,6 +193,42 @@ test("the loop records which of its exits ended the round", async () => {
   const unread = await loop(() => assert.fail("an unread window must not reach the editor"), 3, () => "not json at all");
   assert.equal(unread.result.stoppedAt, "unread");
   assert.equal(unread.result.unreviewedWindows, 1);
+
+  // And which of the five deliver a list of open issues, which is what makes the tally's exits a
+  // split of `unresolved_rate` rather than a breakdown standing beside it (#264, and the
+  // arithmetic is asserted in test/quality.test.ts). These two deliver none — `clean` because
+  // there was nothing and `unread` because nothing was found — so neither records an
+  // `iris:unresolved` row, and the other three each do.
+  assert.deepEqual(clean.result.unresolved, []);
+  assert.deepEqual(unread.result.unresolved, [], "an empty list because nothing was FOUND, not because none is there");
+  assert.equal(converged.result.unresolved.length, 1);
+  assert.equal(cap.result.unresolved.length, 1);
+});
+
+test("the list a converged or capped round ships was read on the bytes that ship", async () => {
+  // The distinction the split in the quality tally turns on (#264). The loop re-reads at the TOP
+  // of each round, and both of these exits are taken before the next editor call — so on them the
+  // issues in `@unresolved` are a statement about the delivered document, and a threshold on that
+  // part of the rate is a threshold on document quality.
+  //
+  // `truncated` is the exit where that is not true: the editor changed the body and the round
+  // that would have re-read it is the one that could not be made. That half is driven in
+  // test/editor-sections.test.ts, where the corrections that ship are ones no Reader ever saw.
+  const converged = await loop(() => JSON.stringify({ edits: [] }));
+  assert.equal(converged.result.body, BODY);
+  assert.equal(converged.readers, 1, "and the one read it has was of that body");
+
+  let n = 0;
+  const cap = await loop(() => JSON.stringify({ edits: [{ block: 0, html: `<p>edit ${n++}</p>` }] }));
+  assert.match(cap.result.body, /edit 2/, "the third round's edit is what shipped");
+  // The claim itself, and not the call count that suggests it: the delivered edit is in the
+  // prompt of the last Reader pass, so the issues left open were raised against these bytes.
+  assert.equal(cap.readers, 4);
+  assert.match(cap.readerPrompts[3], /edit 2/, "the read that found the cap was of the delivered body");
+  assert.ok(
+    cap.readerPrompts.slice(0, 3).every((p) => !/edit 2/.test(p)),
+    "and only that one — the earlier reads were of bodies that did not ship",
+  );
 });
 
 test("the cap and a round that changed nothing are one document with two remedies", async () => {

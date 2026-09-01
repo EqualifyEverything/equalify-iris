@@ -228,7 +228,8 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   as found.
 * `review_stopped` — which of the review loop's exits ended each document, one entry per reason and
   always all five. Recorded for **every** delivered document, so unlike `unresolved_severity` these
-  *are* a partition: the counts sum to `documents`. `clean` is the only exit that re-read the
+  *are* a partition: on a window where every run recorded one, the counts sum to `documents`.
+  `clean` is the only exit that re-read the
   finished document and found nothing. `converged`, `truncated` and `cap` each deliver an
   `@unresolved` list, so those three are the documents `unresolved_rate` counts — in the example
   above, 11 + 2 + 0 of 212, which is the 0.061 beside them. `unread` is the one exit that stops with
@@ -240,7 +241,23 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   split is the one that could not be had before: from outside the loop they are the same shape, and
   only `cap` is something more rounds would help. A sum **below** `documents` means either
   documents delivered before this was recorded or an exit added to the loop with no reason attached
-  — never a sixth kind of exit.
+  — never a sixth kind of exit. Where they differ, this breakdown describes the documents it sums
+  to and **not** the window: a rate read against `documents` and a split read against the attributed
+  subset are two denominators, and the split does not scale up to the rate.
+  * **And it is the split of `unresolved_rate` #264 asked for.** That rate counts a document that
+    was re-read and still had problems, and a document whose open list may predate the bytes that
+    shipped, as the same thing. On `cap` and `converged` the `@unresolved` list was read on the
+    delivered bytes — the loop re-reads at the top of every round and both exits are taken before
+    the next editor call — so an open issue there is an open issue in the delivered document.
+    `truncated` is the one exit where the list may be older than the document: the editor's reply
+    was cut off, the sectioned retry may have corrected part of the body afterwards, and the round
+    that would have re-read it is the one that could not be made (`src/pipeline/review.ts`). So it
+    over-reports there on purpose, and a truncation whose retry rescued nothing over-reports not at
+    all — a distinction this tally cannot draw and the delivered document can
+    (`@editor-truncated sections N of M`). Those are a claim about the document and a claim about
+    the round: read `cap` + `converged` as the part of the rate that is about the document, and
+    `truncated` beside `editor_truncated_rate` and the output ceiling. One threshold over both
+    cannot be set honestly, which is why the weekly report's is still on the mixture and says so.
 * `links_dropped_rate` — share of documents where an `href` present before the copy editor was
   missing after it.
 * `links_unresolved_rate` — share of documents that shipped with an in-document reference that
