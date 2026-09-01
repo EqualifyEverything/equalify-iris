@@ -136,14 +136,28 @@ export interface ReviewResult {
 // control at 61% is not 39% damage, it is marginally better than the control's own repeat.
 // Without that repeat arm, one sentence would look like it had cost a third of the findings.
 //
-// It is a fact about the model in the seat, NOT about Readers. `moonshotai.kimi-k2.5` writes 0%
-// prose in its control, so there is nothing here for the sentence to remove and it only removes
-// headroom: 13.6 issues per document down to 8.8, and 6% more per document. The Reader model is
+// It is a fact about the model in the seat, NOT about Readers — though not for the reason first
+// recorded here, which was "`moonshotai.kimi-k2.5` writes 0% prose in its control". That does not
+// reproduce (#305). Over 157 replies and three rounds Kimi's character share is 38.8%, 30.0% and
+// 9.6%, never 0%, and in one round its 38.8% is HIGHER than the incumbent's 36.1% over the same
+// documents — so the claim was not just a small sample, it inverts. The cause is the shape of the
+// distribution rather than the size of the draw: Kimi's median reply is a bare envelope in all
+// three rounds and it narrates in 7-16% of its replies, but when it does it goes to 87-99% prose,
+// so an aggregate is decided by whether the draw caught one of those. The incumbent narrates in
+// 67-75% of its replies, which is why 5 documents were enough to see its 40%.
+//
+// What survives is the half that makes this sentence buy Kimi little: ITS MEDIAN REPLY IS ALREADY
+// PROSE-FREE, so most windows have nothing here to remove. The measured outcome is unchanged
+// either way — 13.6 issues per document down to 8.8, and 6% more per document. The Reader model is
 // a config line (`providers.per_agent.reader`), so this is re-measured on a swap — the Reader
 // bullet under "Implementation notes & PRD coverage" in README says what to measure, quote fidelity
-// included, since that is the one metric this arm moved the wrong way. Prose share is not a model
-// trait either and must not be recorded as one: Kimi wrote 0% in one run and 38% in another, at
-// n=5 documents.
+// included, since that is the one metric this arm moved the wrong way. Record the SHARE OF REPLIES
+// THAT CONTAIN ANY PROSE rather than the share of characters: the reply share separates these two
+// models in every round measured (67-75% against 7-16%) where their character shares overlap, and
+// it is what the intervention acts on. It is NOT a cheaper measurement — resampled at 5 documents
+// its band is about twice as wide in points as the character share's (35-50 against 21-24) and the
+// same fraction of its own level — so what it buys is a figure that holds from round to round, not
+// one that holds at n=5. Neither form is a model trait to look up.
 //
 // The prompt side is nearly free on the incumbent and not free off it. This sentence is 180
 // characters, and `READER_SYSTEM` clears `cacheableSystemPrompt` on a Claude Reader, so it lands

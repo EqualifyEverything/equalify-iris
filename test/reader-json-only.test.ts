@@ -25,8 +25,12 @@
 // The last test is about the cost claim rather than the text. The comment on `READER_JSON_ONLY`
 // says the tokens it adds are nearly free on the incumbent because they land inside a
 // cached prefix, and not free on a Reader that gets no cache breakpoint at all — which is the same
-// population where the sentence was measured to buy nothing. Both halves of that are decidable
-// here, so neither is left as an assertion in prose.
+// population where the sentence was measured to cost more than it saves (`kimi-k2.5`: 13.6 issues
+// per document down to 8.8, at 6% more per document). Both halves of the cache claim are decidable
+// here, so neither is left as an assertion in prose. The prose share behind that trade is NOT
+// decidable here and is deliberately not asserted anywhere in this repo as a model trait — #305
+// measured it at 9.6%–38.8% across three rounds of the same model, so the constant this file pins
+// is the prompt text, never the number that justified it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { READER_SYSTEM, READER_JSON_ONLY } from "../src/pipeline/review.ts";
