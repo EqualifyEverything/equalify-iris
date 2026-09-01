@@ -943,7 +943,11 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   could see it, which is why it lasted — `extractJson` takes the *last* envelope in a reply, so a
   preamble parses, no call fails, and no log line says that a third of the step's output was prose
   billed at output rates. One appended sentence removes all of it: **output tokens −29%** (3,635 →
-  2,574 per document), **$/doc −13%**, prose 40% → 0%, and it finds **more** rather than less —
+  2,574 per document), **$/doc −13%**, prose 40% → 0% of characters — and, in the unit the
+  re-measure list below asks for, **91% → 0% of replies** (10 of 11 narrating in the control, 0 of 11
+  in the treated arm, over the same five documents). Both units are given because a swap is told to
+  record the second one. It also
+  finds **more** rather than less —
   12.6 issues per document against 10.8, 129 quoted spans against 96, and a finding's cited page
   matching the page order 93% of the time against 84% (citations matching neither the order nor a
   printed folio: 15% → 2%). One metric moved the other way and belongs in any re-measurement of this:
@@ -953,14 +957,58 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   each other's quote-anchored findings, so the terse arm reproducing the control at 61% is not damage
   — the Reader does not reproduce itself to begin with (#299).
   **The saving is a property of the model in the seat, not of the prompt**, and that is the part to
-  carry forward. On a model whose control already writes 0% prose the same sentence has nothing to
-  remove and takes away headroom instead: `kimi-k2.5` drops from 13.6 issues per document to 8.8 and
-  costs 6% more. Since the Reader is one config line (`providers.per_agent.reader`), **swapping it
-  means re-measuring this**, and prose share is not a model trait to look up — the same model wrote
-  0% in one run and 38% in another at n=5 documents. **What to re-measure**, then: prose share,
-  output tokens per document, issues per document, quote fidelity, and the same prompt run twice so
-  the reproduction figures have a floor. Violations per multi-window document (#301) is part of the
-  same swap and wants the same two runs, so measure it here rather than separately. The prompt side of the trade is one 180-character sentence
+  carry forward: the same sentence takes `kimi-k2.5` from 13.6 issues per document to 8.8 and costs
+  6% more. **The reason first given for that was wrong, and correcting it changes which number a
+  swap should record.** This bullet said Kimi's control "already writes 0% prose", from a 5-document
+  draw. Re-asked at 20 and 50 documents over the same persisted replies, Kimi's character share is
+  **38.8%, 30.0% and 9.6%** across three rounds — never 0%, and in one round higher than the
+  incumbent's 36.1% over the same documents, so the claim inverted rather than merely wobbled
+  (#305). And in the deciding round Kimi's *treated* arm wrote **more** prose than its control, not
+  less: **1 of 11 replies narrating in the treated arm, 0 of 11 in the control**, and that one reply
+  carried 51% of the treated arm's characters. The sentence did not suppress prose on that model; the
+  number simply moved with one reply.
+  The 40% for the incumbent replicates: **33.0%–40.4%** over **202 replies** written, four
+  rounds and two ways of cutting the same corpus — 201 of them classified, since one parses only
+  through Iris's repair path, so its envelope's span cannot be pinned and it is excluded from the
+  shares rather than estimated. A 5-document draw of that reads 0% in 0.0% of resamples.
+  **The difference is the shape, not the sample size.** The incumbent narrates a little in most
+  replies — **67%–75% of them** across the four twenty- and fifty-document rounds — so five documents
+  see it. The ablation's own five-document control reads **91%**, which is not a fifth value so much
+  as a demonstration of the band below: 91% is the top edge of what a five-document draw of these
+  rounds produces (p95 86%–100%). Kimi's median reply is a bare envelope and it narrates in
+  **7%–16%** of replies across its three large rounds, going to 87%–99% prose when it does, so any
+  aggregate is decided by whether the draw caught one: five Kimi documents read exactly 0% in up to 46% of
+  resamples and anywhere from 0% to 87% overall. Its median reply being prose-free is what makes the
+  sentence buy it little, and that part holds in all three rounds.
+  Since the Reader is one config line (`providers.per_agent.reader`), **swapping it means
+  re-measuring this**, and prose share is not a model trait to look up in either form.
+  **What to re-measure**, then: the **share of replies containing any prose** — not the share of
+  characters, because the reply share separates these two models in every round measured — the
+  incumbent 67%–75% over the four large rounds and 91% in the ablation's control, Kimi 7%–16% over
+  the three large rounds and 0% (control) to 9% (treated) in the ablation — where their character
+  shares overlap, and because it is the population the sentence acts on.
+  **It is not the cheaper measurement, and the reason is worth stating precisely,
+  because the two statistics fail at n=5 differently.** Resampled at five documents the reply share's
+  band is *wider* in points than the character share's on the incumbent (35–50 against 21–24) and
+  *narrower* on Kimi (20–30 against 26–66) — so "tighter" is not a property either one has. What both
+  have is the same failure on the model in question: the reply share still reads 0% for Kimi in
+  **12%–48%** of draws, against the character share's 40%–46%. Five documents are adequate for the
+  incumbent on either statistic and inadequate for Kimi on either, so the reply share buys a figure
+  that holds from round to round and buys **nothing** at n=5 — measure two runs of twenty documents
+  regardless of which unit you record.
+  Then output tokens per document, issues per document, quote fidelity, and the same
+  prompt run twice so the reproduction figures have a floor. Violations per multi-window document
+  (#301) is part of the same swap and wants the same two runs, so measure it here rather than
+  separately. All of it is free once a round exists — every Reader round persists its raw replies,
+  and `node proseshare.mjs <round>` in `equalify-iris-bench` locates the envelope with Iris's own
+  `extractJson` rather than a regex. The figures here are its four rounds `runs-reader-selfagree`,
+  `runs-reader-probe`, `runs-reader-third` and `runs-reader-persource`, at Iris `158e3d9`; the two
+  arms of the trade — control and treated, each labelled, in both units — are the five documents of
+  `runs-reader-ablate2`, which is the round the sentence was decided on and the only one holding a
+  treated arm. A
+  `` ```json `` fence is counted apart from narration: on a 670-character reply 12 characters of
+  fence read as 1.8% and cross a 10% threshold, which is enough to rank the tersest model in the
+  field as one that narrates. The prompt side of the trade is one 180-character sentence
   that rides inside the cached prefix on a Claude Reader and is paid in full on every chunk of every
   round on one that gets no breakpoint — the same population where it may buy nothing. (The filing
   measured that as +86 prompt tokens **per document**, 29,747 → 29,833, which is the sentence sent
