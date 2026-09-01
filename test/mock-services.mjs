@@ -344,6 +344,14 @@ const or = createServer(async (req, res) => {
     const rewritten =
       `<h1>Quarterly Report</h1>\n<p>Revenue grew this quarter.</p>\n` +
       `<p>Page marker 1.</p>\n<p>Page marker 2.</p>\n<p>Page marker 3.</p>\n` +
+      // A placeholder where a description belongs, written by the ONE component that can put one
+      // into a delivered document after the page agents are finished with it (#290). Every page's
+      // own images are described properly above, so this is the only reason the run's
+      // `delivered_alt` line can exist — which is what makes that line a measurement of the
+      // delivered bytes rather than a second copy of `extraction_complete.alts_generic`. Deliberate
+      // like page 1's unclosed `<div>`: axe passes it (`image-alt` asks only whether the attribute
+      // is present), so nothing else in the run can see it.
+      `<img src="chart.png" alt="image">\n` +
       `<p>Editor saw ${attached} image(s).</p>`;
     // Answered in the shape the request actually asks for (issue #250). An ordinary round shows
     // the body as numbered blocks and wants back only the ones that changed, so the reply is an

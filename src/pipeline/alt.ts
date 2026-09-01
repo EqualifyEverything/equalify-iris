@@ -86,10 +86,31 @@ const GENERIC_ALT = new RegExp(`^(?:${GENERIC_ALT_WORDS.join("|")})[\\s.:;,-]*$`
 // one case a maintainer would most want to see.
 const IMG_TAG = /<img\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
 
-// The `alt` on that tag, in the three spellings source HTML allows. A bare value cannot contain
-// whitespace, so `alt=image` is caught and `alt=a b` reads as `a` — which is what a parser does
-// with it too.
-const ALT_ATTR = /\balt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i;
+// The attributes on that tag, read one at a time: a name, then optionally a value in one of the
+// three spellings source HTML allows. A bare value cannot contain whitespace, so `alt=image` is
+// caught and `alt=a b` reads as `a` — which is what a parser does with it too.
+//
+// Walked as a sequence rather than searched for by name, because `\balt\s*=` finds an `alt` that
+// is not an attribute at all: it matches inside `data-alt="image"` (the word boundary is the
+// hyphen) and inside another attribute's value (`title="alt=photo"`), and the first match in the
+// tag wins — so either one beats the real `alt` written beside it and reports a placeholder for an
+// image that is described properly. Both are false positives, which this file's own measurement
+// says is the expensive direction: a false positive buys a page call and a binding recheck on a
+// page that had already passed. Consuming each value as a unit is what rules them out, and it is
+// the same reason `IMG_TAG` matches quoted regions rather than excluding `>`.
+const ATTR = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
+
+// The first `alt` on one `<img>` start tag, undecoded, or null where the tag has none. First and
+// not last, because a parser handed `<img alt="a" alt="b">` keeps `a` and drops the duplicate.
+function altAttr(tag: string): string | null {
+  // Past `<img`, so the tag name is not read as the first attribute. `matchAll` works on a copy of
+  // the regex, so the shared `lastIndex` is never carried from one tag to the next.
+  for (const attr of tag.slice(4).matchAll(ATTR)) {
+    if (attr[1].toLowerCase() !== "alt") continue;
+    return attr[2] ?? attr[3] ?? attr[4] ?? "";
+  }
+  return null;
+}
 
 // Every non-empty `alt` on an `<img>` in this fragment, decoded and trimmed.
 //
@@ -103,9 +124,9 @@ const ALT_ATTR = /\balt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i;
 export function altTexts(html: string): string[] {
   const out: string[] = [];
   for (const tag of html.match(IMG_TAG) ?? []) {
-    const m = ALT_ATTR.exec(tag);
-    if (!m) continue;
-    const value = decodeEntities(m[1] ?? m[2] ?? m[3] ?? "").trim();
+    const raw = altAttr(tag);
+    if (raw === null) continue;
+    const value = decodeEntities(raw).trim();
     if (value) out.push(value);
   }
   return out;

@@ -57,6 +57,29 @@ test("a > inside an alt does not cut the tag in half", () => {
   assert.deepEqual(altTexts(`<img src="a.png" alt="1 > 2">${img("image")}`), ["1 > 2", "image"]);
 });
 
+test("only an attribute actually named alt is read as one", () => {
+  // The attributes are walked in order rather than searched for by name, because a search finds
+  // the characters `alt=` in two places that are not an `alt` attribute — and it takes the
+  // leftmost, so in both of these the real description loses to a placeholder written elsewhere
+  // in the same tag. Both are false positives, and a false positive here is not free: it buys a
+  // page call and a binding re-check on a page that had already passed.
+  assert.deepEqual(altTexts(`<img src="a.png" data-alt="image" alt="A bar chart of revenue">`), [
+    "A bar chart of revenue",
+  ]);
+  assert.deepEqual(genericAlts(`<img src="a.png" data-alt="image" alt="A bar chart of revenue">`), []);
+  // The same mistake one attribute over: a value that quotes the attribute name is consumed as a
+  // unit, so there is no `alt` inside it to find.
+  assert.deepEqual(altTexts(`<img src="a.png" title="alt=photo" alt="A bar chart">`), ["A bar chart"]);
+  assert.deepEqual(genericAlts(`<img src="a.png" title="alt=photo" alt="A bar chart">`), []);
+  // And the finding is still made when the placeholder is the real attribute, whatever sits beside
+  // it — the tag is read, not pattern-matched.
+  assert.deepEqual(genericAlts(`<img data-alt="A bar chart" alt="image">`), ["image"]);
+  // A valueless `alt` is not a description and not a placeholder either; it is axe's finding.
+  assert.deepEqual(altTexts(`<img src="a.png" alt>`), []);
+  // A duplicate attribute goes the way a parser takes it: the first wins, the second is dropped.
+  assert.deepEqual(altTexts(`<img alt="A bar chart" alt="image">`), ["A bar chart"]);
+});
+
 test("entities are decoded, because the reader is announced the decoded value", () => {
   assert.deepEqual(genericAlts(`<img src="a.png" alt="&#105;mage">`), ["image"]);
   assert.deepEqual(genericAlts(`<img src="a.png" alt="Home &amp; Away">`), []);

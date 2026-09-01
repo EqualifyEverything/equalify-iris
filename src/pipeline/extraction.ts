@@ -3150,10 +3150,18 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
   ctx.log.event("extraction_complete", {
     pages: fragments.length,
     failed: failedPages,
-    // The generic-alt rule over the fragments the document is actually built from, which is a
-    // different question from the per-page `page_generic_alt` above: this one is asked AFTER any
-    // correction, so a non-zero `alts_generic` here is a placeholder Iris SHIPPED. Present at
-    // zero on every run for the reason `failed` is — a class that is only ever reported when it
+    // The generic-alt rule over the fragments the document is assembled FROM, which is a different
+    // question from the per-page `page_generic_alt` above: this one is asked after any correction,
+    // so a non-zero `alts_generic` here is a placeholder this step could not repair.
+    //
+    // Deliberately not read as what shipped, and the distinction is not pedantic: the review loop
+    // runs after this line and rewrites the assembled document a top-level block at a time
+    // (`applyBlockEdits`), replacing a block's markup wholesale — `<img>` and its `alt` with it —
+    // so a copy-edit round that guts an alt ships a placeholder these counts never saw. The
+    // delivered bytes are measured where every other claim about them is, on the file the caller
+    // receives (`delivered_alt`, orchestrator.ts).
+    //
+    // Present at zero on every run for the reason `failed` is — a class that is only ever reported when it
     // fires cannot distinguish "it never happened" from "the check never ran", and this rule's
     // whole claim is that it fires on nothing Iris writes (0 of 1,064 alts in the bench corpus,
     // #290). A count that prints 0 is the thing that can be seen to be working.

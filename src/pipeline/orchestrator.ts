@@ -34,6 +34,7 @@ import { runAxe, lintErrorFields, lintDebrisFields } from "./lint.ts";
 import { learnFromFeedback, proposeAgentUpdatesFromFeedback, scopeFeedback } from "./feedback.ts";
 import { runContribution } from "./contribute.ts";
 import { unresolvedRefs } from "./links.ts";
+import { altTexts, genericAlts } from "./alt.ts";
 import { markupReport } from "./markup.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PdfLink } from "../util/pdf.ts";
@@ -359,6 +360,36 @@ export async function runPipeline(args: {
         ...(structure.dlWithoutDd.count ? { dl_without_dd_examples: structure.dlWithoutDd.examples } : {}),
         ...(structure.langOnVoid.count ? { lang_on_void_examples: structure.langOnVoid.examples } : {}),
         ...(structure.emptyLandmarks.count ? { empty_landmark_elements: structure.emptyLandmarks.examples } : {}),
+      });
+    }
+    // And whether a placeholder where a description belongs survived into the file the caller
+    // receives (#290), measured on the same bytes as the two checks above and for the same reason.
+    //
+    // `extraction_complete.alts_generic` is not this number: it is read on the fragments the
+    // document is assembled from, and the review loop runs afterwards and replaces a top-level
+    // block's markup wholesale, `<img>` and its `alt` included. So a copy-edit round that guts an
+    // alt, or writes a placeholder into a block it was patching for another reason, is invisible
+    // there and visible here. Nothing about it has been seen on file — no bench round has an editor
+    // touching an `alt` — which is exactly why the count exists rather than an assumption.
+    //
+    // Logged only when one is present, like `delivered_markup` and `delivered_structure`: the
+    // ordinary document needs no line, and the run already carries an unconditional denominator for
+    // the rule at `extraction_complete`, so a missing line here cannot be read as a check that
+    // never ran. `checked` rides along anyway, because a count of placeholders means something
+    // different against 2 images and against 200.
+    //
+    // Measurement only, again as above: nothing is repaired at delivery, since the repair is to
+    // describe the picture and the page agent is the only component holding it. What this line says
+    // is that the correction pass (`page_generic_alt`) is not where the defect came from.
+    const deliveredGeneric = genericAlts(review.html);
+    if (deliveredGeneric.length) {
+      log.event("delivered_alt", {
+        checked: altTexts(review.html).length,
+        generic: deliveredGeneric.length,
+        // The values, up to five. A placeholder is by definition a word for the medium rather than
+        // anything out of the user's document, and this log stays on the deployment regardless —
+        // nothing here reaches the tally (see QualityStats).
+        examples: deliveredGeneric.slice(0, 5),
       });
     }
     // Final accessibility lint result, summarized into the PR description on close (§7.13).
