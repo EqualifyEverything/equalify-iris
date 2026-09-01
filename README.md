@@ -944,8 +944,9 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   preamble parses, no call fails, and no log line says that a third of the step's output was prose
   billed at output rates. One appended sentence removes all of it: **output tokens −29%** (3,635 →
   2,574 per document), **$/doc −13%**, prose 40% → 0% of characters — and, in the unit the
-  re-measure list below asks for, **91% → 0% of replies** (10 of 11 narrating, then 0 of 11, over the
-  same five documents). Both units are given because a swap is told to record the second one. It also
+  re-measure list below asks for, **91% → 0% of replies** (10 of 11 narrating in the control, 0 of 11
+  in the treated arm, over the same five documents). Both units are given because a swap is told to
+  record the second one. It also
   finds **more** rather than less —
   12.6 issues per document against 10.8, 129 quoted spans against 96, and a finding's cited page
   matching the page order 93% of the time against 84% (citations matching neither the order nor a
@@ -963,8 +964,8 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   **38.8%, 30.0% and 9.6%** across three rounds — never 0%, and in one round higher than the
   incumbent's 36.1% over the same documents, so the claim inverted rather than merely wobbled
   (#305). And in the deciding round Kimi's *treated* arm wrote **more** prose than its control, not
-  less: 0 of 11 replies narrating against 1 of 11, that one reply carrying 51% of the arm's
-  characters. The sentence did not suppress prose on that model; the number simply moved with one
+  less: **1 of 11 replies narrating in the treated arm, 0 of 11 in the control**, and that one reply
+  carried 51% of the treated arm's characters. The sentence did not suppress prose on that model; the number simply moved with one
   reply. The 40% for the incumbent replicates: **33.0%–40.4%** over **202 replies** written, four
   rounds and two ways of cutting the same corpus — 201 of them classified, since one parses only
   through Iris's repair path, so its envelope's span cannot be pinned and it is excluded from the
@@ -995,7 +996,7 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   and `node proseshare.mjs <round>` in `equalify-iris-bench` locates the envelope with Iris's own
   `extractJson` rather than a regex. The figures here are its four rounds `runs-reader-selfagree`,
   `runs-reader-probe`, `runs-reader-third` and `runs-reader-persource`, at Iris `158e3d9`; the two
-  arms of the trade — control against treated, in both units — are the five documents of
+  arms of the trade — control and treated, each labelled, in both units — are the five documents of
   `runs-reader-ablate2`, which is the round the sentence was decided on and the only one holding a
   treated arm. A
   `` ```json `` fence is counted apart from narration: on a 670-character reply 12 characters of

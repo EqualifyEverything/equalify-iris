@@ -123,8 +123,9 @@ export interface ReviewResult {
 // measured in this prompt is edited (#299).
 //
 // Measured: output 3,635 -> 2,574 tokens per document (-29%), $/doc -13%, prose 40% -> 0% of
-// characters and 91% -> 0% of REPLIES (10 of 11 narrating, then 0 of 11, over the same five
-// documents) — both units, because the re-measure list below asks for the second one. And
+// characters and 91% -> 0% of REPLIES (10 of 11 narrating in the control, 0 of 11 in the treated
+// arm, over the same five documents) — both units, because the re-measure list below asks for the
+// second one. And
 // it finds MORE rather than less, which is the part that decides it — 12.6 issues per document
 // against the control's 10.8, 129 quoted spans against 96, 11 high-severity against 7, and a
 // finding's cited page matches the page order 93% of the time against 84%, with citations
@@ -143,9 +144,9 @@ export interface ReviewResult {
 // reproduce (#305). Over 157 replies and three rounds Kimi's character share is 38.8%, 30.0% and
 // 9.6%, never 0%, and in one round its 38.8% is HIGHER than the incumbent's 36.1% over the same
 // documents — so the claim was not just a small sample, it inverts. In the deciding round itself
-// Kimi's TREATED arm wrote more prose than its control, 1 of 11 replies against 0 of 11, that one
-// reply carrying 51% of the arm's characters: the sentence did not suppress prose on that model,
-// the number moved with one reply. The cause is the shape of the distribution rather than the size
+// Kimi's TREATED arm wrote more prose than its control: 1 of 11 replies narrating in the treated
+// arm, 0 of 11 in the control, and that one reply carried 51% of the treated arm's characters. The
+// sentence did not suppress prose on that model; the number moved with one reply. The cause is the shape of the distribution rather than the size
 // of the draw: Kimi's median reply is a bare envelope in all three rounds and it narrates in 7-16%
 // of its replies, but when it does it goes to 87-99% prose, so an aggregate is decided by whether
 // the draw caught one of those. The incumbent narrates in 67-75% of its replies, which is why 5
