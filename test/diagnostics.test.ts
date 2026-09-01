@@ -353,6 +353,28 @@ test("one agent can be two models, because resolution keys on capability as well
   assert.deepEqual(d.by_agent.page.models, ["a-text-model", "z-vision-model"]);
 });
 
+test("models covers the whole session, not the current round, so a restart between rounds shows both", () => {
+  // Folded over every `model_call` in the log, exactly as the seven numbers beside it are — and a
+  // session's log is one append-only file across its feedback rounds (store/runlog.ts). Config is
+  // read at boot, so a session extracted before a restart and given feedback after one really did
+  // run on two models, and reporting one of them would be the lie. It is pinned because the
+  // docs turn this field into a verdict on a config edit (docs/models.md §1, docs/API.md §7b):
+  // that reading holds on a session that has only run since the edit, which is why both say so.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    end(T(2), "page", 2000, "before-restart", "vision"),
+    { ts: T(2), type: "run_complete" },
+    { ts: T(6), type: "run_start" },
+    end(T(8), "page", 2000, "after-restart", "vision"),
+    { ts: T(8), type: "run_complete" },
+  );
+  const d = summarizeRun(text, { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.parse(T(8)) });
+  assert.deepEqual(d.by_agent.page.models, ["after-restart", "before-restart"]);
+  // And the same set under the other key, since one fold serves both.
+  assert.deepEqual(d.by_step["?"].models, ["after-restart", "before-restart"]);
+  assert.equal(d.by_agent.page.count, 2);
+});
+
 test("a call whose line carries no model leaves the list empty rather than naming a placeholder", () => {
   // Unlike `by_step`'s `?` key, which has to exist so old logs still add up, this field is
   // read to answer "which model" — a `"?"` in it would answer, and wrongly. Empty with a

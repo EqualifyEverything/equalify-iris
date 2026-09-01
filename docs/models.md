@@ -89,7 +89,12 @@ price sheet its numbers came from.
 edit is a swap that did not take effect; the boot warning says which key is wrong beforehand, and
 this says what actually ran. One id is the ordinary case, and more than one is not a defect:
 resolution keys on capability too, so a provider's `per_capability` block can put one agent on two
-models deliberately — which is also how a swap reaches a call site no round has measured. The
+models deliberately — which is also how a swap reaches a call site no round has measured. **Read
+it on a session that has only run since the edit.** Like the seven numbers beside it, `models`
+folds every call in the session's log, and a session's log spans its feedback rounds as well as
+its first run — so a session extracted before the restart and given feedback after it holds both
+ids honestly, and that is the one case where two ids mean a change of config rather than a split
+by capability. A fresh document after the restart cannot be read either way. The
 `page` entry moves all three of the call sites in the table above, and the round in §2 covers two
 of them; the specialist merge is a `text` call and the corpus produced no specialist calls at all.
 

@@ -1000,7 +1000,10 @@ effect. A key naming no dispatched agent is ignored rather than refused (**Confi
 the call falls through to the provider's own model and the run succeeds at the price it would
 have cost anyway: a cheaper model that saved nothing and a swap that never happened produced
 identical diagnostics. Read `by_agent.<agent>.models` after changing an override — that is the
-split the override is keyed by. Usually one id; **more than one is not a defect**, because
+split the override is keyed by, on a session that has only run since the change: this field folds
+the whole session log exactly as the seven numbers do, and a session's log spans its feedback
+rounds, so a session extracted before a restart and given feedback after one reports both ids
+truthfully. Usually one id; **more than one is not a defect**, because
 resolution keys on capability as well as agent, so a provider's `per_capability` block can put
 one agent on two models on purpose (`page` extracts with `vision` and merges a specialist
 fragment with `text`; `feedback` judges with `vision` and classifies with `text`; the copy editor

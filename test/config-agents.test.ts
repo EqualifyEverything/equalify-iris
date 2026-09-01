@@ -11,7 +11,10 @@ import { perAgentKeyWarning } from "../src/config.ts";
 // by agent name and, finding none, falls back through the provider's `per_capability` to its
 // `default_model` — so a key naming an agent nothing dispatches is not a startup error, does
 // not appear in `by_agent` (which reports the agents that RAN), and costs what the run would
-// have cost anyway. A model that was never swapped looks exactly like one that was.
+// have cost anyway. `by_agent.<agent>.models` closes half of that: a finished run now names
+// the model each agent used, so a swap that did not happen is visible after the fact. The
+// ignored KEY still appears nowhere but this warning, which is also the only account of it
+// that arrives before the run is paid for.
 //
 // It had already happened twice, in the two files an operator reads first, and both were
 // relics of the per-content-type fan-out prd.md §7.4 v1.2 withdrew: `config.example.yaml`
