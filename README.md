@@ -976,16 +976,17 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   see it. The ablation's own five-document control reads **91%**, which is not a fifth value so much
   as a demonstration of the band below: 91% is the top edge of what a five-document draw of these
   rounds produces (p95 86%–100%). Kimi's median reply is a bare envelope and it narrates in
-  **7%–16%** of replies, going to 87%–99% prose when it does, so any aggregate is
-  decided by whether the draw caught one: five Kimi documents read exactly 0% in up to 46% of
+  **7%–16%** of replies across its three large rounds, going to 87%–99% prose when it does, so any
+  aggregate is decided by whether the draw caught one: five Kimi documents read exactly 0% in up to 46% of
   resamples and anywhere from 0% to 87% overall. Its median reply being prose-free is what makes the
   sentence buy it little, and that part holds in all three rounds.
   Since the Reader is one config line (`providers.per_agent.reader`), **swapping it means
   re-measuring this**, and prose share is not a model trait to look up in either form.
   **What to re-measure**, then: the **share of replies containing any prose** — not the share of
   characters, because the reply share separates these two models in every round measured — the
-  incumbent 67%–75% over the four large rounds and 91% in the ablation's control, Kimi 7%–16% — where
-  their character shares overlap, and because it is the population the sentence acts on.
+  incumbent 67%–75% over the four large rounds and 91% in the ablation's control, Kimi 7%–16% over
+  the three large rounds and 0% (control) to 9% (treated) in the ablation — where their character
+  shares overlap, and because it is the population the sentence acts on.
   **It is not the cheaper measurement, and the reason is worth stating precisely,
   because the two statistics fail at n=5 differently.** Resampled at five documents the reply share's
   band is *wider* in points than the character share's on the incumbent (35–50 against 21–24) and

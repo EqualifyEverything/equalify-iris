@@ -148,8 +148,8 @@ export interface ReviewResult {
 // arm, 0 of 11 in the control, and that one reply carried 51% of the treated arm's characters. The
 // sentence did not suppress prose on that model; the number moved with one reply. The cause is the
 // shape of the distribution rather than the size of the draw: Kimi's median reply is a bare envelope
-// in all three rounds and it narrates in 7-16%
-// of its replies, but when it does it goes to 87-99% prose, so an aggregate is decided by whether
+// in all three large rounds and it narrates in 7-16% of its replies in each of them, but when it
+// does it goes to 87-99% prose, so an aggregate is decided by whether
 // the draw caught one of those. The incumbent narrates in 67-75% of its replies across the four
 // twenty- and fifty-document rounds, which is why 5 documents were enough to see its 40%. The
 // ablation's own five-document control reads 91%, which is not a fifth value so much as what a
@@ -163,7 +163,8 @@ export interface ReviewResult {
 // included, since that is the one metric this arm moved the wrong way. Record the SHARE OF REPLIES
 // THAT CONTAIN ANY PROSE rather than the share of characters: the reply share separates these two
 // models in every round measured — the incumbent 67-75% over the four large rounds and 91% in the
-// ablation's control, Kimi 7-16% — where their character shares overlap, and
+// ablation's control, Kimi 7-16% over the three large rounds and 0% (control) to 9% (treated) in the
+// ablation — where their character shares overlap, and
 // it is what the intervention acts on. It is NOT the cheaper measurement, and the two statistics
 // fail at n=5 differently rather than one being tighter: resampled at 5 documents the reply share's
 // band is WIDER in points on the incumbent (35-50 against 21-24) and NARROWER on Kimi (20-30
