@@ -428,6 +428,24 @@ echo "$diag" | jq -e '.model_calls.count >= 1 and .in_flight == null and (.phase
   && pass "diagnostics: $(echo "$diag" | jq -r '.model_calls.count') model calls timed, in_flight=null, phases=$(echo "$diag" | jq -r '.phase_durations_ms|keys|length')" \
   || fail "diagnostics" "$diag"
 
+# `errors` is failures of the run, and a second verdict on a corrected page is not one (#296).
+# What this step proves on the mock corpus is the part only a real run can: the field is PRESENT
+# and an array in the payload the route actually serialized, and nothing recheck-typed is in
+# `errors`. The mock verifier answers `{}`, so this run corrects nothing and fails no recheck —
+# `nrf` is 0 and the count and message checks below reduce to 0 == 0. They are written against
+# the log rather than against a fixed number so they arm themselves the day the mock does fail
+# one, and the pass line prints `nrf` so a reader can see which of the two cases this was.
+# That the emitter writes `problems` on an `ok: false` recheck — the field name the old
+# `message: "unknown"` got wrong — is pinned in test/verification.test.ts, not here.
+nrf=$(echo "$logs" | jq -s '[.[] | select(.type == "page_correction_recheck" and .ok == false)] | length')
+echo "$diag" | jq -e --argjson n "$nrf" '
+  (.verification.rechecks.failures | type) == "array"
+  and (.verification.rechecks.failures | length) == $n
+  and ([.verification.rechecks.failures[] | select((.message | length) > 0)] | length) == $n
+  and ([.errors[] | select(.type == "page_correction_recheck")] | length) == 0' >/dev/null \
+  && pass "recheck verdicts are reported as measurements, not errors ($nrf failing, $(echo "$diag" | jq -r '.errors | length') error(s))" \
+  || fail "rechecks.failures" "$(echo "$diag" | jq -c '{errors, failures: .verification.rechecks.failures}')"
+
 # What each call was BOUGHT FOR, on a real run. An agent name is not a step — one agent file
 # serves several jobs, so `by_agent` alone priced extraction at 41% of a document when its jobs
 # together are 57.2% (#280) — so `by_step` keys the same calls by job. Asserted here and not only

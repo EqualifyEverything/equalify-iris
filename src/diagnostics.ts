@@ -413,6 +413,35 @@ export interface Diagnostics {
       binding: number;
       binding_ok: number;
       binding_unjudged: number;
+      // The failing verdicts themselves — not a count; the counts are `sampled - sampled_ok`
+      // and `binding - binding_ok`. One entry per recheck that named a problem, carrying the
+      // prose it named it in, because that prose is the whole answer to "what is still wrong
+      // with the page that shipped" and nothing else in this file holds it: the counts say a
+      // correction did not converge and never say what it failed to fix.
+      //
+      // Here rather than in `errors`, which used to hold these and rendered every one of them
+      // `message: "unknown"` — it reads `error`, and this event's diagnosis is `problems`
+      // (issue #296). Moving it rather than fixing that message is the other half of the same
+      // issue: a second verdict is a measurement, and `errors` has to be readable as "the run
+      // is in doubt". So the diagnosis is beside the numbers it explains instead.
+      //
+      // BOTH populations, marked by `binding`, because the two failures are worth reading and
+      // are not the same reading: a sampled failure is a page that shipped still wrong, and a
+      // binding failure is a rewrite that was refused so the page shipped as it was. `null`
+      // there is a line that did not say, which the counts above put in neither bucket — kept
+      // here anyway rather than dropped, since the verdict is a fact about a page whatever the
+      // line failed to say about its own population.
+      //
+      // Failing only, so an `ok: true` recheck adds nothing: `failedCheck` (extraction.ts) is
+      // `!ok && problems.length > 0`, so a line logged `ok: false` always names at least one
+      // problem and an entry here can never carry an empty message. Which also means an
+      // unjudged recheck is absent by construction — it logs `ok: true`.
+      //
+      // Bounded, and `verdicts_omitted` is how many the bound left out — see `MAX_VERDICTS`
+      // for why a cap exists here and nowhere else in this file, and which of the two
+      // populations can actually reach it. The omitted ones are in log.jsonl in full.
+      failures: { ts: string | null; page: number | null; binding: boolean | null; message: string }[];
+      verdicts_omitted: number;
     };
   };
   // Source pages whose own extraction threw, so the delivered document carries a
@@ -528,6 +557,60 @@ const MAX_PLAUSIBLE_CALL_MS = 60 * 60_000;
 
 const ms = (a?: string, b?: string): number =>
   a && b ? Math.max(0, new Date(b).getTime() - new Date(a).getTime()) : 0;
+
+// How much of `rechecks.failures` this payload carries. Everything else in this file is a
+// count, and these entries are model prose about a page, so they are the one part of it that
+// grows with what the document needed rather than with the shape of the run — which is the
+// growth `errors` did not have when the same entry was 7 characters of `"unknown"` (#296).
+//
+// `MAX_VERDICTS` is 20, which is generous against the SAMPLED population and not against the
+// binding one — and it is worth being exact about that, because the two grow differently.
+// `recheck_sample_size` defaults to 1, so sampled failures accrue at most one per run and a
+// session would need twenty rounds of them to fill this. The binding recheck is not sampled:
+// extraction.ts runs it on every page that PASSED its check and had a link or alt rewritten,
+// so a link-heavy document can refuse more than twenty rewrites inside one round on default
+// config. This cap therefore engages on a real run, and what it engages on is exactly the run
+// worth capping — twenty refusals with a count of the rest says "the rewrite path is losing
+// content systematically" as well as fifty verbatim would, and log.jsonl holds all fifty.
+// `verdicts_omitted` says how many were left out, so a capped list is never a short one read
+// as whole, on the same terms as `calls_reported` beside `tokens`.
+//
+// `MAX_VERDICT_CHARS` is 600 because a verdict about one page is one or two sentences — the
+// one that prompted #296 is 250 characters — while the number of problems in the array is the
+// model's to choose, so the JOIN is what has no bound. Wide enough to hold a real two-problem
+// verdict whole, and the cut is marked (so a cut message is 601 characters, the mark being
+// extra). Deliberately not markup.ts's 40 (`MAX_EXAMPLE_CHARS`): that pair bounds five
+// instances at 40 characters each to recognise a CLASS of defect, and this one has to carry a
+// specific page's diagnosis intact, which is the whole reason the prose is here.
+const MAX_VERDICTS = 20;
+const MAX_VERDICT_CHARS = 600;
+
+// A verifier's verdict as one line, for `verification.rechecks.failures`. The problems in
+// FULL and not the first of them: they are one or two sentences of the Feedback Agent's own
+// prose about a specific page, no order is claimed among them (extraction.ts logs the list
+// as the agent gave it), and the one that would be dropped is as likely as any to be the
+// reason the page is wrong. Counted first when there is more than one, so a reader can see
+// at a glance whether a correction left one problem behind or five.
+//
+// Defensive about the shape for the reason every read in this file is: this runs over a log
+// line that may have been written by an older Iris or hand-edited, and a `problems` that is
+// not an array of strings must produce a sentence rather than `undefined` or a crash.
+//
+// ONE fallback string for every one of those shapes — a missing `problems`, one holding
+// something that is not a string, and one whose strings are all blank — and deliberately not
+// three: this file cannot tell them apart in a way a reader could act on, and today's emitter
+// cannot produce any of them at all (`ok: false` implies a non-empty `problems`, see the field
+// comment). Naming which shape it found would be a distinction no run can make, which is the
+// mistake the `"unknown"` this replaces was: a string that read as an answer about the page
+// when it was really an answer about the reader. This one says where it looked.
+const verdictMessage = (e: LogEvent): string => {
+  const problems = Array.isArray(e.problems)
+    ? e.problems.filter((p): p is string => typeof p === "string" && p.trim() !== "")
+    : [];
+  if (!problems.length) return "no problems on the line";
+  const joined = problems.length === 1 ? problems[0] : `${problems.length} problems: ${problems.join(" | ")}`;
+  return joined.length <= MAX_VERDICT_CHARS ? joined : `${joined.slice(0, MAX_VERDICT_CHARS)}…`;
+};
 
 export function summarizeRun(
   logText: string,
@@ -758,14 +841,32 @@ export function summarizeRun(
   // throw those catches exist for is an fs read, not a provider error, so a run whose
   // training or contribution died would read as clean here and be findable only in the
   // raw ndjson.
+  //
+  // Failures, and only failures. `ok === false` was written for `model_call`, where it means
+  // the provider refused — but `page_correction_recheck` carries an `ok` of its own meaning
+  // "the verifier named no problem", and a second verdict that names one is a measurement
+  // coming back negative, not a run that went wrong: the sampled kind runs AFTER the
+  // correction is kept and changes nothing about what ships, and the binding kind's refusal
+  // is the loop protecting a page that had already passed (`page_links_correction_rejected`).
+  // Both were landing here, and 31 of 31 on disk across 22 rounds were the sampled kind — so
+  // on a four-document round, two documents that were clean read as having errors and the
+  // only thing distinguishing a working measurement from a truncated call was that the
+  // measurement's `message` said `"unknown"`, this event carrying its diagnosis under
+  // `problems` (issue #296). Excluded here and reported where its counts already are, as
+  // `verification.rechecks.failures`, because a non-empty `errors` is the first thing read
+  // off a run and it has to mean the run is in doubt.
   const errors = events
     .filter(
       (e) =>
         e.type === "run_failed" ||
         e.type === "feedback_training_failed" ||
         e.type === "contribution_failed" ||
-        e.ok === false,
+        (e.ok === false && e.type !== "page_correction_recheck"),
     )
+    // Every event that reaches here today carries `error`: the three named above are built
+    // from a caught throw, and a failed `model_call` is logged by providers/index.ts with the
+    // provider's message. So `"unknown"` is what an old log or a future `ok: false` event
+    // would read as, and not — as of #296 — a standing entry on every run that sampled.
     .map((e) => ({ ts: e.ts ?? null, type: e.type ?? "error", message: e.error ?? "unknown" }));
 
   // Which pages the document has no content for — a set, and a set that changes over
@@ -821,6 +922,8 @@ export function summarizeRun(
       binding: 0,
       binding_ok: 0,
       binding_unjudged: 0,
+      failures: [],
+      verdicts_omitted: 0,
     },
   };
   for (const e of events) {
@@ -940,6 +1043,32 @@ export function summarizeRun(
       // Strictly `true`, as on `page_verify_ok`: a recheck subtracted from the pass rate on
       // the strength of a string would be the trap the closed lists here exist for.
       const unjudged = e.unjudged === true;
+      // The verdict's own words, kept whichever population the line claims — including a line
+      // whose `binding` is neither boolean, which the split below counts in neither: what that
+      // line failed to say is which rate it belongs in, not what is wrong with the page. This
+      // is the only place in this file the prose survives, and it used to be in `errors` under
+      // the word `"unknown"` (issue #296, and see the comment on the field).
+      //
+      // `ok === false` and strictly so, for the reason every flag here is read strictly. It is
+      // also the whole condition: `problems` non-empty is implied by it (extraction.ts
+      // `failedCheck`), so there is no second test for an empty message to write.
+      if (e.ok === false) {
+        // Counted whether or not it is carried, so the cap is disclosed rather than being a
+        // list that quietly stops growing. First N and not last N: the earliest failures are
+        // the first pass's, and a session's later rounds re-verify a handful of pages the user
+        // asked about — so a cap that kept the tail would drop the document's own account of
+        // itself in favour of a follow-up's.
+        if (verification.rechecks.failures.length < MAX_VERDICTS) {
+          verification.rechecks.failures.push({
+            ts: e.ts ?? null,
+            page: typeof e.page === "number" ? e.page : null,
+            binding: typeof e.binding === "boolean" ? e.binding : null,
+            message: verdictMessage(e),
+          });
+        } else {
+          verification.rechecks.verdicts_omitted += 1;
+        }
+      }
       if (e.binding === true) {
         verification.rechecks.binding += 1;
         if (e.ok === true) verification.rechecks.binding_ok += 1;
