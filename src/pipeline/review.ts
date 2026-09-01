@@ -1278,7 +1278,12 @@ interface EditorRound {
   // rather than folded into `sections`: the corrections in the delivered body came from the round's
   // own answer, at the length that answer was billed for, instead of from calls made afterwards
   // that could see neither the whole document nor its pages.
-  salvaged?: { edits: number; blocks: number; of: number };
+  // `cutBack` is #317's retreat: `blocks` stops where the reply gave content up rather than where
+  // the ceiling stopped it, so the reply itself answered about MORE of the document than `blocks`
+  // says — up to all of it. Only the delivered marker needs the distinction, and it needs it
+  // because the sentence it would otherwise write ("the answer hit the ceiling partway through")
+  // is the one thing that did not happen at that boundary.
+  salvaged?: { edits: number; blocks: number; of: number; cutBack: boolean };
 }
 
 // Under this contract a reply names one block per edit, so counting the key says how many edits the
@@ -1940,7 +1945,7 @@ function salvageRound(
   ctx: PipelineContext,
   body: string,
   e: unknown,
-): { prefix: string; rest: string; edits: number; reached: number; of: number } | null {
+): { prefix: string; rest: string; edits: number; reached: number; of: number; lostAt: number | null } | null {
   // Nothing to read: an error that lost its prototype on the way here (see
   // `isTruncatedResponseError`), or a truncation that returned no text at all — which is a real
   // shape, and the one the `EMPTY_REPLY` note on the message is about.
@@ -1967,7 +1972,7 @@ function salvageRound(
     });
     // `body` and not a re-join of `blocks`: the two are the same string by `splitBlocks`'s identity
     // property, and the original is the one nothing can have rounded.
-    return { prefix: body, rest: "", edits: 0, reached: blocks.length, of: blocks.length };
+    return { prefix: body, rest: "", edits: 0, reached: blocks.length, of: blocks.length, lostAt: null };
   }
   // Two different failures, and the log says which: a reply with no edits list in it at all is the
   // model answering in some other shape — the whole document, or prose about the document, which is
@@ -2116,7 +2121,7 @@ function salvageRound(
     chars: e.chars,
     rest: rest.length,
   });
-  return { prefix: patched.body, rest, edits: used, reached, of: blocks.length };
+  return { prefix: patched.body, rest, edits: used, reached, of: blocks.length, lostAt };
 }
 
 // The round again, a section at a time, after the answer did not fit.
@@ -2283,7 +2288,10 @@ async function sectionRound(
       // The editor said something usable about this document, and it is in the delivered body.
       usable: true,
       truncated: true,
-      salvaged: { edits: rescued.edits, blocks: rescued.reached, of: rescued.of },
+      // `cutBack` travels with it because the delivered marker is written from this and would
+      // otherwise blame the ceiling for a boundary Iris chose (`salvagedNote`): on a retreat the
+      // reply reached FURTHER than `blocks` says, and on a `closed` retreat it reached the end.
+      salvaged: { edits: rescued.edits, blocks: rescued.reached, of: rescued.of, cutBack: rescued.lostAt !== null },
       ...(sectioned ? { sections: { of: sectioned.of, corrected: sectioned.corrected } } : {}),
     };
   }

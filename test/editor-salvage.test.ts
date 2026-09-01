@@ -581,10 +581,50 @@ test("a COMPLETE patch that lost content is cut back too, and then it does have 
     // the two kinds of correction, and NOT the sentence a complete patch earns.
     assert.match(result.html, /@editor-truncated blocks 10 of 24/);
     assert.doesNotMatch(result.html, /nothing was left to ask/);
+    // And it does not tell this reader the ceiling fell at block 10, which on THIS reply is the one
+    // thing that did not happen there: the edits list ran to the end and closed.
+    assert.match(result.html, /set aside here rather than by the ceiling/);
+    assert.doesNotMatch(result.html, /ceiling partway through/);
     assert.ok(result.body.includes(fixed(0)));
     assert.ok(!result.body.includes(fixed(20)), "an edit past the loss was applied");
     assert.ok(result.body.includes(PARAS[10]!), "the block that gave content up did not keep its content");
   });
+});
+
+test("the delivered marker does not blame the ceiling for a boundary Iris chose", () => {
+  // The marker is written from `editorSalvaged`, and `blocks` alone cannot tell the two boundaries
+  // apart: on a retreat the reply answered PAST it — as far as the whole document — and Iris stopped
+  // believing it there. A reader told "the answer hit the ceiling partway through" at that block
+  // would go looking for a longer reply that exists, and would not know to look for the duplicate the
+  // rule accepts. Both readings are pinned here because only one of them is a claim about the model.
+  const chose = wrapDocument("<p>body</p>", {
+    editorTruncated: true,
+    editorSalvaged: { edits: 4, blocks: 5, of: 24, cutBack: true },
+    editorSections: { of: 3, corrected: 3 },
+  });
+  assert.match(chose, /set aside here rather than by the ceiling/);
+  assert.match(chose, /taken only as far as that change/);
+  assert.doesNotMatch(chose, /ceiling partway through/);
+  // The trade, in the only place a person who has the document is told about it: the run is over, so
+  // no later pass can find it and no log line reaches them.
+  assert.match(chose, /content BACKWARDS into the part above/);
+  assert.match(chose, /twice — once where it was moved to/);
+  // Where the ceiling really is the boundary, the marker says so and has nothing to warn about: the
+  // reply's edits stop where it stops, so no pair of a move can be split by anything Iris did.
+  const ceiling = wrapDocument("<p>body</p>", {
+    editorTruncated: true,
+    editorSalvaged: { edits: 4, blocks: 5, of: 24, cutBack: false },
+    editorSections: { of: 3, corrected: 3 },
+  });
+  assert.match(ceiling, /ceiling partway through/);
+  assert.doesNotMatch(ceiling, /set aside here rather than by the ceiling/);
+  assert.doesNotMatch(ceiling, /BACKWARDS/);
+  // Both are still the same marker about the same two halves of a document.
+  for (const html of [chose, ceiling]) {
+    assert.match(html, /@editor-truncated blocks 5 of 24/);
+    assert.match(html, /3 of 3 sections came back corrected/);
+    assert.match(html, /named 4 of them/);
+  }
 });
 
 test("a loss in the first block the reply claimed leaves no prefix to keep", async () => {
