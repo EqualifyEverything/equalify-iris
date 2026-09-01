@@ -21,9 +21,9 @@ interface LogEvent {
   [k: string]: unknown;
 }
 
-// What a set of model calls cost and took. Shared by `by_agent` and `by_step` so the two
-// splits are the same seven numbers over the same calls, differing only in how they are
-// keyed — a reader comparing them is comparing groupings, never definitions.
+// What a set of model calls cost and took, and who answered them. Shared by `by_agent` and
+// `by_step` so the two splits are the same seven numbers over the same calls, differing only
+// in how they are keyed — a reader comparing them is comparing groupings, never definitions.
 export interface CallTotals {
   count: number;
   total_ms: number;
@@ -32,6 +32,32 @@ export interface CallTotals {
   output_tokens: number;
   cache_read_input_tokens: number;
   cache_creation_input_tokens: number;
+  // Which model ids answered these calls, sorted and deduplicated.
+  //
+  // The seven numbers say what a bucket cost; this says what the cost is a price OF, and
+  // the two are only useful together on the one knob a deployment actually turns.
+  // `providers.per_agent` picks a model per agent, and until this field the run's own
+  // summary could not say whether a swap had taken effect: an override key that names no
+  // dispatched agent is ignored and the call falls through to the provider's own model
+  // (`perAgentKeyWarning`, config.ts), so a swap that never happened and a cheaper model
+  // that saved nothing produced the same run and the same diagnostics. A boot warning
+  // catches the bad KEY; nothing said which model each agent had ended up on.
+  //
+  // Collected over the same calls as the totals, failures included: a model id that is
+  // valid for one provider and named to another resolves happily (`resolveAgentModel`
+  // keeps `providers.default` when only `model:` is overridden and does not check that the
+  // id belongs to it) and then fails on every call, which is exactly the row whose model is
+  // the thing worth reading.
+  //
+  // A list rather than one id, because one agent is not one model. Resolution keys on agent
+  // AND capability, and three agents call with both: `page` extracts and corrects with
+  // `vision` and merges a specialist fragment with `text`, `feedback` judges a page with
+  // `vision` and classifies with `text`, and the copy editor picks its capability from
+  // whether the section it is editing has images. So a deployment using a provider's
+  // `per_capability` block runs one agent on two models on purpose, and a row reporting the
+  // first or the last would be a claim the config does not make. Sorted so the field is
+  // stable across two runs of the same shape.
+  models: string[];
 }
 
 export interface Diagnostics {
@@ -98,8 +124,12 @@ export interface Diagnostics {
   // agent that caches best, which inverts the answer the split exists to give. Keyed as
   // the log line keys them, so the names that cross the adapter/diagnostics seam are the
   // same ones in both places.
+  //
+  // This is also the row that says whether a per-agent model override took effect, because
+  // `models` is on it: `providers.per_agent` is keyed by agent, so the split a swap is
+  // decided from is the split it has to be confirmed from.
   by_agent: Record<string, CallTotals>;
-  // Per-STEP totals: the same seven numbers, keyed by the job that bought the call rather
+  // Per-STEP totals: the same seven numbers and the same models, keyed by the job that bought the call rather
   // than by the agent file that answered it (`PipelineStep` in providers/types.ts).
   //
   // This is the split a per-step cost claim has to be read off, and `by_agent` is not it.
@@ -767,7 +797,8 @@ export function summarizeRun(
   const byStep: Diagnostics["by_step"] = {};
   // One fold, run twice over the same calls under two keys, so `by_agent` and `by_step` cannot
   // disagree about a call: every total in either is the same arithmetic over the same events.
-  // Summing `by_step` and summing `by_agent` gives the same seven numbers, which is worth being
+  // Summing `by_step` and summing `by_agent` gives the same seven numbers over the same set of
+  // models, which is worth being
   // true by construction — a report that quoted a step's share against a differently-collected
   // whole would be wrong in a way no reader could see.
   const fold = (into: Record<string, CallTotals>, key: string, c: LogEvent): void => {
@@ -781,6 +812,7 @@ export function summarizeRun(
         output_tokens: 0,
         cache_read_input_tokens: 0,
         cache_creation_input_tokens: 0,
+        models: [],
       };
     cur.count += 1;
     cur.total_ms += c.duration_ms ?? 0;
@@ -789,6 +821,13 @@ export function summarizeRun(
     cur.output_tokens += c.output_tokens ?? 0;
     cur.cache_read_input_tokens += c.cache_read_input_tokens ?? 0;
     cur.cache_creation_input_tokens += c.cache_creation_input_tokens ?? 0;
+    // Every `model_call` the router writes carries `model`, on the failure branch as well as
+    // the success one, so a bucket with calls in it and nothing here is a log old enough to
+    // predate the field rather than a call that went to nobody. Absent rather than `"?"`:
+    // this list is read to answer "which model", and a placeholder in it would answer.
+    if (typeof c.model === "string" && c.model !== "" && !cur.models.includes(c.model)) {
+      cur.models.push(c.model);
+    }
     into[key] = cur;
   };
   for (const c of calls) {
@@ -810,6 +849,9 @@ export function summarizeRun(
     tokens.cache_read += c.cache_read_input_tokens ?? 0;
     tokens.cache_write += c.cache_creation_input_tokens ?? 0;
   }
+  // Sorted once at the end rather than kept ordered, since first-seen order is an accident of
+  // which page finished first and two dumps of the same run should diff to nothing.
+  for (const t of [...Object.values(byAgent), ...Object.values(byStep)]) t.models.sort();
 
   const slowest = [...calls]
     .sort((a, b) => (b.duration_ms ?? 0) - (a.duration_ms ?? 0))

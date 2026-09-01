@@ -46,8 +46,10 @@ const apiWarning = bedrockApiWarning(cfg.providers);
 if (apiWarning) console.warn(`WARNING: ${apiWarning}`);
 
 // And an override that names no agent, which is the same failure on the one key that
-// decides which model runs: the entry is ignored, the call takes the provider's own model,
-// and a model that was never swapped is indistinguishable from one that was.
+// decides which model runs: the entry is ignored and the call takes the provider's own
+// model. What ran is answerable afterwards — `by_agent.<agent>.models` in diagnostics names
+// the model each agent actually used — but the key that was ignored is nameable only from
+// here, because nothing downstream of resolution ever sees it.
 const agentKeyWarning = perAgentKeyWarning(cfg.providers.per_agent, cfg.storage.agents_dir);
 if (agentKeyWarning) console.warn(`WARNING: ${agentKeyWarning}`);
 

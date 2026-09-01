@@ -331,13 +331,14 @@ const done = { sessionId: "s", status: "ready_for_review", phase: "done", now: D
 
 test("by_step and by_agent are the same calls grouped two ways, and they add up the same", () => {
   const log = [
-    line({ ts: T(1), type: "model_call", agent: "page", step: "extract", duration_ms: 100, input_tokens: 10, output_tokens: 1 }),
-    line({ ts: T(2), type: "model_call", agent: "page", step: "correct", duration_ms: 200, input_tokens: 20, output_tokens: 2 }),
-    line({ ts: T(3), type: "model_call", agent: "feedback", step: "verify", duration_ms: 300, input_tokens: 30, output_tokens: 3 }),
+    line({ ts: T(1), type: "model_call", agent: "page", model: "cheap", step: "extract", duration_ms: 100, input_tokens: 10, output_tokens: 1 }),
+    line({ ts: T(2), type: "model_call", agent: "page", model: "cheap", step: "correct", duration_ms: 200, input_tokens: 20, output_tokens: 2 }),
+    line({ ts: T(3), type: "model_call", agent: "feedback", model: "incumbent", step: "verify", duration_ms: 300, input_tokens: 30, output_tokens: 3 }),
     line({
       ts: T(4),
       type: "model_call",
       agent: "feedback",
+      model: "incumbent",
       step: "feedback_scope",
       duration_ms: 400,
       input_tokens: 40,
@@ -366,6 +367,18 @@ test("by_step and by_agent are the same calls grouped two ways, and they add up 
   assert.equal(d.by_step.feedback_scope.input_tokens, 40);
   assert.equal(d.by_step.extract.total_ms, 100);
   assert.equal(d.by_step.correct.max_ms, 200);
+
+  // `models` is folded by the same pass, so it partitions the same way the numbers do: the
+  // union over either split is the set of models the run called, and neither grouping can
+  // name a model the other does not. This is what lets a `page`-only swap be read off either
+  // — by agent, because that is what the override is keyed by, or by step, because
+  // `specialist_merge` is a `page` call that no round has ever measured a swap on.
+  const models = (rows: Record<string, { models: string[] }>): string[] =>
+    [...new Set(Object.values(rows).flatMap((r) => r.models))].sort();
+  assert.deepEqual(models(d.by_agent), ["cheap", "incumbent"]);
+  assert.deepEqual(models(d.by_step), models(d.by_agent));
+  assert.deepEqual(d.by_agent.page.models, ["cheap"]);
+  assert.deepEqual(d.by_step.verify.models, ["incumbent"]);
 });
 
 test("a log line written before step existed is counted under `?`, not dropped", () => {

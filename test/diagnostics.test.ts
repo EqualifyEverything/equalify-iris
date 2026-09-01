@@ -298,6 +298,7 @@ test("per-agent attribution carries all four counts, not just input and output",
     output_tokens: 900,
     cache_read_input_tokens: 24_000,
     cache_creation_input_tokens: 30_000,
+    models: ["m"],
   });
   // An agent whose calls reported no cache counts gets zeros, not missing keys: the
   // shape is the same for every agent so a consumer can add them up without checking.
@@ -307,6 +308,85 @@ test("per-agent attribution carries all four counts, not just input and output",
   const agents = Object.values(d.by_agent);
   assert.equal(agents.reduce((n, a) => n + a.cache_read_input_tokens, 0), d.tokens.cache_read);
   assert.equal(agents.reduce((n, a) => n + a.cache_creation_input_tokens, 0), d.tokens.cache_write);
+});
+
+test("by_agent names the model each agent ran on, so a swap that did not happen is visible", () => {
+  // The failure this exists for: `providers.per_agent` is the whole model-selection surface,
+  // and a key that names no dispatched agent is IGNORED — the call falls through to the
+  // provider's own model and the run succeeds at the price it would have cost anyway. So a
+  // cheaper model that saved nothing and a swap that never took effect produced the same
+  // seven numbers. Here `page` was swapped and `feedback` deliberately left on the incumbent,
+  // which is what a `page`-only swap looks like, and the rows say so.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    end(T(2), "page", 2000, "moonshotai.kimi-k2.5"),
+    end(T(4), "page", 2000, "moonshotai.kimi-k2.5"),
+    // A failed call counts too: a model id that is valid for one provider and named to
+    // another resolves happily and then fails on every call, and that row's model is the
+    // whole diagnosis. Excluding failures would blank exactly the case worth reading.
+    { ts: T(5), type: "model_call", agent: "page", model: "moonshotai.kimi-k2.5", capability: "vision",
+      provider: "p", duration_ms: 300, ok: false, error: "model not found" },
+    end(T(6), "feedback", 1000, "us.anthropic.claude-sonnet-4-6"),
+    { ts: T(6), type: "run_complete" },
+  );
+  const d = summarizeRun(text, { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.parse(T(6)) });
+  // Deduplicated: three calls to one model is one entry, not three.
+  assert.deepEqual(d.by_agent.page.models, ["moonshotai.kimi-k2.5"]);
+  assert.equal(d.by_agent.page.count, 3);
+  assert.deepEqual(d.by_agent.feedback.models, ["us.anthropic.claude-sonnet-4-6"]);
+  // And the same calls keyed by step carry it, since a step is what a bucket of spend is.
+  assert.deepEqual(d.by_step["?"].models, ["moonshotai.kimi-k2.5", "us.anthropic.claude-sonnet-4-6"]);
+});
+
+test("one agent can be two models, because resolution keys on capability as well", () => {
+  // `page` extracts with `vision` and merges a specialist fragment with `text`; a provider's
+  // `per_capability` block can therefore put one agent on two models on purpose. A row
+  // reporting the first or the last would be a claim the config does not make — and sorted,
+  // not first-seen, because which page finished first is an accident.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    end(T(2), "page", 2000, "z-vision-model", "vision"),
+    end(T(4), "page", 1000, "a-text-model", "text"),
+    { ts: T(4), type: "run_complete" },
+  );
+  const d = summarizeRun(text, { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.parse(T(4)) });
+  assert.deepEqual(d.by_agent.page.models, ["a-text-model", "z-vision-model"]);
+});
+
+test("models covers the whole session, not the current round, so a restart between rounds shows both", () => {
+  // Folded over every `model_call` in the log, exactly as the seven numbers beside it are — and a
+  // session's log is one append-only file across its feedback rounds (store/runlog.ts). Config is
+  // read at boot, so a session extracted before a restart and given feedback after one really did
+  // run on two models, and reporting one of them would be the lie. It is pinned because the
+  // docs turn this field into a verdict on a config edit (docs/models.md §1, docs/API.md §7b):
+  // that reading holds on a session that has only run since the edit, which is why both say so.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    end(T(2), "page", 2000, "before-restart", "vision"),
+    { ts: T(2), type: "run_complete" },
+    { ts: T(6), type: "run_start" },
+    end(T(8), "page", 2000, "after-restart", "vision"),
+    { ts: T(8), type: "run_complete" },
+  );
+  const d = summarizeRun(text, { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.parse(T(8)) });
+  assert.deepEqual(d.by_agent.page.models, ["after-restart", "before-restart"]);
+  // And the same set under the other key, since one fold serves both.
+  assert.deepEqual(d.by_step["?"].models, ["after-restart", "before-restart"]);
+  assert.equal(d.by_agent.page.count, 2);
+});
+
+test("a call whose line carries no model leaves the list empty rather than naming a placeholder", () => {
+  // Unlike `by_step`'s `?` key, which has to exist so old logs still add up, this field is
+  // read to answer "which model" — a `"?"` in it would answer, and wrongly. Empty with a
+  // non-zero count is readable as "this log predates the field".
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(2), type: "model_call", agent: "page", capability: "vision", provider: "p", duration_ms: 2000, ok: true },
+    { ts: T(2), type: "run_complete" },
+  );
+  const d = summarizeRun(text, { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.parse(T(2)) });
+  assert.equal(d.by_agent.page.count, 1);
+  assert.deepEqual(d.by_agent.page.models, []);
 });
 
 test("calls_reported shows when a token sum covers only part of a run", () => {

@@ -109,14 +109,16 @@ from the environment at startup; changes require a restart.
   set per provider (`default_model` + `per_capability`), and can be overridden **per agent** via
   `providers.per_agent` — either a string (provider only) or `{ provider, model }`. Resolution
   falls back: per-agent model → provider `per_capability` → provider `default_model`.
-  **The key has to be an agent Iris dispatches, and getting it wrong is silent**: an
+  **The key has to be an agent Iris dispatches, and getting it wrong does not stop the run**: an
   unrecognized name simply finds no override and takes that same fallback, so the swap does
-  not happen, the run succeeds, and nothing in the logs or in `by_agent` distinguishes a
-  model that was never changed from one that was. The agents are `page`, `reader`,
+  not happen and the document arrives at the price it would have cost anyway. What a finished run
+  does say is `by_agent.<agent>.models` in diagnostics — the model ids that agent's calls actually
+  went out on — so a swap can be confirmed rather than assumed. The agents are `page`, `reader`,
   `copy_editor`, `feedback`, `builder`, and any specialist file in `agents/`; there is no
   `table` key, because joining a table split across a page break is a `copy_editor` call and
   shares that agent's entry with the review round. Boot warns about a key it cannot route
-  (`perAgentKeyWarning`), which is the only place it can be said — both of this repo's own
+  (`perAgentKeyWarning`), which is the only place the *key* can be named — the diagnostics field
+  above names what ran, never what was ignored — and both of this repo's own
   example configs had carried an unroutable key, `config.example.yaml` a `table` no call site
   has ever dispatched and prd.md §10.3 an `image_analysis` that went with the triage step it
   named. **Which model to put on which agent, measured**: each agent's share of the bill, the

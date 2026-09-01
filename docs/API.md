@@ -925,10 +925,12 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
   "tokens": { "input": 43200, "output": 19400, "cache_read": 2500, "cache_write": 2500, "calls_reported": 7 },
   "by_agent": { "page": { "count": 2, "total_ms": 28200, "max_ms": 15100,
     "input_tokens": 16400, "output_tokens": 9100,
-    "cache_read_input_tokens": 2500, "cache_creation_input_tokens": 2500 } },
+    "cache_read_input_tokens": 2500, "cache_creation_input_tokens": 2500,
+    "models": ["us.anthropic.claude-sonnet-4-6"] } },
   "by_step": { "extract": { "count": 2, "total_ms": 28200, "max_ms": 15100,
     "input_tokens": 16400, "output_tokens": 9100,
-    "cache_read_input_tokens": 2500, "cache_creation_input_tokens": 2500 } },
+    "cache_read_input_tokens": 2500, "cache_creation_input_tokens": 2500,
+    "models": ["us.anthropic.claude-sonnet-4-6"] } },
   "slowest_calls": [ { "agent": "table", "step": "specialist", "model": "...", "capability": "vision", "duration_ms": 14300, "ok": true } ],
   "errors": [],
   "verification": {
@@ -988,7 +990,28 @@ would read as rather than a standing entry on every run that sampled.
 `cache_creation_input_tokens`) — so "which agent is slow" and "which agent is expensive" can be
 answered separately, because they are often different agents. `by_step` is the **same calls with
 the same seven numbers, keyed by the job the call was bought for** instead of by the agent that
-answered it, so summing either gives the same totals and the same `tokens`. Both are reported
+answered it, so summing either gives the same totals and the same `tokens`.
+
+Each row also carries `models`: **which model ids answered those calls**, sorted and
+deduplicated. The seven numbers say what a bucket cost, and this says what the cost is a price
+*of* — the pair matters on the one knob a deployment turns, since `providers.per_agent` picks a
+model per agent and until this field nothing in a finished run said whether a swap had taken
+effect. A key naming no dispatched agent is ignored rather than refused (**Configuration**), so
+the call falls through to the provider's own model and the run succeeds at the price it would
+have cost anyway: a cheaper model that saved nothing and a swap that never happened produced
+identical diagnostics. Read `by_agent.<agent>.models` after changing an override — that is the
+split the override is keyed by, on a session that has only run since the change: this field folds
+the whole session log exactly as the seven numbers do, and a session's log spans its feedback
+rounds, so a session extracted before a restart and given feedback after one reports both ids
+truthfully. Usually one id; **more than one is not a defect**, because
+resolution keys on capability as well as agent, so a provider's `per_capability` block can put
+one agent on two models on purpose (`page` extracts with `vision` and merges a specialist
+fragment with `text`; `feedback` judges with `vision` and classifies with `text`; the copy editor
+picks by whether the section it is editing has images). An **empty** list on a row with calls in
+it means a log old enough to predate the field — every `model_call` the router writes carries
+`model`, on the failure branch as well as the success one, which is deliberate: a model id that
+is valid for one provider and named to another resolves happily and then fails on every call, and
+that row's model is the whole diagnosis. Both are reported
 because they answer different questions and neither substitutes for the other: an agent name is a
 *contract*, and one contract serves several jobs. The Feedback Agent judges a freshly extracted
 page, re-judges a corrected one, routes a user's feedback and classifies a lesson from it; the
