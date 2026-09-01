@@ -134,15 +134,13 @@ function cutReply(blocks: number[], opts: { closed?: boolean; chars?: number } =
 // not make: an emptied block, and one handed back with less prose in it than it had. Cut inside the
 // entry after the last one named, exactly as `cutReply` cuts, so the two fixtures differ in what the
 // edits SAY and in nothing else.
-function cutReplyOf(entries: { block: number; html: string }[]): TruncatedResponseError {
+function cutReplyOf(entries: { block: number; html: string }[], opts: { closed?: boolean } = {}): TruncatedResponseError {
   const head = `{"edits":[${entries.map((x) => JSON.stringify(x)).join(",")}`;
   const next = Math.max(...entries.map((x) => x.block)) + 1;
-  return new TruncatedResponseError(
-    "bedrock",
-    "sonnet",
-    32_000,
-    `${head},{"block":${next},"html":"<p id="p`.padEnd(CHARS, "x"),
-  );
+  const text = opts.closed
+    ? `${head}],"fidelity_observed":["the table figures are as printed`.padEnd(CHARS, "x")
+    : `${head},{"block":${next},"html":"<p id="p`.padEnd(CHARS, "x");
+  return new TruncatedResponseError("bedrock", "sonnet", 32_000, text);
 }
 
 interface Call {
@@ -555,6 +553,37 @@ test("a claim cut back late costs fewer section calls, which is the money in it"
       assert.ok(result.body.includes(fixed(block)), `block ${block}'s own correction is missing`);
     }
     assert.ok(result.body.includes(PARAS[18]!), "the block that gave content up did not keep its content");
+  });
+});
+
+test("a COMPLETE patch that lost content is cut back too, and then it does have a remainder", async () => {
+  await withTemp(async (dir) => {
+    // The one shape the retreat changes control flow for: before it, a reply whose edits list closed
+    // covered the document by definition, left `rest` at 0 and made no section call at all. A loss in
+    // it now ends the claim like any other, so a complete patch reaches the section path — and the
+    // document is told it was cut back rather than passed whole, which is the distinction the marker
+    // exists for.
+    const reply = () =>
+      cutReplyOf([{ block: 0, html: fixed(0) }, shrank(10), { block: 20, html: fixed(20) }], { closed: true });
+    const { ctx, rec } = ctxWith(dir, { reply });
+    const result = await review(ctx);
+
+    const remainder = BLOCKS.slice(10).map((b) => b.pre + b.html).join("");
+    const salvaged = rec.events.find((e) => e.type === "editor_salvaged");
+    assert.equal(salvaged?.data.closed, true, "the edits list did finish");
+    assert.equal(salvaged?.data.lost_at, 10);
+    assert.equal(salvaged?.data.reached, 10, "a closed reply's claim is the document, until a loss cuts it");
+    assert.equal(salvaged?.data.dropped, 2);
+    assert.equal(salvaged?.data.rest, remainder.length, "a closed reply with a retreat in it has a remainder");
+    assert.ok(rec.calls.some((c) => c.system === EDITOR_SECTION_SYSTEM), "the remainder was never asked for");
+    assert.equal(rec.events.find((e) => e.type === "editor_sections")?.data.covers, "remainder");
+    // Which the delivered document says in the terms it says everything else: the boundary between
+    // the two kinds of correction, and NOT the sentence a complete patch earns.
+    assert.match(result.html, /@editor-truncated blocks 10 of 24/);
+    assert.doesNotMatch(result.html, /nothing was left to ask/);
+    assert.ok(result.body.includes(fixed(0)));
+    assert.ok(!result.body.includes(fixed(20)), "an edit past the loss was applied");
+    assert.ok(result.body.includes(PARAS[10]!), "the block that gave content up did not keep its content");
   });
 });
 

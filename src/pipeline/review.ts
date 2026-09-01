@@ -1915,13 +1915,20 @@ async function editorSectionCall(
 // asked for by the same section calls that would have covered the whole body anyway — never more of
 // them than before, and fewer whenever the loss is not in the first blocks.
 //
-// What the retreat DOES risk is worth naming, because it is not nothing. A move that carries content
-// BACKWARDS — landing half before the cut, source half at or after it — leaves the landing edit
-// applied and the source block untouched, so the content is duplicated rather than lost. That is the
-// trade this makes deliberately: a deletion is invisible in the delivered document and permanent,
-// while a duplicate is visible to the next Reader pass and is the thing this loop's document-level
-// editor is best at (see `runEditor`). `lost_at` on the log line is what makes the rate of it
-// countable, since nothing else in the pipeline can say how often a retreat happened.
+// What the retreat DOES risk is worth naming, because it is not nothing and nothing in this run
+// takes it back. A move that carries content BACKWARDS — landing half before the cut, source half at
+// or after it — leaves the landing edit applied and the source block untouched, so the content is
+// duplicated rather than lost, and it SHIPS that way: a truncated round is the loop's last round
+// (`lastRound` in `runReview`), so there is no further read and no further document-level call, and
+// the section calls over the remainder are handed the remainder alone, so the section holding the
+// source block cannot know the content is now also in the prefix. What can see it is a feedback
+// re-run (PRD §7.12), which is the user's action and not this loop's.
+//
+// The trade is still the right way round, and this is the whole of the argument for it: a deletion is
+// invisible in the delivered document and permanent, while a duplicate is in the delivered document
+// where a reader, a re-run and the next round of anything can find it. `lost_at` on the log line is
+// what makes the rate countable, since nothing else in the pipeline can say how often a retreat
+// happened — and it is a rate worth watching precisely because the remedy is a re-run.
 //
 // What it returns is the document in two pieces, because the second half of #295 is not to pay for
 // the first half twice: `prefix` is the part of the body the reply reached, corrected, and `rest`
