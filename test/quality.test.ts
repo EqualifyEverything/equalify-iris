@@ -446,6 +446,56 @@ test("an exit nothing took reports zero, and one nobody attributed is a shortfal
   });
 });
 
+test("the exits that ship an open list account for the whole rate, on a window that names them all", () => {
+  withStore((store) => {
+    // The arithmetic that makes `review_stopped` a split OF `unresolved_rate` rather than a
+    // second breakdown standing beside it (#264): three exits deliver a list and two do not, so
+    // on a window where every document named its exit the three sum to the documents in the
+    // rate. Without that the report could print both numbers and a reader could not tell
+    // whether they were about the same population.
+    delivered(store, "fine", [{ code: reviewStoppedSignal("clean"), count: 1 }], 0);
+    delivered(store, "no-verdict", [
+      { code: reviewStoppedSignal("unread"), count: 1 },
+      { code: SIGNAL_REVIEW_UNREAD, count: 2 },
+    ]);
+    delivered(store, "editor-declined", [
+      { code: reviewStoppedSignal("converged"), count: 1 },
+      { code: SIGNAL_UNRESOLVED, count: 1 },
+    ]);
+    delivered(store, "too-long", [
+      { code: reviewStoppedSignal("truncated"), count: 1 },
+      { code: SIGNAL_EDITOR_TRUNCATED, count: 1 },
+      { code: SIGNAL_UNRESOLVED, count: 4 },
+    ]);
+    delivered(store, "out-of-rounds", [
+      { code: reviewStoppedSignal("cap"), count: 1 },
+      { code: SIGNAL_UNRESOLVED, count: 2 },
+    ]);
+
+    const q = store.qualityStats();
+    const docs = (where: string) => q.review_stopped.find((s) => s.where === where)?.documents ?? 0;
+    assert.equal(
+      docs("cap") + docs("converged") + docs("truncated"),
+      Math.round(q.unresolved_rate * q.documents),
+      "the three exits that deliver an `@unresolved` list are the documents in the rate",
+    );
+    // Stated the other way round as well, because it is the half that could break silently: an
+    // exit that started carrying an unresolved row would keep the sum above equal by growing
+    // both sides, and the split would quietly stop being a split.
+    assert.equal(docs("clean") + docs("unread"), 2);
+    assert.equal(
+      q.documents - Math.round(q.unresolved_rate * q.documents),
+      docs("clean") + docs("unread"),
+      "and `clean` and `unread` are the whole of what the rate leaves out",
+    );
+    // The two halves the split is FOR, per that reading: `cap` and `converged` are documents
+    // whose open list was read on the bytes that shipped, `truncated` is the one where it may
+    // predate them (pipeline/review.ts, and test/editor-sections.test.ts drives it).
+    assert.equal(docs("cap") + docs("converged"), 2);
+    assert.equal(docs("truncated"), 1);
+  });
+});
+
 test("the severities of what was left open are counted per document, and are not a partition", () => {
   withStore((store) => {
     // A document with one high issue and three low ones is in BOTH severities, so these

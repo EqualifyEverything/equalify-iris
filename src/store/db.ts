@@ -422,6 +422,11 @@ export interface QualityStats {
   // iteration cap, on a round that changed nothing, or on a round whose response hit the
   // output ceiling. That last case is counted here too, so this is not disjoint from
   // `editor_truncated_rate` below; it is the superset.
+  //
+  // Those three are not one measurement, and `review_stopped` below is where they come apart
+  // (#264): on the first two the list shipped in `@unresolved` was read on the bytes that were
+  // delivered, and on the third it may predate them. A threshold set over the mixture is set
+  // over both facts at once.
   unresolved_rate: number;
   // How the Reader rated what was left open, one entry per severity in `UNRESOLVED_SEVERITY`
   // order and ALWAYS all four, zeroes included — the same "measured, and none of these" vs
@@ -441,19 +446,40 @@ export interface QualityStats {
   unresolved_severity: { severity: UnresolvedSeverity; documents: number }[];
   // Which of the loop's exits ended each document, one entry per value in `REVIEW_STOPPED`
   // order and always all five (#264). Recorded for every delivered document, so unlike
-  // `unresolved_severity` above these ARE a partition: the counts sum to `documents`.
+  // `unresolved_severity` above these ARE a partition — of the documents that recorded one,
+  // which is every document on a window that postdates the field and fewer than `documents`
+  // on any window that does not. The next paragraph is that case, and it is the usual one.
   //
   // A sum BELOW `documents` is the one reading worth spelling out, and it means one of two
   // things. Either the window includes documents delivered before this was recorded — the same
   // shortfall `lint_error_where` can show — or an exit was added to the loop and given no
   // stop reason, which is the failure this field is shaped to make visible rather than
-  // guessable. It is never a sixth kind of exit.
+  // guessable. It is never a sixth kind of exit. Whenever the sum is short, this breakdown is
+  // about the documents it sums to and NOT about the window: `unresolved_rate` is over
+  // `documents`, so quoting the two side by side is quoting two denominators, and the split
+  // does not scale up to the rate.
   //
   // `clean` is the good value and the only one the loop reaches by re-reading the finished
   // document and finding nothing. The other four all deliver `@unresolved`, and which one it
   // was is which fix is being asked for: `cap` a config number, `converged` a prompt,
   // `truncated` an output ceiling, `unread` a reviewer that could not read part of what it was
   // judging. See SIGNAL_REVIEW_STOPPED.
+  //
+  // Which of them the delivered `@unresolved` list is a statement ABOUT is the split #264 asked
+  // for, and it is not the same division. The loop re-reads at the TOP of every round
+  // (pipeline/review.ts), and `cap`, `converged` and `unread` are all taken before the next
+  // editor call — so on those the list was read on the bytes that shipped. `truncated` is the
+  // one exit where it may be older than the document: the editor's reply was cut off, the
+  // sectioned retry may have corrected part of the body afterwards, and the round that would
+  // have re-read it is the one that could not be made. It over-reports on purpose there, and a
+  // truncation whose retry rescued nothing over-reports not at all — a distinction this tally
+  // cannot draw, and the delivered document can (`@editor-truncated sections N of M`).
+  //
+  // So `cap` + `converged` is the part of `unresolved_rate` that is a claim about the delivered
+  // document, `truncated` is the part that is a claim about the round, and a single threshold
+  // over the two cannot be set honestly. `unread` is in neither: its list is empty, so it
+  // contributes no `iris:unresolved` row at all (see SIGNAL_REVIEW_UNREAD), which is what makes
+  // `cap + converged + truncated` equal the documents in the rate on a fully attributed window.
   review_stopped: { where: ReviewStopped; documents: number }[];
   // Share of documents where the Copy Editor dropped at least one link.
   links_dropped_rate: number;
