@@ -27,6 +27,10 @@ import type { Paths } from "../src/store/paths.ts";
 interface Rec {
   events: { type: string; data: Record<string, unknown> }[];
   drafted: number;
+  // Which agent the draft was dispatched as, recorded because `providers.per_agent` is keyed by
+  // exactly this string: a rename here silently un-routes a deployment's override for the
+  // builder, and there is no other call site to notice it (docs/models.md §1).
+  agents: string[];
 }
 
 // No `fetch` stub: the point of these cases is that GitHub is never reached. The
@@ -38,7 +42,7 @@ function makeCtx(dir: string): { ctx: PipelineContext; rec: Rec } {
   for (const d of [agentsDir, inputDir]) mkdirSync(d, { recursive: true });
   writeFileSync(join(inputDir, "page-001.png"), "not-a-real-png");
 
-  const rec: Rec = { events: [], drafted: 0 };
+  const rec: Rec = { events: [], drafted: 0, agents: [] };
   const ctx = {
     sessionId: "ses_test",
     githubToken: "gho_user",
@@ -54,8 +58,9 @@ function makeCtx(dir: string): { ctx: PipelineContext; rec: Rec } {
       // Counted, not just stubbed: drafting is a vision call on the source image, so
       // a suggestion that gets this far has already cost real money before anything
       // is filed. Reaching the draft is a failure even if the filing then fails.
-      complete: async () => {
+      complete: async (agent: string) => {
         rec.drafted++;
+        rec.agents.push(agent);
         return { text: "# Agent\n\n## Required capability\nvision\n" };
       },
     },
@@ -129,12 +134,28 @@ test("two spellings of one new type are drafted once, not twice", async () => {
   );
 });
 
+test("no suggestion means no builder call, which is why its cost and the specialist's are one number", async () => {
+  // A run whose pages named no specialist spends nothing here. That is not a measurement of the
+  // builder: it is the same gate that leaves the specialist at zero, one step downstream
+  // (`runContribution` is called with the page pass's suggestions — orchestrator.ts). A cost
+  // report that lists the two separately is reporting one cause twice, which is what
+  // docs/models.md §4 says and what this pins.
+  const rec = await contribute([]);
+  assert.equal(rec.drafted, 0, "a run with no suggestions still called a model");
+  assert.deepEqual(rec.agents, []);
+  assert.deepEqual(rec.events, []);
+});
+
 test("a genuinely new type is still drafted, so the filter is not just refusing everything", async () => {
   // The control. Without it, a filter that dropped every suggestion would pass both
   // tests above while silently ending contributions altogether — the failure §12
   // cares about most.
   const rec = await contribute(["chartDataAgent"]);
   assert.equal(rec.drafted, 1, "a new content type was not drafted");
+  // Under the `builder` name, and asserted at the call site rather than grepped for: this string
+  // is the `providers.per_agent` key a deployment writes to put a different model on drafting,
+  // and nothing else dispatches it.
+  assert.deepEqual(rec.agents, ["builder"]);
   // Filing then fails (the API base is a closed port), which is itself the proof it
   // was attempted rather than filtered out.
   assert.deepEqual(

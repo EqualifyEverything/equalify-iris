@@ -196,7 +196,7 @@ test("every per_agent key any example names is an agent Iris dispatches", () => 
   // file offers a per_agent key called `max_tokens`. Both files carry more than one block, so
   // each is scanned in turn rather than picking one.
   const blocks = /^(\s*)(#\s?)?per_agent:/;
-  for (const file of ["config.example.yaml", "prd.md"]) {
+  for (const file of ["config.example.yaml", "prd.md", "docs/models.md"]) {
     const lines = readFileSync(join(ROOT, file), "utf8").split("\n");
     let found = 0;
     let seenBlock = false;
@@ -244,5 +244,29 @@ test("every per_agent key any example names is an agent Iris dispatches", () => 
     // count above 0 can only come from the COMMENTED example — a stop rule that gave up before
     // reaching it would fail here rather than pass silently.
     assert.ok(found > 0, `${file}'s per_agent blocks have no entries under them to check`);
+  }
+});
+
+// docs/models.md is a recommendation PER AGENT, so its table is a claim about the same set the
+// test above derives — and the sprint report it was written from got that set wrong, listing the
+// specialist row in place of `builder` and arriving at five by counting one agent twice. A
+// missing row is the failure that matters: an agent nobody has a recommendation for reads as an
+// agent with no cost, which is exactly how `builder` and the specialist came to be reported as
+// two independent zeroes (they are one gate — see the file).
+test("docs/models.md carries a recommendation row for every agent a deployment can route", () => {
+  const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
+  // The RECOMMENDATION table specifically, not the file. Every dispatched agent also appears in
+  // §1's table of call sites, so a check against the whole document passes while the summary a
+  // reader actually acts on is missing a row — which is the failure being guarded, and the one
+  // an earlier version of this test did not catch when the `builder` row was taken out of §0.
+  const section = doc.split(/^## /m).find((s) => s.startsWith("0."));
+  assert.ok(section, "docs/models.md has no `## 0.` summary section any more");
+  for (const agent of declaredAgents()) {
+    assert.match(
+      section,
+      new RegExp(`^\\| \`${agent}\``, "m"),
+      `docs/models.md §0 has no row for the \`${agent}\` agent, so a reader choosing models ` +
+        `cannot tell whether it was measured, left alone deliberately, or forgotten`,
+    );
   }
 });

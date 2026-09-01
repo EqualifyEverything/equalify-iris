@@ -119,7 +119,9 @@ from the environment at startup; changes require a restart.
   (`perAgentKeyWarning`), which is the only place it can be said — both of this repo's own
   example configs had carried an unroutable key, `config.example.yaml` a `table` no call site
   has ever dispatched and prd.md §10.3 an `image_analysis` that went with the triage step it
-  named.
+  named. **Which model to put on which agent, measured**: each agent's share of the bill, the
+  two agents with a cheaper model that measured no worse, and what every figure was measured
+  at — **[docs/models.md](docs/models.md)**.
   Each provider also takes `max_tokens` (default 32000), the per-call **output** ceiling. A
   response that stops at the ceiling is a **failed** call, not a short one: it arrives as a 200
   with HTML cut mid-tag, which would otherwise be assembled into the deliverable as if it were
@@ -377,6 +379,9 @@ direction: it takes a bearer token too, but its own shared secret rather than a 
 Full copy-pasteable bash/curl walkthrough of every endpoint: **[docs/API.md](docs/API.md)**.
 To prove the endpoints work end-to-end (mock GitHub + mock model, no credentials needed):
 `./test/e2e.sh`.
+
+Which model to run each agent on, what each one costs, and the two swaps that measured no worse:
+**[docs/models.md](docs/models.md)**.
 
 Example — create a session (order of `images` parts is the processing order, §9.2):
 
