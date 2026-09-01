@@ -585,6 +585,18 @@ echo "$terr" | grep -q 'output ceiling' && echo "$terr" | grep -q 'max_tokens' \
 tout=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/$TSID/output")
 [ "$tout" = "409" ] && pass "no output served for the truncated run (409)" \
   || fail "truncation output" "expected 409, got $tout"
+# And the reply itself is on the failure line (#293). A page lost to the ceiling takes its content
+# with it, so the fragment the model did emit is the only record of what was written before the cut,
+# and the round cannot be asked again for it. Asserted through the real adapter rather than in the
+# unit test alone, because the text arrives on the error from the provider and nothing between here
+# and there is allowed to drop it. This fragment is 35 characters — shorter than both excerpts
+# together — so it is quoted ENTIRE under `reply_head`, with no `reply_tail` repeating part of it.
+tfail=$(curl -s "${AUTH[@]}" "$BASE/sessions/$TSID/logs" \
+  | jq -c 'select(.type == "page_extraction_failed")' | tail -1)
+echo "$tfail" | jq -e --arg h '{"html":"<table><tr><td>cut off mid' \
+  '.truncated == true and .reply_chars == 35 and .reply_head == $h and (has("reply_tail") | not)' >/dev/null \
+  && pass "the lost page's reply is quoted on the failure line ($tfail)" \
+  || fail "truncation excerpt" "$tfail"
 
 echo "==> 9g. one page failing is a hole the document admits, and a later round fills it"
 # The other side of 9d: when SOME pages produced content, ending the run throws away

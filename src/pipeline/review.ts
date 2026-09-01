@@ -3,7 +3,12 @@ import type { ReviewStopped } from "../store/db.ts";
 import { VERIFY_KINDS, type VerifyKind } from "./feedback.ts";
 import { mapWithConcurrency } from "../util/concurrency.ts";
 import { MAX_EDITOR_IMAGES } from "../providers/imageLimits.ts";
-import { isRequestTooLargeError, isTruncatedResponseError, TruncatedResponseError } from "../providers/types.ts";
+import {
+  isRequestTooLargeError,
+  isTruncatedResponseError,
+  replyExcerpt,
+  TruncatedResponseError,
+} from "../providers/types.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
 import { stripDeprecatedRoles } from "./roles.ts";
@@ -1110,15 +1115,6 @@ interface EditorRound {
   sections?: { of: number; corrected: number };
 }
 
-// How much of a truncated reply the log keeps at each end. A few hundred characters in all, which
-// is what the question below needs and no more: this is text out of the user's own document.
-const REPLY_EXCERPT = 240;
-
-// Whether there are two ends worth reporting apart. At or under the pair's width the excerpts would
-// overlap or abut, so the fragment is quoted whole instead — the log never carries more than
-// `2 x REPLY_EXCERPT` characters of it either way.
-const split = (text: string) => text.length > 2 * REPLY_EXCERPT;
-
 // Under this contract a reply names one block per edit, so counting the key says how many edits the
 // model got through before the ceiling — the difference between one enormous block and forty small
 // ones. Not authoritative in either direction: a model that wrote `'block':` or `block:` counts
@@ -1149,31 +1145,20 @@ const BLOCK_KEY = /"block"\s*:/g;
 // form — a model answering a plain-HTML request in the shape of the whole-document contract.
 // docs/API.md says so on both rows.
 //
-// This is the user's own document coming back, so it stays in the run log on the deployment and
-// **never** reaches `GET /v1/quality` — the same confinement, for the same reason, as
-// `prose_joined`'s `word_split_examples`. Whitespace is folded so the line stays one line, and the
-// two ends are only reported apart when there are two ends: at or under the excerpt pair's width
-// the fragment fits inside the same budget entire, so `reply_head` IS the reply and a tail would
-// repeat part of it. Absent altogether on a truncation that returned nothing, and on an error that
-// reached here having lost its prototype — there is no fragment to quote in either case.
+// The excerpt pair itself — its width, its whitespace folding, and the rule that quotes a short
+// fragment whole instead of as a head — is `replyExcerpt` in providers/types.ts, shared with the
+// page-correction path (issue #293) so the two lines can be read against each other. Absent
+// altogether on a truncation that returned nothing, and on an error that reached here having lost
+// its prototype: there is no fragment to quote in either case. `blocks_named` follows the excerpts
+// rather than standing alone, because a count with no text beside it is a number no one can check.
 function truncation(e: unknown): Record<string, unknown> {
   const message = e instanceof Error ? e.message : String(e);
   if (!(e instanceof TruncatedResponseError)) return { error: message };
-  const fold = (s: string) => s.replace(/\s+/g, " ").trim();
   const text = e.text;
   return {
     max_tokens: e.maxTokens,
     chars: e.chars,
-    ...(text === ""
-      ? {}
-      : {
-          // One budget, spent either as two ends or as the whole fragment: a reply short enough
-          // that both excerpts would fit it is quoted entire under `reply_head`, rather than
-          // reported as a head with its middle silently missing.
-          reply_head: fold(text.slice(0, split(text) ? REPLY_EXCERPT : 2 * REPLY_EXCERPT)),
-          ...(split(text) ? { reply_tail: fold(text.slice(-REPLY_EXCERPT)) } : {}),
-          blocks_named: (text.match(BLOCK_KEY) ?? []).length,
-        }),
+    ...(text === "" ? {} : { ...replyExcerpt(text), blocks_named: (text.match(BLOCK_KEY) ?? []).length }),
     error: message,
   };
 }

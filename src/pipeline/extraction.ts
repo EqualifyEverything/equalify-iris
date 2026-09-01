@@ -19,7 +19,7 @@ import { examplesForPrompt } from "./memory.ts";
 import { altTexts, genericAltProblem, genericAlts } from "./alt.ts";
 import { missingLinkProblem, missingLinks, pageLinkContext, unexpectedHrefs } from "./links.ts";
 import { STANDARD as STANDARD_AGENTS, isStandardType, logicalType } from "./contribute.ts";
-import { isTruncatedResponseError } from "../providers/types.ts";
+import { isTruncatedResponseError, replyExcerpt, TruncatedResponseError } from "../providers/types.ts";
 import type { Fragment } from "./fragment.ts";
 
 const PAGE_AGENT = "page";
@@ -2520,9 +2520,38 @@ interface PageOutcome {
 // inert to axe and to `flatten`, and findable by tooling — the same trade
 // `wrapDocument` makes for @unresolved, and it sanitizes runs of dashes for the same
 // reason (a `--` inside a comment ends it early).
+// What a page failure says about the reply, when the reply is the thing that failed (issue #293).
+// Empty for every other error — a throttle, a stall, a stream that stopped: `error` is the whole of
+// what is known about those, and a `reply_chars: 0` on such a line would read as a model that
+// answered with nothing.
+//
+// Every page path that loses a reply to the ceiling gets it from here rather than assembling its own
+// fields, because there are three of them — a first pass, a re-extraction a user asked for, and a
+// correction — and the evidence is worth nothing if the round that produced it is the one round that
+// did not record it. It is what `editor_truncated` has carried since #277, at the same width, from
+// the same `replyExcerpt`: what the reply reached, and both of its ends. A tail mid-sentence in
+// content the head has not reached is a page that needed the room; a tail repeating rows already in
+// the head is a model rewriting the page it was given. Nothing in the pipeline reads any of it — the
+// question is a person's, and it is otherwise unanswerable, because a truncated round has already
+// been billed for a full ceiling of output and cannot be asked again.
+//
+// `instanceof` and not `isTruncatedResponseError`: the predicate also matches an error that arrived
+// having lost its prototype, which has a message and no `text` to quote.
+//
+// A truncation that wrote NOTHING is therefore `truncated: true` with no `reply_head` and
+// `reply_chars: 0` — a call that spent a whole ceiling of output and never began the page, which is a
+// model problem and not a room problem (`EMPTY_REPLY`, providers/types.ts). It is the shape a
+// reasoning model produces, so it is the one to watch when the page model changes.
+function truncationEvidence(e: unknown): Record<string, unknown> {
+  if (!(e instanceof TruncatedResponseError)) return {};
+  return { truncated: true, reply_chars: e.chars, ...replyExcerpt(e.text) };
+}
+
 function failedPage(ctx: PipelineContext, pageAgent: AgentSpec, img: InputImage, e: unknown): PageOutcome {
   const message = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim();
-  ctx.log.event("page_extraction_failed", { image: img.name, page: img.order, error: message });
+  // No `ceiling` beside the evidence, unlike `page_correction_failed`: a first pass asks for no cap
+  // of its own, so the number that was hit is the deployment's and the error already names it.
+  ctx.log.event("page_extraction_failed", { image: img.name, page: img.order, error: message, ...truncationEvidence(e) });
   const note = message.slice(0, 300).replace(/--+/g, "—");
   return {
     fragment: {
@@ -2763,6 +2792,12 @@ async function extractPage(
       const message = (attempt.error instanceof Error ? attempt.error.message : String(attempt.error))
         .replace(/\s+/g, " ")
         .trim();
+      // Deliberately narrower than the `truncated` field below, which is the predicate: an error that
+      // arrived having lost its prototype has a message and no `text` to quote. So this line can say
+      // `truncated: true` and carry no excerpt, which is the one case where their disagreement is the
+      // truth — and it is why `reply_chars: 0`, and not the absence of `reply_head`, is what names the
+      // zero-character shape HERE. On `page_extraction_failed` both come from the same `instanceof`.
+      const evidence = truncationEvidence(attempt.error);
       ctx.log.event("page_correction_failed", {
         image: img.name,
         page: img.order,
@@ -2780,6 +2815,28 @@ async function extractPage(
         // remedy is a config edit or `correctionCeiling`'s multiple. Absent only where the first
         // pass reported no usage and the call therefore ran uncapped.
         ...(ceiling !== undefined ? { ceiling } : {}),
+        // What the reply reached, and both of its ends — the evidence that decides the question the
+        // `ceiling` above only poses (issue #293). A cap this page hit is either a page that
+        // genuinely needs more room than its first pass took, in which case the multiple in
+        // `correctionCeiling` is too tight, or a model that went on rewriting the same page, in
+        // which case the multiple is doing its job. Nothing on this line could tell those apart:
+        // two truncations at 34,573 and 41,959 characters against pages of 11,908 and 11,456 were
+        // argued both ways off the same log, and the round could not be asked again to settle it
+        // because a truncation has already been billed for a full ceiling of output.
+        //
+        // A head and a tail settle it by inspection: a tail mid-sentence in content the head has
+        // not reached is a page that needed the room, and a tail repeating rows already in the head
+        // is a model looping. `reply_chars` rather than `chars` because `chars_kept` is on this same
+        // line and a bare `chars` here would read as the page's own length; it is the number
+        // `editor_truncated` calls `chars`, and it is a ratio against `chars_kept` for free.
+        //
+        // Only for a truncation, and only for one that kept its prototype: every other failure —
+        // a throttle, a stall, a stream that stopped — has no reply to quote, and `error` above is
+        // the whole of what is known about it. Like `editor_truncated`'s excerpts this is the
+        // user's own document coming back, so it stays in the run log on the deployment and never
+        // reaches `GET /v1/quality`. Its `truncated: true` restates what the predicate above already
+        // said on every line where both fire, and the two paths above spell the field the same way.
+        ...evidence,
         // What the page kept, so the log shows this was a page retained and not a page lost.
         chars_kept: before.length,
       });
@@ -3294,6 +3351,11 @@ export async function reExtractPages(
           page: img.order,
           error: message,
           kept: "prior",
+          // The same evidence as a first pass that truncated, on the round a USER asked for. Left off
+          // here at first, and that was the wrong half to leave: this round is the one someone is
+          // waiting on an answer about, and a reader following docs/API.md's row would have read the
+          // absence of these fields as "not a truncation" (#293, review of #297).
+          ...truncationEvidence(e),
         });
         return { fragment: priorByOrder.get(img.order)!, failed: true };
       },
