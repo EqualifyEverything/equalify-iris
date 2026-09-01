@@ -972,8 +972,11 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   `$0.0721` included, still at `158e3d9`. **These prices meter the Reader and nothing else**, which is
   what makes a price comparison across two shas an A/B on the prompt rather than on the four commits
   between them: every priced call in all five rounds is `agent: reader`, `step: read` — 945 of them,
-  with no extraction, editor or verify call in any round — because the harness drives `runReview`
-  alone. The four commits between the two shas do touch this file, but on the editor path — #295 and
+  with no extraction, editor or verify call in any round. The harness drives `runReview` with
+  `ctx.maxReviewIterations = 0`, and that is the part doing the work: `runReview` calls `runEditor`
+  whenever the Reader returns issues, which on these rounds is every document, so it is the cap that
+  breaks the loop before the editor, not the entry point.
+  The four commits between the two shas do touch this file, but on the editor path — #295 and
   #300's truncation salvage — and the only change they make to `READER_SYSTEM` itself is the append,
   which is the one line of `git diff 158e3d9 e842faa -- src/pipeline/review.ts` that lands inside the
   template.

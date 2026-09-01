@@ -82,11 +82,17 @@ test("the Reader is told what a no-content entry is, and that neither kind is it
     //
     // RE-MEASURED AFTER #275 SHIPPED, and the result is the reason these clauses are pinned as
     // WORDING rather than treated as a first attempt to improve on (#301). Over 20 documents,
-    // 18 of them windowed, two runs of this exact prompt: violations per multi-window document
-    // 0.00 `gpt-5.6-luna`, 0.03 `claude-sonnet-4-6`, 0.25 `kimi-k2.5`, 0.31 `claude-haiku-4-5`.
-    // Two things follow. (1) The incumbent is NOT exempt — 0 violations in one run and 1 in the
-    // next, so #274's "0 of 197" was a sample and a single run cannot tell 0 from 1. (2) The
-    // failure is not comprehension, so more prompt text is not the lever: in the clearest cases
+    // 18 of them windowed, two runs per prompt. Violations per multi-window document at the
+    // prompt this file pinned then (`158e3d9`): 0.00 `gpt-5.6-luna`, 0.03 `claude-sonnet-4-6`,
+    // 0.25 `kimi-k2.5`, 0.31 `claude-haiku-4-5`. At the prompt it pins now (`e842faa`, which
+    // appends READER_JSON_ONLY and changes nothing here): 0.00 Luna, 0.14 the incumbent, 0.08
+    // Kimi, 0.28 Haiku (#307, #308). Two things follow. (1) The incumbent is NOT exempt, and at
+    // the shipped prompt it is second-worst of the four rather than nearly clean, so #274's
+    // "0 of 197" was a sample. Do not read either column as a rate: of four models given the same
+    // append the incumbent rose by 4 violations, Kimi fell by 6, Haiku by 1 and Luna not at all,
+    // and each shift is the size of that model's own spread between two runs of the IDENTICAL
+    // prompt. A pair of runs locates a model to within a few events on 18 windowed documents.
+    // (2) The failure is not comprehension, so more prompt text is not the lever: in the clearest cases
     // the model states the rule correctly and files the issue anyway, in the SAME issue. The
     // incumbent named a seam as interior ("this is the document's window boundary edge and not
     // the document's own close") and then asked for window 2 to be verified; Kimi wrote "window
