@@ -580,8 +580,19 @@ out2=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/output")
 # exists because this round DID log a `reader` result of its own, and without it a session's log
 # and `/v1/quality` disagree about the number with nothing saying why.
 carried=$(log_field first_read_carried carried)
-[ "$carried" != "none" ] && pass "the document's first read was carried across the feedback round (carried=$carried, this round found $(log_field first_read_carried found))" \
-  || fail "first_read" "no first_read_carried line on a document-level re-run — either the row was overwritten with a re-read of edited bytes, or the session had no first read to keep"
+# Asserted as a NUMBER, because the two non-numeric answers are the two regressions and neither is
+# an absent value: `log_field` prints an empty string when the event is missing entirely — the line
+# dropped, or the carry reverted so the block never runs — and `none` when it is there with
+# `carried: null`, which is a documented value for a session delivered before the field existed and
+# a defect here, since this session's first run recorded one.
+case "$carried" in
+  '' | *[!0-9]*)
+    fail "first_read" "first_read_carried carried='$carried' on a document-level re-run: '' means no such line in the log at all, 'none' means a null count on a session that has a first read"
+    ;;
+  *)
+    pass "the document's first read was carried across the feedback round (carried=$carried, this round found $(log_field first_read_carried found))"
+    ;;
+esac
 
 echo "==> 9b. POST /v1/sessions/{id}/feedback (source-level => re-extract page 2)"
 # Content-level feedback the review loop structurally cannot fix: the Reader never
