@@ -214,13 +214,17 @@ test("every per_agent key any example names is an agent Iris dispatches", () => 
         // paragraph is still an entry the operator would uncomment; stopping at the prose would
         // leave it unchecked while this test passed.
         //
-        // A LIVE block is stricter: real YAML cannot put prose between two entries, so the
-        // first line that is not an entry ends it (prd.md's `# everything else uses default`
-        // is a comment about the block, not a member of it).
+        // A LIVE block runs to the first line at or above the key's own indent, since that is
+        // the line that has left the mapping. YAML allows both blank lines and comments
+        // between two entries, so neither ends it — and neither can BE an entry, so both are
+        // skipped rather than read (prd.md's `# everything else uses default` is a comment
+        // about the block, and a `#` line in a live block cannot be an override however it is
+        // indented).
         const isComment = /^\s*#/.test(raw);
+        const blank = raw.trim() === "";
         if (commented) {
           if (!isComment) break;
-        } else if (raw.trim() === "" || isComment) break;
+        } else if (blank || isComment) continue;
         const line = commented ? raw.replace(/^(\s*)#\s?/, "$1") : raw;
         const m = line.match(/^(\s+)([A-Za-z_][A-Za-z0-9_]*)\s*:/);
         if (m === null || m[1]!.length <= indent) {
