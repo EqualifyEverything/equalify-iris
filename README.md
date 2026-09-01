@@ -965,23 +965,28 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   incumbent's 36.1% over the same documents, so the claim inverted rather than merely wobbled
   (#305). And in the deciding round Kimi's *treated* arm wrote **more** prose than its control, not
   less: **1 of 11 replies narrating in the treated arm, 0 of 11 in the control**, and that one reply
-  carried 51% of the treated arm's characters. The sentence did not suppress prose on that model; the number simply moved with one
-  reply. The 40% for the incumbent replicates: **33.0%–40.4%** over **202 replies** written, four
+  carried 51% of the treated arm's characters. The sentence did not suppress prose on that model; the
+  number simply moved with one reply.
+  The 40% for the incumbent replicates: **33.0%–40.4%** over **202 replies** written, four
   rounds and two ways of cutting the same corpus — 201 of them classified, since one parses only
   through Iris's repair path, so its envelope's span cannot be pinned and it is excluded from the
   shares rather than estimated. A 5-document draw of that reads 0% in 0.0% of resamples.
   **The difference is the shape, not the sample size.** The incumbent narrates a little in most
-  replies — **67%–75% of them** — so five documents see it. Kimi's median reply is a bare envelope
-  and it narrates in **7%–16%** of replies, going to 87%–99% prose when it does, so any aggregate is
+  replies — **67%–75% of them** across the four twenty- and fifty-document rounds — so five documents
+  see it. The ablation's own five-document control reads **91%**, which is not a fifth value so much
+  as a demonstration of the band below: 91% is the top edge of what a five-document draw of these
+  rounds produces (p95 86%–100%). Kimi's median reply is a bare envelope and it narrates in
+  **7%–16%** of replies, going to 87%–99% prose when it does, so any aggregate is
   decided by whether the draw caught one: five Kimi documents read exactly 0% in up to 46% of
   resamples and anywhere from 0% to 87% overall. Its median reply being prose-free is what makes the
   sentence buy it little, and that part holds in all three rounds.
   Since the Reader is one config line (`providers.per_agent.reader`), **swapping it means
   re-measuring this**, and prose share is not a model trait to look up in either form.
   **What to re-measure**, then: the **share of replies containing any prose** — not the share of
-  characters, because the reply share separates these two models in every round measured (67%–75%
-  against 7%–16%) where their character shares overlap, and because it is the population the
-  sentence acts on. **It is not the cheaper measurement, and the reason is worth stating precisely,
+  characters, because the reply share separates these two models in every round measured — the
+  incumbent 67%–75% over the four large rounds and 91% in the ablation's control, Kimi 7%–16% — where
+  their character shares overlap, and because it is the population the sentence acts on.
+  **It is not the cheaper measurement, and the reason is worth stating precisely,
   because the two statistics fail at n=5 differently.** Resampled at five documents the reply share's
   band is *wider* in points than the character share's on the incumbent (35–50 against 21–24) and
   *narrower* on Kimi (20–30 against 26–66) — so "tighter" is not a property either one has. What both
@@ -989,7 +994,8 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   **12%–48%** of draws, against the character share's 40%–46%. Five documents are adequate for the
   incumbent on either statistic and inadequate for Kimi on either, so the reply share buys a figure
   that holds from round to round and buys **nothing** at n=5 — measure two runs of twenty documents
-  regardless of which unit you record. Then output tokens per document, issues per document, quote fidelity, and the same
+  regardless of which unit you record.
+  Then output tokens per document, issues per document, quote fidelity, and the same
   prompt run twice so the reproduction figures have a floor. Violations per multi-window document
   (#301) is part of the same swap and wants the same two runs, so measure it here rather than
   separately. All of it is free once a round exists — every Reader round persists its raw replies,
