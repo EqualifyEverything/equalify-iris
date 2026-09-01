@@ -144,6 +144,19 @@ export interface CompletionRequest {
   // end, so a call that stalls or truncates — exactly the expensive kind — would
   // report nothing at all if usage only rode the successful return path.
   onUsage?: (usage: Usage) => void;
+  // A ceiling for THIS call, below the deployment's. Only ever lowers it: an adapter takes the
+  // smallest of the deployment's `max_tokens`, whatever ceiling the model has stated for itself,
+  // and this — so a caller can bound one call's output without knowing which of the other two is
+  // currently in force, and cannot raise a limit by asking.
+  //
+  // It exists because the deployment's ceiling is the wrong instrument for a call whose answer has
+  // a known size. A page correction re-emits a page it has already seen, so its output has a tight
+  // prior — the first pass's own output — and one that ran away to the full 32,000-token ceiling
+  // cost $0.51 and shipped the uncorrected page anyway (issue #285): a bill 5.13x the first pass
+  // for text that was discarded. Raising `max_tokens`, which is what the truncation error advises,
+  // would only buy a larger discarded reply. See `correctionCeiling` in pipeline/extraction.ts for
+  // the one caller and the corpus the multiple was chosen on.
+  maxOutputTokens?: number;
   // Called for a fact worth recording that is neither usage nor an error — see ProviderNote.
   // Called once per occurrence, and deliberately NOT deduplicated the way the adapter's own
   // stderr warning is: Bedrock says the paragraph about a wrong ceiling once per process
@@ -200,11 +213,16 @@ export class TruncatedResponseError extends Error {
   // describes.
   readonly text: string;
 
-  // `note` is for the one case where "raise it" is the wrong instruction: a ceiling the
-  // MODEL enforces, below the one the deployment asked for, cannot be raised at all
-  // (providers/bedrock.ts, issue #249). Appended rather than replacing the sentence,
-  // because `isTruncatedResponseError` matches the fixed part of it and the review loop
-  // acts on that.
+  // `note` is for the cases where "raise it" is the wrong instruction, of which there are now
+  // two: a ceiling the MODEL enforces, below the one the deployment asked for, which cannot be
+  // raised at all (issue #249), and a ceiling the CALLER asked for because it knows how large the
+  // answer should be, where the number to look at is the caller's (`maxOutputTokens` above, issue
+  // #285). Both are chosen in `truncationRemedy`, providers/bedrock.ts.
+  //
+  // Appended rather than replacing the sentence, because `isTruncatedResponseError` matches the
+  // fixed part of it and the review loop acts on that. So a noted message says "raise it" and
+  // then takes it back, deliberately: the alternative is a wrong instruction that reads as the
+  // only one, and the note is what an operator needs either way.
   constructor(provider: string, model: string, maxTokens: number, text: string, note?: string) {
     super(
       `${provider}: response hit the ${maxTokens}-token output ceiling and was truncated ` +

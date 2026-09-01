@@ -91,7 +91,12 @@ export class ProviderRouter {
     agentName: string,
     capability: Capability,
     messages: Message[],
-    opts: { step: PipelineStep; images?: Image[]; schema?: Record<string, unknown> },
+    opts: {
+      step: PipelineStep;
+      images?: Image[];
+      schema?: Record<string, unknown>;
+      maxOutputTokens?: number;
+    },
   ): Promise<CompletionResult> {
     const { provider: providerName, model } = resolveAgentModel(this.cfg, agentName, capability);
     const provider = this.build(providerName);
@@ -107,6 +112,12 @@ export class ProviderRouter {
     // round has already paid for a full ceiling of output, and a stalled page call has
     // already paid for a prompt carrying an image — those are the calls whose cost most needs
     // attributing, and they are the ones that never produce a usable answer to attribute by.
+    //
+    // `max_output_tokens` only when the caller asked for a ceiling below the deployment's, and on
+    // `meta` for the same reason `step` is: the line it has to reach is the truncation. A capped
+    // call that truncates and a deployment whose `max_tokens` is too low produce the same error,
+    // and the remedies are opposite — raise the config, or raise this caller's multiple — so the
+    // failure line has to say which of the two it was.
     const meta = {
       agent: agentName,
       step: opts.step,
@@ -114,6 +125,7 @@ export class ProviderRouter {
       model,
       provider: providerName,
       ...(provider.dialect ? { api: provider.dialect } : {}),
+      ...(opts.maxOutputTokens !== undefined ? { max_output_tokens: opts.maxOutputTokens } : {}),
     };
     this.onEvent?.("model_call_start", meta);
     const startedAt = Date.now();
@@ -180,6 +192,7 @@ export class ProviderRouter {
         model,
         images: opts.images,
         schema: opts.schema,
+        maxOutputTokens: opts.maxOutputTokens,
         onUsage,
         onNote,
       });

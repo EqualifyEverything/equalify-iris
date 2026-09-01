@@ -193,10 +193,16 @@ export class OpenRouterProvider implements ModelProvider {
     // default the upstream model happens to apply — which differs per model and is
     // silent when reached, so the same document could truncate on one model and
     // not another with nothing in the config to explain it.
+    //
+    // A caller's own cap only ever lowers it, and is honoured here and not only on Bedrock so
+    // that a cap is not a thing that quietly stops applying when a deployment changes provider.
+    // There is no third number on this path — nothing here learns a model's own ceiling — so the
+    // comparison below is enough to say which of the two a truncation hit.
+    const maxTokens = Math.min(this.maxTokens, req.maxOutputTokens ?? Infinity);
     const body: Record<string, unknown> = {
       model: req.model,
       messages,
-      max_tokens: this.maxTokens,
+      max_tokens: maxTokens,
       stream: true,
     };
     if (req.capability === "structured_output" && req.schema) {
@@ -376,7 +382,18 @@ export class OpenRouterProvider implements ModelProvider {
         // deliberately — it is not transient, so isTransientNetworkError() rejects
         // it and the loop exits rather than re-billing the same truncation twice.
         if (finishReason === "length") {
-          throw new TruncatedResponseError(this.name, req.model, this.maxTokens, text);
+          throw new TruncatedResponseError(
+            this.name,
+            req.model,
+            maxTokens,
+            text,
+            maxTokens < this.maxTokens
+              ? `That ceiling is this call's own: it asked for at most ${maxTokens} output ` +
+                  `tokens, below the ${this.maxTokens} in providers.openrouter.max_tokens, so ` +
+                  `raising that setting will not move it. See \`step\` and \`agent\` on this ` +
+                  `call's model_call line for which caller set it.`
+              : undefined,
+          );
         }
         return { text, model: req.model, provider: this.name, usage: addUsage(spent, usage) };
       } catch (e) {
