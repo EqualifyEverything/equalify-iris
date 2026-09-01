@@ -80,6 +80,27 @@ test("only an attribute actually named alt is read as one", () => {
   assert.deepEqual(altTexts(`<img alt="A bar chart" alt="image">`), ["A bar chart"]);
 });
 
+test("a tag quoted inside a comment is not an image", () => {
+  // The delivered document carries the `@unresolved` list and the other `@` markers, and those are
+  // model-written prose ABOUT the document that quotes markup freely — which is why links.ts and
+  // markup.ts strip comments off the same bytes before counting anything. An `<img>` in one is not
+  // an image a reader is offered: counting it would put a placeholder on the record for a document
+  // whose images are all described, and inflate the denominator at the same time.
+  assert.deepEqual(
+    genericAlts(`<!-- @unresolved: page 2 needs a description, e.g. <img src="f.png" alt="figure"> --><p>hi</p>`),
+    [],
+  );
+  assert.deepEqual(altTexts(`<!-- <img alt="A real description"> -->${img("image")}`), ["image"]);
+  // And one step earlier, where the same mistake costs money rather than credibility: a
+  // commented-out tag in a page fragment would buy a correction on a page with nothing wrong.
+  assert.deepEqual(genericAlts(`<!-- <img alt="image"> -->${img("A bar chart of revenue")}`), []);
+  // An unterminated comment runs to the end of the document, which is what a parser does with one
+  // and is the direction that under-reports rather than reading prose as markup.
+  assert.deepEqual(altTexts(`${img("A sunset over water")}<!-- cut off ${img("image")}`), [
+    "A sunset over water",
+  ]);
+});
+
 test("entities are decoded, because the reader is announced the decoded value", () => {
   assert.deepEqual(genericAlts(`<img src="a.png" alt="&#105;mage">`), ["image"]);
   assert.deepEqual(genericAlts(`<img src="a.png" alt="Home &amp; Away">`), []);

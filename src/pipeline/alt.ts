@@ -80,6 +80,19 @@ const GENERIC_ALT_WORDS = [
 // flagging it would buy a correction on a judgement this rule does not have.
 const GENERIC_ALT = new RegExp(`^(?:${GENERIC_ALT_WORDS.join("|")})[\\s.:;,-]*$`, "i");
 
+// Comments, stripped before anything is read, for the reason links.ts and markup.ts strip them
+// from the same bytes: the delivered document carries the `@unresolved` list and the other `@`
+// markers, which are model-written prose ABOUT the document and quote markup freely — an `<img>`
+// inside one is not an image a reader is offered, and counting it puts a placeholder on the record
+// for a document whose images are all described, as well as inflating the denominator. Same
+// argument one step earlier, where it also costs money: a commented-out tag in a page fragment
+// would buy a correction on a page that has nothing wrong with it.
+//
+// An unterminated `<!--` is read as running to the end of the document, which is what a parser
+// does with one and is the safe direction for a count — under-reporting rather than reading quoted
+// prose as markup (markup.ts measured that mistake at `table 25/19` on a clean document).
+const COMMENT = /<!--[\s\S]*?(?:-->|$)/g;
+
 // One `<img>` start tag. Quoted regions are matched as units rather than excluded by `[^>]*`,
 // because `alt="a > b"` is legal and the naive form cuts the tag in half at the `>` — which
 // loses the alt entirely and reads as an image with no attribute, i.e. it under-reports in the
@@ -112,7 +125,7 @@ function altAttr(tag: string): string | null {
   return null;
 }
 
-// Every non-empty `alt` on an `<img>` in this fragment, decoded and trimmed.
+// Every non-empty `alt` on an `<img>` in this fragment, decoded and trimmed, comments excluded.
 //
 // `<img>` only. An `alt` is legal on `<area>` and `<input type="image">` too, and neither is
 // something the page agents emit; scanning for the attribute name across the whole document
@@ -123,7 +136,7 @@ function altAttr(tag: string): string | null {
 // announced is the decoded one, and `alt="&#105;mage"` is the same placeholder written twice.
 export function altTexts(html: string): string[] {
   const out: string[] = [];
-  for (const tag of html.match(IMG_TAG) ?? []) {
+  for (const tag of html.replace(COMMENT, " ").match(IMG_TAG) ?? []) {
     const raw = altAttr(tag);
     if (raw === null) continue;
     const value = decodeEntities(raw).trim();
