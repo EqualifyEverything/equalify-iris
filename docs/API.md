@@ -946,7 +946,7 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
       "sampled": 1, "sampled_ok": 1, "sampled_unjudged": 0,
       "sampled_problems_before": 3, "sampled_problems_after": 0,
       "binding": 1, "binding_ok": 1, "binding_unjudged": 0,
-      "failures": []
+      "failures": [], "verdicts_omitted": 0
     }
   },
   "fidelity_observed": {
@@ -1251,6 +1251,14 @@ counted when there is more than one (`"2 problems: … | …"`), since no order 
 the dropped one is as likely as any to be why the page is wrong. Failing verdicts only, so an
 unjudged recheck never appears — it logs `ok: true` and names nothing. This is where these were meant
 to be read all along: they were in `errors` under the word `"unknown"` (issue #296).
+Bounded, which nothing else in this payload needs to be: every other field here is a count, and these
+entries are model prose, so they are the one part that grows with what the documents needed. At most
+**20** verdicts, each `message` at most **600** characters with a `…` where it was cut, and
+`verdicts_omitted` says how many the cap left out — a capped list is never a short one read as whole.
+Neither bound can engage on a default deployment: `recheck_sample_size` is 1, so a run supplies at
+most one of these, and a page's verdict is one or two sentences (the one that prompted #296 is 250
+characters). They engage at a **census**, where the list has stopped being per-page news and become an
+audit — and `GET /v1/sessions/{id}/logs` holds every verdict in full, uncut and uncapped.
 
 `rejected: 0` over a whole round is the expected reading of a healthy one, not a gate that accepts
 everything. The only rejection that applies on every trigger is the shrink floor — a correction that

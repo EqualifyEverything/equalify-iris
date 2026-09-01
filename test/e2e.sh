@@ -429,12 +429,14 @@ echo "$diag" | jq -e '.model_calls.count >= 1 and .in_flight == null and (.phase
   || fail "diagnostics" "$diag"
 
 # `errors` is failures of the run, and a second verdict on a corrected page is not one (#296).
-# Asserted against the log rather than against a fixed number, so this holds whether or not the
-# mock verifier failed a recheck on this run: every `ok: false` recheck line has exactly one entry
-# in `rechecks.failures`, none of them is in `errors`, and each carries prose. That last part is
-# what actually broke — the entry was present all along and read `message: "unknown"`, because it
-# looked for `error` on a line that carries `problems` — so an empty message here is the defect
-# back, and only a real run proves the reader and the emitter agree about the field name.
+# What this step proves on the mock corpus is the part only a real run can: the field is PRESENT
+# and an array in the payload the route actually serialized, and nothing recheck-typed is in
+# `errors`. The mock verifier answers `{}`, so this run corrects nothing and fails no recheck —
+# `nrf` is 0 and the count and message checks below reduce to 0 == 0. They are written against
+# the log rather than against a fixed number so they arm themselves the day the mock does fail
+# one, and the pass line prints `nrf` so a reader can see which of the two cases this was.
+# That the emitter writes `problems` on an `ok: false` recheck — the field name the old
+# `message: "unknown"` got wrong — is pinned in test/verification.test.ts, not here.
 nrf=$(echo "$logs" | jq -s '[.[] | select(.type == "page_correction_recheck" and .ok == false)] | length')
 echo "$diag" | jq -e --argjson n "$nrf" '
   (.verification.rechecks.failures | type) == "array"

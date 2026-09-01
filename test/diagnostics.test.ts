@@ -432,6 +432,7 @@ test("the verification tally counts what was checked, corrected and re-checked",
     binding: 0, binding_ok: 0, binding_unjudged: 0,
     // The sample cleared, so there is no verdict to carry: this list holds the failing ones.
     failures: [],
+    verdicts_omitted: 0,
   });
   assert.equal(d.verification.pages_unjudged, 0, "every page here carried a real verdict");
 });
@@ -644,6 +645,7 @@ test("a correction that bought nothing is counted apart from one that was kept",
     // count of one cannot give. `binding: true` is what says the page shipped as it was
     // rather than shipping still wrong (issue #296).
     failures: [{ ts: T(3), page: 3, binding: true, message: "a heading level was lost" }],
+    verdicts_omitted: 0,
   });
   // And out of `errors`, which is now failures only: this run had none. A verdict that names
   // a problem is a measurement, and the refusal it drove is the loop working.
@@ -684,12 +686,14 @@ test("a log from before these events reports zeros, not absences", () => {
     // Present and empty on a log that never wrote a verdict, like every count beside it: an
     // empty list is a run with no failing recheck, and an absent field is a consumer guessing.
     failures: [],
+    verdicts_omitted: 0,
   });
   assert.deepEqual(summarizeRun("", done(Date.parse(T(0)))).verification.rechecks, {
     sampled: 0, sampled_ok: 0, sampled_unjudged: 0,
     sampled_problems_before: 0, sampled_problems_after: 0,
     binding: 0, binding_ok: 0, binding_unjudged: 0,
     failures: [],
+    verdicts_omitted: 0,
   });
 });
 
@@ -723,6 +727,7 @@ test("a log from before the prose sizes and the problem counts leaves both sums 
     sampled_problems_before: 0, sampled_problems_after: 0,
     binding: 0, binding_ok: 0, binding_unjudged: 0,
     failures: [{ ts: T(2), page: 1, binding: false, message: "a table row is still missing" }],
+    verdicts_omitted: 0,
   });
 });
 
@@ -761,6 +766,7 @@ test("a recheck nothing judged is counted apart from a rewrite that was checked"
     // An unjudged recheck is not a failing one: nothing looked, so it logs `ok: true` and
     // names nothing, and an entry here would be a page reported wrong on no evidence.
     failures: [],
+    verdicts_omitted: 0,
   });
   assert.equal(
     d.verification.rechecks.binding_ok - d.verification.rechecks.binding_unjudged, 2,
@@ -862,4 +868,56 @@ test("a recheck that does not say which population it belongs to still says what
   assert.equal(d.verification.rechecks.sampled, 1);
   assert.equal(d.verification.rechecks.binding, 0);
   assert.deepEqual(d.errors, []);
+});
+
+test("the verdict list is bounded, and says how much it left out", () => {
+  // The one part of this payload that grows as model PROSE rather than as a count, so it is
+  // the one part with a cap. Which cannot engage on a default deployment — one sample per run
+  // means twenty rounds of failing corrections to reach it — and engages at a census, where
+  // the list has stopped being per-page news and become an audit that log.jsonl holds whole.
+  //
+  // Disclosed rather than silent: a list that quietly stopped growing would be read as the
+  // run's complete account of what shipped wrong, which is the opposite of what it is.
+  const events = [{ ts: T(0), type: "run_start" } as Record<string, unknown>];
+  for (let p = 1; p <= 25; p++) {
+    events.push({ ts: T(p), type: "page_correction_recheck", image: `p${p}.png`, page: p, ok: false,
+      problems: [`page ${p} is still missing a table row`], binding: false });
+  }
+  events.push({ ts: T(26), type: "run_complete" });
+  const d = summarizeRun(log(...events), done(Date.parse(T(26))));
+  assert.equal(d.verification.rechecks.failures.length, 20);
+  assert.equal(d.verification.rechecks.verdicts_omitted, 5);
+  // The FIRST twenty: a session's early failures are the delivered document's own account of
+  // itself, and its later rounds re-verify a handful of pages the user asked about — so a cap
+  // that kept the tail would drop the former for the latter.
+  assert.equal(d.verification.rechecks.failures[0].page, 1);
+  assert.equal(d.verification.rechecks.failures[19].page, 20);
+  // And the counts are untouched by the cap: 25 samples failed, whatever the list carries.
+  assert.equal(d.verification.rechecks.sampled, 25);
+  assert.equal(d.verification.rechecks.sampled_ok, 0);
+});
+
+test("a verdict longer than the payload will carry is cut, and marked", () => {
+  // How many problems the array holds is the model's to choose, so the JOIN is the unbounded
+  // quantity — not any one sentence of it. Wide enough that the verdict which prompted #296
+  // (250 characters) is carried whole, and a cut is visible rather than being a diagnosis that
+  // happens to end mid-word.
+  const short = "The alt text swaps two states: MISS. is shown with the solid-dark fill.";
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_correction_recheck", image: "a.png", page: 1, ok: false,
+      problems: [short], binding: false },
+    { ts: T(2), type: "page_correction_recheck", image: "b.png", page: 2, ok: false,
+      problems: Array.from({ length: 12 }, (_, i) => `problem ${i} ${"x".repeat(80)}`), binding: false },
+    { ts: T(3), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(3))));
+  const [a, b] = d.verification.rechecks.failures;
+  assert.equal(a.message, short, "a real one-page verdict is carried whole");
+  assert.equal(b.message.length, 601, "600 characters and the mark");
+  assert.equal(b.message.endsWith("…"), true);
+  // The count survives the cut, because it is the part that says how much was left behind.
+  assert.equal(b.message.startsWith("12 problems: "), true);
+  // Nothing was omitted from the LIST — both verdicts are reported, one of them abridged.
+  assert.equal(d.verification.rechecks.verdicts_omitted, 0);
 });
