@@ -670,6 +670,67 @@ test("a first read that could not answer is the mean's error bar, per document",
   });
 });
 
+test("the first read survives a feedback re-run, because the re-read is of an edited body", () => {
+  withStore((store) => {
+    // The one exemption from the replace-on-re-run rule (PRD §7.16), and the reason for it is
+    // the same reason the field exists. A document-level feedback re-run re-reviews the body
+    // that was already delivered, so its first read sees the copy editor's work and normally
+    // finds LESS — recording it would move the mean in the exact direction a Reader going
+    // blind moves it, on the documents users asked Iris to retry. This is the orchestrator's
+    // sequence: read the prior value, then replace the session's rows with it in place of the
+    // re-read's.
+    delivered(store, "revised", [
+      { code: SIGNAL_FIRST_READ_ISSUES, count: 5 },
+      { code: SIGNAL_FIRST_READ_UNREAD, count: 2 },
+    ]);
+    const prior = store.priorFirstRead("revised");
+    assert.deepEqual(prior, { issues: 5, unread: 2 });
+    delivered(store, "revised", [
+      { code: SIGNAL_FIRST_READ_ISSUES, count: prior!.issues },
+      { code: SIGNAL_FIRST_READ_UNREAD, count: prior!.unread },
+    ]);
+    const q = store.qualityStats();
+    assert.equal(q.documents, 1, "one document, whatever it cost to deliver twice");
+    assert.equal(q.first_read.mean_issues, 5, "the re-read's smaller count is not what is held");
+    assert.equal(q.first_read.unread_documents, 1);
+  });
+});
+
+test("the prior first read is gone once the rows are replaced, which is why it is read first", () => {
+  withStore((store) => {
+    delivered(store, "s", [{ code: SIGNAL_FIRST_READ_ISSUES, count: 3 }]);
+    // `recordRunSignals` deletes the session's rows and re-inserts, so a caller that recorded
+    // before reading has nothing left to carry forward — the ordering in the orchestrator is
+    // load-bearing rather than incidental, and this is the assertion that says so.
+    delivered(store, "s", [{ code: SIGNAL_UNRESOLVED, count: 1 }]);
+    assert.equal(store.priorFirstRead("s"), undefined);
+    assert.equal(store.qualityStats().first_read.documents, 0);
+  });
+});
+
+test("a session with no first read on record carries nothing forward, rather than a substitute", () => {
+  withStore((store) => {
+    // A document delivered before this signal existed, given feedback afterwards. The honest
+    // answer is that it has no first-read measurement: `first_read.documents` short of
+    // `documents` is how this tally says so, and the re-read's count would be a number that is
+    // not what the field means.
+    delivered(store, "old");
+    assert.equal(store.priorFirstRead("old"), undefined);
+    // And an unread count with no issues row is not a read either — the issues row is the one
+    // that says a read happened, which is what lets 0 mean "found nothing".
+    assert.equal(store.priorFirstRead("never_delivered"), undefined);
+  });
+});
+
+test("an unread row that was never written reads as zero, not as unknown", () => {
+  withStore((store) => {
+    // The signal is recorded only when non-zero, so its absence has to mean 0 here — a
+    // carried-forward `undefined` would turn a fully answered read into a missing error bar.
+    delivered(store, "whole", [{ code: SIGNAL_FIRST_READ_ISSUES, count: 0 }]);
+    assert.deepEqual(store.priorFirstRead("whole"), { issues: 0, unread: 0 });
+  });
+});
+
 test("dropped links are counted per document and per link", () => {
   withStore((store) => {
     delivered(store, "a", [{ code: SIGNAL_LINKS_DROPPED, count: 3 }]);

@@ -1266,16 +1266,21 @@ echo "$q" | jq -e '[.unresolved_severity[].severity] == ["high","medium","low","
 # existed". Only a real run can check that, and the way it breaks is the way every producer here
 # breaks — a mean that quietly covers half the documents reads as a Reader finding half as much.
 #
-# `mean_issues > 0` is the half that needs the pipeline: the mock Reader is clean except on the
-# feedback round that asks for a copy-edit pass, so a positive mean is that document's finding
-# arriving through the loop, the store and the endpoint. A producer stuck at 0 would otherwise
-# look exactly like a deployment whose documents are all fine — which is the reading this field
-# exists to make impossible.
+# The mean is asserted at exactly 0, which is a statement about this mock and a sharp check on
+# the one subtle part of the field. The mock Reader finds nothing on a first read; the only read
+# in this whole script that finds anything is the feedback round of step 9c, which re-reviews a
+# body the Copy Editor has already rewritten — and that is precisely the read this signal must
+# not hold, because a re-read of corrected bytes finds less and would move the mean the same way
+# a Reader going blind moves it. So a non-zero mean here is not good news: it means a feedback
+# round's read reached the row (`Store.priorFirstRead` and its caller in the orchestrator are
+# what stop it). A shortfall in the count is the other failure and the commoner one — dropping
+# the carry-forward entirely takes this to `documents: 8` against 10, which is how this check
+# was verified.
 echo "$q" | jq -e '.first_read.documents == .documents
-  and .first_read.mean_issues != null and .first_read.mean_issues > 0
+  and .first_read.mean_issues != null and .first_read.mean_issues == 0
   and .first_read.unread_documents == 0' >/dev/null \
-  && pass "first_read covers all $docs document(s) at $(echo "$q" | jq -r '.first_read.mean_issues') issue(s) found per document" \
-  || fail "quality" "first_read=$(echo "$q" | jq -c '.first_read') against documents=$docs — the Reader's yield is not reaching the tally"
+  && pass "first_read covers all $docs document(s), and holds each one's FIRST read (mean $(echo "$q" | jq -r '.first_read.mean_issues'), all windows answered)" \
+  || fail "quality" "first_read=$(echo "$q" | jq -c '.first_read') against documents=$docs — either the Reader's yield is not reaching the tally, or a feedback round's re-read of an edited body is being recorded as one"
 # And the floor under that rate: documents still carrying `[page not fully transcribed]`,
 # which no pass in the loop may resolve. Above zero because step 9i put exactly one such
 # document through the pipeline, and that is the half of this only a real run can check —

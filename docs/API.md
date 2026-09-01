@@ -229,6 +229,11 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
     as much as what the reviewer saw, and the first read is the only one taken on extraction's own
     output. A document the reviewer cleared contributes `0` — that is the observation, not a missing
     one — and the field is `null`, not `0`, when no document in the window recorded a read.
+    A feedback re-run (§5) does **not** replace it, unlike every other value in this tally: a
+    document-level re-run re-reviews the body already delivered, so its first read is on bytes
+    the copy editor has rewritten and would land here as a smaller number for a reason that is
+    not the reviewer's. A re-run that re-extracts does replace it, because that read *is* on
+    fresh extraction output.
   * `documents` — how many documents recorded a first read, which is the denominator `mean_issues`
     was divided by. Compare it with `documents` at the top of the response: it is the same on a
     window whose runs all pass through the review loop, and short of it otherwise.

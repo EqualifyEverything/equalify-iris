@@ -199,6 +199,12 @@ export const SIGNAL_UNRESOLVED = "iris:unresolved";
 // number — while the first read is the one read every document gets exactly once, at
 // `max_review_iterations` 1 as well as 20. That is what makes it comparable across
 // deployments and either side of a model swap, which is the whole use.
+//
+// Which is why a feedback re-run does not replace this row, alone among the signals here: a
+// `feedback_iterative` round re-reviews the body that was already delivered, so its own first
+// read is on rewritten bytes and would land here as a smaller number for a reason that has
+// nothing to do with the Reader. `Store.priorFirstRead` and its caller in the orchestrator are
+// that exception; PRD §7.16's re-run bullet names it.
 export const SIGNAL_FIRST_READ_ISSUES = "iris:first-read-issues";
 // How many windows of that first read came back with no usable answer (`ReaderWindow.usable`),
 // recorded only when there is any.
@@ -1309,6 +1315,43 @@ export class Store {
       this.db.exec("ROLLBACK");
       throw e;
     }
+  }
+
+  /**
+   * What this session's first read found, as already recorded — read BEFORE
+   * `recordRunSignals` replaces the session's rows, which is the only moment it exists.
+   *
+   * Every other signal in that table is a fact about the document a user was last handed, so
+   * replacing them on a feedback re-run is exactly right (see PRD §7.16 on the re-run). These
+   * two are the exception, because they are facts about the REVIEW rather than the document:
+   * `feedback_iterative` re-reviews the previously delivered body, so its first read is taken
+   * on bytes the copy editor has already rewritten — normally finding less, and pulling the
+   * mean the same way a reviewer going blind would. That is the one reading the field exists
+   * to prevent, arriving from the other direction. So the orchestrator carries this value
+   * forward instead of recording the re-read's, and the row keeps meaning what
+   * `SIGNAL_FIRST_READ_ISSUES` and `docs/API.md` §0c say it means.
+   *
+   * `undefined` when there is none — a session delivered before this was recorded, or one
+   * whose run never got a read. The caller records nothing in that case rather than
+   * substituting the re-read: `first_read.documents` falling short of `documents` is the
+   * documented way this tally says "no such measurement", and a number that is not the first
+   * read is worse than an absent one.
+   */
+  priorFirstRead(sessionId: string): { issues: number; unread: number } | undefined {
+    const rows = this.db
+      .prepare(`SELECT code, count FROM run_signals WHERE session_id = ? AND code IN (?, ?)`)
+      .all(sessionId, SIGNAL_FIRST_READ_ISSUES, SIGNAL_FIRST_READ_UNREAD) as {
+      code: string;
+      count: number;
+    }[];
+    const issues = rows.find((r) => r.code === SIGNAL_FIRST_READ_ISSUES);
+    if (!issues) return undefined;
+    // The unread row is written only when non-zero, so its absence is 0 and not "unknown" —
+    // the issues row above is what says whether a read happened at all.
+    return {
+      issues: Number(issues.count),
+      unread: Number(rows.find((r) => r.code === SIGNAL_FIRST_READ_UNREAD)?.count ?? 0),
+    };
   }
 
   /**
