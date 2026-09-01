@@ -557,32 +557,99 @@ export function destroyedBody(before: string, after: string): boolean {
   return visibleText(after).length * EDITOR_SHRINK_FLOOR < text;
 }
 
-// How many measurement-only re-verifications a batch of pages may buy.
+// How many measurement-only re-verifications a batch of pages may buy, and which pages
+// get them.
 //
-// One, because the point is a rate across runs rather than a verdict on any one page,
-// and the cost is the thing under investigation: re-verifying every corrected page
-// would add a Feedback Agent call per correction — on the Meta run, 25 of them, which
-// would roughly double the 24% share the issue is asking about. A sample of one per run
-// costs ~1% of a document and answers the question over a week of them.
+// The count is `defaults.recheck_sample_size` (config.ts, default 1) — a deployment
+// knob rather than a constant here, because the number that reads it is a rate and one
+// draw per run cannot produce one. See `DEFAULT_RECHECK_SAMPLE_SIZE` for the cost of a
+// census and for what it took to answer the question without one (issue #288).
 //
-// The links path already re-verifies for its own reasons and that verdict is logged the
-// same way, so a run whose corrections were link-driven contributes more than one.
-export const RECHECKS_PER_BATCH = 1;
-
+// `left` was the whole of this: the first corrected page to ARRIVE took the slot. That
+// is a defect in what the sample means, separate from its size, and the reason it is not
+// self-correcting: pages are corrected concurrently up to `extraction_concurrency`, so
+// the winner is drawn from the batch's opening pages, and on `runs-extract100-1` all 8
+// slots across 8 batches landed on exactly that (p001, p027, p028, p051, p076, p077).
+// Accumulating such draws over a week of runs does not widen the population — it asks
+// about page 1 of every document, repeatedly.
+//
+// A slot is therefore claimable only from a page whose order has reached that slot's
+// THRESHOLD, and the thresholds are spread across the run: for k slots over N pages, the
+// pages nearest 1/2k, 3/2k, 5/2k ... of the way through. One slot lands mid-batch — page 13
+// of 25, page 50 of 100 — two on the quarters, and k >= N puts a threshold on every page: a
+// census, the only setting with no selection left in it. On a batch of two pages there is no
+// room to spread and the first page is the threshold, which is the old behaviour and the
+// right one there. The claim on this is narrow and worth stating as such:
+// which page a fixed threshold picks still depends on the document, so this is not a
+// random draw and it is not evidence that any position is representative. What it does is
+// make the sampled position depend on the document's length and on which of its pages
+// needed correcting, so a fleet of runs samples more than one page. Deterministic on
+// purpose, too: a measurement whose corpus can be replayed off persisted replies is worth
+// more than an unbiased draw of one page in twenty-five.
+//
+// A run whose corrections all fall before its lowest threshold takes no sample. That is
+// the honest outcome and it is the cost of the change: the old rule always spent its slot,
+// on the page it always spent it on.
+//
+// The links path re-verifies for its own reasons on every page it applies to, and that
+// verdict is logged the same way but counted apart (`rechecks.binding`), so none of the
+// above applies to it.
 export interface RecheckSampler {
-  left: number;
+  // Ascending page orders, each a band worth one re-verification to a corrected page that
+  // has reached it — the highest such band, so out-of-order arrival cannot spend a low one
+  // (`claimRecheck`). Consumed as they are claimed, so its length is the sample still
+  // unspent and `[]` is a sampler with nothing left (or one that was never given anything,
+  // at `recheck_sample_size: 0`).
+  thresholds: number[];
 }
 
-export function recheckSampler(): RecheckSampler {
-  return { left: RECHECKS_PER_BATCH };
+// `pageOrders` is the orders of the pages THIS batch will run, not a count of them: a
+// feedback round re-extracts a few pages of a long document (pages 7, 12 and 20 of 25),
+// and a band expressed as a fraction of a page count would put every threshold below the
+// first of them and hand the slot straight back to whichever arrived first.
+export function recheckSampler(pageOrders: number[], size: number): RecheckSampler {
+  const orders = [...pageOrders].sort((a, b) => a - b);
+  const n = orders.length;
+  const k = Math.min(Math.max(0, Math.floor(size) || 0), n);
+  // The page nearest the midpoint of each of k equal bands OF THE BATCH, taking the lower
+  // page when the midpoint falls between two. Strictly increasing, and there are exactly k
+  // of them, with no de-duplication needed: consecutive midpoints are n/k pages apart and
+  // k <= n, so no two can round to the same page (asserted over every n and k up to 200 in
+  // test/recheck-sample.test.ts). Two thresholds on one page would let that page take two
+  // slots and report two draws from one measurement.
+  const thresholds: number[] = [];
+  for (let i = 0; i < k; i += 1) {
+    thresholds.push(orders[Math.min(n - 1, Math.max(0, Math.round(((i + 0.5) * n) / k) - 1))]);
+  }
+  return { thresholds };
 }
 
-// Take the batch's sample slot, if it is still there. Claimed SYNCHRONOUSLY and before
-// the call it authorizes, because pages are extracted concurrently: a check that
-// awaited first would let several pages each see a free slot and every corrected page
-// would be re-verified, which is the cost this bounds.
-export function claimRecheck(sampler: RecheckSampler): boolean {
-  if (sampler.left <= 0) return false;
-  sampler.left -= 1;
+// Take a sample slot for a page, if that page's order has reached any threshold still
+// unspent. Claimed SYNCHRONOUSLY and before the call it authorizes, because pages are
+// extracted concurrently: a check that awaited first would let several pages each see a
+// free slot and every corrected page would be re-verified, which is the cost this bounds.
+//
+// A page past several unspent thresholds takes ONE of them — the sample is a page count,
+// so a page cannot be worth two of it — and it takes the HIGHEST one it has reached,
+// leaving the lower bands for pages that have not arrived yet. That direction is the whole
+// of the arithmetic here, and it is the one that survives out-of-order arrival, which is
+// the condition this sampler exists because of: any page that can reach a high threshold
+// can reach every lower one too, so the low bands are the flexible resource and spending
+// them first strands the sample. At `recheck_sample_size: 3` on a 3-page document with all
+// three corrected (thresholds [1, 2, 3]) whose corrections land in the order 3, 2, 1,
+// consuming the lowest gives page 3 the band at 1 and page 2 the band at 2 and then
+// refuses page 1 — two draws out of three, from a setting documented as a census, and the
+// log cannot say it was short. Taking the highest gives each page its own band whatever
+// order they arrive in.
+export function claimRecheck(sampler: RecheckSampler, order: number): boolean {
+  // Ascending, so the last threshold at or below this page's order is the highest it has
+  // reached; -1 means the page has not reached any of the ones still unspent.
+  let claim = -1;
+  for (let i = 0; i < sampler.thresholds.length; i += 1) {
+    if (sampler.thresholds[i] > order) break;
+    claim = i;
+  }
+  if (claim < 0) return false;
+  sampler.thresholds.splice(claim, 1);
   return true;
 }

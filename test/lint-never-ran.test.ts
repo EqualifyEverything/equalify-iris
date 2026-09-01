@@ -267,6 +267,7 @@ function reviewCtx(editorReturns?: string): {
     images: [],
     maxReviewIterations: 1,
     extractionConcurrency: 4,
+    recheckSampleSize: 1,
     paths: { agentsDir: "agents", tmpAgentsDir: () => "tmp", agentMemory: () => "memory.json" } as unknown as Paths,
     router: {
       complete: async (agent: string, _cap: string, messages: { content?: unknown }[]) => {

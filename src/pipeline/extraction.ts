@@ -2831,20 +2831,26 @@ async function extractPage(
             problems: recheck.problems,
           });
         }
-      } else if (moved && claimRecheck(sampler)) {
-        // Measurement only, on at most one page per batch: does a corrected page pass
-        // the check it just failed? A page the pass did not actually change is not worth
-        // the batch's one slot — there is nothing to check, and the answer would be the
-        // verdict already on record. Nothing here decides anything — a verify-driven
+      } else if (moved && claimRecheck(sampler, img.order)) {
+        // Measurement only, on the batch's sampled pages — one by default: does a
+        // corrected page pass the check it just failed? A page the pass did not actually
+        // change is not worth a slot — there is nothing to check, and the answer would be
+        // the verdict already on record. Nothing here decides anything — a verify-driven
         // correction is accepted exactly as it always was, whatever this says — because
         // whether to keep re-rendering until a page passes is a policy question, and the
         // answer to it needs the rate this event exists to produce (issue #137). See
-        // `RECHECKS_PER_BATCH` for why it is one page and not all of them.
+        // `recheckSampler` for how many pages and which, and `DEFAULT_RECHECK_SAMPLE_SIZE`
+        // for why the default is not all of them.
         //
         // Two bench rounds later that is the thing being asked about: 200 pages, 8 samples,
         // 2 of them ok, every correction kept regardless, and the note is that a check with no
         // consequence is decorative (issue #166). Three reasons it stays as it is, in the
-        // order they bind.
+        // order they bind. The rate itself has since been measured, by replaying this same
+        // call over 57 corrected pages in the bench: **26%** of them pass, against 2% for
+        // re-asking about the page as it was, 19 pages better and 2 worse, p = 0.000 (issue
+        // #288). So the pass does real work and finishes the job on about a quarter of the
+        // pages it is bought for — which is an argument about the step's cost, not about
+        // this line, and none of the three below turns on the number.
         //
         // What discarding buys. A rejected correction does not restore a good page — it ships
         // the fragment that FAILED this same verifier minutes earlier. On those rounds the
@@ -2854,16 +2860,20 @@ async function extractPage(
         // which. The links path is the case where discarding does make sense and it is
         // binding there: those pages had PASSED, so the original has standing to protect.
         //
-        // Whose page it would apply to. This is one page per batch. Binding it would put a
-        // gate on page 4 that page 5 never sees, and the delivered document would differ by
-        // which page happened to win the sample slot. Binding it for everyone means a Feedback
-        // Agent call per corrected page — 71 of them on a 100-page round, roughly doubling the
-        // 24% verification share that is under investigation in the first place.
+        // Whose page it would apply to. This is a sample, so at any setting below a census
+        // binding it would put a gate on page 4 that page 5 never sees, and the delivered
+        // document would differ by which pages the thresholds fell on. Binding it for
+        // everyone means a Feedback Agent call per corrected page — 71 of them on a 100-page
+        // round, roughly doubling the 24% verification share that is under investigation in
+        // the first place. That is now a configured number rather than a compiled one
+        // (`defaults.recheck_sample_size`), and raising it still buys measurement only: a
+        // deployment can pay for the census without any page's fate depending on it.
         //
         // And how much the sample says. Eight verdicts, of which round 3 supplied 0 ok and
-        // round 4 supplied 2, is not a rate yet. This is a measurement whose whole purpose is
-        // to be accumulated across runs before anything is decided on it, and binding it now
-        // would spend the pages it was collected to protect.
+        // round 4 supplied 2, is not a rate yet — and the two 100-page rounds after them made
+        // the point again, reading 50% and 25% off four draws each on one corpus. This is a
+        // measurement whose whole purpose is to be accumulated across runs before anything is
+        // decided on it, and binding it now would spend the pages it was collected to protect.
         //
         // And nothing here can cost a page either. `verifyAgentOutput` is non-blocking
         // for an absent Feedback Agent and an unparseable reply, but a PROVIDER error is
@@ -3030,15 +3040,30 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
   if (lessons) ctx.log.event("page_lessons_injected", { chars: lessons.length });
 
   const limit = ctx.extractionConcurrency;
-  ctx.log.event("extraction_start", { pages: ctx.images.length, concurrency: limit });
 
   // Contained per page: mapWithConcurrency rejects with the first error any item
   // throws (matching a serial loop), so without this one page takes the document with
   // it. See `failedPage`.
-  // One measurement-only re-verify for the whole batch, claimed by whichever corrected
-  // page gets there first (correction.ts). Created here rather than inside extractPage so
-  // it cannot become one per page, which is the cost it exists to bound.
-  const sampler = recheckSampler();
+  // The batch's measurement-only re-verifications — `defaults.recheck_sample_size` of
+  // them, one by default, claimable by a corrected page that reaches the next threshold
+  // (correction.ts). Created here rather than inside extractPage so it cannot become one
+  // per page, which is the cost it exists to bound.
+  const sampler = recheckSampler(
+    ctx.images.map((i) => i.order),
+    ctx.recheckSampleSize,
+  );
+  // Logged with the sampler rather than before it, so a round says what it was going to
+  // measure and where — `recheck_sample_size` is the setting, `recheck_thresholds` the
+  // page orders it resolved to. Without them a log with no `page_correction_recheck` in it
+  // reads three ways at once: measurement off, no page corrected, or every correction
+  // landing below the first threshold. Only the last is a sample that was available and
+  // went unspent, and it is the one that changes how the fleet's counts should be read.
+  ctx.log.event("extraction_start", {
+    pages: ctx.images.length,
+    concurrency: limit,
+    recheck_sample_size: ctx.recheckSampleSize,
+    recheck_thresholds: [...sampler.thresholds],
+  });
   const outcomes = await mapWithConcurrency(ctx.images, limit, (img) =>
     extractPage(ctx, pageAgent, img, lessons, sampler).catch((e) => failedPage(ctx, pageAgent, img, e)),
   );
@@ -3133,12 +3158,6 @@ export async function reExtractPages(
   const missing = [...targets].filter((p) => !toRun.some((img) => img.order === p));
   if (missing.length) ctx.log.event("reextract_skipped", { pages: missing, reason: "no source image or prior fragment" });
 
-  ctx.log.event("reextract_start", {
-    pages: toRun.map((i) => i.order),
-    of: priorFragments.length,
-    concurrency: ctx.extractionConcurrency,
-  });
-
   // A page with no content has nothing worth showing the agent as "your previous
   // output": its fragment is the failure comment, and handing that back invites the
   // model to treat a note about a truncated response as prose to preserve — on the one
@@ -3153,8 +3172,23 @@ export async function reExtractPages(
   // Replacing good prior content with a marker would make a feedback round destructive.
   // A feedback round gets its own sample, for the same reason the first pass does: these
   // pages are corrected too, and a round that re-extracts three pages is as much a place
-  // for the rate to come from as a full run.
-  const sampler = recheckSampler();
+  // for the rate to come from as a full run. Its thresholds are spread over the pages
+  // being RE-EXTRACTED, which is why the sampler is given their orders rather than a
+  // count — see `recheckSampler`.
+  const sampler = recheckSampler(
+    toRun.map((i) => i.order),
+    ctx.recheckSampleSize,
+  );
+  // After the sampler, and carrying the same two fields as `extraction_start`, for the
+  // same reason: a feedback round's sample is drawn from the pages it re-extracts, so its
+  // thresholds are different numbers from the first pass's and are only readable here.
+  ctx.log.event("reextract_start", {
+    pages: toRun.map((i) => i.order),
+    of: priorFragments.length,
+    concurrency: ctx.extractionConcurrency,
+    recheck_sample_size: ctx.recheckSampleSize,
+    recheck_thresholds: [...sampler.thresholds],
+  });
   const outcomes = await mapWithConcurrency(toRun, ctx.extractionConcurrency, (img) =>
     extractPage(ctx, pageAgent, img, lessons, sampler, previousFor(img.order)).catch(
       (e): PageOutcome => {

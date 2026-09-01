@@ -77,6 +77,7 @@ function ctxWith(dir: string, editorReply: string, iterations = 1): { ctx: Pipel
     images,
     maxReviewIterations: iterations,
     extractionConcurrency: 4,
+    recheckSampleSize: 1,
     paths: {
       agentsDir: join(dir, "agents"),
       tmpAgentsDir: () => join(dir, "tmp-agents"),

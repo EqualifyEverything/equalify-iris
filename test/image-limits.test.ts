@@ -54,7 +54,7 @@ function cfg(providers: IrisConfig["providers"]): IrisConfig {
       oauth_base_url: "https://github.com",
     },
     providers,
-    defaults: { max_review_iterations: 3, extraction_concurrency: 5, max_concurrent_runs: 2 },
+    defaults: { max_review_iterations: 3, extraction_concurrency: 5, max_concurrent_runs: 2, recheck_sample_size: 1 },
   };
 }
 

@@ -104,6 +104,7 @@ export async function runPipeline(args: {
     feedback: args.feedback,
     maxReviewIterations: args.maxReviewIterations,
     extractionConcurrency: cfg.defaults.extraction_concurrency,
+    recheckSampleSize: cfg.defaults.recheck_sample_size,
     githubToken: args.githubToken,
   };
 

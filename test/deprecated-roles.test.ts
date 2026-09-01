@@ -283,6 +283,7 @@ async function loop(editorReply: (shown: string) => string, body: string): Promi
       images: [],
       maxReviewIterations: 3,
       extractionConcurrency: 4,
+      recheckSampleSize: 1,
       paths: {
         agentsDir: join(dir, "agents"),
         tmpAgentsDir: () => join(dir, "tmp-agents"),

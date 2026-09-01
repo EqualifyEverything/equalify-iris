@@ -334,6 +334,23 @@ logs=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/logs")
 echo "$logs" | head -1 | jq -e '.type' >/dev/null \
   && pass "run log is ndjson ($(echo "$logs" | wc -l | tr -d ' ') lines)" || fail "logs" "$logs"
 
+# What this run was going to measure about its own corrections, and where (#288). The sampled
+# re-check is the one signal whose ABSENCE used to be unreadable: no `page_correction_recheck`
+# line means the measurement is off, or no page was corrected, or every corrected page fell below
+# the first threshold, and those have different remedies. So the settings ride on the phase's own
+# start line, and only a real run says whether the config reached it — the sampler is built from
+# the pages this batch runs, in the pipeline, from a value normalized three layers away.
+# No `| head -1`: `set -o pipefail` is on, and if a run ever logged two of these the head
+# would exit first, kill jq with SIGPIPE and abort the whole suite over a passing assertion.
+xs=$(echo "$logs" | jq -c 'select(.type == "extraction_start")')
+[ -n "$xs" ] \
+  && pass "extraction says what it will measure ($xs)" \
+  || fail "extraction_start" "no extraction_start event in the run log"
+echo "$xs" | jq -e '.recheck_sample_size == 1 and (.recheck_thresholds | length) == 1
+  and .recheck_thresholds[0] >= 1 and .recheck_thresholds[0] <= .pages' >/dev/null \
+  && pass "one slot, on a page of this batch (threshold $(echo "$xs" | jq -r '.recheck_thresholds[0]') of $(echo "$xs" | jq -r '.pages'))" \
+  || fail "recheck sample" "$xs"
+
 # The in-document references in what shipped (#234). Every page's mock output links to
 # #appendix-a and no page defines it, so this asserts the whole measurement path — the
 # check runs on the delivered bytes, the event carries both units, and the ids are the

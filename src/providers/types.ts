@@ -55,7 +55,7 @@ export type PipelineStep =
   // diagnostics already reports them apart (`verification.rechecks.binding` / `.sampled`).
   // The binding one runs on a page that PASSED and was re-rendered only to recover a link,
   // and its verdict decides whether that rewrite ships; the sampled one is bought once per
-  // batch (correction.ts `RECHECKS_PER_BATCH`) and decides nothing. Folding them would put a
+  // batch by default (correction.ts `recheckSampler`) and decides nothing. Folding them would put a
   // measurement that is deliberately capped at ~1% of a document in the same bucket as one
   // that runs whenever a link needs recovering — which is the whole failure this type exists
   // to stop.

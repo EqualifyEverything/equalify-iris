@@ -37,6 +37,7 @@ function ctxWith(
     sessionId: "ses_test",
     feedback,
     extractionConcurrency: 4,
+    recheckSampleSize: 1,
     paths: {
       agentsDir,
       tmpAgentsDir: () => join(dir, "tmp-agents"),

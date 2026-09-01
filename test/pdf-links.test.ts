@@ -757,6 +757,7 @@ function makeCtx(
     sessionId: "ses_test",
     images: [{ name: "page-001.png", order: 1, path: join(inputDir, "page-001.png"), links }],
     extractionConcurrency: 1,
+    recheckSampleSize: 1,
     maxReviewIterations: 1,
     paths: {
       agentsDir,

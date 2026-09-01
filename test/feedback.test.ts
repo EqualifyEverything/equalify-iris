@@ -150,6 +150,7 @@ function gateCtx(
     images: [],
     maxReviewIterations: 1,
     extractionConcurrency: opts.concurrency ?? 1,
+    recheckSampleSize: 1,
     router: {
       complete: async (agent: string, _cap: string, messages: { role: string; content: string }[]) => {
         const user = messages.map((m) => m.content).join("\n");

@@ -168,6 +168,7 @@ async function readerPrompts(lint: LintResult, body = "<h1>Report</h1>"): Promis
       images: [],
       maxReviewIterations: 0,
       extractionConcurrency: 4,
+      recheckSampleSize: 1,
       paths: {
         agentsDir: join(dir, "agents"),
         tmpAgentsDir: () => join(dir, "tmp-agents"),

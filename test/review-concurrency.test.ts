@@ -68,6 +68,7 @@ async function readerRound(
       images: [],
       maxReviewIterations: 0,
       extractionConcurrency: concurrency,
+      recheckSampleSize: 1,
       paths: {
         agentsDir: join(dir, "agents"),
         tmpAgentsDir: () => join(dir, "tmp-agents"),
@@ -151,6 +152,7 @@ test("the page index leads the prompt, and is declared as its invariant head", a
       images: [],
       maxReviewIterations: 0,
       extractionConcurrency: 4,
+      recheckSampleSize: 1,
       paths: {
         agentsDir: join(dir, "agents"),
         tmpAgentsDir: () => join(dir, "tmp-agents"),
@@ -212,6 +214,7 @@ test("a document with no page index declares no head at all", async () => {
       images: [],
       maxReviewIterations: 0,
       extractionConcurrency: 2,
+      recheckSampleSize: 1,
       paths: {
         agentsDir: join(dir, "agents"),
         tmpAgentsDir: () => join(dir, "tmp-agents"),
@@ -256,6 +259,7 @@ async function failingRound(throwValue: unknown): Promise<{ calls: number; rejec
       images: [],
       maxReviewIterations: 0,
       extractionConcurrency: 2,
+      recheckSampleSize: 1,
       paths: {
         agentsDir: join(dir, "agents"),
         tmpAgentsDir: () => join(dir, "tmp-agents"),

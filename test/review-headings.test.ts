@@ -279,6 +279,7 @@ async function readerPrompts(body: string): Promise<string[]> {
       images: [],
       maxReviewIterations: 0,
       extractionConcurrency: 4,
+      recheckSampleSize: 1,
       paths: {
         agentsDir: join(dir, "agents"),
         tmpAgentsDir: () => join(dir, "tmp-agents"),

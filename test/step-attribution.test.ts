@@ -117,6 +117,7 @@ test("extraction's jobs each get their own step, and each agent answers more tha
       sessionId: "ses_test",
       images: [{ name: "page-001.png", order: 1, path: join(inputDir, "page-001.png"), links: [] }],
       extractionConcurrency: 1,
+      recheckSampleSize: 1,
       maxReviewIterations: 1,
       paths: {
         agentsDir,
@@ -153,7 +154,7 @@ test("extraction's jobs each get their own step, and each agent answers more tha
     // The step names the job. Order matters and is asserted: a document pays for the check before
     // it pays for the correction, which is what makes `correct` conditional on `verify`. The
     // fourth call is the sampled re-check of the corrected page — one per batch
-    // (correction.ts `RECHECKS_PER_BATCH`), a measurement that decides nothing — and its presence
+    // (correction.ts `recheckSampler`), a measurement that decides nothing — and its presence
     // here is the case for splitting it out: it is bought under the same agent as the `verify`
     // above it, and a document with more corrected pages does not buy proportionally more of it.
     assert.deepEqual(
@@ -247,6 +248,7 @@ test("a table join and a review round are one agent and two steps (#243)", async
       images: [],
       maxReviewIterations: 1,
       extractionConcurrency: 2,
+      recheckSampleSize: 1,
       paths: {
         agentsDir: join(dir, "agents"),
         tmpAgentsDir: () => join(dir, "tmp-agents"),

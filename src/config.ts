@@ -160,6 +160,14 @@ export interface IrisConfig {
     // model calls, so the real peak is the product of the two. Runs over the cap
     // wait in `queued`; they are not rejected. Normalized by loadConfig.
     max_concurrent_runs: number;
+    // How many corrected pages a run re-verifies for MEASUREMENT ONLY — the sample
+    // behind `verification.rechecks.sampled` (pipeline/correction.ts
+    // `recheckSampler`). Decides nothing about the delivered document at any
+    // value. `0` turns the measurement off; a value at or above the run's page count
+    // re-verifies every corrected page, which is the only setting whose result is a
+    // rate over corrected pages rather than over whichever pages the slots landed on.
+    // Normalized by loadConfig, so it is always an integer >= 0.
+    recheck_sample_size: number;
   };
 }
 
@@ -181,6 +189,26 @@ export const MAX_EXTRACTION_CONCURRENCY = 16;
 // concurrency — waiting is cheap and visible (`status: "queued"`), whereas
 // over-subscribing degrades every run at once.
 export const DEFAULT_MAX_CONCURRENT_RUNS = 2;
+// Corrected pages a run re-verifies for measurement only, when the deployment
+// doesn't say. One, because the sample decides nothing about the document and its
+// cost is the thing under investigation: re-verifying every corrected page adds a
+// Feedback Agent call per correction, and on the two 100-page rounds behind issue
+// #288 that is 111 extra calls for 200 pages — verify is already 14.2% of a
+// document's bill (issue #280), so a census on a run where most pages are corrected
+// adds roughly half that again.
+//
+// What one draw per run cannot do is produce a RATE, and for four rounds it was read
+// as one. `recheckSampler` gets one slot for a whole run, so a 25-page batch supplies
+// a single verdict and a 100-page document supplied four: on `runs-extract100-1`,
+// 111 corrections were bought and 8 were measured (7.2%), 3 of them ok — and the two
+// models' four-draw samples read 50% and 25% off the same corpus. The census that
+// answered it (issue #288: 26% of corrected pages clear the verifier, against a 2%
+// floor from re-asking about the uncorrected page, n=57, sign test p=0.000) had to be
+// replayed off persisted replies in the bench, because this knob did not exist.
+//
+// So the number stays 1 — a deployment keeps accumulating a count at ~1% of a
+// document — and the knob is what makes the rate buyable when somebody wants it.
+export const DEFAULT_RECHECK_SAMPLE_SIZE = 1;
 // Upper bound. This is a cap on how much of the machine one deployment will
 // commit, not a statement about what a provider will serve; an operator who
 // genuinely needs more concurrency than this wants multiple instances and a
@@ -624,6 +652,37 @@ export function normalizeReviewIterations(value: unknown): number {
   return Math.max(1, Math.floor(n));
 }
 
+// Coerce a configured recheck_sample_size into a usable integer. The same "absent
+// means the default, not zero" guard as the others, and the same reason it matters
+// here: a valueless `recheck_sample_size:` parses as null, and Number(null) is 0 —
+// which is a legitimate value for this knob (measurement off), so obeying it would
+// turn a YAML typo into a deployment that quietly stops collecting the only number it
+// publishes about whether correction converges.
+//
+// Floored at 0 and not clamped above. 0 is meaningful, unlike the concurrency knobs;
+// and there is no ceiling because the cost is bounded by the run — the most this can
+// buy is one Feedback Agent call per corrected page, so a deployment that sets 10,000
+// gets a census and not a runaway. A negative is a value nobody can mean, and the
+// nearest thing to it that this code can honour is off. So is a fraction below 1: this
+// is a count of pages, and `0.5` floors to none — which is worth knowing because it is
+// the one input here that looks like it asks for a little measuring and turns it off.
+//
+// A value this cannot read at all resolves to the DEFAULT, which is the opposite
+// direction from `recheckSampler`'s own guard on the same shape (there, an unusable size
+// means no measurement). Deliberate, because the two answer different questions: this one
+// asks what the operator meant by a line in their config, where a typo means "they did not
+// set it", and the sampler asks what to do with a number it cannot use, where a garbled
+// value must not be read as "measure everything". `loadConfig` runs first on every
+// production path, so this is the rule that decides a deployment's behaviour.
+// Exported for tests.
+export function normalizeRecheckSampleSize(value: unknown): number {
+  if (value === null || value === undefined) return DEFAULT_RECHECK_SAMPLE_SIZE;
+  if (typeof value === "string" && value.trim() === "") return DEFAULT_RECHECK_SAMPLE_SIZE;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_RECHECK_SAMPLE_SIZE;
+  return Math.max(0, Math.floor(n));
+}
+
 // Bundled GitHub App client_id for the device flow (PRD §9.1). This is the single
 // place to embed Equalify's registered "Equalify Iris" GitHub App so the default
 // deployment needs no per-operator app setup — the same pattern the GitHub CLI uses.
@@ -688,6 +747,12 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   // at first auth, to seed the account default that every later session inherits.
   parsed.defaults.max_review_iterations = normalizeReviewIterations(
     parsed.defaults.max_review_iterations,
+  );
+  // And for the measurement sample, so `recheckSampler` can be handed the number
+  // directly. It has no fallback of its own on purpose: a default parameter there
+  // would make a run that read no config look identical to one configured for 1.
+  parsed.defaults.recheck_sample_size = normalizeRecheckSampleSize(
+    parsed.defaults.recheck_sample_size,
   );
   // Same treatment for each provider's output ceiling, so an adapter can read
   // block.max_tokens directly and never has to re-derive a default. Applied to

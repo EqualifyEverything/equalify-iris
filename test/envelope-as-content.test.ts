@@ -1414,6 +1414,7 @@ function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 3): Pipelin
     sessionId: "ses_test",
     images: names.map((name, i) => ({ name, order: i + 1, path: join(inputDir, name), links: [] })),
     extractionConcurrency: pages,
+    recheckSampleSize: 1,
     maxReviewIterations: 1,
     paths: {
       agentsDir,

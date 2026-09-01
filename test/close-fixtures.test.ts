@@ -40,7 +40,7 @@ function cfg(dir: string): IrisConfig {
       oauth_base_url: "https://github.com",
     },
     providers: { default: "openrouter", openrouter: { api_key: "k", default_model: "anthropic/claude-sonnet-4.6" } },
-    defaults: { max_review_iterations: 1, extraction_concurrency: 2, max_concurrent_runs: 1 },
+    defaults: { max_review_iterations: 1, extraction_concurrency: 2, max_concurrent_runs: 1, recheck_sample_size: 1 },
   };
 }
 

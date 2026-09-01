@@ -380,3 +380,27 @@ defaults:
   # the default. Needing more than a handful means you want multiple instances and
   # a shared Postgres store, which v1 does not implement.
   max_concurrent_runs: 2
+  # How many corrected pages a run re-verifies FOR MEASUREMENT ONLY. Extraction
+  # checks every page against its image and re-renders the ones that fail; this
+  # buys a second check of the re-rendered page, to see whether the correction
+  # actually cleared what it was bought to fix. It decides nothing at any value —
+  # the corrected page is delivered either way — and it is counted apart in
+  # `GET /v1/diagnostics` as `verification.rechecks.sampled` / `sampled_ok`.
+  #
+  # 1 (the default) costs about 1% of a document and gives you a COUNT per run,
+  # not a rate: one draw cannot be a percentage, and reading it as one is how "half
+  # of corrections work" got quoted off two verdicts. The measured answer, from a
+  # 57-page census, is that 26% of corrected pages pass the re-check against a 2%
+  # floor for re-asking about the uncorrected page (issue #288).
+  #
+  # 0 turns it off, and so does anything below 1 — this is a count of pages, and a
+  # fraction floors like every other count here, so `0.5` is no measurement rather
+  # than a little of one.
+  #
+  # A number at or above your page count re-verifies EVERY
+  # corrected page — the only setting that yields a rate over corrected pages
+  # rather than over the pages the sample happened to land on — and costs one extra
+  # Feedback Agent call per correction, which on a document where most pages are
+  # corrected is roughly half the price of the per-page checking again. Raise it to
+  # measure your own documents; leave it alone otherwise.
+  recheck_sample_size: 1

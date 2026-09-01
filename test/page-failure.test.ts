@@ -69,6 +69,7 @@ function makeCtx(
     sessionId: "ses_test",
     images,
     extractionConcurrency: 2,
+    recheckSampleSize: 1,
     maxReviewIterations: 1,
     paths: {
       agentsDir,

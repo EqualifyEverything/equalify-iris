@@ -435,6 +435,7 @@ function makeCtx(dir: string, calls: Call[]): PipelineContext {
     sessionId: "ses_test",
     images: names.map((name, i) => ({ name, order: i + 1, path: join(inputDir, name), links: [] })),
     extractionConcurrency: 2,
+    recheckSampleSize: 1,
     maxReviewIterations: 1,
     paths: {
       agentsDir,
