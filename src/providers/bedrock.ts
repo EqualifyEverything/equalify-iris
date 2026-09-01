@@ -463,13 +463,24 @@ export function refusedForOutputCeiling(e: unknown): boolean {
 // "context length", "too many tokens"): this call was refused over its OUTPUT ceiling, and
 // a caller that read it as a prompt-size refusal would drop the page images and ask again
 // with the same ceiling.
-function outputCeilingRefused(model: string, asked: number, cause: unknown): Error {
+// `cappedBelow` is the deployment's ceiling, and is passed ONLY when the number refused was a cap
+// this one call chose (#285) — never inferred from `asked < this.maxTokens`, because the second
+// refusal below is also below the deployment's ceiling and is the MODEL's number, so a comparison
+// here would blame a caller for a ceiling the model named. When a caller's cap was refused, "lower
+// providers.bedrock.max_tokens" changes nothing — the request was already under it — so the
+// sentence naming the setting at fault has to name a different one.
+function outputCeilingRefused(model: string, asked: number, cause: unknown, cappedBelow?: number): Error {
   const said = cause instanceof Error ? cause.message : String(cause);
   const error = new Error(
     `bedrock: ${model} refused a request asking for ${asked} output tokens, and its own ` +
       `ceiling is what it refused — the model is not being asked to do work it cannot do. ` +
-      `providers.bedrock.max_tokens is the setting at fault: lower it, or route this ` +
-      `capability to a model whose ceiling is at least that high (providers.per_agent). ` +
+      (cappedBelow !== undefined
+        ? `That ${asked} is this call's own cap, below the ${cappedBelow} in ` +
+          `providers.bedrock.max_tokens, so lowering that setting will not move it: what to lower ` +
+          `is the cap set by the caller named on this call's model_call line, or route this ` +
+          `capability to a model whose ceiling is at least ${asked} (providers.per_agent). `
+        : `providers.bedrock.max_tokens is the setting at fault: lower it, or route this ` +
+          `capability to a model whose ceiling is at least that high (providers.per_agent). `) +
       `Bedrock said: ${said}`,
     { cause },
   );
@@ -650,7 +661,8 @@ export class BedrockProvider implements ModelProvider {
       // No note for these two: nothing was clamped and nothing was re-sent, so there is no
       // second request to make visible, and the `model_call` line already carries `ok: false`
       // with this error's message — which names `providers.bedrock.max_tokens` outright.
-      if (stated === null || stated >= asked) throw outputCeilingRefused(req.model, asked, e);
+      if (stated === null || stated >= asked)
+        throw outputCeilingRefused(req.model, asked, e, first.ceilingFrom === "call" ? this.maxTokens : undefined);
       this.ceilings.set(req.model, stated);
       // The run log's own record of the clamp, and the one difference from the warning below
       // that matters: this fires on EVERY call it happens on, while that paragraph is said once
@@ -662,7 +674,14 @@ export class BedrockProvider implements ModelProvider {
       // `refused: true` is the second of those: this is the call that paid a rejected
       // round-trip, so its `duration_ms` covers two requests where a later clamped call's
       // covers one.
-      req.onNote?.({ kind: "output_ceiling_clamped", model: req.model, asked, stated, refused: true });
+      //
+      // `asked: this.maxTokens` and not `asked`, which since #285 may be a cap this one call chose:
+      // the field is documented as what `providers.<provider>.max_tokens` says (docs/API.md), and
+      // it exists to be paired with `stated` as the remedy — a row reading 12466 where the config
+      // reads 32000 would send whoever aggregates it to edit a number that is already correct.
+      // The rejection is the deployment's ceiling being unacceptable either way: `stated < asked`
+      // and `asked <= this.maxTokens`, so the model refuses the configured number too.
+      req.onNote?.({ kind: "output_ceiling_clamped", model: req.model, asked: this.maxTokens, stated, refused: true });
       // Once per model per process, and said with a flag of its own rather than left to the
       // line above: pages are extracted five at a time (DEFAULT_EXTRACTION_CONCURRENCY), so
       // on a fresh process every call already in flight asks for the deployment's ceiling
@@ -677,7 +696,13 @@ export class BedrockProvider implements ModelProvider {
       if (!this.warnedCeilings.has(req.model)) {
         this.warnedCeilings.add(req.model);
         console.warn(
-          `bedrock: ${req.model} refused ${asked} output tokens and stated its own ceiling of ` +
+          `bedrock: ${req.model} refused ${asked} output tokens` +
+            // Said only when the two differ, because the paragraph's subject is the config and a
+            // reader who is not told otherwise will read `asked` as it. The number stays the one
+            // the request carried: that is what was refused, and rounding it up to the config's
+            // ceiling would be reporting a request nobody made.
+            (asked < this.maxTokens ? ` (this call's own cap, not the configured ceiling)` : ``) +
+            ` and stated its own ceiling of ` +
             `${stated}, so the call was sent again at ${stated} and every later call to this ` +
             `model in this process will ask for ${stated}. providers.bedrock.max_tokens is ` +
             `${this.maxTokens}, which this model does not accept: nothing has to change for ` +
