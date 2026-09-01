@@ -894,8 +894,9 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   **The incumbent is not exempt — and one pair of runs locates a model, it does not give it a
   rate.** Violations per multi-window document over 20 documents (18 of them long enough to be
   windowed, 45 windows) and two runs of the identical prompt, measured at both Reader prompts this
-  repo has shipped: `158e3d9`, and the current `e842faa`, which differs from it only by the appended
-  sentence in the bullet below. **At `158e3d9`:** `gpt-5.6-luna` **0.00** (0 and 0), the incumbent
+  repo has shipped: `158e3d9`, and the current `e842faa`, whose *Reader prompt* differs from it only
+  by the appended sentence in the bullet below (the builds are four commits apart; the provenance
+  paragraph below says why that does not reach these figures). **At `158e3d9`:** `gpt-5.6-luna` **0.00** (0 and 0), the incumbent
   `claude-sonnet-4-6` **0.03** (0 then 1), `kimi-k2.5` **0.25** (6 then 3), `claude-haiku-4-5`
   **0.31** (6 then 5). **At `e842faa`,** same corpus and same design: Luna **0.00** (0 and 0), the
   incumbent **0.14** (4 then 1), Kimi **0.08** (1 then 2), Haiku **0.28** (5 then 5). The thesis is
@@ -904,7 +905,7 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   36 document-runs, and the incumbent's five is *more* than Kimi's three (#308).
   **The prompt change is not the lever, which is what four models measured at both shas are for.**
   All four were given the same appended sentence. The incumbent rose by four violations, Kimi fell
-  by six, Haiku and Luna did not move. There is no common direction, and every per-model shift is
+  by six, Haiku fell by one and Luna did not move. There is no common direction, and every per-model shift is
   the size of that model's own spread between two runs of the *identical* prompt: Kimi's two runs at
   `158e3d9` differ by 3 violations, the incumbent's two at `e842faa` by 3. So a pair of runs resolves
   a model to within a few events on 18 windowed documents, and no more than that — which is also why
@@ -964,10 +965,18 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   changed `READER_SYSTEM` — the change the bullet below asks to have this very count re-measured on
   (#308). The `e842faa` figures are `runs-reader-newsha` and `runs-reader-newsha2`; all four rounds
   are re-derived here rather than quoted.
-  The $/doc figures are those rounds' `usd` over their succeeded documents, so both halves of the
-  price-and-compliance sentence come from one pair of rounds — but a model's price spans exactly the
-  rounds its violation count does, so the four one-run models are one sample on both axes, `$0.0721`
-  included.
+  The published $/doc figures are `runs-reader-newsha` and `runs-reader-newsha2`'s `usd` over their
+  succeeded documents — the same pair as the `e842faa` violation counts, so both halves of the
+  price-and-compliance sentence come from one pair of rounds, and a model's price spans exactly the
+  rounds its violation count does. That leaves the four one-run models as one sample on both axes,
+  `$0.0721` included, still at `158e3d9`. **These prices meter the Reader and nothing else**, which is
+  what makes a price comparison across two shas an A/B on the prompt rather than on the four commits
+  between them: every priced call in all five rounds is `agent: reader`, `step: read` — 945 of them,
+  with no extraction, editor or verify call in any round — because the harness drives `runReview`
+  alone. The four commits between the two shas do touch this file, but on the editor path — #295 and
+  #300's truncation salvage — and the only change they make to `READER_SYSTEM` itself is the append,
+  which is the one line of `git diff 158e3d9 e842faa -- src/pipeline/review.ts` that lands inside the
+  template.
 - **The Reader replies with JSON and nothing else, and that sentence is tuned to the model in the
   seat.** `READER_SYSTEM` has always ended "Respond with ONLY JSON:", and the incumbent narrated
   anyway: 40% of the characters it wrote sat outside the JSON envelope, over 5 documents. Nothing

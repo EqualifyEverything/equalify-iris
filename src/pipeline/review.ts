@@ -219,7 +219,7 @@ export interface ReviewResult {
 // the incumbent's rise is 6 issues in one run against 1 in the other. The same reading kills the
 // positional story told with it — that removing prose as a destination pushes discarded reasoning into
 // `issues[]` — because #275 window violations move in opposite directions on models given the same
-// append (the incumbent +4, Kimi -6, Haiku and Luna flat), each shift the size of that model's own
+// append (the incumbent +4, Kimi -6, Haiku -1, Luna flat), each shift the size of that model's own
 // spread between identical runs. A clause naming nowhere as the destination for a discarded
 // observation is a plausible fix and is deliberately NOT in this prompt: it would have to be measured
 // as its own arm on the two models that do this, two runs each, scoring self-cancelling issues
