@@ -1783,31 +1783,53 @@ test("a reply that made no blank claim says nothing about a veto", async () => {
   });
 });
 
-test("a page wrongly reported blank is still caught by the fidelity check", async () => {
+test("a blank declaration is taken at its word, and the page says nothing judged it", async () => {
   await withTemp(async (dir) => {
     const events: Event[] = [];
-    // The reason the blank claim is not short-circuited: it is checked against the source
-    // image like any other page, so a page that DOES have content on it fails that check and
-    // is corrected on the normal path, at the normal cost. Trusting the claim would buy one
-    // saved call by trading a reported failure for a silent hole.
+    // What issue #294 changed here. The blank claim used to be checked against the source image
+    // like any other page, so a page that DID have content on it failed that check and was
+    // corrected on the normal path — this test asserted exactly that. The check never once said
+    // no: 36 judgements over 9 blank pages of a 100-page corpus, two page-model arms, two
+    // commits, all faithful, for $0.0859 an arm spent being told that the empty page the model
+    // described is the empty page in the image. So the call is not made any more.
+    //
+    // The saving is taken on the terms this file cares about, which is what the assertions below
+    // are: a page nothing looked at must not read as a page that passed. The verifier is rigged
+    // to reject page 2 — the wrong declaration this test used to catch — and page 3, an
+    // ordinary page. Only page 3's rejection can happen now.
     const { fragments, failedPages } = await runExtraction(
       makeCtx(dir, events, {
         render: (o) => (o === 2 ? '{"html": "", "log": "This page is blank."}' : good(o)),
-        problems: (o) => (o === 2 ? ["The page has a table on it. The output has nothing."] : []),
+        problems: (o) =>
+          o === 2
+            ? ["The page has a table on it. The output has nothing."]
+            : o === 3
+              ? ["The second table row is missing."]
+              : [],
         // Not keyed to the page: the correction prompt does not carry the image filename, so
-        // `orderOf` cannot see which page it is about. Page 2 is the only one corrected.
+        // `orderOf` cannot see which page it is about. Page 3 is the only one corrected.
         correct: () => '{"html": "<table><tr><td>1</td></tr></table>"}',
       }),
     );
     assert.deepEqual(failedPages, []);
     assert.equal(of(events, "page_blank").length, 1, "the claim was made and recorded");
-    assert.deepEqual(of(events, "page_verify_failed").map((e) => e.image), ["page-002.png"]);
-    assert.equal(
-      fragments.find((f) => f.order === 2)!.innerHtml,
-      "<table><tr><td>1</td></tr></table>",
-      "the content the page actually had is in the document",
-    );
+    // The page the verifier would have rejected is now a page nothing judged, and its line says
+    // which of the two silences it is: `unjudged` keeps it out of every pass rate computed off
+    // these logs (#211), `skipped` says the call was not bought rather than could not be made.
+    const blankLine = of(events, "page_verify_ok").find((e) => e.image === "page-002.png")!;
+    assert.equal(blankLine.unjudged, true);
+    assert.equal(blankLine.skipped, "blank");
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "", "and it ships as the empty page it claimed");
+    // The fidelity check is otherwise untouched: page 3 is rejected and corrected exactly as it
+    // was, so what changed is one page's verdict and not the pipeline's.
+    assert.deepEqual(of(events, "page_verify_failed").map((e) => e.image), ["page-003.png"]);
+    assert.deepEqual(of(events, "page_corrected").map((e) => e.page), [3]);
     assert.equal(of(events, "page_corrected")[0].result, "kept");
+    // What is given up, plainly: a confident wrong declaration about a page the FILE says nothing
+    // about now ships as an empty page, with `page_blank` as the whole of the evidence. The wrong
+    // declarations that are still caught are the ones caught for nothing — a log that contradicts
+    // its own claim, two tests above, and a page carrying link annotations, in
+    // test/blank-verify-skip.test.ts.
   });
 });
 

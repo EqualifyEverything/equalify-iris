@@ -91,6 +91,20 @@ export interface VerifyVerdict {
   unjudged?: true;
 }
 
+// The verdict for a page nothing looked at. A function and not a shared constant because
+// `problems` and `kinds` are arrays: one frozen object would hand every caller the same two
+// arrays, and `Object.freeze` is shallow, so a single `push` anywhere would rewrite the default
+// for the whole process.
+//
+// Three callers, which is why it stopped being a literal: `verifyAgentOutput` returns it when
+// there is no Feedback Agent and when the reply will not parse, and `extractPage` returns it for
+// a page the agent declared blank and no verify call was bought for (#294). Written out twice it
+// was already the same shape by coincidence; a fourth reader of `unjudged` would have had to
+// trust that.
+export function unjudgedVerdict(): VerifyVerdict {
+  return { ok: true, problems: [], kinds: [], untagged: 0, unjudged: true };
+}
+
 // Read VERIFY's `problems` out of a reply that may predate the kinds, may be a session-built
 // or trained agent file whose contract still says `["..."]`, or may simply have answered in
 // strings anyway. A string entry is a problem with no kind — never a dropped problem, since
@@ -189,7 +203,7 @@ export async function verifyAgentOutput(
   >,
 ): Promise<VerifyVerdict> {
   const fb = loadFeedbackAgent(ctx);
-  if (!fb || blocks.length === 0) return { ok: true, problems: [], kinds: [], untagged: 0, unjudged: true };
+  if (!fb || blocks.length === 0) return unjudgedVerdict();
 
   const html = blocks.map((b) => b.html).join("\n\n");
   // Everything this task says that is not about the page in front of it: the task marker
@@ -237,7 +251,7 @@ export async function verifyAgentOutput(
   ctx.log.agentCall({ agent: fb, phase: "extraction", image: img.name, output: res.text });
 
   const parsed = extractJson<VerifyOutput>(res.text);
-  if (!parsed) return { ok: true, problems: [], kinds: [], untagged: 0, unjudged: true };
+  if (!parsed) return unjudgedVerdict();
   const ok = parsed.faithful !== false && parsed.accessible !== false;
   return { ok, ...readProblems(parsed.problems) };
 }

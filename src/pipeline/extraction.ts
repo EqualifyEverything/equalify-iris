@@ -5,7 +5,7 @@ import { mapWithConcurrency } from "../util/concurrency.ts";
 import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
-import { verifyAgentOutput, type VerifyVerdict } from "./feedback.ts";
+import { unjudgedVerdict, verifyAgentOutput, type VerifyVerdict } from "./feedback.ts";
 import {
   carriesContent,
   changedAnything,
@@ -1961,6 +1961,12 @@ interface PageRender {
   // exactly as it did before. Never inferred from the HTML — a length is not a token count, and a
   // wrong estimate here truncates a correction that would have worked.
   outputTokens?: number;
+  // The agent declared this page blank and the fragment is `""` on purpose (`page_blank`). Set
+  // rather than inferred from an empty `html`, which is the same string for two different
+  // answers: today every other unusable reply throws before it can get here, so the two happen
+  // to coincide, and a future path that returns an empty page without declaring one would
+  // silently inherit the caller's decision not to verify it (#294).
+  blank?: true;
 }
 
 // The output ceiling for a correction call, or undefined for "whatever the deployment allows".
@@ -2119,12 +2125,13 @@ async function renderPage(
     // page is work to redo, a blank page is nothing to do. The empty fragment is dropped at
     // assembly, which for a page with nothing on it is what the document should say.
     //
-    // The claim is not taken on trust. This returns like any other page, so the fidelity check
-    // runs on it exactly as it runs on the rest — the Feedback Agent is shown the source image
-    // and an empty fragment, and a page that in fact has content on it fails that check and is
-    // corrected, on the same path and at the same cost as any other page that arrived wrong.
-    // Short-circuiting here would buy one saved call by trading a reported failure for a silent
-    // hole, which is the wrong side of the trade this whole file is built around.
+    // This still returns like any other page, and everything that runs on a page still runs on
+    // this one — what no longer runs is the paid one. `extractPage` reads `blank` and does not buy
+    // the Feedback Agent's verdict on an empty fragment (#294); the free checks are unchanged, and
+    // the paragraph at that call site is where the reasoning and the numbers are. Short-circuiting
+    // HERE, by returning early out of the page's own function, is a different thing and is still
+    // refused: it would take the link and alt checks with it, and those are the two detectors of a
+    // wrong blank declaration that cost nothing.
     //
     // And not on a page Iris already has content for. `previous` is set only on a feedback
     // re-extraction, and only for a page whose fragment is real content (`previousFor` in
@@ -2163,7 +2170,7 @@ async function renderPage(
       // page 14 begins here. The prompt forbids exactly that and the paragraph at `blankDeclaration`
       // has the reasoning; a blank page that DID print its folio loses an anchor to nothing, which is
       // the cheaper mistake. The markup is on the log line above either way.
-      return { html: "", log: parsed?.log ?? "", outputTokens: res.usage?.output_tokens };
+      return { html: "", log: parsed?.log ?? "", outputTokens: res.usage?.output_tokens, blank: true };
     }
     const shape = replyShape(res.text, parsed);
     // A declaration the veto refused is recorded as the refusal it is, with the words that did it:
@@ -2589,7 +2596,7 @@ async function extractPage(
   sampler: RecheckSampler,
   previous?: string,
 ): Promise<PageOutcome> {
-  const { html, log, suggestion, outputTokens } = await renderPage(ctx, pageAgent, img, lessons, previous);
+  const { html, log, suggestion, outputTokens, blank } = await renderPage(ctx, pageAgent, img, lessons, previous);
   let innerHtml = html;
   let logNote = log;
   let dispatched = false;
@@ -2606,7 +2613,38 @@ async function extractPage(
     }
   }
 
-  const verdict = await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml }], "verify");
+  // A page the agent declared blank is not sent to the verifier. The fidelity question this call
+  // asks is whether the fragment is faithful to the image, and an empty fragment has no content to
+  // be unfaithful with: the Feedback Agent is shown the source image and an empty code block, and
+  // in 36 such judgements — 9 pages of a 100-page corpus, two page-model arms, two shas — it
+  // passed every one (#294). What that bought was $0.0859 per arm, 0.77% of the deployed lineup's
+  // bill and 1.33% of the cheaper one the sprint is heading for, which is the direction the share
+  // moves: a per-image cost that does not shrink is a growing fraction of a shrinking bill.
+  //
+  // `blank` AND an empty fragment, not `blank` alone. The flag says what the model answered; the
+  // emptiness is what makes the argument above true. A specialist cannot reach a blank page today
+  // (the declaration returns before a `suggested_agent` is read), so the conjunction is a belt —
+  // and if some later path does put content into a page that was declared blank, the check comes
+  // back on rather than being skipped on the strength of a stale flag.
+  //
+  // What is NOT given up. The two code-level checks below still run on this page, and both are
+  // detectors of a wrong declaration that the verifier is not needed for: a page carrying link
+  // annotations that came back empty fails `missingLinks` exactly as before, and buys a correction
+  // — which for a blank page means the page is re-rendered against the image with a named problem,
+  // and the corrected fragment is then verified in turn (`recheck_binding`, because the check did
+  // not fail). So a "blank" page that the FILE says has content in it is still caught, for free.
+  //
+  // What is: a page with content on it that the agent declared blank confidently and that carries
+  // no annotations. The model call was the only thing that could catch that, and it never has —
+  // 0 of 36. The failure mode it was written for was observed (#190, four pages) and is now caught
+  // one step earlier and for nothing by the doubt-word veto in `blankDeclaration`, which refuses a
+  // hedged declaration before it can reach this line at all (`blank_vetoed` on `page_no_output`).
+  // A confident-but-wrong declaration would leave a `page_blank` line and a blank count in
+  // diagnostics as its evidence, and no verdict.
+  const blankSkip = blank === true && innerHtml === "";
+  const verdict = blankSkip
+    ? unjudgedVerdict()
+    : await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml }], "verify");
 
   // Whether the page's links arrived is checked here rather than left to the
   // Feedback Agent: it verifies the output against the IMAGE, which is the one place
@@ -2663,7 +2701,17 @@ async function extractPage(
     // measurement OF the verifier drawn from these lines would otherwise take pages nothing
     // judged as its population (issue #180, src/pipeline/calibration.ts). Omitted, not
     // false, on the ordinary pass — a log full of `unjudged: false` says nothing.
-    ctx.log.event("page_verify_ok", verdict.unjudged ? { image: img.name, unjudged: true } : { image: img.name });
+    //
+    // `skipped` says which kind of unjudged this is: a call that could not be made, or one that was
+    // not bought. Both must stay out of any pass rate — that is what `unjudged` is for and it is set
+    // either way — but they are different facts about a run, and only one of them is a saving. A
+    // reader counting these lines is the only way to price the skip after the fact, so the reason is
+    // on the line rather than inferred from a `page_blank` on the same image (issue #294).
+    ctx.log.event("page_verify_ok", {
+      image: img.name,
+      ...(verdict.unjudged ? { unjudged: true } : {}),
+      ...(blankSkip ? { skipped: "blank" } : {}),
+    });
     // The verdict that describes a defect and then passes the page. `ok` is the verdict's
     // `faithful`/`accessible` FLAGS, and `failedCheck` needs a false flag AND a named problem
     // before the run will spend a correction — so a verdict that names one while both flags
@@ -2782,7 +2830,21 @@ async function extractPage(
     // have merged into it since, and it is the pair (tokens, the length they produced) that gives
     // this page its own characters-per-token. Handing the same string as both would make `growth`
     // 1 by definition and quietly delete the term.
-    const ceiling = correctionCeiling({ outputTokens, chars: html.length }, before.length);
+    //
+    // A page that rendered as NOTHING is the one case where the first pass bounds nothing, so it
+    // gets no caller ceiling at all. `correctionCeiling` cannot tell that page apart from a first
+    // pass whose length is merely unknown — both arrive as `chars: 0`, and for an unknown length
+    // scaling by 1 is right — but the caller can, and here the emptiness is a measurement. Such a
+    // page is a page declared blank (nothing else empty survives to a correction), and its
+    // correction is not an edit of a page: it is a re-render of the page from the image, which is a
+    // first pass, and first passes are bounded by the deployment rather than by a caller. Left to
+    // the floor it was 4,000 tokens — roughly 16,000 characters of HTML, where this file's own
+    // worked example of a dense page is 17,721 — so a dense page wrongly declared blank whose file
+    // carries a link annotation would have its one free repair truncated and ship empty. That
+    // repair is the safety net the skip above rests on, so capping it at a bound taken from the
+    // reply that got the page wrong is the wrong side of #285's own argument (the cap exists to
+    // bound a runaway, and this call has nothing to run away from being asked to produce).
+    const ceiling = html === "" ? undefined : correctionCeiling({ outputTokens, chars: html.length }, before.length);
     const attempt = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons, ceiling).then(
       (html) => ({ html, error: null as unknown }),
       (error: unknown) => ({ html: null, error }),
@@ -2812,8 +2874,13 @@ async function extractPage(
         // And the ceiling it was truncated AT, which since #285 is usually this call's own and not
         // the deployment's. `truncated: true` beside a 32,000-token config used to be enough to
         // name the number; with a per-call cap it is not, and the difference decides whether the
-        // remedy is a config edit or `correctionCeiling`'s multiple. Absent only where the first
-        // pass reported no usage and the call therefore ran uncapped.
+        // remedy is a config edit or `correctionCeiling`'s multiple. Absent where the call ran
+        // uncapped, which is two causes and not one: the first pass reported no usage, so there was
+        // no measurement to cap from, or the page rendered nothing and was delivered blank, whose
+        // correction is a re-render rather than an edit (#294, and the only trigger that reaches it
+        // there is `links`). Both leave the deployment's ceiling as the one that bound the call, so
+        // the remedy on the line is the same; what differs is whether anything here could have
+        // capped it, which is what an operator reading this field is asking.
         ...(ceiling !== undefined ? { ceiling } : {}),
         // What the reply reached, and both of its ends — the evidence that decides the question the
         // `ceiling` above only poses (issue #293). A cap this page hit is either a page that

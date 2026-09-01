@@ -160,6 +160,27 @@ export interface Diagnostics {
     // lines as a passing one, and nothing recoverable from the file says which (issue #211,
     // and #180 for the measurement that needed it).
     pages_unjudged: number;
+    // Of THOSE, the pages nothing looked at because nothing was bought: a page the agent declared
+    // blank, whose fragment is empty and which is no longer sent to the Feedback Agent at all
+    // (issue #294, `page_verify_ok` with `skipped: "blank"`). A subset of `pages_unjudged`, which is
+    // a subset of `pages_verified`, so neither of those moves and no published rate changes — what
+    // this adds is the ability to tell a saving from a failure, because until it existed a run that
+    // skipped 9 calls and a run whose Feedback Agent would not load produced the same two numbers.
+    //
+    // It is also the only way to PRICE the skip from a delivered run: this count times the cost of a
+    // verify call on an empty fragment ($0.0095 against $0.0212 for an average page, measured on the
+    // bench's 100-page corpus) is what the run did not spend. Zero on every log written before the
+    // skip, where those pages were verified and counted in `pages_verified` exactly as they are now.
+    //
+    // Calls not bought, which is money not spent only where there was a verifier to spend it on: a run
+    // with no Feedback Agent loaded skips the blank page's call too and saves nothing by it.
+    // `pages_unjudged == pages_verified` is consistent with that run and does not identify it — the
+    // same equality comes out of a run whose verifier loaded and whose every reply failed to parse,
+    // where the calls were bought — so the thing to read is the calls: `by_step.verify.count` below is
+    // 0 where no verdict was bought at all. The flag deliberately does not depend
+    // on whether the agent loaded — it would make one field mean two things, and it would put a disk
+    // check in the extraction path to decide a label.
+    pages_skipped_blank: number;
     verify_failed: number;
     // `verify_failed` split by what the verifier said was WRONG, counted in pages
     // (pipeline/feedback.ts `VERIFY_KINDS`). Two bench rounds rejected 74 of 94 and 76 of
@@ -766,6 +787,7 @@ export function summarizeRun(
   const verification: Diagnostics["verification"] = {
     pages_verified: 0,
     pages_unjudged: 0,
+    pages_skipped_blank: 0,
     verify_failed: 0,
     verify_kinds: {
       content_missing: 0,
@@ -809,6 +831,12 @@ export function summarizeRun(
       // on the strength of a typo. A line without the field is a judged page, which is what
       // every log written before it says (issue #211).
       if (e.unjudged === true) verification.pages_unjudged += 1;
+      // Strictly the string the emitter writes, and counted inside `unjudged` rather than beside it:
+      // a line claiming a skip while claiming a verdict was reached is a line this reader does not
+      // have to reconcile, because the only emitter sets both together (pipeline/extraction.ts). A
+      // future `skipped` for some other reason lands in `pages_unjudged` and not here, which is the
+      // right default — this field is named for the one thing it prices.
+      if (e.unjudged === true && e.skipped === "blank") verification.pages_skipped_blank += 1;
     } else if (e.type === "page_verify_failed") {
       verification.pages_verified += 1;
       verification.verify_failed += 1;
