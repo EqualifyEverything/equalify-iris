@@ -186,27 +186,49 @@ test("every per_agent key any example names is an agent Iris dispatches", () => 
       .map((f) => f.replace(/\.md$/, "")),
   ]);
 
+  // A YAML comment marker is stripped so a commented example is read as the operator would
+  // uncomment it — but only for a block whose own `per_agent:` was commented, and only for
+  // lines indented deeper than that key. An earlier version scanned everything after the
+  // FIRST `per_agent:` and stopped at the first line that was neither an entry, a comment nor
+  // blank, which in config.example.yaml is `openrouter:` some forty lines later: every
+  // paragraph of prose in between was a candidate, and one indented comment reading
+  // `#   max_tokens: 32000` anywhere in that span would have failed this suite claiming the
+  // file offers a per_agent key called `max_tokens`. Both files carry more than one block, so
+  // each is scanned in turn rather than picking one.
+  const blocks = /^(\s*)(#\s?)?per_agent:/;
   for (const file of ["config.example.yaml", "prd.md"]) {
     const lines = readFileSync(join(ROOT, file), "utf8").split("\n");
-    const start = lines.findIndex((l) => /^\s*#?\s*per_agent:/.test(l));
-    assert.ok(start >= 0, `${file} no longer contains a per_agent block; drop this or repoint it`);
     let found = 0;
-    for (const raw of lines.slice(start + 1)) {
-      // Strip a YAML comment marker so the commented example is read as the operator would
-      // uncomment it, then stop at the first line that is not an entry under the key.
-      const line = raw.replace(/^(\s*)#\s?/, "$1");
-      const m = line.match(/^\s{4,}([A-Za-z_][A-Za-z0-9_]*)\s*:/);
-      if (!m) {
-        if (/^\s*#/.test(raw) || raw.trim() === "" || /^\s{4,}#/.test(line)) continue;
-        break;
+    let seenBlock = false;
+    for (const [i, head] of lines.entries()) {
+      const b = head.match(blocks);
+      if (!b) continue;
+      seenBlock = true;
+      const indent = b[1]!.length;
+      const commented = Boolean(b[2]);
+      for (const raw of lines.slice(i + 1)) {
+        if (raw.trim() === "") continue;
+        // Commentedness has to match: a `#` line under a live key is prose about the block,
+        // not an entry in it (prd.md's "# everything else uses default").
+        const isComment = /^\s*#/.test(raw);
+        if (isComment !== commented) break;
+        const line = commented ? raw.replace(/^(\s*)#\s?/, "$1") : raw;
+        const m = line.match(/^(\s+)([A-Za-z_][A-Za-z0-9_]*)\s*:/);
+        // Anything at or above the key's own indent has left the block, and prose under it
+        // does not parse as `key:` at all.
+        if (!m || m[1]!.length <= indent) break;
+        found++;
+        assert.ok(
+          known.has(m[2]!),
+          `${file} offers per_agent key "${m[2]}", which no router.complete call dispatches — ` +
+            `it would be silently ignored. Routable: ${[...known].sort().join(", ")}`,
+        );
       }
-      found++;
-      assert.ok(
-        known.has(m[1]!),
-        `${file} offers per_agent key "${m[1]}", which no router.complete call dispatches — ` +
-          `it would be silently ignored. Routable: ${[...known].sort().join(", ")}`,
-      );
     }
-    assert.ok(found > 0, `${file}'s per_agent block has no entries under it to check`);
+    assert.ok(seenBlock, `${file} no longer contains a per_agent block; drop this or repoint it`);
+    // Self-arming: config.example.yaml's live block is `per_agent: {}` with no entries, so a
+    // count above 0 can only come from the COMMENTED example — a stop rule that gave up before
+    // reaching it would fail here rather than pass silently.
+    assert.ok(found > 0, `${file}'s per_agent blocks have no entries under them to check`);
   }
 });

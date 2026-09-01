@@ -610,10 +610,9 @@ export function perAgentKeyWarning(
   // a specialist wherever its name happens to fall.
   const dispatched = new Set<string>(DISPATCHED_AGENTS);
   const specialists = [...new Set(library.filter((n) => !dispatched.has(n)))].sort();
-  const where =
-    specialists.length > 0
-      ? `, and any agent file in ${agentsDir} (currently ${specialists.join(", ")})`
-      : `. ${agentsDir} holds no agent file beyond those`;
+  const where = `, and any agent file in ${agentsDir} (${
+    specialists.length > 0 ? `currently ${specialists.join(", ")}` : "which currently holds none"
+  })`;
   return (
     `providers.per_agent names ${unknown.map((k) => `"${k}"`).join(", ")}, which Iris does not ` +
     `dispatch. Those entries are ignored: the calls fall through to the provider's own model, so ` +
