@@ -131,14 +131,29 @@ test("per_agent keys that name no agent are warned about, and routable ones are 
   // The consequence, not just the name: an operator who reads only the first clause has to
   // learn that the entry is ignored, since that is the part no log will tell them.
   assert.match(w, /ignored/);
-  // And the way out, including the one an operator is most likely to be looking for.
+  // And the way out. The two routable sets are named SEPARATELY — the dispatched agents, then
+  // the directory and what is in it — because that is the distinction the sentence exists to
+  // draw, and one merged list has to be sorted, which drops a specialist in the middle of the
+  // built-ins. An earlier draft said "the last of those beyond <built-ins> are specialist
+  // files" over a sorted list, where `chartDataAgent` came out second.
   for (const agent of declaredAgents()) assert.ok(w.includes(agent), `warning omits ${agent}`);
-  assert.match(w, /table join is a copy_editor call/);
+  assert.match(w, /any agent file in .*agents/);
+  const shipped = readdirSync(AGENTS_DIR)
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => f.replace(/\.md$/, ""))
+    .filter((n) => !declaredAgents().includes(n));
+  for (const s of shipped) assert.ok(w.includes(s), `warning omits the specialist ${s}`);
 
-  // A routable key alongside a broken one is not named as broken.
+  // `table` earns its own sentence, because that key was shipped in this repo's own example
+  // and the join really is a copy_editor call — but only where it answers the key in hand.
+  assert.match(w, /no table agent/);
+
+  // A routable key alongside a broken one is not named as broken, and a typo does not get a
+  // sentence about tables.
   const mixed = perAgentKeyWarning({ page: "bedrock", tabel: "bedrock" }, AGENTS_DIR);
   assert.ok(mixed?.includes('"tabel"'));
   assert.ok(!/"page"/.test(mixed!), "a routable key was reported as unroutable");
+  assert.ok(!/table agent/.test(mixed!), "a typo was answered with a sentence about tables");
 });
 
 test("an unreadable agents_dir warns about nothing rather than about everything", () => {

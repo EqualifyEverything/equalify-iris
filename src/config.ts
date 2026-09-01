@@ -604,13 +604,27 @@ export function perAgentKeyWarning(
   const unknown = keys.filter((k) => !known.has(k));
   if (unknown.length === 0) return undefined;
 
+  // The two routable sets are named separately rather than as one list with a tail clause,
+  // because the whole question this sentence answers is whether a name came from the code or
+  // from a directory the operator controls — and any single list has to be sorted, which puts
+  // a specialist wherever its name happens to fall.
+  const dispatched = new Set<string>(DISPATCHED_AGENTS);
+  const specialists = [...new Set(library.filter((n) => !dispatched.has(n)))].sort();
+  const where =
+    specialists.length > 0
+      ? `, and any agent file in ${agentsDir} (currently ${specialists.join(", ")})`
+      : `. ${agentsDir} holds no agent file beyond those`;
   return (
     `providers.per_agent names ${unknown.map((k) => `"${k}"`).join(", ")}, which Iris does not ` +
     `dispatch. Those entries are ignored: the calls fall through to the provider's own model, so ` +
     `the swap they were written for does not happen and no log line reports that it did not. ` +
-    `The agents this deployment can route are ${[...known].sort().join(", ")} — the last of those ` +
-    `beyond ${DISPATCHED_AGENTS.join(", ")} are specialist files in ${agentsDir}. Note that the ` +
-    `table join is a copy_editor call, so it has no line of its own.`
+    `The agents this deployment can route are ${DISPATCHED_AGENTS.join(", ")}${where}.` +
+    // Only where it answers the key in hand. Said unconditionally it is a sentence about
+    // tables attached to a typo.
+    (unknown.includes("table")
+      ? ` There is no table agent: joining a table split across a page break is a copy_editor ` +
+        `call, and it shares that agent's entry with the review round.`
+      : "")
   );
 }
 

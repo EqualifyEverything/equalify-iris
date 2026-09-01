@@ -158,10 +158,16 @@ echo "==> 1a. a per_agent key naming no agent is reported at boot"
 # and silently disarms the warning for every deployment).
 #
 # Both halves read the KEY LIST rather than the whole log or the whole warning line: the
-# sentence goes on to list every routable agent as the way out, so `reader` appears in it
+# sentence goes on to name every routable agent as the way out, so `reader` appears in it
 # legitimately. The keys are the quoted names before "which Iris does not", and nothing is
 # assumed about their order.
-named=$(grep 'per_agent names' "$LOG" | sed 's/, which Iris does not.*//')
+#
+# `|| true` because the missing warning is the regression this step exists to report: under
+# `set -euo pipefail` a grep that matches nothing makes the assignment fail, and the script
+# would exit here with no ✗ line, no server log dumped (`fail` is its only caller) and every
+# later step's result lost — an unexplained early exit instead of this check failing. Same
+# reason as the `if grep` at the alt-text step below.
+named=$(grep 'per_agent names' "$LOG" | sed 's/, which Iris does not.*//' || true)
 case "$named" in
   *'"table"'*) pass "boot names the unroutable key" ;;
   *) fail "per_agent warning" \
