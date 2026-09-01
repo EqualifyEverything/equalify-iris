@@ -291,7 +291,8 @@ test("a correction that truncates at its own cap says so on the log line", async
     assert.equal(failed.length, 1);
     // `truncated: true` beside a 32,000-token config used to be enough to name the number that
     // was hit. With a per-call cap it is not, and the two have opposite remedies, so the ceiling
-    // that was actually asked for is on the line — and it is the same number the call sent.
+    // that was actually asked for is on the line — the same number this caller asked the router for,
+    // which an adapter may then lower to the deployment's ceiling and never raise.
     assert.equal(failed[0].fields.truncated, true);
     assert.equal(failed[0].fields.ceiling, 12_466);
     assert.equal(failed[0].fields.ceiling, asked.find((a) => a.step === "correct")?.maxOutputTokens);

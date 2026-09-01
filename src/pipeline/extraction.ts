@@ -2211,9 +2211,11 @@ async function correctPage(
   previous: string,
   problems: string[],
   lessons: string,
-  // The output ceiling for this one call, from `correctionCeiling`, or undefined for whatever the
-  // deployment allows. Computed by the caller rather than here so the number sent and the number
-  // on `page_correction_failed` are the same number and cannot drift apart.
+  // The output ceiling this call asks for, from `correctionCeiling`, or undefined for whatever the
+  // deployment allows. Computed by the caller rather than here so the number asked for and the
+  // number on `page_correction_failed` are one number and cannot drift apart. Asked for is not
+  // always sent: an adapter lowers it to the deployment's ceiling if it is higher, and never the
+  // other way round — see the call site for what a larger number on that log line means.
   maxOutputTokens?: number,
 ): Promise<string | null> {
   // The link list is repeated here, not just in the first pass: a dropped link is one
