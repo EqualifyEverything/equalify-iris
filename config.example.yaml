@@ -188,7 +188,7 @@ providers:
   # own config notes the earlier move off Opus 4.7 as a latency change — so the per-page
   # cost figures and the quality baseline are all Sonnet's. Cheaper models HAVE been
   # measured per agent, though not evenly — seven arms on `page`, four on `reader`, none
-  # on the other three. One swap measured no NET loss (`page`) and one is a priced trade
+  # on the other three. One swap measured no net loss (`page`) and one is a priced trade
   # (`reader`, 78% of the incumbent's own agreement floor for −77%): which model to put
   # on which agent, and what each is worth, is docs/models.md.
   #
