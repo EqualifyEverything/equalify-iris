@@ -393,7 +393,11 @@ defaults:
   # 57-page census, is that 26% of corrected pages pass the re-check against a 2%
   # floor for re-asking about the uncorrected page (issue #288).
   #
-  # 0 turns it off. A number at or above your page count re-verifies EVERY
+  # 0 turns it off, and so does anything below 1 — this is a count of pages, and a
+  # fraction floors like every other count here, so `0.5` is no measurement rather
+  # than a little of one.
+  #
+  # A number at or above your page count re-verifies EVERY
   # corrected page — the only setting that yields a rate over corrected pages
   # rather than over the pages the sample happened to land on — and costs one extra
   # Feedback Agent call per correction, which on a document where most pages are

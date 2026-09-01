@@ -663,7 +663,17 @@ export function normalizeReviewIterations(value: unknown): number {
 // and there is no ceiling because the cost is bounded by the run — the most this can
 // buy is one Feedback Agent call per corrected page, so a deployment that sets 10,000
 // gets a census and not a runaway. A negative is a value nobody can mean, and the
-// nearest thing to it that this code can honour is off.
+// nearest thing to it that this code can honour is off. So is a fraction below 1: this
+// is a count of pages, and `0.5` floors to none — which is worth knowing because it is
+// the one input here that looks like it asks for a little measuring and turns it off.
+//
+// A value this cannot read at all resolves to the DEFAULT, which is the opposite
+// direction from `recheckSampler`'s own guard on the same shape (there, an unusable size
+// means no measurement). Deliberate, because the two answer different questions: this one
+// asks what the operator meant by a line in their config, where a typo means "they did not
+// set it", and the sampler asks what to do with a number it cannot use, where a garbled
+// value must not be read as "measure everything". `loadConfig` runs first on every
+// production path, so this is the rule that decides a deployment's behaviour.
 // Exported for tests.
 export function normalizeRecheckSampleSize(value: unknown): number {
   if (value === null || value === undefined) return DEFAULT_RECHECK_SAMPLE_SIZE;

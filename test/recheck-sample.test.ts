@@ -59,15 +59,39 @@ test("one slot on a 25-page run sits mid-batch, and page 1 can no longer take it
 test("two slots sit on the quarters, and a page takes one of them rather than both", () => {
   const s = recheckSampler(orders(100), 2);
   assert.deepEqual(s.thresholds, [25, 75]);
-  // A page past both unspent thresholds consumes the LOWER one, so the sample stays a page
-  // count: two draws mean two pages, never one page counted twice. What makes this the right
-  // choice rather than an arbitrary one is that pages arrive out of order — consuming the
-  // higher would strand the lower band with nothing able to reach it.
+  // A page past both unspent thresholds consumes ONE of them, so the sample stays a page
+  // count: two draws mean two pages, never one page counted twice.
   assert.equal(claimRecheck(s, 90), true);
-  assert.deepEqual(s.thresholds, [75]);
-  assert.equal(claimRecheck(s, 30), false, "page 30 is below the only threshold left");
-  assert.equal(claimRecheck(s, 76), true);
+  // And it consumes the HIGHER one, which is what makes out-of-order arrival survivable:
+  // page 30 can only ever fill the band at 25, while page 90 could have filled either, so
+  // spending 25 on page 90 would have cost this run a draw it goes on to take.
+  assert.deepEqual(s.thresholds, [25]);
+  assert.equal(claimRecheck(s, 30), true);
   assert.deepEqual(s.thresholds, []);
+  assert.equal(claimRecheck(s, 99), false, "both slots are spent");
+});
+
+test("corrections arriving back to front still fill every band: a census stays a census", () => {
+  // The failure this rule is chosen against, and it is not a corner: corrections run
+  // concurrently up to `extraction_concurrency` (default 5), so the order they come back in
+  // is the order the model answered, not page order. Under "consume the lowest", page 3
+  // would take the band at 1 and page 2 the band at 2, and page 1 would be refused — two
+  // draws from a setting documented as re-verifying every corrected page, with nothing in
+  // the log to say the census came up short.
+  const s = recheckSampler(orders(3), 3);
+  assert.deepEqual(s.thresholds, [1, 2, 3]);
+  for (const page of [3, 2, 1]) {
+    assert.equal(claimRecheck(s, page), true, `page ${page} was refused its own band`);
+  }
+  assert.deepEqual(s.thresholds, []);
+
+  // Same thing below a census, where the loss would be a silently smaller sample rather
+  // than a broken promise: two slots on 3 pages, the late page arriving first.
+  const t = recheckSampler(orders(3), 2);
+  assert.deepEqual(t.thresholds, [1, 2]);
+  assert.equal(claimRecheck(t, 3), true);
+  assert.equal(claimRecheck(t, 1), true, "the band page 1 is the only candidate for is still there");
+  assert.deepEqual(t.thresholds, []);
 });
 
 test("a size at or above the page count is a census, and 0 is the measurement off", () => {
@@ -115,10 +139,14 @@ test("thresholds are strictly increasing and exactly k, for every batch size and
 });
 
 test("a page count the sampler cannot use leaves it with nothing rather than sampling everything", () => {
-  // `recheck_sample_size` is normalized by loadConfig, so these are the shapes a hand-built
-  // context can still produce. The failure to avoid is the opposite of the usual one: a garbled
-  // size that read as "unbounded" would put a Feedback Agent call on every corrected page of a
-  // production run, so an unusable number resolves to no measurement, not to a census.
+  // A belt, not the rule a deployment gets: `loadConfig` runs first on every production path and
+  // resolves an unreadable value to the default (`normalizeRecheckSampleSize`, asserted above), so
+  // these are the shapes only a hand-built `PipelineContext` still reaches — this file's own
+  // harness, and `src/tools/calibrate.ts` if it ever stopped reading config. The two directions
+  // are deliberate and not a disagreement: config asks what the operator meant, where a typo means
+  // they did not set it, and the sampler asks what to do with a number it cannot use, where the
+  // one reading that must never happen is "unbounded" — that would put a Feedback Agent call on
+  // every corrected page of a production run.
   assert.deepEqual(recheckSampler(orders(10), Number.NaN).thresholds, []);
   assert.deepEqual(recheckSampler(orders(10), -3).thresholds, []);
   assert.deepEqual(recheckSampler(orders(10), 0.5).thresholds, []);
@@ -146,6 +174,11 @@ test("recheck_sample_size: absent is the default, 0 is honoured, garbage is the 
   // is a census and not a runaway.
   assert.equal(normalizeRecheckSampleSize(9999), 9999);
   assert.equal(normalizeRecheckSampleSize(2.7), 2);
+  // This is a count of pages, so a fraction below one is none — the one input here that looks
+  // like it asks for a little measuring and turns it off. Documented in config.example.yaml
+  // rather than special-cased: every count in `defaults` floors, and a rule that floored 2.7 to
+  // 2 while raising 0.5 to 1 would be a third behaviour to know about rather than one fewer.
+  assert.equal(normalizeRecheckSampleSize(0.5), 0);
 });
 
 // --- through the pipeline -----------------------------------------------------------
@@ -156,11 +189,23 @@ interface Event {
 }
 
 // A run of `pages` pages where the pages in `fails` come back with a fidelity problem and are
-// corrected into something different, so each of them reaches the sampled re-check. Serial
-// (`extractionConcurrency: 1`) so that which page claims a slot is decided by page order and
-// not by which model call happened to return first — the concurrency this measurement lives
-// under is the reason the old rule always picked the front of the batch.
-function makeCtx(dir: string, events: Event[], pages: number, fails: number[], size: number): PipelineContext {
+// corrected into something different, so each of them reaches the sampled re-check. Serial by
+// default (`extractionConcurrency: 1`), so that which page claims a slot is decided by page
+// order and not by which model call happened to return first.
+//
+// `opts.backToFront` is the other half of that, and the one a real deployment runs: pages are
+// corrected concurrently, so it makes each correction call slower the earlier its page is and
+// the corrections therefore land in reverse page order. The concurrency this measurement lives
+// under is the reason the old rule always picked the front of the batch, so a harness that only
+// ever ran serially could not have caught a sampler that lost draws to arrival order.
+function makeCtx(
+  dir: string,
+  events: Event[],
+  pages: number,
+  fails: number[],
+  size: number,
+  opts: { backToFront?: boolean } = {},
+): PipelineContext {
   const agentsDir = join(dir, "agents");
   const fragDir = join(dir, "fragments");
   const inputDir = join(dir, "input");
@@ -169,13 +214,23 @@ function makeCtx(dir: string, events: Event[], pages: number, fails: number[], s
   writeFileSync(join(agentsDir, "feedback.md"), "# Feedback Agent\n\n## Required capability\nvision\n");
   const names = Array.from({ length: pages }, (_, i) => `page-${String(i + 1).padStart(3, "0")}.png`);
   for (const n of names) writeFileSync(join(inputDir, n), "not-a-real-png");
-  const orderOf = (user: string): number => names.findIndex((n) => user.includes(n)) + 1;
+  // Which page a prompt is about. The extract and verify prompts name the image file, but a
+  // CORRECTION is handed the previous fragment and the image bytes and never the file's name, so
+  // that page is read back out of the heading the first pass wrote. Worth being exact about,
+  // because a helper that answered 0 for every correction would make every correction identical
+  // and quietly defeat any test that depends on which page's correction is which.
+  const orderOf = (user: string): number => {
+    const byName = names.findIndex((n) => user.includes(n)) + 1;
+    if (byName > 0) return byName;
+    const inHtml = /<h2>Page (\d+)<\/h2>/.exec(user);
+    return inHtml ? Number(inHtml[1]) : 0;
+  };
   const verifies = new Map<number, number>();
 
   return {
     sessionId: "ses_test",
     images: names.map((name, i) => ({ name, order: i + 1, path: join(inputDir, name), links: [] })),
-    extractionConcurrency: 1,
+    extractionConcurrency: opts.backToFront ? pages : 1,
     recheckSampleSize: size,
     maxReviewIterations: 1,
     paths: {
@@ -197,6 +252,11 @@ function makeCtx(dir: string, events: Event[], pages: number, fails: number[], s
           return { text: JSON.stringify({ faithful: problems.length === 0, accessible: true, problems }) };
         }
         if (user.includes("had fidelity/accessibility problems")) {
+          if (opts.backToFront) {
+            // The earlier the page, the slower its correction, so the LAST page's claim is the
+            // first one the sampler sees.
+            await new Promise((r) => setTimeout(r, (pages - order + 1) * 25));
+          }
           return { text: JSON.stringify({ html: `<h2>Page ${order}</h2><table><tr><th>A</th></tr></table>` }) };
         }
         return { text: JSON.stringify({ html: `<h2>Page ${order}</h2><table><tr><td>A</td></tr></table>`, log: "" }) };
@@ -285,6 +345,30 @@ test("a census measures every corrected page, and 0 measures none", async () => 
     const [start] = of(events, "extraction_start");
     assert.equal(start.recheck_sample_size, 0);
     assert.deepEqual(start.recheck_thresholds, []);
+  });
+});
+
+test("a census holds when the corrections come back in reverse page order", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The same census, run the way a deployment runs it: four pages corrected concurrently,
+    // landing back to front. Nothing about the setting changes, so the assertion is the same
+    // one — every corrected page measured — and it is a different code path only because the
+    // claims arrive as 4, 3, 2, 1. A sampler that spent its lowest band on the first claim
+    // would report three draws here and call itself a census.
+    await runExtraction(makeCtx(dir, events, 4, [1, 2, 3, 4], 4, { backToFront: true }));
+    const rechecks = of(events, "page_correction_recheck");
+    assert.equal(rechecks.length, 4, "a census must measure every corrected page");
+    assert.deepEqual(
+      rechecks.map((r) => r.page).sort((a, b) => Number(a) - Number(b)),
+      [1, 2, 3, 4],
+    );
+    // And the arrival order really was reversed, so this test would still be testing something
+    // if the delays stopped working.
+    assert.deepEqual(
+      of(events, "page_corrected").map((e) => e.page),
+      [4, 3, 2, 1],
+    );
   });
 });
 

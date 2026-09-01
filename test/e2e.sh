@@ -340,7 +340,9 @@ echo "$logs" | head -1 | jq -e '.type' >/dev/null \
 # the first threshold, and those have different remedies. So the settings ride on the phase's own
 # start line, and only a real run says whether the config reached it — the sampler is built from
 # the pages this batch runs, in the pipeline, from a value normalized three layers away.
-xs=$(echo "$logs" | jq -c 'select(.type == "extraction_start")' | head -1)
+# No `| head -1`: `set -o pipefail` is on, and if a run ever logged two of these the head
+# would exit first, kill jq with SIGPIPE and abort the whole suite over a passing assertion.
+xs=$(echo "$logs" | jq -c 'select(.type == "extraction_start")')
 [ -n "$xs" ] \
   && pass "extraction says what it will measure ($xs)" \
   || fail "extraction_start" "no extraction_start event in the run log"

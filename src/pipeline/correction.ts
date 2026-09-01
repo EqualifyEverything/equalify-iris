@@ -595,10 +595,11 @@ export function destroyedBody(before: string, after: string): boolean {
 // verdict is logged the same way but counted apart (`rechecks.binding`), so none of the
 // above applies to it.
 export interface RecheckSampler {
-  // Ascending page orders, each of which entitles the first corrected page to reach it
-  // to one re-verification. Consumed as they are claimed, so its length is the sample
-  // still unspent and `[]` is a sampler with nothing left (or one that was never given
-  // anything, at `recheck_sample_size: 0`).
+  // Ascending page orders, each a band worth one re-verification to a corrected page that
+  // has reached it — the highest such band, so out-of-order arrival cannot spend a low one
+  // (`claimRecheck`). Consumed as they are claimed, so its length is the sample still
+  // unspent and `[]` is a sampler with nothing left (or one that was never given anything,
+  // at `recheck_sample_size: 0`).
   thresholds: number[];
 }
 
@@ -623,19 +624,32 @@ export function recheckSampler(pageOrders: number[], size: number): RecheckSampl
   return { thresholds };
 }
 
-// Take a sample slot for a page, if that page's order has reached the lowest one still
+// Take a sample slot for a page, if that page's order has reached any threshold still
 // unspent. Claimed SYNCHRONOUSLY and before the call it authorizes, because pages are
 // extracted concurrently: a check that awaited first would let several pages each see a
 // free slot and every corrected page would be re-verified, which is the cost this bounds.
 //
-// A page past several unspent thresholds takes ONE of them, the lowest, and leaves the
-// rest — the sample is a page count, so a page cannot be worth two of it. The lowest
-// rather than the nearest for the same reason the claim is synchronous: pages arrive out
-// of order, and consuming the lowest keeps the remaining thresholds ahead of the
-// document rather than stranding a band nothing can reach.
+// A page past several unspent thresholds takes ONE of them — the sample is a page count,
+// so a page cannot be worth two of it — and it takes the HIGHEST one it has reached,
+// leaving the lower bands for pages that have not arrived yet. That direction is the whole
+// of the arithmetic here, and it is the one that survives out-of-order arrival, which is
+// the condition this sampler exists because of: any page that can reach a high threshold
+// can reach every lower one too, so the low bands are the flexible resource and spending
+// them first strands the sample. At `recheck_sample_size: 3` on a 3-page document with all
+// three corrected (thresholds [1, 2, 3]) whose corrections land in the order 3, 2, 1,
+// consuming the lowest gives page 3 the band at 1 and page 2 the band at 2 and then
+// refuses page 1 — two draws out of three, from a setting documented as a census, and the
+// log cannot say it was short. Taking the highest gives each page its own band whatever
+// order they arrive in.
 export function claimRecheck(sampler: RecheckSampler, order: number): boolean {
-  if (sampler.thresholds.length === 0) return false;
-  if (order < sampler.thresholds[0]) return false;
-  sampler.thresholds.shift();
+  // Ascending, so the last threshold at or below this page's order is the highest it has
+  // reached; -1 means the page has not reached any of the ones still unspent.
+  let claim = -1;
+  for (let i = 0; i < sampler.thresholds.length; i += 1) {
+    if (sampler.thresholds[i] > order) break;
+    claim = i;
+  }
+  if (claim < 0) return false;
+  sampler.thresholds.splice(claim, 1);
   return true;
 }
