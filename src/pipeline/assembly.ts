@@ -224,6 +224,45 @@ export function bodyLang(body: string): string | null {
   return agreed;
 }
 
+// The `@editor-truncated` marker for a round whose reply was read as far as it got (#295).
+//
+// Its own function because it is three statements about two different parts of one document, and
+// which of the three applies depends on what was left over: a reply that reached the last block
+// left nothing to ask for again, a remainder that was corrected a section at a time carries two
+// kinds of correction, and a remainder that could not be sectioned is text this round never
+// touched. Written out rather than assembled from clauses — a marker that a person reads to find
+// out what happened to their document is worth three plain paragraphs.
+function salvagedNote(salvaged: { edits: number; blocks: number; of: number }, sections?: { of: number; corrected: number }): string {
+  const head = `\n<!-- @editor-truncated blocks ${salvaged.blocks} of ${salvaged.of}`;
+  const opening =
+    `  A correction round could not be completed in one response: the copy editor is asked for\n` +
+    `  the whole document, and the answer hit the model's output ceiling partway through. What it\n` +
+    `  had already said was read and kept: it answered about the first ${salvaged.blocks} of this\n` +
+    `  document's ${salvaged.of} top-level blocks and named ${salvaged.edits} of them, with the whole document\n` +
+    `  in view.\n`;
+  const rest =
+    salvaged.blocks >= salvaged.of
+      ? `  The reply named its last block before the ceiling cut it, so nothing was left to ask\n` +
+        `  for again and every part of this document has been through that round.\n`
+      : sections
+        ? `  The remaining ${salvaged.of - salvaged.blocks} blocks were asked for again a section at a time, and\n` +
+          `  ${sections.corrected} of ${sections.of} sections came back corrected — from requests that each saw one\n` +
+          `  section and not the rest, so a problem spanning two of them may be untouched, and a\n` +
+          `  section that did not come back is the text that entered the round.\n`
+        : `  The remaining ${salvaged.of - salvaged.blocks} blocks could not be asked for again a section at a\n` +
+          `  time, so they are the text that entered the round, uncorrected.\n`;
+  return (
+    head +
+    `\n` +
+    opening +
+    rest +
+    `  The review loop then stopped, so any issues listed below are the ones found BEFORE all of\n` +
+    `  this and were not looked for again; some may already be fixed. See the run log\n` +
+    `  (editor_truncated, editor_salvaged, editor_sections) for the ceiling, the size of the\n` +
+    `  response and what each half of the document got.\n-->`
+  );
+}
+
 // Wrap body content in a minimal accessible document shell. If issues remain when the
 // review loop stops — at its cap, or on a round that changed nothing — they are recorded
 // as an HTML comment (invisible to users, but in the document for tooling); the full list
@@ -250,6 +289,13 @@ export function bodyLang(body: string): string | null {
 // the one that entered it, with those issues never worked on at all. Two different documents,
 // and a reader who is told "a round was abandoned" about the first would go looking for
 // corrections that are in fact there.
+// `editorSalvaged` is a third way for that round to have ended, and it changes what BOTH of the
+// numbers above mean (issue #295). The truncated reply was read as far as it got, so part of this
+// document carries the round's own whole-document corrections — and `editorSections` then counts
+// the sections of what was LEFT, not of the document. Said as blocks because that is the unit the
+// editor answers in: `blocks 17 of 24` is where the reply stopped, and it is also the boundary
+// between the two kinds of correction in the document below, which is the thing a reader chasing a
+// problem across it needs to know.
 // `lintUnavailable` is the fourth statement of the same kind, and the one that is about
 // the CHECKING rather than about the content: axe-core could not run on this document, so
 // nothing here has been through the accessibility gate at all. It belongs in the document
@@ -270,6 +316,7 @@ export function wrapDocument(
     failedPages?: number[];
     editorTruncated?: boolean;
     editorSections?: { of: number; corrected: number };
+    editorSalvaged?: { edits: number; blocks: number; of: number };
     lintUnavailable?: string;
     reviewUnread?: { windows: number; of: number };
   } = {},
@@ -285,23 +332,25 @@ export function wrapDocument(
     : "";
   const truncated = !opts.editorTruncated
     ? ""
-    : opts.editorSections
-      ? `\n<!-- @editor-truncated sections ${opts.editorSections.corrected} of ${opts.editorSections.of}\n` +
-        `  A correction round could not be completed in one response: the copy editor is asked\n` +
-        `  for the whole document, and the answer hit the model's output ceiling. It was made\n` +
-        `  again a section at a time, and the corrections above are what came back — from\n` +
-        `  requests that each saw one section of the document and not the rest of it, so a\n` +
-        `  problem spanning two of them may be untouched. The review loop then stopped, so any\n` +
-        `  issues listed below are the ones found BEFORE those corrections and were not looked\n` +
-        `  for again; some may already be fixed. See the run log (editor_truncated,\n` +
-        `  editor_sections) for the ceiling, the size of the response and the sections.\n-->`
-      : `\n<!-- @editor-truncated\n` +
-        `  A correction round could not be completed: the copy editor is asked for the whole\n` +
-        `  document, and its response hit the model's output ceiling, so that round was\n` +
-        `  discarded and the review loop stopped. The content below is what entered that\n` +
-        `  round; any issues listed below were not corrected. See the run log\n` +
-        `  (editor_truncated, editor_sections_declined) for the ceiling, the size of the\n` +
-        `  response and why it could not be corrected a section at a time.\n-->`;
+    : opts.editorSalvaged
+      ? salvagedNote(opts.editorSalvaged, opts.editorSections)
+        : opts.editorSections
+          ? `\n<!-- @editor-truncated sections ${opts.editorSections.corrected} of ${opts.editorSections.of}\n` +
+            `  A correction round could not be completed in one response: the copy editor is asked\n` +
+            `  for the whole document, and the answer hit the model's output ceiling. It was made\n` +
+            `  again a section at a time, and the corrections above are what came back — from\n` +
+            `  requests that each saw one section of the document and not the rest of it, so a\n` +
+            `  problem spanning two of them may be untouched. The review loop then stopped, so any\n` +
+            `  issues listed below are the ones found BEFORE those corrections and were not looked\n` +
+            `  for again; some may already be fixed. See the run log (editor_truncated,\n` +
+            `  editor_sections) for the ceiling, the size of the response and the sections.\n-->`
+          : `\n<!-- @editor-truncated\n` +
+            `  A correction round could not be completed: the copy editor is asked for the whole\n` +
+            `  document, and its response hit the model's output ceiling, so that round was\n` +
+            `  discarded and the review loop stopped. The content below is what entered that\n` +
+            `  round; any issues listed below were not corrected. See the run log\n` +
+            `  (editor_truncated, editor_sections_declined) for the ceiling, the size of the\n` +
+            `  response and why it could not be corrected a section at a time.\n-->`;
   // The message is axe's own, and it is the only text here that comes from outside this
   // function — `runAxe` builds it from an Error's `message`, so it can be long, can carry a
   // newline, and would otherwise be able to close this comment early. Bounded like the

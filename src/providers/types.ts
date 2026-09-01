@@ -228,9 +228,14 @@ export class TruncatedResponseError extends Error {
   // What the model DID emit before the ceiling cut it. Carried rather than dropped, because the
   // caller cannot ask again — the next round would put the same question to the same model — so
   // this is the only evidence that will ever exist about why the answer did not fit, and a round
-  // that hits it has already been paid for in full (issue #277). Nothing acts on it: the review
-  // loop logs a short excerpt for a person and treats the round as having produced nothing, which
-  // is the whole point of raising instead of returning the fragment.
+  // that hits it has already been paid for in full (issue #277).
+  //
+  // One caller now reads it rather than only logging an excerpt of it. The Copy Editor answers with
+  // a list of independent block edits, so a reply cut inside the list still carries every edit the
+  // model finished writing, and `salvageRound` (pipeline/review.ts) applies those and asks again
+  // only for the part the reply never reached (issue #295). That is a property of one contract and
+  // not of this field: raising rather than returning the fragment is still right, because whether a
+  // fragment means anything is the caller's question and the answer for a page of HTML is no.
   //
   // The length is derived from it rather than passed alongside it, so `chars` — which the message
   // quotes and which `sectionRound` sizes the next request from — cannot disagree with the text it
