@@ -255,7 +255,7 @@ function makeCtx(
           if (opts.backToFront) {
             // The earlier the page, the slower its correction, so the LAST page's claim is the
             // first one the sampler sees.
-            await new Promise((r) => setTimeout(r, (pages - order + 1) * 25));
+            await new Promise((r) => setTimeout(r, (pages - order + 1) * 50));
           }
           return { text: JSON.stringify({ html: `<h2>Page ${order}</h2><table><tr><th>A</th></tr></table>` }) };
         }
@@ -364,10 +364,15 @@ test("a census holds when the corrections come back in reverse page order", asyn
       [1, 2, 3, 4],
     );
     // And the arrival order really was reversed, so this test would still be testing something
-    // if the delays stopped working.
-    assert.deepEqual(
-      of(events, "page_corrected").map((e) => e.page),
-      [4, 3, 2, 1],
+    // if the delays stopped working. The two ENDS only, not the whole permutation: the ordering
+    // comes from timers 50 ms apart with a mock call and an event write between each firing and
+    // its event, so on a loaded runner two adjacent pages can swap with nothing wrong — and that
+    // would fail a test whose regression is carried by the order-independent count above. Page 4
+    // before page 1 is 150 ms of spacing and is the whole of what this guard needs to say.
+    const order = of(events, "page_corrected").map((e) => e.page);
+    assert.ok(
+      order.indexOf(4) < order.indexOf(1),
+      `the corrections did not arrive back to front (${order.join(", ")})`,
     );
   });
 });
