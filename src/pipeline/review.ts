@@ -125,7 +125,14 @@ export interface ReviewResult {
 // Measured: output 3,635 -> 2,574 tokens per document (-29%), $/doc -13%, prose 40% -> 0% of
 // characters and 91% -> 0% of REPLIES (10 of 11 narrating in the control, 0 of 11 in the treated
 // arm, over the same five documents) — both units, because the re-measure list below asks for the
-// second one. And
+// second one.
+//
+// Re-measured at 8x the size and the incumbent's half holds, on the shipped prompt against the old
+// one over 20 documents and two runs per side (#307): output 2,698 -> 1,778 tokens per document
+// (-34%), $/doc -13.2% ($0.1072 -> $0.0931), prose 0.0% over 90 replies — not one character outside
+// the envelope. The margin is the point: those two runs price within 1.5% of each other, so -13% is
+// many times the spread between identical runs. Issues per document did not move (9.93 -> 10.28,
+// bracketed by the old prompt's 9.35 / 9.70 / 10.75). And
 // it finds MORE rather than less, which is the part that decides it — 12.6 issues per document
 // against the control's 10.8, 129 quoted spans against 96, 11 high-severity against 7, and a
 // finding's cited page matches the page order 93% of the time against 84%, with citations
@@ -146,7 +153,10 @@ export interface ReviewResult {
 // documents — so the claim was not just a small sample, it inverts. In the deciding round itself
 // Kimi's TREATED arm wrote more prose than its control: 1 of 11 replies narrating in the treated
 // arm, 0 of 11 in the control, and that one reply carried 51% of the treated arm's characters. The
-// sentence did not suppress prose on that model; the number moved with one reply. The cause is the
+// sentence did not suppress prose on that model; the number moved with one reply. Nor does it at 40
+// documents with the sentence SHIPPED: Kimi's prose is 23.8% of characters in one run of 45 replies
+// (two replies, one of them 98%) and 0.0% in the other, where the incumbent goes to 0.0% over 90
+// replies and stays there. The cause is the
 // shape of the distribution rather than the size of the draw: Kimi's median reply is a bare envelope
 // in all three large rounds and it narrates in 7-16% of its replies in each of them, but when it
 // does it goes to 87-99% prose, so an aggregate is decided by whether
@@ -156,8 +166,15 @@ export interface ReviewResult {
 // five-document draw of those rounds does at its top edge (p95 86-100%).
 //
 // What survives is the half that makes this sentence buy Kimi little: ITS MEDIAN REPLY IS ALREADY
-// PROSE-FREE, so most windows have nothing here to remove. The measured outcome is unchanged
-// either way — 13.6 issues per document down to 8.8, and 6% more per document. The Reader model is
+// PROSE-FREE, so most windows have nothing here to remove. What does NOT survive is the trade first
+// recorded here, "13.6 issues per document down to 8.8, and 6% more per document" — fewer findings
+// for more money, from 5 documents. At 20 documents and two runs per side it is 11.75 -> 12.80 issues
+// per document at -5.0% $/doc, both signs reversed (#307). Neither figure is the one to carry: both
+// changes are smaller than Kimi's own spread between two runs of the IDENTICAL prompt — 13.8 and 9.7
+// issues per document at the old prompt, 13.45 and 12.15 at the shipped one, those two shipped runs
+// pricing 8% apart. On Kimi neither the finding count nor the price moved resolvably, so this
+// sentence is neither the cost the old numbers made it nor the bargain their reversal makes it.
+// The Reader model is
 // a config line (`providers.per_agent.reader`), so this is re-measured on a swap — the Reader
 // bullet under "Implementation notes & PRD coverage" in README says what to measure, quote fidelity
 // included, since that is the one metric this arm moved the wrong way. Record the SHARE OF REPLIES
@@ -190,6 +207,25 @@ export interface ReviewResult {
 // single measurement with no interval of its own. The corpus stitches three source PDFs into each
 // document, so some of the findings this arm added are models correctly noticing that — every arm
 // saw the identical document, so the comparison holds either way.
+//
+// One edge is open here, and it was filed as a regression caused by this sentence (#307) but is not
+// one. A Reader can file an issue whose own `suggested_action` says nothing needs doing — the model
+// decides an observation is not a defect and reports it anyway, which reaches the Copy Editor as work
+// on a document that is not broken, every round, since no edit can change this prompt. Per document,
+// over two runs at each prompt: kimi-k2.5 1.10, 0.70 then 1.25, 0.75 — about one per document either
+// side, 6-9% of everything it files — the incumbent 0.00, 0.05 then 0.30, 0.05, Haiku 0.20, 0.25 then
+// 0.15, 0.10, Luna 0.00 throughout. So the behaviour is real and model-specific, and appending this
+// sentence is not what causes it: Kimi is flat across the change, Haiku falls, Luna stays at zero, and
+// the incumbent's rise is 6 issues in one run against 1 in the other. The same reading kills the
+// positional story told with it — that removing prose as a destination pushes discarded reasoning into
+// `issues[]` — because #275 window violations move in opposite directions on models given the same
+// append (the incumbent +4, Kimi -6, Haiku and Luna flat), each shift the size of that model's own
+// spread between identical runs. A clause naming nowhere as the destination for a discarded
+// observation is a plausible fix and is deliberately NOT in this prompt: it would have to be measured
+// as its own arm on the two models that do this, two runs each, scoring self-cancelling issues
+// against issues per document so a drop in one is not paid for out of the other. Editing these bytes
+// on a per-model rate that a single pair of runs cannot resolve is how the figures above went stale
+// the first time.
 export const READER_JSON_ONLY =
   "Your entire reply must be the JSON object and nothing else. Do not write any reasoning, " +
   "preamble, commentary or summary before or after it. Do the thinking without writing it down.";
