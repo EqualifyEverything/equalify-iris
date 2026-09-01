@@ -139,6 +139,7 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   "since": "2026-07-14T00:00:00.000Z",
   "mean_rounds": 1.8,
   "unresolved_rate": 0.061,
+  "first_read": { "documents": 212, "mean_issues": 2.4, "unread_documents": 2 },
   "unresolved_severity": [
     { "severity": "high", "documents": 1 },
     { "severity": "medium", "documents": 4 },
@@ -217,6 +218,26 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   fields that follow, plus `unfinished_page_rate` below, are what measure it. Until #264 nothing did,
   which is how a threshold of 15% came to be compared against a rate of 84% with no way to tell
   which part was inherent.
+* `first_read` — what the reviewer **found**, before any of it was fixed. Every other number in this
+  tally is taken after the editor has run, which makes the two facts a reviewer change most needs to
+  be told apart arrive identically: an editor that fixed everything and a reviewer that faulted
+  nothing both deliver an empty `@unresolved` list and a `clean` exit, and both *lower*
+  `unresolved_rate`. This is the one field that separates them.
+  * `mean_issues` — mean issues raised by the **first** read of a document, averaged over the
+    documents that recorded one. The first read specifically, and not a sum over rounds: every later
+    round reads a body the editor has already rewritten, so a total would measure how many rounds ran
+    as much as what the reviewer saw, and the first read is the only one taken on extraction's own
+    output. A document the reviewer cleared contributes `0` — that is the observation, not a missing
+    one — and the field is `null`, not `0`, when no document in the window recorded a read.
+  * `documents` — how many documents recorded a first read, which is the denominator `mean_issues`
+    was divided by. Compare it with `documents` at the top of the response: it is the same on a
+    window whose runs all pass through the review loop, and short of it otherwise.
+  * `unread_documents` — of those, how many had at least one window of that first read come back
+    unusable. This is the error bar on `mean_issues` rather than a defect rate: on those documents the
+    count is a floor, so a fall in `mean_issues` with this number rising is a reviewer that could not
+    answer, and a fall with it flat is a reviewer that found less. Distinct from
+    `review_unread_rate` below, which is about the **last** read — the one taken on the bytes that
+    shipped. A document can be counted here and not there, and the reverse.
 * `unresolved_severity` — how the Reader rated what was left open, one entry per severity and always
   all four including the zeroes. **Per document, and not a partition of `unresolved_rate`**: a
   document with three `low` issues and one `high` is one entry in each of those two, so the counts
@@ -393,7 +414,10 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   windows that *did* answer may have found issues. The delivered document carries a `@review-unread`
   comment saying how many windows of how many, and `reader_no_output` in the run log carries the
   reply's size and which of the two ways it failed. A non-zero value is a statement about the reader
-  model or its prompt, and the run log's `agentCall` output for that call is where to start.
+  model or its prompt, and the run log's `agentCall` output for that call is where to start. The
+  **last** read is the one this counts, because what ships is one reading of the body that shipped;
+  `first_read.unread_documents` above is the same failure on the first read, where it is an error bar
+  on that read's count rather than a gap in the delivered document's verdict.
 * `unfinished_page_rate` — share of documents delivered with a `[page not fully transcribed]` marker
   still in the body, i.e. documents that **could not** have finished the review loop clean whatever
   budget they were given. Not a defect rate of its own: the Reader is instructed to report every one

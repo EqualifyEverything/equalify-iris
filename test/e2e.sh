@@ -1259,6 +1259,23 @@ echo "$q" | jq -e '[.unresolved_severity[].severity] == ["high","medium","low","
   and ((([.unresolved_severity[].documents] | add) > 0) == (.unresolved_rate > 0))' >/dev/null \
   && pass "unresolved_severity agrees with unresolved_rate=$(echo "$q" | jq -r '.unresolved_rate') ($(echo "$q" | jq -c '[.unresolved_severity[] | "\(.severity)=\(.documents)"] | join(" ")' | tr -d '"'))" \
   || fail "quality" "unresolved_severity=$(echo "$q" | jq -c '.unresolved_severity') against unresolved_rate=$(echo "$q" | jq -r '.unresolved_rate')"
+# What the Reader FOUND, which is the one number here that is not downstream of the editor
+# (#313). Its invariant is the same one `review_stopped` has and for the same reason: the row is
+# written for every delivered document, zero included, so on a window where every document
+# recorded one these two counts are equal and a shortfall means "delivered before the field
+# existed". Only a real run can check that, and the way it breaks is the way every producer here
+# breaks — a mean that quietly covers half the documents reads as a Reader finding half as much.
+#
+# `mean_issues > 0` is the half that needs the pipeline: the mock Reader is clean except on the
+# feedback round that asks for a copy-edit pass, so a positive mean is that document's finding
+# arriving through the loop, the store and the endpoint. A producer stuck at 0 would otherwise
+# look exactly like a deployment whose documents are all fine — which is the reading this field
+# exists to make impossible.
+echo "$q" | jq -e '.first_read.documents == .documents
+  and .first_read.mean_issues != null and .first_read.mean_issues > 0
+  and .first_read.unread_documents == 0' >/dev/null \
+  && pass "first_read covers all $docs document(s) at $(echo "$q" | jq -r '.first_read.mean_issues') issue(s) found per document" \
+  || fail "quality" "first_read=$(echo "$q" | jq -c '.first_read') against documents=$docs — the Reader's yield is not reaching the tally"
 # And the floor under that rate: documents still carrying `[page not fully transcribed]`,
 # which no pass in the loop may resolve. Above zero because step 9i put exactly one such
 # document through the pipeline, and that is the half of this only a real run can check —
@@ -1304,8 +1321,11 @@ done
 # quoted the markup jsdom choked on. `severity` (#264) is publishable for the same reason
 # and needs it more: the Reader WRITES that value, so the store maps anything outside its
 # four words to `unrated` rather than passing it on — an unmapped one would put model prose
-# about someone's document into a public issue.
-allowed='["window_days","documents","since","mean_rounds","unresolved_rate","severity","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","where","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","unfinished_page_rate","id","impact","share","nodes"]'
+# about someone's document into a public issue. `mean_issues` and `unread_documents` (#313) are
+# the leaves of `first_read`, and are two counts and an average of counts — the obvious next
+# request of a mean is a distribution, and the obvious way to give it one is a sample, which
+# would name documents.
+allowed='["window_days","documents","since","mean_rounds","unresolved_rate","mean_issues","unread_documents","severity","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","where","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","unfinished_page_rate","id","impact","share","nodes"]'
 extra=$(echo "$q" | jq -c --argjson allowed "$allowed" '([paths(scalars) | last] | unique) - $allowed')
 [ "$extra" = "[]" ] \
   && pass "the payload's key set is exactly the documented one (no session id, login or document content)" \

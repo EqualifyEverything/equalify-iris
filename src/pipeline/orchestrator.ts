@@ -13,6 +13,8 @@ import {
   SIGNAL_EDITOR_TRUNCATED,
   SIGNAL_EDITOR_TRUNCATED_LOST,
   SIGNAL_REVIEW_UNREAD,
+  SIGNAL_FIRST_READ_ISSUES,
+  SIGNAL_FIRST_READ_UNREAD,
   reviewStoppedSignal,
   SIGNAL_ROUNDS,
   SIGNAL_UNRESOLVED,
@@ -442,6 +444,22 @@ export async function runPipeline(args: {
         // rate divides by (see SIGNAL_ROUNDS).
         { code: SIGNAL_ROUNDS, count: review.iterationsCompleted },
         ...(review.unresolved.length ? [{ code: SIGNAL_UNRESOLVED, count: review.unresolved.length }] : []),
+        // And what the Reader found in the first place, which the row above cannot say: it
+        // counts what shipped still open, so it falls both when the editor fixes more and when
+        // the Reader finds less. Recorded for every document that got a read, ZERO included —
+        // unlike almost everything else here, because this is a mean and a document the Reader
+        // cleared is the observation that keeps it honest (see SIGNAL_FIRST_READ_ISSUES).
+        //
+        // Written only when a read happened, on the `stoppedAt` principle: `review.firstRead`
+        // is assigned by the read itself, so a 0 here always means a Reader that found nothing
+        // and never a loop that measured nothing.
+        ...(review.firstRead ? [{ code: SIGNAL_FIRST_READ_ISSUES, count: review.firstRead.issues }] : []),
+        // And whether that read was answered in full, so the mean has an error bar: a window
+        // with no usable reply raises no issues for a reason that is not the document's. Only
+        // when there is one, since these rows are the exception.
+        ...(review.firstRead?.unread
+          ? [{ code: SIGNAL_FIRST_READ_UNREAD, count: review.firstRead.unread }]
+          : []),
         // And how the Reader rated them, one row per severity that occurs (#264). The rate above
         // says a document shipped with something open; this says whether that something was a
         // barrier or a nit, which is the difference between a defect and the floor.
