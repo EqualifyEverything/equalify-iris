@@ -665,6 +665,10 @@ test("a correction that hit the output ceiling costs the correction, not the pag
         problems: 2,
         error: "…",
         truncated: true,
+        // What the call was allowed to write (#285). The fixture page is 89 characters, so three
+        // times its size is far under `CORRECTION_OUTPUT_FLOOR` and the floor is what it asked
+        // for — the arithmetic itself is pinned in test/correction-output-cap.test.ts.
+        output_cap: 8_000,
         chars_kept: page.length,
       },
     );

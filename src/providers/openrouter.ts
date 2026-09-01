@@ -1,5 +1,5 @@
 import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
-import { StalledStreamError, TruncatedResponseError, type StallKind } from "./types.ts";
+import { StalledStreamError, TruncatedResponseError, outputCapNote, type StallKind } from "./types.ts";
 import type { CompletionRequest, CompletionResult, ModelProvider, Usage } from "./types.ts";
 import {
   cacheableSystemPrompt,
@@ -193,10 +193,17 @@ export class OpenRouterProvider implements ModelProvider {
     // default the upstream model happens to apply — which differs per model and is
     // silent when reached, so the same document could truncate on one model and
     // not another with nothing in the config to explain it.
+    //
+    // A caller's own ceiling for one call is honoured here too (`CompletionRequest.maxTokens`,
+    // issue #285), and honoured in both adapters rather than only in the one the deployment
+    // happens to run: a cap that silently does nothing on OpenRouter is a saving that reads as
+    // applied and is not, which is worse than not having it. Always the LOWER of the two, so a
+    // call site cannot ask for more room than the deployment configured.
+    const asked = req.maxTokens === undefined ? this.maxTokens : Math.min(this.maxTokens, req.maxTokens);
     const body: Record<string, unknown> = {
       model: req.model,
       messages,
-      max_tokens: this.maxTokens,
+      max_tokens: asked,
       stream: true,
     };
     if (req.capability === "structured_output" && req.schema) {
@@ -376,7 +383,19 @@ export class OpenRouterProvider implements ModelProvider {
         // deliberately — it is not transient, so isTransientNetworkError() rejects
         // it and the loop exits rather than re-billing the same truncation twice.
         if (finishReason === "length") {
-          throw new TruncatedResponseError(this.name, req.model, this.maxTokens, text);
+          // The ceiling this call asked for, which is the deployment's unless the caller capped
+          // it — and where it did, the standing advice to raise `max_tokens` is the wrong one
+          // (providers/types.ts `outputCapNote`). Unchanged for every uncapped call, which is
+          // every call docs/API.md quotes this message for.
+          throw new TruncatedResponseError(
+            this.name,
+            req.model,
+            asked,
+            text,
+            asked < this.maxTokens
+              ? outputCapNote(asked, this.maxTokens, "providers.openrouter.max_tokens")
+              : undefined,
+          );
         }
         return { text, model: req.model, provider: this.name, usage: addUsage(spent, usage) };
       } catch (e) {

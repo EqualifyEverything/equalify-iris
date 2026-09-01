@@ -13,6 +13,7 @@ import {
   StalledStreamError,
   TruncatedResponseError,
   isRequestTooLargeError,
+  outputCapNote,
   type StallKind,
 } from "./types.ts";
 import type { CompletionRequest, CompletionResult, ModelProvider, Usage } from "./types.ts";
@@ -564,7 +565,7 @@ export class BedrockProvider implements ModelProvider {
       .filter((m) => m.role === "system")
       .map((m) => m.content)
       .join("\n\n");
-    const asked = this.ceilingFor(req.model);
+    const granted = this.ceilingFor(req.model);
     // A call running below the ceiling its deployment configured says so whether or not IT was
     // the call that found that out (#254). The alternative — reporting only the refusal — puts
     // the fact on exactly one `model_call` per model per process, because both `ceilings` and
@@ -572,15 +573,21 @@ export class BedrockProvider implements ModelProvider {
     // call in its first run log and nothing in the thirty since, which is the "no trace anyone
     // aggregates" this is meant to fix rather than a fix for it. `refused` is what separates the
     // cost from the condition — see the notes below.
-    if (asked < this.maxTokens) {
+    if (granted < this.maxTokens) {
       req.onNote?.({
         kind: "output_ceiling_clamped",
         model: req.model,
         asked: this.maxTokens,
-        stated: asked,
+        stated: granted,
         refused: false,
       });
     }
+    // A caller's own ceiling for this one call, never above what the deployment or the model
+    // allows (`CompletionRequest.maxTokens`). Applied AFTER the note above and deliberately
+    // outside it: `output_ceiling_clamped` says a config error is live, and a correction pass
+    // asking for less than 32,000 tokens on purpose is the opposite of that — a line saying the
+    // deployment's ceiling was clamped would send an operator to a setting that is right.
+    const asked = req.maxTokens === undefined ? granted : Math.min(granted, req.maxTokens);
     const first: Attempt = { maxTokens: asked, spent: false };
     try {
       return await this.send(req, system, first);
@@ -1004,17 +1011,33 @@ export class BedrockProvider implements ModelProvider {
       // that model the standing advice is wrong too — the ceiling cannot be raised, because
       // the model refuses more — so the error says so rather than sending someone to edit a
       // setting that is already higher than the answer.
+      //
+      // Two ways to be below the deployment's ceiling and they need opposite sentences, so the
+      // caller's own cap is checked first: it is the one the CALL chose (`req.maxTokens`, issue
+      // #285), while the other is one the model imposed. Equality is enough to attribute it —
+      // `attempt.maxTokens` is the lower of the two — and a cap that ties with a model's own
+      // ceiling still gets the cap's sentence, because "raise the setting" is wrong either way
+      // and the call site is the place a person can actually change the number.
+      // `< this.maxTokens` as well, so the sentence cannot claim a cap is below a setting it
+      // equals: a caller asking for exactly the deployment's ceiling has capped nothing, and the
+      // message it should get is the one that deployment has always got.
+      const cappedByCaller =
+        req.maxTokens !== undefined &&
+        attempt.maxTokens === req.maxTokens &&
+        req.maxTokens < this.maxTokens;
       throw new TruncatedResponseError(
         this.name,
         req.model,
         attempt.maxTokens,
         text,
-        attempt.maxTokens < this.maxTokens
-          ? `That ceiling is ${req.model}'s own, below the ${this.maxTokens} in ` +
-              `providers.bedrock.max_tokens, so raising that setting will not move it: this ` +
-              `model refuses a larger request outright. A document this long needs a model ` +
-              `with a higher ceiling, or fewer pages per call.`
-          : undefined,
+        cappedByCaller
+          ? outputCapNote(attempt.maxTokens, this.maxTokens, "providers.bedrock.max_tokens")
+          : attempt.maxTokens < this.maxTokens
+            ? `That ceiling is ${req.model}'s own, below the ${this.maxTokens} in ` +
+                `providers.bedrock.max_tokens, so raising that setting will not move it: this ` +
+                `model refuses a larger request outright. A document this long needs a model ` +
+                `with a higher ceiling, or fewer pages per call.`
+            : undefined,
       );
     }
     // Every other way of stopping short. The ceiling above is the one with a knob to

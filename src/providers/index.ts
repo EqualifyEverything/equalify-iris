@@ -91,7 +91,12 @@ export class ProviderRouter {
     agentName: string,
     capability: Capability,
     messages: Message[],
-    opts: { step: PipelineStep; images?: Image[]; schema?: Record<string, unknown> },
+    opts: {
+      step: PipelineStep;
+      images?: Image[];
+      schema?: Record<string, unknown>;
+      maxTokens?: number;
+    },
   ): Promise<CompletionResult> {
     const { provider: providerName, model } = resolveAgentModel(this.cfg, agentName, capability);
     const provider = this.build(providerName);
@@ -107,12 +112,19 @@ export class ProviderRouter {
     // round has already paid for a full ceiling of output, and a stalled page call has
     // already paid for a prompt carrying an image — those are the calls whose cost most needs
     // attributing, and they are the ones that never produce a usable answer to attribute by.
+    //
+    // `output_cap` for the same reason, on both lines: a call the caller bounded is a call whose
+    // failure has a different remedy from every other truncation (providers/types.ts
+    // `outputCapNote`), and the only way to know whether a cap is set right is to see the number
+    // it was set to beside what the call then spent. Present only where a caller passed one, so
+    // every other line is unchanged and the field means "this call was bounded on purpose".
     const meta = {
       agent: agentName,
       step: opts.step,
       capability,
       model,
       provider: providerName,
+      ...(opts.maxTokens === undefined ? {} : { output_cap: opts.maxTokens }),
       ...(provider.dialect ? { api: provider.dialect } : {}),
     };
     this.onEvent?.("model_call_start", meta);
@@ -180,6 +192,7 @@ export class ProviderRouter {
         model,
         images: opts.images,
         schema: opts.schema,
+        maxTokens: opts.maxTokens,
         onUsage,
         onNote,
       });

@@ -557,6 +557,68 @@ export function destroyedBody(before: string, after: string): boolean {
   return visibleText(after).length * EDITOR_SHRINK_FLOOR < text;
 }
 
+// --- what a correction may spend on its answer ---
+
+// A LOWER BOUND on characters per token, used to turn the size of a page into the number of
+// output tokens re-emitting it costs. The same bound, for the same reason, as
+// `MIN_CHARS_PER_TOKEN` in providers/promptCache.ts, and set here rather than shared because
+// the two decisions are unrelated and the directions they are safe in happen to agree today:
+// no plausible HTML tokenizes denser than two characters per token, so dividing by two
+// OVER-states how many tokens a page needs, which makes the ceiling below generous. Being
+// generous costs a fraction of one failure's price; being tight would refuse a correction that
+// was going to work, and a refused correction ships a page nobody looks at again.
+const MIN_CHARS_PER_TOKEN = 2;
+
+// How much bigger than the page it was given a correction's reply may be.
+//
+// The correction pass is the one model call in this pipeline whose answer has a size known in
+// advance: it is handed a page it has already rendered and asked to return that page with named
+// problems fixed, so the page IS the estimate. Nothing was using it. Every correction asked for
+// the deployment's whole ceiling — 32,000 output tokens — and one runaway therefore cost
+// $0.5091 on a single page, 4.6% of what it cost to run all 100 pages of that document, and was
+// truncated, discarded, and the page shipped with all six of the problems it was bought to fix
+// (issue #285). Output tokens are billed whether or not the text is kept, so that reply was paid
+// for in full at the ceiling.
+//
+// THREE, measured against the corrections that worked rather than against the one that did not.
+// Over 111 correction attempts on two models (issue #285 and its first comment): the median
+// reply is 1.01x the first pass's output, the largest that SUCCEEDED is 1.65x, and the one that
+// failed asked for 5.13x and was still cut off — 96,709 characters correcting a 14,287-character
+// page. A cap at 2x would have broken none of the 111; 3x is the same 0 with room for the case
+// the corpus cannot speak for, a page whose correction legitimately grows because it is
+// restoring content the first pass dropped (`content_missing`). The saving between 2x and 3x is
+// a fifth of one failure's price and not worth a rule that could refuse a real repair.
+//
+// What this does NOT claim: that a capped correction sometimes succeeds where the runaway
+// failed. Nothing measured that, and the outcome of hitting this ceiling is exactly the outcome
+// of hitting the deployment's — `page_correction_failed`, and the page keeps the version that
+// passed everything but its fidelity check. This makes that failure cheaper, and it is on the
+// `model_call` line (`output_cap`) and the failure line so that whether it is set right is
+// something a run can answer rather than something this comment asserts.
+export const CORRECTION_OUTPUT_MULTIPLE = 3;
+
+// The floor under it, in output tokens, and the reason it is needed rather than tidy: the
+// estimate is the page the FIRST pass produced, and a first pass that lost content produces a
+// small page — which is exactly the page whose correction has the most to write. Three times
+// almost nothing is a ceiling no correction could answer under.
+//
+// 8,000 because the largest reply among the 111 successful corrections measured was 7,060 output
+// tokens (issue #285, first comment: 6,891 on one arm, 7,060 on the other, against the 32,000
+// they were all allowed). So no correction that has been observed to work could be refused by
+// this cap at any page size, whatever the multiple above computes — which is the property worth
+// having, since a cap that breaks a success is not a saving.
+export const CORRECTION_OUTPUT_FLOOR = 8_000;
+
+// The output ceiling for one correction call, from the size of the page it is correcting.
+//
+// Never above the deployment's `providers.<name>.max_tokens`: the adapters take the lower of
+// this and that (providers/types.ts `CompletionRequest.maxTokens`), so a large page simply asks
+// for what it always asked for and nothing about it changes.
+export function correctionOutputCeiling(previousChars: number): number {
+  const pageTokens = Math.ceil(previousChars / MIN_CHARS_PER_TOKEN);
+  return Math.max(CORRECTION_OUTPUT_FLOOR, pageTokens * CORRECTION_OUTPUT_MULTIPLE);
+}
+
 // How many measurement-only re-verifications a batch of pages may buy.
 //
 // One, because the point is a rate across runs rather than a verdict on any one page,

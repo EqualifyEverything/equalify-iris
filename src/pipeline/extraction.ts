@@ -11,6 +11,7 @@ import {
   changedAnything,
   claimRecheck,
   correctionEffect,
+  correctionOutputCeiling,
   destroyedPage,
   recheckSampler,
   type RecheckSampler,
@@ -2122,6 +2123,11 @@ async function correctPage(
   previous: string,
   problems: string[],
   lessons: string,
+  // The most output this call may ask for, from the size of `previous`
+  // (`correctionOutputCeiling`). Passed in rather than derived here so the caller can log the
+  // number it capped at on the failure line: a cap only tells anyone anything if the run says
+  // what it was set to (issue #285).
+  outputCap: number,
 ): Promise<string | null> {
   // The link list is repeated here, not just in the first pass: a dropped link is one
   // of the problems this pass exists to fix, and it cannot re-attach a URL it can no
@@ -2153,7 +2159,13 @@ async function correctPage(
       { role: "system", content: pageSystem(agent, lessons) },
       { role: "user", content: user },
     ],
-    { step: "correct", images: [loadImage(img)] },
+    // The one call in this file that says how much output it may buy, because it is the one
+    // whose answer has a size known before it is made: the page it was handed. A reply several
+    // times that size is a runaway, and a runaway is billed for every token the ceiling allows
+    // it before it is cut off and thrown away — $0.51 and a page that shipped with all six of
+    // its problems, on the failure this comes from (issue #285). The first pass has no such
+    // prior and passes none.
+    { step: "correct", images: [loadImage(img)], maxTokens: outputCap },
   );
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
   const parsed = extractJson<{ html?: string }>(res.text);
@@ -2602,7 +2614,12 @@ async function extractPage(
     // will truncate again, and the retry would buy a second full ceiling of output to prove
     // it (the providers agree — `TruncatedResponseError` is thrown from inside their retry
     // loops precisely so it is not re-billed).
-    const attempt = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons).then(
+    // What this correction may spend on its answer, sized from the page it is correcting rather
+    // than left at the deployment's ceiling (`correctionOutputCeiling`, issue #285). On the
+    // failure line below as well as on the `model_call` line, because the question a capped
+    // failure raises is whether the cap was the reason.
+    const outputCap = correctionOutputCeiling(before.length);
+    const attempt = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons, outputCap).then(
       (html) => ({ html, error: null as unknown }),
       (error: unknown) => ({ html: null, error }),
     );
@@ -2622,6 +2639,13 @@ async function extractPage(
         // model wrote an essay where a page was asked for — a 32,000-token correction of a
         // 17,721-character page is not a rewrite of it.
         truncated: isTruncatedResponseError(attempt.error),
+        // What this call was allowed to write, so a `truncated: true` line says which ceiling it
+        // hit and what that ceiling was derived from — `chars_kept` is the page the number came
+        // from. Read the pair to decide whether the cap is set right: a truncation at a cap on a
+        // page whose correction was going to be large is the argument for a larger multiple
+        // (correction.ts `CORRECTION_OUTPUT_MULTIPLE`), and one at the deployment's own ceiling
+        // means the cap was above it and this failure is the uncapped one.
+        output_cap: outputCap,
         // What the page kept, so the log shows this was a page retained and not a page lost.
         chars_kept: before.length,
       });

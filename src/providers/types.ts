@@ -138,6 +138,20 @@ export interface CompletionRequest {
   images?: Image[];
   schema?: Record<string, unknown>; // JSON Schema for structured_output
   model: string; // resolved by the router from deployment config
+  // The most output this ONE call may ask for, when the caller knows how long the answer
+  // should be. A CEILING and never a floor: an adapter takes the lower of this and the
+  // deployment's `providers.<name>.max_tokens`, so a call site cannot buy itself more room
+  // than the deployment configured — only less.
+  //
+  // Left undefined by every caller that has no such prior, which is most of them: the first
+  // render of a page image, a review round, a table join. It exists for the answer whose size
+  // is already known, where the ceiling is otherwise the only bound and the ceiling is the
+  // wrong number by a factor. Extraction's correction pass re-emits a page it has already
+  // rendered (pipeline/correction.ts `correctionOutputCeiling`), so a reply several times the
+  // size of that page is a runaway rather than a long answer — and a runaway pays for every
+  // token it is allowed before it is cut off and discarded (issue #285: one such call spent
+  // $0.51, 4.6% of a 100-page round, and shipped the uncorrected page).
+  maxTokens?: number;
   // Called by the adapter whenever the running token totals change, with the full
   // snapshot known so far (the latest call wins). A return value cannot serve here:
   // the prompt's size is known at the start of a stream and the output's only at the
@@ -218,6 +232,30 @@ export class TruncatedResponseError extends Error {
     this.chars = text.length;
     this.text = text;
   }
+}
+
+// The sentence for a truncation at a ceiling THIS CALL asked for, below the deployment's.
+//
+// `TruncatedResponseError`'s standing advice — raise `providers.<name>.max_tokens` — is wrong
+// twice over on such a call, in the same way it is wrong on a model that refuses the
+// deployment's ceiling: the setting is already higher than what was asked for, so editing it
+// moves nothing. But the reason it is wrong here is the opposite one, and worth saying, because
+// this is the only place a person meets the cap: the call site chose a number from the size of
+// the answer it asked for, so a reply that did not fit in it is a model that ran away with the
+// request rather than an answer that needed more room. Issue #285's failure emitted 96,709
+// characters correcting a 14,287-character page and was discarded — more ceiling would have
+// bought a larger discarded reply. Raising a cap is a thing to do deliberately, at the call
+// site, with the ratio measured; it is not the remedy this error should send anyone to.
+//
+// Both adapters use this one string rather than each writing their own, so the two cannot
+// drift into telling an operator different things about the same failure.
+export function outputCapNote(cap: number, configured: number, setting: string): string {
+  return (
+    `That ceiling is this request's own: the call site asked for at most ${cap} output tokens, ` +
+    `below the ${configured} in ${setting}, because it knows about how long the answer should ` +
+    `be. Raising that setting will not move it. A reply that did not fit in ${cap} tokens is ` +
+    `usually a model re-writing far more than it was asked to, which more room does not fix.`
+  );
 }
 
 // The same fact as a predicate, and the one the review loop acts on: a round whose
