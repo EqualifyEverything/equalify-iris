@@ -7,9 +7,12 @@ it cost" — the outcome of the model-selection sprint tracked in
 [#246](https://github.com/EqualifyEverything/equalify-iris/issues/246) and reported in
 [#311](https://github.com/EqualifyEverything/equalify-iris/issues/311).
 
-Two of the five agents have a cheaper model that measured no worse. Two were left alone for a
-measured reason worth reading before benchmarking them again, and one has never been measured at
-all — for a reason that is also worth knowing (§4).
+Two of the five agents have a cheaper model worth putting on them, and **the two are not the same
+kind of decision**: on `page` the cheaper model measured at-or-better on every axis at once, while
+on `reader` it is a priced trade — 78% of the incumbent's own agreement floor for 77% less money.
+Read §3 before applying the second one. Two agents were left alone for a measured reason worth
+reading before benchmarking them again, and one has never been measured at all — for a reason that
+is also worth knowing (§4).
 
 **Every figure here names the benchmark round it came from**, because some of them are stale by
 design and one is superseded outright — §6 says which. The reference deployment and
@@ -28,8 +31,9 @@ design and one is superseded outright — §6 says which. The reference deployme
 | specialists | 0% | no change, and no round: 0 calls on a corpus with no charts in it |
 
 Shares are of $17.86 for 100 pages, `runs-bystep-100` at `158e3d9` — a partition of that round's
-priced spend, adding to 100%. They are **shares, not prices**; see §6 before quoting a dollar
-figure forward.
+priced spend, adding to 100% **before rounding** (44.485 + 24.993 + 17.959 + 12.556; the column as
+printed adds to 100.1). They are **shares, not prices**; see §6 before quoting a dollar figure
+forward.
 
 Both recommendations are one line each:
 
@@ -248,7 +252,8 @@ rewrites `summary.json` and `results.jsonl`, and doing so on 2026-09-01 reset bo
 **Two numbers in [#311](https://github.com/EqualifyEverything/equalify-iris/issues/311) are not
 the ones in §0**, and both are in the recommendations' favour. That report gives `page` 43.2% and
 `copy_editor` 20.8%; `runs-bystep-100/summary.json` gives **44.5%** and **25.0%**, and its four
-agents partition the round's spend exactly (100.0%), where the report's four sum to 94.6%. 43.2%
+agents partition the round's spend exactly — $7.9453 + $4.4639 + $3.2086 + $2.2427 = $17.8605, the
+round's whole priced total — where the report's four shares sum to 94.6%. 43.2%
 is `runs-177`'s `page` share — an earlier round, 2026-08-25, $17.83 — and 20.8% does not match any
 captured round's `by_agent`. The figures published here are the ones that re-derive from the
 round's own summary.

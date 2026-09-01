@@ -186,9 +186,11 @@ providers:
   # every number this project publishes about a WHOLE RUN was measured on. The reference
   # deployment has served every capability with it for as long as there is a record — its
   # own config notes the earlier move off Opus 4.7 as a latency change — so the per-page
-  # cost figures and the quality baseline are all Sonnet's. Seven models HAVE been
-  # measured per agent, two of them cheaper at no measured cost in quality: which model
-  # to put on which agent, and what each is worth, is docs/models.md.
+  # cost figures and the quality baseline are all Sonnet's. Cheaper models HAVE been
+  # measured per agent, though not evenly — seven arms on `page`, four on `reader`, none
+  # on the other three. One swap measured no worse (`page`) and one is a priced trade
+  # (`reader`, 78% of the incumbent's own agreement floor for −77%): which model to put
+  # on which agent, and what each is worth, is docs/models.md.
   #
   # That matters past tidiness because `max_tokens` below is OUR setting and not the
   # model's: how often a dense page overruns that ceiling, and the shrink floor and

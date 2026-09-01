@@ -253,7 +253,7 @@ test("every per_agent key any example names is an agent Iris dispatches", () => 
 // missing row is the failure that matters: an agent nobody has a recommendation for reads as an
 // agent with no cost, which is exactly how `builder` and the specialist came to be reported as
 // two independent zeroes (they are one gate — see the file).
-test("docs/models.md carries a recommendation row for every agent a deployment can route", () => {
+test("docs/models.md's recommendation table is exactly the agents a deployment can route", () => {
   const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
   // The RECOMMENDATION table specifically, not the file. Every dispatched agent also appears in
   // §1's table of call sites, so a check against the whole document passes while the summary a
@@ -261,12 +261,19 @@ test("docs/models.md carries a recommendation row for every agent a deployment c
   // an earlier version of this test did not catch when the `builder` row was taken out of §0.
   const section = doc.split(/^## /m).find((s) => s.startsWith("0."));
   assert.ok(section, "docs/models.md has no `## 0.` summary section any more");
-  for (const agent of declaredAgents()) {
-    assert.match(
-      section,
-      new RegExp(`^\\| \`${agent}\``, "m"),
-      `docs/models.md §0 has no row for the \`${agent}\` agent, so a reader choosing models ` +
-        `cannot tell whether it was measured, left alone deliberately, or forgotten`,
-    );
-  }
+
+  // Both directions, because both are the same mistake in the reader's hands. A MISSING row
+  // reads as an agent with no cost; an EXTRA one names a `per_agent` key that would be silently
+  // ignored, which is the failure the rest of this file exists for — and a recommendation is
+  // the most likely place someone copies such a key from. Rows whose agent cell is backticked
+  // are the claim; §0's `specialists` row is deliberately not, since it is a class of agents
+  // named at run time and not a key anyone can write.
+  const rows = [...section.matchAll(/^\| `([^`]+)`/gm)].map((m) => m[1]!);
+  assert.deepEqual(
+    [...rows].sort(),
+    [...declaredAgents()].sort(),
+    "docs/models.md §0's recommendation table and DISPATCHED_AGENTS disagree — a missing row " +
+      "leaves a reader unable to tell whether that agent was measured, left alone deliberately " +
+      "or forgotten, and an extra one recommends a per_agent key Iris would silently ignore",
+  );
 });
