@@ -1,4 +1,4 @@
-import { extractJson } from "../util/json.ts";
+import { extractJson, readArrayPrefix } from "../util/json.ts";
 import type { ReviewStopped } from "../store/db.ts";
 import { VERIFY_KINDS, type VerifyKind } from "./feedback.ts";
 import { mapWithConcurrency } from "../util/concurrency.ts";
@@ -65,6 +65,13 @@ export interface ReviewResult {
   // True when that round did not come back whole: no section could be made of the body, or a
   // section truncated in its turn and kept the text it went in with. Never true with
   // `editorTruncated` false.
+  //
+  // Since #295 the question is asked of a smaller thing, because the truncated reply itself is read
+  // as far as it got: the blocks it reached were corrected by the round, so what can still be lost is
+  // the REMAINDER, and both halves have to have failed for this to be true. A reply that reached the
+  // last block leaves no remainder and makes no section call at all, so this is false — the one shape
+  // of truncation that costs the reader nothing, and the reason "no section could be made" above is
+  // not by itself the condition any more (`sectionRound`, and the assignment below).
   //
   // The delivered document has carried this distinction since #165 — `@editor-truncated
   // sections 3 of 4` against a bare `@editor-truncated` — and the quality tally had not, so a
@@ -1106,13 +1113,29 @@ interface EditorRound {
   // It no longer implies `usable: false`, which is issue #165: the round is retried a section
   // at a time before it is given up on, so a truncated round can come back with corrections in
   // it. `truncated` still says the ceiling was hit and the loop still ends on it; `sections`
-  // says what was rescued.
+  // and `salvaged` say what was rescued, and by which of the two routes.
   truncated: boolean;
   // Set when the round was answered section by section: how many sections the body was cut
   // into, and how many of them came back corrected. Absent on a round that was answered whole
   // and on one that could not be sectioned at all — so its presence is what distinguishes a
   // truncation the document survived with corrections from one it survived without them.
+  //
+  // Since #295 it is the sections of whatever `salvaged` below did not cover, which on a salvaged
+  // round is the REMAINDER of the document and not the whole of it. The two fields are read
+  // together for that reason: `sections: { of: 3, corrected: 3 }` beside `salvaged` is three
+  // sections of the part the reply never reached, and the same pair without `salvaged` is three
+  // sections of the document.
   sections?: { of: number; corrected: number };
+  // Set when the truncated reply's own edits were read and applied (issue #295): how many of them
+  // were used, how many top-level blocks of the body they cover, and how many blocks the body has.
+  // `blocks` equal to `of` is a reply that answered about the whole document before the ceiling cut
+  // it, which needs no sections at all.
+  //
+  // Its presence changes what a truncation means for the document, which is why it is reported
+  // rather than folded into `sections`: the corrections in the delivered body came from the round's
+  // own answer, at the length that answer was billed for, instead of from calls made afterwards
+  // that could see neither the whole document nor its pages.
+  salvaged?: { edits: number; blocks: number; of: number };
 }
 
 // Under this contract a reply names one block per edit, so counting the key says how many edits the
@@ -1717,6 +1740,185 @@ async function editorSectionCall(
   return corrected;
 }
 
+// What the reply DID say before the ceiling cut it (issue #295).
+//
+// The waste this exists to stop is the largest single one the bench has measured: 24 truncated
+// editor calls across 10 deployment rounds, $17.23 of a $158.67 bill, every dollar of it spent on
+// a response that was thrown away unread. And unread is the word — until now the fragment on the
+// error was quoted for a person (`reply_head`, #277) and nothing acted on it, so a round that got
+// through sixteen corrections delivered none of them and the body was then asked for again, a
+// section at a time, by a weaker call that cannot see the whole document or the page images.
+//
+// Why a prefix of THIS reply is usable where half an envelope never is. The contract makes the
+// answer a list of independent edits, each naming its own block (#250, patch.ts), so an entry that
+// arrived complete is a whole correction to a whole top-level node and does not depend on the
+// entries behind it. That is exactly what `readArrayPrefix` reads and exactly why it is safe here
+// and not on a page render, where the one field is the page and half of it is half a page.
+//
+// The one way a prefix is NOT independent is the reason for the strictest rule below. This contract
+// makes a MOVE a pair of edits — the block the content came from, and the block it lands in — and a
+// cut between the two halves would take the source half alone, which deletes content nothing
+// downstream can miss (`applyEditorPatch`, and #250's `refusal_with_loss`). Under the ordinary
+// contract that rule fires only where the reply already holds a refusal; here the CUT is the
+// refusal, of everything after it, so any block that gave content up refuses the whole salvage.
+// The cost of being wrong about the pairing is what it is there: this round takes the long way
+// round, exactly as it did before this existed.
+//
+// What it returns is the document in two pieces, because the second half of #295 is not to pay for
+// the first half twice: `prefix` is the part of the body the reply reached, corrected, and `rest`
+// is the part it never got to, untouched. `reached` is a count of BLOCKS, not of edits — the blocks
+// the reply passed over without naming are answered too, since "return only the blocks you are
+// changing" makes silence about a block an answer about it, which is the same reading the ordinary
+// round gives an `edits` list that names three blocks of a hundred.
+function salvageRound(
+  ctx: PipelineContext,
+  body: string,
+  e: unknown,
+): { prefix: string; rest: string; edits: number; reached: number; of: number } | null {
+  // Nothing to read: an error that lost its prototype on the way here (see
+  // `isTruncatedResponseError`), or a truncation that returned no text at all — which is a real
+  // shape, and the one the `EMPTY_REPLY` note on the message is about.
+  if (!(e instanceof TruncatedResponseError) || e.text === "") return null;
+  const blocks = blocksOf(body);
+  const read = readArrayPrefix<unknown>(e.text, "edits");
+  // The editor finding nothing to change is an ANSWER, and a list that closed empty is that answer
+  // arriving whole: every block was considered and none of them was wrong. v1.5 lets an ordinary
+  // round say exactly that and converge on it (`applyEditorPatch`), and all the ceiling took here is
+  // whatever the model went on to write after the list closed. So this is a salvage with no edits in
+  // it rather than a decline — it covers the whole document, leaves no remainder and makes no section
+  // call — where declining it would spend up to `MAX_SECTIONS` further calls re-correcting a document
+  // the editor has just passed, and would log `no_complete_edit`, whose whole meaning is the opposite:
+  // a document too big for one of its own blocks to fit the ceiling.
+  if (read !== null && read.closed && read.entries.length === 0) {
+    ctx.log.event("editor_salvaged", {
+      edits: 0,
+      applied: 0,
+      closed: true,
+      reached: blocks.length,
+      of: blocks.length,
+      chars: e.chars,
+      rest: 0,
+    });
+    // `body` and not a re-join of `blocks`: the two are the same string by `splitBlocks`'s identity
+    // property, and the original is the one nothing can have rounded.
+    return { prefix: body, rest: "", edits: 0, reached: blocks.length, of: blocks.length };
+  }
+  // Two different failures, and the log says which: a reply with no edits list in it at all is the
+  // model answering in some other shape — the whole document, or prose about the document, which is
+  // what `reply_head` on the line above is for — while an edits list whose first entry did not
+  // finish is the contract followed and the ceiling reached inside one enormous block. Only the
+  // second is a document too big for its ceiling; the first is a prompt that was not followed.
+  if (read === null || read.entries.length === 0) {
+    ctx.log.event("editor_salvage_declined", {
+      reason: read === null ? "no_edits_list" : "no_complete_edit",
+      chars: e.chars,
+      of: blocks.length,
+    });
+    return null;
+  }
+  const { edits, unreadable } = readBlockEdits(read.entries);
+  // An entry this cannot read, or a block this document does not have. Either one is tolerated by
+  // the ordinary round, which applies what it recognises and reports the rest (`applyBlockEdits`) —
+  // and neither can be tolerated here, because this round claims coverage of every block up to the
+  // last one named, and that claim is an inference about a reply walking THIS document in order. An
+  // entry whose block cannot be read might have named a block past the cut; a block number the
+  // document has no such block for says the reply is not about this document. Both make the
+  // inference unsound, and its whole value is that the blocks it covers are not asked for again.
+  //
+  // `edits` empty implies `unreadable`, since every entry read either became an edit or was counted
+  // here — which is why nothing below has to guard `Math.max` against an empty list.
+  const unknown = edits.filter((x) => !Number.isInteger(x.block) || x.block < 0 || x.block >= blocks.length).length;
+  if (unreadable > 0 || unknown > 0) {
+    ctx.log.event("editor_salvage_declined", {
+      reason: unknown > 0 ? "unknown_block" : "unreadable_edit",
+      edits: edits.length,
+      ...(unknown ? { unknown } : {}),
+      ...(unreadable ? { unreadable } : {}),
+      chars: e.chars,
+      of: blocks.length,
+    });
+    return null;
+  }
+  // Which blocks this reply has answered about. `closed` is the edits list itself having finished —
+  // the cut fell after it, in `fidelity_observed` or in trailing prose — and that is a COMPLETE
+  // patch: every block was considered, so the whole body is covered and nothing is left to section.
+  //
+  // Otherwise the claim is bounded by the last block the reply named, and it needs the names to be
+  // in document order. A reply that jumps backwards was not written in one pass through the
+  // document, so the blocks between two named ones cannot be read as deliberately left alone, and
+  // the coverage this round rests on is not claimable. The edits would still apply — but applying
+  // them and then sectioning the whole body is paying for the same blocks twice and letting the
+  // weaker call overwrite the stronger one's work, which is what #295 is about.
+  const named = edits.map((x) => x.block);
+  const ordered = named.every((n, i) => i === 0 || n >= named[i - 1]!);
+  if (!read.closed && !ordered) {
+    ctx.log.event("editor_salvage_declined", {
+      reason: "out_of_order",
+      edits: edits.length,
+      chars: e.chars,
+      of: blocks.length,
+    });
+    return null;
+  }
+  const reached = read.closed ? blocks.length : Math.max(...named) + 1;
+  // The identity property `splitBlocks` guarantees — every block's `pre` and `html` concatenated is
+  // the body, character for character — is what makes this split exact: the tail of the body from
+  // the first unreached block is `rest`, and the blocks before it are what the reply was about, put
+  // back together the same way (`applyBlockEdits` joins through `joinSections`).
+  const rest = blocks.slice(reached).map((b) => b.pre + b.html).join("");
+  const patched = applyBlockEdits(blocks.slice(0, reached), edits);
+  const used = patched.applied + patched.deleted + patched.unchanged;
+  // `unknown` and `unreadable` are 0 by the guard above and are not summed in: a count that cannot
+  // be non-zero on this line would read as a claim that it can be.
+  const refused = patched.duplicate + patched.incomplete;
+  // Two ways this is given up on, and the second is the move-pair rule above: a block emptied or
+  // handed back with less in it than it had may be the source half of a move whose landing half is
+  // past the cut.
+  //
+  // #174's whole-body floor is NOT read here as well, and it is worth saying why rather than leaving
+  // a guard that cannot fire. `shrunk` is `gaveContentUp` on each named block, which is any loss of
+  // visible text at all, and a block nobody named comes back byte for byte — so this prefix cannot
+  // have less text in it than it went in with unless one of these two counts is already non-zero.
+  // The floor is a halving of the whole; the rule above it is stricter than the floor everywhere the
+  // floor could apply.
+  const gave = patched.deleted > 0 || patched.shrunk > 0;
+  const declined = used === 0 ? "all_refused" : gave ? "loss_before_cut" : null;
+  if (declined) {
+    ctx.log.event("editor_salvage_declined", {
+      reason: declined,
+      edits: edits.length,
+      applied: patched.applied,
+      ...(patched.deleted ? { deleted: patched.deleted } : {}),
+      ...(patched.shrunk ? { shrunk: patched.shrunk } : {}),
+      ...(refused ? { refused } : {}),
+      reached,
+      of: blocks.length,
+      chars: e.chars,
+    });
+    return null;
+  }
+  // The counts an operator needs to read this round as a round: what the reply managed before the
+  // ceiling, and how much of the document that came to. `blocks` and `of` together are the number
+  // #295 asks for — the share of the document a truncated call had already answered — and the one
+  // that says whether this is a rescue or a rounding error. `closed` marks the reply whose edits
+  // list finished: a complete patch that hit the ceiling on its way out of the envelope, which
+  // needs no sections at all.
+  ctx.log.event("editor_salvaged", {
+    edits: edits.length,
+    applied: patched.applied,
+    ...(patched.unchanged ? { unchanged: patched.unchanged } : {}),
+    ...(refused ? { refused } : {}),
+    ...(patched.markers ? { markers: patched.markers } : {}),
+    ...(Object.keys(patched.navigation_lost).length ? { navigation_lost: patched.navigation_lost } : {}),
+    ...(read.closed ? { closed: true } : {}),
+    reached,
+    of: blocks.length,
+    chars: e.chars,
+    rest: rest.length,
+  });
+  return { prefix: patched.body, rest, edits: used, reached, of: blocks.length };
+}
+
 // The round again, a section at a time, after the answer did not fit.
 //
 // Why this exists: the editor used to be asked to return the complete corrected body, so the
@@ -1747,22 +1949,31 @@ async function editorSectionCall(
 // Returns null when nothing was attempted or nothing came back, and the caller then behaves as
 // it did before this existed. Every decline is logged with the reason: a round that quietly
 // declines to try is indistinguishable in a log from one that tried and failed.
+// `covers` is which of two things `body` is: the whole document the failed call was about, or the
+// REMAINDER of it that a salvaged prefix did not reach (`salvageRound`). Only two decisions turn on
+// it, and both are the same question — whether asking again would be the identical request at the
+// identical length. For the document it can be; for a remainder it cannot, because a remainder is a
+// strictly smaller request than the one that truncated.
 async function correctBySection(
   ctx: PipelineContext,
   body: string,
   issues: ReviewIssue[],
   e: unknown,
+  covers: "document" | "remainder",
 ): Promise<{ body: string; of: number; corrected: number } | null> {
+  // On every line this function writes, so a log reader never has to work out which body a budget
+  // was applied to. Absent on the ordinary path, which is what every log before #295 holds.
+  const part = covers === "remainder" ? { covers } : {};
   // No measurement, no budget. `chars` is on the error Iris raised, which is every truncation
   // except one that lost its prototype at some boundary (see `isTruncatedResponseError`), and
   // inventing a budget for that case would be the pre-flight guess this deliberately is not.
   if (!(e instanceof TruncatedResponseError) || !Number.isFinite(e.chars)) {
-    ctx.log.event("editor_sections_declined", { reason: "unmeasured" });
+    ctx.log.event("editor_sections_declined", { reason: "unmeasured", ...part });
     return null;
   }
   const budget = Math.floor(e.chars * SECTION_HEADROOM);
   if (budget < MIN_SECTION_BUDGET) {
-    ctx.log.event("editor_sections_declined", { reason: "budget_too_small", budget, chars: e.chars });
+    ctx.log.event("editor_sections_declined", { reason: "budget_too_small", budget, chars: e.chars, ...part });
     return null;
   }
   // A budget that already covers the whole body says the response was longer than the document
@@ -1771,7 +1982,12 @@ async function correctBySection(
   // preamble that never ended — and not a document too long to answer, so it is reported as
   // what it is rather than as a body that could not be cut. Reachable, on a short document
   // whose editor call returned more than twice its characters.
-  if (budget >= body.length) {
+  //
+  // A REMAINDER under the budget is the opposite case and is asked for in one call. The failed
+  // request was about the whole document; this one is about the part of it the reply never reached,
+  // it carries no images, and it is under a length this model has just been measured producing — so
+  // it is not the same question at the same length, which is the whole of the objection above.
+  if (budget >= body.length && covers === "document") {
     ctx.log.event("editor_sections_declined", {
       reason: "budget_exceeds_body",
       budget,
@@ -1785,8 +2001,13 @@ async function correctBySection(
   // one enormous table, say — cannot be cut, and asking for it again in one piece would hit the
   // same ceiling. This is the case a section-size bound genuinely does not solve, and it is
   // reported rather than retried.
-  if (sections.length < 2) {
-    ctx.log.event("editor_sections_declined", { reason: "indivisible", budget, chars: body.length });
+  //
+  // Which is a statement about a piece that is OVER budget, and that is now how it is written: a
+  // remainder short enough to be one section is short enough to ask for, and one call is the
+  // cheapest way this round can end. On the document path the two readings are the same, because a
+  // body under the budget has already been declined above.
+  if (sections.length < 2 && body.length > budget) {
+    ctx.log.event("editor_sections_declined", { reason: "indivisible", budget, chars: body.length, ...part });
     return null;
   }
   if (sections.length > MAX_SECTIONS) {
@@ -1796,6 +2017,7 @@ async function correctBySection(
       max: MAX_SECTIONS,
       budget,
       chars: body.length,
+      ...part,
     });
     return null;
   }
@@ -1809,6 +2031,7 @@ async function correctBySection(
     budget,
     chars: body.length,
     concurrency: limit,
+    ...part,
   });
   const corrected = await mapWithConcurrency(sections, limit, async (section, i) => {
     try {
@@ -1843,7 +2066,28 @@ async function sectionRound(
   issues: ReviewIssue[],
   e: unknown,
 ): Promise<EditorRound> {
-  const sectioned = await correctBySection(ctx, body, issues, e);
+  // First, what the reply already said (#295). The part of the document it reached is corrected by
+  // the model's own whole-document answer — which saw every block and every attached page image —
+  // and only the part it never got to is asked for again, in sections that see neither. So the
+  // section calls are made over the REMAINDER, which is fewer of them and none of them overwriting
+  // work that has already been paid for.
+  const rescued = salvageRound(ctx, body, e);
+  if (rescued) {
+    // Nothing left to ask about: the reply's edits list finished, or it named the last block of the
+    // document. A round that hit the ceiling and still answered in full — the ceiling was reached
+    // on the way out of the envelope — so `sections` is absent because there were none to make,
+    // which is not the same as a round given up on (see `editorTruncatedLost`).
+    const sectioned = rescued.rest === "" ? null : await correctBySection(ctx, rescued.rest, issues, e, "remainder");
+    return {
+      body: rescued.prefix + (sectioned?.body ?? rescued.rest),
+      // The editor said something usable about this document, and it is in the delivered body.
+      usable: true,
+      truncated: true,
+      salvaged: { edits: rescued.edits, blocks: rescued.reached, of: rescued.of },
+      ...(sectioned ? { sections: { of: sectioned.of, corrected: sectioned.corrected } } : {}),
+    };
+  }
+  const sectioned = await correctBySection(ctx, body, issues, e, "document");
   // Nothing to use: either the round could not be divided at all, or it was and no section came
   // back. Both are the state this feature started in — the body that entered the round is the
   // body that leaves it — and both are reported as that, WITHOUT `sections`. `sections` is what
@@ -1889,6 +2133,10 @@ export async function runReview(
   // as a boolean (`editorTruncatedLost`), because a rate over documents cannot use "3 of 4" —
   // but it is the same fact and this local is where both readings are taken from.
   let editorSections: { of: number; corrected: number } | undefined;
+  // And what the truncated reply itself corrected before the ceiling cut it (#295). Read beside
+  // `editorSections` everywhere: the sections of a salvaged round are the sections of what this did
+  // not cover, so either number alone describes a different round from the one that ran.
+  let editorSalvaged: { edits: number; blocks: number; of: number } | undefined;
   // The page index is built from the fragments as they entered review. Pages are
   // deliberately NOT re-indexed as the editor rewrites the body: the index exists
   // to attribute content to a SOURCE page, and the source doesn't change.
@@ -1939,7 +2187,13 @@ export async function runReview(
         // Reader looked again and found nothing left". That verdict is the Reader's alone
         // when the linter could not run, and a document that says so is the difference
         // between a clean document and an unchecked one (#164).
-        html: wrapDocument(body, { failedPages, editorTruncated, editorSections, lintUnavailable: lint.error }),
+        html: wrapDocument(body, {
+          failedPages,
+          editorTruncated,
+          editorSections,
+          editorSalvaged,
+          lintUnavailable: lint.error,
+        }),
         body,
         iterationsCompleted: iterations,
         unresolved: [],
@@ -1999,12 +2253,19 @@ export async function runReview(
       // is too high for that ceiling.
       editorTruncated = true;
       editorSections = round.sections;
+      editorSalvaged = round.salvaged;
       // And whether it cost the document anything, which is the half of this a threshold can
       // be put on. `sections` absent is a round given up on entirely — declined, or every
       // section failed (`sectionRound`) — and `corrected` short of `of` is a section that kept
       // the text it went in with. Either way those issues are in the delivered document
       // uncorrected and this is the last round, so nothing looks for them again.
-      editorTruncatedLost = !round.sections || round.sections.corrected < round.sections.of;
+      //
+      // A salvaged round asks the same question of a smaller thing (#295). The blocks the reply
+      // reached were corrected by the round itself, so what a section could still cost is the
+      // REMAINDER — and a reply that reached the end of the document leaves no remainder and
+      // therefore no loss, which is the one case where a truncation costs the reader nothing at all.
+      const sectionsHeld = !round.sections || round.sections.corrected < round.sections.of;
+      editorTruncatedLost = round.salvaged ? round.salvaged.blocks < round.salvaged.of && sectionsHeld : sectionsHeld;
       // Nothing came back from the section calls either — or there were none to make — so the
       // round ends where it used to: the body that entered it is delivered with that round's
       // issues unresolved. It still counts as a round; it was made and paid for, a full
@@ -2122,7 +2383,20 @@ export async function runReview(
       // second question is already answered by `changed` on this same line.
       structure_before: structureCounts(before),
       structure_after: structureCounts(body),
-      ...(round.sections ? { sections: round.sections.of, corrected: round.sections.corrected } : {}),
+      // `sections` and `corrected` are read as how much of the document the corrections reached, and
+      // on a salvaged round they are not: the sections are the sections of the REMAINDER the reply
+      // never got to (#295). So the two block counts come with them — `blocks_reached` of `blocks`,
+      // the same pair `editor_salvaged` calls `reached` and `of` — and `covers` says which thing the
+      // section counts on THIS line are over. Recoverable from the log as a whole either way; this is
+      // the one line a reader greps per round, and it was the one overstating its coverage.
+      ...(round.salvaged ? { blocks_reached: round.salvaged.blocks, blocks: round.salvaged.of } : {}),
+      ...(round.sections
+        ? {
+            sections: round.sections.of,
+            corrected: round.sections.corrected,
+            ...(round.salvaged ? { covers: "remainder" } : {}),
+          }
+        : {}),
     });
 
     // A round that changed nothing has said what the next one would say.
@@ -2274,6 +2548,7 @@ export async function runReview(
       failedPages,
       editorTruncated,
       editorSections,
+      editorSalvaged,
       lintUnavailable: lint.error,
       // Said in the document whether or not `unresolved` is empty, because it changes how
       // that list is to be read either way: an empty one is not a clean bill of health, and

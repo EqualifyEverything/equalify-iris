@@ -83,6 +83,50 @@ export function extractJson<T = unknown>(text: string): T | null {
   return last;
 }
 
+// The entries of an array field that DID arrive complete, out of a reply that stopped partway
+// through it. Null when the reply carries no such field at all.
+//
+// `extractJson` above is the right reader for a reply that finished, and the only one: it returns
+// the last envelope that parses, and a truncated envelope parses as nothing. That is deliberate —
+// nothing can invent the rest of a cut-off object, and a caller handed half an envelope would
+// deliver half a page. But an ARRAY of independent entries is the one shape where the prefix is
+// not half an answer: `{"edits":[{…},{…},{…` cut in the third entry is two entries the model
+// finished saying, each complete in itself, and reading them is the difference between a round
+// that produced nothing and a round that produced most of what it was paid for (issue #295).
+//
+// Only the caller can know whether its entries really are independent, so this function reads and
+// does not judge: `pipeline/review.ts` is where the Copy Editor's are, and where the rule about a
+// pair of edits split across the cut lives.
+//
+// `closed` says the array's own `]` was reached, which means the cut fell somewhere AFTER it and
+// the entries are the whole of what the model meant to send. A caller that can act on the
+// difference should: a complete list is an answer, and a prefix is a fragment of one.
+//
+// The LAST occurrence of the field, for the reason `extractJson` takes the last envelope: a model
+// that drafts before it answers writes the earlier one while thinking. A backslash in front of the
+// key means it is quoted inside a string — a document that prints JSON — and is not this field.
+export function readArrayPrefix<T>(text: string, field: string): { entries: T[]; closed: boolean } | null {
+  const key = new RegExp(`"${field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*:\\s*\\[`, "g");
+  let open: number | null = null;
+  for (let m = key.exec(text); m !== null; m = key.exec(text)) {
+    if (text[m.index - 1] === "\\") continue;
+    open = m.index + m[0].length;
+  }
+  if (open === null) return null;
+  const entries: T[] = [];
+  for (let i = open; ; ) {
+    while (i < text.length && (text[i] === "," || /\s/.test(text[i]!))) i++;
+    // A `]` is the list the model finished; anything that is not an object where an entry belongs
+    // is where this stops reading — the cut itself, or a shape this cannot use. Both leave the
+    // entries already read intact, which is the whole point.
+    if (i >= text.length || text[i] !== "{") return { entries, closed: text[i] === "]" };
+    const read = readObjectAt<T>(text, i);
+    if (read === null) return { entries, closed: false };
+    entries.push(read.value);
+    i = read.end;
+  }
+}
+
 // One candidate: the balanced object starting at `start` and its end in the source, or null
 // when nothing starting there parses.
 function readObjectAt<T>(text: string, start: number): { value: T; end: number } | null {

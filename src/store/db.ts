@@ -470,10 +470,11 @@ export interface QualityStats {
   // (pipeline/review.ts), and `cap`, `converged` and `unread` are all taken before the next
   // editor call — so on those the list was read on the bytes that shipped. `truncated` is the
   // one exit where it may be older than the document: the editor's reply was cut off, the
-  // sectioned retry may have corrected part of the body afterwards, and the round that would
-  // have re-read it is the one that could not be made. It over-reports on purpose there, and a
-  // truncation whose retry rescued nothing over-reports not at all — a distinction this tally
-  // cannot draw, and the delivered document can (`@editor-truncated sections N of M`).
+  // truncated reply's own completed edits and then the sectioned retry may have corrected part of
+  // the body afterwards (#295), and the round that would have re-read it is the one that could not
+  // be made. It over-reports on purpose there, and a truncation that rescued nothing over-reports
+  // not at all — a distinction this tally cannot draw, and the delivered document can
+  // (`@editor-truncated blocks B of T`, `sections N of M`).
   //
   // So `cap` + `converged` is the part of `unresolved_rate` that is a claim about the delivered
   // document, `truncated` is the part that is a claim about the round, and a single threshold
