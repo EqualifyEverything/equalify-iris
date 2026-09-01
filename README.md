@@ -909,8 +909,9 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   carry into a swap: over the same two rounds Luna costs **$0.0196** per document at 0.00,
   `kimi-k2.5` **$0.0218** at 0.25, `claude-haiku-4-5` **$0.0370** at 0.31 — the worst violator, at
   a third of the incumbent's price — and the incumbent **$0.1057** at 0.03, while `pixtral-large`
-  files 0 at **$0.0721**, dearer than Haiku. So "a cheaper Reader is the risk" is not the rule and
-  neither is its inverse; the number has to be measured per candidate (#301).
+  files 0 at **$0.0721**, dearer than Haiku on one round, its price as much a single sample as its
+  zero. So "a cheaper Reader is the risk" is not the rule and neither is its inverse; the number has
+  to be measured per candidate (#301).
   **More prompt text is not the remedy, and the evidence is inside the violations.** In the
   clearest cases the model states the rule correctly and files anyway, in the same issue: the
   incumbent identified a seam as an interior one — "this is the document's window boundary edge and
@@ -932,8 +933,10 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   `equalify-iris-bench`, which prints every row so the classification can be argued with. The
   figures above are its two rounds `runs-reader-probe` and `runs-reader-selfagree`, both at Iris
   `158e3d9`, re-derived here rather than quoted — which is how the Haiku row gained its second run.
-  The $/doc figures are the same rounds' `usd` over their succeeded documents, so both halves of the
-  price-and-compliance sentence come from one pair of rounds.
+  The $/doc figures are those rounds' `usd` over their succeeded documents, so both halves of the
+  price-and-compliance sentence come from one pair of rounds — but a model's price spans exactly the
+  rounds its violation count does, so the four one-run models are one sample on both axes, `$0.0721`
+  included.
 - **The Reader replies with JSON and nothing else, and that sentence is tuned to the model in the
   seat.** `READER_SYSTEM` has always ended "Respond with ONLY JSON:", and the incumbent narrated
   anyway: 40% of the characters it wrote sat outside the JSON envelope, over 5 documents. Nothing
