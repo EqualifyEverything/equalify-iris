@@ -79,6 +79,21 @@ test("the Reader is told what a no-content entry is, and that neither kind is it
     // find, and a cheaper model read the label as the finding instead — Haiku 4.5 filed it in
     // 7 of 163 issues where Sonnet 4.6 filed it in 0 of 197. Each of those buys an editor
     // call, and the round's images, to work on a document that is not broken.
+    //
+    // RE-MEASURED AFTER #275 SHIPPED, and the result is the reason these clauses are pinned as
+    // WORDING rather than treated as a first attempt to improve on (#301). Over 20 documents,
+    // 18 of them windowed, two runs of this exact prompt: violations per multi-window document
+    // 0.00 `gpt-5.6-luna`, 0.03 `claude-sonnet-4-6`, 0.25 `kimi-k2.5`, 0.31 `claude-haiku-4-5`.
+    // Two things follow. (1) The incumbent is NOT exempt — 0 violations in one run and 1 in the
+    // next, so #274's "0 of 197" was a sample and a single run cannot tell 0 from 1. (2) The
+    // failure is not comprehension, so more prompt text is not the lever: in the clearest cases
+    // the model states the rule correctly and files the issue anyway, in the SAME issue. The
+    // incumbent named a seam as interior ("this is the document's window boundary edge and not
+    // the document's own close") and then asked for window 2 to be verified; Kimi wrote "window
+    // boundaries are not document defects" into the `suggested_action` of an issue whose whole
+    // content was the label. Strengthening these sentences is spending prompt tokens on a model
+    // that already quotes them back. Recorded in README's window bullet, which is where a
+    // Reader swap is told to re-measure the count.
     ["the label itself is named as never a defect",
       /That label is never itself a defect, and neither is the window it describes/],
     // The three shapes measured, in the order they were quoted on #274: the label reported as
@@ -102,6 +117,11 @@ test("the Reader is told what a no-content entry is, and that neither kind is it
     // back the one case a single-chunk document depends on: with no label emitted at all, the
     // Reader is the only check that a body truly ending mid-tag is a defect. Reviewed on #275 —
     // the first draft said "its first and last lines" and covered the document's real ends too.
+    // #301 measured it working: the incumbent filed "ends mid-sentence … the document ends here
+    // (end of window 3 of 3)" as a real finding in one run and reported an interior seam in the
+    // other, so the SAME sentence is a violation at one edge and required at the other. That is
+    // why nothing here may be reduced to a keyword check on "window" — such a filter would
+    // silence the finding this clause exists to preserve.
     ["the document's own ends are excluded from the cut-edge exemption",
       /The document's own opening and its own close are never a cut — where window 1 begins, where the last window ends, and both ends of an unlabelled body are the document as it really is, so a body that ends mid-sentence there is a real finding and yours to make/],
     // The exemption, because the two reports this must NOT silence are the floor under
