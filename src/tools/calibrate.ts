@@ -450,6 +450,7 @@ async function main(): Promise<void> {
     images: used.map((p) => p.image),
     maxReviewIterations: cfg.defaults.max_review_iterations,
     extractionConcurrency: cfg.defaults.extraction_concurrency,
+    recheckSampleSize: cfg.defaults.recheck_sample_size,
   };
 
   process.stdout.write(

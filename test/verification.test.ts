@@ -307,6 +307,7 @@ function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 2): Pipelin
       links: b.links ?? [],
     })),
     extractionConcurrency: pages,
+    recheckSampleSize: 1,
     maxReviewIterations: 1,
     paths: {
       agentsDir,

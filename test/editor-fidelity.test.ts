@@ -197,6 +197,7 @@ function ctxWith(dir: string, editorReply: string): { ctx: PipelineContext; rec:
     images,
     maxReviewIterations: 1,
     extractionConcurrency: 4,
+    recheckSampleSize: 1,
     paths: {
       agentsDir: join(dir, "agents"),
       tmpAgentsDir: () => join(dir, "tmp-agents"),

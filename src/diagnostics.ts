@@ -314,8 +314,8 @@ export interface Diagnostics {
     // decide anything, because the two answer different questions and a single ok-rate over
     // both answers neither.
     //
-    // `sampled` is the measurement-only sample — at most one page per batch (correction.ts
-    // `RECHECKS_PER_BATCH`) — taken on a page that FAILED its check and was re-rendered, so
+    // `sampled` is the measurement-only sample — `defaults.recheck_sample_size` pages per
+    // batch, one by default (correction.ts `recheckSampler`) — taken on a page that FAILED its check and was re-rendered, so
     // `sampled_ok / sampled` is whether correction converges: the number that says whether
     // the loop is worth its 24%. It accumulates one or two per run, so it is a fleet
     // measurement and not a per-document one.

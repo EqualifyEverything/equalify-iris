@@ -62,6 +62,7 @@ async function loop(readerReply: (n: number) => string, body = BODY, maxReviewIt
       images: [],
       maxReviewIterations,
       extractionConcurrency: 4,
+      recheckSampleSize: 1,
       paths: {
         agentsDir: join(dir, "agents"),
         tmpAgentsDir: () => join(dir, "tmp-agents"),

@@ -353,6 +353,7 @@ async function run(
       sessionId: "ses_test",
       paths: { agentsDir, tmpAgentsDir: () => join(dir, "tmp-agents") } as unknown as Paths,
       extractionConcurrency: 3,
+      recheckSampleSize: 1,
       router: {
         complete: async (
           _agent: string,
@@ -721,6 +722,7 @@ test("a page carrying its own contract is judged against that one, and the row s
       sessionId: "ses_test",
       paths: { agentsDir, tmpAgentsDir: () => join(dir, "tmp-agents") } as unknown as Paths,
       extractionConcurrency: 2,
+      recheckSampleSize: 1,
       router: {
         complete: async (_a: string, _c: string, messages: { role: string; content: string }[]) => {
           const user = messages.find((m) => m.role === "user")?.content ?? "";
@@ -775,6 +777,7 @@ test("every verify call goes against the page's own image", async () => {
       sessionId: "ses_test",
       paths: { agentsDir, tmpAgentsDir: () => join(dir, "tmp-agents") } as unknown as Paths,
       extractionConcurrency: 2,
+      recheckSampleSize: 1,
       router: {
         complete: async (
           _agent: string,

@@ -32,6 +32,12 @@ export interface PipelineContext {
   // Pages extracted in parallel in this run. Always a valid integer >= 1
   // (normalized by loadConfig), so consumers need no fallback.
   extractionConcurrency: number;
+  // Corrected pages this run re-verifies for measurement only (config
+  // `defaults.recheck_sample_size`; pipeline/correction.ts `recheckSampler`). Always a
+  // valid integer >= 0, where 0 means the measurement is off. Carried here rather than
+  // read off `cfg` at the claim site for the same reason as the line above: one place
+  // resolves it, and a phase cannot disagree with the number the run was started with.
+  recheckSampleSize: number;
   // The logged-in user's GitHub token — used to file agent-suggestion issues
   // attributed to them (unless a service token override is configured).
   githubToken?: string;

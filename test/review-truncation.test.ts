@@ -89,6 +89,7 @@ function ctxWith(
     images,
     maxReviewIterations: opts.maxReviewIterations ?? 3,
     extractionConcurrency: 4,
+    recheckSampleSize: 1,
     paths: {
       agentsDir: join(dir, "agents"),
       tmpAgentsDir: () => join(dir, "tmp-agents"),

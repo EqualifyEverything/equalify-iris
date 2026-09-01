@@ -60,6 +60,7 @@ function makeCtx(
     feedback: opts.feedback ?? "The table on page 2 has the wrong numbers.",
     images,
     extractionConcurrency: 4,
+    recheckSampleSize: 1,
     maxReviewIterations: 1,
     paths: {
       agentsDir,

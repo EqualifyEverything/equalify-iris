@@ -73,7 +73,7 @@ function cfg(rate_limits?: Partial<RateLimitConfig>): IrisConfig {
       oauth_base_url: "https://github.com",
     },
     providers: { default: "openrouter", openrouter: { api_key: "k", default_model: "anthropic/claude-sonnet-4.6" } },
-    defaults: { max_review_iterations: 3, extraction_concurrency: 5, max_concurrent_runs: 2 },
+    defaults: { max_review_iterations: 3, extraction_concurrency: 5, max_concurrent_runs: 2, recheck_sample_size: 1 },
   };
 }
 
