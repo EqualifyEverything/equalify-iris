@@ -232,8 +232,29 @@ export function bodyLang(body: string): string | null {
 // kinds of correction, and a remainder that could not be sectioned is text this round never
 // touched. Written out rather than assembled from clauses — a marker that a person reads to find
 // out what happened to their document is worth three plain paragraphs.
+//
+// A fourth reading, and the one a reader would otherwise be told the opposite of: the round can be
+// salvaged with NO edits in it, where the reply's list of changes closed empty and the ceiling was
+// reached in what the model wrote afterwards. That document is unchanged because the editor found
+// nothing to change, which is not what "a round could not be completed" means, so it says so in its
+// own words rather than as `named 0 of them`.
 function salvagedNote(salvaged: { edits: number; blocks: number; of: number }, sections?: { of: number; corrected: number }): string {
   const head = `\n<!-- @editor-truncated blocks ${salvaged.blocks} of ${salvaged.of}`;
+  if (salvaged.edits === 0) {
+    return (
+      head +
+      `\n` +
+      `  A correction round hit the model's output ceiling, and what it had already said was read:\n` +
+      `  the copy editor listed no changes to make. It had considered all ${salvaged.of} of this\n` +
+      `  document's top-level blocks and named none of them, with the whole document in view, so the\n` +
+      `  ceiling was reached in the remarks it went on to write rather than partway through the\n` +
+      `  corrections. This document is therefore unchanged by that round because it was passed, not\n` +
+      `  because the round was lost, and no part of it was asked for again.\n` +
+      `  The review loop then stopped, so any issues listed below are the ones found BEFORE that\n` +
+      `  round and were not looked for again. See the run log (editor_truncated, editor_salvaged)\n` +
+      `  for the ceiling and the size of the response.\n-->`
+    );
+  }
   const opening =
     `  A correction round could not be completed in one response: the copy editor is asked for\n` +
     `  the whole document, and the answer hit the model's output ceiling partway through. What it\n` +

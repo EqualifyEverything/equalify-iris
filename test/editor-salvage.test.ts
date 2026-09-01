@@ -286,6 +286,13 @@ test("a reply whose list closed needs no sections at all, and costs the document
     assert.equal(result.editorTruncatedLost, false, "but no part of this document went uncorrected");
     assert.match(result.html, /@editor-truncated blocks 24 of 24/);
     assert.match(result.html, /nothing was left to ask\n {2}for again/);
+    // The `editor` line carries the coverage without a `covers`, because there are no section
+    // counts on it to be over anything.
+    const line = rec.events.find((e) => e.type === "editor")?.data;
+    assert.equal(line?.blocks_reached, BLOCKS.length);
+    assert.equal(line?.blocks, BLOCKS.length);
+    assert.equal(line?.sections, undefined);
+    assert.equal(line?.covers, undefined);
   });
 });
 
@@ -331,7 +338,53 @@ test("the document says which half of it got which kind of correction", async ()
     // only "sections 2 of 2" would read the first half as text no editor ever saw.
     assert.doesNotMatch(html, /that round was\n  discarded/);
     assert.doesNotMatch(html, /@editor-truncated sections/);
-    assert.equal(rec.events.find((e) => e.type === "editor")?.data.sections, of);
+    // The same two facts on the one line a log reader greps per round. `sections` there is read as
+    // how much of the document the corrections reached, and on a salvaged round it is over the
+    // remainder — so the block pair and `covers` are what stop this line overstating its coverage.
+    const line = rec.events.find((e) => e.type === "editor")?.data;
+    assert.equal(line?.sections, of);
+    assert.equal(line?.covers, "remainder");
+    assert.equal(line?.blocks_reached, REACHED);
+    assert.equal(line?.blocks, BLOCKS.length);
+  });
+});
+
+test("an edits list that closed empty is the editor passing the document, not losing it", async () => {
+  await withTemp(async (dir) => {
+    // The list closed with nothing in it, and the ceiling fell in what the model wrote after it.
+    // Every block was considered and none of them was wrong, which under this contract is a round
+    // that converges — so declining it would spend up to `MAX_SECTIONS` further calls re-correcting
+    // a document the editor has just passed, and would log `no_complete_edit`, whose meaning is the
+    // opposite: a document with a block too big for the ceiling.
+    const empty = new TruncatedResponseError(
+      "bedrock",
+      "sonnet",
+      32_000,
+      `{"edits":[],"fidelity_observed":["the table figures are as printed`.padEnd(CHARS, "x"),
+    );
+    const { ctx, rec } = ctxWith(dir, { reply: () => empty });
+    const result = await review(ctx);
+
+    assert.equal(rec.calls.filter((c) => c.system === EDITOR_SECTION_SYSTEM).length, 0, "nothing was asked for again");
+    assert.equal(rec.events.find((e) => e.type === "editor_salvage_declined"), undefined);
+    const salvaged = rec.events.find((e) => e.type === "editor_salvaged");
+    assert.equal(salvaged?.data.edits, 0);
+    assert.equal(salvaged?.data.applied, 0);
+    assert.equal(salvaged?.data.closed, true);
+    assert.equal(salvaged?.data.reached, BLOCKS.length, "an empty list that closed covers the whole document");
+    assert.equal(salvaged?.data.rest, 0);
+    // The body is the one that entered the round, character for character.
+    assert.equal(result.body, LONG);
+    assert.equal(result.editorTruncated, true, "the ceiling was hit and the deployment is told so");
+    assert.equal(result.editorTruncatedLost, false, "no part of this document went uncorrected for want of a round");
+    // And the document says which of the two unchanged documents it is: passed, not lost. A reader
+    // told a round "could not be completed" about this one would go looking for a correction the
+    // editor deliberately did not make.
+    assert.match(result.html, /@editor-truncated blocks 24 of 24/);
+    assert.match(result.html, /the copy editor listed no changes to make/);
+    assert.match(result.html, /passed, not\n {2}because the round was lost/);
+    assert.doesNotMatch(result.html, /named 0 of them/);
+    assert.doesNotMatch(result.html, /asked for again a section at a time/);
   });
 });
 

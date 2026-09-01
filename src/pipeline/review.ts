@@ -66,6 +66,13 @@ export interface ReviewResult {
   // section truncated in its turn and kept the text it went in with. Never true with
   // `editorTruncated` false.
   //
+  // Since #295 the question is asked of a smaller thing, because the truncated reply itself is read
+  // as far as it got: the blocks it reached were corrected by the round, so what can still be lost is
+  // the REMAINDER, and both halves have to have failed for this to be true. A reply that reached the
+  // last block leaves no remainder and makes no section call at all, so this is false — the one shape
+  // of truncation that costs the reader nothing, and the reason "no section could be made" above is
+  // not by itself the condition any more (`sectionRound`, and the assignment below).
+  //
   // The delivered document has carried this distinction since #165 — `@editor-truncated
   // sections 3 of 4` against a bare `@editor-truncated` — and the quality tally had not, so a
   // deployment could not tell a ceiling it is paying to work around from one that is costing
@@ -1774,6 +1781,28 @@ function salvageRound(
   if (!(e instanceof TruncatedResponseError) || e.text === "") return null;
   const blocks = blocksOf(body);
   const read = readArrayPrefix<unknown>(e.text, "edits");
+  // The editor finding nothing to change is an ANSWER, and a list that closed empty is that answer
+  // arriving whole: every block was considered and none of them was wrong. v1.5 lets an ordinary
+  // round say exactly that and converge on it (`applyEditorPatch`), and all the ceiling took here is
+  // whatever the model went on to write after the list closed. So this is a salvage with no edits in
+  // it rather than a decline — it covers the whole document, leaves no remainder and makes no section
+  // call — where declining it would spend up to `MAX_SECTIONS` further calls re-correcting a document
+  // the editor has just passed, and would log `no_complete_edit`, whose whole meaning is the opposite:
+  // a document too big for one of its own blocks to fit the ceiling.
+  if (read !== null && read.closed && read.entries.length === 0) {
+    ctx.log.event("editor_salvaged", {
+      edits: 0,
+      applied: 0,
+      closed: true,
+      reached: blocks.length,
+      of: blocks.length,
+      chars: e.chars,
+      rest: 0,
+    });
+    // `body` and not a re-join of `blocks`: the two are the same string by `splitBlocks`'s identity
+    // property, and the original is the one nothing can have rounded.
+    return { prefix: body, rest: "", edits: 0, reached: blocks.length, of: blocks.length };
+  }
   // Two different failures, and the log says which: a reply with no edits list in it at all is the
   // model answering in some other shape — the whole document, or prose about the document, which is
   // what `reply_head` on the line above is for — while an edits list whose first entry did not
@@ -2354,7 +2383,20 @@ export async function runReview(
       // second question is already answered by `changed` on this same line.
       structure_before: structureCounts(before),
       structure_after: structureCounts(body),
-      ...(round.sections ? { sections: round.sections.of, corrected: round.sections.corrected } : {}),
+      // `sections` and `corrected` are read as how much of the document the corrections reached, and
+      // on a salvaged round they are not: the sections are the sections of the REMAINDER the reply
+      // never got to (#295). So the two block counts come with them — `blocks_reached` of `blocks`,
+      // the same pair `editor_salvaged` calls `reached` and `of` — and `covers` says which thing the
+      // section counts on THIS line are over. Recoverable from the log as a whole either way; this is
+      // the one line a reader greps per round, and it was the one overstating its coverage.
+      ...(round.salvaged ? { blocks_reached: round.salvaged.blocks, blocks: round.salvaged.of } : {}),
+      ...(round.sections
+        ? {
+            sections: round.sections.of,
+            corrected: round.sections.corrected,
+            ...(round.salvaged ? { covers: "remainder" } : {}),
+          }
+        : {}),
     });
 
     // A round that changed nothing has said what the next one would say.
