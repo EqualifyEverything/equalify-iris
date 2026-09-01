@@ -31,7 +31,7 @@ import {
   refusedForOutputCeiling,
   statedOutputCeiling,
 } from "../src/providers/bedrock.ts";
-import { TruncatedResponseError, isRequestTooLargeError } from "../src/providers/types.ts";
+import { TruncatedResponseError, isRequestTooLargeError, isTruncatedResponseError } from "../src/providers/types.ts";
 
 // The model the issue was found on, and one Anthropic model on the same provider block, so
 // "remembered per model" is testable against the case that makes it necessary.
@@ -537,6 +537,57 @@ test("a truncation on a model that accepted the ceiling reads exactly as it alwa
       "bedrock: response hit the 32000-token output ceiling and was truncated " +
         "(11 chars returned). Raise providers.bedrock.max_tokens.",
     );
+    return true;
+  });
+});
+
+// The clause the marker's cut has to keep whole, quoted here so the assertion below measures the
+// sentence an operator reads and not a prefix of it.
+const EMPTY_ADVICE =
+  "look at the model's reasoning behaviour and at the size of what it was asked to produce.";
+
+test("a ceiling reached with nothing written says that raising it is not the remedy", async () => {
+  // The stop reason is identical to the case above and the failure is not: no `contentBlockDelta` at
+  // all, so the whole ceiling went somewhere the adapter does not read as reply — reasoning streamed
+  // as its own channel. Measured on a 100-page benchmark round, where one page's extraction spent
+  // 32,000 output tokens and returned 0 characters (#293), and the standing advice sent an operator
+  // to buy a larger burn of exactly the same thing.
+  const bedrock = provider({ default_model: CLAUDE, api: "converse" });
+  stubAttempts(bedrock, [{ events: [{ messageStop: { stopReason: "max_tokens" } }] }]);
+  await assert.rejects(() => bedrock.complete(req(CLAUDE)), (e: Error) => {
+    assert.ok(e instanceof TruncatedResponseError);
+    assert.equal(e.chars, 0);
+    assert.equal(e.text, "");
+    assert.match(e.message, /\(0 chars returned\)/);
+    assert.match(e.message, /No text was returned at all/);
+    assert.match(e.message, /raising that ceiling is not the remedy/);
+    assert.match(e.message, /a larger one buys more of whatever consumed it/);
+    // The instruction is in front of the explanation, because the `@page-failed` comment a lost
+    // page ships carries only the first 300 characters of this message. What has to survive is the
+    // whole clause and not its opening: a marker that stops at "look at the model's" has kept a
+    // sentence fragment where the operator needed an instruction. So this measures the END of it,
+    // and against the longest prefix the message can have — the prefix names the provider twice and
+    // carries the ceiling as digits, so a long provider name and a seven-figure ceiling are the
+    // worst case, not the bedrock/32,000 one this test constructs.
+    assert.ok(
+      e.message.indexOf(EMPTY_ADVICE) + EMPTY_ADVICE.length <= 300,
+      "the advice has to survive the marker's 300-character cut",
+    );
+    const worst = new TruncatedResponseError("openrouter", CLAUDE, 1_000_000, "");
+    assert.ok(
+      worst.message.indexOf(EMPTY_ADVICE) + EMPTY_ADVICE.length <= 300,
+      `the widest prefix still leaves room for the advice: ${worst.message.slice(0, 300)}`,
+    );
+    // The fixed sentence survives, and in front, for the reason the caller-cap note gives: the
+    // review loop and the extraction paths act on `isTruncatedResponseError`, which matches that
+    // sentence, and this failure is still a truncation to every one of them.
+    assert.ok(
+      e.message.indexOf("Raise providers.bedrock.max_tokens.") < e.message.indexOf("No text was returned"),
+      e.message,
+    );
+    assert.equal(isTruncatedResponseError(e), true);
+    // Including through a boundary that kept the message and lost the prototype.
+    assert.equal(isTruncatedResponseError(new Error(e.message)), true);
     return true;
   });
 });

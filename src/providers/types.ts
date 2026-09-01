@@ -190,6 +190,30 @@ export interface ModelProvider {
   complete(request: CompletionRequest): Promise<CompletionResult>;
 }
 
+// What the standing "raise it" advice is worth when the ceiling was reached with no reply at all,
+// which is a different failure wearing the same stop reason. A response cut mid-document is an
+// answer that did not fit, and a larger ceiling is exactly the remedy. Zero characters is not a
+// long answer: the ceiling was spent before the answer began — on reasoning a model streams as its
+// own channel, which the adapters do not read as text (providers/bedrock.ts `readConverse` builds
+// the reply out of `delta.text` alone) — so raising the number is a bet that the thinking ends
+// inside the new ceiling, and a lost bet is billed for the whole of the new one. Measured on a
+// 100-page benchmark round, where one page's extraction spent 32,000 output tokens and returned 0
+// characters (issue #293); the advice as it stood sent an operator to buy a larger burn.
+//
+// Appended to the standing sentence rather than replacing it, for the same reason `note` below is:
+// `isTruncatedResponseError` matches the fixed part of that sentence and two callers act on the
+// match, so this one must keep reading as a truncation.
+//
+// The instruction comes FIRST and the explanation second, because this message is quoted somewhere
+// that cuts it: a lost page ships a `@page-failed` comment carrying the first 300 characters of it
+// (pipeline/extraction.ts `failedPage`), which a maintainer greps before they reach the run log. In
+// the other order that comment kept "Raise providers.<provider>.max_tokens." in full and dropped the
+// clause taking it back — the one thing this sentence exists to deliver.
+const EMPTY_REPLY =
+  "No text was returned at all, so raising that ceiling is not the remedy: look at the model's " +
+  "reasoning behaviour and at the size of what it was asked to produce. The ceiling was spent " +
+  "before the reply began, and a larger one buys more of whatever consumed it.";
+
 // A model stopped because it hit the output-token ceiling, not because it was
 // finished. This is a 200 response carrying partial content, so nothing below the
 // provider layer can tell it from a complete answer — a page of HTML truncated
@@ -227,6 +251,7 @@ export class TruncatedResponseError extends Error {
     super(
       `${provider}: response hit the ${maxTokens}-token output ceiling and was truncated ` +
         `(${text.length} chars returned). Raise providers.${provider}.max_tokens.` +
+        (text === "" ? ` ${EMPTY_REPLY}` : "") +
         (note ? ` ${note}` : ""),
     );
     this.name = "TruncatedResponseError";
@@ -236,6 +261,37 @@ export class TruncatedResponseError extends Error {
     this.chars = text.length;
     this.text = text;
   }
+}
+
+// How a log line quotes the `text` above: a few hundred characters at each end, whitespace folded
+// so the line stays one line. Shared by both paths that report a truncation of their own — the Copy
+// Editor's round (pipeline/review.ts, issue #277) and a page's correction (pipeline/extraction.ts,
+// issue #293) — because two copies of the budget rule drift, and a reader comparing an editor
+// truncation with a page one needs the same width on both to compare them at all.
+//
+// It is the user's own document coming back, so every caller keeps it in the run log on the
+// deployment and **never** puts it on `GET /v1/quality` — the same confinement, for the same reason,
+// as `prose_joined`'s `word_split_examples`. The width is what that question needs and no more.
+// Not exported: `replyExcerpt` below is the only thing that may spend this budget, and a caller
+// holding the number would be a caller that could quote a reply on its own terms.
+const REPLY_EXCERPT = 240;
+
+// One budget, spent either as two ends or as the whole fragment: at or under the pair's width the
+// two excerpts would overlap or abut, so the fragment is quoted entire under `reply_head` with no
+// `reply_tail` at all — rather than reported as a head whose middle and end are missing while
+// `chars` says there was more. Either way the log carries at most `2 x REPLY_EXCERPT` characters.
+//
+// Both fields are absent on a reply that returned nothing. `reply_head: ""` would read as a model
+// that answered with an empty string, which is a thing a model can do and is not this; `chars: 0`
+// and `EMPTY_REPLY`'s sentence are what say a ceiling was spent with the answer never started.
+export function replyExcerpt(text: string): { reply_head?: string; reply_tail?: string } {
+  if (text === "") return {};
+  const fold = (s: string) => s.replace(/\s+/g, " ").trim();
+  const split = text.length > 2 * REPLY_EXCERPT;
+  return {
+    reply_head: fold(text.slice(0, split ? REPLY_EXCERPT : 2 * REPLY_EXCERPT)),
+    ...(split ? { reply_tail: fold(text.slice(-REPLY_EXCERPT)) } : {}),
+  };
 }
 
 // The same fact as a predicate, and the one the review loop acts on: a round whose

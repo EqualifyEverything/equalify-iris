@@ -106,8 +106,8 @@ function makeCtx(
 }
 
 // 87,851 characters of a page came back before the ceiling cut it. The fragment rides on the error
-// now (#277) and nothing on this path reads it — a page that truncated is a page lost either way —
-// so what matters here is still the length.
+// (#277) and since #293 this path quotes both of its ends on the failure line — the page's content
+// is gone, so the excerpt is the only record of what the model had written when the ceiling cut it.
 const truncated = () => new TruncatedResponseError("bedrock", "claude-test", 32000, "<p>cut".padEnd(87_851, "x"));
 const ev = (rec: Recorded, type: string) => rec.events.filter((e) => e.type === type);
 
@@ -120,6 +120,58 @@ test("one page's failure does not take the document with it", async () => {
     assert.equal(fragments.filter((f) => f.innerHtml === "<p>page</p>").length, 3, "the other 3 pages survived");
     assert.deepEqual(ev(rec, "page_extraction_failed").map((e) => e.data.page), [2]);
     assert.match(String(ev(rec, "page_extraction_failed")[0].data.error), /output ceiling/);
+  });
+});
+
+test("a page lost to the ceiling records what the model had written", async () => {
+  await withTemp(async (dir) => {
+    // This is the destructive truncation — the page's content is gone and nothing recovers it — so
+    // the fields matter more here than on `page_correction_failed`, where the page survives. Same
+    // three, so the two lines can be read against each other (#293).
+    const { ctx, rec } = makeCtx(dir, 2, [1], truncated);
+    await runExtraction(ctx);
+    const failed = ev(rec, "page_extraction_failed")[0].data;
+    assert.equal(failed.truncated, true);
+    assert.equal(failed.reply_chars, 87_851);
+    assert.match(String(failed.reply_head), /^<p>cutx+$/);
+    assert.equal(String(failed.reply_head).length, 240);
+    assert.equal(String(failed.reply_tail).length, 240);
+    // No `ceiling` field, and its absence is a fact rather than an omission: a first pass carries no
+    // cap of its own, so the number that was hit is the deployment's and the error names it.
+    assert.equal("ceiling" in failed, false);
+    assert.match(String(failed.error), /32000-token output ceiling/);
+  });
+});
+
+test("a first pass that spent its ceiling and wrote nothing is a different failure", async () => {
+  await withTemp(async (dir) => {
+    // The shape measured on a 100-page round: 32,000 output tokens, 0 characters. A model that
+    // streams reasoning as its own channel can spend the whole ceiling before the page begins, and
+    // the standing advice — raise `max_tokens` — buys a larger burn rather than a longer answer.
+    // Here it is `truncated: true` with no excerpt at all, and the error's own sentence (#293).
+    const empty = () => new TruncatedResponseError("bedrock", "claude-test", 32000, "");
+    const { ctx, rec } = makeCtx(dir, 2, [1], empty);
+    const { fragments } = await runExtraction(ctx);
+    const failed = ev(rec, "page_extraction_failed")[0].data;
+    assert.equal(failed.truncated, true);
+    assert.equal(failed.reply_chars, 0);
+    assert.equal("reply_head" in failed, false, "a head of \"\" would read as a model answering with nothing");
+    assert.match(String(failed.error), /No text was returned at all/);
+    // Still contained the same way: the page is a marker and the other page is delivered. Nothing
+    // about this shape changes what the run does — it changes what an operator is told to do.
+    assert.match(fragments.find((f) => f.order === 1)!.innerHtml, /@page-failed 1:/);
+  });
+});
+
+test("a page that failed for any other reason has no reply to quote", async () => {
+  await withTemp(async (dir) => {
+    const { ctx, rec } = makeCtx(dir, 2, [1], () => new Error("ThrottlingException"));
+    const failed = await runExtraction(ctx).then(() => ev(rec, "page_extraction_failed")[0].data);
+    // Absent rather than false: this line has carried `error` alone since it existed, and a
+    // `truncated: false` on every throttle would suggest the field is a partition of the failures.
+    assert.equal("truncated" in failed, false);
+    assert.equal("reply_chars" in failed, false);
+    assert.equal("reply_head" in failed, false);
   });
 });
 
@@ -249,7 +301,15 @@ test("a failed re-extraction keeps the page it could not improve", async () => {
     );
     assert.equal(fragments.find((f) => f.order === 3)!.innerHtml, "<p>page</p>", "page 3 was re-extracted");
     assert.equal(fragments.find((f) => f.order === 1)!.innerHtml, "<p>prior 1</p>", "untargeted page untouched");
-    assert.equal(ev(rec, "page_extraction_failed")[0].data.kept, "prior");
+    const failed = ev(rec, "page_extraction_failed")[0].data;
+    assert.equal(failed.kept, "prior");
+    // And the same evidence a first pass would have recorded (#293). This is the round a USER asked
+    // for, so it is the worst one to leave silent: someone is waiting on an answer about this page,
+    // and a reader following docs/API.md's row reads a missing `truncated` as "not a truncation".
+    assert.equal(failed.truncated, true);
+    assert.equal(failed.reply_chars, 87_851);
+    assert.equal(String(failed.reply_head).length, 240);
+    assert.equal(String(failed.reply_tail).length, 240);
   });
 });
 

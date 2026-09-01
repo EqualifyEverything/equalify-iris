@@ -300,6 +300,93 @@ test("a correction that truncates at its own cap says so on the log line", async
   });
 });
 
+// --- what the reply itself was, which is what decides whether the cap was too tight (#293) ------
+
+// A truncated correction, with the fragment the model got out before the ceiling. `reply` is the
+// text; the ceiling matters only in that it is the cap this page's first pass computed.
+const truncatedCorrection = (reply: string) => () =>
+  new TruncatedResponseError("bedrock", "some-model", 12_466, reply);
+
+// 34,573 characters is the real one: `acir-p049`, a correction of an 11,908-character page that was
+// still going when the cap cut it. `ROW` repeats, because that is the shape under test — a tail that
+// repeats what the head already showed is a model rewriting the page it was given, and a tail in
+// content the head has not reached is a page that needed the room. Both are 2.9x the page either
+// way, which is why the ratio alone cannot say which happened.
+const ROW = "<tr><td>Findings for the quarter</td><td>17.5</td></tr>";
+// Cut to that length rather than built up to it, so it ends mid-tag the way a real one does.
+const RUNAWAY = (`<h2>Findings</h2><table>${ROW.repeat(700)}`).slice(0, 34_573);
+
+test("a truncated correction quotes both ends of the reply, and its length", async () => {
+  await withTemp(async (dir) => {
+    const events: { type: string; fields: Record<string, unknown> }[] = [];
+    await runExtraction(ctxWith(dir, [], events, { outputTokens: 6233, correctionThrows: truncatedCorrection(RUNAWAY) }));
+    const failed = events.filter((e) => e.type === "page_correction_failed")[0].fields;
+    // The length, under a name that cannot be read as the page's: `chars_kept` is on this same line
+    // and is the page. The pair is the ratio the argument turns on — here 34,573 against 51.
+    assert.equal(failed.reply_chars, RUNAWAY.length);
+    assert.equal(failed.reply_chars, 34_573);
+    assert.equal(failed.chars_kept, PAGE_HTML.length);
+    // Both ends, at the shared width, whitespace folded. The head is where the reply began, which
+    // says whether the model answered about the page at all; the tail is where it ran out.
+    assert.equal(failed.reply_head, RUNAWAY.slice(0, 240));
+    assert.equal(failed.reply_tail, RUNAWAY.slice(-240));
+    assert.equal(String(failed.reply_head).length, 240);
+    assert.equal(String(failed.reply_tail).length, 240);
+    // And the question it was added to answer is answerable off the line: the tail is rows the head
+    // already showed, so this reply was going round rather than transcribing a large page. That
+    // reading is a person's to make — nothing in the pipeline reads these fields.
+    assert.ok(String(failed.reply_tail).includes(ROW), "the tail repeats what the head showed");
+    assert.ok(String(failed.reply_head).includes(ROW));
+  });
+});
+
+test("a short truncated reply is quoted entire, not as a head with its middle missing", async () => {
+  await withTemp(async (dir) => {
+    // 400 characters: longer than one excerpt, shorter than both together. A head of 240 with no
+    // tail would drop 160 characters of a reply the log could have carried whole, and nothing on the
+    // line would say it had — `reply_chars` would be the only hint, against a head that looks
+    // complete. Same rule, same numbers, as `editor_truncated` (test/review-truncation.test.ts).
+    const short = "<p>".padEnd(400, "y");
+    const events: { type: string; fields: Record<string, unknown> }[] = [];
+    await runExtraction(ctxWith(dir, [], events, { outputTokens: 6233, correctionThrows: truncatedCorrection(short) }));
+    const failed = events.filter((e) => e.type === "page_correction_failed")[0].fields;
+    assert.equal(failed.reply_chars, 400);
+    assert.equal(failed.reply_head, short, "the whole fragment, not the first 240 of it");
+    assert.equal("reply_tail" in failed, false, "a tail here would repeat part of the head");
+  });
+});
+
+test("a truncation that returned nothing carries no excerpt, and says so by absence", async () => {
+  await withTemp(async (dir) => {
+    // The measured shape: 32,000 output tokens, 0 characters of text, because the ceiling went on
+    // reasoning the adapters do not read as reply. `reply_head: ""` would say the model answered
+    // with an empty string, which is a thing a model can do and is not this.
+    const events: { type: string; fields: Record<string, unknown> }[] = [];
+    await runExtraction(ctxWith(dir, [], events, { outputTokens: 6233, correctionThrows: truncatedCorrection("") }));
+    const failed = events.filter((e) => e.type === "page_correction_failed")[0].fields;
+    assert.equal(failed.truncated, true);
+    assert.equal(failed.reply_chars, 0);
+    assert.equal("reply_head" in failed, false);
+    assert.equal("reply_tail" in failed, false);
+    // And the error sentence is what names the outcome, since the fields can only be absent.
+    assert.match(String(failed.error), /No text was returned at all/);
+    assert.match(String(failed.error), /raising that ceiling is not the remedy/);
+  });
+});
+
+test("a failure that is not a truncation has no reply to quote", async () => {
+  await withTemp(async (dir) => {
+    // A throttle, a stall, a stream that stopped: `error` is the whole of what is known, and a
+    // `reply_chars: 0` on such a line would read as a model that answered with nothing.
+    const events: { type: string; fields: Record<string, unknown> }[] = [];
+    await runExtraction(ctxWith(dir, [], events, { outputTokens: 6233, correctionThrows: () => new Error("ThrottlingException") }));
+    const failed = events.filter((e) => e.type === "page_correction_failed")[0].fields;
+    assert.equal(failed.truncated, false);
+    assert.equal("reply_chars" in failed, false);
+    assert.equal("reply_head" in failed, false);
+  });
+});
+
 test("a provider that reports no usage leaves the correction uncapped", async () => {
   await withTemp(async (dir) => {
     const asked: Asked[] = [];
@@ -409,6 +496,23 @@ test("a truncation at the caller's cap does not send an operator to the deployme
     // And it is not confused with the other case that cannot be raised: a model whose OWN ceiling
     // is below the deployment's needs a different model, not a different caller.
     assert.doesNotMatch(e.message, new RegExp(`That ceiling is ${MODEL}'s own`));
+    return true;
+  });
+});
+
+test("a capped call that wrote nothing gets both caveats, in the order they are read in", async () => {
+  // The two caveats are about different things and both apply: what happened (the ceiling went on
+  // something other than the reply, #293) and which knob it was (the caller's, #285). Read in that
+  // order, the line says what to look at instead of the number and then which number it was — the
+  // other order names a knob before saying the knob is beside the point.
+  const bedrock = new BedrockProvider({ default_model: MODEL, api: "converse" } as never);
+  stubBedrock(bedrock, [{ events: [{ messageStop: { stopReason: "max_tokens" } }] }]);
+  await assert.rejects(() => bedrock.complete(bedrockReq(MODEL, 12_466)), (e: Error) => {
+    assert.match(e.message, /\(0 chars returned\)/);
+    const advice = e.message.indexOf("Raise providers.bedrock.max_tokens.");
+    const empty = e.message.indexOf("No text was returned at all");
+    const whose = e.message.indexOf("That ceiling is this call's own");
+    assert.ok(advice < empty && empty < whose, e.message);
     return true;
   });
 });

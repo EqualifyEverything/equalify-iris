@@ -19,8 +19,10 @@ import type { PdfLink } from "../src/util/pdf.ts";
 import { TruncatedResponseError } from "../src/providers/types.ts";
 
 // 93,039 characters of a correction came back before the ceiling cut it. The error carries the
-// fragment as well as its length now (#277); nothing on this path reads it, since a correction that
-// truncated is a correction not applied either way.
+// fragment as well as its length (#277), and since #293 this path quotes both of its ends on the
+// failure line — nothing in the pipeline reads them, a correction that truncated being a correction
+// not applied either way, but they are what says whether the cap was too tight or the model was
+// running away, and the round cannot be asked again.
 const TRUNCATED_REPLY = "<p>cut".padEnd(93_039, "x");
 
 // --- what a correction changed, read off the two fragments --------------------
@@ -666,6 +668,13 @@ test("a correction that hit the output ceiling costs the correction, not the pag
         problems: 2,
         error: "…",
         truncated: true,
+        // The whole reply and its two ends, which on this line are the evidence and not colour: 93,039
+        // characters against an 89-character page is the ratio the argument about the cap turns on, and
+        // a head that is the page's own opening tells that apart from a model answering about something
+        // else (#293). `reply_chars` and not `chars`, because `chars_kept` is on this same line.
+        reply_chars: TRUNCATED_REPLY.length,
+        reply_head: TRUNCATED_REPLY.slice(0, 240),
+        reply_tail: TRUNCATED_REPLY.slice(-240),
         chars_kept: page.length,
       },
     );
