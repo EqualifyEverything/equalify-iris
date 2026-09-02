@@ -235,7 +235,16 @@ providers:
     # on any other model they are conservative guesses rather than facts, and the hint
     # `GET /v1/limits` publishes says so instead of promising what the model discards.
     # Setting `max_long_edge_px` here is how you say you have read that model's own
-    # documentation; it silences the warning and the qualification with it.
+    # documentation; it silences the warning and the qualification with it — but only
+    # where this block serves nothing Iris can already place. This key is per provider
+    # BLOCK and the question is per MODEL, so on a block whose `default_model` is a Claude
+    # and onto which `providers.per_agent` (a sibling of these blocks, not a key on one)
+    # routes one agent to something else, a number here could have been read from either
+    # model, and Iris will not take it as an answer about the one it does not know.
+    # It still applies (it is your block) — to every agent on it, including the ones whose
+    # own documented long edge is smaller, which sends those larger images for no gain
+    # anyone has documented. On that deployment there is nothing to set: the boot warning
+    # names the models the block is shared with and asks for nothing.
     #
     # Setting these too HIGH does not raise what the model accepts — it re-creates the
     # failure the check exists to prevent, where an upload is accepted and then dies

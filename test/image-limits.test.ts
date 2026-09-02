@@ -264,6 +264,12 @@ test("a config with no reachable provider publishes defaults, never Infinity", (
 // measured — so the whole difference is in what is claimed, which is what these pin.
 
 const QWEN_VL = "qwen.qwen3-vl-235b-a22b-instruct-v1:0";
+// A second vision model this build cannot place, on a DIFFERENT provider block, so the boot
+// warning can be asked about two of them at once.
+const OTHER_VL = "mistral/pixtral-large-2502";
+// A third, so a single block can hold more unplaceable models than a sentence saying "both"
+// can describe. This is the model the UIC deployment's `page` agent runs on since #312.
+const KIMI = "moonshotai.kimi-k2.5";
 
 test("a model id decides whether the limits are documented or assumed", () => {
   // Both spellings and the legacy ordering: the question is the same one modelGeneration
@@ -471,6 +477,127 @@ test("boot says once that the published image limits are a guess", () => {
     null,
   );
 });
+
+test("boot asks for a setting only where the setting can answer", () => {
+  // The remedy sentence used to be unconditional: "Set providers.bedrock.image_limits to
+  // the numbers this model's documentation gives." On a block that also serves a model this
+  // build knows, `foreignOnly` will not read that number as an answer, so following the
+  // instruction means editing config, restarting, and meeting the same warning. And it is
+  // not a corner: `api` is a block setting and only a block named `bedrock` builds a
+  // Bedrock adapter, so a Bedrock deployment that sends ONE agent to another vendor — which
+  // is what the UIC deployment does — is always in this case. See #320.
+  const mixed = cfg({
+    default: "bedrock",
+    bedrock: { region: "us-east-1", default_model: SONNET_46, api: "converse" },
+    per_agent: { page: { model: QWEN_VL } },
+  });
+  const warning = String(visionModelWarning(mixed));
+  // Says which case it is, names the model it is about, and names what the block is shared
+  // with so the ambiguity is legible rather than asserted.
+  assert.match(warning, new RegExp(`cannot answer for ${QWEN_VL.replace(/[.:]/g, "\\$&")}`));
+  assert.match(warning, new RegExp(SONNET_46.replace(/\./g, "\\.")));
+  assert.match(warning, /nothing to set/);
+  // And does NOT instruct. This is the assertion that fails on the old text.
+  assert.doesNotMatch(warning, /Set providers/);
+  // Still names the agent and the model, which is how an operator finds the config line.
+  assert.match(warning, /page/);
+  assert.doesNotMatch(warning, /feedback/); // feedback is on the Claude, and not in question
+
+  // A block serving nothing this build can place still gets the instruction, because there
+  // the number can only have been read about the model it does serve.
+  const foreign = cfg({
+    default: "bedrock",
+    bedrock: { region: "us-east-1", default_model: QWEN_VL, api: "converse" },
+  });
+  const askable = String(visionModelWarning(foreign));
+  assert.match(askable, /Set providers\.bedrock\.image_limits/);
+  assert.doesNotMatch(askable, /cannot answer/);
+});
+
+test("each block gets its own sentence, naming its own model", () => {
+  // Two guessed models on two blocks, one of which can be answered for and one of which
+  // cannot. Both sentences are emitted, so a pronoun in either would point at a different
+  // member of the model list this warning opens with — and this paragraph exists to be
+  // quoted verbatim, which is what made #320 a defect rather than a wording preference.
+  const two = cfg({
+    default: "bedrock",
+    bedrock: { region: "us-east-1", default_model: SONNET_46, api: "converse" },
+    openrouter: { api_key: "k", default_model: OTHER_VL },
+    per_agent: { page: { model: QWEN_VL }, copy_editor: "openrouter" },
+  });
+  const warning = String(visionModelWarning(two));
+  const qwen = QWEN_VL.replace(/[.:]/g, "\\$&");
+  const other = OTHER_VL.replace(/[./]/g, "\\$&");
+  // The mixed block declines, for the model that is actually on it.
+  assert.match(warning, new RegExp(`providers\\.bedrock\\.image_limits cannot answer for ${qwen}`));
+  // The foreign-only block is asked, for ITS model — not for the other block's.
+  assert.match(
+    warning,
+    new RegExp(`Set providers\\.openrouter\\.image_limits to the numbers documented for ${other}`),
+  );
+  // Neither sentence leans on a pronoun that the reader has to resolve against the list.
+  assert.doesNotMatch(warning, /this one/);
+  assert.doesNotMatch(warning, /this model's documentation/);
+});
+
+test("one key for several unplaceable models says the number has to hold for all", () => {
+  // Both vision models on the one block are unknown, so the block is foreign-only and the
+  // instruction is right — but there is a single `image_limits` key and two documentations
+  // to read it from. "the numbers documented for A, B" reads as though there were a key per
+  // model; an instruction that cannot be followed as written is what #320 was about.
+  const twoUnknown = cfg({
+    default: "bedrock",
+    bedrock: { region: "us-east-1", default_model: QWEN_VL, api: "converse" },
+    per_agent: { page: { model: OTHER_VL } },
+  });
+  const warning = String(visionModelWarning(twoUnknown));
+  const qwen = QWEN_VL.replace(/[.:]/g, "\\$&");
+  const other = OTHER_VL.replace(/[./]/g, "\\$&");
+  assert.match(
+    warning,
+    new RegExp(`smallest of the numbers documented for (${qwen} and ${other}|${other} and ${qwen})`),
+  );
+  assert.match(warning, /one setting for the whole block/);
+  // Still one block, so still one sentence — the plural is inside it, not two of them.
+  assert.equal(warning.match(/Set providers\.bedrock\.image_limits/g)?.length, 1);
+
+  // THREE unplaceable models on the block, which IMAGE_AGENTS being four agents allows. The
+  // sentence said "both" while the model list grew, so it was quotably false on exactly the
+  // deployment reading it — the defect this PR is about. The list is comma-joined too.
+  const three = cfg({
+    default: "bedrock",
+    bedrock: { region: "us-east-1", default_model: QWEN_VL, api: "converse" },
+    per_agent: { page: { model: OTHER_VL }, feedback: { model: KIMI } },
+  });
+  const wide = String(visionModelWarning(three));
+  assert.match(wide, /to hold for all of them/);
+  assert.doesNotMatch(wide, /for both/);
+  // Read the list itself out of the sentence rather than pattern-matching the whole warning,
+  // which has its own "and"s in the prose around it. Three models, comma-joined, one "and".
+  const list = wide.match(/documented for (.+?) — it is one setting/)?.[1] ?? "";
+  assert.deepEqual([...list.matchAll(/ and /g)].length, 1);
+  for (const model of [QWEN_VL, OTHER_VL, KIMI]) assert.ok(list.includes(model), model);
+
+  // And a single unplaceable model keeps the plain instruction, with no clause about a
+  // second documentation to reconcile it with.
+  const one = cfg({
+    default: "bedrock",
+    bedrock: { region: "us-east-1", default_model: QWEN_VL, api: "converse" },
+  });
+  assert.doesNotMatch(String(visionModelWarning(one)), /smallest of|hold for both/);
+});
+
+// NOT TESTED, deliberately, and worth saying why rather than leaving a name that claims a
+// guard: `visionModelWarning` derives "does this block also serve a model we know" from
+// `limitsBasisFor(a.model)` and not from the resolved `a.basis`. Those two spellings cannot
+// disagree at that point today. `basis` differs from `limitsBasisFor(model)` only where
+// `edgeOverride > 0 && foreignOnly.has(provider)`, and on such a block every agent is
+// foreign and answered for, so no agent from it survives into `guessed` and the loop is
+// never entered for it. Mutating the line to `a.basis === "documented"` leaves this whole
+// file green, and no config makes it bite. The `limitsBasisFor` spelling is still the
+// correct question — it is what keeps the sentence true if `foreignOnly` is ever widened to
+// read one answered-for model as an answer for another on the same block — but it is a
+// future-proofing, not a live invariant, and a test asserting otherwise would be theatre.
 
 test("a config that resolves no model at all warns about nothing", () => {
   // Nothing is configured to warn ABOUT, and a config whose default provider has no

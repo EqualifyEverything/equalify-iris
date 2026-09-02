@@ -1326,7 +1326,15 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   destroy detail that may have been read — and the 8000 px rejection stops attributing itself to
   the model's refusal. Boot warns once, naming the agents, the model and the config path, because
   every downstream surface here is written to be quoted verbatim and none of them can qualify
-  itself. Setting `image_limits.max_long_edge_px` is the operator answering, and it silences both.
+  itself. Setting `image_limits.max_long_edge_px` is the operator answering, and it silences both —
+  where it can be read as an answer. That setting is per provider **block** and the basis question is
+  per **model**, so on a block that also serves a model Iris does have limits for, a number there is
+  ambiguous about which of them it was read from, and Iris will not take it as one. A Bedrock
+  deployment that sends a single agent to another vendor is always in that case, since `api` is a
+  block setting and only a block named `bedrock` builds a Bedrock adapter: there is no per-model
+  `image_limits` and nothing to set, so the warning says so and names the models the block is shared
+  with rather than asking for a line that would not help. Such a deployment keeps the conservative
+  numbers until someone publishes or measures that model's own.
   `GET /v1/limits` gains no field for this: the endpoint deliberately says nothing about which
   model serves the deployment, so the qualification is in the wording of `hint`.
 - **Starting work on a session is a claim, not a check (`store.claimSession`).** The two endpoints
