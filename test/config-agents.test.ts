@@ -559,3 +559,56 @@ test("docs/models.md's sections agree with §0 about each agent's share and disp
     );
   }
 });
+
+// The last defect in this document that shipped past every gate was a rendering one: fixing a figure
+// above, I wrapped a clause in `**` inside a sentence that was already bold, and the outer run was
+// left open. It renders as two literal asterisks in front of the sentence stating the price of a
+// decision. tsc was clean, all 1328 tests passed, and nothing else in the file reads that paragraph —
+// the only thing that caught it was a person reading the diff (PR #332 review round 2).
+//
+// So this checks the one property a markdown document can lose without anything else noticing: every
+// `**` run closes inside the paragraph that opened it. Per paragraph rather than per file, because a
+// file-wide count comes back even as soon as a second paragraph breaks the other way, and per
+// paragraph is also where the render actually goes wrong.
+//
+// Its limit, stated because it will eventually fire on innocent text: this is a parity count, not a
+// parser. A deliberate literal `**` in prose fails it, and the fix then is to fence or escape that
+// text, not to delete the test. Fenced blocks are skipped for the same reason — they quote markup
+// rather than use it.
+test("docs/models.md's bold runs close in the paragraph that opens them", () => {
+  const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
+  const unclosed: string[] = [];
+  let fenced = false;
+  let para: string[] = [];
+  let start = 0;
+
+  const finish = () => {
+    if (para.length > 0 && (para.join("\n").match(/\*\*/g) ?? []).length % 2 !== 0) {
+      unclosed.push(`line ${start}: ${para[0]!.trim().slice(0, 90)}`);
+    }
+    para = [];
+  };
+
+  for (const [i, line] of doc.split("\n").entries()) {
+    if (line.startsWith("```")) {
+      finish();
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    if (line.trim() === "") {
+      finish();
+      continue;
+    }
+    if (para.length === 0) start = i + 1;
+    para.push(line);
+  }
+  finish();
+
+  assert.deepEqual(
+    unclosed,
+    [],
+    `docs/models.md has ${unclosed.length} paragraph(s) with an odd number of \`**\` runs, so a bold ` +
+      `run opens and never closes and the asterisks render literally:\n  ${unclosed.join("\n  ")}`,
+  );
+});

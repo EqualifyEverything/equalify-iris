@@ -454,7 +454,7 @@ On the three classes with identical, complete denominators:
 The incumbent misses nothing on a changed number, a dropped paragraph or a dropped table row. The
 four Luna misses include **3 of 27 changed numbers** — the defect class least likely to be caught
 downstream, because the page still looks right, in a pipeline whose promise is fidelity. **The price
-of keeping the incumbent is $1.65–$1.90 per 100 pages — **−15.4% to −17.7% of the $10.7106 §5
+of keeping the incumbent is $1.65–$1.90 per 100 pages — −15.4% to −17.7% of the $10.7106 §5
 prices, ≈−15.3% to −17.6% of the ≈$10.79 round including `builder`**, from
 three independent derivations that agree ($0.65–$0.90 for a Luna verify line against the
 incumbent's $2.5499 over 90 calls); the most expensive derivation is quoted, and the decision does
