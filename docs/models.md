@@ -32,7 +32,8 @@ decision** — and none of the three was the same kind of decision.
   **−26.1% of the bill §5 prices**
   ([#329](https://github.com/EqualifyEverything/equalify-iris/issues/329), §4). That result only
   appeared once the benchmark attached the page images Iris attaches; the round that withheld them
-  ranked the two the other way round, which is §7's sixth limit.
+  ranked the two the other way round, which §7 carries as a limit in its own right — a benchmark
+  that withholds an input the agent receives in production measures a different agent.
 
 Read §2, §3 and §4 before revisiting any of them. Of the two agents not on that list, `feedback` is
 kept for a measured reason, and `builder` has made two model calls in the whole sprint — both of them
@@ -144,6 +145,11 @@ carries no per-step breakdown, so `by_step` has to be read per session (docs/API
 
 ## 2. `page` — the largest line on the bill
 
+**`page` (42.0%) — swapped and live, and whether it stays is still open
+([#324](https://github.com/EqualifyEverything/equalify-iris/issues/324)).** The 11-page round below
+is what the decision was taken on; §5 is the 100-page round that priced it afterwards and found the
+content cost the small round could not see. Read both before revisiting it.
+
 `runs-extract-ad3e7a6`: 7 models × 11 deliberately hard pages, Iris at `ad3e7a6` with a clean
 tree, `agents/page.md` at `635267ac32bb`, `agents/feedback.md` at `b4b2d3cac40f`, judge pinned to
 the incumbent on **every** arm, all rows `ok` and `priced`, 0 unattributed calls.
@@ -235,6 +241,11 @@ model grading a rival — worth naming, though it raised 29 flags against its ow
 against Kimi's, so it is not sparing itself.
 
 ## 3. `reader` — the cheapest defensible cut
+
+**`reader` (9.3%) — declined, on the shape of the loss rather than its size
+([#313](https://github.com/EqualifyEverything/equalify-iris/issues/313)).** It was the best-looking
+cut in the sprint on a single aggregate and the decision reversed once the same loss was broken out
+by defect kind, which is the reason this section is longer than the saving would justify.
 
 `runs-reader-newsha` and `runs-reader-newsha2`: 20 stitched documents × 2 passes × 4 models =
 **160 document-runs, $6.64**, both rounds at `e842faa` with a clean tree, 0 model mismatches, 0
@@ -393,8 +404,11 @@ unchanged, and the denominator moves (§7).
   an editor an empty issue list. Read it as a clean demonstration of a mechanism, never as a rate.
   Confinement, in the table above, is the on-distribution form of the same question.
 - **One document carries the capability gap.** `amazon.nova-2-lite-v1_0` is 8 of the 23 instances
-  and accounts for −8 of the incumbent's −10 and +6 of Luna's +5. The *direction* is corroborated
-  by confinement and by the edit counts on other documents; the *size* does not survive dropping it.
+  and accounts for −8 of the incumbent's −10 and **+6 of Luna's +5** — a component larger than the
+  net it sits in, because Luna also lost one instance on `nvidia.nemotron-nano-12b-v2` (8 → 7), and
+  the incumbent's other −2 is one instance each on that document and on
+  `anthropic.claude-sonnet-4-6`. The *direction* is corroborated by obedience to the issue list and
+  by the other documents; the *size* does not survive dropping it.
 - **Luna's rate is substituted from us-gov-west-1** (`not sold in us-east-1`), and its input side
   gets no prompt-cache discount at all, because `cacheableSystemPrompt` is false for a non-Claude
   id. The quality result does not depend on the price; the −26.1% does. The free check still
@@ -440,7 +454,8 @@ On the three classes with identical, complete denominators:
 The incumbent misses nothing on a changed number, a dropped paragraph or a dropped table row. The
 four Luna misses include **3 of 27 changed numbers** — the defect class least likely to be caught
 downstream, because the page still looks right, in a pipeline whose promise is fidelity. **The price
-of keeping the incumbent is $1.65–$1.90 per 100 pages, −15.5% to −17.8% of the whole bill**, from
+of keeping the incumbent is $1.65–$1.90 per 100 pages — **−15.4% to −17.7% of the $10.7106 §5
+prices, ≈−15.3% to −17.6% of the ≈$10.79 round including `builder`**, from
 three independent derivations that agree ($0.65–$0.90 for a Luna verify line against the
 incumbent's $2.5499 over 90 calls); the most expensive derivation is quoted, and the decision does
 not turn on which one you take. `amazon.nova-2-lite` is not a cheap verifier on any reading — it

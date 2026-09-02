@@ -464,6 +464,22 @@ test("docs/models.md §5's per-agent rows sum to the total row they are publishe
 // paragraph whose job is to publish a wrong figure — the same trap that made an earlier draft of the
 // §5 test above read a table of verifier counters. The cost of scoping this way is real and worth
 // naming: §6's drift-note shares go unchecked, and so does any share quoted mid-paragraph.
+//
+// The agents checked are LISTED rather than discovered, which is the whole of what makes the
+// disposition half load-bearing (PR #332 review, note 1). The first version of this test skipped any
+// pair it could not classify — `if (want === null || got === null) continue` — so rewording §0's
+// cell to "swap pending a decision" disabled the check silently and let §4 go on saying whatever it
+// liked. An unclassifiable cell is now a FAILURE for these four, because "§0 stopped stating a
+// disposition in words this test knows" is itself the thing worth being told about: either the
+// vocabulary below needs a phrase adding, or the summary stopped answering the question a reader
+// came for.
+//
+// Four, not five: `page`, `reader`, `copy_editor` and `feedback` are the agents a model decision has
+// been taken or recommended on. `builder` is exempt because it genuinely has no disposition in this
+// vocabulary — its §0 cell is a zero with a date on it, not a keep or a swap — and forcing it into
+// one would be inventing a decision nobody took. Add an agent here when a decision is taken on it.
+const DECIDED = ["page", "reader", "copy_editor", "feedback"] as const;
+
 const DISPOSITIONS = [
   // Ordered, because the phrases overlap: "swap recommended, not yet applied" holds `applied`, and
   // §4's `copy_editor` opener quotes the word "keep" while saying it no longer applies. First match
@@ -492,20 +508,26 @@ test("docs/models.md's sections agree with §0 about each agent's share and disp
   }
   assert.ok(stated.size >= 4, `§0 yielded ${stated.size} agent rows; expected one per dispatched agent`);
 
-  // A section's opener: a bolded lead-in naming a backticked agent and re-quoting its share. The
-  // `(0% in this round)` form is deliberately allowed, since that parenthetical carries a caveat
-  // rather than a second figure.
-  const openers = [...doc.matchAll(/^\*\*`([a-z_]+)` \((\d[\d.]*)%[^)]*\)\s*—\s*([^*]+)\*\*/gm)];
-  assert.ok(
-    openers.length >= 2,
-    "no section of docs/models.md opens with `**`agent` (share%) — disposition**` any more, so " +
-      "this test is checking nothing; either the convention changed or the openers were reworded",
-  );
+  // A section's opener: a bolded lead-in naming a backticked agent and re-quoting its share. Any
+  // further parenthetical between the share and the dash is tolerated — `(0% in this round)` carries
+  // a caveat rather than a second figure, and §4's `builder` opener names the specialists too.
+  const openers = new Map<string, [string, string]>();
+  for (const m of doc.matchAll(/^\*\*`([a-z_]+)` \((\d[\d.]*)%[^—]*—\s*([^*]+)\*\*/gm)) {
+    openers.set(m[1]!, [m[2]!, m[3]!]);
+  }
 
-  for (const [, name, share, text] of openers) {
-    const row = stated.get(name!);
-    assert.ok(row, `a section of docs/models.md opens on \`${name}\`, which has no row in §0`);
+  for (const name of DECIDED) {
+    const row = stated.get(name);
+    assert.ok(row, `\`${name}\` has a model decision on it but no row in §0's table`);
     const [share0, status] = row;
+    const opener = openers.get(name);
+    assert.ok(
+      opener,
+      `no section of docs/models.md opens with \`**\`${name}\` (share%) — disposition**\`, so its ` +
+        `share and its disposition are stated only in §0 and nothing checks the section a reader ` +
+        `is sent to. \`page\` and \`reader\` were both in this position until PR #332.`,
+    );
+    const [share, text] = opener;
     assert.equal(
       Number(share),
       share0,
@@ -513,9 +535,21 @@ test("docs/models.md's sections agree with §0 about each agent's share and disp
         `the two was updated from a newer round and the other was not; §0's is the partition that ` +
         `is checked to sum to 100%, so the opener is the likelier stale copy.`,
     );
+    // Both sides must classify. A null here is not a pass — see the note above the vocabulary.
     const want = disposition(status!);
-    const got = disposition(text!);
-    if (want === null || got === null) continue;
+    const got = disposition(text);
+    const vocabulary = DISPOSITIONS.map(([d]) => d).join(", ");
+    assert.ok(
+      want,
+      `§0's \`${name}\` cell no longer states a disposition this test can read (${vocabulary}): ` +
+        `"${status!.trim().slice(0, 80)}". §0 is the table a reader takes the decision from, so ` +
+        `either say which of those it is, or add the new phrasing to DISPOSITIONS deliberately.`,
+    );
+    assert.ok(
+      got,
+      `\`${name}\`'s own section opens without a disposition this test can read (${vocabulary}): ` +
+        `"${text.trim().slice(0, 80)}". Skipping this pair is how the check disabled itself.`,
+    );
     assert.equal(
       got,
       want,
