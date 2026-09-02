@@ -537,6 +537,36 @@ test("each block gets its own sentence, naming its own model", () => {
   assert.doesNotMatch(warning, /this model's documentation/);
 });
 
+test("one key for two unplaceable models says the number has to hold for both", () => {
+  // Both vision models on the one block are unknown, so the block is foreign-only and the
+  // instruction is right — but there is a single `image_limits` key and two documentations
+  // to read it from. "the numbers documented for A, B" reads as though there were a key per
+  // model; an instruction that cannot be followed as written is what #320 was about.
+  const twoUnknown = cfg({
+    default: "bedrock",
+    bedrock: { region: "us-east-1", default_model: QWEN_VL, api: "converse" },
+    per_agent: { page: { model: OTHER_VL } },
+  });
+  const warning = String(visionModelWarning(twoUnknown));
+  const qwen = QWEN_VL.replace(/[.:]/g, "\\$&");
+  const other = OTHER_VL.replace(/[./]/g, "\\$&");
+  assert.match(
+    warning,
+    new RegExp(`smallest of the numbers documented for (${qwen} and ${other}|${other} and ${qwen})`),
+  );
+  assert.match(warning, /one setting for the whole block/);
+  // Still one block, so still one sentence — the plural is inside it, not two of them.
+  assert.equal(warning.match(/Set providers\.bedrock\.image_limits/g)?.length, 1);
+
+  // And a single unplaceable model keeps the plain instruction, with no clause about a
+  // second documentation to reconcile it with.
+  const one = cfg({
+    default: "bedrock",
+    bedrock: { region: "us-east-1", default_model: QWEN_VL, api: "converse" },
+  });
+  assert.doesNotMatch(String(visionModelWarning(one)), /smallest of|hold for both/);
+});
+
 // NOT TESTED, deliberately, and worth saying why rather than leaving a name that claims a
 // guard: `visionModelWarning` derives "does this block also serve a model we know" from
 // `limitsBasisFor(a.model)` and not from the resolved `a.basis`. Those two spellings cannot
