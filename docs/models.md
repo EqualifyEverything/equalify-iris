@@ -502,7 +502,7 @@ A round driven against a deployment records the base URL and nothing about the b
 re-reading the round can produce one. The four chunks were submitted between 18:41:01Z and 18:57:06Z
 on 2026-09-02, and the last successful "Notify UIC deploy" before that was **`2566c8b`** at 17:25:14Z,
 with none after it during the round. That is the build the **swapped** arm was measured on — the
-$0.1940 baseline it is compared against is `runs-bystep-now` at `3749f54`, three rows up. It is
+$0.1940 baseline it is compared against is `runs-bystep-now` at `3749f54`, the row above it. It is
 deploy-log evidence rather than round evidence, which is a weaker link than the
 `iris_sha` a local round records: it establishes what main had shipped, not that the box was serving
 it. The swap itself is the exception — that *is* confirmed inside the round, from
