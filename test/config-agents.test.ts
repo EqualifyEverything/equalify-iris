@@ -314,3 +314,93 @@ test("docs/models.md §0's share column is a partition of one round, not a mix o
       `money is" and neither is.`,
   );
 });
+
+// §5's per-agent table is the OTHER partition in this document, and it needs the same guard §0 has.
+//
+// What it does NOT catch, said plainly because it was proposed as the fix for exactly this: the
+// version reviewed on PR #327 left `builder` out of §5 altogether, and no arithmetic check could
+// have found that. The four rows summed to the stated total to the cent and the shares summed to
+// 100.0%, because the total was ITSELF the four-agent subtotal the harness prints — an agent absent
+// from the rows *and* the denominator leaves a table that is internally perfect and mis-labelled.
+// The only fix for that shape is naming the denominator in the prose, which §5 now does. A test that
+// passes on the defect it was written for is worse than no test, so this one claims a different job.
+//
+// The job it does have is the realistic later edit: a fifth row added while the total stands, a total
+// updated while the rows stand, or one column re-run and the other left stale. It also pins the
+// arithmetic the section's own headline is read off — the reviewed draft summarised this table as
+// "only about a third of the saving comes from the agent that was swapped" when its two money
+// columns give 63.8%, and a table that adds up cannot be summarised backwards without one of the two
+// being wrong on its face.
+//
+// Both money columns, because they fail differently: the SWAPPED column is the one an agent goes
+// missing from (a new agent appears in a later round and nobody adds a row), and the UNSWAPPED column
+// is the one that goes stale (a re-run moves the baseline and only the interesting half is updated).
+test("docs/models.md §5's per-agent rows sum to the total row they are published under", () => {
+  const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
+  const section = doc.split(/^## /m).find((s) => s.startsWith("5."));
+  assert.ok(section, "docs/models.md has no `## 5.` section any more");
+
+  // Cells with the bold markers stripped, since emphasis lands on whichever figures moved.
+  const rows = section
+    .split("\n")
+    .filter((l) => l.startsWith("|"))
+    .map((l) =>
+      l
+        .replace(/\*\*/g, "")
+        .split("|")
+        .slice(1, -1)
+        .map((c) => c.trim()),
+    );
+  const money = (cell: string | undefined) => {
+    const m = cell?.match(/\$([\d,]+\.\d+)/);
+    return m ? Number(m[1]!.replace(/,/g, "")) : undefined;
+  };
+
+  // Anchored on the total row and walked BACK to its own header separator, rather than picking rows
+  // that look like agents: §5 carries a second table of Iris's verifier counters whose first cell is
+  // also a backticked snake_case name (`content_missing`, `editor_truncated`), and a name-shaped
+  // filter swept those in. Structural membership also means "a row with no dollar figure" is a real
+  // failure rather than a row this test declined to recognise.
+  const iTotal = rows.findIndex((r) => /^total\b/.test(r[0] ?? ""));
+  assert.ok(iTotal > 0, "docs/models.md §5's per-agent table has no `total` row to check against");
+  const total = rows[iTotal]!;
+  const agents: string[][] = [];
+  for (let i = iTotal - 1; i >= 0 && !/^-+$/.test(rows[i]![0] ?? ""); i--) agents.unshift(rows[i]!);
+  assert.ok(agents.length >= 4, `§5 lists ${agents.length} agent rows; expected one per agent`);
+
+  for (const [col, label] of [
+    [1, "unswapped"],
+    [2, "swapped"],
+  ] as const) {
+    const parts = agents.map((r) => money(r[col]));
+    assert.ok(
+      parts.every((p) => p !== undefined),
+      `§5's ${label} column has a row with no dollar figure in it: ` +
+        `${agents.map((r) => `${r[0]}=${r[col]}`).join(", ")}`,
+    );
+    const sum = parts.reduce((a, b) => a! + b!, 0)!;
+    const stated = money(total[col]);
+    assert.ok(stated !== undefined, `§5's total row has no ${label} figure`);
+    // Half a cent per row: the rows are published to four decimals, the total to four.
+    assert.ok(
+      Math.abs(sum - stated) <= agents.length * 0.005,
+      `docs/models.md §5's ${label} agent rows sum to $${sum.toFixed(4)}, but the total row says ` +
+        `$${stated.toFixed(4)}. An agent that ran and is not in this table reads as an agent that ` +
+        `cost nothing, and the share column beside it then partitions a subtotal while the prose ` +
+        `calls it the round.`,
+    );
+  }
+
+  // And the share column, which is only meaningful over the total the rows above actually sum to.
+  const shares = agents.map((r) => Number(r[r.length - 1]!.match(/([\d.]+)%/)?.[1]));
+  assert.ok(
+    shares.every((s) => Number.isFinite(s)),
+    `§5's last column is not a share on every agent row: ${agents.map((r) => r[r.length - 1]).join(" | ")}`,
+  );
+  const shareSum = shares.reduce((a, b) => a + b, 0);
+  assert.ok(
+    Math.abs(shareSum - 100) <= shares.length * 0.1,
+    `docs/models.md §5's post-swap shares sum to ${shareSum.toFixed(1)}%, not 100% — ` +
+      `${shares.join(" + ")}.`,
+  );
+});

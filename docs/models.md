@@ -14,7 +14,7 @@ declined, and the two were never the same kind of decision.**
   agent since 2026-09-02
   ([#312](https://github.com/EqualifyEverything/equalify-iris/issues/312)). On 11 hard pages it
   measured at-or-better on cost, word recall, first-pass rate and three of the judge's four defect
-  kinds (§2). On **100 pages of the live deployment** it measures **−44.8% of the whole model bill**
+  kinds (§2). On **100 pages of the live deployment** it measures **−44.8% of the priced model bill**
   and a content loss the small round could not see: Iris's own unchanged verifier reports
   `content_missing` on **42 pages against the incumbent's 15**, and the specific thing missing is
   the regional subtotal rows of statistical tables
@@ -30,16 +30,20 @@ reading before benchmarking them again, and one has never been measured at all �
 is also worth knowing (§4).
 
 **Every figure here names the benchmark round it came from**, because some of them are stale by
-design and several are superseded outright — §6 says which. `config.example.yaml` serves every
-capability with `us.anthropic.claude-sonnet-4-6`, and **"the incumbent" below means that
-unswapped baseline** — not the reference deployment as it stands today, whose `page` agent has run
-on `moonshotai.kimi-k2.5` since 2026-09-02.
+design and several are superseded outright — §6 says which. **"The incumbent" below means the
+unswapped Sonnet-4.6 baseline every round was measured against** — not the reference deployment as it
+stands today, whose `page` agent has run on `moonshotai.kimi-k2.5` since 2026-09-02, and not
+`config.example.yaml` as shipped either: that file's `providers.default` is `openrouter`, so its
+capabilities resolve to `anthropic/claude-sonnet-4.6` and the Bedrock id `us.anthropic.claude-sonnet-4-6`
+is only the `bedrock` block's default. Same model generation, two providers and two ids — a
+distinction §1 spends a paragraph on, because a Bedrock id under an OpenRouter default does not
+resolve.
 
 ## 0. The short version
 
 | agent | share of the bill, unswapped | status |
 |---|---|---|
-| `page` | **42.0%** | **swapped and live since 2026-09-02** (#312) — −44.8% of the whole bill measured on 100 pages, at a named content cost: `content_missing` on 42 pages against 15 (§5) |
+| `page` | **42.0%** | **swapped and live since 2026-09-02** (#312) — −44.8% of the priced bill measured on 100 pages, at a named content cost: `content_missing` on 42 pages against 15 (§5) |
 | `copy_editor` | **33.1%** | keep. The wins here were code, not a model — and it is now the largest line that has never had a model round (§8) |
 | `feedback` | 15.6% | keep. It is the oracle every other number is scored against |
 | `reader` | 9.3% | **declined** (#313) — 78% of the incumbent's own agreement floor at −77%, and §3 says what the 22% is |
@@ -57,7 +61,8 @@ Kimi reproduces 118 of 180 reference findings (65.6%) and the incumbent's own se
 absolute per-issue miss is **34%**. §3 gives the paired figure, which is the one that charges a swap
 for its own losses rather than for the reference's irreproducibility.
 
-The applied swap is one line:
+The applied swap is one line of `per_agent` — and on the reference deployment it took two, which is
+the paragraph under the block, not a footnote:
 
 ```yaml
 providers:
@@ -244,25 +249,38 @@ runs, priced as the sum of both.
 
 **`kimi ×1` was proposed and declined**
 ([#313](https://github.com/EqualifyEverything/equalify-iris/issues/313)): 78% of the floor at
-$0.0216/doc, −77%, one config line and nothing else. The table above is the case for it. Here is
+$0.0216/doc, −77%, and the same single `per_agent` line the page swap took — `kimi-k2.5` is a Bedrock
+non-Claude id here too, so on an Anthropic-native block it needs `api: converse` as well (§0). The
+table above is the case for it. Here is
 what settled it against, and none of it needed another round — the loss was broken out by kind from
 the rounds already on disk:
 
-| | reproduces the 180-finding reference | findings lost | $/doc |
-|---|---|---|---|
-| incumbent ×1 — the reference | — | — | $0.0938 |
-| **incumbent ×1 again — the control** | 152/180 = 84.4% | 26 (14.4%) | $0.0924 |
-| **kimi ×1** | 118/180 = 65.6% | 55 (30.6%) | $0.0216 |
-| kimi ×2 | 135/180 = 75.0% | 42 (23.3%) | $0.0415 |
+The reference is **180 anchored issues**, and the two loss columns below are in different units, so
+neither is the other's complement. *Issues missed* is `180 − reproduced`. *Findings lost* is that
+set with the duplicates taken out: the reference states some findings more than once in a document,
+and `readermissed.mjs` drops a missed issue whose finding the arm caught in a different issue of the
+same document — 7 such for `kimi ×1`, 2 for the control, 3 for `kimi ×2`. Both percentages are over
+the 180-issue denominator, which for the findings column is a mixed rate; the count is the number to
+read.
+
+| | reproduces the 180-issue reference | issues missed | findings lost, dedup'd | $/doc |
+|---|---|---|---|---|
+| incumbent ×1 — the reference | — | — | — | $0.0938 |
+| **incumbent ×1 again — the control** | 152/180 = 84.4% | 28 (15.6%) | 26 (14.4%) | $0.0924 |
+| **kimi ×1** | 118/180 = 65.6% | 62 (34.4%) | 55 (30.6%) | $0.0216 |
+| kimi ×2 | 135/180 = 75.0% | 45 (25.0%) | 42 (23.3%) | $0.0415 |
 
 **The swap's own cost is the paired figure: 34 findings — 18.9% of the reference — that Kimi loses
 and the incumbent's own repeat keeps.** Not "a fifth of the issues", and not 55 − 26 either: the
 control's losses are not a subset of the arm's, so two counts over one denominator do not subtract
 into a paired count. Of the 34, **7 are high severity**, and reading those 7 rather than counting
-them is what decided it — an empty `<h1>`, link text broken mid-word so the accessible name is a
-word fragment, pages of body text with no headings, and **three findings of data tables emitted as
-absolutely-positioned paragraphs with no table element, no headers and no caption**. That last kind
-is exactly what the editor and `tables.ts` exist to act on, so it is not a cosmetic loss.
+them is what decided it. All seven, by kind: an empty `<h1>` (a page-break element carrying both
+`role="doc-pagebreak"` and a heading role); link text broken mid-word, so the accessible name is a
+word fragment; pages of body text with no headings at all; dozens of one-word `<h3>`s on one page
+against the same content as a paragraph in a single table cell on the next; a page of garbled
+repeated body text; and **two findings of data tables emitted as absolutely-positioned paragraphs
+with no table element, no headers and no caption**. Those last three kinds are exactly what the
+editor and `tables.ts` exist to act on, so they are not a cosmetic loss.
 
 **The deciding reason is not the price, though.** A bad `page` extraction moves five counters a
 deployment already records — `pages_verify_failed`, `pages_unreadable`, `reextracts`,
@@ -365,18 +383,30 @@ Per agent, each priced at its own model's rate — the swap is confirmed **insid
 `by_agent[].models` (§1) rather than assumed, with all 165 `page` calls answered by
 `moonshotai.kimi-k2.5` and `feedback` / `reader` / `copy_editor` still on the incumbent:
 
-| agent | unswapped | swapped | | share after |
+| agent | unswapped | swapped | | share of the priced total, after |
 |---|---|---|---|---|
 | `page` | $8.1521 (158 calls) | **$2.6098** (165) | **−68.0%** | 24.4% |
 | `copy_editor` | $6.4118 (28) | **$3.0849** (15) | **−51.9%** | 28.8% |
 | `feedback` | $3.0226 (95) | $2.6125 (94) | −13.6% | 24.4% |
 | `reader` | $1.8086 (33) | **$2.4034** (40) | **+32.9%** | 22.4% |
-| total | $19.3951 | **$10.7106** | −44.8% | 100.0% |
+| total priced by the harness | $19.3951 | **$10.7106** | −44.8% | 100.0% |
 
-**Only about a third of the saving comes from the agent that was swapped**, and the projection this
+**That total is four agents, and the swapped round ran a fifth.** `builder` answered twice on the
+swapped deployment and `mixedcost.mjs` does not price it, so it is in neither column above: about
+$0.04 a call at the incumbent's rate (§4), against nothing at all in the unswapped arm, which filed
+no suggestions. Add it and the round's spend is **≈$10.79, ≈−44.4%** — small money, and named here
+because it is the same defect §0's share test was written to catch. Every `−44.8%` and `$0.1071/page`
+in this document is over the four priced agents; the share column above partitions that subtotal, not
+the round.
+
+**About two thirds of the saving is the agent that was swapped, and a third of it is an agent nobody
+touched.** Of the $8.6845 saved, `page` is $5.5423 (63.8%), the unswapped `copy_editor` is $3.3269
+(38.3%), `feedback` is $0.4101 (4.7%), and `reader` gives $0.5948 back (−6.8%). The projection this
 section used to carry (−25%, and described as a *floor* that the lost prompt cache could only push
-up) was wrong in the generous direction for a reason worth keeping: **a one-agent swap re-prices
-every agent downstream of it.** Kimi's markup is leaner, so the editor's job got smaller — 28 calls
+up) came in **too low, not too high**: the swapped agent's own contribution alone is
+$5.5423/$19.3951 = −28.6%, so the floor held, and the reason it was beaten is worth keeping — **a
+one-agent swap re-prices every agent downstream of it.** Kimi's markup is leaner, so the editor's job
+got smaller — 28 calls
 became 15, and both of the round's 32,000-token output-ceiling truncations disappeared, which is most
 of `copy_editor`'s $3.33. That is luck rather than headroom: the largest surviving editor reply came
 back at **30,909 of 32,000 tokens, 96.6% of the ceiling**
@@ -486,9 +516,11 @@ appear — the reader's second reference column, and the sprint-wide spend total
 - **There is a ceiling and it is about 84%.** The incumbent reader agrees with its own previous
   pass on 84–85% of issues. Every "% of floor" number is against that, not against truth. A raw
   agreement figure quoted without the floor beside it overstates the gap between models.
-- **Every share needs its denominator.** 42.0% is of $19.3951 at `3749f54`. −44.8% is of the whole
-  bill; −56% and −68.0% are of the page agent's own spend. 78% is of an 84% floor, and 18.9% is of a
-  180-finding reference. 10.89% was of $176.53 across 63 rounds. Those are five different
+- **Every share needs its denominator.** 42.0% is of $19.3951 at `3749f54`. −44.8% is of the four
+  agents the bench harness prices, which is ≈−44.4% of the round including `builder` (§5); −56% and
+  −68.0% are of the page agent's own spend. 78% is of an 84% floor, and 18.9% is of a reference of
+  **180 anchored issues** — over which §3's two loss columns are in different units, so neither
+  complements the agreement rate. 10.89% was of $176.53 across 63 rounds. Those are six different
   denominators, and mixing them was the most common way a number went wrong in this sprint.
 - **A share is a ratio, so it moves when any other term moves.** Predicting one agent's share from
   the commits that touched *that agent* is the mistake §6 records: `page`'s share fell while its own
@@ -504,8 +536,10 @@ appear — the reader's second reference column, and the sprint-wide spend total
 ## 8. What would change these answers
 
 - **Whether the applied `page` swap stays is the open question, and it is not a cost question.**
-  −44.8% of the bill against the regional subtotal rows of a statistical report (§5). The revert is
-  the one config line that applied it. Two things would settle it better than another price round: a
+  −44.8% of the priced bill against the regional subtotal rows of a statistical report (§5). The
+  revert is **two** config lines, not one: #312 set `providers.per_agent.page` *and*
+  `providers.bedrock.api: converse`, and undoing only the model leaves every agent on a transport no
+  round has measured for parity (§1, #178). Two things would settle it better than another price round: a
   second post-swap round to put an error bar on `content_missing` 15 → 42 (~$10.70), and a
   prose-heavy corpus, since this one is the hardest possible case for exactly that failure mode.
 - **A page Iris knows it could not fix is indistinguishable, in the delivered document, from one it
@@ -550,8 +584,9 @@ records it keeps. The figures come back identical, but the two files' timestamps
 a round's date off its `ledger.jsonl` (or the chunk directories), never off the summary.
 
 A single arm of the page round is about $0.20 with `--probe`, and a one-page probe against a
-deployment costs more *per page* than a hundred-page round does — $0.2060 against $0.1940 — so a
-probe price is a ceiling, never a quote. A full 100-page round is **$19.40 unswapped, $10.71
+deployment costs more *per page* than a hundred-page round does — $0.2060 for the single cold page of
+`runs-probe-swap312` against `runs-bystep-now`'s $0.1940 — so a probe price is a ceiling, never a
+quote. A full 100-page round is **$19.40 unswapped, $10.71
 swapped**. Every round directory carries `records.jsonl` with the per-row model, sha, token counts and
 price, and the raw model replies are in its `logs/` — which is what makes a paid round regradable
 for free, and what every number above was re-derived from.
