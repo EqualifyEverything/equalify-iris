@@ -280,3 +280,37 @@ test("docs/models.md's recommendation table is exactly the agents a deployment c
       "or forgotten, and an extra one recommends a per_agent key Iris would silently ignore",
   );
 });
+
+// The same table's OTHER column is a partition, and the way it goes wrong is one row being
+// updated from a new round while its neighbours keep the old round's numbers. That has happened
+// twice already in this sprint's reporting: #311 published four shares that summed to 94.6%, and
+// §0 carried a set from one round while §6 predicted where a later round would put them. A share
+// that does not belong to the same denominator as the one beside it is unusable, and the sum is
+// the only free check for it — nothing in the document can tell a reader that 42.0% and 25.0%
+// came from different rounds, but they cannot both be true at once.
+//
+// NOT a check that the figures are current: it passes on any self-consistent set, so it does not
+// substitute for the round names §6 attaches to each. It fails on the realistic edit — one row
+// moved, the rest left standing.
+test("docs/models.md §0's share column is a partition of one round, not a mix of several", () => {
+  const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
+  const section = doc.split(/^## /m).find((s) => s.startsWith("0."));
+  assert.ok(section, "docs/models.md has no `## 0.` summary section any more");
+
+  // Second cell of each row, which is the share. Read as a number only when it looks like a
+  // percentage, so a row that stops quoting one (or the header separator) is skipped rather than
+  // read as zero — a silent 0 would make a broken table sum closer to 100, not further from it.
+  const shares = [...section.matchAll(/^\|[^|]+\|\s*\*{0,2}([\d.]+)%\*{0,2}\s*\|/gm)].map((m) =>
+    Number(m[1]!),
+  );
+  assert.ok(shares.length >= 4, `§0 has ${shares.length} share cells; expected one per agent`);
+  const sum = shares.reduce((a, b) => a + b, 0);
+  // A tenth of a point per row, since each is published rounded to one decimal.
+  assert.ok(
+    Math.abs(sum - 100) <= shares.length * 0.1,
+    `docs/models.md §0's shares sum to ${sum.toFixed(1)}%, not 100% — ${shares.join(" + ")}. ` +
+      `Either a row was updated from a newer round while its neighbours kept the old one, or an ` +
+      `agent is missing from the denominator. Both read to an operator as "this is where the ` +
+      `money is" and neither is.`,
+  );
+});

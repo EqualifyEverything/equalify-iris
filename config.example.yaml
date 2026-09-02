@@ -356,7 +356,8 @@ providers:
       text: us.anthropic.claude-sonnet-4-6
     # WHICH BEDROCK API the calls go out on. `invoke` (the default, and what is left set
     # here by omission) is InvokeModelWithResponseStream carrying an Anthropic Messages
-    # body — every number this project publishes was measured through it. `converse` is
+    # body — the model-selection sprint's per-agent measurements were taken through it,
+    # and the one deployment round taken through `converse` is named below. `converse` is
     # ConverseStream, whose request shape belongs to Bedrock rather than to a model
     # vendor, and which is therefore the only one of the two that can reach a model
     # Anthropic did not make: `default_model` above cannot name a Qwen or a Nova on
@@ -367,12 +368,17 @@ providers:
     # image_limits above first: what Iris publishes about uploads is documented for
     # Claude and guessed for anything else, and boot says which one you are running.
     #
-    # Left off because parity is not yet measured, not because it is doubted (issue
-    # #178). The two send the same prompt, ask for the same cache breakpoints on the same
-    # text, and report the same four token counts under different names — all of which is
-    # tested — but no round has been run on `converse`, and one variable at a time is how
-    # a model comparison stays interpretable. Turn it on to run that round; anything but
-    # `invoke` or `converse` is ignored, with a warning at boot.
+    # Left off HERE because parity between the two is still not measured head-to-head,
+    # not because `converse` is doubted (issue #178). The two send the same prompt, ask
+    # for the same cache breakpoints on the same text, and report the same four token
+    # counts under different names — all of which is tested. What is now known from
+    # running it: the reference deployment has served every agent over `converse` since
+    # 2026-09-02, and a 100-page round through it priced out at $0.1071/page (#324). That
+    # round changed the page model at the same time, so it says `converse` works and says
+    # nothing about parity — one variable at a time is how a model comparison stays
+    # interpretable. **This key is block-wide**: setting it for one non-Claude agent moves
+    # every agent on this provider onto ConverseStream. Anything but `invoke` or
+    # `converse` is ignored, with a warning at boot.
     # api: converse
 
 defaults:
