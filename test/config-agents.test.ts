@@ -280,3 +280,165 @@ test("docs/models.md's recommendation table is exactly the agents a deployment c
       "or forgotten, and an extra one recommends a per_agent key Iris would silently ignore",
   );
 });
+
+// The same table's OTHER column is a partition, and the way it goes wrong is one row being
+// updated from a new round while its neighbours keep the old round's numbers. That has happened
+// twice already in this sprint's reporting: #311 published four shares that summed to 94.6%, and
+// §0 carried a set from one round while §6 predicted where a later round would put them. A share
+// that does not belong to the same denominator as the one beside it is unusable, and the sum is
+// the only free check for it — nothing in the document can tell a reader that 42.0% and 25.0%
+// came from different rounds, but they cannot both be true at once.
+//
+// NOT a check that the figures are current: it passes on any self-consistent set, so it does not
+// substitute for the round names §6 attaches to each. It fails on the realistic edit — one row
+// moved, the rest left standing.
+test("docs/models.md §0's share column is a partition of one round, not a mix of several", () => {
+  const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
+  const section = doc.split(/^## /m).find((s) => s.startsWith("0."));
+  assert.ok(section, "docs/models.md has no `## 0.` summary section any more");
+
+  // Second cell of each row, which is the share. Read as a number only when it looks like a
+  // percentage, so a row that stops quoting one (or the header separator) is skipped rather than
+  // read as zero — a silent 0 would make a broken table sum closer to 100, not further from it.
+  const shares = [...section.matchAll(/^\|[^|]+\|\s*\*{0,2}([\d.]+)%\*{0,2}\s*\|/gm)].map((m) =>
+    Number(m[1]!),
+  );
+  assert.ok(shares.length >= 4, `§0 has ${shares.length} share cells; expected one per agent`);
+  const sum = shares.reduce((a, b) => a + b, 0);
+  // A tenth of a point per row, since each is published rounded to one decimal.
+  assert.ok(
+    Math.abs(sum - 100) <= shares.length * 0.1,
+    `docs/models.md §0's shares sum to ${sum.toFixed(1)}%, not 100% — ${shares.join(" + ")}. ` +
+      `Either a row was updated from a newer round while its neighbours kept the old one, or an ` +
+      `agent is missing from the denominator. Both read to an operator as "this is where the ` +
+      `money is" and neither is.`,
+  );
+});
+
+// §5's per-agent table is the OTHER partition in this document, and it needs the same guard §0 has.
+//
+// What it does NOT catch, said plainly because it was proposed as the fix for exactly this: the
+// version reviewed on PR #327 left `builder` out of §5 altogether, and no arithmetic check could
+// have found that. The four rows summed to the stated total to the cent and the shares summed to
+// 100.0%, because the total was ITSELF the four-agent subtotal the harness prints — an agent absent
+// from the rows *and* the denominator leaves a table that is internally perfect and mis-labelled.
+// The only fix for that shape is naming the denominator in the prose, which §5 now does. A test that
+// passes on the defect it was written for is worse than no test, so this one claims a different job.
+//
+// The job it does have is the realistic later edit: a fifth row added while the total stands, a total
+// updated while the rows stand, or one column re-run and the other left stale. It also pins the
+// arithmetic the section's own headline is read off — the reviewed draft summarised this table as
+// "only about a third of the saving comes from the agent that was swapped" when its two money
+// columns give 63.8%, and a table that adds up cannot be summarised backwards without one of the two
+// being wrong on its face.
+//
+// Both money columns, because they fail differently: the SWAPPED column is the one an agent goes
+// missing from (a new agent appears in a later round and nobody adds a row), and the UNSWAPPED column
+// is the one that goes stale (a re-run moves the baseline and only the interesting half is updated).
+test("docs/models.md §5's per-agent rows sum to the total row they are published under", () => {
+  const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
+  const section = doc.split(/^## /m).find((s) => s.startsWith("5."));
+  assert.ok(section, "docs/models.md has no `## 5.` section any more");
+
+  // Cells with the bold markers stripped, since emphasis lands on whichever figures moved.
+  const rows = section
+    .split("\n")
+    .filter((l) => l.startsWith("|"))
+    .map((l) =>
+      l
+        .replace(/\*\*/g, "")
+        .split("|")
+        .slice(1, -1)
+        .map((c) => c.trim()),
+    );
+  const money = (cell: string | undefined) => {
+    const m = cell?.match(/\$([\d,]+\.\d+)/);
+    return m ? Number(m[1]!.replace(/,/g, "")) : undefined;
+  };
+
+  // Anchored on the total row and walked BACK to its own header separator, rather than picking rows
+  // that look like agents: §5 carries a second table of Iris's verifier counters whose first cell is
+  // also a backticked snake_case name (`content_missing`, `editor_truncated`), and a name-shaped
+  // filter swept those in. Structural membership also means "a row with no dollar figure" is a real
+  // failure rather than a row this test declined to recognise.
+  const iTotal = rows.findIndex((r) => /^total\b/.test(r[0] ?? ""));
+  assert.ok(iTotal > 0, "docs/models.md §5's per-agent table has no `total` row to check against");
+  const total = rows[iTotal]!;
+  const agents: string[][] = [];
+  for (let i = iTotal - 1; i >= 0 && !/^-+$/.test(rows[i]![0] ?? ""); i--) agents.unshift(rows[i]!);
+  assert.ok(agents.length >= 4, `§5 lists ${agents.length} agent rows; expected one per agent`);
+
+  for (const [col, label] of [
+    [1, "unswapped"],
+    [2, "swapped"],
+  ] as const) {
+    const parts = agents.map((r) => money(r[col]));
+    assert.ok(
+      parts.every((p) => p !== undefined),
+      `§5's ${label} column has a row with no dollar figure in it: ` +
+        `${agents.map((r) => `${r[0]}=${r[col]}`).join(", ")}`,
+    );
+    const sum = parts.reduce((a, b) => a! + b!, 0)!;
+    const stated = money(total[col]);
+    assert.ok(stated !== undefined, `§5's total row has no ${label} figure`);
+    // Half a cent per row: the rows are published to four decimals, the total to four.
+    assert.ok(
+      Math.abs(sum - stated) <= agents.length * 0.005,
+      `docs/models.md §5's ${label} agent rows sum to $${sum.toFixed(4)}, but the total row says ` +
+        `$${stated.toFixed(4)}. An agent that ran and is not in this table reads as an agent that ` +
+        `cost nothing, and the share column beside it then partitions a subtotal while the prose ` +
+        `calls it the round.`,
+    );
+  }
+
+  // And the share column, which is only meaningful over the total the rows above actually sum to.
+  const shares = agents.map((r) => Number(r[r.length - 1]!.match(/([\d.]+)%/)?.[1]));
+  assert.ok(
+    shares.every((s) => Number.isFinite(s)),
+    `§5's last column is not a share on every agent row: ${agents.map((r) => r[r.length - 1]).join(" | ")}`,
+  );
+  const shareSum = shares.reduce((a, b) => a + b, 0);
+  assert.ok(
+    Math.abs(shareSum - 100) <= shares.length * 0.1,
+    `docs/models.md §5's post-swap shares sum to ${shareSum.toFixed(1)}%, not 100% — ` +
+      `${shares.join(" + ")}.`,
+  );
+
+  // And the figures the section's HEADLINE is actually read off, which is the gap the two sums above
+  // leave open: each agent's share of the SAVING is a difference of the two money columns, so an edit
+  // that moves the table and leaves this sentence standing reproduces the reviewed defect exactly —
+  // both columns would still sum, the shares would still be 100.0%, and everything above would pass
+  // while the prose said "a third" of a saving that is two thirds. Recomputed from the same rows
+  // rather than pinned as literals, so it is the relationship that is asserted and not the numbers.
+  const totalDelta = money(total[1])! - money(total[2])!;
+  const attributed = [
+    ...section.matchAll(/`([a-z_]+)`\s+(?:is|gives)\s+\$([\d.]+)(?:\s+back)?\s+\((−?[\d.]+)%\)/g),
+  ];
+  assert.equal(
+    attributed.length,
+    agents.length,
+    `§5 attributes the saving to ${attributed.length} agents but its table has ${agents.length} ` +
+      `rows — every row's contribution to the saving has to be stated, including a negative one, or ` +
+      `the sentence adds to less than the total it claims to break down`,
+  );
+  for (const [, name, dollars, percent] of attributed) {
+    const row = agents.find((r) => r[0] === `\`${name}\``);
+    assert.ok(row, `§5 attributes part of the saving to \`${name}\`, which has no row in its table`);
+    const delta = money(row[1])! - money(row[2])!;
+    // Written unsigned with "back" where an agent got dearer, so compare magnitudes here and let the
+    // percentage carry the sign.
+    assert.ok(
+      Math.abs(Math.abs(delta) - Number(dollars)) <= 0.0001,
+      `§5 says \`${name}\` accounts for $${dollars} of the saving, but its own row is ` +
+        `${row[1]} → ${row[2]}, a difference of $${Math.abs(delta).toFixed(4)}`,
+    );
+    const stated = Number(percent.replace("−", "-"));
+    const actual = (delta / totalDelta) * 100;
+    assert.ok(
+      Math.abs(actual - stated) <= 0.1,
+      `§5 says \`${name}\` is ${percent}% of the saving; its own columns give ` +
+        `${actual.toFixed(1)}% ($${delta.toFixed(4)} of $${totalDelta.toFixed(4)}). This is the ` +
+        `sentence a reader takes the keep-or-revert decision from.`,
+    );
+  }
+});
