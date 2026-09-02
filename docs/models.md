@@ -43,8 +43,8 @@ on `moonshotai.kimi-k2.5` since 2026-09-02.
 | `copy_editor` | **33.1%** | keep. The wins here were code, not a model — and it is now the largest line that has never had a model round (§8) |
 | `feedback` | 15.6% | keep. It is the oracle every other number is scored against |
 | `reader` | 9.3% | **declined** (#313) — 78% of the incumbent's own agreement floor at −77%, and §3 says what the 22% is |
-| `builder` | 0% | not measured. Its zero and the specialist's are the same zero (§4) |
-| specialists | 0% | no change, and no round: 0 calls on a corpus with no charts in it |
+| `builder` | 0% | 0 in this round, **not zero any more**: it ran twice on the swapped deployment, at about $0.04 a call (§4) |
+| specialists | 0% | still 0 calls, and §4 says why that is a fact about `agents_dir` rather than about the corpus |
 
 Shares are of **$19.3951 for 100 pages ($0.1940/page), `runs-bystep-now` at `3749f54`** — the
 unswapped deployment, so they are the shares the two decisions above were taken against. They
@@ -121,9 +121,9 @@ ids honestly, and that is the one case where two ids mean a change of config rat
 by capability. A fresh document after the restart cannot be read either way. The
 `page` entry moves all three of the call sites in the table above, and the round in §2 covers two
 of them; the specialist merge is a `text` call and no round's corpus has produced a specialist call
-at all. **That third site is therefore live on the reference deployment and unmeasured**, and it
-cannot be read back from `/v1/quality`, which carries no per-step breakdown — `by_step` is per-session
-diagnostics only (docs/API.md §7b).
+at all. **That third site is live on the reference deployment and still unfired**, for the structural
+reason in §4 rather than for want of a corpus. Note that `/v1/quality` cannot answer this — it
+carries no per-step breakdown, so `by_step` has to be read per session (docs/API.md §7b).
 
 ## 2. `page` — the largest line on the bill
 
@@ -325,13 +325,31 @@ genuine contract violations, two of which have since been fixed in Iris. A cheap
 just cost less — it moves every measurement, including the ones used to justify the two swaps
 above.
 
-**`builder` (0%) and specialists (0%) — no round, and one zero, not two.** `runContribution` is
-called with the page pass's `suggested_agent` list (`src/pipeline/orchestrator.ts`), and the
-`builder` call is made per suggestion inside it, after a suggestion naming a content type the page
-pass already covers has been declined. So on a corpus where no page names a specialist, both rows
-read 0 from a **single** cause. The 100-page round is one US appropriations report — text, tables,
-footnotes, **no charts** — which is exactly the corpus on which that gate never opens. Neither
-zero is evidence about a model.
+**`builder` (0% in this round) and specialists (0%) — one gate, two different reasons, and the
+`builder` zero has since stopped being zero.** `runContribution` is called with the page pass's
+`suggested_agent` list (`src/pipeline/orchestrator.ts`), and the `builder` call is made per
+suggestion inside it, after a suggestion naming a content type the page pass already covers has been
+declined. Both rows read 0 on every round of this sprint, and the reason given here used to be "a
+corpus with no charts". **That reason was wrong, and the swapped deployment showed it:**
+
+- The **swapped** page agent filed **two** suggestions from that round's pages —
+  [#322](https://github.com/EqualifyEverything/equalify-iris/issues/322) (`censusDataTable`, from
+  `p51-75-p7`) and [#323](https://github.com/EqualifyEverything/equalify-iris/issues/323)
+  (`mapChart`, a choropleth, from `p76-100-p20`). **So the corpus does contain a chart**, and the
+  gate does open on it. Both sessions' `by_agent` reads `page: moonshotai.kimi-k2.5`, which is how
+  they are known to be post-swap sessions rather than inferred from the clock.
+- `by_agent.builder` on those sessions: **1 call each, 2,013 input and 2,225 output tokens, on the
+  incumbent model** — about **$0.04 a suggestion**, and a `contribute` step in `by_step` where no
+  earlier round had one. Small money, but it is no longer an unmeasured agent.
+- The **unswapped** arm of the *same* corpus filed none. One round per arm, so that is a signal and
+  not a rate — but it is a behavioural difference the cost table cannot show, and it means a swap
+  can add an agent to the bill as well as re-price the ones already on it.
+- **Specialists are still 0, for a reason that has nothing to do with the corpus.** A suggestion
+  produces a `builder` draft and a GitHub issue; it does not produce a specialist call, because
+  resolution is by file stem in `agents_dir` and `chartDataAgent` is the only specialist shipped. A
+  page asking for `mapChart` finds nothing to call. That zero holds until a specialist file is
+  merged, and it is why `specialist_merge` — a `page` call site, so one the swap moved — has never
+  fired on any round: `by_step` on both post-swap sessions carries `contribute` and no `specialist`.
 
 ## 5. What the applied swap did to the bill, and what it cost
 
@@ -414,7 +432,8 @@ share column above), so the next win has to come from asking an agent to do less
 | cost shares (44.5 / 25.0 / 18.0 / 12.6) | `runs-bystep-100` | `158e3d9` (derived, below) | **superseded** by the row above; see the drift note |
 | $0.1786/page, $17.86/100 pages | `runs-bystep-100` | `158e3d9` | **no. Superseded** — it was never a price to quote forward |
 | "10.89% of spend bought nothing" | 63 rounds, mixed | pre-#300 | **no. Superseded — do not quote it forward** |
-| specialists = 0 calls | `runs-bystep-100` | `158e3d9` | yes, **on a corpus with no charts** |
+| specialists = 0 calls | every round | — | yes, and **the stated reason was wrong** — see §4 |
+| `builder` = 0 calls | every round before `runs-postswap-312` | — | **no.** 2 calls on the swapped deployment (§4) |
 
 **The drift in the older shares was predicted and the prediction was wrong, which is worth keeping
 rather than deleting.** Those shares predate nine merged changes (#297, #298, #300, #302, #303,
@@ -477,9 +496,10 @@ appear — the reader's second reference column, and the sprint-wide spend total
 - **The oracle is a lower bound, and it is the incumbent.** A flag on a page a human would pass is
   a cost, not an error; the judge was never scored against itself.
 - **The corpora are small and named.** Page agent: 11 hand-picked hard pages (dense budget tables,
-  dot-leader contents, statutory prose, two pure scans). Reader: 20 stitched documents. Cost
-  shares: one 100-page US appropriations report with no charts. Nothing here is a claim about
-  arbitrary PDFs.
+  dot-leader contents, statutory prose, two pure scans). Reader: 20 stitched documents. Cost shares
+  and the −44.8%: one 100-page US government statistical report — hierarchical tables of states
+  grouped into regions, and at least one choropleth map (§4). Nothing here is a claim about arbitrary
+  PDFs, and §5's content finding is on the hardest possible corpus for exactly that failure mode.
 
 ## 8. What would change these answers
 
