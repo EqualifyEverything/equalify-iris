@@ -474,16 +474,19 @@ export function visionModelWarning(cfg: IrisConfig): string | null {
       ),
     ];
     if (shared.length === 0) {
-      // `image_limits` is one setting for the block, so two unplaceable models on it means
-      // one number standing for two documentations, and it silences the warning for both.
-      // Saying so is the same care the declining sentence gets: an instruction that cannot
-      // be followed as written is what made #320 a defect, and "the numbers documented for
-      // A, B" reads as though there were a key per model.
+      // `image_limits` is one setting for the block, so several unplaceable models on it mean
+      // one number standing for several documentations, and it silences the warning for all
+      // of them. Saying so is the same care the declining sentence gets: an instruction that
+      // cannot be followed as written is what made #320 a defect, and "the numbers documented
+      // for A, B" reads as though there were a key per model. "All of them" and not "both"
+      // because `IMAGE_AGENTS` is four agents, so one block can serve more than two.
+      const last = unknown[unknown.length - 1];
       remedy.push(
         unknown.length > 1
           ? `Set providers.${provider}.image_limits to the smallest of the numbers documented ` +
-              `for ${unknown.join(" and ")} — it is one setting for the whole block, so it has ` +
-              `to hold for both, and setting it stops this warning for both.`
+              `for ${unknown.slice(0, -1).join(", ")} and ${last} — it is one setting for the ` +
+              `whole block, so it has to hold for all of them, and setting it stops this ` +
+              `warning for all of them.`
           : `Set providers.${provider}.image_limits to the numbers documented for ${unknown[0]}.`,
       );
     } else {

@@ -267,6 +267,9 @@ const QWEN_VL = "qwen.qwen3-vl-235b-a22b-instruct-v1:0";
 // A second vision model this build cannot place, on a DIFFERENT provider block, so the boot
 // warning can be asked about two of them at once.
 const OTHER_VL = "mistral/pixtral-large-2502";
+// A third, so a single block can hold more unplaceable models than a sentence saying "both"
+// can describe. This is the model the UIC deployment's `page` agent runs on since #312.
+const KIMI = "moonshotai.kimi-k2.5";
 
 test("a model id decides whether the limits are documented or assumed", () => {
   // Both spellings and the legacy ordering: the question is the same one modelGeneration
@@ -537,7 +540,7 @@ test("each block gets its own sentence, naming its own model", () => {
   assert.doesNotMatch(warning, /this model's documentation/);
 });
 
-test("one key for two unplaceable models says the number has to hold for both", () => {
+test("one key for several unplaceable models says the number has to hold for all", () => {
   // Both vision models on the one block are unknown, so the block is foreign-only and the
   // instruction is right — but there is a single `image_limits` key and two documentations
   // to read it from. "the numbers documented for A, B" reads as though there were a key per
@@ -557,6 +560,23 @@ test("one key for two unplaceable models says the number has to hold for both", 
   assert.match(warning, /one setting for the whole block/);
   // Still one block, so still one sentence — the plural is inside it, not two of them.
   assert.equal(warning.match(/Set providers\.bedrock\.image_limits/g)?.length, 1);
+
+  // THREE unplaceable models on the block, which IMAGE_AGENTS being four agents allows. The
+  // sentence said "both" while the model list grew, so it was quotably false on exactly the
+  // deployment reading it — the defect this PR is about. The list is comma-joined too.
+  const three = cfg({
+    default: "bedrock",
+    bedrock: { region: "us-east-1", default_model: QWEN_VL, api: "converse" },
+    per_agent: { page: { model: OTHER_VL }, feedback: { model: KIMI } },
+  });
+  const wide = String(visionModelWarning(three));
+  assert.match(wide, /to hold for all of them/);
+  assert.doesNotMatch(wide, /for both/);
+  // Read the list itself out of the sentence rather than pattern-matching the whole warning,
+  // which has its own "and"s in the prose around it. Three models, comma-joined, one "and".
+  const list = wide.match(/documented for (.+?) — it is one setting/)?.[1] ?? "";
+  assert.deepEqual([...list.matchAll(/ and /g)].length, 1);
+  for (const model of [QWEN_VL, OTHER_VL, KIMI]) assert.ok(list.includes(model), model);
 
   // And a single unplaceable model keeps the plain instruction, with no clause about a
   // second documentation to reconcile it with.
