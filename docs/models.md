@@ -7,8 +7,9 @@ it cost" — the outcome of the model-selection sprint tracked in
 [#246](https://github.com/EqualifyEverything/equalify-iris/issues/246) and reported in
 [#311](https://github.com/EqualifyEverything/equalify-iris/issues/311).
 
-Two of the five agents had a cheaper model worth putting on them. **One was applied and one was
-declined, and the two were never the same kind of decision.**
+Three of the five agents have a cheaper model worth putting on them, and no two of the three are at
+the same stage. **One was applied, one was declined, and one is recommended and waiting on a
+decision** — and none of the three was the same kind of decision.
 
 - **`page` is swapped and live.** `moonshotai.kimi-k2.5` has served the reference deployment's page
   agent since 2026-09-02
@@ -24,10 +25,19 @@ declined, and the two were never the same kind of decision.**
   own agreement floor for 77% less money — and the decision went the other way once the loss was
   broken out by kind
   ([#313](https://github.com/EqualifyEverything/equalify-iris/issues/313), §3).
+- **`copy_editor` is recommended for a swap and nothing has been applied.** `openai.gpt-5.6-luna`
+  costs 9.5% of the incumbent per document and is ahead on *both* quality halves — **21 of 23
+  provable defect instances against 12** on the one measure whose denominator is the same for both,
+  corroborated by obedience to the issue list (5 of 6 documents against 3 of 10) — worth about
+  **−26.1% of the bill §5 prices**
+  ([#329](https://github.com/EqualifyEverything/equalify-iris/issues/329), §4). That result only
+  appeared once the benchmark attached the page images Iris attaches; the round that withheld them
+  ranked the two the other way round, which is §7's sixth limit.
 
-Read §2 and §3 before revisiting either. Two agents were left alone for a measured reason worth
-reading before benchmarking them again, and one has never been measured at all — for a reason that
-is also worth knowing (§4).
+Read §2, §3 and §4 before revisiting any of them. Of the two agents not on that list, `feedback` is
+kept for a measured reason, and `builder` has made two model calls in the whole sprint — both of them
+on the swapped deployment, which is why §0's zero for it is a zero with a date on it rather than a
+property of the agent (§4).
 
 **Every figure here names the benchmark round it came from**, because some of them are stale by
 design and several are superseded outright — §6 says which. **"The incumbent" below means the
@@ -44,14 +54,16 @@ resolve.
 | agent | share of the bill, unswapped | status |
 |---|---|---|
 | `page` | **42.0%** | **swapped and live since 2026-09-02** (#312) — −44.8% of the priced bill measured on 100 pages, at a named content cost: `content_missing` on 42 pages against 15 (§5) |
-| `copy_editor` | **33.1%** | keep. The wins here were code, not a model — and it is now the largest line that has never had a model round (§8) |
-| `feedback` | 15.6% | keep. It is the oracle every other number is scored against |
+| `copy_editor` | **33.1%** | **swap recommended, not yet applied** (#329) — `openai.gpt-5.6-luna` at 9.5% of the cost and *ahead* on both quality halves, once the page images the agent actually receives are attached (§4) |
+| `feedback` | 15.6% | keep — and for a priced reason, not the circular one this row used to give (#330): 57/57 against the cheapest credible judge's 53/57 on injected damage, bought for about $1.7–1.9 per 100 pages (§4) |
 | `reader` | 9.3% | **declined** (#313) — 78% of the incumbent's own agreement floor at −77%, and §3 says what the 22% is |
 | `builder` | 0% | 0 in this round, **not zero any more**: it ran twice on the swapped deployment, at about $0.04 a call (§4) |
 | specialists | 0% | still 0 calls, and §4 says why that is a fact about `agents_dir` rather than about the corpus |
 
 Shares are of **$19.3951 for 100 pages ($0.1940/page), `runs-bystep-now` at `3749f54`** — the
-unswapped deployment, so they are the shares the two decisions above were taken against. They
+unswapped deployment, so they are the shares the two decisions **already taken** — `page` and
+`reader` — were weighed against. The `copy_editor` recommendation is priced on a different round
+(`runs-postswap-312`, §4), so its −26.1% is not a share of this column and does not belong in it. They
 partition that round's priced spend and sum to 100.0%. They are **shares, not prices**, and the
 swap has since moved them: §5 has the post-swap partition, in which no agent is above 29%.
 
@@ -324,24 +336,128 @@ the *other* pass's issue set instead (floor 148/170 = 87.1%), the four Kimi and 
 haiku's rows are absent from that second artifact as it now stands, though its two passes are both
 in the round's records and priced.
 
-## 4. The three keeps
+## 4. One swap recommended, one keep, and two zeros
 
-**`copy_editor` (33.1%) — keep.** Every win on this agent this sprint came from changing what it
-is asked to do, not who does it: table joins moved into code
+**`copy_editor` (33.1%) — a swap to `openai.gpt-5.6-luna` is recommended and has not been applied,
+and this row said "keep" for as long as the benchmark withheld an input the agent gets in
+production.** Every win on this agent up to that point came from changing what it is asked to do,
+not who does it: table joins moved into code
 ([#278](https://github.com/EqualifyEverything/equalify-iris/issues/278) — 62% of split tables
 joined at $0, 0 refused by Iris's own `verifyJoin`, with the measured caveat that the code path
 keeps the first half's header and one joined document read "19592"); the editor patches blocks
 instead of retyping the document (#277, #258 — 22%, after the finding that 44% of documents could
 not fit the reply at all); and a truncated reply's completed blocks are now applied instead of
-thrown away (#300). No cheaper editor has been benched as *better*, and this agent's share is
-larger than the sprint's own report had it, so it is the obvious next place to look — see §8.
+thrown away (#300).
 
-**`feedback` (15.6%) — keep, and treat a swap here as a change to the instrument.** This is the
-judge behind every quality number in this document, in `/v1/quality`, and in Iris's own review
-loop. Its rejections are mostly real: of 33 rejections of *undamaged* control documents, 26 were
-genuine contract violations, two of which have since been fixed in Iris. A cheaper judge does not
-just cost less — it moves every measurement, including the ones used to justify the two swaps
-above.
+**Two rounds have now run, and the second reversed the first.** `runs-editor-1` (2026-08-30,
+$3.58, seven models, 20 documents) sent the editor the document and the issue list and **no page
+images**, and could not separate its finalists. `runs-editor-2`
+([#329](https://github.com/EqualifyEverything/equalify-iris/issues/329) — 2026-09-02, $2.6059,
+iris `2566c8b`, block contract, 40 calls, 5–11 real page renders per call in assembly order, capped
+at Iris's own 12) attached them and separated the finalists in the opposite direction. On the two
+measures taken on documents that carry issues — which is every document Iris sends this agent:
+
+| with page images attached | resolved, of 23 provable defect instances | edits confined to blocks an issue named | $/doc on the 15 documents Iris feeds the editor |
+|---|---|---|---|
+| **incumbent** `us.anthropic.claude-sonnet-4-6` | **12 of 23** (22 without images) | 3 of 10 — **30%** | $0.1172 |
+| **`openai.gpt-5.6-luna`** | **21 of 23** (16 without images) | 5 of 6 — **83%** | **$0.0111 — 9.5%** |
+
+**The capability column is the one to weigh, because it is the only one of the three whose
+denominator is the same for both rows.** 23 provable instances, same corpus, same grader, one
+number each. The confinement column's denominator is **set by the subject** — a model that declines a
+document has no edits to be confined, so Luna's obedience is scored over 6 documents and the
+incumbent's over 10 — and §4's own verifier section rejects exactly that shape for
+`heading_flattened`. The gap is wide enough that the direction is not in doubt; the 83%-against-30%
+*ratio* is not a like-for-like comparison and should not be quoted as one.
+
+**The incumbent gets worse when it is shown the page**, 22 → 12, and the mechanism is legible in
+the replies: it spends edits rewriting blocks no issue named and does not reach the block that held
+the defect. It is doing something defensible — reading the page and reporting what it sees — and
+this step's contract does not ask for it. The issue list is what a Reader raised, and an edit
+outside it is unrequested by definition.
+
+Carried to the shipped deployment, where `copy_editor` is $3.0849 of the **$10.7106 §5 prices for
+four agents**: **$3.0849 → ≈$0.29, so $10.7106 → ≈$7.92 and $0.1071 → ≈$0.0792/page — a saving of
+$2.79 per 100 pages, −26.1% of the priced bill and ≈−25.9% of the round including `builder`
+(≈$10.79).** Both are quoted because they are different denominators and this document has already
+published one as the other once (§5, §7). That is the largest single move left, and unlike the `page`
+swap it carries no quality debit: it is a credit on both halves. What it does *not* license is a
+prediction of what `copy_editor`'s share becomes — a share is a ratio, the other agents' dollars are
+unchanged, and the denominator moves (§7).
+
+**Three things the round does not settle, and one it hands to the pipeline.**
+
+- **The loudest number in #329 is off-distribution.** Luna declines 8 of 8 clean documents against
+  the incumbent's 1 — a striking result on an input Iris does not produce, because
+  `src/pipeline/review.ts` breaks out of the loop when the Reader raises nothing rather than handing
+  an editor an empty issue list. Read it as a clean demonstration of a mechanism, never as a rate.
+  Confinement, in the table above, is the on-distribution form of the same question.
+- **One document carries the capability gap.** `amazon.nova-2-lite-v1_0` is 8 of the 23 instances
+  and accounts for −8 of the incumbent's −10 and +6 of Luna's +5. The *direction* is corroborated
+  by confinement and by the edit counts on other documents; the *size* does not survive dropping it.
+- **Luna's rate is substituted from us-gov-west-1** (`not sold in us-east-1`), and its input side
+  gets no prompt-cache discount at all, because `cacheableSystemPrompt` is false for a non-Claude
+  id. The quality result does not depend on the price; the −26.1% does. The free check still
+  outstanding is the deployed editor's own cache-read share: if the incumbent is cache-heavy there,
+  its real $/doc is under $0.1172 and −26.1% is optimistic.
+- **The incumbent demoted five real headings on a document nothing had flagged, and nothing gated
+  it** — `<h2>Standby Pay.</h2>` → `<p><strong>…</strong></p>` with `word_delta: 0` and the prose
+  byte-identical in length, on a stated reason that is false (`li`'s content model is flow content,
+  so a heading in a list item is valid HTML). `navigation_lost: {headings: 5}` was logged and read
+  by nobody. That is [#331](https://github.com/EqualifyEverything/equalify-iris/issues/331) and it
+  is deliberately **not** part of this recommendation: the guard is worth having whichever model
+  ships, and a guard that only matters for the model you are replacing is the one that never gets
+  written.
+
+**`feedback` (15.6%) — keep, and the reason this section used to give was not a reason.** It read
+"treat a swap here as a change to the instrument", which is an argument for measuring carefully
+rather than evidence about the choice — being the oracle is a *consequence* of the choice, so it
+cannot justify it. The measurement that escapes the circle does not use the incumbent as its
+reference at all: **inject a known defect and ask each candidate whether it sees it**, where ground
+truth is the injection. `runs-verifier-1`
+([#330](https://github.com/EqualifyEverything/equalify-iris/issues/330) — 2026-08-30, **645 verify
+calls, $6.4739**, iris `da78e0b`, five models, 11 pages, five defect classes, three repeats each,
+plus three undamaged controls per page) did exactly that, driven through Iris's own
+`verifyAgentOutput` with one page image and the page agent's whole contract per call.
+
+Two of the five classes have to come out before the headline means anything, and both exclusions
+cut against the incumbent's case rather than for it. `alt_gutted` is no longer a model's job —
+#290/#291 shipped `src/pipeline/alt.ts`, a closed word list that catches `alt="image"` on every page
+at $0 — and it was the class the incumbent was *weakest* at, so removing it flatters the incumbent
+(97.1% against Luna's 87.7%). `heading_flattened` is not comparable across models, because the
+*undecidable* count is itself a model behaviour: from the same 33 draws the incumbent's denominator
+is 12 and Luna's is 24, and a row whose denominator is set by the subject cannot rank subjects.
+
+On the three classes with identical, complete denominators:
+
+| verifier | `digits_changed` + `para_deleted` + `row_deleted` | contradicts itself on identical HTML | $/call |
+|---|---|---|---|
+| **incumbent** `us.anthropic.claude-sonnet-4-6` | **57/57 — no misses** | **1/25 = 4%** | $0.0207 |
+| `openai.gpt-5.6-luna` | 53/57 | 3/29 = 10% | $0.0073 |
+| `anthropic.claude-haiku-4-5` | 47/57 | 7/26 = 27% | $0.0068 |
+| `amazon.nova-2-lite-v1:0` | 18/57 | 9/31 = 29% | $0.0025 |
+
+The incumbent misses nothing on a changed number, a dropped paragraph or a dropped table row. The
+four Luna misses include **3 of 27 changed numbers** — the defect class least likely to be caught
+downstream, because the page still looks right, in a pipeline whose promise is fidelity. **The price
+of keeping the incumbent is $1.65–$1.90 per 100 pages, −15.5% to −17.8% of the whole bill**, from
+three independent derivations that agree ($0.65–$0.90 for a Luna verify line against the
+incumbent's $2.5499 over 90 calls); the most expensive derivation is quoted, and the decision does
+not turn on which one you take. `amazon.nova-2-lite` is not a cheap verifier on any reading — it
+passes 25 of 33 undamaged pages and finds 23.7% of injected damage — and #291's word list now does
+more for $0.
+
+**A cheap screen escalating to the incumbent was priced and declined.** The verifier rejects 65 of
+the 90 pages it judges, so Luna on all 90 plus the incumbent on ~72% of them is $0.90 + $1.84 =
+**$2.74 against $2.55 for the incumbent alone** — more expensive, and it still ships Luna's misses,
+because a defect the screen does not flag is never escalated. A triage tier can beat its cheap tier
+on cost but never on detection; the same shape lost in #317.
+
+Its rejections are also mostly real: of 33 rejections of *undamaged* control documents, 26 were
+genuine contract violations, two of which have since been fixed in Iris. **And if the verify line
+has to come down, the lever is the number of calls, not the model.** It is one full vision call per
+non-blank page with 44.1% of the line in output prose; #294 already took 9% out by not verifying
+blank versos. That direction has no detection cost and has not been benched.
 
 **`builder` (0% in this round) and specialists (0%) — one gate, two different reasons, and the
 `builder` zero has since stopped being zero.** `runContribution` is called with the page pass's
@@ -459,6 +575,9 @@ share column above), so the next win has to come from asking an agent to do less
 | cost shares (42.0 / 33.1 / 15.6 / 9.3) | `runs-bystep-now` | `3749f54`, recorded | **yes**, for the unswapped pipeline |
 | $0.1940/page, $19.3951/100 pages | `runs-bystep-now` | `3749f54` | yes, unswapped — and superseded in practice by the row below |
 | $0.1071/page, −44.8%, the quality deltas | `runs-postswap-312` | **`2566c8b`**, from the deploy log, not the round | **yes** — one round per arm, §5 says what that does and does not support |
+| editor capability, confinement, $/doc | `runs-editor-2` | `2566c8b`, recorded in the round | **yes** — one arm per model, and §4 names the one document that carries the capability size |
+| the editor round that could not separate its finalists | `runs-editor-1` | graded at `917bb38` | **no. Superseded** — it sent the editor no page images, so it measured a different agent (§7) |
+| verifier detection, self-contradiction, $/call | `runs-verifier-1` | `da78e0b`, recorded | **yes** for the injected-damage columns. The *undamaged-control* column is measured against a superseded `agents/page.md` and would move on a re-run |
 | cost shares (44.5 / 25.0 / 18.0 / 12.6) | `runs-bystep-100` | `158e3d9` (derived, below) | **superseded** by the row above; see the drift note |
 | $0.1786/page, $17.86/100 pages | `runs-bystep-100` | `158e3d9` | **no. Superseded** — it was never a price to quote forward |
 | "10.89% of spend bought nothing" | 63 rounds, mixed | pre-#300 | **no. Superseded — do not quote it forward** |
@@ -523,7 +642,24 @@ column at its stated reference, both rounds' shas and totals, and the $/doc of e
 the two-pass sums. Two things in the sprint report were not re-derived and are marked where they
 appear — the reader's second reference column, and the sprint-wide spend totals behind the 10.89%.
 
-## 7. Five limits worth knowing before re-benchmarking
+**§4's editor and verifier figures are the exception to that, and it is worth being exact about
+what they rest on.** They were re-derived from `runs-editor-2` and `runs-verifier-1` by the seat
+that ran them, not independently by the seat that wrote this section. Both rounds persist every
+raw model reply, so both regrade for **$0** — the commands are in §9 — and each of the four
+statistics that decides something (capability 21-vs-12, confinement 83%-vs-30%, 57/57-vs-53/57,
+4%-vs-10%) comes with a stated denominator and a named exclusion. That is a weaker link than a
+figure this document derived twice, in the same way §6's deploy-log sha is weaker than a recorded
+`iris_sha`, and it is recorded here rather than smoothed over.
+
+**Both rounds were also unpublished for days while this document asserted they did not exist**, and
+that is the one class of error nothing in this repo can catch. Every other figure here is checked by
+re-reading the round it names; a claim about the *absence* of a round names no round, so there is
+nothing to check it against, and the table above lists only rounds that produced published figures —
+so an unreported round is invisible in it by construction. When auditing this document, sort its
+claims into ones that cite a source and ones that assert a negative. The negatives are the unaudited
+set.
+
+## 7. Six limits worth knowing before re-benchmarking
 
 - **There is a ceiling and it is about 84%.** The incumbent reader agrees with its own previous
   pass on 84–85% of issues. Every "% of floor" number is against that, not against truth. A raw
@@ -537,8 +673,19 @@ appear — the reader's second reference column, and the sprint-wide spend total
 - **A share is a ratio, so it moves when any other term moves.** Predicting one agent's share from
   the commits that touched *that agent* is the mistake §6 records: `page`'s share fell while its own
   cost was untouched, because `copy_editor`'s rose.
-- **The oracle is a lower bound, and it is the incumbent.** A flag on a page a human would pass is
-  a cost, not an error; the judge was never scored against itself.
+- **A benchmark that withholds an input the agent receives in production measures a different
+  agent, and no care taken inside the round can rescue it.** `runs-editor-1` sent the editor the
+  document and the issue list but not the page images Iris attaches, tied four models on restraint,
+  and could not separate its finalists. `runs-editor-2` attached them and separated the same two in
+  the *opposite* direction — the incumbent fell 22 → 12 on the same corpus with the same grader (§4).
+  The gap was named in round 1 and read as a scope note; it was the whole result. Before quoting any
+  arm, diff what the harness sent against what the call site sends.
+- **The oracle is a lower bound, and it is the incumbent — but that is a property of the shipped
+  measurements, not a limit on what can be measured.** A flag on a page a human would pass is a cost,
+  not an error, and the judge is never scored against itself anywhere in this document. That does not
+  make the judge unmeasurable, which is what this bullet used to imply: `runs-verifier-1` scores five
+  candidates against *injected* damage, where ground truth is the injection and the incumbent is not
+  the reference (§4). The circle is escapable; it just had not been escaped in print.
 - **The corpora are small and named.** Page agent: 11 hand-picked hard pages (dense budget tables,
   dot-leader contents, statutory prose, two pure scans). Reader: 20 stitched documents. Cost shares
   and the −44.8%: one 100-page US government statistical report — hierarchical tables of states
@@ -564,9 +711,16 @@ appear — the reader's second reference column, and the sprint-wide spend total
   make the specialist and `builder` rows mean anything.
 - **Re-derive the failed-spend figure after #300.** It is the one number here that is known wrong
   rather than merely old.
-- **`copy_editor` is 33.1% unswapped, 28.8% after the swap, and has never had a model round.** It is
-  the largest unexamined line on the bill, and its output ceiling is 3.4% away from binding again
-  (§5) — the three merged wins were all changes to its contract rather than to its model.
+- **`copy_editor` is 33.1% unswapped, 28.8% after the `page` swap, and its own swap is now
+  recommended and undecided.** Two rounds have run — `runs-editor-1` and `runs-editor-2` — and the
+  second says `openai.gpt-5.6-luna` at 9.5% of the cost is ahead on capability and on obedience to
+  the issue list both (§4), worth ≈−26.1% of the priced bill — §5's four agents, so ≈−25.9% of the
+  round including `builder`. Applying it is a decision, not a finding, and it needs the
+  same three checks the `page` swap needed: `per_agent` for this agent only, a diff of the
+  deployment's whole `providers` block (#312's one line moved every agent's transport), and the model
+  id verified against the deployment's IAM allowlist **with the identity that will make the call**.
+  One free check first: the deployed editor's cache-read share, since Luna gets no cache discount
+  and the −26.1% is measured on a bench arm. Its output ceiling is also still 3.4% from binding (§5).
 - **A swap invalidates the quality baseline, not just the cost.** `/v1/quality` reports a clean
   rate and mean rounds per document from the judge's verdicts, and a change to `page` or `reader`
   changes what the judge is reading. Re-measure the week after, not the day after.
@@ -582,6 +736,8 @@ node src/report.mjs --runs runs-bystep-now                         # §0's cost 
 node mixedcost.mjs     runs-postswap-312                           # §5's per-agent prices, free
 node verifierdelta.mjs runs-bystep-now runs-postswap-312           # §5's quality deltas, free
 node subtotalrows.mjs  runs-bystep-now runs-postswap-312           # the subtotal-row finding, free
+node editorround.mjs   --report runs-editor-2                     # §4's editor table, free
+node verifyregrade.mjs runs-verifier-1                            # §4's verifier tables, free
 ```
 
 `mixedcost.mjs` exists because `report.mjs` prices a whole document at its `primaryModel`, which was
