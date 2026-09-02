@@ -485,6 +485,13 @@ const DISPOSITIONS = [
   // §4's `copy_editor` opener quotes the word "keep" while saying it no longer applies. First match
   // in this order wins, and the text each is matched against is cut at the first comma or dash so a
   // later clause cannot reclassify a paragraph.
+  //
+  // `open` was added an hour after this test was written, and by the route the comment above
+  // predicted: the seat that ran the verifier round retracted its headline, `feedback`'s keep became
+  // undecided, and both §0 and §4 stopped stating a disposition in the four words this list knew. The
+  // test failed rather than skipping the pair, which is the whole point of listing DECIDED — a
+  // decision can be *un*-taken, and "no answer yet" is a disposition a reader has to be told.
+  ["open", /\bopen\b|\bundecided\b/i],
   ["declined", /declin/i],
   ["recommended", /recommend/i],
   ["keep", /\bkeep\b/i],
