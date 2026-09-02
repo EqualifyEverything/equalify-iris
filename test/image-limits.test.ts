@@ -472,6 +472,60 @@ test("boot says once that the published image limits are a guess", () => {
   );
 });
 
+test("boot asks for a setting only where the setting can answer", () => {
+  // The remedy sentence used to be unconditional: "Set providers.bedrock.image_limits to
+  // the numbers this model's documentation gives." On a block that also serves a model this
+  // build knows, `foreignOnly` will not read that number as an answer, so following the
+  // instruction means editing config, restarting, and meeting the same warning. And it is
+  // not a corner: `api` is a block setting and only a block named `bedrock` builds a
+  // Bedrock adapter, so a Bedrock deployment that sends ONE agent to another vendor — which
+  // is what the UIC deployment does — is always in this case. See #320.
+  const mixed = cfg({
+    default: "bedrock",
+    bedrock: { region: "us-east-1", default_model: SONNET_46, api: "converse" },
+    per_agent: { page: { model: QWEN_VL } },
+  });
+  const warning = String(visionModelWarning(mixed));
+  // Says which case it is, and names what the block is shared with so the ambiguity is
+  // legible rather than asserted.
+  assert.match(warning, /cannot answer for this one/);
+  assert.match(warning, new RegExp(SONNET_46.replace(/\./g, "\\.")));
+  assert.match(warning, /nothing to set/);
+  // And does NOT instruct. This is the assertion that fails on the old text.
+  assert.doesNotMatch(warning, /Set providers/);
+  // Still names the agent and the model, which is how an operator finds the config line.
+  assert.match(warning, /page/);
+  assert.doesNotMatch(warning, /feedback/); // feedback is on the Claude, and not in question
+
+  // A block serving nothing this build can place still gets the instruction, because there
+  // the number can only have been read about the model it does serve.
+  const foreign = cfg({
+    default: "bedrock",
+    bedrock: { region: "us-east-1", default_model: QWEN_VL, api: "converse" },
+  });
+  const askable = String(visionModelWarning(foreign));
+  assert.match(askable, /Set providers\.bedrock\.image_limits/);
+  assert.doesNotMatch(askable, /cannot answer/);
+});
+
+test("an override on a foreign-only block does not make it read as shared", () => {
+  // `basis` is "documented" for both an id this file can place and an id an operator has
+  // answered for, so deriving "does this block serve a model we know" from `basis` would
+  // report the block as shared on the strength of the operator's own number — and the
+  // warning is silent there anyway, so the only way to see it is with two foreign models
+  // where one is answered for. It is one number on one block, so it answers for both.
+  const config = cfg({
+    default: "bedrock",
+    bedrock: {
+      region: "us-east-1",
+      default_model: QWEN_VL,
+      api: "converse",
+      image_limits: { max_long_edge_px: 3000 },
+    },
+  });
+  assert.equal(visionModelWarning(config), null);
+});
+
 test("a config that resolves no model at all warns about nothing", () => {
   // Nothing is configured to warn ABOUT, and a config whose default provider has no
   // block fails validateConfig at startup anyway — a second line here would be noise on

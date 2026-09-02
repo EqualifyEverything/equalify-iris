@@ -433,15 +433,48 @@ function perAgentImageLimits(cfg: IrisConfig): AgentImageLimits[] {
 // quoted, and boot is the only place an operator can be told which of the two they are
 // quoting. The hint qualifies itself for the user; this line is for whoever can fix it.
 //
-// It goes quiet as soon as that is done: an `image_limits.max_long_edge_px` on the
-// provider block serving the agent is the operator saying they have read the model's
-// documentation, which is exactly what this asks for.
+// It goes quiet as soon as that is done — but only where the escape hatch can be read as
+// an answer at all. `image_limits` is per provider BLOCK and the basis question is per
+// MODEL, so on a block that also serves a model this file CAN place, a number there is
+// ambiguous about which of them it was read from and `perAgentImageLimits` declines to
+// take it as an answer (`foreignOnly` above). Asking for it anyway would send an operator
+// to edit a file, restart, and find the same warning: so this says which case it is, and
+// where there is nothing to set it says that instead of instructing. A Bedrock deployment
+// that sends one agent to another vendor is always the second case, because `api` is a
+// block setting and only a block named `bedrock` builds a Bedrock adapter — see #320.
 export function visionModelWarning(cfg: IrisConfig): string | null {
-  const guessed = perAgentImageLimits(cfg).filter((a) => a.basis === "assumed");
+  const all = perAgentImageLimits(cfg);
+  const guessed = all.filter((a) => a.basis === "assumed");
   if (guessed.length === 0) return null;
   const limits = resolveImageLimits(cfg);
   const formats = limits.media_types.map((t) => t.replace("image/", "").toUpperCase()).join("/");
-  const blocks = [...new Set(guessed.map((a) => `providers.${a.provider}.image_limits`))];
+
+  // Read off the model rather than off the resolved `basis`, which an override on a
+  // foreign-only block has already flipped to "documented" — that would report a block as
+  // shared with a model this file knows on the strength of the operator's own number.
+  const remedy: string[] = [];
+  const settable: string[] = [];
+  for (const provider of [...new Set(guessed.map((a) => a.provider))]) {
+    const shared = [
+      ...new Set(
+        all
+          .filter((a) => a.provider === provider && limitsBasisFor(a.model) === "documented")
+          .map((a) => a.model),
+      ),
+    ];
+    if (shared.length === 0) settable.push(`providers.${provider}.image_limits`);
+    else remedy.push(
+      `providers.${provider}.image_limits cannot answer for this one: that block also serves ` +
+        `${shared.join(", ")}, which this build does have limits for, so a number set there is ` +
+        `ambiguous about which model it was read from — it would move what those agents ` +
+        `publish too, and this warning would still fire. There is nothing to set, and the ` +
+        `numbers above are the ones to serve an unmeasured model with.`,
+    );
+  }
+  if (settable.length > 0) {
+    remedy.unshift(`Set ${settable.join(" / ")} to the numbers this model's documentation gives.`);
+  }
+
   return (
     `the vision model for ${guessed.map((a) => a.agent).join(", ")} ` +
     `(${[...new Set(guessed.map((a) => a.model))].join(", ")}) is not one Iris has documented ` +
@@ -451,8 +484,7 @@ export function visionModelWarning(cfg: IrisConfig): string | null {
     `models this build does know, and GET /v1/limits, the upload check and the demo all read ` +
     `them — for this model they may be wrong in either direction, including refusing an image it ` +
     `would have accepted. The ${formatBytes(limits.max_image_bytes)} per-image cap is the ` +
-    `provider's own and holds whatever the model. Set ${blocks.join(" / ")} to the numbers this ` +
-    `model's documentation gives.`
+    `provider's own and holds whatever the model. ${remedy.join(" ")}`
   );
 }
 
