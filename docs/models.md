@@ -458,7 +458,7 @@ share column above), so the next win has to come from asking an agent to do less
 | reader % of floor, $/doc | `runs-reader-newsha`, `-newsha2` | `e842faa`, recorded, code-identical to `ad3e7a6` | **yes** |
 | cost shares (42.0 / 33.1 / 15.6 / 9.3) | `runs-bystep-now` | `3749f54`, recorded | **yes**, for the unswapped pipeline |
 | $0.1940/page, $19.3951/100 pages | `runs-bystep-now` | `3749f54` | yes, unswapped — and superseded in practice by the row below |
-| $0.1071/page, −44.8%, the quality deltas | `runs-postswap-312` | the live swapped deployment | **yes** — one round per arm, §5 says what that does and does not support |
+| $0.1071/page, −44.8%, the quality deltas | `runs-postswap-312` | **`2566c8b`**, from the deploy log, not the round | **yes** — one round per arm, §5 says what that does and does not support |
 | cost shares (44.5 / 25.0 / 18.0 / 12.6) | `runs-bystep-100` | `158e3d9` (derived, below) | **superseded** by the row above; see the drift note |
 | $0.1786/page, $17.86/100 pages | `runs-bystep-100` | `158e3d9` | **no. Superseded** — it was never a price to quote forward |
 | "10.89% of spend bought nothing" | 63 rounds, mixed | pre-#300 | **no. Superseded — do not quote it forward** |
@@ -495,6 +495,17 @@ mutable file: the round's `ledger.jsonl` puts its four chunks between 07:38:58Z 
 `e173d1c` at 09:05:05Z. The whole round therefore ran on `158e3d9`. Worth writing down because the
 timestamp route is now unavailable: re-running the benchmark's `report.mjs` over that directory
 rewrites `summary.json` and `results.jsonl`, and doing so on 2026-09-01 reset both mtimes.
+
+**The same derivation names the sha for `runs-postswap-312`, and there it is the only route there is.**
+A round driven against a deployment records the base URL and nothing about the build behind it — its
+`meta.json` carries `base`, the PDF's own `sha256` and `parent_sha`, and no Iris sha — so no amount of
+re-reading the round can produce one. The four chunks were submitted between 18:41:01Z and 18:57:06Z
+on 2026-09-02, and the last successful "Notify UIC deploy" before that was **`2566c8b`** at 17:25:14Z,
+with none after it during the round. That is the build every headline figure in this document was
+measured on. It is deploy-log evidence rather than round evidence, which is a weaker link than the
+`iris_sha` a local round records: it establishes what main had shipped, not that the box was serving
+it. The swap itself is the exception — that *is* confirmed inside the round, from
+`by_agent.page.models` (§5).
 
 **Two numbers in [#311](https://github.com/EqualifyEverything/equalify-iris/issues/311) do not match
 the round it cites**, and both are in the recommendations' favour. That report gives `page` 43.2% and

@@ -403,4 +403,42 @@ test("docs/models.md §5's per-agent rows sum to the total row they are publishe
     `docs/models.md §5's post-swap shares sum to ${shareSum.toFixed(1)}%, not 100% — ` +
       `${shares.join(" + ")}.`,
   );
+
+  // And the figures the section's HEADLINE is actually read off, which is the gap the two sums above
+  // leave open: each agent's share of the SAVING is a difference of the two money columns, so an edit
+  // that moves the table and leaves this sentence standing reproduces the reviewed defect exactly —
+  // both columns would still sum, the shares would still be 100.0%, and everything above would pass
+  // while the prose said "a third" of a saving that is two thirds. Recomputed from the same rows
+  // rather than pinned as literals, so it is the relationship that is asserted and not the numbers.
+  const totalDelta = money(total[1])! - money(total[2])!;
+  const attributed = [
+    ...section.matchAll(/`([a-z_]+)`\s+(?:is|gives)\s+\$([\d.]+)(?:\s+back)?\s+\((−?[\d.]+)%\)/g),
+  ];
+  assert.equal(
+    attributed.length,
+    agents.length,
+    `§5 attributes the saving to ${attributed.length} agents but its table has ${agents.length} ` +
+      `rows — every row's contribution to the saving has to be stated, including a negative one, or ` +
+      `the sentence adds to less than the total it claims to break down`,
+  );
+  for (const [, name, dollars, percent] of attributed) {
+    const row = agents.find((r) => r[0] === `\`${name}\``);
+    assert.ok(row, `§5 attributes part of the saving to \`${name}\`, which has no row in its table`);
+    const delta = money(row[1])! - money(row[2])!;
+    // Written unsigned with "back" where an agent got dearer, so compare magnitudes here and let the
+    // percentage carry the sign.
+    assert.ok(
+      Math.abs(Math.abs(delta) - Number(dollars)) <= 0.0001,
+      `§5 says \`${name}\` accounts for $${dollars} of the saving, but its own row is ` +
+        `${row[1]} → ${row[2]}, a difference of $${Math.abs(delta).toFixed(4)}`,
+    );
+    const stated = Number(percent.replace("−", "-"));
+    const actual = (delta / totalDelta) * 100;
+    assert.ok(
+      Math.abs(actual - stated) <= 0.1,
+      `§5 says \`${name}\` is ${percent}% of the saving; its own columns give ` +
+        `${actual.toFixed(1)}% ($${delta.toFixed(4)} of $${totalDelta.toFixed(4)}). This is the ` +
+        `sentence a reader takes the keep-or-revert decision from.`,
+    );
+  }
 });
