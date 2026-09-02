@@ -238,8 +238,9 @@ providers:
     # documentation; it silences the warning and the qualification with it — but only
     # where this block serves nothing Iris can already place. This key is per provider
     # BLOCK and the question is per MODEL, so on a block whose `default_model` is a Claude
-    # and whose `per_agent` sends one agent elsewhere, a number here could have been read
-    # from either, and Iris will not take it as an answer about the one it does not know.
+    # and onto which `providers.per_agent` (a sibling of these blocks, not a key on one)
+    # routes one agent to something else, a number here could have been read from either
+    # model, and Iris will not take it as an answer about the one it does not know.
     # It still applies (it is your block) — to every agent on it, including the ones whose
     # own documented long edge is smaller, which sends those larger images for no gain
     # anyone has documented. On that deployment there is nothing to set: the boot warning

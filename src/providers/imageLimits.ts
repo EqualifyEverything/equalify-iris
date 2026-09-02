@@ -449,12 +449,23 @@ export function visionModelWarning(cfg: IrisConfig): string | null {
   const limits = resolveImageLimits(cfg);
   const formats = limits.media_types.map((t) => t.replace("image/", "").toUpperCase()).join("/");
 
-  // Read off the model rather than off the resolved `basis`, which an override on a
-  // foreign-only block has already flipped to "documented" — that would report a block as
-  // shared with a model this file knows on the strength of the operator's own number.
+  // One sentence per provider block, each NAMING the models it is about. A deployment can
+  // have a guessed model on a mixed block and another on a foreign-only one, and then two of
+  // these sentences appear beside a list of models at the top: "this one" would point at a
+  // different member of that list in each. This paragraph is written to be quoted verbatim,
+  // which is the whole reason #320 was a defect rather than a wording preference.
+  //
+  // `shared` reads `limitsBasisFor(a.model)` rather than the resolved `a.basis`, which is
+  // also "documented" for a model the operator answered for. The two spellings cannot
+  // actually disagree HERE while `foreignOnly` is what it is — it flips a basis only on a
+  // block where every agent is foreign, and no such block has an agent left in `guessed` —
+  // so this is the correct spelling of the question and not a live guard. Nothing can test
+  // the difference; see the note in test/image-limits.test.ts.
   const remedy: string[] = [];
-  const settable: string[] = [];
   for (const provider of [...new Set(guessed.map((a) => a.provider))]) {
+    const unknown = [
+      ...new Set(guessed.filter((a) => a.provider === provider).map((a) => a.model)),
+    ];
     const shared = [
       ...new Set(
         all
@@ -462,17 +473,20 @@ export function visionModelWarning(cfg: IrisConfig): string | null {
           .map((a) => a.model),
       ),
     ];
-    if (shared.length === 0) settable.push(`providers.${provider}.image_limits`);
-    else remedy.push(
-      `providers.${provider}.image_limits cannot answer for this one: that block also serves ` +
-        `${shared.join(", ")}, which this build does have limits for, so a number set there is ` +
-        `ambiguous about which model it was read from — it would move what those agents ` +
-        `publish too, and this warning would still fire. There is nothing to set, and the ` +
-        `numbers above are the ones to serve an unmeasured model with.`,
-    );
-  }
-  if (settable.length > 0) {
-    remedy.unshift(`Set ${settable.join(" / ")} to the numbers this model's documentation gives.`);
+    if (shared.length === 0) {
+      remedy.push(
+        `Set providers.${provider}.image_limits to the numbers documented for ` +
+          `${unknown.join(", ")}.`,
+      );
+    } else {
+      remedy.push(
+        `providers.${provider}.image_limits cannot answer for ${unknown.join(", ")}: that block ` +
+          `also serves ${shared.join(", ")}, which this build does have limits for, so a number ` +
+          `set there is ambiguous about which model it was read from — it would move what those ` +
+          `agents publish too, and this warning would still fire. There is nothing to set, and ` +
+          `the numbers above are the ones to serve an unmeasured model with.`,
+      );
+    }
   }
 
   return (
