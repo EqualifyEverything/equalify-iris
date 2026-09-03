@@ -1521,10 +1521,24 @@ delivered document. Naming a destination rather than only forbidding the narrati
 lesson read the other way round, since what the Reader stopped writing as prose partly came back as
 issues asking for no change. `test/verify-notes-field.test.ts` pins both halves — the clause, and the
 promise the clause makes to the model about where `notes` goes, which is the half a later change could
-quietly falsify. What it costs is 1,102 characters of prompt on every verify call; what it buys is
+quietly falsify. What it costs is 1,253 characters of prompt on every verify call; what it buys is
 **not** measured — the behaviour was counted and the fix was not — and `pages_unjudged` is the number
 to read beside any re-count, because an invited free-text field makes a reply longer and a verify
 reply that stops mid-object is a page nothing judged, shipping under a `page_verify_ok` line.
+
+Inviting prose also invites a reply that quotes the contract back, and `extractJson` returns the LAST
+readable object in a reply. So an unescaped `{ "faithful": true, "problems": [] }` inside `notes` ends
+the reply with a second object that carries the decision flag, and reading it turns a page the
+verifier rejected for a missing table row into a confident pass — no problems, no `unjudged` marker,
+a plain `page_verify_ok` line, the one shape `pages_unjudged` cannot count. Two things close it. A
+reply that is nothing but its object is now read with the repair rule's colon case confined to keys,
+which is where JSON puts a colon after a string; that confinement is measured rather than assumed,
+because applying it to every candidate in the walk changes 14 of 4,100 bench replies and loses on all
+14 — a Reader verdict quoting `{"html":"…` in its prose gets a string that never closes and swallows
+the verdict, returning one issue instead of five. And because a fenced reply is beyond any one-pass
+reader, `verifyAgentOutput` now refuses to read anything carrying fewer than both boolean flags as a
+verdict: 1,342 of 1,342 readable verify replies in those logs carry both, so the check costs nothing
+measurable and converts a silent pass into a counted `unjudged` page.
 
 ## Automated code review
 

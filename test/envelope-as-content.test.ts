@@ -109,6 +109,55 @@ test("a backslash the page prints is a character, not a broken escape", () => {
   assert.equal(repaired?.html, 'a\nb "x" café');
 });
 
+test("a reply that is only its object is read as that object, not as something quoted inside it", () => {
+  // The colon rule and its limit (issue #339). `repairedSpan` ends a string at a `"` followed by
+  // `,` `}` `]` or `:`, and the `:` case is what breaks a reply whose prose quotes a field name
+  // back — the value-string ends at the quote before the colon, the sentence after it is read as
+  // object syntax, and the envelope does not parse. What DOES parse is the fragment the model was
+  // quoting, because the search resumes inside a candidate it could not read. So the last readable
+  // object in this reply was the decoy, and the decoy carries `faithful`.
+  const decoyed =
+    `{ "faithful": false, "accessible": false,\n` +
+    `  "problems": [{ "kind": "content_missing", "problem": "the third data row is absent" }],\n` +
+    `  "notes": "I first read the contract as { "faithful": true, "problems": [] }; it is not." }`;
+  const read = extractJson<{ faithful?: boolean; problems?: { problem?: string }[] }>(decoyed);
+  assert.equal(read?.faithful, false, "the decoy quoted in `notes` was read as the answer");
+  assert.deepEqual(
+    read?.problems?.map((p) => p.problem),
+    ["the third data row is absent"],
+  );
+
+  // Read that way only because the reply is nothing BUT the object, first character to last, which
+  // is what every one of these prompts asks for. The narrow colon rule is confined to that shape
+  // for a measured reason: applied to each candidate in the walk it changes 14 of the 4,100 agent
+  // replies in the bench logs and loses on all 14. This is the shape of those — a Reader verdict
+  // that quotes the page agent's envelope in its prose BEFORE answering — and under the narrow rule
+  // the quoted `"html":"…` value never closes, so the prose candidate swallows the real verdict and
+  // the walk returns one issue instead of two. It must keep returning both.
+  const readerReply =
+    `Looking at the excerpt, the extractor's own commentary was transcribed: the raw JSON blob\n` +
+    "`{\"html\":\"...`, `\"log\": \"...\"`, `\"suggested_agent\": null}` is announced to the reader.\n\n" +
+    "```json\n" +
+    `{\n  "issues": [\n` +
+    `    { "issue": "Extractor metadata is in the document text", "pages": [22, 23] },\n` +
+    `    { "issue": "The table's totals row is inside <thead>", "pages": [24] }\n` +
+    `  ]\n}\n` +
+    "```\n";
+  const issues = extractJson<{ issues?: { pages?: number[] }[] }>(readerReply)?.issues;
+  assert.equal(issues?.length, 2, "the prose's quoted envelope swallowed part of the verdict");
+  assert.deepEqual(
+    issues?.map((i) => i.pages),
+    [[22, 23], [24]],
+  );
+
+  // And the limit, stated so it is not mistaken for coverage: wrap the same verdict in a fence or a
+  // sentence and the decoy is the last readable object again. One pass cannot tell that reply from
+  // a page printing `She said "hello", he replied`, so `verifyAgentOutput` refuses a verdict
+  // missing either decision flag instead (test/verify-notes-field.test.ts).
+  assert.equal(extractJson<{ faithful?: boolean }>("```json\n" + decoyed + "\n```")?.faithful, true);
+  assert.equal(extractJson<{ faithful?: boolean }>("Here is my verdict.\n\n" + decoyed)?.faithful, true);
+});
+
 test("an envelope nothing can read stays unread, rather than being guessed at", () => {
   // Truncation is the case no repair can help: the rest of the page is not in the reply.
   assert.equal(extractJson(TRUNCATED), null);

@@ -21,6 +21,17 @@
 //    later change could falsify: fold `notes` into the problem list for "context" and the
 //    prompt is left telling the model its working-out is discarded while it is being acted on.
 //    So it is asserted behaviourally, through `verifyAgentOutput`, and not by grepping.
+//
+// And a third the first draft of this file got wrong, which is why the last two tests exist. A
+// field invited to hold prose is a field that quotes the contract back, `extractJson` returns the
+// LAST readable object in a reply, and an unescaped `{ "faithful": true, "problems": [] }` inside
+// `notes` is one — so the rejection above becomes `ok: true` with no problems and no `unjudged`
+// marker, which `pages_unjudged` cannot count. The draft "pinned" that shape with a fixture built
+// by `JSON.stringify`, which escapes the quotes for you, so the whole-text `JSON.parse` read the
+// envelope and the span walk was never consulted: a test that could not fail asserting the one
+// property that could. The unescaped shape is pinned below on both sides — read correctly when the
+// reply is nothing but its object (`src/util/json.ts`), and refused as a verdict at all when it is
+// fenced or prefixed, because a verdict answers both flags and a swallowed envelope answers one.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -102,6 +113,15 @@ test("the working-out has a named destination, and the reply shape it is named i
     /It is ONE string for the whole reply, never a field on a problem, and every entry of "problems" still needs its "problem" text/,
     "the field is scoped to the reply, so it cannot re-enter the correction prompt per item",
   );
+  // And no JSON inside it. `extractJson` returns the last readable object in a reply, so a quoted
+  // `{ "faithful": … }` can BE the reply — the shape the two tests below are about. Asking for it
+  // is the cheapest of the three defences and the only one that reaches a fenced reply, where the
+  // parser cannot help; it is not the only one, because a prompt cannot be relied on for this.
+  assert.match(
+    prompt,
+    /Write no JSON, no braces and no quoted field names inside it/,
+    "the field is not invited to quote the contract back at the parser",
+  );
   assert.match(
     prompt,
     /"notes": "working-out, read by nothing — omit when you have none" \}/,
@@ -173,23 +193,61 @@ test("a passing page's `notes` does not become a problem, which is where the old
   assert.equal(v.unjudged, undefined, "the page was judged — this is a pass, not an absent verdict");
 });
 
-test("`notes` that quotes JSON does not shadow the verdict, fenced or bare", async () => {
+test("`notes` that quotes JSON does not shadow the verdict, escaped or not", async () => {
   // `extractJson` takes the LAST readable `{…}` span in a reply, which is what rescues a model
   // that drafts before it answers. A field invited to hold prose is a field that will quote the
   // contract back — and a brace inside a JSON string must not read as a later, better answer,
   // or a rejection silently becomes a pass on the page the quote appeared on.
-  const reply = JSON.stringify({
-    faithful: false,
-    accessible: false,
-    problems: [{ kind: "content_missing", problem: "the third data row is absent" }],
-    notes: 'I first read the contract as { "faithful": true, "problems": [] } for a marker-only page; it is not.',
-  });
+  const notes = 'I first read the contract as { "faithful": true, "problems": [] } for a marker-only page; it is not.';
+  const body = { faithful: false, accessible: false, problems: [{ kind: "content_missing", problem: "the third data row is absent" }] };
+  // Escaped, which is what a model that gets JSON right sends — and, because `JSON.stringify`
+  // escapes for it, the case this test USED to stop at. The whole-text `JSON.parse` reads it and
+  // the span walk is never consulted, so on its own it pins nothing about the decoy.
+  const escaped = JSON.stringify({ ...body, notes });
+  // The shape the prompt actually invites, and the one #339 is about: the same sentence with the
+  // model's own quotes unescaped, which is the commonest way a model gets a JSON string wrong
+  // (`repairedSpan` exists for it — 67 of 1,596 bench replies are unreadable strictly). Here the
+  // `"` before each `:` inside the sentence ended the value early, the envelope stopped parsing,
+  // and `{ "faithful": true, "problems": [] }` was the last thing in the reply that read.
+  const unescaped =
+    `{ "faithful": false, "accessible": false,\n` +
+    `  "problems": [{ "kind": "content_missing", "problem": "the third data row is absent" }],\n` +
+    `  "notes": "${notes}" }`;
   for (const [shape, text] of [
-    ["bare", reply],
-    ["fenced", "Here is my verdict.\n```json\n" + reply + "\n```\n"],
+    ["escaped", escaped],
+    ["unescaped", unescaped],
   ] as [string, string][]) {
     const v = await verdict(text);
     assert.equal(v.ok, false, `${shape}: the quoted object was read as the answer`);
     assert.deepEqual(v.problems, ["the third data row is absent"], `${shape}: the real problem survived`);
+    assert.equal(v.unjudged, undefined, `${shape}: this is a verdict, not an absent one`);
   }
+});
+
+test("a reply carrying only one decision flag is not a verdict, and does not become a pass", async () => {
+  // The half the parser cannot reach. Wrap that unescaped verdict in a fence or a sentence and the
+  // decoy is the last readable object again — one pass cannot tell it from a page printing
+  // `She said "hello", he replied` (see `repairedSpan`). So the shape is refused HERE instead: a
+  // verdict answers both flags, and all 1,342 readable verify replies in the bench logs do. What
+  // arrives from a swallowed envelope answers one, and the difference between reading it and
+  // refusing it is the difference between `page_verify_ok` on a page with a missing table row and
+  // a page counted in `pages_unjudged`.
+  const decoy = '{ "faithful": true, "problems": [] }';
+  for (const [shape, text] of [
+    ["fenced", "```json\n{ \"faithful\": false, \"accessible\": false, \"problems\": [{ \"problem\": \"a row is missing\" }],\n  \"notes\": \"I read it as " + decoy + " at first.\" }\n```"],
+    ["faithful only", decoy],
+    ["accessible only", '{ "accessible": true }'],
+    ["neither", '{ "kind": "content_missing", "problem": "the third data row is absent" }'],
+    ["flag not a boolean", '{ "faithful": "yes", "accessible": true, "problems": [] }'],
+  ] as [string, string][]) {
+    const v = await verdict(text);
+    assert.equal(v.unjudged, true, `${shape}: read as a verdict when it answers only part of one`);
+    assert.deepEqual(v.problems, [], `${shape}: an unjudged page names no problems`);
+    // Still non-blocking: verification never costs a page, which is why the flag exists at all.
+    assert.equal(v.ok, true, `${shape}: an unjudged page is not a failed one`);
+  }
+  // And the complete verdict is still read, so the check is a shape test and not a stricter judge.
+  const good = await verdict('{ "faithful": true, "accessible": true, "problems": [] }');
+  assert.equal(good.unjudged, undefined);
+  assert.equal(good.ok, true);
 });

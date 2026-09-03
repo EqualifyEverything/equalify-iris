@@ -51,10 +51,31 @@ export function extractJson<T = unknown>(text: string): T | null {
   // on it. Note this is the whole text and not a fenced block's content — the fenced case is
   // reached by the span walk below, which finds an object wherever it sits, and matching a
   // fence FIRST is what bound the scratch template above.
+  const whole = text.trim();
   try {
-    return JSON.parse(text.trim()) as T;
+    return JSON.parse(whole) as T;
   } catch {
     // On to the candidates.
+  }
+  // The same reply with the escaping slightly wrong: still nothing but one object, opening at the
+  // first character and closing at the last, and readable under the narrower colon rule described
+  // above `repairedSpan`. Taken here rather than in the walk because the walk's unit is a
+  // CANDIDATE, and at a candidate the narrow rule can succeed where the wide one failed and hand
+  // back a span that runs past the answer — which is how it loses four of five issues on the
+  // Reader replies that quote `{"html":"…` in their prose. Those replies open with that prose, so
+  // requiring the object to be the WHOLE reply excludes every one of them by construction, and
+  // over 4,100 bench replies this reads one shape differently and only one: the verify verdict
+  // whose `notes` quotes the contract back (#339). What it will not rescue is the same verdict
+  // inside a code fence — there the walk is the only reader, and it still returns the decoy.
+  if (whole.startsWith("{")) {
+    const span = repairedSpan(whole, 0, false);
+    if (span !== null && span.end === whole.length) {
+      try {
+        return JSON.parse(span.text) as T;
+      } catch {
+        // On to the candidates.
+      }
+    }
   }
   let last: T | null = null;
   for (let i = text.indexOf("{"); i !== -1; ) {
@@ -142,7 +163,7 @@ function readObjectAt<T>(text: string, start: number): { value: T; end: number }
   // past an object whose strings contain the page's own punctuation. It is tried even when
   // the strict walk found a span, because a stray quote makes the two disagree about where
   // the object ends.
-  const repaired = repairedSpan(text, start);
+  const repaired = repairedSpan(text, start, true);
   if (repaired !== null) {
     try {
       return { value: JSON.parse(repaired.text) as T, end: repaired.end };
@@ -233,9 +254,46 @@ function strictSpan(candidate: string, start: number): Span | null {
 //     the document. What comes back is whichever sub-object IS valid JSON, which does not carry
 //     `issues` or `faithful`, so the verdict reads as "nothing to say" rather than as a guess.
 //
+// That rule has a SECOND reading, used in exactly one place — `extractJson`'s whole-reply attempt,
+// not the candidate walk — and the reason is a verdict rather than a page. A `"` followed by `:`
+// closes a KEY; that is the only place JSON puts a colon after a string, since after a VALUE comes
+// `,`, `}` or `]`. So on prose that quotes a field name back the wider rule ends the value early.
+// In
+//
+//   { "faithful": false, "problems": [{ … }],
+//     "notes": "I first read the contract as { "faithful": true, "problems": [] }; it is not." }
+//
+// the quote after the inner `faithful` is followed by `:`, the value-string ended there, the walk
+// read the rest of the sentence as object syntax, and the envelope did not parse. The decoy the
+// model was quoting DID — `extractJson` resumed inside the failed candidate and returned
+// `{ faithful: true, problems: [] }`. That is the one sub-object shape the null-is-safe argument
+// below does NOT cover: it carries `faithful`, so a rejected page with a missing table row read as
+// a confident pass, `ok: true` with no `unjudged` flag on it (issue #339, `verifyAgentOutput`).
+//
+// Which is NOT an argument for narrowing the rule generally, and the corpus said so before this
+// shipped. Applied to every candidate it changes 14 of the 4,100 replies in the bench logs and
+// worsens all 14: each is a Reader verdict whose prose quotes `{"html":"…`, `"log": "…"`,
+// `"suggested_agent": null}` ahead of the answer, and under the narrow rule that value-string never
+// closes, so the prose candidate swallows the real envelope behind it and the walk comes back with
+// the LAST issue of the verdict in place of all of them — one issue instead of five. A runaway
+// string is the failure the wider rule holds shut. Nor does trying it as a per-candidate FALLBACK
+// help, which is the version that looked obviously safe and is not: at that prose brace both wider
+// readings fail, so the fallback runs, succeeds on a span that ends past the real envelope, and
+// `extractJson` resumes beyond the answer. Same 14 replies, same loss.
+//
+// What is safe is the narrow rule on the whole reply and nowhere else — one object, first character
+// to last. Those 14 all open with prose, so the shape excludes them by construction, and over the
+// same 4,100 replies it leaves 4,100 byte-identical while reading the verdict above correctly.
+//
 // The known limit within the rule is content whose unescaped quote is itself followed by a
 // comma or a brace — `<p>She said "hello", he replied</p>` — which reads as a terminator and
-// fails the parse. That is the failure this had before, not a new one.
+// fails the parse. That is the failure this had before, not a new one. It also bounds what the
+// whole-reply attempt fixes, and the bound is worth stating because a verdict is on the other side
+// of it: the same `notes` inside a code fence, or after a sentence of preamble, or quoting
+// `"faithful",` rather than `"faithful":`, still leaves the decoy as the last readable object.
+// A parser cannot close that in one pass, so it is closed twice elsewhere instead —
+// `agents/feedback.md` asks the verifier for no quoted JSON in `notes`, and `verifyAgentOutput`
+// refuses to read anything carrying fewer than both decision flags as a verdict at all.
 
 // Is the backslash at `i` the start of one of the six escapes JSON allows, or of a `\uXXXX`
 // with its four hex digits? Anything else is a backslash the model wrote as itself.
@@ -246,18 +304,40 @@ function isEscape(candidate: string, i: number): boolean {
   return '"\\/bfnrt'.includes(next);
 }
 
-function repairedSpan(candidate: string, start: number): Span | null {
+// `colonClosesValues` is the difference between the two readings `readObjectAt` tries. True is the
+// original rule: a `"` followed by `:` ends the string wherever it appears. False confines that to
+// a string in KEY position, which is the only place JSON puts a colon after one.
+function repairedSpan(candidate: string, start: number, colonClosesValues: boolean): Span | null {
   let out = "";
   let depth = 0;
   let inStr = false;
   let esc = false;
+  // Which containers we are inside, innermost last, and whether a string opened here would be a
+  // key. Both exist only to answer that question for the `":` case below; `depth` still decides
+  // where the object ends, unchanged, so a reply with unbalanced `[` cannot change the span.
+  const stack: ("obj" | "arr")[] = [];
+  let expectKey = false;
+  let keyString = false;
   for (let i = start; i < candidate.length; i++) {
     const c = candidate[i];
     if (!inStr) {
       out += c;
-      if (c === '"') inStr = true;
-      else if (c === "{") depth++;
-      else if (c === "}") {
+      if (c === '"') {
+        inStr = true;
+        keyString = stack[stack.length - 1] === "obj" && expectKey;
+      } else if (c === ":") expectKey = false;
+      else if (c === ",") expectKey = stack[stack.length - 1] === "obj";
+      else if (c === "[") stack.push("arr");
+      else if (c === "]") {
+        stack.pop();
+        expectKey = false;
+      } else if (c === "{") {
+        stack.push("obj");
+        expectKey = true;
+        depth++;
+      } else if (c === "}") {
+        stack.pop();
+        expectKey = false;
         depth--;
         // `end` is an index in the SOURCE, not in `out`: the repair adds characters, so the
         // two lengths differ and a caller resuming at `start + out.length` would land past
@@ -291,11 +371,19 @@ function repairedSpan(candidate: string, start: number): Span | null {
       continue;
     }
     if (c === '"') {
-      // Whatever follows this quote decides what it was.
+      // Whatever follows this quote decides what it was — except a `:`, which decides it only
+      // when this string is a key. In a value it is a colon the model wrote inside its prose,
+      // and the string carries on (issue #339; see the note above `isEscape`).
       let j = i + 1;
       while (j < candidate.length && /\s/.test(candidate[j])) j++;
       const next = candidate[j];
-      if (next === "," || next === "}" || next === "]" || next === ":" || next === undefined) {
+      const closes =
+        next === "," ||
+        next === "}" ||
+        next === "]" ||
+        next === undefined ||
+        (next === ":" && (colonClosesValues || keyString));
+      if (closes) {
         out += c;
         inStr = false;
       } else {

@@ -261,7 +261,21 @@ export async function verifyAgentOutput(
   ctx.log.agentCall({ agent: fb, phase: "extraction", image: img.name, output: res.text });
 
   const parsed = extractJson<VerifyOutput>(res.text);
-  if (!parsed) return unjudgedVerdict();
+  // Both flags, as booleans, or this is not a verdict. The contract asks for both and every one of
+  // the 1,342 readable verify replies in the bench logs answers both — so the check costs nothing
+  // measurable, and what it buys is the failure mode #339's `notes` field opens. `extractJson`
+  // returns the LAST readable object in a reply, and a `notes` string that quotes the contract back
+  // ends with one: an unescaped `{ "faithful": true, "problems": [] }` inside the prose, which read
+  // as a confident PASS on a page the verifier had just rejected for a missing table row — `ok`
+  // true, `problems` empty, no `unjudged` flag, and a plain `page_verify_ok` line over it. The
+  // whole-reply repair in `src/util/json.ts` reads the envelope correctly when the reply is nothing
+  // but its JSON, which is what the prompt asks for; this is the half that also holds when the
+  // model fences it or writes a sentence first, and it degrades to a page nobody judged rather than
+  // to a page that passed. `pages_unjudged` counts those, which is why the after-check in prd.md
+  // §7.4 names it.
+  if (!parsed || typeof parsed.faithful !== "boolean" || typeof parsed.accessible !== "boolean") {
+    return unjudgedVerdict();
+  }
   const ok = parsed.faithful !== false && parsed.accessible !== false;
   return { ok, ...readProblems(parsed.problems) };
 }

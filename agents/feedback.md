@@ -79,9 +79,11 @@ only. Working-out goes in "notes" instead — a reading you checked and ruled ou
 a rule you had to re-read, anything you decided was fine. "notes" is read by
 nothing: no correction pass, no other agent, no part of the delivered document.
 It is ONE string for the whole reply, never a field on a problem, and every
-entry of "problems" still needs its "problem" text. Use it only for text you
-would otherwise have written into a problem, and leave the field out when you
-have none. Respond with ONLY:
+entry of "problems" still needs its "problem" text. Write no JSON, no braces
+and no quoted field names inside it: a `{ "faithful": ... }` quoted in "notes"
+can be read as the reply instead of the reply. Use it only for text you would
+otherwise have written into a problem, and leave the field out when you have
+none. Respond with ONLY:
 { "faithful": true|false, "accessible": true|false,
   "problems": [{ "kind": "content_missing", "problem": "..." }],
   "notes": "working-out, read by nothing — omit when you have none" }
