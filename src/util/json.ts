@@ -398,18 +398,23 @@ function strictSpan(candidate: string, start: number): Span | null {
 //     opens with `{`, so the whole-reply attempt does not apply to it at all;
 //   * a quote of `"faithful",` rather than `"faithful":`, where the wide rule ends the value early
 //     for a reason the narrow rule shares;
-//   * a decoy containing an EMPTY quoted string, `{ …, "notes": "" }`. Its `""` is a quote followed
-//     by `}`, so the narrow rule closes the real `notes` value there, the span ends before the end
-//     of the reply, and the whole-reply attempt yields nothing. This is the shape the new `notes`
-//     field most invites, and it is the one residual worth knowing about by name.
+//   * a decoy containing ANY quoted string value at all — the `"` that opens it follows a `:` and the
+//     `"` that closes it is followed by `,`, `}` or `]`, so the narrow rule ends the real `notes`
+//     value at that point, the span stops before the end of the reply, and the whole-reply attempt
+//     yields nothing. This is a CLASS, and it is the one the new `notes` field most invites. The
+//     minimal instance is `{ …, "notes": "" }`; an earlier revision of this list named that instance
+//     as if it were the trigger, which is the same error as the tail claim above but in the more
+//     expensive direction — a residual understated is a residual someone closes by making the pin for
+//     the special case pass. What this repair DOES fix is the decoy with no string values in it, which
+//     is the shape issue #339 produced.
 //
 // A parser cannot close those in one pass — a `"` before `}` is a terminator on every reply that
 // needed this repair in the first place — so they are closed twice elsewhere instead:
 // `agents/feedback.md` asks the verifier for no quoted JSON in `notes` at all, and
 // `verifyAgentOutput` refuses to read anything carrying fewer than both decision flags as a verdict.
-// The last of the four defeats BOTH of those, since the quoted contract it produces carries both
-// flags as booleans, and a reply that quotes the whole contract back is indistinguishable in one
-// pass from a reply that IS the contract. It reads as a pass on a page the verifier rejected, on
+// The last of these — the whole class of it, not just the empty-string instance — defeats BOTH of
+// those, since the quoted contract it produces carries both flags as booleans, and a reply that quotes
+// the whole contract back is indistinguishable in one pass from a reply that IS the contract. It reads as a pass on a page the verifier rejected, on
 // `main` and here alike; what makes it acceptable to leave is that the prompt clause removes the
 // only reason such a string would be written.
 
