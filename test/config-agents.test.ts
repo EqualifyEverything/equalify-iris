@@ -608,10 +608,15 @@ test("docs/models.md's sections agree with §0 about each agent's share and disp
 // what it cannot classify. So a list item and a table row each start a fresh count; their wrapped
 // continuation lines belong to the item they continue, because a `**` legitimately spans those.
 //
-// Its limit, stated because it will eventually fire on innocent text: this is a parity count, not a
-// parser. A deliberate literal `**` in prose fails it, and the fix then is to fence or escape that
-// text, not to delete the test. Fenced blocks are skipped for the same reason — they quote markup
-// rather than use it.
+// Two limits, stated because both will eventually fire on innocent text. This is a parity count, not
+// a parser: (1) a deliberate literal `**` in prose fails it, and the fix then is to fence or escape
+// that text, not to delete the test — fenced blocks are skipped for the same reason, since they quote
+// markup rather than use it. (2) The split below tests what a line *looks* like, so a prose line that
+// happens to wrap onto `- and that is the point` or `3. Undecided, because…` starts a fresh count
+// mid-sentence, and a `**` run spanning that wrap then reports as two odd blocks. That is a false
+// positive and the fix is to reflow the paragraph, not to widen the guard. It is latent here — this
+// document's minus signs are U+2212, which the ASCII `[-*+]` class does not match, and no line wraps
+// onto an ordered marker — but §4's numbered list is where a future edit would hit it first.
 test("docs/models.md's bold runs close in the block that opens them", () => {
   const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
   const unclosed: string[] = [];
