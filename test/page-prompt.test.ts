@@ -741,6 +741,40 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
       /neither does being hard to describe.*describe what you can and say so in the "log" field/],
     ["the attribute is never dropped and never left holding a filename",
       /never leave the attribute off, and never leave a filename in it/],
+    // #353: on a map of state income categories the alt named 41 states as above-average, ten lines
+    // above a <figcaption> transcribing the page's own subtitle — "Eight of the Twelve States That
+    // Shift…". The first pass named 40 and the verify pass ADDED one more. Both strings were in the
+    // same fragment and neither agent compared them. Measuring the sheet's ink settled it the
+    // expensive way (three distinguishable fills, splitting 8 / 4 / base map, matching the printed
+    // arithmetic exactly), but nothing about the defect needed the picture: a category the page caps
+    // at eight cannot have 41 members, and that is decidable from text already transcribed.
+    ["a count the page prints about its picture is evidence the description is checked against",
+      /A number the page prints about its own picture is transcribed evidence, and checking a description against it costs nothing/],
+    ["the check is named with the shapes such a count comes in",
+      /where the page states how many things a category holds — a subtitle's "eight of the twelve states", a total row, an "of which" — and your description enumerates that category's members, count your own list and make the two agree before you emit/],
+    // Which of the two gives way is the whole rule. Without this sentence "make them agree" is as
+    // easily satisfied by rewriting the caption, and the caption is the transcription.
+    ["the list gives way to the count, because the count came off the page",
+      /Where they disagree it is the list that is wrong, because the number came off the page and the list is your reading of the picture/],
+    // The destination, pinned rather than the imperative that needs one: #347's first revision told
+    // this agent to say how many entries a key prints and named nowhere to say it, so the only home
+    // a model finds is a sentence beside the figure — text the page never printed, which the
+    // fidelity rule forbids and which the verifier reads as invention and deletes. A mismatch
+    // between a count and a list has exactly the same problem, so it names both homes and the
+    // forbidden shape.
+    ["the mismatch is reported in the alt text and the log, and never as prose beside the figure",
+      /in the alt text itself, and in the "log" field either way, never as a sentence of your own added beside the figure, which is text the page does not print/],
+    // Both directions of the wrong repair, because a model told to make two numbers agree has two
+    // ways to do it and both of them corrupt the page. Padding invents members; trimming deletes
+    // ones it could see.
+    ["neither number is reached by inventing members or dropping them",
+      /Never pad the list to reach the number and never drop members to fit it/],
+    // And the count itself is transcribed, which is what makes the check available to the next pass
+    // and to the reader: on this sheet the caption was the ONLY sound decoder — the legend's own
+    // swatch measured 100 against fills of 32–42 and 163–186, neither distance clearing the panel's
+    // 55-unit lighting gradient, so a reader working from the image alone cannot decode the map.
+    ["the printed count is transcribed where the page prints it",
+      /Transcribe the printed count where the page prints it, in the caption or label that carries it/],
     // #122, #124, #125: the position title, the product name and the caption were each
     // repeated into the alt text of the image they sat beside.
     ["a name the page prints beside the image is not repeated in its description",

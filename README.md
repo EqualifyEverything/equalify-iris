@@ -1598,6 +1598,27 @@ it. Pinned in `test/feedback-prompt.test.ts`; the page-agent half, and the cover
 ordering that came with it (issue #351), are in `prd.md` §7.4 v1.10 and
 `test/page-prompt.test.ts`.
 
+Two of that verifier's cheapest checks need no image at all, and issue #353 is where both were
+missed on one page. The fragment's `<figcaption>` transcribed the figure's printed subtitle — *"Eight
+of the Twelve States That Shift…"* — and its `alt` attribute, ten lines above, enumerated 40 states
+as above-average; the verify pass quoted the legend's labels verbatim in its own first problem, and
+then asserted one more state into the category, so the delivered page names 41. Measuring the sheet
+puts the true partition at 8 and 4 with everything else base map, matching the printed arithmetic
+exactly — and the legend's own swatch cannot settle it, reading 100 against fills of 32–42 and
+163–186 under a 55-unit lighting gradient, so on this page the caption was the only sound decoder.
+Both prompts now compare an enumeration against a count the page states before grading anything that
+turns on the ink, and `agents/feedback.md` will let such a list be **shortened** and never lengthened.
+The second check is a signal the pipeline already emitted and nothing consumed: the page agent's
+`suggested_agent` request, which in one 100-page round fired 7 times on 5 pages under 6 names, every
+one a map specialist, none resolvable — and those 5 were every page whose verdict turned on reading
+ink. An unmet request is now carried into the verify message (`specialistCaution` in
+`src/pipeline/extraction.ts`, after the cached prefix so one page's note cannot cost the document its
+cache reads), where it narrows what the verifier may assert: it can ask for an unsupported reading to
+be hedged or removed, and may not supply one of its own. It is not treated as a detector — it is
+page-level rather than per-arm and it missed two hard pages in that round — so that licence bound
+holds on every page and the flag only says where the model has already admitted the difficulty.
+`prd.md` §7.4 v1.11, with the carrying pinned in `test/verify-specialist-caution.test.ts`.
+
 ## Automated code review
 
 Every PR is reviewed by Claude in CI before a human reads it

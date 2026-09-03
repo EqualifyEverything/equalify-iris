@@ -292,6 +292,18 @@ Thirteen structures are easy to render as something that merely looks right, so 
   alt text says what the picture shows. Where you cannot make an image out with confidence,
   describe what you can and say so in the "log" field: never leave the attribute off, and never
   leave a filename in it.
+  A number the page prints about its own picture is transcribed evidence, and checking a description
+  against it costs nothing: where the page states how many things a category holds — a subtitle's
+  "eight of the twelve states", a total row, an "of which" — and your description enumerates that
+  category's members, count your own list and make the two agree before you emit. Where they
+  disagree it is the list that is wrong, because the number came off the page and the list is your
+  reading of the picture: name only the members you can actually distinguish, and say that the page
+  states this many while you could place that many — in the alt text itself, and in the "log" field
+  either way, never as a sentence of your own added beside the figure, which is text the page does
+  not print. Never pad the list to reach the number and never drop members to fit it. Transcribe the
+  printed count where the page prints it, in the caption or label that carries it: it is the only
+  thing a reader who cannot see the picture has to check the list against, and where the picture's
+  own ink is ambiguous it is frequently the only thing that says which reading is right.
   Do not spend the description on what the page has already said. A screen reader announces a
   <figcaption>, a label and a heading as well as the alt text, so where the name of the thing
   pictured is printed beside the image — in its caption, in the label that follows it, in the
@@ -2514,6 +2526,43 @@ async function dispatchSpecialist(
   }
 }
 
+// What the page agent said about its own weakest work, in the words it used, for the verifier to be
+// told alongside the output. A page that asked for a specialist and did not get one is a page whose
+// own author said it could not do this content reliably — the request names the content and carries
+// its reason — and until now `dispatchSpecialist` was the only thing that read it: the request was
+// routed, the outcome logged (`specialist_unresolved`), and the judgement of the page never heard
+// about it.
+//
+// What that cost, measured. In one 100-page bench round across two page-model arms there were 7
+// requests on 5 pages under 6 different names, every one of them a map specialist, 0 dispatched. The
+// 5 pages were every page in the round whose verdict turned on reading ink. On one of them the page
+// agent asked for help producing "a structured data table of each state's classification", got the
+// classification wrong, and the verify step — not told any of this — ADDED a state to a category the
+// page does not put it in; the correction obeyed, and a false sentence shipped in the delivered
+// document (#353).
+//
+// Two limits, stated because the prompt is written to survive them rather than to rely on their
+// being better than they are. It is page-level and not per-arm: 4 of those 7 requests came from the
+// OTHER arm's reader on the same images, so a run reads its own reader's suggestions and not the
+// union that made the count look strong. And it missed 2 of that round's hard pages outright. So
+// this is not a detector and `agents/feedback.md` does not treat it as one — it narrows what the
+// verifier may assert on a page rather than deciding anything about the page, which is a use that
+// costs nothing when the flag is wrong. `dispatched` is the whole of the test alongside the name,
+// because both unresolved branches and both declined branches return false, and a page that got its
+// specialist has no unmet request to report.
+function specialistCaution(
+  suggestion: { name: string; reason: string } | undefined,
+  dispatched: boolean,
+): string | undefined {
+  if (!suggestion?.name || dispatched) return undefined;
+  const why = suggestion.reason.trim();
+  return (
+    `The page agent asked for a specialist it did not get: "${suggestion.name}"` +
+    `${why ? `, because "${why}"` : ""}. No agent of that name was available, so the HTML above is ` +
+    `its own unaided attempt at the content it wanted help with.`
+  );
+}
+
 interface PageOutcome {
   fragment: Fragment;
   // A genuinely-new content type to file for contribution, if any. A suggestion
@@ -2666,10 +2715,15 @@ async function extractPage(
   // hedged declaration before it can reach this line at all (`blank_vetoed` on `page_no_output`).
   // A confident-but-wrong declaration would leave a `page_blank` line and a blank count in
   // diagnostics as its evidence, and no verdict.
+  // Computed once, above the check and both rechecks: it is a fact about this page's render, so a
+  // recheck of a correction to that render carries the same one. It is read from `suggestion` and
+  // `dispatched` rather than from the log, so the caution and the `specialist_unresolved` line cannot
+  // disagree about whether the request was met.
+  const caution = specialistCaution(suggestion, dispatched);
   const blankSkip = blank === true && innerHtml === "";
   const verdict = blankSkip
     ? unjudgedVerdict()
-    : await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml }], "verify");
+    : await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml, caution }], "verify");
 
   // Whether the page's links arrived is checked here rather than left to the
   // Feedback Agent: it verifies the output against the IMAGE, which is the one place
@@ -3007,7 +3061,7 @@ async function extractPage(
           chars_after: corrected.length,
         });
       } else if (!verifyFailed) {
-        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }], "recheck_binding");
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected, caution }], "recheck_binding");
         keep = !failedCheck(recheck);
         if (!keep) {
           // Named `page_links_correction_rejected` since before there was anything else on this
@@ -3081,7 +3135,7 @@ async function extractPage(
         // taken: it is logged, the slot stays spent (a refund would let a throttled
         // provider be retried once per corrected page, which is the cost this bounds),
         // and the page ships exactly as it would have with no measurement at all.
-        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }], "recheck_sampled").catch(
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected, caution }], "recheck_sampled").catch(
           (e: unknown) => {
             ctx.log.event("page_correction_recheck_failed", {
               image: img.name,

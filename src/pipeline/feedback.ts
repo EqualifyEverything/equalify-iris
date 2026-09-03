@@ -206,7 +206,13 @@ export async function verifyAgentOutput(
   ctx: PipelineContext,
   agent: AgentSpec,
   img: InputImage,
-  blocks: { html: string }[],
+  // `caution` is something the agent under test said about its OWN output, carried through to the
+  // judgement of it. It rides on the block rather than on a sixth parameter so that `step` stays the
+  // last argument of every call site — which is what `test/step-attribution.test.ts` reads them with,
+  // and a per-call vocabulary check is worth more than the argument shape it depends on. Optional,
+  // deduplicated, and absent by default: a judgement with nothing to carry sends exactly the bytes
+  // it always did.
+  blocks: { html: string; caution?: string }[],
   step: Extract<
     PipelineStep,
     "verify" | "recheck_binding" | "recheck_sampled" | "agent_calibrate" | "agent_regression"
@@ -216,6 +222,7 @@ export async function verifyAgentOutput(
   if (!fb || blocks.length === 0) return unjudgedVerdict();
 
   const html = blocks.map((b) => b.html).join("\n\n");
+  const cautions = [...new Set(blocks.map((b) => b.caution?.trim()).filter((c): c is string => !!c))];
   // Everything this task says that is not about the page in front of it: the task marker
   // and the whole contract of the agent being judged. It is the same bytes on every page
   // of a document — `agents/page.md` is 16 KB of it, re-sent per page and per correction
@@ -244,9 +251,18 @@ export async function verifyAgentOutput(
   const contract =
     `TASK: verify\n\n` +
     `## Agent under test: ${agent.file}\n\`\`\`markdown\n${agent.content}\n\`\`\`\n\n`;
+  // The cautions go here, AFTER the cached prefix and after the output they are about. They are
+  // per-page by construction, so a copy of one inside `contract` would change the invariant head on
+  // the page that has it and cost every other page in the document its cache read — the saving the
+  // comment above is written to protect. `agents/feedback.md` says what a caution narrows: the
+  // verifier may ask for an unsupported reading to be hedged or removed and may not supply one of
+  // its own.
   const user =
     contract +
     `## The agent's output for source image "${img.name}"\n\`\`\`html\n${html}\n\`\`\`\n\n` +
+    (cautions.length
+      ? `## What the agent said about its own output\n${cautions.map((c) => `- ${c}`).join("\n")}\n\n`
+      : "") +
     `Compare the output against the attached source image.`;
 
   const res = await ctx.router.complete(
