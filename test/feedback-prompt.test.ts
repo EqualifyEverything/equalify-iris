@@ -255,8 +255,16 @@ test("the verify task reads a quoted log as evidence and never makes it the subj
       /Tag it by what\s+the reader loses, the way you tag everything else/],
     ["with the content-side two named",
       /a missing marker and a missing\s+note about an irregular sequence are "content_missing"/],
-    ["and the attribute-side two named as a11y_only",
-      /a language the log names and no lang\s+attribute marks, or a graphic with no placeholder src to supply, is\s+"a11y_only"/],
+    ["with the language case as a11y_only",
+      /a language the log names that no lang\s+attribute marks is "a11y_only"/],
+    // Review round 3, non-blocking, and the tag it corrects was mine rather than round 2's. `a11y_only`
+    // is defined at :157 as a WCAG 2.2 AA requirement unmet, and an absent placeholder `src` is not
+    // one: `page.md:313-314` puts the placeholder there "for whatever supplies the real asset", while
+    // the reader is given the graphic by its alt text, which is present by hypothesis. So the fourth
+    // obligation is `structure_wrong` — content all there, markup around it incomplete — which is also
+    // where :160's earliest-in-list tiebreak would land it if both kinds were argued.
+    ["and the placeholder src as structure_wrong rather than a11y_only",
+      /a\s+graphic whose placeholder src the log records but the HTML does not carry is\s+"structure_wrong"/],
     // The other direction: a log that overstates what was done is not a licence to argue with the
     // log, it is evidence about the page — and the finding it supports is the ordinary one.
     ["a log the image refutes makes the missing content the problem, not the log",

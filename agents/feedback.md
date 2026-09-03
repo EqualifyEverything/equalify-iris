@@ -126,10 +126,13 @@ all, because a page that stops without one reads as complete to every reader and
 every later pass, while one that says where it ends can be finished. Tag it by what
 the reader loses, the way you tag everything else: a missing marker and a missing
 note about an irregular sequence are "content_missing", because content the contract
-puts in the document is absent from it, while a language the log names and no lang
-attribute marks, or a graphic with no placeholder src to supply, is
-"a11y_only" — the words of the page are all there and what is unmet is the
-attribute a reader needs in order to be given them properly.
+puts in the document is absent from it; a language the log names that no lang
+attribute marks is "a11y_only", because the words of the page are all there and what
+is unmet is the attribute a reader needs in order to be given them properly; and a
+graphic whose placeholder src the log records but the HTML does not carry is
+"structure_wrong", because a reader is given that graphic by its description and the
+placeholder is for whatever supplies the real asset — the content is all there and
+the markup around it is incomplete.
 And where the log asserts something the image refutes — "the table is fully
 transcribed" beside a table that stops at a row the page keeps going past — the log is
 not the problem; the missing content is, and it is "content_missing" like any other,
