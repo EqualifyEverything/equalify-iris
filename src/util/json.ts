@@ -131,12 +131,17 @@ export function extractJson<T = unknown>(text: string): T | null {
 //
 // If it did, the walk read an object whose closing brace is the reply's own, and there is nothing
 // left over for a second reading to recover — so the narrow rule is not tried at all. That is the
-// gate the brace test below could not be: a restarted draft's inline object is always the TAIL of
-// the reply, since everything the model wrote after abandoning its first attempt belongs to it, and
-// the walk finds it by resuming inside the candidate that failed. The brace test catches the same
-// shape only while the abandoned prose leaves its `{` unbalanced, and one `}` anywhere in the
-// restarted content — a code listing, template syntax, a math brace, all ordinary page content —
-// rebalances it and hands #168 back:
+// gate the brace test below could not be, and the claim it rests on is deliberately the narrow one:
+// a restart the walk can read WHOLE leaves nothing after it, and a restart the walk cannot read
+// whole is the brace test's case. What it does NOT claim is that a restart is always the last thing
+// in the reply — a model that restarts, closes the object and then adds a sentence has written a
+// reply where it is not, and that reply is refused by `wholeReplyObject`'s `span.end` check instead,
+// independently of where the walk stopped. Three revisions of this argument were retired for
+// asserting an invariant one shape wider than the code relied on; this is the width it relies on.
+//
+// The brace test catches the abandoned-draft shape only while the abandoned prose leaves its `{`
+// unbalanced, and one `}` anywhere in the restarted content — a code listing, template syntax, a
+// math brace, all ordinary page content — rebalances it and hands #168 back:
 //
 //   {"html": "<p>draft continues\n{"html": "<p>use the } token</p>", "log": "ok", …}
 //

@@ -203,6 +203,18 @@ test("a reply that is only its object is read as that object, not as something q
     );
   }
 
+  // The change is slightly wider than #339, and this is the half of it a verify fixture cannot show.
+  // A PAGE whose content prints the contract — a document about this system, or any page quoting JSON —
+  // used to lose the page to the fragment it printed: the walk's candidate failed at the quote before
+  // the colon, resumed inside it, and returned `{faithful: true}` as the envelope. Now the envelope is
+  // read. Pinned because the page path is the one with no floor under it (see the header: there is no
+  // before-page to compare a first render against), so this rescue would regress silently.
+  const pageQuotingTheContract = extractJson<{ html?: string; log?: string }>(
+    '{"html": "<p>{ "faithful": true }</p>", "log": "ok", "suggested_agent": null}',
+  );
+  assert.equal(pageQuotingTheContract?.html, '<p>{ "faithful": true }</p>');
+  assert.equal(pageQuotingTheContract?.log, "ok");
+
   // A page that legitimately prints a lone `{` fails the brace test too, and that costs nothing:
   // discarding the narrow reading answers with the walk's result, which is what this returned
   // before any of it. The direction is the safety property — head and base can differ only where

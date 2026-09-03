@@ -1539,9 +1539,9 @@ Applied to every candidate in the walk the narrow rule changes 14 of 4,100 bench
 all 14: a Reader verdict quoting `{"html":"…` in its prose gets a string that never closes and swallows
 the verdict, returning one issue instead of five. Its own weak case is a draft abandoned mid-string and
 restarted inline, where it returns the abandoned prose glued to the front of the page. Two gates refuse
-that, and it took both: a restart is always the **tail** of the reply, so the walk's answer closes where
-the reply closes; and the abandoned `{` does not close inside its string, which catches a restart the
-walk could only read in part. The brace test alone is not enough, because one `}` in the restarted page
+that, and it took both: a restart the walk can read **whole** closes where the reply closes, so nothing
+is left for a second reading to recover; and the abandoned `{` does not close inside its string, which
+catches a restart the walk could only read in part. The brace test alone is not enough, because one `}` in the restarted page
 content — a code listing, template syntax, a math brace — rebalances the abandoned string.
 Discarding the reading costs nothing: it answers with the walk's result, which is the answer before any
 of this. And because a fenced reply is beyond any one-pass reader,
