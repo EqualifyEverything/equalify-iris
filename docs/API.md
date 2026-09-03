@@ -1415,9 +1415,12 @@ merely leaves `"log"` empty also has no log and has a different remedy, and is n
 though over 67 round logs on file that shape is 0 of 2,320 page replies, so today this field is the
 whole population of pages with no log. It follows the document like the other two: a page
 re-extracted with a proper envelope has a log and leaves the set, one that came back bare stays, and
-a round that threw keeps the prior fragment and so keeps the page. All three sets are disjoint in any round the pipeline can
-produce: a blank declaration needs an envelope with a `log` asserting the page is empty, and a page
-that failed has no fragment of its own at all, so no one page can be answered two of these ways.
+a round that threw keeps the prior fragment and so keeps the page. No one page is ANSWERED two of these ways: a blank declaration needs
+an envelope with a `log` asserting the page is empty, and a page that failed has no fragment of its own
+at all. The sets are not quite disjoint as memberships, though, and the exception is worth knowing before
+you subtract one from another: `page_bare_html` is emitted while the page is being rendered, and the
+verify call that follows is unwrapped, so a bare page whose verifier takes a provider error is in
+`pages_bare_html` and `pages_failed` both. Nothing on file has done it.
 
 ## 7c. Partial documents
 

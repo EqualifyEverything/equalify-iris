@@ -497,12 +497,17 @@ export interface Diagnostics {
   pages_blank: number[];
   // Source pages whose fragment came from a reply that was markup rather than the envelope, so it
   // carried no `"log"` field for the agent to record anything in (pipeline/extraction.ts
-  // `bareHtml`, event `page_bare_html`). These pages SHIPPED and are in neither set above: the
-  // HTML is usable, which is why the rescue exists, and 0 of the 41 in two 100-page bench rounds
-  // left any other line behind. What is missing is everything `agents/page.md` asks for in the log
-  // and nowhere else — a page ending mid-sentence, an orphan heading, an unkeyed symbol, a
-  // placeholder image source, a language change, an irregular table — unmet and unreported on
-  // about one page in seven (#349).
+  // `bareHtml`, event `page_bare_html`). These pages ordinarily SHIP and are in neither set above:
+  // the HTML is usable, which is why the rescue exists, and 0 of the 41 in two 100-page bench rounds
+  // left any other line behind. "Ordinarily" rather than "always", because this event is emitted in
+  // `renderPage` and the binding verify call that follows it is unwrapped — a provider error there
+  // reaches `failedPage` through `runExtraction`'s `.catch`, so a bare page CAN also appear in
+  // `pages_failed`. Nothing has been observed doing it and no rate here is computed from the
+  // difference, so it is stated rather than engineered around. What is missing is every record
+  // `agents/page.md` asks for in the log — a page ending mid-sentence, an orphan heading, an unkeyed
+  // symbol, a placeholder image source, a language change, an irregular table — unmet and unreported
+  // on about one page in seven (#349). Two of those six exist in the log and nowhere else; the other
+  // four also oblige the HTML, so on a bare page what is lost is the record, not always the remedy.
   //
   // Named for the reply shape and not for the consequence, because it is the narrower claim: an
   // enveloped reply that simply leaves `"log"` empty ALSO has no log, has a different remedy (a

@@ -109,12 +109,22 @@ of finding one.
 Where the user message quotes what the agent recorded in its own "log" field, that
 is the transcriber's account of its own work on this page, and it is evidence rather
 than a second source: check it against the image, the way you check the HTML. It
-settles two things and licenses nothing else. An obligation the contract puts in the
-log and nowhere else is DISCHARGED there — a page ending mid-sentence, a heading with
-no parent on the page, a symbol with no key, a placeholder image source, a language
-change, an irregular table — so where the log records one of those, it is recorded,
-and reporting it as unrecorded is a false finding about the one field you can now
-see. And where the log asserts something the image refutes — "the table is fully
+settles two things and licenses nothing else. A record the contract asks for in the
+log AND NOWHERE ELSE is made there — a heading the page gives nothing to place it
+under, a symbol the page never keys — so where the log carries one of those, it is
+carried, and reporting it as unrecorded is a false finding about the one field you
+can now see. For everything else the log is asked to note, the contract asks
+something of the DOCUMENT as well, and that half is still yours to check: a page that
+stopped short also emits [page not fully transcribed] as the last thing it emits, a
+placeholder src also names the page and the graphic, a change of language also
+carries lang on the element that holds it, an irregular list or table also carries a
+note a reader can check against the rows above it. So a log saying the page was cut,
+or that it holds a second language, is not the discharge of those rules but your
+evidence for reading them: where the log admits one and the HTML does not carry its
+half, the reader loses it, and that is "content_missing" like any other — the marker
+most of all, because a page that stops without one reads as complete to every reader
+and to every later pass, while one that says where it ends can be finished.
+And where the log asserts something the image refutes — "the table is fully
 transcribed" beside a table that stops at a row the page keeps going past — the log is
 not the problem; the missing content is, and it is "content_missing" like any other,
 now with the agent's own words as the reason it went unnoticed.

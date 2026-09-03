@@ -196,13 +196,24 @@ test("the verify task compares a region the page names against the bands the HTM
 });
 
 // #349. `agents/page.md` asks for the "log" field by name in 26 places, and for six kinds of
-// obligation the log is the only place it asks — a page ending mid-sentence, an orphan heading, an
-// unkeyed symbol, a placeholder image source, a language change, an irregular table. The verifier
-// judging the page against that contract was never shown the field, so it could only ignore those
-// rules or hunt for their evidence in the HTML: across 311 verify replies in two bench rounds, 35
-// problems on 26 replies demanded something of the log, and 26 of the 35 were about a log that
-// existed and was not shown. `verifyAgentOutput` now quotes it (test/page-log-to-verifier.test.ts
-// pins the carrying, including that a recheck is sent none).
+// obligation it asks for a log entry — a page ending mid-sentence, an orphan heading, an unkeyed
+// symbol, a placeholder image source, a language change, an irregular table. The verifier judging the
+// page against that contract was never shown the field, so it could only ignore those rules or hunt
+// for their evidence in the HTML: across 311 verify replies in two bench rounds, 35 problems on 26
+// replies demanded something of the log, and 26 of the 35 were about a log that existed and was not
+// shown. `verifyAgentOutput` now quotes it (test/page-log-to-verifier.test.ts pins the carrying,
+// including that a recheck is sent none).
+//
+// **Only TWO of the six are log-only, and the first draft of this clause said all six were.** The
+// other four have an HTML half that is the load-bearing one — `[page not fully transcribed]` as the
+// last content emitted (`page.md:49-51` calls the marker "the part that matters", because "log" is
+// not delivered as the document), a placeholder `src` naming the page and the graphic (`:313`), `lang`
+// on the element that changes language (`:602`), a reader-checkable note on an irregular sequence
+// (`:513`). Telling the verifier the OBLIGATION is discharged by the log suppresses exactly those
+// four in the HTML, on pages whose log admits them — so a truncated page whose log says where it
+// stopped would ship without the marker `test/e2e.sh` §9i requires, and a Korean page whose log names
+// its languages would ship declared English. The clause now discharges the RECORD and hands the log
+// back as evidence FOR reading the HTML half, which is why the pins below are split in two.
 //
 // This pins what the prompt does with it, and the prohibition is the half that pays. Showing the
 // field without a rule invites MORE log-directed demands, and every one of them is unsatisfiable by
@@ -212,14 +223,28 @@ test("the verify task reads a quoted log as evidence and never makes it the subj
   for (const [what, re] of [
     ["a quoted log is the transcriber's own account, to be checked rather than trusted",
       /that is the transcriber's account of its own work on this page, and it is evidence rather than a second source: check it against the image, the way you check the HTML/],
-    ["an obligation the contract puts in the log alone is discharged there",
-      /An obligation the contract puts in the log and nowhere else is DISCHARGED there/],
-    // The six by name, because the general rule is the one a verifier applies to the HTML and these
-    // are the cases where the evidence is nowhere else to be found.
-    ["with the six such obligations named",
-      /a page ending mid-sentence, a heading with no parent on the page, a symbol with no key, a placeholder image source, a language change, an irregular table/],
+    ["a record the contract asks for in the log and nowhere else is made there",
+      /A record the contract asks for in the\s+log AND NOWHERE ELSE is made there/],
+    // The two that really are log-only, named — the general rule is the one the verifier applies to
+    // the HTML, and these are the two cases where the evidence is nowhere else to be found.
+    ["with the two log-only records named",
+      /a heading the page gives nothing to place it\s+under, a symbol the page never keys/],
     ["and what it costs to report one of them as unrecorded",
-      /where the log records one of those, it is recorded, and reporting it as unrecorded is a false finding/],
+      /where the log carries one of those, it is\s+carried, and reporting it as unrecorded is a false finding/],
+    // And the four with an HTML half, each named with the half the DOCUMENT owes — the whole point of
+    // the split. A verifier told the log discharges these stops checking the marker and the `lang`.
+    ["the four with an HTML half say the document's half is still the verifier's",
+      /the contract asks\s+something of the DOCUMENT as well, and that half is still yours to check/],
+    ["with each document-side obligation named",
+      /\[page not fully transcribed\] as the last thing it emits, a\s+placeholder src also names the page and the graphic, a change of language also\s+carries lang on the element that holds it, an irregular list or table also carries a\s+note a reader can check/],
+    // The inversion that makes the change earn its cost rather than just not regress: an admission in
+    // the log is EVIDENCE the HTML half is owed, so it turns a silent loss into a `content_missing`.
+    ["and the log is evidence FOR that reading, not a discharge of it",
+      /is not the discharge of those rules but your\s+evidence for reading them: where the log admits one and the HTML does not carry its\s+half, the reader loses it, and that is "content_missing"/],
+    // Named because it is the one of the four with a downstream gate on it: `test/e2e.sh` §9i treats
+    // the marker as the thing that must survive the review loop.
+    ["with the marker singled out, in page.md's own words",
+      /the marker\s+most of all, because a page that stops without one reads as complete to every reader/],
     // The other direction: a log that overstates what was done is not a licence to argue with the
     // log, it is evidence about the page — and the finding it supports is the ordinary one.
     ["a log the image refutes makes the missing content the problem, not the log",

@@ -1669,17 +1669,22 @@ halves pinned in `test/page-prompt.test.ts`, `test/feedback-prompt.test.ts` and
 
 The fourth check is not a comparison at all but a field the verifier was never shown: the page
 agent's own `"log"`. `agents/page.md` asks for it by name in **26** places, and for six kinds of
-finding it is the only place asked — a page ending mid-sentence, a heading with no parent on the page,
+finding it asks for a log entry — a page ending mid-sentence, a heading with no parent on the page,
 a symbol with no key, a placeholder image source, a language change, an irregular table. The verifier
 judges the HTML against that contract and was given the HTML alone, so on all six it could only ignore
-the rule or hunt for its evidence in the markup, where the contract does not put it. Across **311
+the rule or hunt for its evidence in the markup, where for two of them the contract does not put it. Across **311
 verify replies, 35 problems on 26 replies demanded something of the log, and 26 of the 35 were about a
 log that existed and was not shown** (issue #349). It is now quoted in the verify message, after the
 cached prefix like the caution and clipped at a bound no observed log reaches (median 671 characters,
 longest 2,566 over 2,001 replies). What the prompt may do with it is deliberately small: the log is the
-transcriber's account of its own work, so an obligation recorded there is **discharged** and reporting
-it as unrecorded is a false finding, while a log the image refutes makes the missing content the
-problem with the agent's own words as the reason. The log is never the subject of a problem — the
+transcriber's account of its own work, so a **record** the contract asks for in the log and nowhere
+else is made there and reporting it as unrecorded is a false finding, while a log the image refutes
+makes the missing content the problem with the agent's own words as the reason. Only two of the six are
+log-only, and the distinction is the whole clause: the other four oblige the HTML as well — the
+`[page not fully transcribed]` marker, a placeholder `src`, `lang` on the element that changes language,
+a note on an irregular sequence — so the prompt says that half is still the verifier's and hands the log
+back as **evidence for** reading it. A log admitting the page was cut is the reason to look for the
+marker, not a discharge of it; the looser wording would have shipped a truncated page without one. The log is never the subject of a problem — the
 correction pass is parsed for `html` alone and writes no log, so "the log does not note X" is an
 instruction nobody can carry out and it spends the page's only licence. Both rechecks of a correction
 are sent none, because the log they would carry describes a fragment that has since been rewritten.
