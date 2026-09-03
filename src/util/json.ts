@@ -58,10 +58,14 @@ export function extractJson<T = unknown>(text: string): T | null {
     // On to the candidates.
   }
   let last: T | null = null;
+  // Where the answer we settled on ended, for the whole-reply attempt at the bottom. An object
+  // that closes on the reply's last character is the reply's own envelope, however it got there.
+  let lastEnd = -1;
   for (let i = text.indexOf("{"); i !== -1; ) {
     const read = readObjectAt<T>(text, i);
     if (read !== null) {
       last = read.value;
+      lastEnd = read.end;
       // Past the object, because everything inside it belongs to it: a nested
       // `{"name": "table-agent"}` is not a later answer, and counting it as one would make
       // "the last object" mean the innermost one.
@@ -84,9 +88,11 @@ export function extractJson<T = unknown>(text: string): T | null {
   // Last chance for a reply that is nothing BUT one object — opening at the first character and
   // closing at the last, which is what every one of these prompts asks for — whose escaping the
   // walk could not repair. Read under the narrower colon rule described above `repairedSpan`, and
-  // taken only where its own strings are self-contained (`stringsAreSelfContained`).
+  // taken only where the walk did not already close on the reply's last character
+  // (`walkClosedOnTheLastCharacter`) and this reading's own strings are self-contained
+  // (`stringsAreSelfContained`).
   //
-  // Both halves of that condition are load-bearing, and each is a version of this change that
+  // Every part of that condition is load-bearing, and each is a version of this change that
   // shipped nothing. The narrow rule cannot go in the walk, because a candidate that newly parses
   // moves the cursor: on 14 of the 4,100 agent replies in the bench logs a Reader verdict quoting
   // `{"html":"…` in its prose gets a value-string that never closes, swallows the verdict behind
@@ -100,20 +106,49 @@ export function extractJson<T = unknown>(text: string): T | null {
   // a draft the model gave up on mid-string and restarted inline. The walk reads the restart, which
   // is the answer; the narrow rule reads one object whose `html` is the abandoned prose with
   // `{"html": "` glued to the front of it, and that string is delivered to a reader as the page
-  // (#168). The abandoned `{` never closes inside that string, so the test discards the reading and
-  // the walk's answer stands. A decoy the model QUOTED closes inside its own string, so the test
-  // keeps the reading and #339's verdict is read as the rejection it is.
+  // (#168). Both gates refuse that reading, for different reasons — the restart is the tail of the
+  // reply, and the abandoned `{` does not close inside the string — and a decoy the model QUOTED
+  // fails neither, so #339's verdict is read as the rejection it is.
   //
-  // An earlier version of this gate compared KEY SETS — the narrow reading preferred where it
-  // carried every field the walk found plus one more — and it is worth saying why that was wrong,
-  // because it looked like the same idea. It is a race the decoy can win: it holds only while the
-  // quoted object names fewer fields than the real envelope, so a four-field `notes` quote ties it,
-  // and it depends on field ORDER, since a restart preceded by one complete field carries a strict
-  // superset and wins. Neither shape has anything to do with which reading is right. What separates
-  // them is whether the model finished writing the object it quoted, and that is what is tested now.
+  // TWO EARLIER VERSIONS OF THIS GATE WERE WRONG, and both looked like the same idea. The first
+  // compared KEY SETS — the narrow reading preferred where it carried every field the walk found
+  // plus one more — which is a race the decoy can win: it holds only while the quoted object names
+  // fewer fields than the real envelope, so a four-field `notes` quote ties it, and it depends on
+  // field ORDER, since a restart preceded by one complete field carries a strict superset and wins.
+  // The second was the brace test alone, which is about the right thing and is not sufficient: one
+  // `}` in the restarted page content rebalances the abandoned string and the envelope reaches the
+  // page again. Neither field count nor a coincidence of braces has anything to do with which
+  // reading is right. What does is whether the walk has already read an object that closes where the
+  // reply closes — and, failing that, whether the model finished writing the object it quoted.
   const recovered = wholeReplyObject<T>(whole);
-  if (recovered !== null && stringsAreSelfContained(recovered)) return recovered;
-  return last;
+  if (recovered === null) return last;
+  if (walkClosedOnTheLastCharacter(text, lastEnd)) return last;
+  if (!stringsAreSelfContained(recovered)) return last;
+  return recovered;
+}
+
+// Did the walk's answer end on the reply's final character?
+//
+// If it did, the walk read an object whose closing brace is the reply's own, and there is nothing
+// left over for a second reading to recover — so the narrow rule is not tried at all. That is the
+// gate the brace test below could not be: a restarted draft's inline object is always the TAIL of
+// the reply, since everything the model wrote after abandoning its first attempt belongs to it, and
+// the walk finds it by resuming inside the candidate that failed. The brace test catches the same
+// shape only while the abandoned prose leaves its `{` unbalanced, and one `}` anywhere in the
+// restarted content — a code listing, template syntax, a math brace, all ordinary page content —
+// rebalances it and hands #168 back:
+//
+//   {"html": "<p>draft continues\n{"html": "<p>use the } token</p>", "log": "ok", …}
+//
+// Whereas a decoy the model QUOTED sits inside a field of an envelope that closes after it, so the
+// walk's reading of it stops short of the reply's end and this gate lets the narrow rule run.
+//
+// Both tests are kept because each is free in the same direction and neither implies the other: a
+// restart whose own object does not parse leaves the walk on a fragment mid-reply, which only the
+// brace test refuses. Rejecting a reading always answers with the walk's result, which is the
+// result `main` gives, so a gate here can only ever return behaviour to the base.
+function walkClosedOnTheLastCharacter(text: string, lastEnd: number): boolean {
+  return lastEnd === text.trimEnd().length;
 }
 
 // One object spanning the whole reply, read with the colon rule confined to keys. Null unless the
@@ -131,12 +166,17 @@ function wholeReplyObject<T>(whole: string): T | null {
 
 // Does every `{` inside this object's strings close inside the same string?
 //
-// This is the whole discriminator between the two shapes the narrow rule cannot tell apart, and it
-// is the difference itself rather than a proxy for it. A model QUOTING an object writes the whole
-// thing — `"I read it as { "faithful": true, "problems": [] } at first"` — so the braces inside that
-// string balance. A model that ABANDONS an object mid-string and restarts has written a `{` whose
-// `}` belongs to the restarted object, so the narrow reading swallows the opener and leaves it
-// unbalanced. Nothing about field order, field count, or which reading is longer enters into it.
+// The second of the two gates, and the one that catches a restart the walk could not read whole: a
+// model QUOTING an object writes the whole thing — `"I read it as { "faithful": true, "problems": []
+// } at first"` — so the braces inside that string balance. A model that ABANDONS an object
+// mid-string and restarts has written a `{` whose `}` belongs to the restarted object, so the narrow
+// reading swallows the opener and leaves it unbalanced. Nothing about field order, field count, or
+// which reading is longer enters into it.
+//
+// What it is NOT is a complete discriminator, which is worth stating because a comment here once
+// claimed it was: the invariant holds only while the abandoned string's own braces stay unbalanced,
+// and a single `}` in the restarted content rebalances it. `walkClosedOnTheLastCharacter` is what
+// closes that, and it is the gate to reach for first.
 //
 // False negatives cost exactly nothing, which is why this can afford to be strict: a page that
 // legitimately prints a lone `{` makes the narrow reading unusable, and an unusable narrow reading

@@ -160,35 +160,45 @@ test("a reply that is only its object is read as that object, not as something q
     [[22, 23], [24]],
   );
 
-  // The narrow reading is also preferred only where its own strings are SELF-CONTAINED: every `{`
-  // inside them closes inside the same string. Its failure case is a string the position tracker
-  // reads as a value where JSON meant a key, and an abandoned unterminated string is exactly what
-  // does that — a draft the model gave up on mid-string and restarted inline. The walk reads the
-  // restart, which is the answer. The narrow rule reads one object whose `html` is the abandoned
-  // prose with `{"html": "` glued to the front, and that string is delivered to a reader as the
-  // page, which is the whole subject of this file. The abandoned `{` never closes inside that
-  // string, so the reading is discarded and the walk's answer stands.
+  // The narrow reading is preferred only where TWO gates allow it, and the shape both exist for is
+  // an abandoned draft: the model gave up on an object mid-string and restarted inline. Its
+  // unterminated string is the narrow rule's own failure case — the position tracker reads a value
+  // where JSON meant a key — so the rule returns one object whose `html` is the abandoned prose with
+  // `{"html": "` glued to the front, and that string is delivered to a reader as the page, which is
+  // the whole subject of this file. The walk reads the restart, which is the answer.
   //
-  // BOTH FIELD ORDERS, because the gate this replaced could only see one of them. It compared key
-  // sets — the narrow reading preferred where it carried every field the walk found plus one more —
-  // and the abandoned string being the FIRST field is what made the two sets equal. Move one
-  // complete field ahead of it and the narrow reading is a strict superset, so it won and the
-  // envelope reached the page. The brace test does not care where in the object the model gave up.
-  for (const [where, restarted] of [
+  // Each row below defeats a different version of this gate, and the first two are versions that
+  // shipped. A KEY-SET gate (the narrow reading preferred where it carries every field the walk
+  // found plus one more) sees only row 1: the abandoned string being the FIRST field is what makes
+  // the two sets equal, and moving one complete field ahead of it makes the narrow reading a strict
+  // superset, so it wins and the envelope reaches the page. A BRACE gate (every `{` inside a string
+  // closes inside it) sees rows 1 and 2 and not row 3, because a single `}` in the restarted content
+  // — a code listing, template syntax, a math brace, none of them exotic on a page — rebalances the
+  // abandoned string. What holds for all three is that a restart is the TAIL of the reply: the walk's
+  // answer closes on the reply's last character, and where it does, the narrow rule is not tried.
+  for (const [where, restarted, page] of [
     [
       "first field",
       `{"html": "<p>Table 3 continues\n` +
         `{"html": "<table><tr><th>Year</th></tr></table>", "log": "ok", "suggested_agent": null}`,
+      "<table><tr><th>Year</th></tr></table>",
     ],
     [
       "after a complete field",
       `{"log": "ok", "html": "<p>Table 3 continues\n` +
         `{"html": "<table><tr><th>Year</th></tr></table>", "suggested_agent": null}`,
+      "<table><tr><th>Year</th></tr></table>",
     ],
-  ] as [string, string][]) {
+    [
+      "a brace in the restarted page content",
+      `{"html": "<p>Table 3 continues\n` +
+        `{"html": "<table><tr><th>Year} onwards</th></tr></table>", "log": "ok", "suggested_agent": null}`,
+      "<table><tr><th>Year} onwards</th></tr></table>",
+    ],
+  ] as [string, string, string][]) {
     assert.equal(
       extractJson<{ html?: string }>(restarted)?.html,
-      "<table><tr><th>Year</th></tr></table>",
+      page,
       `${where}: the abandoned draft's prose was read as the page`,
     );
   }
