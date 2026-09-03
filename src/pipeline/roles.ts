@@ -45,6 +45,11 @@ const REDUNDANT_ON: Record<string, string[]> = {
 // transcribed page that mentions a staff directory should not pay for a scan of the whole
 // joined body. Still only a pre-check — it matches `role=directory` written in text too, and a
 // false positive costs the scan below, which then finds no tag to change.
+//
+// That last clause was not true until the attribute was located by walking: a page saying
+// `role=directory` inside an `<ul aria-label="…">` matched here AND matched in the scan, and the
+// word came out of the accessible name. `directory` being an ordinary English word is the reason
+// this comment exists, and was the reason that was reachable. See `findRoleAttribute`.
 const ANY_DEPRECATED = /role\s*=\s*["']?[^"'>]*(?:doc-endnote|doc-biblioentry|directory)\b/i;
 
 // A start tag, with its attributes read as text-or-quoted-string so a `>` inside an
@@ -56,17 +61,115 @@ const ANY_DEPRECATED = /role\s*=\s*["']?[^"'>]*(?:doc-endnote|doc-biblioentry|di
 // mis-sliced, because the only edit made is to a `role` attribute found INSIDE the slice.
 const START_TAG = /<([a-z][a-z0-9-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
 
-// `role` in the attribute text: double-quoted, single-quoted, or bare. The leading
-// whitespace is captured so the attribute can be removed WITH its separator when the last
-// token goes, rather than leaving `<li  id="x">`.
+// Where a `role` attribute is, found by walking the attribute text as a sequence of
+// `name(=value)?` pairs from position 0 — the way a parser reads it — rather than by searching
+// it for something shaped like `role=`.
 //
-// Non-global, so only the FIRST `role` in a start tag is considered — which is the only one
-// that exists as far as anything downstream is concerned. The HTML parser drops a repeated
-// attribute and keeps the first, so `<li role="listitem" role="doc-endnote">` is
-// `<li role="listitem">` in the tree, axe never sees the deprecated one, and rewriting it here
-// would edit a string nobody reads. (anchors.ts's source scan takes the first of a repeated
-// attribute for the same reason.)
-const ROLE_ATTR = /(\s+)role\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i;
+// **The walk is what makes a match inside a quoted value impossible, and that is the whole
+// reason it is not a regex.** A search for `\s+role\s*=\s*(…)` matches inside another
+// attribute's value, and the values on these elements are prose out of a document: `alt`,
+// `aria-label`, `title`. `role\s*=\s*` accepts the spaced form, which is how the phrase
+// appears in English — an `alt` reading "each user and role = admin, editor or viewer" put
+// `admin,` where a role name goes, and the word was cut out of the middle of the alt text. The
+// same search damaged an `<ol title="role = directory listings">`, because `directory` is an
+// ordinary English word and `<ol>` is one of its hosts, so the table above was no protection.
+// Both losses are unreportable: the name is still non-empty and not generic, so nothing in the
+// gate can see a word has gone, and the log line names the eaten word as an invented role —
+// evidence pointing at the page agent for something this file did.
+//
+// It also finds the role wherever it sits rather than wherever the first lookalike sits. The
+// old search, stopping at the first match, could damage a `title` and leave a genuinely invalid
+// `role` after it in place: the document went on failing the gate, now with mangled markup, and
+// the log said a strip had happened.
+//
+// Only the FIRST `role` attribute is returned, which is the only one that exists as far as
+// anything downstream is concerned. The HTML parser drops a repeated attribute and keeps the
+// first, so `<li role="listitem" role="doc-endnote">` is `<li role="listitem">` in the tree,
+// axe never sees the deprecated one, and rewriting it here would edit a string nobody reads.
+// (anchors.ts's source scan takes the first of a repeated attribute for the same reason.)
+type RoleAttr =
+  // No `role` attribute, or one with no value — an empty role is ignored by ARIA and by the
+  // gate, so there is nothing to remove.
+  | { kind: "none" }
+  // A `role` whose value cannot be read to its end, which is the JSON-escaping leak's shape.
+  // Both passes leave the whole tag alone; see the comment at the call sites.
+  | { kind: "declined" }
+  | {
+      kind: "found";
+      // Offset into the attribute text, and the exact text to splice out — the leading
+      // whitespace included, so the attribute can go WITH its separator when the last token
+      // goes, rather than leaving `<li  id="x">`.
+      index: number;
+      whole: string;
+      gap: string;
+      dq?: string;
+      sq?: string;
+      bare?: string;
+    };
+
+const WS = /\s/;
+
+function findRoleAttribute(attrs: string): RoleAttr {
+  let i = 0;
+  while (i < attrs.length) {
+    const start = i;
+    while (i < attrs.length && WS.test(attrs[i]!)) i++;
+    const gap = attrs.slice(start, i);
+    if (i >= attrs.length) break;
+    const nameStart = i;
+    while (i < attrs.length && !WS.test(attrs[i]!) && attrs[i] !== "=") i++;
+    const isRole = attrs.slice(nameStart, i).toLowerCase() === "role";
+    // The `=` may be separated from the name by whitespace, and so may the value from the `=`.
+    let j = i;
+    while (j < attrs.length && WS.test(attrs[j]!)) j++;
+    if (attrs[j] !== "=") {
+      // A valueless attribute. `i` already sits after the name, so the next turn reads the
+      // whitespace before whatever follows.
+      if (isRole) return { kind: "none" };
+      continue;
+    }
+    j++;
+    while (j < attrs.length && WS.test(attrs[j]!)) j++;
+    const quote = attrs[j];
+    if (quote === '"' || quote === "'") {
+      const end = attrs.indexOf(quote, j + 1);
+      // Unreachable from START_TAG, whose quoted branches only match closed pairs, so this is
+      // for a caller passing attribute text of its own: a value with no end is a value that
+      // cannot be read, which is the declined case.
+      if (end === -1) return isRole ? { kind: "declined" } : { kind: "none" };
+      if (isRole) {
+        const value = attrs.slice(j + 1, end);
+        return {
+          kind: "found",
+          index: start,
+          whole: attrs.slice(start, end + 1),
+          gap,
+          ...(quote === '"' ? { dq: value } : { sq: value }),
+        };
+      }
+      i = end + 1;
+      continue;
+    }
+    // A bare value, ending at whitespace — or at a quote, which means the value ran into one
+    // and cannot be read whole.
+    let k = j;
+    while (k < attrs.length && !WS.test(attrs[k]!) && attrs[k] !== '"' && attrs[k] !== "'" && attrs[k] !== ">") k++;
+    if (isRole) {
+      if (k < attrs.length && !WS.test(attrs[k]!)) return { kind: "declined" };
+      return { kind: "found", index: start, whole: attrs.slice(start, k), gap, bare: attrs.slice(j, k) };
+    }
+    i = k;
+  }
+  return { kind: "none" };
+}
+
+// Splice a new `role` attribute — or nothing — into a start tag, by position. `attrs` is the
+// last thing in the tag before its `>`, so its offset is fixed by the two lengths; nothing is
+// searched for, so a value that happens to contain the attribute text cannot be edited instead.
+function spliceAttr(tag: string, attrs: string, at: number, len: number, replacement: string): string {
+  const attrsAt = tag.length - 1 - attrs.length;
+  return tag.slice(0, attrsAt + at) + replacement + tag.slice(attrsAt + at + len);
+}
 
 export interface RoleStrip {
   html: string;
@@ -85,9 +188,13 @@ export function stripDeprecatedRoles(html: string): RoleStrip {
   const stripped: string[] = [];
   let nodes = 0;
   const out = html.replace(START_TAG, (tag, name: string, attrs: string) => {
-    const m = ROLE_ATTR.exec(attrs);
-    if (!m) return tag;
-    const [whole, gap, dq, sq, bare] = m;
+    const found = findRoleAttribute(attrs);
+    // A value the walk cannot read whole is left alone rather than edited — see the guard's
+    // comment in `stripInvalidRoles`, which is where that shape was observed. This pass could
+    // only reach it through a stray token that happened to be one of three names, but the
+    // outcome would be the same mangling, so it declines for the same reason.
+    if (found.kind !== "found") return tag;
+    const { whole, gap, dq, sq, bare, index } = found;
     const value = dq ?? sq ?? bare ?? "";
     // ARIA takes the first token it recognises, so a deprecated token after a good one is
     // already inert — removed anyway, because an inert token is still text in the file that
@@ -105,10 +212,7 @@ export function stripDeprecatedRoles(html: string): RoleStrip {
     // loses every token loses the attribute and the whitespace that introduced it.
     const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : "";
     const replacement = kept.length === 0 ? "" : `${gap}role=${quote}${kept.join(" ")}${quote}`;
-    // Replaced through a function so a `$` in a surviving token is a character rather than a
-    // `$&`-style reference, and searched from the start of the tag — where `whole` begins with
-    // whitespace and `<name` has none, so the first hit is the attribute just matched.
-    return tag.replace(whole, () => replacement);
+    return spliceAttr(tag, attrs, index, whole.length, replacement);
   });
   return { html: out, stripped, nodes };
 }
@@ -132,6 +236,12 @@ export function stripDeprecatedRoles(html: string): RoleStrip {
 // attribute gone. So removing it cannot lose a reader anything, on any element, and no host table
 // is needed. It also closes the class rather than the instance — the next model to invent
 // `doc-footer` or `doc-notes` is covered by code that was written before it existed.
+//
+// That argument is about a role TOKEN, though, and holds of nothing else — which is why the
+// attribute is located by walking the start tag's attributes rather than by searching them, and why
+// `findRoleAttribute` below carries the longest comment in this file. A pass that removes anything
+// it does not recognise, pointed at a `role=` that was really prose inside an `alt`, deletes a word
+// from an accessible name and reports it as an invented role.
 //
 // What it does NOT do is name the block. A stripped `<section role="doc-footnotes">` is a
 // `<section>` with no accessible name, which is compliant and anonymous, and the model's intent
@@ -212,22 +322,17 @@ export function stripInvalidRoles(html: string): InvalidRoleStrip {
   const stripped: string[] = [];
   let nodes = 0;
   const out = html.replace(START_TAG, (tag, _name: string, attrs: string) => {
-    const m = ROLE_ATTR.exec(attrs);
-    if (!m) return tag;
-    const [whole, gap, dq, sq, bare] = m;
-    // An UNQUOTED value that the scan did not read to its end, which means the next character is a
-    // quote the value ran into. This pass declines the whole tag there, and that decline is load
-    // bearing rather than tidiness: the escaping leak (#233/#234/#257) delivers
-    // `<hr role=\"doc-pagebreak\" …>`, where the unquoted value reads as the single character `\`.
-    // Removing a "token" that is one character out of the middle of an attribute leaves
-    // `<hr"doc-pagebreak\" …>` — markup mangled worse than the violation it was fixing. The strip
-    // above cannot reach this case because it only ever removes one of three names it knows, and a
-    // stray `\` is not one of them; this pass removes everything it does not recognise, so it needs
-    // the guard the other does not.
-    if (bare !== undefined) {
-      const next = attrs.slice(m.index + whole.length, m.index + whole.length + 1);
-      if (next !== "" && !/\s/.test(next)) return tag;
-    }
+    const found = findRoleAttribute(attrs);
+    // An unquoted value the walk could not read to its end, because the next character is a quote
+    // the value ran into. The whole tag is declined there, and that decline is load bearing rather
+    // than tidiness: the escaping leak (#233/#234/#257) delivers `<hr role=\"doc-pagebreak\" …>`,
+    // where the unquoted value reads as the single character `\`. Removing a "token" that is one
+    // character out of the middle of an attribute leaves `<hr"doc-pagebreak\" …>` — markup mangled
+    // worse than the violation it was fixing. The strip above can only reach that shape through a
+    // stray token that happens to be one of three known names; this pass removes everything it does
+    // not recognise, so it meets the case on every leaked marker.
+    if (found.kind !== "found") return tag;
+    const { whole, gap, dq, sq, bare, index } = found;
     const value = dq ?? sq ?? bare ?? "";
     const tokens = value.split(/\s+/).filter((t) => t.length > 0);
     const kept = tokens.filter((t) => {
@@ -251,7 +356,7 @@ export function stripInvalidRoles(html: string): InvalidRoleStrip {
     // above makes it: an inert token is still text in the file saying the wrong thing.
     const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : "";
     const replacement = kept.length === 0 ? "" : `${gap}role=${quote}${kept.join(" ")}${quote}`;
-    return tag.replace(whole, () => replacement);
+    return spliceAttr(tag, attrs, index, whole.length, replacement);
   });
   return { html: out, stripped, nodes };
 }

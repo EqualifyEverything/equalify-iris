@@ -23,7 +23,7 @@ import { join } from "node:path";
 import axe from "axe-core";
 import { runAxe } from "../src/pipeline/lint.ts";
 import { wrapDocument, assembleBodyWithReport } from "../src/pipeline/assembly.ts";
-import { stripInvalidRoles } from "../src/pipeline/roles.ts";
+import { stripInvalidRoles, stripDeprecatedRoles } from "../src/pipeline/roles.ts";
 import { runReview } from "../src/pipeline/review.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
@@ -259,12 +259,108 @@ test("a document with nothing to strip comes back byte-identical", () => {
     // token to report.
     '<div role="">x</div>',
     '<div role>x</div>',
+    // `role=` INSIDE another attribute's value. The words here are alt text and accessible names —
+    // the thing this whole pass exists to protect — and a locator that searched the attribute slice
+    // for `\s+role=` deleted a word out of the middle of each of them. See the test below for what
+    // makes them reachable and why the spaced form matters.
+    '<img src="p3.png" alt="Permissions table: each user and role = admin, editor or viewer">',
+    '<p aria-label="Table 3 role=guest counts">x</p>',
+    '<div title="see role=footer for details">x</div>',
+    // The same thing where the pseudo-value is the LAST thing in the value, so nothing follows it
+    // to look like a separator.
+    '<img src="p4.png" alt="the column headed role=admin">',
   ]) {
     const strip = stripInvalidRoles(body);
     assert.equal(strip.html, body, `should be unchanged: ${body}`);
     assert.deepEqual(strip.stripped, []);
     assert.equal(strip.nodes, 0);
   }
+});
+
+// The attribute is found by WALKING the attributes as a parser does, and this is the test that
+// requires it. A search for `\s+role=` anywhere in the slice matches inside a quoted value, and
+// what sits in quoted values is exactly the prose this pass exists to protect: `alt`,
+// `aria-label`, `title`. `role\s*=\s*` accepts the spaced form too, which is how the phrase
+// actually appears in English — "each user and role = admin" — so a screenshot of a permissions
+// table, a figure showing ARIA markup, or a manual about user roles all reach it with no config or
+// code change.
+//
+// The loss is unreportable, which is why it is worse than the violation it was fixing: the alt is
+// still non-empty and not generic, so nothing in the gate or in `delivered_alt` can see a word has
+// gone, and the only trace is an `invalid_roles_stripped` line naming `admin,` as an invented role
+// — evidence pointing at the page agent for something this pass did.
+test("a `role=` inside another attribute's value is prose, and is not an attribute", () => {
+  // The mangling cases, byte-for-byte, so a locator that regresses says which word it ate.
+  for (const body of [
+    '<img src="p3.png" alt="Permissions table: each user and role = admin, editor or viewer">',
+    '<p aria-label="Table 3 role=guest counts">x</p>',
+    '<div title="see role=footer for details">x</div>',
+    "<div title='single quotes role=footer too'>x</div>",
+  ]) {
+    assert.equal(stripInvalidRoles(body).html, body, `prose is not an attribute: ${body}`);
+  }
+  // The worse half of the same defect: the pseudo-value came FIRST, and the locator stops at the
+  // first thing it matches, so the old pass damaged the `title` and left the real invalid role in
+  // place. The document went on failing `aria-roles` at critical, now with mangled markup, and the
+  // log said a strip had happened. Walking finds the real attribute wherever it sits.
+  const both = stripInvalidRoles('<div title="see role=footer for details" role="doc-footnotes">x</div>');
+  assert.equal(both.html, '<div title="see role=footer for details">x</div>');
+  assert.deepEqual(both.stripped, ["doc-footnotes"]);
+  assert.equal(both.nodes, 1);
+  // And a real role BEFORE the prose, which the old locator happened to get right — pinned so the
+  // fix is not one-directional.
+  const first = stripInvalidRoles('<div role="doc-footnotes" title="see role=footer for details">x</div>');
+  assert.equal(first.html, '<div title="see role=footer for details">x</div>');
+  assert.deepEqual(first.stripped, ["doc-footnotes"]);
+  // The other half of the fix, and a second way the old pass could edit the wrong text: the
+  // replacement is spliced BY POSITION rather than searched for. Here the attribute text of the
+  // real `role` occurs verbatim inside the `title` before it, and a search-and-replace edits the
+  // first copy — deleting from the accessible name and leaving the invalid role standing.
+  const twin = stripInvalidRoles('<div title=\' role="doc-notes"\' role="doc-notes">n</div>');
+  assert.equal(twin.html, '<div title=\' role="doc-notes"\'>n</div>');
+  assert.deepEqual(twin.stripped, ["doc-notes"]);
+});
+
+// A repeated attribute is the first one, because that is the element the browser builds and the
+// element axe sees: rewriting the second would edit a string nothing reads, and report a strip that
+// changed nothing about the document. The valueless case is the same rule — an empty role is
+// ignored, so the element has nothing invalid on it however the second copy is spelled.
+test("a repeated role is the first one, which is the only one that exists", () => {
+  const inert = '<li role="listitem" role="doc-notes">n</li>';
+  assert.equal(stripInvalidRoles(inert).html, inert);
+  assert.deepEqual(stripInvalidRoles(inert).stripped, []);
+  const valueless = '<div role role="doc-notes">n</div>';
+  assert.equal(stripInvalidRoles(valueless).html, valueless);
+  // The other order does strip, and leaves the repeat behind — the pass is not in the business of
+  // tidying duplicate attributes, only of removing a role that is not a role.
+  assert.equal(stripInvalidRoles('<li role="doc-notes" role="listitem">n</li>').html, '<li role="listitem">n</li>');
+});
+
+// The same defect, in the pass that has been shipping since #187, and this half is live on `main`.
+// The review that found the hazard read the name-plus-host table as protection: a token is removed
+// only when it is one of three names AND the element is a host for it. But `directory` is an
+// ordinary English word — the pre-check comment in roles.ts says so in as many words — and `<ul>`
+// is one of its hosts, so a list whose accessible name mentions a staff directory lost the word.
+// Nothing about it is specific to the new pass; it is the locator, which both passes share.
+test("the deprecated strip does not read prose inside an attribute value either", () => {
+  for (const body of [
+    '<ul aria-label="the role=directory column">x</ul>',
+    // The spaced form, which is the one an English sentence actually uses. Armed deliberately with
+    // a word in front of `role`: the old locator needed `\s+` before it, so a `role=` sitting flush
+    // against the opening quote was safe by accident and would have been a true negative here.
+    '<ol title="marked role = directory in the source">x</ol>',
+    '<li aria-label="marked role=doc-endnote in the source">n</li>',
+  ]) {
+    const strip = stripDeprecatedRoles(body);
+    assert.equal(strip.html, body, `prose is not an attribute: ${body}`);
+    assert.deepEqual(strip.stripped, []);
+    assert.equal(strip.nodes, 0);
+  }
+  // Still strips the real thing when both are present, and from wherever it sits.
+  assert.equal(
+    stripDeprecatedRoles('<ul aria-label="the role=directory column" role="directory">x</ul>').html,
+    '<ul aria-label="the role=directory column">x</ul>',
+  );
 });
 
 test("the strip runs where pages are joined, and reports what it removed", () => {

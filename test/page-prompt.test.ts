@@ -396,6 +396,12 @@ test("the page agent's footnote-role rule keeps the clauses that make it a rule"
     // src/pipeline/roles.ts strips the invalid role without supplying any of them.
     ["the shapes that work, including the one that names the block",
       /A footnote block needs no role at all — <aside>, <footer> and a bare <ol> each pass the gate — and where the block deserves a name, give it one the element already understands: <section aria-label="Footnotes">/],
+    // The offered shape is also the only one of the four that produces an accessible NAME, i.e.
+    // spoken text — and the example's text is English. This file already says "transcribe that
+    // language; do not translate it" about the page's content, and nothing said it of the label, so
+    // a model working a Korean or Spanish footnote list was shown an English literal to copy.
+    ["the offered label follows the page's language rather than this instruction's",
+      /That label is read aloud to a reader, so it is text of the page like any other: write it in the language the page is in, and do not copy the English word out of this instruction onto a page that is not in English/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }

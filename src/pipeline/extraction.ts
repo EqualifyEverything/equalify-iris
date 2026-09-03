@@ -383,7 +383,9 @@ Thirteen structures are easy to render as something that merely looks right, so 
   names a collection of notes, and a plural of the first was never defined. Do not make a role by
   adding an s to one you have seen. A footnote block needs no role at all — <aside>, <footer> and a
   bare <ol> each pass the gate — and where the block deserves a name, give it one the element
-  already understands: <section aria-label="Footnotes">.
+  already understands: <section aria-label="Footnotes">. That label is read aloud to a reader, so it
+  is text of the page like any other: write it in the language the page is in, and do not copy the
+  English word out of this instruction onto a page that is not in English.
 - QUOTATIONS: <blockquote> for a block quotation, <q> only for a short inline one. Attribute a
   visible source with <cite>. Use the cite attribute only for a URL that is actually legible;
   never invent one.
