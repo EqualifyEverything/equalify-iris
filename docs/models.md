@@ -655,8 +655,9 @@ never been the uncertain part; only the size, and the size is set by an agent th
 recommendation is priced against a page agent running `claude-sonnet-4-6`, where it puts the challenger
 **4.4 points from break-even** — and those are percentage points of *rejection rate*, not of money.
 #330 expresses break-even as the rejection rate at which the swap stops saving: its 88.8% against the
-84.4% it measures. Recomputed from the inputs published here it is **88.9%** — which is not either of
-the two 88.9%s in the table above, the incumbent's detect rate and the union's trigger rate — so 4.5
+84.4% it measures. Recomputed from the inputs published here it is **88.9%** — which is neither of the
+two quantities printed as 88.9% in the table above, the incumbent's detect rate and the union's trigger
+rate, each of which appears once per corrector block — so 4.5
 points, a tenth of a point from #330's and not worth reconciling. This document expresses the same
 threshold as a correction price instead — $0.0644 a pass on its own inputs, $0.0708 on #330's — and
 the matching rejection-rate form of it is 86.5% against a measured 85.2%, or **1.3 points**. Which
