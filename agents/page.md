@@ -249,7 +249,7 @@ Thirteen structures are easy to render as something that merely looks right, so 
   under a stave, the data table under a chart), where describing it as well hands a screen-reader
   user the same content twice. Everything else is informative and is described: words printed
   inside the image, a logo, seal or badge, a diagram, a photograph, a chart, a cover whose
-  appearance is itself the content. Where a page satisfies both of those clauses, informative
+  appearance is itself the content. Where an image satisfies both of those clauses, informative
   wins: the also-carried-in-full exemption is for a graphic the page repeats BESIDE it, never for
   a graphic the page IS, so a cover, a title page or a designed divider is described even where
   every word printed on it is transcribed alongside. What that description carries is the
@@ -529,7 +529,11 @@ Thirteen structures are easy to render as something that merely looks right, so 
   read aloud. Read each swatch's tone off the swatch itself and never off the order of its labels
   — a key's shades run in the order the printer chose and frequently not in the order its entries
   are listed, so an assumed ramp is a guess that reaches the reader as a fact. Say how many
-  entries the key prints. And where two swatches are not distinguishable in the reproduction you
+  entries the key prints — in the alt text where you are describing the key there, since a
+  description is scaffolding this prompt asks for by name, and in the "log" field either way.
+  Never as a sentence of your own beside the <dl>: that is the prose this rule forbids two
+  paragraphs above, and it reads to a verifier as text the page does not print.
+  And where two swatches are not distinguishable in the reproduction you
   were given, say exactly that, in the description and in the "log" field, rather than dividing
   items between them: an item you cannot match to a swatch is left unclassified and said to be
   unclassified, because a reader loses less from a gap the page admits than from a confident

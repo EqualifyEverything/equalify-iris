@@ -70,17 +70,33 @@ test("the verify task will not score a described swatch as invented, or overturn
       /A graphical key is where that goes wrong most expensively, so it is named here/],
     ["a description of the ink is the transcription, because the page prints no words for it",
       /the page prints no words for that half, so a description of the ink standing as the term of the legend IS the transcription the contract asks for and is not invented text/],
-    ["and the consequent report is prohibited by name",
-      /do not send it back for naming a shade the page does not name/],
+    // Bounded to the invention framing it is aimed at. Unqualified, "do not send it back for naming
+    // a shade the page does not name" also covers a shade named WRONGLY — which on this corpus is
+    // the commonest defect of all, since the page names none of the tones in words — so the literal
+    // reading told the verifier to leave a mis-read tone standing. The clause below is what it is
+    // for; that one is what it is not for.
+    ["the prohibited report is bounded to the invention framing",
+      /do not send it back AS INVENTED TEXT for naming a shade the page does not name/],
+    ["a count of the key's entries in the same description is covered on the same terms",
+      /A count of the key's entries carried in the same description is the contract too, on the same terms/],
     // The root cause on p077: both agents assumed the legend's tones ran in the order of its
     // labels. Measured, they do not — 26, then 176, then 143 — so the assumption was written into
-    // the markup as fact by the extraction and enforced as fact by the verifier.
-    ["the tone is read off the swatch and not off the order of the labels",
-      /Read a swatch's tone off the swatch and not off the order of the labels beside it, which is frequently not the order the shades run in/],
+    // the markup as fact by the extraction and enforced as fact by the verifier. Pinned with its
+    // kind, because this rule's job is to make one report clearly available while another is
+    // withdrawn, and a verifier told only what NOT to file files nothing.
+    ["what the contract does not sanction is named, so a mis-read tone stays reportable",
+      /What the contract does not sanction is the tone being read off the order of the labels beside the swatch rather than off the swatch, which is frequently not the order the shades run in — a wrongly named shade is a real problem, and it is "content_wrong"/],
     ["a stated uncertainty is the contract being followed, and is checked before it is contradicted",
       /that hedge is the contract being followed — check it against the image before contradicting it/],
     ["and is never replaced by a confident assignment the verifier cannot see well enough to make",
       /never replace a stated uncertainty with a confident assignment you cannot see well enough to make/],
+    // Symmetry, and it is the half a shield alone would cost. Protecting a hedge without also
+    // licensing a verifier that CAN see through it makes an unclassified item nearly unfalsifiable,
+    // so it becomes the cheapest answer the page agent has and the gap ships. `prd.md` §7.4 v1.10
+    // takes the trade knowingly in the other direction — a gap the page admits beats a confident
+    // assignment to the wrong band — which is a reason to bound the shield, not to omit it.
+    ["a hedge is falsifiable, and a verifier that can tell the shades apart says which",
+      /A hedge is not unfalsifiable, though: where you CAN tell the two apart, say so and say which is which, because an item left unclassified is a gap in the delivered page and a hedge nobody checks is the cheapest wrong answer available/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
   }

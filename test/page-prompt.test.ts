@@ -625,8 +625,16 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     // category for a third, pale tone: one arm put 24 states in a group of four, another wrote a
     // four-category legend for a key that prints two, and a third listed 12, 12 and 4 for three
     // fills each labelled a bottom 12 with three states in two mutually exclusive fills.
-    ["the number of entries the key prints is stated",
-      /Say how many entries the key prints/],
+    // The count is pinned WITH its destination, because the destination is the whole of it. Every
+    // other imperative in this rule names where its answer goes, and a count with no home lands in
+    // the delivered page as a sentence beside the <dl> — which the same rule forbids two paragraphs
+    // above ("the second copy is prose you wrote rather than content the page has") and which a
+    // verifier reads as invented text, reopening the very delete loop this change exists to close.
+    // A first revision of this clause said only "Say how many entries the key prints."
+    ["the number of entries the key prints is stated, and where it is stated",
+      /Say how many entries the key prints — in the alt text where you are describing the key there, since a description is scaffolding this prompt asks for by name, and in the "log" field either way/],
+    ["and the one place it must not go is named, with the rule that forbids it",
+      /Never as a sentence of your own beside the <dl>: that is the prose this rule forbids two paragraphs above, and it reads to a verifier as text the page does not print/],
     ["two indistinguishable swatches are declared, in the description and in the log",
       /where two swatches are not distinguishable in the reproduction you were given, say exactly that, in the description and in the "log" field, rather than dividing items between them/],
     ["an unmatched fill is left unclassified and said to be, with the reason a reader would give",
@@ -712,8 +720,8 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     // same page. The order is pinned in both directions because either half alone re-opens it —
     // "informative wins" without the reason invites the exemption being read as narrower than it
     // is, and the reason without the ruling leaves two clauses and no precedence.
-    ["the two clauses are ordered where a page satisfies both",
-      /Where a page satisfies both of those clauses, informative wins/],
+    ["the two clauses are ordered where one image satisfies both",
+      /Where an image satisfies both of those clauses, informative wins/],
     ["and the exemption is bounded to a graphic the page repeats beside it",
       /the also-carried-in-full exemption is for a graphic the page repeats BESIDE it, never for a graphic the page IS/],
     // Which resolves it against the redundancy clause below as well, by saying what the description
