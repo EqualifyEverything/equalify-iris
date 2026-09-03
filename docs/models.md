@@ -8,8 +8,9 @@ it cost" — the outcome of the model-selection sprint tracked in
 [#311](https://github.com/EqualifyEverything/equalify-iris/issues/311).
 
 Four of the five agents have a cheaper model in play, and no two of the four are at the same stage.
-**One was applied, one was declined, and two are recommended and waiting on a decision** — and none
-of the four was the same kind of decision.
+**One was applied, one was declined, one is recommended and waiting on a decision, and one went back
+to open after the seat that ran its round withdrew the recommendation** — and none of the four was
+the same kind of decision.
 
 - **`page` is swapped and live.** `moonshotai.kimi-k2.5` has served the reference deployment's page
   agent since 2026-09-02
@@ -34,21 +35,25 @@ of the four was the same kind of decision.
   appeared once the benchmark attached the page images Iris attaches; the round that withheld them
   ranked the two the other way round, which §7 carries as a limit in its own right — a benchmark
   that withholds an input the agent receives in production measures a different agent.
-- **`feedback` is a recommended swap that spent this sprint recommending the opposite, and the number
-  that finally decided it belongs to a different agent.** The keep rested first on a circular argument
-  and then on **57 of 57 injected defects, no misses** — a figure taken on 11 hand-picked pages. The
-  same injector on **45 pages** gives 40 of 45 against the cheap finalist's 39 of 45, a tie, and
-  adjudicating the pages where the two disagree found the cheap model's extra rejections were mostly
-  **real defects the incumbent passed**. What settled it is that **a verify verdict is not a
-  deliverable**: it triggers one correction pass, billed to whichever model runs `page`, and the cheap
-  verifier rejects far more pages. Priced that way the swap is **−50.9% of the total cost per page
-  judged under the corrector actually deployed, and −2.0% under the incumbent one** — the same swap
-  worth 2% or 51% according to a price that is not the verifier's. On the verify line *alone* it is
-  −71% under both, which is the number this document would have quoted before §7's eighth limit and
-  the number that decides nothing
-  ([#330](https://github.com/EqualifyEverything/equalify-iris/issues/330), §4). Both measured
-  corrector prices sit under the **$0.0644/pass** that would reverse it, so the direction is not in
-  doubt; one blocker is, and §4 names it.
+- **`feedback` is open, and it is the one row where the price is settled and the decision still is
+  not.** Five dispositions have been published here in one sprint. The keep rested first on a circular
+  argument and then on **57 of 57 injected defects, no misses** — a figure taken on 11 hand-picked
+  pages. The same injector on **45 pages** gives 40 of 45 against the cheap finalist's 39 of 45, a tie,
+  and adjudicating the pages where the two disagree found the cheap model's extra rejections were
+  mostly **real defects the incumbent passed**. Then the unit turned out to be wrong: **a verify
+  verdict is not a deliverable**, it triggers one correction pass billed to whichever model runs
+  `page`, and the cheap verifier rejects far more pages. Priced that way the swap is **−50.9% of the
+  total cost per page judged under the corrector actually deployed, and −2.0% under the incumbent
+  one** — the same swap worth 2% or 51% according to a price that is not the verifier's, where on the
+  verify line *alone* it is −71% under both and decides nothing (§7's eighth limit). Both measured
+  corrector prices sit under the **$0.0644/pass** that would reverse it, **so the price favours the
+  swap and the price is not what is holding it up.** Two things are: the cheap verifier invents
+  defects at a rate 45 pages cannot bound, and reading the same round per *page* rather than per call
+  — 45 control pages, three reads each — shows it rejects **44 of 45 undamaged pages** at least once
+  and reproduces its own verdict on 32 of those 44, against the incumbent's 22 of 25. That second
+  reading withdrew the recommendation the seat that ran the round had made
+  ([#330](https://github.com/EqualifyEverything/equalify-iris/issues/330), §4, and §7's ninth limit
+  for why the per-call rate priced it correctly and could not see it).
 
 Read §2, §3 and §4 before revisiting any of them. The one agent not on that list is `builder`, which
 has made two model calls in the whole sprint — both of them on the swapped deployment, which is why
@@ -70,7 +75,7 @@ resolve.
 |---|---|---|
 | `page` | **42.0%** | **swapped and live since 2026-09-02** (#312) — −44.8% of the priced bill measured on 100 pages, at a named content cost: `content_missing` on 42 pages against 15 (§5) |
 | `copy_editor` | **33.1%** | **swap recommended, not yet applied** (#329) — `openai.gpt-5.6-luna` at 9.5% of the cost and *ahead* on both quality halves, once the page images the agent actually receives are attached (§4) |
-| `feedback` | 15.6% | **swap recommended** to `openai.gpt-5.6-luna`, blocked on one unfixed defect — the keep this row used to assert has been retracted twice over (#330): its reason was circular, and the 57/57 that replaced it was an 11-page artifact. On 45 pages it is 40/45 against the cheap finalist's 39/45, a tie, and the extra rejections are mostly real. Priced on total cost per page, including the correction pass a rejection triggers, the swap is **−50.9%** under the deployed corrector and −2.0% under the incumbent one; the blocker is two fabricated defects, not the price (§4) |
+| `feedback` | 15.6% | **open** (#330) — five dispositions in one sprint, and the last two were a swap to `openai.gpt-5.6-luna` and its withdrawal by the seat that ran the round. On 45 pages the two arms tie on detection (40/45 against 39/45) and the cheap arm's extra rejections are mostly real. Total cost per page, including the correction pass a rejection triggers, favours the swap at **−50.9%** under the deployed corrector and −2.0% under the incumbent one, so the price is not what leaves this open: an unbounded rate of invented defects and a verdict that rejects 44 of 45 clean pages, reproducibly on 32 of them, are (§4) |
 | `reader` | 9.3% | **declined** (#313) — 78% of the incumbent's own agreement floor at −77%, and §3 says what the 22% is |
 | `builder` | 0% | 0 in this round, **not zero any more**: it ran twice on the swapped deployment, at about $0.04 a call (§4) |
 | specialists | 0% | still 0 calls, and §4 says why that is a fact about `agents_dir` rather than about the corpus |
@@ -361,7 +366,7 @@ the *other* pass's issue set instead (floor 148/170 = 87.1%), the four Kimi and 
 haiku's rows are absent from that second artifact as it now stands, though its two passes are both
 in the round's records and priced.
 
-## 4. Two swaps recommended, one of them on its fourth published reason, and two zeros
+## 4. One swap recommended, one re-opened on its fifth published disposition, and two zeros
 
 **`copy_editor` (33.1%) — a swap to `openai.gpt-5.6-luna` is recommended and still awaiting a decision,
 and this row said "keep" for as long as the benchmark withheld an input the agent gets in
@@ -437,16 +442,21 @@ unchanged, and the denominator moves (§7).
   ships, and a guard that only matters for the model you are replacing is the one that never gets
   written.
 
-**`feedback` (15.6%) — swap recommended, after both of the reasons this section gave for keeping the
-incumbent were retracted and the unit the price was quoted in turned out to be the wrong one.** The
-first reason was circular: "treat a swap here as a change to the instrument" is an argument for
-measuring carefully rather than evidence about the choice — being the oracle is a *consequence* of the
-choice, so it cannot justify it
-([#330](https://github.com/EqualifyEverything/equalify-iris/issues/330)). The second is what this
+**`feedback` (15.6%) — open, on the fifth disposition this section has published for one agent in one
+sprint, and the previous four were each retracted for a different reason.** The first was a keep, and
+it was circular: "treat a swap here as a change to the instrument" is an argument for measuring
+carefully rather than evidence about the choice — being the oracle is a *consequence* of the choice, so
+it cannot justify it
+([#330](https://github.com/EqualifyEverything/equalify-iris/issues/330)). The second was the keep this
 section published in its place, and it survived about an hour: **57 of 57 injected defects, no
-misses**. That was true of 11 pages and false of the class. This section then spent a revision
-*undecided*, on the reasoning that a tie on detection leaves nothing to decide with — which was
-itself wrong, because it priced the verify call and a verify call is not what a verifier costs.
+misses**. That was true of 11 pages and false of the class. The third was *undecided*, on the reasoning
+that a tie on detection leaves nothing to decide with — itself wrong, because it priced the verify call
+and a verify call is not what a verifier costs. The fourth was a **swap recommendation** on that
+corrected price, and it is the one this revision withdraws: the price still favours the swap under both
+correctors measured, and re-reading the same round per *page* instead of per call put two facts about
+the cheap arm's verdicts in front of it. Only one of the two is new — the other this section had
+already printed and had not weighted. The price was never the open question; it just looked like the
+only one left.
 
 The method is right and is unchanged: **inject a known defect and ask each candidate whether it sees
 it**, where ground truth is the injection and the incumbent is not the reference anywhere in it. What
@@ -456,7 +466,8 @@ hand-picked hard pages**, driven through Iris's own `verifyAgentOutput` with one
 page agent's whole contract per call. `runs-digits-45` (2026-09-02, **360 calls, $6.8797**, iris
 `2566c8b`, `agents/feedback.md` at `b4b2d3ca`) ran the `digits_changed` injector the same way against
 **45 pages** — every page of a real 91-page 1962 statistical report that carried a breakable figure —
-one repeat per page, both finalists.
+both finalists, at **one damaged read per page and three undamaged control reads**, which is where its
+360 calls come from and why every control figure below has two defensible denominators.
 
 | `digits_changed` detected | 11 hand-picked pages | **45 pages** |
 |---|---|---|
@@ -531,8 +542,30 @@ miss, and its 47.4% is a blend of correct passes and false negatives that the nu
 separate. The other 33 pages are unadjudicated in both directions, and an undamaged control is not a
 correct one — these are real Iris outputs, not verified-clean fixtures.
 
-Two things were named as blocking a swap. **The first has now been priced and does not block; the
-second is unmeasured and does:**
+**The same 135 draws read per page instead of per call, which is what withdrew the swap.** Each control
+page is read three times, so the 85.2% above is a rate per *draw* — the unit the pipeline pays for, and
+the right one for the cost table below. It is the wrong unit for asking whether a verdict is a property
+of the page or of the draw:
+
+| `runs-digits-45` controls, 45 pages × 3 reads | `claude-sonnet-4-6` | `openai.gpt-5.6-luna` |
+|---|---|---|
+| rejected at least once in 3 reads | 25 | **44** |
+| never rejected on any read | **20** | 1 |
+| rejected on all 3 reads | 22 | 32 |
+| rejected on only 1 or 2 of 3 | 3 of 25 (12%) | **12 of 44 (27%)** |
+
+The first row is the same fact as "passing 1 page of 45" above, stated the other way round: **the cheap
+arm fails essentially every undamaged page it is shown often enough.** The last row is the new one, and
+it is the part that reopened this row: 27% of its rejections do not survive its own repeat against the
+incumbent's 12%, so a single verdict from it is a noisier thing to spend a correction pass on. Both
+columns reconcile with the per-draw rates — 22×3 plus 3 unstable pages is the incumbent's 71 of 135,
+and 32×3 plus 12 is the cheap arm's 115 — so this is the same measurement recut, not a second. Neither
+row moves the pricing, because production reads each page once and 85.2% is what the bill is computed
+from, and both were sitting in repeats the round had already paid for
+([#330](https://github.com/EqualifyEverything/equalify-iris/issues/330), 2026-09-02, $0).
+
+Three things were named as blocking a swap. **The first has now been priced and does not block; the
+other two are what leave this open:**
 
 - **Rejecting 85% of pages is an action, not an opinion — and the action is what a verifier costs.**
   Each rejected page buys exactly **one** correction attempt: `correctPage` in
@@ -546,7 +579,7 @@ second is unmeasured and does:**
   [#328](https://github.com/EqualifyEverything/equalify-iris/issues/328), nothing in the delivered
   document saying so. That remains a quality cost. As a *cost* cost it is small, and the next table is
   why.
-- **Luna's errors are the expensive kind, and this is the blocker.** Two of the 12 pages also
+- **Luna's errors are the expensive kind, and this one is a blocker.** Two of the 12 pages also
   carried an invented defect — a
   sentence claimed missing that is in the file, a colon claimed inserted that is not — and a false
   `content_missing` sends a correction pass to add text nobody dropped. Two instances in 45 pages is
@@ -554,6 +587,15 @@ second is unmeasured and does:**
   verifier bare HTML with none of the page agent's JSON log envelope, which Luna complains about on 16
   of 135 control calls against the incumbent's 6 — but only 2 calls fail on that ground alone, so it
   does not explain the rejection floor.
+- **Its verdicts are the less repeatable of the two, and that is the other one.** 12 of the 44 clean
+  pages it rejects are rejected on only one or two of three reads, against 3 of the incumbent's 25 —
+  27% against 12%, from the per-page table above. A correction pass is spent on a single verdict, so
+  reproducibility is not a presentational property of the round: it is the probability that the pass
+  was bought against nothing. This compounds the blocker above rather than sitting beside it, because
+  an invented defect and an unrepeatable rejection are the same purchase seen from two sides, and the
+  round can bound neither rate. **It is also why the seat that produced this round withdrew its own
+  swap recommendation** after re-reading it per page, and why this section follows it rather than
+  keeping the tidier disposition its own pricing supports.
 
 **The verify call is 29.0% of the incumbent's price and that number decides almost nothing.** Luna is
 **$0.0086 a call against $0.0296** on `runs-digits-45` (35.3% on the 11-page round), earning 33.9%
@@ -580,9 +622,11 @@ Same verifiers, same detection, same trigger rates: **the swap is worth 2% or 51
 that belongs to a different agent.** A 71% discount on the verify call becomes a 2% saving on the bill
 when the corrector is expensive, because the extra passes eat it. **Break-even is $0.0644 a
 correction pass** — under it the extra rejections are affordable, over it the incumbent wins. Both
-measured corrector prices are under it, which is why this is a recommendation rather than another
-undecided row; the incumbent corrector sits only 6% under, so the margin there is thin and the
-deployed one is not.
+measured corrector prices are under it, so **the cost question is settled in the direction of the
+swap**; the incumbent corrector sits only 6% under, so the margin there is thin and the deployed one is
+not. An earlier revision of this section treated that as sufficient and published a recommendation. It
+is not sufficient: everything in this table is a price, and both of the things holding the swap up are
+rates the round cannot bound. A settled cost case removes an objection; it does not supply a reason.
 
 Three things follow that the verify-price framing hid. **A second opinion is the best detector and the
 worst buy:** running both and rejecting if either rejects closes 4 of the incumbent's 5 blind spots for
@@ -617,7 +661,7 @@ pages carry defects in Iris's own page output — a misread word, fabricated tab
 word, a broken list, alt text duplicating its caption, headings emitted as italics — and
 [#333](https://github.com/EqualifyEverything/equalify-iris/issues/333) adds a sixth kind: the page
 agent numbers 5 of 91 markers by file position instead of the printed folio, against a clause in its
-own prompt. The verifier swap recommended above is worth about **$1.61 per 100 document pages** —
+own prompt. The verifier swap priced above is worth, at most, about **$1.61 per 100 document pages** —
 $0.0177 per page *judged* under the deployed corrector, and only ≈91 of every 100 pages are judged
 since #294 stopped sending blank versos; under the incumbent corrector the same swap is worth **$0.11**,
 a ≈15x spread in dollars, which §7's eighth limit states as 2.0% against 50.9% — a ≈25x spread,
@@ -745,8 +789,8 @@ share column above), so the next win has to come from asking an agent to do less
 | $0.1071/page, −44.8%, the quality deltas | `runs-postswap-312` | **`2566c8b`**, from the deploy log, not the round | **yes** — one round per arm, §5 says what that does and does not support |
 | editor capability, confinement, $/doc | `runs-editor-2` | `2566c8b`, recorded in the round | **yes** — one arm per model, and §4 names the one document that carries the capability size |
 | the editor round that could not separate its finalists | `runs-editor-1` | graded at `917bb38` | **no. Superseded** — it sent the editor no page images, so it measured a different agent (§7) |
-| verifier `digits_changed` detection, table-vs-year split, control adjudication, $/call, scratchpad share | `runs-digits-45` (+ `runs-digits-repro`) | `2566c8b`, recorded | **yes** — 45 pages of one document, one repeat per page; `runs-digits-repro` is the 10 pages either finalist missed, at three repeats, so its detection rate is not a corpus rate and is not quoted as one |
-| §4's operating-point table: `$total/page`, the −2.0%/−50.9% pair, the $0.0644 break-even | trigger rates and $verify from `runs-digits-45`'s controls; **correction-pass price from `runs-extract100-1`** ($0.0607 sonnet) and a **3-page kimi probe** ($0.0100) | `2566c8b` | **partly.** Every cell re-derives from the four published inputs and does so exactly. But the row that carries the recommendation's size rests on that 3-page probe, drawn from front matter, which is the cheap part of a document. A 100-page kimi extraction round was running when this was written; **the figure to replace $0.0100 with, and the break-even to test it against, are both stated so that landing it does not need a new round** |
+| verifier `digits_changed` detection, table-vs-year split, control adjudication, $/call, scratchpad share | `runs-digits-45` (+ `runs-digits-repro`) | `2566c8b`, recorded | **yes** — 45 pages of one document, one damaged read per page and three control reads; the control rows are quoted both per draw (135, what the pricing uses) and per page (45, what §7's ninth limit is about). `runs-digits-repro` is the 10 pages either finalist missed, at three repeats, so its detection rate is not a corpus rate and is not quoted as one |
+| §4's operating-point table: `$total/page`, the −2.0%/−50.9% pair, the $0.0644 break-even | trigger rates and $verify from `runs-digits-45`'s controls; **correction-pass price from `runs-extract100-1`** ($0.0607 sonnet) and a **3-page kimi probe** ($0.0100) | `2566c8b` | **partly.** Every cell re-derives from the four published inputs and does so exactly. But the row that carries the swap's size rests on that 3-page probe, drawn from front matter, which is the cheap part of a document. The table settles the cost question only; §4 says why that is no longer the question. A 100-page kimi extraction round was running when this was written; **the figure to replace $0.0100 with, and the break-even to test it against, are both stated so that landing it does not need a new round** |
 | verifier self-contradiction, $/call, `para_deleted` + `row_deleted` | `runs-verifier-1` | `da78e0b`, recorded | **partly.** Its `digits_changed` column is **superseded** by the row above — 9/9 became 40/45 at 4x the corpus. The other two classes have never been re-run wider, and its *undamaged-control* column is measured against a superseded `agents/page.md` |
 | cost shares (44.5 / 25.0 / 18.0 / 12.6) | `runs-bystep-100` | `158e3d9` (derived, below) | **superseded** by the row above; see the drift note |
 | $0.1786/page, $17.86/100 pages | `runs-bystep-100` | `158e3d9` | **no. Superseded** — it was never a price to quote forward |
@@ -836,7 +880,7 @@ so an unreported round is invisible in it by construction. When auditing this do
 claims into ones that cite a source and ones that assert a negative. The negatives are the unaudited
 set.
 
-## 7. Eight limits worth knowing before re-benchmarking
+## 7. Nine limits worth knowing before re-benchmarking
 
 - **There is a ceiling and it is about 84%.** The incumbent reader agrees with its own previous
   pass on 84–85% of issues. Every "% of floor" number is against that, not against truth. A raw
@@ -891,6 +935,19 @@ set.
   measure a rate in the unit the pipeline pays for, since OR-ing this round's reject flag across a
   page's three draws — a thing no page in the pipeline experiences — inflated every arm and inverted
   the sign of the comparison before it was caught.
+- **The unit the pipeline pays for is the right one for the price and the wrong one for asking whether
+  a verdict is real.** That is the converse of the limit above and it cost a published recommendation.
+  `runs-digits-45`'s 135 control draws are 45 pages read three times. Per draw, the cheap verifier
+  rejects 85.2% — correct, and what the whole operating-point table is computed from, since production
+  reads each page once. Per page it rejects **44 of 45**, and 27% of those rejections do not survive its
+  own repeat against the incumbent's 12%: it is both fussier and less repeatable, and a correction pass
+  is spent on one verdict. The pooled rate also cannot see whether a detection *credited* to an arm
+  reproduced — one such credit turned out to rest on one read of three, which is a single observation
+  and not coverage (§4, #330). **Nothing was re-run**: this was the same round recut for $0, so it is
+  not another instance of the wider-corpus limit above but a cheaper failure than that one, and the
+  cheapest check for it is to print both denominators and the reads-agreeing count beside every rate
+  taken over repeats. §7's own advice to prefer a wider corpus to more repeats stands, but repeats you
+  have already paid for should be read before they are pooled.
 
 ## 8. What would change these answers
 
@@ -921,18 +978,22 @@ set.
   id verified against the deployment's IAM allowlist **with the identity that will make the call**.
   One free check first: the deployed editor's cache-read share, since Luna gets no cache discount
   and the −26.1% is measured on a bench arm. Its output ceiling is also still 3.4% from binding (§5).
-- **`feedback` is 15.6%, the swap is recommended, and what would change it is one price and one
-  defect — not another detection round.** The cost case is settled in the direction of the swap under
-  both correctors measured, so the two things that could still move it are: **the corrector's real
-  price** (the −50.9% row rests on a 3-page probe at $0.0100 a pass; anything above **$0.0644** hands
-  it back to the incumbent, and a 100-page kimi round was in flight when this was written), and
-  **Luna's two fabricated defects**, which are the blocker and are unmeasured as a rate — a verifier
-  that invents a defect spends a correction pass damaging a page that was fine. Two free things come
-  first: adjudicate the remaining 33 control pages, and fix the incumbent's self-retracting `problems`
-  with a prompt clause. What would *not* change the answer is more detection data on `digits_changed`;
-  the arms are tied there and the decision no longer rests on it. The paid round worth running instead
-  is against the `page` agent: 12 of 12 disputed pages carry extraction defects the verifier is
-  passing, plus #333.
+- **`feedback` is 15.6% and open, and what would settle it is two rates — not another detection
+  round and not another price.** The cost case is settled in the direction of the swap under both
+  correctors measured, and a settled cost case is not a reason to swap. The two rates are **how often
+  the cheap verifier invents a defect** (two instances in 45 pages, unbounded, and a false
+  `content_missing` spends a correction pass damaging a page that was fine) and **how often its
+  rejections survive their own repeat** (27% do not, against the incumbent's 12%). Both are about
+  verdict quality, both are unbounded by this round, and they are the same purchase seen from two
+  sides. Three free things come first: adjudicate the remaining 33 control pages, read the repeats of
+  the *damaged* pages the same way the controls have now been read, and fix the incumbent's
+  self-retracting `problems` with a prompt clause. One price is still worth having, since it decides
+  how much the swap would be worth if the rates come good: **the corrector's real price** (the −50.9%
+  row rests on a 3-page probe at $0.0100 a pass; anything above **$0.0644** hands it back to the
+  incumbent, and a 100-page kimi round was in flight when this was written). What would *not* change
+  the answer is more detection data on `digits_changed`; the arms are tied there and nothing rests on
+  it. The paid round worth running instead is against the `page` agent: 12 of 12 disputed pages carry
+  extraction defects the verifier is passing, plus #333.
 - **A swap invalidates the quality baseline, not just the cost.** `/v1/quality` reports a clean
   rate and mean rounds per document from the judge's verdicts, and a change to `page` or `reader`
   changes what the judge is reading. Re-measure the week after, not the day after.
@@ -952,6 +1013,7 @@ node editorround.mjs   --report runs-editor-2                     # §4's editor
 node verifyregrade.mjs runs-verifier-1                            # §4's 11-page verifier table, free
 node verifyregrade.mjs runs-digits-45                             # §4's 45-page detection split, free
 node verifyregrade.mjs runs-digits-repro                           # §4's stability check, free
+node verifierfinds-perpage.mjs runs-digits-45                     # §4's per-page control table, free
 ```
 
 §4's operating-point table is arithmetic over four published inputs — the two `$verify` prices and the
