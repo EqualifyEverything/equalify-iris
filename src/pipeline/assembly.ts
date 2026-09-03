@@ -1,7 +1,7 @@
 import { runAxe, lintErrorFields, lintDebrisFields, isKnownLanguage, type LintResult } from "./lint.ts";
 import { cutPoints } from "./sections.ts";
 import { namespaceAnchors, type AnchorReport } from "./anchors.ts";
-import { stripDeprecatedRoles, type RoleStrip } from "./roles.ts";
+import { stripDeprecatedRoles, stripInvalidRoles, type RoleStrip, type InvalidRoleStrip } from "./roles.ts";
 import { stripNestedMain, type MainStrip } from "./landmarks.ts";
 import { joinContinuedTables } from "./tables.ts";
 import { joinPageBreakProse, type ProseJoinReport } from "./prose.ts";
@@ -58,6 +58,7 @@ export function assembleBodyWithReport(fragments: Fragment[]): {
   body: string;
   anchors: AnchorReport;
   deprecatedRoles: RoleStrip;
+  invalidRoles: InvalidRoleStrip;
   mains: MainStrip;
   prose: ProseJoinReport;
 } {
@@ -77,8 +78,13 @@ export function assembleBodyWithReport(fragments: Fragment[]): {
     .filter((p) => p.html.length > 0);
   const prose = joinPageBreakProse(kept);
   const joined = stripDeprecatedRoles(prose.pages.join("\n\n"));
-  const mains = stripNestedMain(joined.html);
-  return { body: mains.html, anchors: report, deprecatedRoles: joined, mains, prose: prose.report };
+  // And a role that is not a role at all, on the same argument one step further (roles.ts, #345).
+  // After the deprecated pass rather than before it only for reading order: the two look at
+  // disjoint sets of tokens — every role ARIA deprecates is still a valid role — so neither pass
+  // can take work from the other, whichever runs first.
+  const invalid = stripInvalidRoles(joined.html);
+  const mains = stripNestedMain(invalid.html);
+  return { body: mains.html, anchors: report, deprecatedRoles: joined, invalidRoles: invalid, mains, prose: prose.report };
 }
 
 // The language the shell declares, read off the body instead of assumed. `lang="en"` on a document
@@ -472,7 +478,7 @@ export async function runAssembly(
   fragments: Fragment[],
   opts: { unresolved?: string[] } = {},
 ): Promise<AssemblyResult> {
-  const { body: joinedPages, anchors, deprecatedRoles, mains, prose } = assembleBodyWithReport(fragments);
+  const { body: joinedPages, anchors, deprecatedRoles, invalidRoles, mains, prose } = assembleBodyWithReport(fragments);
   // A table the source printed across a page break arrives here as two tables, and this is the
   // first moment both halves exist in one string — each page was extracted alone, so the agent that
   // wrote the second half had nothing to append to (#239). The join belongs on THIS side of the
@@ -549,6 +555,18 @@ export async function runAssembly(
       stage: "assembly",
       roles: [...new Set(deprecatedRoles.stripped)].sort(),
       nodes: deprecatedRoles.nodes,
+    });
+  }
+  // The same convention for a role that is not a role (roles.ts, #345), and the same reason to
+  // spend a line on it: the delivered document is clean, `aria-roles` finds nothing, and this is
+  // the only place the fact survives that a page agent invented a role name. Read it as harder
+  // evidence than the deprecated line beside it — `doc-endnotes` is a real role reached for in the
+  // wrong place, and a name like `doc-footnotes` was never in any spec.
+  if (invalidRoles.nodes > 0) {
+    ctx.log.event("invalid_roles_stripped", {
+      stage: "assembly",
+      roles: [...new Set(invalidRoles.stripped)].sort(),
+      nodes: invalidRoles.nodes,
     });
   }
   // Same convention again: logged only when a page had emitted one, so an ordinary run adds no

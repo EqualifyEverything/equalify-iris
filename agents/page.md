@@ -344,6 +344,14 @@ Thirteen structures are easy to render as something that merely looks right, so 
   a landmark, put it on a wrapper and leave the list a list:
   <section role="doc-endnotes"><ol><li id="fn-1">…</li></ol></section>. Never
   <ol role="doc-endnotes"> directly, and never <li role="doc-endnote">.
+  There is no plural of doc-footnote. role="doc-footnotes" is not an ARIA role at all — not
+  deprecated, not discouraged, absent from the set — and a document using it fails the gate on
+  aria-roles at CRITICAL, the most severe thing the gate reports about anything. These role names
+  are a fixed list and not a pattern you can build on: doc-footnote names ONE note, doc-endnotes
+  names a collection of notes, and a plural of the first was never defined. Do not make a role by
+  adding an s to one you have seen. A footnote block needs no role at all — <aside>, <footer> and a
+  bare <ol> each pass the gate — and where the block deserves a name, give it one the element
+  already understands: <section aria-label="Footnotes">.
 - QUOTATIONS: <blockquote> for a block quotation, <q> only for a short inline one. Attribute a
   visible source with <cite>. Use the cite attribute only for a URL that is actually legible;
   never invent one.

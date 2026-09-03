@@ -373,6 +373,29 @@ test("the page agent's footnote-role rule keeps the clauses that make it a rule"
       /put it on a wrapper and leave the list a list: <section role="doc-endnotes"><ol><li id="fn-1">…<\/li><\/ol><\/section>/],
     ["both wrong shapes are named at the end",
       /Never <ol role="doc-endnotes"> directly, and never <li role="doc-endnote">/],
+    // Issue #345, and the reason it goes in THIS bullet: the `<section role="doc-endnotes">`
+    // example above is the pattern the models generalise from. Two of the three arms benchmarked
+    // emitted `role="doc-footnotes"` — the shipped one on 3 of the 22 occasions it had to name
+    // this role — which is that example's shape with the noun swapped, and nothing anywhere said
+    // the plural does not exist. So the clause has to say it, within reading distance of what
+    // suggests it.
+    ["the plural does not exist, said flatly",
+      /There is no plural of doc-footnote\. role="doc-footnotes" is not an ARIA role at all/],
+    // Named as a gate failure at its real severity, because "not a role" alone reads as pedantry.
+    // This is the only critical violation any arm produced across 274 delivered pages.
+    ["what using it costs, at the severity the gate gives it",
+      /a document using it fails the gate on aria-roles at CRITICAL, the most severe thing the gate reports about anything/],
+    // The generalisation itself, forbidden as a move rather than as one name — a model that is
+    // only told about `doc-footnotes` can still invent `doc-notes` or `doc-footer`.
+    ["the names are a list and not a pattern",
+      /These role names are a fixed list and not a pattern you can build on/],
+    ["and so the move itself is forbidden",
+      /Do not make a role by adding an s to one you have seen/],
+    // What to do instead. Without this the rule leaves the block unnamed by default and a model
+    // reaching for a name has nowhere to go: all three of these pass axe, and
+    // src/pipeline/roles.ts strips the invalid role without supplying any of them.
+    ["the shapes that work, including the one that names the block",
+      /A footnote block needs no role at all — <aside>, <footer> and a bare <ol> each pass the gate — and where the block deserves a name, give it one the element already understands: <section aria-label="Footnotes">/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
