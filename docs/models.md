@@ -41,9 +41,11 @@ of the four was the same kind of decision.
   adjudicating the pages where the two disagree found the cheap model's extra rejections were mostly
   **real defects the incumbent passed**. What settled it is that **a verify verdict is not a
   deliverable**: it triggers one correction pass, billed to whichever model runs `page`, and the cheap
-  verifier rejects far more pages. Priced that way the swap is **−50.9% of the verify line under the
-  corrector actually deployed and −2.0% under the incumbent one** — the same swap worth 2% or 51%
-  according to a price that is not the verifier's
+  verifier rejects far more pages. Priced that way the swap is **−50.9% of the total cost per page
+  judged under the corrector actually deployed, and −2.0% under the incumbent one** — the same swap
+  worth 2% or 51% according to a price that is not the verifier's. On the verify line *alone* it is
+  −71% under both, which is the number this document would have quoted before §7's eighth limit and
+  the number that decides nothing
   ([#330](https://github.com/EqualifyEverything/equalify-iris/issues/330), §4). Both measured
   corrector prices sit under the **$0.0644/pass** that would reverse it, so the direction is not in
   doubt; one blocker is, and §4 names it.
@@ -587,10 +589,16 @@ worst buy:** running both and rejecting if either rejects closes 4 of the incumb
 97.8% detection, and costs +35.1% to +49.8%. **The intersection is worse than either alone** — it pays
 for two verifiers and then discards the detection they were bought for. And **`$/page actually fixed`
 ranks Luna best under both correctors**, a column whose *ranking* does not depend on #288's 26% clear
-rate at all, since that rate is a common factor across arms; only its level does. This also settles the
-cheap-screen-escalating-to-the-incumbent design that #317 lost on and that an earlier revision of this
-section priced at rates it did not publish: escalation is the union row, and it loses on cost here on
-measured numbers.
+rate at all, since that rate is a common factor across arms; only its level does. **That column has one
+assumption worth stating where it is read rather than only in the blocker below: its denominator is
+`trigger × 26%`, so it credits an arm for every correction that clears — including one that clears
+against a defect the verifier invented.** Blocker 2 says at least two such defects exist in 45 pages
+and that their rate is unmeasured, so the column is most generous exactly where the arm it favours
+is least measured. It is a bound on the value of the cheap arm, not independent support for it.
+
+This also settles the cheap-screen-escalating-to-the-incumbent design that #317 lost on and that an
+earlier revision of this section priced at rates it did not publish: escalation is the union row, and
+it loses on cost here on measured numbers.
 
 **One defect in the incumbent that no corpus change touches:** `problems` is used as a scratchpad, and
 items retract themselves and are emitted anyway ("Disregard — not a problem", on all three calls of a
@@ -609,7 +617,10 @@ pages carry defects in Iris's own page output — a misread word, fabricated tab
 word, a broken list, alt text duplicating its caption, headings emitted as italics — and
 [#333](https://github.com/EqualifyEverything/equalify-iris/issues/333) adds a sixth kind: the page
 agent numbers 5 of 91 markers by file position instead of the printed folio, against a clause in its
-own prompt. The verifier swap recommended above is worth about **$1.78 per 100 pages**. These are
+own prompt. The verifier swap recommended above is worth about **$1.61 per 100 document pages** —
+$0.0177 per page *judged* under the deployed corrector, and only ≈91 of every 100 pages are judged
+since #294 stopped sending blank versos; under the incumbent corrector the same swap is worth **$0.11**,
+which is the ~15x spread §7's eighth limit is about. These are
 defects a reader can catch the service out on, and fixing the extraction is worth more than changing
 who grades it — the same conclusion §5 reaches from the other direction, where the swap that saved
 44.8% is also the one that lost the subtotal rows.

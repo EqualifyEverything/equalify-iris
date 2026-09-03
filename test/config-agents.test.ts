@@ -481,10 +481,13 @@ test("docs/models.md §5's per-agent rows sum to the total row they are publishe
 const DECIDED = ["page", "reader", "copy_editor", "feedback"] as const;
 
 const DISPOSITIONS = [
-  // Ordered, because the phrases overlap: "swap recommended, not yet applied" holds `applied`, and
-  // §4's `copy_editor` opener quotes the word "keep" while saying it no longer applies. First match
-  // in this order wins, and the text each is matched against is cut at the first comma or dash so a
-  // later clause cannot reclassify a paragraph.
+  // The order of this list decides NOTHING — do not add a phrase here on the assumption that putting
+  // it earlier wins. It used to: the phrases overlap ("swap recommended, not yet applied" holds
+  // `applied`), first match won, and reordering reclassified documents. That was the defect, because
+  // both halves of the check below read this same list in the same order, so an overlapping clause
+  // made them agree on the wrong word instead of disagreeing. A clause matching two entries now
+  // FAILS. The text each entry is matched against is still cut at the first comma or dash, so a later
+  // clause cannot reclassify a paragraph.
   //
   // `open` was added an hour after this test was written, and by the route the comment above
   // predicted: the seat that ran the verifier round retracted its headline, `feedback`'s keep became
