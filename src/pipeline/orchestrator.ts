@@ -12,6 +12,7 @@ import {
   lintErrorWhereSignal,
   SIGNAL_EDITOR_TRUNCATED,
   SIGNAL_EDITOR_TRUNCATED_LOST,
+  SIGNAL_EDITOR_HEADINGS_GATED,
   SIGNAL_REVIEW_UNREAD,
   SIGNAL_FIRST_READ_ISSUES,
   SIGNAL_FIRST_READ_UNREAD,
@@ -557,6 +558,12 @@ export async function runPipeline(args: {
         // is paying to work around, against the corrections its readers did not get — and
         // because a threshold can only be put on the second (see SIGNAL_EDITOR_TRUNCATED_LOST).
         ...(review.editorTruncatedLost ? [{ code: SIGNAL_EDITOR_TRUNCATED_LOST, count: 1 }] : []),
+        // A round the loop threw away because it would have demoted a heading out of the document
+        // (#331). Recorded on documents that shipped CLEAN as readily as on any other, which is the
+        // one thing to hold on to when reading it: the refusal is why the document is clean, so
+        // this signal and a good outcome belong on the same session. See
+        // SIGNAL_EDITOR_HEADINGS_GATED for what the rate can and cannot be read as.
+        ...(review.editorHeadingsGated ? [{ code: SIGNAL_EDITOR_HEADINGS_GATED, count: 1 }] : []),
         // How much of the document the reviewer's last read did not answer about. The one
         // signal here that changes what `clean_rate` MEANS rather than adding a rate beside
         // it: without it, a document whose review said nothing is indistinguishable from one

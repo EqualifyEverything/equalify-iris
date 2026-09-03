@@ -355,6 +355,44 @@ export const SIGNAL_EDITOR_TRUNCATED = "iris:editor-truncated";
 // live with the inherent floor; this answers "did the output ceiling stop the loop from
 // trying", whose remedy is one number in the deployment's config rather than a prompt.
 export const SIGNAL_EDITOR_TRUNCATED_LOST = "iris:editor-truncated-lost";
+// A correction round had blocks handed back because applying them would have taken heading
+// elements out of the document while leaving every word of it in place (`headings_reverted`, or
+// `headings_lost` where the whole round went; #331).
+//
+// The odd one out in this table, and the reason it is here rather than left to the run log:
+// every other signal counts something a delivered document HAS, and this counts something it
+// was spared. The document is fine — that is what the refusal is for — so this is a rate of
+// how often the editor attempts a heading demotion, not of how often one shipped.
+//
+// It is recorded because the alternative is not measuring it at all. #331 asked for the rate
+// two ways round: if the demotion stayed ungated, the population to count was heading falls on
+// rounds that shipped; with a gate in place that population is empty by construction, and the
+// question that remains is what the gate costs and whether it earns its keep. One reading 0.3
+// has an editor that would be flattening headings out of a third of its documents unwatched —
+// the shape #329's round did to five headings at once, which until this signal no number on a
+// deployment could confirm or refute.
+//
+// WHAT A 0 IS NOT: evidence that no round demotes a heading, and therefore not on its own a
+// reason to retire the guard. The reading behind this signal is computed on the BLOCK-PATCH
+// round only. The sectioned round and the whole-body reply check the size floor and nothing
+// else (`editorSectionCall` and its neighbour in pipeline/review.ts), so a demotion on either
+// is applied and delivered and never reaches this. The sectioned round is also the loop's LAST
+// round, which is the permanence #331 rests on. So a 0 is equally consistent with a guard that
+// never fires and with one that is watching a path the demotions are not on, and separating
+// those two means reading `navigation_lost` off the run logs of documents that took a sectioned
+// round. Deciding from a 0 that the two false positives named in `GATED` are not worth a round
+// is a decision made on a number that cannot see the population it would be about.
+//
+// Not derivable from anything else here: the blocks that were handed back leave no length, no
+// rule and no `unresolved` row behind them. A round refused whole adds a round to `mean_rounds`,
+// which is the only trace of it in this table without this signal — and indistinguishable there
+// from a round the editor answered; a round that was merely narrowed leaves no trace at all.
+//
+// Per document, like the pair above and for the same reason: a rate over documents cannot
+// divide "2 of 3 rounds". How many headings each round would have removed, and which blocks
+// were handed back, are on that round's `editor_patch` line in the run log, which is where a
+// magnitude belongs — it is one session's, and these sessions are user uploads.
+export const SIGNAL_EDITOR_HEADINGS_GATED = "iris:editor-headings-gated";
 // How many windows of the document the review's last read of it came back with no usable
 // answer for (issue #186). Recorded only when non-zero, like the three above.
 //
@@ -620,6 +658,23 @@ export interface QualityStats {
   // the one of the two truncation numbers a threshold can be put on — the other rises with
   // document length alone.
   editor_truncated_lost_rate: number;
+  // Share of documents where at least one correction round had blocks handed back for demoting a
+  // heading, or was refused whole for it — every edit applied, nothing refused, the prose no
+  // shorter, and the document left with fewer headings in it than it had (#331).
+  //
+  // Read it as a rate of ATTEMPTS, not of damage: the demoting blocks kept the text they had, so
+  // the delivered document has its headings. That makes it the one number here that goes UP when a
+  // guard is working, and the reason to read it is what it says about the editor and about the
+  // guard's cost — is this happening at all, and how often does it take the whole round rather
+  // than a block (`headings_reverted` against `discarded: "headings_lost"` on the run log's
+  // `editor_patch` lines). `cap` beside this no longer means the editor cannot get past the guard:
+  // a narrowed round still corrects everything else in its reply, so a document can reach `cap`
+  // for unrelated reasons with this true all the way. Only a document whose rounds were refused
+  // WHOLE says that, and only the run log distinguishes them.
+  //
+  // Overlaps everything and is a subset of nothing. See SIGNAL_EDITOR_HEADINGS_GATED for the
+  // false positives it can count and for why the magnitude is not here.
+  editor_headings_gated_rate: number;
   // Share of documents where part of the reviewer's last read came back unusable, so some
   // of the document has no review verdict at all (#186). Disjoint from nothing: a document
   // here may also be in `unresolved_rate` (the windows that DID answer found issues) or in
@@ -1490,6 +1545,7 @@ export class Store {
       documents_linted: documentsLinted,
       editor_truncated_rate: rate(SIGNAL_EDITOR_TRUNCATED),
       editor_truncated_lost_rate: rate(SIGNAL_EDITOR_TRUNCATED_LOST),
+      editor_headings_gated_rate: rate(SIGNAL_EDITOR_HEADINGS_GATED),
       review_unread_rate: rate(SIGNAL_REVIEW_UNREAD),
       unfinished_page_rate: rate(SIGNAL_UNFINISHED_PAGE),
       rules,

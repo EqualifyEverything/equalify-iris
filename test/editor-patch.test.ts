@@ -677,16 +677,30 @@ test("a navigable count falling beside a word loss is the sanctioned deletion, a
   const dedupe = deduped.events.find((e) => e.type === "editor_patch");
   assert.equal(dedupe?.data.shrunk, 1);
   assert.ok(!("navigation_lost" in (dedupe?.data ?? {})), "a heading gone with its words is the old signal's business");
+  // And therefore not gated by #331 either, which is the half of that rule doing the work: the
+  // deletion EDITOR_SYSTEM asks for takes the title's words with it, so the prose shortens, so
+  // `navigationLost` is silent and the round is applied. A gate read off `structureCounts` alone
+  // would refuse this round — the commonest correction the loop makes — every time.
+  assert.ok(!("discarded" in (dedupe?.data ?? {})), "the sanctioned deletion still ships");
+  assert.match(deduped.result.body, /<div><p>More\.<\/p><\/div>/);
 
-  // Whereas the same heading demoted, words intact, reaches the line — on a round that was applied
-  // and not discarded, because a fall here has never meant the round was wrong. How often a WORKING
-  // round does this is the rate #271 has no measurement of, and this is where it comes from.
+  // Whereas the same heading demoted, words intact, reaches the line — and since #331 that block is
+  // handed back, with no refusal anywhere in the reply. The count is still on the line, because the
+  // magnitude is what says whether this was one repeated title resolved too thoroughly or a document
+  // being flattened.
   const demoted = await round(() => ({ edits: [{ block: 1, html: `<div><p>Operation</p><p>More.</p></div>` }] }), REPRINTED, 1);
   const demote = demoted.events.find((e) => e.type === "editor_patch");
-  assert.match(demoted.result.body, /<p>Operation<\/p>/, "applied, not refused");
-  assert.equal(demote?.data.shrunk, 1);
-  assert.deepEqual(demote?.data.navigation_lost, { headings: 1 });
-  assert.ok(!("discarded" in (demote?.data ?? {})));
+  assert.equal(demoted.result.body, REPRINTED, "the heading is still a heading in the delivered body");
+  // `applied: 0` and `headings_reverted: [1]` rather than `applied: 1`: the one edit in this reply is
+  // the demotion, so handing that block back leaves nothing applied at all. The counts on this line are
+  // what SHIPPED, which is the same thing they mean beside `incomplete` or `unknown`.
+  assert.equal(demote?.data.applied, 0, "the demoted block was handed back, so nothing applied");
+  assert.deepEqual(demote?.data.headings_reverted, [1]);
+  assert.ok(!("shrunk" in (demote?.data ?? {})), "the block that shrank is not in the delivered body");
+  assert.deepEqual(demote?.data.navigation_lost, { headings: 1 }, "the reply AS SENT is what this reads");
+  // And still `discarded`, because a reply whose every edit was handed back changes nothing — crediting
+  // that as usable would read an untouched document as a converged one.
+  assert.equal(demote?.data.discarded, "headings_lost");
 
   // And beside a refusal it is the half of a move that gates, which is what `shrunk` is for: take
   // the source half of a move and refuse the landing half and the heading is simply gone.
@@ -700,6 +714,287 @@ test("a navigable count falling beside a word loss is the sanctioned deletion, a
   const half = halved.events.find((e) => e.type === "editor_patch");
   assert.equal(half?.data.discarded, "refusal_with_loss");
   assert.deepEqual(half?.data.navigation_lost, { headings: 1 }, "on the line whether or not the round survived");
+});
+
+// --- the heading gate (#331) ---
+
+// The round #331 was filed on, in the shape it arrived in: every edit applied, nothing refused,
+// nothing unknown, nothing incomplete, the visible text the same length either side — and five `<h2>`
+// headings rewritten to `<p><strong>` on blocks no issue had named. Every guard in patch.ts passed it
+// and `refused > 0` was the conjunct that kept the gate shut, so the document shipped without them.
+//
+// Five, and the imitation left in place, because both are the point. `<strong>` keeps the rendered
+// page identical, so nothing a sighted reviewer looks at moves; the words are all there, so no length
+// pair moves and `destroyedBody` cannot see it; and what a screen-reader user lost is the whole
+// heading outline of the document, which is the only means they had of reaching the third of five
+// sections. `navigation_lost` was on the log line for all of it and gated nothing.
+const OUTLINE =
+  `<h1>Pay Schedules</h1>\n` +
+  [
+    ["Standby Pay.", "Paid at one half of the base rate for each hour on call."],
+    ["Holiday Pay.", "Paid at twice the base rate for each hour worked."],
+    ["Shift Differential.", "Paid at one tenth of the base rate for evening hours."],
+    ["Overtime.", "Paid at one and one half of the base rate beyond forty hours."],
+    ["Severance.", "Paid at the base rate for one week of each year served."],
+  ]
+    .map(([h, p]) => `<h2>${h}</h2>\n<p>${p}</p>`)
+    .join("\n") +
+  `\n`;
+
+// Every `<h2>` in the document as it was SHOWN, demoted to the paragraph that imitates it, one block
+// edit each. Read off the annotated copy rather than off the body, because that is the copy the model
+// answers about and the block numbers in it are the ones it would quote back.
+const demoteEveryHeading = (shown: string) =>
+  [...shown.matchAll(/<!-- @block (\d+) -->\n<h2>(.*?)<\/h2>/g)].map((m) => ({
+    block: Number(m[1]),
+    html: `<p><strong>${m[2]}</strong></p>`,
+  }));
+
+test("a heading demoted out of the document is handed back, with nothing refused beside it", async () => {
+  const { result, events } = await round((shown) => ({ edits: demoteEveryHeading(shown) }), OUTLINE, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  // The reply was well-formed and every edit in it was one of the five demotions, so all five blocks
+  // are handed back and nothing survives to be applied. `headings_reverted` is the record of that,
+  // named by block, and it is what distinguishes this from every other guard on this line.
+  assert.equal(patch?.data.applied, 0);
+  assert.deepEqual(patch?.data.headings_reverted, [1, 3, 5, 7, 9], "the five `<h2>` blocks, by number");
+  for (const clean of ["unknown", "duplicate", "incomplete", "unreadable"]) {
+    assert.ok(!(clean in (patch?.data ?? {})), `nothing was refused, so no \`${clean}\` on the line`);
+  }
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 5 });
+  assert.equal(patch?.data.discarded, "headings_lost");
+  // Not the unattributable case: no block in this reply GAINED a heading, which is the licence for
+  // handing the source blocks back at all.
+  assert.ok(!("headings_gained" in (patch?.data ?? {})));
+  // Not `refusal_with_loss`, although #331 proposed reusing it: there is no refusal in this reply,
+  // and a reader of the log told there was would go looking for an edit that was never sent.
+  assert.notEqual(patch?.data.discarded, "refusal_with_loss");
+
+  // What the gate is for. The delivered body is the one that entered, headings and all.
+  assert.equal(result.body, OUTLINE);
+  assert.equal((result.body.match(/<h2>/g) ?? []).length, 5);
+  assert.doesNotMatch(result.body, /<p><strong>Standby Pay\.<\/strong><\/p>/);
+  // And the round is a retry, not an answer: the loop must not read the untouched body as the editor
+  // having decided the document was fine. The whole cost of a false positive here is this one round.
+  assert.equal(events.filter((e) => e.type === "review_converged").length, 0);
+  // The one fact about it that outlives the round, for the deployment-wide rate (#331's second ask).
+  assert.equal(result.editorHeadingsGated, true);
+});
+
+test("the demotion costs its own block and nothing else in the reply", async () => {
+  // The finding that narrowed this gate, asserted. The first version discarded the whole reply, so a
+  // heading correctly re-expressed as a `<label>` — a fix for axe's `label` rule, which is `wcag2a` and
+  // in the active tag set, so a violation the Reader raises and the editor is TOLD to make — cost every
+  // other correction in the same reply. On every round, because the retry re-sends the same body and
+  // the same issues to the same model.
+  //
+  // So: one block handed back, the rest of the reply delivered. This is the shape that reaches a real
+  // deployment, and it is the one the old behaviour got most wrong.
+  const FORM =
+    `<h1>Claim Form</h1>\n` +
+    `<form><h4>Name</h4><input id="name"><h4>Date</h4><input id="date"></form>\n` +
+    `<p>Return the form to the address below.</p>\n` +
+    `<img src="seal.png">\n`;
+  const { result, events } = await round(() => ({
+    edits: [
+      // The false positive: every word kept, `headings` down by two, and `structureCounts` cannot see
+      // a `<label>` arriving because it does not count `<label>` at all.
+      { block: 1, html: `<form><label for="name">Name</label><input id="name"><label for="date">Date</label><input id="date"></form>` },
+      // The corrections that used to go down with it.
+      { block: 3, html: `<img src="seal.png" alt="Department seal.">` },
+    ],
+  }), FORM, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 2 }, "the fall is still read and still on the record");
+  assert.deepEqual(patch?.data.headings_reverted, [1], "the block that dropped them, and only that block");
+  assert.equal(patch?.data.applied, 1, "the other edit shipped");
+  // The whole point: the alt text is in the delivered document.
+  assert.match(result.body, /alt="Department seal\."/);
+  // And the form's headings are back, exactly as they were.
+  assert.equal((result.body.match(/<h4>/g) ?? []).length, 2);
+  assert.doesNotMatch(result.body, /<label for="name">/);
+  // The round is USABLE — a correction was delivered, so `body` moves on and the loop is not spending a
+  // round on nothing. That is the difference from the version this replaces, and it is why the signal
+  // below cannot be read off `discarded`.
+  assert.ok(!("discarded" in (patch?.data ?? {})), "part of the reply was kept, so the round was not refused");
+  assert.equal(result.editorHeadingsGated, true, "the guard still says it fired");
+});
+
+test("a block that gave its words to another block is not re-seated, because that would print them twice", async () => {
+  // The mirror image of the reorder case, and the one `headings_gained` cannot see: the thing that
+  // migrated is not a heading. The extractor emits the field label as a stray `<h4>` SIBLING of the
+  // form — the ordinary shape, not the same-wrapper shape — so the fix axe's `label` rule asks for is
+  // two edits: empty the stray block, seat the label inside the form. The document keeps every word
+  // (`navigation_lost` is populated at all only because "Name" is still in the body) and `headings`
+  // falls by one, so this reaches the salvage with `headings_gained: 0`.
+  //
+  // Handing block 1 back would put its `<h4>Name</h4>` next to the `<label>Name</label>` that now
+  // holds the same words: content duplicated and a heading invented that heads nothing, in a body
+  // neither the editor nor the extractor produced. The re-applied check cannot catch it, because with
+  // the `<h4>` back the count is whole again. So a block that gave content up is never re-seated, and
+  // a reply with nothing left to hand back is refused whole.
+  const SIBLING =
+    `<h1>Form</h1>\n` +
+    `<h4>Name</h4>\n` +
+    `<form><p>Enter it.</p><input id="name"></form>\n`;
+  const { result, events } = await round(() => ({
+    edits: [
+      { block: 1, html: `` },
+      { block: 2, html: `<form><p>Enter it.</p><label for="name">Name</label><input id="name"></form>` },
+    ],
+  }), SIBLING, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 1 }, "the fall is read: the words stayed, the heading did not");
+  assert.ok(!("headings_gained" in (patch?.data ?? {})), "nothing arrived as a heading, which is why the other guard is blind to this");
+  assert.ok(!("headings_reverted" in (patch?.data ?? {})), "and the block that dropped it is the block that emptied, so it is not handed back");
+  assert.equal(patch?.data.discarded, "headings_lost", "leaving nothing to seat, which is refused whole");
+  assert.deepEqual(patch?.data.headings_dropped, [1], "and the line says WHICH block fell and could not be handed back");
+  assert.equal(result.body, SIBLING, "the document that entered — not one carrying `Name` twice");
+  assert.equal((result.body.match(/Name/g) ?? []).length, 1, "once, in one place");
+  assert.equal(result.editorHeadingsGated, true);
+});
+
+test("a block that sheds the heading's words while GROWING is not re-seated either", async () => {
+  // The reading is an inequality, not a shortfall, and this is the input that settles which. A block
+  // can hand the heading's words to another edit and come back LONGER — reword what survives, gain a
+  // piece of alt text — and "did this block get shorter" calls that no loss at all. The block would
+  // then be re-seated over an edit already holding those words, and the fail-closed re-check cannot
+  // see it: with the `<h4>` back the document's count is whole again.
+  //
+  // Nothing else separates this from the case above. The document's own prose GREW, so the joined
+  // reading is populated; no heading arrived, so `headings_gained` is 0; the block is not shorter, so a
+  // shortfall test passes it. Only "these are not the words it had" refuses it.
+  const GROWN =
+    `<h1>Form</h1>\n` +
+    `<div><h4>Name</h4><p>Enter it.</p></div>\n` +
+    `<form><input id="name"></form>\n`;
+  const { result, events } = await round(() => ({
+    edits: [
+      { block: 1, html: `<div><p>Enter it. Please print clearly in block capitals.</p></div>` },
+      { block: 2, html: `<form><label for="name">Name</label><input id="name"></form>` },
+    ],
+  }), GROWN, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  // `shrunk` is on the line, and it is on it for the HEADING and not for the words: `gaveContentUp`
+  // reads a heading fall as content given up, so every block that drops one is `shrunk` and in `lost`
+  // whatever became of its text. That is why neither can be the seatability reading, and why this
+  // needed one of its own.
+  assert.equal(patch?.data.shrunk, 1);
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 1 }, "and the document still lost a heading");
+  assert.ok(!("headings_reverted" in (patch?.data ?? {})), "so it is not handed back");
+  assert.equal(patch?.data.discarded, "headings_lost");
+  assert.equal(result.body, GROWN, "the document that entered");
+  assert.equal((result.body.match(/Name/g) ?? []).length, 1, "`Name` once, not once in the heading and once in the label");
+});
+
+test("a reorder in the same reply as a demotion is refused whole, because neither can be told from the other", async () => {
+  // The one shape the per-block revert cannot attribute, and the reason it is not applied blindly.
+  // EDITOR_SYSTEM sanctions "reorder blocks", written as two edits — the block content lands in and the
+  // block it came from. Put that in one reply with a demotion elsewhere and THREE blocks' heading counts
+  // move while the document's falls by one. Handing back every block that dropped one would restore the
+  // reorder's source while its landing block still has the heading: one heading printed twice, invented
+  // here. Nothing binds a departure to an arrival, so this does not guess.
+  const MOVED =
+    `<h1>Manual</h1>\n` +
+    `<div><h2>Operation</h2><p>Start here.</p></div>\n` +
+    `<div><p>Then this.</p></div>\n` +
+    `<div><h2>Appendix</h2><p>Tables.</p></div>\n`;
+  const { result, events } = await round(() => ({
+    edits: [
+      { block: 1, html: `<div><p>Start here.</p></div>` }, // the reorder's source
+      { block: 2, html: `<div><h2>Operation</h2><p>Then this.</p></div>` }, // where it lands
+      { block: 3, html: `<div><p><strong>Appendix</strong></p><p>Tables.</p></div>` }, // the demotion
+    ],
+  }), MOVED, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 1 }, "the document lost exactly one");
+  assert.equal(patch?.data.headings_gained, 1, "and one arrived somewhere, which is what makes it unreadable");
+  assert.ok(!("headings_reverted" in (patch?.data ?? {})), "nothing is handed back on a reply this cannot attribute");
+  assert.equal(patch?.data.discarded, "headings_lost", "so the round is refused whole — the old behaviour, kept for the case that needs it");
+  assert.equal(result.body, MOVED, "and the document is the one that entered");
+  assert.equal((result.body.match(/<h2>/g) ?? []).length, 2, "both headings, neither duplicated");
+  assert.equal(result.editorHeadingsGated, true);
+});
+
+test("the gate is headings only: a list re-expressed as a definition list is a working round", async () => {
+  // The limit of the claim, and why the gate is not `navigation_lost` entire. `items` and `rows` fall
+  // on corrections agents/page.md asks for BY NAME — a `<ul>` that should have been a `<dl>`, a list
+  // mis-extracted as a single-column table — because there the content lands in a DIFFERENT structure
+  // the reader can still navigate, with every word intact. Refusing those would report the loop
+  // working as damage. No sanctioned correction removes a heading and keeps its text, which is the
+  // asymmetry the gate rests on.
+  const LIST = `<h2>Terms</h2>\n<ul><li>Folio: the number the page prints.</li><li>Verso: the left page.</li></ul>\n`;
+  const { result, events } = await round(() => ({
+    // The colon stays in the `<dd>`, so the prose is no shorter — which it has to be for
+    // `navigationLost` to read this round at all, a fall beside a word loss being the sanctioned
+    // deletion and silent there. So this is squarely inside the gate's reach, and still not gated.
+    edits: [{ block: 1, html: `<dl><dt>Folio</dt><dd>: the number the page prints.</dd><dt>Verso</dt><dd>: the left page.</dd></dl>` }],
+  }), LIST, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  assert.deepEqual(patch?.data.navigation_lost, { items: 2 }, "two list items stopped existing");
+  assert.ok(!("discarded" in (patch?.data ?? {})), "and the round is applied, because that is the fix");
+  assert.match(result.body, /<dl><dt>Folio<\/dt>/);
+  assert.equal(result.editorHeadingsGated, false);
+});
+
+test("a gated round is retried, and the round after it is delivered", async () => {
+  // The gate's cost, measured rather than asserted: one round. The editor demotes on its first pass,
+  // that round is thrown away, and the second pass makes the correction the issue actually asked for
+  // — which is what ships, with the headings the first round would have taken.
+  let call = 0;
+  const { result, events } = await round((shown) => {
+    call++;
+    if (call === 1) return { edits: demoteEveryHeading(shown) };
+    return { edits: [{ block: 0, html: `<h1>Pay Schedules, 1962</h1>` }] };
+  }, OUTLINE, 2);
+  const patches = events.filter((e) => e.type === "editor_patch");
+  assert.equal(patches.length, 2, "the refused round did not end the loop");
+  assert.equal(patches[0]?.data.discarded, "headings_lost");
+  assert.ok(!("discarded" in (patches[1]?.data ?? {})));
+  // The second round's correction is in the delivered document AND the five headings are still there.
+  assert.match(result.body, /<h1>Pay Schedules, 1962<\/h1>/);
+  assert.equal((result.body.match(/<h2>/g) ?? []).length, 5);
+  // Recorded on a document that came out of the loop corrected, which is the pairing to expect: the
+  // signal says the editor tried it, not that anything was delivered damaged.
+  assert.equal(result.editorHeadingsGated, true);
+});
+
+test("an editor that demotes every round spends the budget and the document keeps its headings", async () => {
+  // The worst case, where the editor's ONLY edits are demotions. Nothing here can force it to stop, so
+  // a model that demotes deterministically runs out the rounds and the document is delivered as it
+  // entered with its issues in @unresolved — the loop's ordinary way of saying it could not fix
+  // something. That is the direction to be wrong in: the alternative is a document whose heading outline
+  // is gone and which nothing looks at again.
+  const { result, events } = await round((shown) => ({ edits: demoteEveryHeading(shown) }), OUTLINE, 3);
+  const patches = events.filter((e) => e.type === "editor_patch");
+  assert.equal(patches.length, 3, "bounded by max_review_iterations, not unbounded");
+  for (const p of patches) assert.equal(p.data.discarded, "headings_lost");
+  assert.equal(result.body, OUTLINE);
+  assert.equal((result.body.match(/<h2>/g) ?? []).length, 5);
+  assert.equal(result.stoppedAt, "cap", "and the tally can tell this apart from a document that converged");
+  assert.equal(result.unresolved.length, ISSUES.length, "the issue is declared open rather than silently dropped");
+  assert.equal(result.editorHeadingsGated, true);
+});
+
+test("an editor that demotes every round still delivers what it corrected on the way", async () => {
+  // The same worst case with one correction beside the demotions, which is what makes it the review's
+  // finding rather than a hypothetical. Under the version this replaces, three rounds of this delivered
+  // a document with NOTHING corrected in it: each round was thrown away whole, and the retry asked the
+  // same model the same question about the same body. Now every round keeps its correction and hands
+  // back only the demoted blocks — so the budget is still spent and the headings are still there, but
+  // the document that comes out has been edited.
+  const { result, events } = await round((shown) => ({
+    edits: [...demoteEveryHeading(shown), { block: 0, html: `<h1>Pay Schedules, 1962</h1>` }],
+  }), OUTLINE, 3);
+  const patches = events.filter((e) => e.type === "editor_patch");
+  assert.deepEqual(patches[0]?.data.headings_reverted, [1, 3, 5, 7, 9], "the five demoted blocks, every round");
+  assert.equal(patches[0]?.data.applied, 1, "and the correction beside them");
+  assert.ok(!("discarded" in (patches[0]?.data ?? {})), "so the round is not thrown away");
+  // The delivered document: corrected, and with all five headings.
+  assert.match(result.body, /<h1>Pay Schedules, 1962<\/h1>/);
+  assert.equal((result.body.match(/<h2>/g) ?? []).length, 5);
+  assert.doesNotMatch(result.body, /<p><strong>Standby Pay\.<\/strong><\/p>/);
+  assert.equal(result.editorHeadingsGated, true);
 });
 
 test("a reply with neither shape in it is a call that said nothing", async () => {

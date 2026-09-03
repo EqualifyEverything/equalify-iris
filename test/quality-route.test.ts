@@ -62,6 +62,7 @@ function fakeStore(): { store: Store; state: { calls: number; days: number[] } }
         documents_linted: 10,
         editor_truncated_rate: 0,
         editor_truncated_lost_rate: 0,
+        editor_headings_gated_rate: 0,
         review_unread_rate: 0,
         unfinished_page_rate: 0,
         rules: [{ id: "heading-order", impact: "moderate", documents: 4, share: 0.4, nodes: 9 }],
