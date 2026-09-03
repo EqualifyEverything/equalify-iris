@@ -1684,7 +1684,10 @@ log-only, and the distinction is the whole clause: the other four oblige the HTM
 `[page not fully transcribed]` marker, a placeholder `src`, `lang` on the element that changes language,
 a note on an irregular sequence — so the prompt says that half is still the verifier's and hands the log
 back as **evidence for** reading it. A log admitting the page was cut is the reason to look for the
-marker, not a discharge of it; the looser wording would have shipped a truncated page without one. The log is never the subject of a problem — the
+marker, not a discharge of it; the looser wording would have shipped a truncated page without one. The
+four do not share one `kind`: an absent marker or irregularity note is `content_missing`, a named
+language with no `lang` is `a11y_only`, and the prompt says so rather than leaving it to a tiebreak that
+only reaches problems where content is absent. The log is never the subject of a problem — the
 correction pass is parsed for `html` alone and writes no log, so "the log does not note X" is an
 instruction nobody can carry out and it spends the page's only licence. Both rechecks of a correction
 are sent none, because the log they would carry describes a fragment that has since been rewritten.

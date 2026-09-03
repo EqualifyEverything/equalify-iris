@@ -240,11 +240,23 @@ test("the verify task reads a quoted log as evidence and never makes it the subj
     // The inversion that makes the change earn its cost rather than just not regress: an admission in
     // the log is EVIDENCE the HTML half is owed, so it turns a silent loss into a `content_missing`.
     ["and the log is evidence FOR that reading, not a discharge of it",
-      /is not the discharge of those rules but your\s+evidence for reading them: where the log admits one and the HTML does not carry its\s+half, the reader loses it, and that is "content_missing"/],
+      /is not the discharge of those rules but your\s+evidence for reading them: where the log admits one and the HTML does not carry its\s+half, the reader loses it, and it is a problem like any other/],
     // Named because it is the one of the four with a downstream gate on it: `test/e2e.sh` §9i treats
     // the marker as the thing that must survive the review loop.
     ["with the marker singled out, in page.md's own words",
-      /the marker\s+most of all, because a page that stops without one reads as complete to every reader/],
+      /the marker most of\s+all, because a page that stops without one reads as complete to every reader/],
+    // Review round 2, non-blocking. The four dual obligations do NOT share one `kind`: the taxonomy at
+    // :157 puts a WCAG requirement unmet over faithful content in `a11y_only`, and :160's
+    // earliest-in-list tiebreak cannot rescue a missing `lang` into `content_missing`, because nothing
+    // is absent. `kind` gates nothing today (extraction.ts records the kind-gated fail as deliberately
+    // unimplemented) — but it is the count #349's own §7.4 argument is measured in, and it becomes a
+    // behaviour difference the day that gate is priced off these counts.
+    ["the four are tagged by what the reader loses and not all as content_missing",
+      /Tag it by what\s+the reader loses, the way you tag everything else/],
+    ["with the content-side two named",
+      /a missing marker and a missing\s+note about an irregular sequence are "content_missing"/],
+    ["and the attribute-side two named as a11y_only",
+      /a language the log names and no lang\s+attribute marks, or a graphic with no placeholder src to supply, is\s+"a11y_only"/],
     // The other direction: a log that overstates what was done is not a licence to argue with the
     // log, it is evidence about the page — and the finding it supports is the ordinary one.
     ["a log the image refutes makes the missing content the problem, not the log",
