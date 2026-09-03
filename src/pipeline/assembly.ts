@@ -5,6 +5,7 @@ import { stripDeprecatedRoles, stripInvalidRoles, type RoleStrip, type InvalidRo
 import { stripNestedMain, type MainStrip } from "./landmarks.ts";
 import { joinContinuedTables } from "./tables.ts";
 import { joinPageBreakProse, type ProseJoinReport } from "./prose.ts";
+import { stripPositionalMarkers, type MarkerReport } from "./markers.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PipelineContext } from "./context.ts";
 
@@ -61,6 +62,7 @@ export function assembleBodyWithReport(fragments: Fragment[]): {
   invalidRoles: InvalidRoleStrip;
   mains: MainStrip;
   prose: ProseJoinReport;
+  markers: MarkerReport;
 } {
   const ordered = [...fragments].sort((a, b) => a.order - b.order);
   const { pages, report } = namespaceAnchors(ordered.map((f) => ({ order: f.order, innerHtml: f.innerHtml.trim() })));
@@ -74,9 +76,28 @@ export function assembleBodyWithReport(fragments: Fragment[]): {
   // disagreement a browser will not honour.
   const skipped = new Set(report.skipped_pages);
   const kept = pages
-    .map((html, i) => ({ order: ordered[i]!.order, html, asWritten: skipped.has(ordered[i]!.order) }))
+    .map((html, i) => ({
+      order: ordered[i]!.order,
+      // The filename as the page agent was told it, which is the positional number a marker's label
+      // is checked against (markers.ts).
+      name: ordered[i]!.image,
+      html,
+      asWritten: skipped.has(ordered[i]!.order),
+    }))
     .filter((p) => p.html.length > 0);
-  const prose = joinPageBreakProse(kept);
+  // A marker naming the page's position in the file rather than the number the page prints loses its
+  // label here (markers.ts, issue #333), and this is the only stage that can do it: the offset that
+  // convicts one label is derived from every other page's marker, and after the join there is one
+  // string with the pages' provenance spent. It runs before the prose join because that join reads the
+  // marker as a boundary — it matches the role and not the label, so the two do not interact, and
+  // running first keeps this pass looking at what the page agent wrote.
+  //
+  // A page being delivered byte for byte (`skipped_pages`) is edited too, unlike the prose join, which
+  // declines on one. The reason the join declines does not apply: this is a splice inside a start tag
+  // with no reserialization anywhere near it, the same class of edit as the role strips that already
+  // run over those bytes further down.
+  const markers = stripPositionalMarkers(kept);
+  const prose = joinPageBreakProse(kept.map((p, i) => ({ ...p, html: markers.pages[i]! })));
   const joined = stripDeprecatedRoles(prose.pages.join("\n\n"));
   // And a role that is not a role at all, on the same argument one step further (roles.ts, #345).
   // After the deprecated pass rather than before it only for reading order: the two look at
@@ -84,7 +105,15 @@ export function assembleBodyWithReport(fragments: Fragment[]): {
   // can take work from the other, whichever runs first.
   const invalid = stripInvalidRoles(joined.html);
   const mains = stripNestedMain(invalid.html);
-  return { body: mains.html, anchors: report, deprecatedRoles: joined, invalidRoles: invalid, mains, prose: prose.report };
+  return {
+    body: mains.html,
+    anchors: report,
+    deprecatedRoles: joined,
+    invalidRoles: invalid,
+    mains,
+    prose: prose.report,
+    markers: markers.report,
+  };
 }
 
 // The language the shell declares, read off the body instead of assumed. `lang="en"` on a document
@@ -478,7 +507,8 @@ export async function runAssembly(
   fragments: Fragment[],
   opts: { unresolved?: string[] } = {},
 ): Promise<AssemblyResult> {
-  const { body: joinedPages, anchors, deprecatedRoles, invalidRoles, mains, prose } = assembleBodyWithReport(fragments);
+  const { body: joinedPages, anchors, deprecatedRoles, invalidRoles, mains, prose, markers } =
+    assembleBodyWithReport(fragments);
   // A table the source printed across a page break arrives here as two tables, and this is the
   // first moment both halves exist in one string — each page was extracted alone, so the agent that
   // wrote the second half had nothing to append to (#239). The join belongs on THIS side of the
@@ -609,6 +639,25 @@ export async function runAssembly(
       // broke in two are the shape a human checks by eye, and a count of them cannot be checked
       // against anything.
       ...(prose.wordSplitExamples.length ? { word_split_examples: prose.wordSplitExamples } : {}),
+    });
+  }
+  // Every document whose pages numbered themselves gets this line, not only the ones something was
+  // taken off — which breaks the convention the strips above follow, for the reason `prose_joined`
+  // breaks it: `stripped: []` on a line that exists says this document's markers were checked and
+  // agreed, and no line at all says they could not be checked (too few, or no offset holding a
+  // majority). Without the denominators a round cannot tell those two apart, and would read every
+  // undecidable document as a clean one. `readable` is the population the check ran on, `systems` says
+  // what it derived, `off_mode` and `undecided` are the two things it saw and left.
+  if (markers.readable > 0) {
+    ctx.log.event("page_markers", {
+      stage: "assembly",
+      markers: markers.markers,
+      readable: markers.readable,
+      unreadable: markers.unreadable,
+      systems: markers.systems,
+      stripped: markers.stripped,
+      off_mode: markers.offMode,
+      undecided: markers.undecided,
     });
   }
   if (anchors.collisions.length > 0 || anchors.ambiguous.length > 0) {
