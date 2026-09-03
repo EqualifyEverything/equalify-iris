@@ -109,6 +109,157 @@ test("a backslash the page prints is a character, not a broken escape", () => {
   assert.equal(repaired?.html, 'a\nb "x" café');
 });
 
+test("a reply that is only its object is read as that object, not as something quoted inside it", () => {
+  // The colon rule and its limit (issue #339). `repairedSpan` ends a string at a `"` followed by
+  // `,` `}` `]` or `:`, and the `:` case is what breaks a reply whose prose quotes a field name
+  // back — the value-string ends at the quote before the colon, the sentence after it is read as
+  // object syntax, and the envelope does not parse. What DOES parse is the fragment the model was
+  // quoting, because the search resumes inside a candidate it could not read. So the last readable
+  // object in this reply was the decoy, and the decoy carries `faithful`.
+  const decoyed =
+    `{ "faithful": false, "accessible": false,\n` +
+    `  "problems": [{ "kind": "content_missing", "problem": "the third data row is absent" }],\n` +
+    `  "notes": "I first read the contract as { "faithful": true, "problems": [] }; it is not." }`;
+  const read = extractJson<{ faithful?: boolean; problems?: { problem?: string }[] }>(decoyed);
+  assert.equal(read?.faithful, false, "the decoy quoted in `notes` was read as the answer");
+  assert.deepEqual(
+    read?.problems?.map((p) => p.problem),
+    ["the third data row is absent"],
+  );
+
+  // The same defect with the prose in a `problem` rather than in `notes`, so the quoted object names
+  // exactly the fields the envelope does. Worth its own case because it is what a key-count gate
+  // cannot see — the two readings tie — and it is the shape a verifier writes when it reasons
+  // inside a problem, which is the behaviour #339 measured.
+  const tied =
+    `{ "faithful": false, "accessible": false,\n` +
+    `  "problems": [{ "kind": "content_missing", "problem": "row 3 is absent — I first read the contract as ` +
+    `{ "faithful": true, "accessible": true, "problems": [] } and it is not that" }] }`;
+  assert.equal(extractJson<{ faithful?: boolean }>(tied)?.faithful, false);
+
+  // Read that way only because the reply is nothing BUT the object, first character to last, which
+  // is what every one of these prompts asks for. The narrow colon rule is confined to that shape
+  // for a measured reason: applied to each candidate in the walk it changes 14 of the 4,100 agent
+  // replies in the bench logs and loses on all 14. This is the shape of those — a Reader verdict
+  // that quotes the page agent's envelope in its prose BEFORE answering — and under the narrow rule
+  // the quoted `"html":"…` value never closes, so the prose candidate swallows the real verdict and
+  // the walk returns one issue instead of two. It must keep returning both.
+  const readerReply =
+    `Looking at the excerpt, the extractor's own commentary was transcribed: the raw JSON blob\n` +
+    "`{\"html\":\"...`, `\"log\": \"...\"`, `\"suggested_agent\": null}` is announced to the reader.\n\n" +
+    "```json\n" +
+    `{\n  "issues": [\n` +
+    `    { "issue": "Extractor metadata is in the document text", "pages": [22, 23] },\n` +
+    `    { "issue": "The table's totals row is inside <thead>", "pages": [24] }\n` +
+    `  ]\n}\n` +
+    "```\n";
+  const issues = extractJson<{ issues?: { pages?: number[] }[] }>(readerReply)?.issues;
+  assert.equal(issues?.length, 2, "the prose's quoted envelope swallowed part of the verdict");
+  assert.deepEqual(
+    issues?.map((i) => i.pages),
+    [[22, 23], [24]],
+  );
+
+  // The narrow reading is preferred only where TWO gates allow it, and the shape both exist for is
+  // an abandoned draft: the model gave up on an object mid-string and restarted inline. Its
+  // unterminated string is the narrow rule's own failure case — the position tracker reads a value
+  // where JSON meant a key — so the rule returns one object whose `html` is the abandoned prose with
+  // `{"html": "` glued to the front, and that string is delivered to a reader as the page, which is
+  // the whole subject of this file. The walk reads the restart, which is the answer.
+  //
+  // Each row below defeats a different version of this gate, and the first two are versions that
+  // shipped. A KEY-SET gate (the narrow reading preferred where it carries every field the walk
+  // found plus one more) sees only row 1: the abandoned string being the FIRST field is what makes
+  // the two sets equal, and moving one complete field ahead of it makes the narrow reading a strict
+  // superset, so it wins and the envelope reaches the page. A BRACE gate (every `{` inside a string
+  // closes inside it) sees rows 1 and 2 and not row 3, because a single `}` in the restarted content
+  // — a code listing, template syntax, a math brace, none of them exotic on a page — rebalances the
+  // abandoned string. What holds for all three is that a restart is the TAIL of the reply: the walk's
+  // answer closes on the reply's last character, and where it does, the narrow rule is not tried.
+  for (const [where, restarted, page] of [
+    [
+      "first field",
+      `{"html": "<p>Table 3 continues\n` +
+        `{"html": "<table><tr><th>Year</th></tr></table>", "log": "ok", "suggested_agent": null}`,
+      "<table><tr><th>Year</th></tr></table>",
+    ],
+    [
+      "after a complete field",
+      `{"log": "ok", "html": "<p>Table 3 continues\n` +
+        `{"html": "<table><tr><th>Year</th></tr></table>", "suggested_agent": null}`,
+      "<table><tr><th>Year</th></tr></table>",
+    ],
+    [
+      "a brace in the restarted page content",
+      `{"html": "<p>Table 3 continues\n` +
+        `{"html": "<table><tr><th>Year} onwards</th></tr></table>", "log": "ok", "suggested_agent": null}`,
+      "<table><tr><th>Year} onwards</th></tr></table>",
+    ],
+  ] as [string, string, string][]) {
+    assert.equal(
+      extractJson<{ html?: string }>(restarted)?.html,
+      page,
+      `${where}: the abandoned draft's prose was read as the page`,
+    );
+  }
+
+  // The change is slightly wider than #339, and this is the half of it a verify fixture cannot show.
+  // A PAGE whose content prints the contract — a document about this system, or any page quoting JSON —
+  // used to lose the page to the fragment it printed: the walk's candidate failed at the quote before
+  // the colon, resumed inside it, and returned `{faithful: true}` as the envelope. Now the envelope is
+  // read. Pinned because the page path is the one with no floor under it (see the header: there is no
+  // before-page to compare a first render against), so this rescue would regress silently.
+  const pageQuotingTheContract = extractJson<{ html?: string; log?: string }>(
+    '{"html": "<p>{ "faithful": true }</p>", "log": "ok", "suggested_agent": null}',
+  );
+  assert.equal(pageQuotingTheContract?.html, '<p>{ "faithful": true }</p>');
+  assert.equal(pageQuotingTheContract?.log, "ok");
+
+  // A page that legitimately prints a lone `{` fails the brace test too, and that costs nothing:
+  // discarding the narrow reading answers with the walk's result, which is what this returned
+  // before any of it. The direction is the safety property — head and base can differ only where
+  // the narrow reading is PREFERRED, so a stricter gate can only ever return behaviour to base.
+  assert.equal(
+    extractJson<{ html?: string }>('{"html": "<p>A block opens with { and the "kind" attribute is set</p>", "log": "ok"}')?.html,
+    '<p>A block opens with { and the "kind" attribute is set</p>',
+  );
+
+  // And the limits, stated so none of this is mistaken for coverage. Wrap the same verdict in a
+  // fence or a sentence and the decoy is the last readable object again: the reply no longer opens
+  // with `{`, so the whole-reply attempt does not apply, and one pass cannot tell that reply from a
+  // page printing `She said "hello", he replied`.
+  assert.equal(extractJson<{ faithful?: boolean }>("```json\n" + decoyed + "\n```")?.faithful, true);
+  assert.equal(extractJson<{ faithful?: boolean }>("Here is my verdict.\n\n" + decoyed)?.faithful, true);
+  // The third limit is the one the new `notes` field most invites, and it is a CLASS rather than a
+  // shape: **any string value inside the quoted decoy** defeats the whole-reply repair. The `"` that
+  // opens it is preceded by `:` and the `"` that closes it is followed by `,` `}` or `]`, which every
+  // reading here treats as a terminator — so the real `notes` value ends inside the quoted sentence,
+  // the span stops before the end of the reply, and there is no whole-reply object left to prefer.
+  // The decoy wins, and it carries both flags as booleans, so `verifyAgentOutput`'s gate passes it
+  // too: a page rejected for a missing data row ships under `page_verify_ok`, where `pages_unjudged`
+  // cannot see it. What the change fixes is only the decoy with NO string values in it — the shape
+  // #339 actually produced, and the one the two `verify-notes-field` fixtures use.
+  //
+  // An earlier revision of this comment called it "a decoy quoting an EMPTY string" and pinned only
+  // that. The mechanism was right and the width was wrong in the more expensive direction: whoever
+  // next tries to close this would have made the empty pin pass and believed the class was closed.
+  // The empty string is the MINIMAL instance, so both are pinned. Both are `main`'s behaviour,
+  // unchanged by this branch; what removes them is the prompt clause asking for no quoted JSON in
+  // `notes` at all. If a later change closes the class, these are the assertions to invert.
+  const real =
+    `{ "faithful": false, "accessible": false,\n` +
+    `  "problems": [{ "kind": "content_missing", "problem": "the third data row is absent" }],\n`;
+  const emptyStringDecoy =
+    real + `  "notes": "I read it as { "faithful": true, "accessible": true, "problems": [], "notes": "" }; it is not." }`;
+  assert.equal(extractJson<{ faithful?: boolean }>(emptyStringDecoy)?.faithful, true);
+  // Not empty, and not the last field of the quoted object either — the terminator needs neither.
+  const nonEmptyStringDecoy =
+    real + `  "notes": "First read: { "faithful": true, "accessible": true, "problems": [], "notes": "the table is fine" }. On review it is not." }`;
+  const won = extractJson<{ faithful?: boolean; notes?: string }>(nonEmptyStringDecoy);
+  assert.equal(won?.faithful, true);
+  assert.equal(won?.notes, "the table is fine");
+});
+
 test("an envelope nothing can read stays unread, rather than being guessed at", () => {
   // Truncation is the case no repair can help: the rest of the page is not in the reply.
   assert.equal(extractJson(TRUNCATED), null);

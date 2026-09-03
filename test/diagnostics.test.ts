@@ -509,7 +509,7 @@ test("the verification tally counts what was checked, corrected and re-checked",
   assert.deepEqual(d.verification.rechecks, {
     sampled: 1, sampled_ok: 1, sampled_unjudged: 0,
     sampled_problems_before: 1, sampled_problems_after: 0,
-    binding: 0, binding_ok: 0, binding_unjudged: 0,
+    binding: 0, binding_ok: 0, binding_unjudged: 0, binding_error: 0,
     // The sample cleared, so there is no verdict to carry: this list holds the failing ones.
     failures: [],
     verdicts_omitted: 0,
@@ -720,7 +720,7 @@ test("a correction that bought nothing is counted apart from one that was kept",
   assert.deepEqual(d.verification.rechecks, {
     sampled: 0, sampled_ok: 0, sampled_unjudged: 0,
     sampled_problems_before: 0, sampled_problems_after: 0,
-    binding: 1, binding_ok: 0, binding_unjudged: 0,
+    binding: 1, binding_ok: 0, binding_unjudged: 0, binding_error: 0,
     // What the refused rewrite lost, in the verifier's own words, which is the reading a
     // count of one cannot give. `binding: true` is what says the page shipped as it was
     // rather than shipping still wrong (issue #296).
@@ -762,7 +762,7 @@ test("a log from before these events reports zeros, not absences", () => {
   assert.deepEqual(d.verification.rechecks, {
     sampled: 0, sampled_ok: 0, sampled_unjudged: 0,
     sampled_problems_before: 0, sampled_problems_after: 0,
-    binding: 0, binding_ok: 0, binding_unjudged: 0,
+    binding: 0, binding_ok: 0, binding_unjudged: 0, binding_error: 0,
     // Present and empty on a log that never wrote a verdict, like every count beside it: an
     // empty list is a run with no failing recheck, and an absent field is a consumer guessing.
     failures: [],
@@ -771,7 +771,7 @@ test("a log from before these events reports zeros, not absences", () => {
   assert.deepEqual(summarizeRun("", done(Date.parse(T(0)))).verification.rechecks, {
     sampled: 0, sampled_ok: 0, sampled_unjudged: 0,
     sampled_problems_before: 0, sampled_problems_after: 0,
-    binding: 0, binding_ok: 0, binding_unjudged: 0,
+    binding: 0, binding_ok: 0, binding_unjudged: 0, binding_error: 0,
     failures: [],
     verdicts_omitted: 0,
   });
@@ -805,7 +805,7 @@ test("a log from before the prose sizes and the problem counts leaves both sums 
   assert.deepEqual(d.verification.rechecks, {
     sampled: 1, sampled_ok: 0, sampled_unjudged: 0,
     sampled_problems_before: 0, sampled_problems_after: 0,
-    binding: 0, binding_ok: 0, binding_unjudged: 0,
+    binding: 0, binding_ok: 0, binding_unjudged: 0, binding_error: 0,
     failures: [{ ts: T(2), page: 1, binding: false, message: "a table row is still missing" }],
     verdicts_omitted: 0,
   });
@@ -842,7 +842,7 @@ test("a recheck nothing judged is counted apart from a rewrite that was checked"
   assert.deepEqual(d.verification.rechecks, {
     sampled: 1, sampled_ok: 1, sampled_unjudged: 1,
     sampled_problems_before: 0, sampled_problems_after: 0,
-    binding: 3, binding_ok: 3, binding_unjudged: 1,
+    binding: 3, binding_ok: 3, binding_unjudged: 1, binding_error: 0,
     // An unjudged recheck is not a failing one: nothing looked, so it logs `ok: true` and
     // names nothing, and an entry here would be a page reported wrong on no evidence.
     failures: [],

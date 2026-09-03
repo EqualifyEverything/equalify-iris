@@ -595,6 +595,56 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     // silence #145 shipped through. Measured in test/page-definition-lists.test.ts.
     ["title is the attribute, and the reason the gate does not say so is stated",
       /title is the attribute for this, and aria-label is not: <abbr> carries no ARIA role of its own.*The gate demotes that finding rather than reporting it/],
+    // #347: the control case above works the rule out for a symbol that HAS a textual form — a ■ or
+    // a ▶‖ the page names in a caption or a key. A shading key's symbol has none: it is an area of
+    // ink, so "a <dl> of symbol and meaning" cannot be completed in the page's own words at all,
+    // and the words "swatch", "shading" and "fill" appeared nowhere in this file. The gap was not
+    // theoretical — on nine legend-bearing pages of a 100-page document the only arm that gave a
+    // legend list structure is the only arm axe failed, because the verifier read the described
+    // `<dd>` as the invented expansion this rule's first clause forbids and the correction deleted
+    // it. The counterpart clause is in agents/feedback.md and pinned in test/feedback-prompt.test.ts;
+    // this half is the one that says the description is owed.
+    ["a key whose symbol is ink is named as this rule's other case",
+      /A key whose symbol is an area of ink is this rule's other case: the bands of a shaded map, the fills of a cartogram, the hatchings of a chart/],
+    ["describing that ink is transcription rather than the invented expansion the rule forbids",
+      /the words are yours to write and writing them is transcription rather than the invented expansion the first clause forbids/],
+    ["with the halves assigned, so the described ink is the term and the printed wording its definition",
+      /describe the ink as the <dt> and transcribe the page's printed wording as its <dd>/],
+    // The verifier is right about this part and it is granted rather than argued with: a colour
+    // carried in a style attribute is not read out, so it answers nobody the <dl> was built for.
+    ["the description is words and never markup",
+      /Describe it in words and never in markup: a style attribute or a coloured <span> hands a screen-reader user nothing/],
+    // The root cause of every defect on the page this came from. Measured off the source image the
+    // legend's three tones run 26, 176, 143 — non-monotonic — and both agents assumed a ramp and
+    // wrote the assumption into the markup as fact.
+    ["the tone comes off the swatch and not off the order of the labels",
+      /Read each swatch's tone off the swatch itself and never off the order of its labels/],
+    ["and an assumed ramp is named as a guess that reaches the reader as a fact",
+      /a key's shades run in the order the printer chose and frequently not in the order its entries are listed, so an assumed ramp is a guess that reaches the reader as a fact/],
+    // The two checks that need no image and no second arm. Every defect in #347 is an arm having no
+    // category for a third, pale tone: one arm put 24 states in a group of four, another wrote a
+    // four-category legend for a key that prints two, and a third listed 12, 12 and 4 for three
+    // fills each labelled a bottom 12 with three states in two mutually exclusive fills.
+    // The count is pinned WITH its destination, because the destination is the whole of it. Every
+    // other imperative in this rule names where its answer goes, and a count with no home lands in
+    // the delivered page as a sentence beside the <dl> — which the same rule forbids two paragraphs
+    // above ("the second copy is prose you wrote rather than content the page has") and which a
+    // verifier reads as invented text, reopening the very delete loop this change exists to close.
+    // A first revision of this clause said only "Say how many entries the key prints."
+    ["the number of entries the key prints is stated, and where it is stated",
+      /Say how many entries the key prints — in the alt text where you are describing the key there, since a description is scaffolding this prompt asks for by name, and in the "log" field either way/],
+    ["and the one place it must not go is named, with the rule that forbids it",
+      /Never as a sentence of your own beside the <dl>: that is the prose this rule forbids two paragraphs above, and it reads to a verifier as text the page does not print/],
+    // Destinations conditioned the same way as the count clause above, which is the standard
+    // prd.md §7.4 v1.10 sets for this whole rule: every clause names where its answer goes. A first
+    // revision said "in the description and in the 'log' field" — safe, because "the description"
+    // resolves to the <dt> in the <dl> case and the sentence above forbids a <p> beside it, but it
+    // was the last clause here leaving a reader to work the home out, in a rule whose defect was
+    // exactly that.
+    ["two indistinguishable swatches are declared, with every home named and none of them prose",
+      /where two swatches are not distinguishable in the reproduction you were given, say exactly that — in the <dt> describing the ink, or in the alt text where you are describing the key there, and in the "log" field either way — rather than dividing items between them/],
+    ["an unmatched fill is left unclassified and said to be, with the reason a reader would give",
+      /an item you cannot match to a swatch is left unclassified and said to be unclassified, because a reader loses less from a gap the page admits than from a confident assignment to the wrong band/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
@@ -667,12 +717,107 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     // #127: a logo and a back cover were both given alt="" as "decorative".
     ["what counts as informative is enumerated, so a logo or a cover cannot be called decorative",
       /words printed inside the image, a logo, seal or badge, a diagram, a photograph, a chart, a cover whose appearance is itself the content/],
+    // #351: a cover satisfies BOTH of the two clauses above at once — its title, banner, publisher
+    // and date are transcribed in full beside it, so the also-carried-in-full exemption fires, and
+    // its appearance is itself the content, so the enumeration fires. Nothing ordered them, so the
+    // clause that won was whichever the model reached first: on one 100-page document every arm's
+    // first pass demanded the image by the enumeration and the sampled recheck then reversed one of
+    // them by the exemption, both quoting this rule accurately. Three arms, three outcomes on the
+    // same page. The order is pinned in both directions because either half alone re-opens it —
+    // "informative wins" without the reason invites the exemption being read as narrower than it
+    // is, and the reason without the ruling leaves two clauses and no precedence.
+    ["the two clauses are ordered where one image satisfies both",
+      /Where an image satisfies both of those clauses, informative wins/],
+    ["and the exemption is bounded to a graphic the page repeats beside it",
+      /the also-carried-in-full exemption is for a graphic the page repeats BESIDE it, never for a graphic the page IS/],
+    // Which resolves it against the redundancy clause below as well, by saying what the description
+    // is FOR: the appearance, which the transcription does not carry. Without this sentence the two
+    // rules still disagree on a cover — describe it, but do not say what the page has already said.
+    ["a cover's description carries the appearance and not the words transcribed beside it",
+      /What that description carries is the appearance — the colours, the layout, the shape of the type — which is the half the transcription does not carry, and not the words, which it does/],
     ["a heading beside an image does not make it decorative",
       /Sitting beside a heading that names the section does not make an image decorative/],
     ["an image that is hard to describe is described as far as it can be, and logged",
       /neither does being hard to describe.*describe what you can and say so in the "log" field/],
     ["the attribute is never dropped and never left holding a filename",
       /never leave the attribute off, and never leave a filename in it/],
+    // #353: on a map of state income categories the alt named 41 states as above-average, ten lines
+    // above a <figcaption> transcribing the page's own subtitle — "Eight of the Twelve States That
+    // Shift…". The first pass named 40 and the verify pass ADDED one more. Both strings were in the
+    // same fragment and neither agent compared them. Measuring the sheet's ink settled it the
+    // expensive way (three distinguishable fills, splitting 8 / 4 / base map, matching the printed
+    // arithmetic exactly), but nothing about the defect needed the picture: a category the page caps
+    // at eight cannot have 41 members, and that is decidable from text already transcribed.
+    ["a count the page prints about its picture is evidence the description is checked against",
+      /A number the page prints about its own picture is transcribed evidence, and checking a description against it costs nothing/],
+    ["the check is named with the shapes such a count comes in",
+      /where the page states how many things a category holds — a subtitle's "eight of the twelve states", a total row, an "of which" — and your description enumerates that category's members, count your own list and make the two agree before you emit/],
+    // Which of the two gives way is the whole rule. Without this sentence "make them agree" is as
+    // easily satisfied by rewriting the caption, and the caption is the transcription.
+    ["the list gives way to the count, because the count came off the page",
+      /Where they disagree it is the list that is wrong, because the number came off the page and the list is your reading of the picture/],
+    // The destination, pinned rather than the imperative that needs one: #347's first revision told
+    // this agent to say how many entries a key prints and named nowhere to say it, so the only home
+    // a model finds is a sentence beside the figure — text the page never printed, which the
+    // fidelity rule forbids and which the verifier reads as invention and deletes. A mismatch
+    // between a count and a list has exactly the same problem, so it names both homes and the
+    // forbidden shape.
+    ["the mismatch is reported in the alt text and the log, and never as prose beside the figure",
+      /in the alt text itself, and in the "log" field either way, never as a sentence of your own added beside the figure, which is text the page does not print/],
+    // Both directions of the wrong repair, because a model told to make two numbers agree has two
+    // ways to do it and both of them corrupt the page. Padding invents members; trimming deletes
+    // ones it could see.
+    ["neither number is reached by inventing members or dropping them",
+      /Never pad the list to reach the number and never drop members to fit it/],
+    // And the count itself is transcribed, which is what makes the check available to the next pass
+    // and to the reader: on this sheet the caption was the ONLY sound decoder — the legend's own
+    // swatch measured 100 against fills of 32–42 and 163–186, neither distance clearing the panel's
+    // 55-unit lighting gradient, so a reader working from the image alone cannot decode the map.
+    ["the printed count is transcribed where the page prints it",
+      /Transcribe the printed count where the page prints it, in the caption or label that carries it/],
+    // Which puts the count in two places, immediately above a rule that forbids the description
+    // repeating what the words beside the image already say. That rule is scoped to the NAME of the
+    // thing pictured, so there is no contradiction — but it has to be derived from two adjacent
+    // paragraphs, and the audience that derives it wrongly is the same verifier that read a
+    // described swatch as invention and deleted it (#347). Stated instead of derived.
+    ["the count standing in both places is excluded from the redundancy rule that follows",
+      /A count standing in both places is not the repetition the next rule forbids: that rule is about the NAME of the thing pictured/],
+    // #355, the sibling of that check on the other axis: the count compares an enumeration's LENGTH
+    // against a printed size, this compares its MEMBERSHIP against a printed region. Same map, same
+    // fragment. The <figcaption> transcribed "The South, in General, Has the Lowest Effective Rates;
+    // the New England and Mideastern States, the Highest" while the alt ten lines above put 0 of 6
+    // New England and 0 of 6 Mideast jurisdictions in its highest band — eleven of those twelve in the
+    // second-LOWEST and Massachusetts in the middle one — with the South as a clean control at 6 of 6
+    // in the lightest. Two regional
+    // claims, both inverted, and no pixel needed to see it.
+    ["a printed claim about a region is evidence the description's bands are checked against",
+      /A claim the page makes in words about a whole REGION is the same kind of evidence as a printed count, and reading it costs no more ink/],
+    ["the check is named with the shape such a claim comes in",
+      /where the page says that some named group of places runs highest or lowest — "the New England and Mideastern states, the highest" — and your description sorts individual places into bands, read your own bands back against that sentence before you emit/],
+    // The trigger is pinned as a SET predicate, because the caption's own words are hedged: "in
+    // general" licenses exceptions, so one place out of its region's band is not evidence of
+    // anything, and a rule that fired on one would fire on most correct maps. Nought of six twice
+    // over is not an exception.
+    ["what the sentence contradicts is the whole set, never one member",
+      /What such a sentence can contradict is the SET and not one member: it is a generalisation and leaves room for exceptions, so one place out of step with its region is nothing/],
+    // Both directions, because the page carried both: the "highest" claim was the one contradicted and
+    // the "lowest" claim was the control that passed.
+    ["a region called highest with no member in the highest band is the contradiction",
+      /a region the page calls highest with NOT ONE of its members in your highest band — or one it calls lowest with not one of them in your lowest — contradicts the page's own words/],
+    // Which of the two gives way, and how far. The sentence is transcription and the bands are a
+    // reading, so the reading is what gets re-examined — but a regional generalisation cannot say
+    // which place sits in which band, so it licenses no reassignment. Without this, a model told two
+    // strings disagree has an obvious repair available: move states until the caption is satisfied,
+    // which on this plate would have written a second wrong answer over the first.
+    ["the ink is re-read, and places are not moved between bands to satisfy the sentence",
+      /Do not move places between bands to satisfy the sentence: it says which region runs high and never which place sits in which band/],
+    ["an unresolved band is left unassigned and said to be, not filled in from the sentence",
+      /a band you cannot see well enough to assign is left unassigned and said to be, not filled in from the sentence/],
+    // And the bound that keeps this from inventing work: which places a named region covers is world
+    // knowledge, not text on the page. Where the model is not sure of the membership there is no
+    // second string to compare, and guessing one manufactures the disagreement it then reports.
+    ["the check applies only where the region's membership is not in doubt",
+      /Make this comparison only where you are sure which places the named region covers: where you are not, there is nothing on the page to compare and you make no such report/],
     // #122, #124, #125: the position title, the product name and the caption were each
     // repeated into the alt text of the image they sat beside.
     ["a name the page prints beside the image is not repeated in its description",

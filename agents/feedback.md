@@ -53,6 +53,107 @@ attribute instead of in text, a symbol it asks to be left out — following the
 contract is not an infidelity, and reporting it as one spends a correction round
 on undoing the rule. What is missing is what the contract asked for and the HTML
 does not have.
+A graphical key is where that goes wrong most expensively, so it is named here.
+Where a legend's symbol is an area of ink — a shaded band, a fill, a hatching —
+the page prints no words for that half, so a description of the ink standing as
+the term of the legend IS the transcription the contract asks for and is not
+invented text: do not send it back AS INVENTED TEXT for naming a shade the page
+does not name. A count of the key's entries carried in the same description is
+the contract too, on the same terms. What the contract does not sanction is the
+tone being read off the order of the labels beside the swatch rather than off the
+swatch, which is frequently not the order the shades run in — a wrongly named
+shade is a real problem, and it is "content_wrong".
+And where the HTML says two shades cannot be told apart in this reproduction, or
+leaves an item unclassified for that reason, that hedge is the contract being
+followed — check it against the image before contradicting it, and never replace
+a stated uncertainty with a confident assignment you cannot see well enough to
+make. A hedge is not unfalsifiable, though: where you CAN tell the two apart,
+say so and say which is which, because an item left unclassified is a gap in the
+delivered page and a hedge nobody checks is the cheapest wrong answer available.
+A count the page prints about its own picture settles more than the picture does,
+and reading it needs no ink at all: where the HTML transcribes a number for the
+size of a category — a subtitle's "eight of the twelve states", a total row, an
+"of which" — and an alt attribute or a list in the same fragment enumerates that
+category's members, count them and compare the two. Both strings are in front of
+you and one of them is the page's own, so a list whose length contradicts it is
+wrong, and it is "content_wrong". Make that comparison BEFORE you grade anything
+that turns on the ink, because it is free and it is decidable where the ink may
+not be. And never ask for such a list to be taken PAST the printed count: adding
+a member to a category the page itself caps is the one repair that cannot be
+right, whatever the picture seems to show. A list that falls SHORT of the count
+is a different finding and a real one — the page says twelve and the list names
+nine — so report it, as "content_missing", and quote the printed number in the
+problem so the repair has the bound the page gives it. Where you cannot say which
+members are missing, say that the list is short of the count and leave it there;
+naming members to reach the number is the same wrong repair arriving by the other
+direction.
+A claim the page makes in words about a whole REGION is checkable the same way and
+for the same nothing: where a <figcaption> or a sentence in the fragment says that
+a named group of places runs highest or lowest, and an alt attribute or a list
+sorts individual places into bands, compare the two. Both strings are in front of
+you and one of them is the page's own. What such a sentence can contradict is the
+SET and not one member — it is a generalisation and leaves room for exceptions —
+so a single place out of step with its region is not a problem at all, while a
+region the page calls highest with NOT ONE of its members in the highest band the
+HTML describes — or one it calls lowest with not one of them in the lowest band —
+contradicts the page's own words, and that is "content_wrong". Make
+this comparison with the count comparison above, before you grade anything that
+turns on the ink, because both are decidable where the ink may not be. Quote both
+strings in the problem and stop there: the sentence says which region runs high and
+never which place sits in which band, so you may say the sorting is unsupported and
+ask for it to be hedged, scoped or re-read, and you may not supply the assignment
+yourself. And make no such report where you cannot say which places the named
+region covers — that membership is not on the page, and supplying it from your own
+knowledge to manufacture the comparison is how this check invents a problem instead
+of finding one.
+Where the user message quotes what the agent recorded in its own "log" field, that
+is the transcriber's account of its own work on this page, and it is evidence rather
+than a second source: check it against the image, the way you check the HTML. It
+settles two things and licenses nothing else. A record the contract asks for in the
+log AND NOWHERE ELSE is made there — a heading the page gives nothing to place it
+under, a symbol the page never keys — so where the log carries one of those, it is
+carried, and reporting it as unrecorded is a false finding about the one field you
+can now see. For everything else the log is asked to note, the contract asks
+something of the DOCUMENT as well, and that half is still yours to check: a page that
+stopped short also emits [page not fully transcribed] as the last thing it emits, a
+placeholder src also names the page and the graphic, a change of language also
+carries lang on the element that holds it, an irregular list or table also carries a
+note a reader can check against the rows above it. So a log saying the page was cut,
+or that it holds a second language, is not the discharge of those rules but your
+evidence for reading them: where the log admits one and the HTML does not carry its
+half, the reader loses it, and it is a problem like any other — the marker most of
+all, because a page that stops without one reads as complete to every reader and to
+every later pass, while one that says where it ends can be finished. Tag it by what
+the reader loses, the way you tag everything else: a missing marker and a missing
+note about an irregular sequence are "content_missing", because content the contract
+puts in the document is absent from it; a language the log names that no lang
+attribute marks is "a11y_only", because the words of the page are all there and what
+is unmet is the attribute a reader needs in order to be given them properly; and a
+graphic whose placeholder src the log records but the HTML does not carry is
+"structure_wrong", because a reader is given that graphic by its description and the
+placeholder is for whatever supplies the real asset — the content is all there and
+the markup around it is incomplete.
+And where the log asserts something the image refutes — "the table is fully
+transcribed" beside a table that stops at a row the page keeps going past — the log is
+not the problem; the missing content is, and it is "content_missing" like any other,
+now with the agent's own words as the reason it went unnoticed.
+Never make the log itself the subject of a problem. The correction pass is handed
+your problem strings and the page and answers with HTML alone — it writes no log —
+so "the log does not note X" is an instruction nobody can carry out, and it spends
+the only licence you have over that page on a field the repair cannot touch. Say
+what the READER loses. And where the user message quotes no log at all, the reply
+had none to quote: that is a fact about the reply and not about the page, so say
+nothing about it either way.
+Where the user message tells you the page agent asked for a specialist it did not
+get, that is the agent saying it could not do this content reliably, and your
+licence over what it produced for that content is narrower than usual: you may
+say a reading is unsupported and ask for it to be hedged, scoped or removed, and
+you may not supply a replacement reading of your own. That bound is not special
+to those pages — a problem is an instruction the correction obeys literally, so
+asserting what a region of a picture means when you cannot support it writes your
+guess into the delivered document as a fact, and nothing downstream can see that
+it did. What makes such a page worth naming is that the model has already told
+you where its own reading is weakest, for nothing.
 List concrete, actionable problems (empty when there are none), each tagged with the
 KIND of problem it is — one of exactly these five:
 - "content_missing" — something in the image is absent from the HTML: a dropped table
@@ -67,9 +168,30 @@ KIND of problem it is — one of exactly these five:
 Tag each problem by what a reader LOSES. When more than one kind applies, the earliest
 in that list wins: content that is absent is "content_missing" even though it is also a
 WCAG failure, and an image with no description at all is "content_missing", not
-"alt_quality". Use no kind outside those five. Respond with ONLY:
+"alt_quality". Use no kind outside those five.
+Every string in "problems" is handed to a correction pass verbatim, under the
+instruction to resolve every problem and to change nothing the list does not
+name — so a problem is a licence to alter the page, and the only licence that
+pass has. The REASON you give is part of that licence and not commentary on it:
+"this heading sits at the wrong level" licenses moving it, while "this text is
+not on the page" licenses only deleting it, so a right finding with a wrong
+reason buys the wrong repair. Say what you saw and where, not what you infer it
+means. An item you conclude is NOT a problem must therefore be OMITTED from
+"problems" rather than reported and then withdrawn inside its own text: "on
+closer inspection this is correct, disregard" arrives at that pass as work to do
+on output you have just confirmed was right. Each "problem" is the conclusion
+only. Working-out goes in "notes" instead — a reading you checked and ruled out,
+a rule you had to re-read, anything you decided was fine. "notes" is read by
+nothing: no correction pass, no other agent, no part of the delivered document.
+It is ONE string for the whole reply, never a field on a problem, and every
+entry of "problems" still needs its "problem" text. Write no JSON, no braces
+and no quoted field names inside it: a `{ "faithful": ... }` quoted in "notes"
+can be read as the reply instead of the reply. Use it only for text you would
+otherwise have written into a problem, and leave the field out when you have
+none. Respond with ONLY:
 { "faithful": true|false, "accessible": true|false,
-  "problems": [{ "kind": "content_missing", "problem": "..." }] }
+  "problems": [{ "kind": "content_missing", "problem": "..." }],
+  "notes": "working-out, read by nothing — omit when you have none" }
 
 TASK: scope
 You are given a user-feedback message and a list of the document's pages (page

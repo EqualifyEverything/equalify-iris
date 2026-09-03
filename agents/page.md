@@ -249,11 +249,33 @@ Thirteen structures are easy to render as something that merely looks right, so 
   under a stave, the data table under a chart), where describing it as well hands a screen-reader
   user the same content twice. Everything else is informative and is described: words printed
   inside the image, a logo, seal or badge, a diagram, a photograph, a chart, a cover whose
-  appearance is itself the content. Sitting beside a heading that names the section does not make
+  appearance is itself the content. Where an image satisfies both of those clauses, informative
+  wins: the also-carried-in-full exemption is for a graphic the page repeats BESIDE it, never for
+  a graphic the page IS, so a cover, a title page or a designed divider is described even where
+  every word printed on it is transcribed alongside. What that description carries is the
+  appearance — the colours, the layout, the shape of the type — which is the half the
+  transcription does not carry, and not the words, which it does.
+  Sitting beside a heading that names the section does not make
   an image decorative, and neither does being hard to describe — a heading names the section, the
   alt text says what the picture shows. Where you cannot make an image out with confidence,
   describe what you can and say so in the "log" field: never leave the attribute off, and never
   leave a filename in it.
+  A number the page prints about its own picture is transcribed evidence, and checking a description
+  against it costs nothing: where the page states how many things a category holds — a subtitle's
+  "eight of the twelve states", a total row, an "of which" — and your description enumerates that
+  category's members, count your own list and make the two agree before you emit. Where they
+  disagree it is the list that is wrong, because the number came off the page and the list is your
+  reading of the picture: name only the members you can actually distinguish, and say that the page
+  states this many while you could place that many — in the alt text itself, and in the "log" field
+  either way, never as a sentence of your own added beside the figure, which is text the page does
+  not print. Never pad the list to reach the number and never drop members to fit it. Transcribe the
+  printed count where the page prints it, in the caption or label that carries it: it is the only
+  thing a reader who cannot see the picture has to check the list against, and where the picture's
+  own ink is ambiguous it is frequently the only thing that says which reading is right. A count
+  standing in both places is not the repetition the next rule forbids: that rule is about the NAME
+  of the thing pictured, which a caption beside the image already announces on its own, and a
+  number is the opposite case — it is transcription where the page prints it, and in the alt text
+  it is the bound on the list that only that text contains.
   Do not spend the description on what the page has already said. A screen reader announces a
   <figcaption>, a label and a heading as well as the alt text, so where the name of the thing
   pictured is printed beside the image — in its caption, in the label that follows it, in the
@@ -264,6 +286,22 @@ Thirteen structures are easy to render as something that merely looks right, so 
   it repeats, because those are words on the page and dropping them takes them from every reader.
   What is forbidden is adding the repetition yourself — never extend a printed caption with the
   product, section or category name its heading already gives.
+  A claim the page makes in words about a whole REGION is the same kind of evidence as a printed
+  count, and reading it costs no more ink: where the page says that some named group of places runs
+  highest or lowest — "the New England and Mideastern states, the highest" — and your description
+  sorts individual places into bands, read your own bands back against that sentence before you
+  emit. What such a sentence can contradict is the SET and not one member: it is a generalisation
+  and leaves room for exceptions, so one place out of step with its region is nothing, while a
+  region the page calls highest with NOT ONE of its members in your highest band — or one it calls
+  lowest with not one of them in your lowest — contradicts the page's own words. Where that happens the ink is what you re-read, because the sentence came off
+  the page and the bands are your reading of the picture. Do not move places between bands to
+  satisfy the sentence: it says which region runs high and never which place sits in which band, so
+  it can tell you a reading is wrong and cannot tell you which reading is right. Where re-reading
+  cannot settle it, say in the alt text which places you could place with confidence and which you
+  could not, and say so in the "log" field — a band you cannot see well enough to assign is left
+  unassigned and said to be, not filled in from the sentence. Make this comparison only where you
+  are sure which places the named region covers: where you are not, there is nothing on the page to
+  compare and you make no such report.
   Where the same subject is pictured more than once with no visible difference between the
   occurrences, describe them the same way and in the same detail — a fuller description of one
   tells a reader that the other differs.
@@ -514,6 +552,25 @@ Thirteen structures are easy to render as something that merely looks right, so 
   a naming attribute on it is prohibited. The gate demotes that finding rather than reporting it,
   because the element has text of its own, which is the same silence that let a labelled <p> page
   marker ship.
+  A key whose symbol is an area of ink is this rule's other case: the bands of a shaded map, the
+  fills of a cartogram, the hatchings of a chart. Its symbol half has no words anywhere on the
+  page, so the words are yours to write and writing them is transcription rather than the invented
+  expansion the first clause forbids — describe the ink as the <dt> and transcribe the page's
+  printed wording as its <dd>. Describe it in words and never in markup: a style attribute or a
+  coloured <span> hands a screen-reader user nothing, and the description has to survive being
+  read aloud. Read each swatch's tone off the swatch itself and never off the order of its labels
+  — a key's shades run in the order the printer chose and frequently not in the order its entries
+  are listed, so an assumed ramp is a guess that reaches the reader as a fact. Say how many
+  entries the key prints — in the alt text where you are describing the key there, since a
+  description is scaffolding this prompt asks for by name, and in the "log" field either way.
+  Never as a sentence of your own beside the <dl>: that is the prose this rule forbids two
+  paragraphs above, and it reads to a verifier as text the page does not print.
+  And where two swatches are not distinguishable in the reproduction you
+  were given, say exactly that — in the <dt> describing the ink, or in the alt text where you are
+  describing the key there, and in the "log" field either way — rather than dividing
+  items between them: an item you cannot match to a swatch is left unclassified and said to be
+  unclassified, because a reader loses less from a gap the page admits than from a confident
+  assignment to the wrong band.
 - SIGNATURE AND FILL-IN BLOCKS: a block of fields the page provides for someone to complete — a
   signature block, an application section, a run of fill-in lines — is a form even where it has
   already been filled in. Render the whole block as a <form> with one <fieldset>/<legend> per

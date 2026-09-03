@@ -134,6 +134,206 @@ test("an attribute that merely ends in alt is not an alt", () => {
   assert.equal(e.text_changed, false);
 });
 
+// --- a member that crossed between two lists (#355) ---------------------------
+
+// The p095 shape, at its own scale. A shaded map of state property tax rates, the verify pass made
+// exactly ONE edit to the description's bands, and the edit moved Missouri out of the darkest list
+// and into the cross-hatched one. Measuring the plate put Missouri on the flat side of the legend's
+// own dispersion gap by 1.9×, so the $0.045 pass turned a classification the image permits into the
+// one it excludes — and nothing in the log said a state had crossed, because nothing compared the
+// two replies.
+const BANDS_BEFORE =
+  `<figure><img src="p095-map.png" alt="A map of the United States shaded in four bands. ` +
+  `Darkest, 2.0 percent and over: Ohio, Wisconsin, Wyoming, Missouri; ` +
+  `cross-hatched, 1.5 thru 1.9 percent: Michigan, Iowa, Kansas, N.D., Illinois, Minnesota">` +
+  `<figcaption>Effective Property Tax Rates Vary.</figcaption></figure>`;
+const BANDS_AFTER = BANDS_BEFORE
+  .replace("Ohio, Wisconsin, Wyoming, Missouri", "Ohio, Wisconsin, Wyoming")
+  .replace("Michigan, Iowa", "Michigan, Missouri, Iowa");
+
+test("a member the correction moved into another list is named", () => {
+  const e = correctionEffect(BANDS_BEFORE, BANDS_AFTER);
+  assert.deepEqual(e.alt_relocated, ["Missouri"]);
+  // It is an alt change and nothing else: no word of the page moved, so a log line built on the
+  // four booleans alone reports this page as an alt refinement — the same bucket as "orange kayak"
+  // becoming "orange-yellow kayak".
+  assert.equal(e.alt_changed, true);
+  assert.equal(e.text_changed, false);
+  assert.equal(e.structure_changed, false);
+  // And the two sizes are three characters apart, which is the other thing that would have had to
+  // stand in for a reclassification.
+  assert.equal(e.chars_before - e.chars_after, 0);
+});
+
+test("the member is named from the description that carried it, whatever the correction typed", () => {
+  // Read on the normalised key and reported as it was written: a correction that lowercases a name
+  // has still moved it, and the name a reader of the log needs is the one they can search the
+  // fragment for.
+  const e = correctionEffect(BANDS_BEFORE, BANDS_AFTER.replace("Michigan, Missouri", "Michigan, missouri"));
+  assert.deepEqual(e.alt_relocated, ["Missouri"]);
+});
+
+test("a list reordered, or reworded around, is not a member changing lists", () => {
+  // Every correction re-emits the whole description, so a pass asked to fix one thing rewrites
+  // everything else in place. None of these may report a relocation.
+  const reordered = BANDS_BEFORE.replace(
+    "Ohio, Wisconsin, Wyoming, Missouri",
+    "Wisconsin, Missouri, Ohio, Wyoming",
+  );
+  assert.equal(correctionEffect(BANDS_BEFORE, reordered).alt_relocated, undefined);
+  // The list intact and the prose around it rewritten.
+  const reworded = BANDS_BEFORE.replace("A map of the United States shaded in four bands.", "A U.S. map, four bands.");
+  assert.equal(correctionEffect(BANDS_BEFORE, reworded).alt_relocated, undefined);
+  // A member added to one list and a member dropped from another. Both change what the page says
+  // and neither is a member asserted into a category the same reply had denied it — there is no pair
+  // of lists to compare — and the sizes on the effect are what report them.
+  const added = BANDS_BEFORE.replace("Michigan, Iowa", "Michigan, Indiana, Iowa");
+  assert.equal(correctionEffect(BANDS_BEFORE, added).alt_relocated, undefined);
+  const dropped = BANDS_BEFORE.replace("Ohio, Wisconsin, Wyoming, Missouri", "Ohio, Wisconsin, Wyoming");
+  assert.equal(correctionEffect(BANDS_BEFORE, dropped).alt_relocated, undefined);
+});
+
+test("a two-part description whose halves are reworded is not a relocation", () => {
+  // The false positive this is bounded to avoid: an alt of two comma-separated phrases has the same
+  // shape as a list of two, so any rewording of one phrase leaves the other sitting with entirely
+  // new company. Corrections do this constantly. What refuses it is the destination clause and not a
+  // size floor — the "list" the surviving half joins holds one name, and one name cannot have been
+  // listed with two others beforehand. That is measured rather than assumed: a draft that also
+  // demanded three names at each end was mutated back to one, and this test stayed green either way.
+  const e = correctionEffect(
+    `<img src="a.png" alt="a bar chart, revenue by quarter"><img src="b.png" alt="a map, three shades">`,
+    `<img src="a.png" alt="a bar chart, quarterly revenue"><img src="b.png" alt="a map, four bands">`,
+  );
+  assert.equal(e.alt_changed, true);
+  assert.equal(e.alt_relocated, undefined);
+});
+
+test("a member whose new neighbours are all new text moved nowhere", () => {
+  // The third condition, on its own. Missouri leaves a real list of four, and what it is listed with
+  // afterwards is a clause that did not exist in the description being corrected — so the evidence
+  // is that this sentence was rewritten, not that a category was reassigned. One shared name would
+  // be a coincidence between any two sentences about the same map; two is a list.
+  const rewritten = BANDS_BEFORE
+    .replace("Ohio, Wisconsin, Wyoming, Missouri", "Ohio, Wisconsin, Wyoming")
+    .replace(
+      "cross-hatched, 1.5 thru 1.9 percent: Michigan, Iowa, Kansas, N.D., Illinois, Minnesota",
+      "hard to place at this scale: Missouri, two Gulf states, several plains states",
+    );
+  assert.equal(correctionEffect(BANDS_BEFORE, rewritten).alt_relocated, undefined);
+});
+
+test("a member leaving a two-name band for one that already existed is still a move", () => {
+  // The shape a floor of three at the SOURCE end declined in silence. Two states share the darkest
+  // band and one of them crosses into the cross-hatched list, and nothing about that evidence is
+  // weaker than p095's: the band it joined is the band it was not in, named by the same six members
+  // in both replies. The floor that remains is two names, so that a member has a sibling it can be
+  // listed with at all, and the destination clause is what makes the reading safe.
+  const before = BANDS_BEFORE.replace("Ohio, Wisconsin, Wyoming, Missouri", "Wyoming, Missouri");
+  const after = before
+    .replace("Wyoming, Missouri", "Wyoming")
+    .replace("Michigan, Iowa", "Michigan, Missouri, Iowa");
+  assert.deepEqual(correctionEffect(before, after).alt_relocated, ["Missouri"]);
+});
+
+test("a name that contains \"and\" is one member, and can move like one", () => {
+  // Raised by the review of this change. A conjunction joins a list at its end, so it is only opened
+  // on there: split anywhere earlier, "Trinidad and Tobago" is two phantom members that travel
+  // together, they share company in both replies, and the disjointness test can then never hold —
+  // the member becomes unreportable however far it moves.
+  const before = `<img alt="Darkest: Trinidad and Tobago, Guyana, Suriname; lightest: Belize, Panama, Costa Rica">`;
+  const after = `<img alt="Darkest: Guyana, Suriname; lightest: Belize, Trinidad and Tobago, Panama, Costa Rica">`;
+  assert.deepEqual(correctionEffect(before, after).alt_relocated, ["Trinidad and Tobago"]);
+  // And a list that ends in a conjunction is still a list of its names, which is what the split is
+  // there for: Wyoming crosses out of a three whose last two are joined by "and".
+  const joined = `<img alt="Darkest: Ohio, Wisconsin and Wyoming; cross-hatched: Iowa, Kansas and Minnesota">`;
+  const movedOut = `<img alt="Darkest: Ohio and Wisconsin; cross-hatched: Iowa, Wyoming, Kansas and Minnesota">`;
+  assert.deepEqual(correctionEffect(joined, movedOut).alt_relocated, ["Wyoming"]);
+  // The same name in the position English usually writes a list's last member in, which the first
+  // version of this fix still split: the last piece is opened on its FIRST conjunction, so
+  // "Suriname and Trinidad and Tobago" separates into the member and the name rather than into the
+  // name's two halves.
+  const last = `<img alt="Darkest: Guyana, Suriname and Trinidad and Tobago; lightest: Belize, Panama, Costa Rica">`;
+  const lastMoved = `<img alt="Darkest: Guyana and Suriname; lightest: Belize, Panama, Costa Rica and Trinidad and Tobago">`;
+  assert.deepEqual(correctionEffect(last, lastMoved).alt_relocated, ["Trinidad and Tobago"]);
+});
+
+test("a run written with no commas is separated by every conjunction in it", () => {
+  // The other side of that rule, and the second thing the review of this branch caught. A bucket with
+  // commas in it has said what its separator is; a bucket with none has not, and there the conjunction
+  // is doing the work every comma would have done. Read as two, the key for the tail is a name nobody
+  // wrote — "Wisconsin and Wyoming" — so the member that moved is not a key at all and the move is
+  // lost in silence.
+  const runOn = `<img alt="Darkest: Ohio and Wisconsin and Wyoming; light: Iowa, Kansas, Nebraska">`;
+  const runOnMoved = `<img alt="Darkest: Ohio and Wisconsin; light: Iowa, Kansas, Nebraska and Wyoming">`;
+  assert.deepEqual(correctionEffect(runOn, runOnMoved).alt_relocated, ["Wyoming"]);
+  // And a conjunction NAME inside such a run costs only itself: "Health" and "Human Services" are two
+  // phantoms that travel together, so neither is ever reported, while the real member beside them is.
+  const depts = `<img alt="Fully funded: Health and Human Services and Education; partly: Interior, Commerce, Labor">`;
+  const deptsMoved = `<img alt="Fully funded: Health and Human Services; partly: Interior, Commerce, Labor and Education">`;
+  assert.deepEqual(correctionEffect(depts, deptsMoved).alt_relocated, ["Education"]);
+});
+
+test("a member that was alone in its clause did not leave a list", () => {
+  // The other side of that floor, and why it is two rather than one. Missouri is the only name in the
+  // clause it sits in beforehand, so there is no set of names it was listed WITH — and this reports a
+  // member listed with one company and then another, which needs both. A lone name in a clause is as
+  // likely to be prose as a category of one, and reading it as a category would report a relocation
+  // off the strength of the destination alone.
+  const before = `<img alt="Too faint to place: Missouri; cross-hatched, 1.5 thru 1.9 percent: Michigan, Iowa, Kansas, Minnesota">`;
+  const after = `<img alt="cross-hatched, 1.5 thru 1.9 percent: Michigan, Missouri, Iowa, Kansas, Minnesota">`;
+  const e = correctionEffect(before, after);
+  assert.equal(e.alt_changed, true);
+  assert.equal(e.alt_relocated, undefined);
+});
+
+test("an abbreviation or a decimal inside a member does not cut its list in half", () => {
+  // Both are ordinary on a shaded map — "N.D.", "1.5 thru 1.9" — and a sentence split that took
+  // either for the end of a list would put the members after it in a list of their own, then report
+  // every one of them as having moved the next time the description was re-emitted. This is the
+  // whole reason `ENUMERATION_BREAK` will not open on a period after a capital or a digit.
+  const before = `<img alt="Shaded 1.5 thru 1.9: N.D., S.D., Kan., Mo.; shaded 2.0 and over: Ohio, Wis., Wyo.">`;
+  const reordered = `<img alt="Shaded 1.5 thru 1.9: S.D., Kan., N.D., Mo.; shaded 2.0 and over: Wis., Ohio, Wyo.">`;
+  assert.equal(correctionEffect(before, reordered).alt_relocated, undefined);
+  // And the move itself is still seen through the same punctuation. "Mo." keeps its period in one
+  // reply and loses it to the sentence break at the end of the other, which is why the key a member
+  // is matched on drops a trailing one: left in, this move would be two different members and
+  // nothing would have crossed.
+  const moved = `<img alt="Shaded 1.5 thru 1.9: N.D., S.D., Kan.; shaded 2.0 and over: Ohio, Wis., Wyo., Mo.">`;
+  assert.deepEqual(correctionEffect(before, moved).alt_relocated, ["Mo."]);
+});
+
+test("a name listed twice in one description is not resolved to one of its places", () => {
+  // Which of the two the corrected reply's "Michigan" corresponds to is exactly what this cannot
+  // know, and settling it by position would be a guess reported as a measurement. Here Michigan is
+  // filed in two bands at once — a first-read defect of its own, and one this says nothing about.
+  const twice =
+    `<img alt="Darkest: Ohio, Wisconsin, Wyoming, Michigan; cross-hatched: Iowa, Kansas, Minnesota, ` +
+    `Illinois; lightest: Texas, Georgia, Michigan">`;
+  // A correction that drops the duplicate is not a member changing lists, and reading the repeat as
+  // its first occurrence would report exactly that: Michigan listed with Ohio and Wisconsin before,
+  // with Texas and Georgia after, and both of those are real lists that existed all along.
+  const deduped = twice.replace("Ohio, Wisconsin, Wyoming, Michigan", "Ohio, Wisconsin, Wyoming");
+  assert.equal(correctionEffect(twice, deduped).alt_relocated, undefined);
+  // And the other members of a list holding a repeat are still read, so one ambiguous name does not
+  // cost the description the check.
+  const moved = twice
+    .replace("Ohio, Wisconsin, Wyoming, Michigan", "Ohio, Wisconsin, Michigan")
+    .replace("Iowa, Kansas", "Iowa, Wyoming, Kansas");
+  assert.deepEqual(correctionEffect(twice, moved).alt_relocated, ["Wyoming"]);
+});
+
+test("a correction that changed how many images there are reports no relocation", () => {
+  // Descriptions are paired by position, so an image added or dropped shifts every pairing after it
+  // and every member of both lists would read as relocated. That correction is a structural change
+  // and is reported as one.
+  const e = correctionEffect(
+    BANDS_BEFORE,
+    `<img src="new.png" alt="a chart">${BANDS_AFTER}`,
+  );
+  assert.equal(e.structure_changed, true);
+  assert.equal(e.alt_relocated, undefined);
+});
+
 test("a re-typed href is a change, though no word on the page moves", () => {
   // The correction the links pass exists to buy: links.ts asks for "exactly that URL —
   // without changing anything else about the page", so a model that obeys, on an anchor it
@@ -262,6 +462,13 @@ interface Behaviour {
   recheck?: (order: number) => VerifyProblem[];
   // A provider error on the re-verification, the way ProviderRouter.complete raises one.
   recheckThrows?: boolean;
+  // A provider error on the FIRST verify — the fidelity check itself. Separate from
+  // `recheckThrows` because that one fires on every call after the first, and the whole point of
+  // issue #364 is that this call is reached by every page in every run while a recheck is reached
+  // only by a page that was corrected. A thunk rather than a flag so a test can choose the shape:
+  // a throttle carries no reply, and a `TruncatedResponseError` carries the evidence the log line
+  // exists to preserve.
+  verifyThrows?: () => unknown;
   // The first verify answers prose with no JSON in it. `verifyAgentOutput` cannot read a
   // verdict out of that and returns its non-blocking default, which is a page nothing
   // judged rather than a page that passed.
@@ -324,6 +531,7 @@ function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 2): Pipelin
         if (user.includes("TASK: verify")) {
           const n = (verifies.get(order) ?? 0) + 1;
           verifies.set(order, n);
+          if (n === 1 && b.verifyThrows) throw b.verifyThrows();
           if (n > 1 && b.recheckThrows) throw new Error("ThrottlingException: Too many requests");
           if (n === 1 && b.verifyGarbles) return { text: "I was unable to compare the HTML with the image." };
           if (n > 1 && b.recheckGarbles) return { text: "I was unable to compare the HTML with the image." };
@@ -405,6 +613,54 @@ test("a correction that changed the page says what it changed", async () => {
     );
     // And the document is the corrected page, unchanged by any of this.
     assert.match(result.fragments[0].innerHtml, /facing away/);
+  });
+});
+
+// #355. The unit tests above are on `correctionEffect`; this one is on the line an operator reads.
+// A relocation that no event carries is a measurement nobody has, which is the state the issue
+// reported: both replies existed, one after the other, and the log said `alt_changed: true`.
+test("a member that crossed between two lists reaches the correction's log line", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    await runExtraction(
+      makeCtx(dir, events, {
+        html: () => BANDS_BEFORE,
+        problems: (o) =>
+          o === 1
+            ? [{ kind: "content_wrong", problem: "Missouri appears cross-hatched, not in the darkest band" }]
+            : [],
+        corrected: () => BANDS_AFTER,
+      }),
+    );
+    const corrected = of(events, "page_corrected");
+    assert.equal(corrected.length, 1);
+    assert.deepEqual(corrected[0].alt_relocated, ["Missouri"]);
+    // Beside the fields that were the whole of this line before, and which cannot say it: the page's
+    // words did not move, its structure did not move, and one description was refined.
+    assert.equal(corrected[0].alt_changed, true);
+    assert.equal(corrected[0].text_changed, false);
+    assert.equal(corrected[0].result, "kept");
+    // The verdict that bought the correction is on the same line, so the pair reads as one fact: a
+    // `content_wrong` finding was acted on, and what it moved was a state between two bands.
+    assert.deepEqual(corrected[0].kinds, ["content_wrong"]);
+  });
+});
+
+test("an ordinary correction leaves the relocation field off the line entirely", async () => {
+  // The field is absent rather than empty, so it costs nothing on the corrections that are not this
+  // — and a consumer counting relocations counts lines that have it.
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<h2>Findings</h2><img src="a.png" alt="a kayak">`,
+        problems: (o) => (o === 1 ? [{ kind: "alt_quality", problem: "the alt text is thin" }] : []),
+        corrected: () => `<h2>Findings</h2><img src="a.png" alt="a kayak, the paddler facing away">`,
+      }),
+    );
+    const corrected = of(events, "page_corrected");
+    assert.equal(corrected.length, 1);
+    assert.ok(!("alt_relocated" in corrected[0]));
   });
 });
 
@@ -1176,6 +1432,200 @@ test("a provider error on the sample costs the measurement, not the page", async
     // And the slot stays spent: a throttled provider is not asked again for every
     // corrected page in the batch.
     assert.equal(of(events, "page_corrected").length, 2);
+  });
+});
+
+// --- a check that cannot answer may not delete the page it was checking (issue #364) ---------
+
+test("a verify call that overruns its ceiling keeps the page it was judging", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The worst reach of the same defect, and the one the two tests above do not cover: they
+    // guard the calls a CORRECTED page makes, and this is the call every page in every run
+    // makes. Uncaught, a provider error on the fidelity check left `extractPage` through the
+    // per-page catch and shipped a `@page-failed` comment for a page whose extraction had
+    // succeeded and was sitting in a local variable — measured once as 8,855 characters of a
+    // statistical table delivered as 156 bytes, where $0.5051 of the page's $0.6634 was the
+    // call that deleted it.
+    const page = `<h2>Table 4</h2><table><tr><th>State</th><td>Illinois</td></tr></table>`;
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => page,
+        problems: () => ["never reached"],
+        corrected: () => `<p>never reached</p>`,
+        verifyThrows: () => new TruncatedResponseError("bedrock", "some-model", 32_000, TRUNCATED_REPLY),
+      }),
+    );
+    // The page is delivered, whole and unmarked. This is the assertion the issue is about:
+    // everything below is about being able to say WHY, and this is the content.
+    assert.equal(result.failedPages.length, 0);
+    for (const f of result.fragments) assert.equal(f.innerHtml, page);
+    assert.doesNotMatch(result.fragments.map((f) => f.innerHtml).join(""), /@page-failed/);
+    // And no correction is bought: an unobtainable verdict is a fidelity check that did not
+    // run, and a check that did not run names nothing to correct. So the page ships exactly as
+    // it would have with no Feedback Agent configured at all, which is what the rest of this
+    // file already guarantees for that configuration.
+    assert.equal(of(events, "page_corrected").length, 0);
+    assert.equal(of(events, "page_extraction_failed").length, 0);
+    // The failure is on the record with the evidence, under its own name — `page_verify_failed`
+    // is already taken by a verdict that named problems, which is the opposite of this.
+    const errs = of(events, "page_verify_error");
+    assert.equal(errs.length, 2);
+    for (const e of errs) {
+      assert.equal(e.step, "verify");
+      assert.match(String(e.error), /truncat/i);
+      // The shape with a configuration remedy, named rather than left to be read out of the
+      // message, and both ends of the reply — which is what says whether the ceiling was too
+      // tight or the verifier wrote an essay about a page it had already judged. The round
+      // cannot be asked again: a truncation has already been billed for a full ceiling.
+      assert.equal(e.truncated, true);
+      assert.equal(e.reply_chars, TRUNCATED_REPLY.length);
+    }
+    // The page is countable beside the others without reading two event streams, and it is
+    // counted as the kind of unjudged that COST money rather than the kind that saved it.
+    const oks = of(events, "page_verify_ok");
+    assert.equal(oks.length, 2);
+    for (const o of oks) {
+      assert.equal(o.unjudged, true);
+      assert.equal(o.skipped, "error");
+    }
+    // Which the fold reads back nested, so nothing published moves: both pages are still
+    // `pages_verified`, still `pages_unjudged`, and the judged pass rate is 0 of 0.
+    const d = summarizeRun(
+      events.map((e) => JSON.stringify({ ts: new Date(Date.UTC(2026, 0, 1)).toISOString(), ...e })).join("\n"),
+      { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.UTC(2026, 0, 1) },
+    );
+    assert.equal(d.verification.pages_verified, 2);
+    assert.equal(d.verification.pages_unjudged, 2);
+    assert.equal(d.verification.pages_verify_error, 2);
+    // And it is NOT the blank skip. The two point opposite ways in money — a blank page's call
+    // is not made and is a saving, this one was billed for a full ceiling and answered with
+    // nothing — so a reader adding them together would price a loss as a saving.
+    assert.equal(d.verification.pages_skipped_blank, 0);
+    assert.equal(d.verification.verify_failed, 0);
+    assert.deepEqual(d.pages_failed, []);
+    // And the first check's failure is counted ONCE. `page_verify_error` and `page_verify_ok` both
+    // fire for it, so the fold matches `step` strictly rather than reading "not the recheck" — a
+    // `binding_error` here would be this page counted twice under two names.
+    assert.equal(d.verification.rechecks.binding_error, 0);
+  });
+});
+
+test("a throttled verify is unjudged for its own reason, not the blank one", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The other shape, which is the commoner one: a throttle has no reply to quote, so `error`
+    // is the whole of what is known about it and the truncation fields are absent rather than
+    // false. Asserted because `truncationEvidence` spreads nothing for a plain Error, and a
+    // `truncated: false` here would read as a measurement that the ceiling was fine.
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<p>Kept</p>`,
+        problems: () => ["never reached"],
+        corrected: () => `<p>never reached</p>`,
+        verifyThrows: () => new Error("ThrottlingException: Too many requests"),
+      }),
+    );
+    assert.equal(result.failedPages.length, 0);
+    const errs = of(events, "page_verify_error");
+    assert.equal(errs.length, 2);
+    for (const e of errs) {
+      assert.match(String(e.error), /ThrottlingException/);
+      assert.equal("truncated" in e, false);
+      assert.equal("reply_chars" in e, false);
+    }
+    // A run being throttled reads, on a log written before this event existed, as a run whose
+    // vision was failing — the failure took the page with it and was recorded as an extraction
+    // failure. That is the misattribution the count exists to end.
+    const d = summarizeRun(
+      events.map((e) => JSON.stringify({ ts: new Date(Date.UTC(2026, 0, 1)).toISOString(), ...e })).join("\n"),
+      { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.UTC(2026, 0, 1) },
+    );
+    assert.equal(d.verification.pages_verify_error, 2);
+    assert.deepEqual(d.pages_failed, []);
+  });
+});
+
+test("an unobtainable binding recheck discards the correction and keeps the page that passed", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const link = { text: "the full report", href: "https://example.org/report" };
+    // The second unguarded call site, which is not in the issue's report and costs MORE when it
+    // fires: this page rendered, PASSED its fidelity check, and was corrected, so a throw here
+    // threw away two calls' work instead of one, by the same route into the per-page catch.
+    //
+    // Where its verdict cannot be obtained the correction is DISCARDED, which is a decision and
+    // not a default. This recheck is the gate on changing a page that had already passed — the
+    // page is being re-rendered only to attach one link — so no verdict is no licence, and the
+    // status quo is the fragment that passed. It is also the same answer this branch gives a
+    // verdict that fails.
+    const page = `<h2>Progress</h2><p>Read the full report for the 2026 figures.</p>`;
+    const corrected = `<h2>Progress</h2><p>Read <a href="https://example.org/report">the full report</a> for the 2026 figures.</p>`;
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => page,
+        problems: () => [],
+        corrected: () => corrected,
+        recheckThrows: true,
+        links: [link],
+      }),
+    );
+    // The page that passed is what ships, byte for byte, and the link stays missing — which is
+    // the trade this branch was written to make: recovering a target may not cost a page the
+    // accessibility it already had.
+    assert.equal(result.failedPages.length, 0);
+    for (const f of result.fragments) assert.equal(f.innerHtml, page);
+    assert.doesNotMatch(result.fragments.map((f) => f.innerHtml).join(""), /href="https:\/\/example\.org\/report"/);
+    assert.equal(of(events, "page_extraction_failed").length, 0);
+    // The correction was billed, so the discard is on the record rather than inferred from an
+    // absent rejection line, and `trigger` says which repair the money bought nothing for.
+    const errs = of(events, "page_verify_error");
+    assert.equal(errs.length, 2);
+    for (const e of errs) {
+      assert.equal(e.step, "recheck_binding");
+      assert.equal(e.correction_discarded, true);
+      assert.equal(e.trigger, "links");
+      assert.match(String(e.error), /ThrottlingException/);
+    }
+    // And the rejection event does NOT fire: it reports what the second verdict said was wrong,
+    // and there is no second verdict. A line claiming problems it never read would be worse than
+    // no line, which is why the discard has an event of its own.
+    assert.equal(of(events, "page_links_correction_rejected").length, 0);
+    // The FIRST verdict stands and is a real one — this page passed. So the failure here is not
+    // an unjudged page: the fold must not count it as one, or a run whose rechecks were
+    // throttled would read as a run nothing verified.
+    const oks = of(events, "page_verify_ok");
+    assert.equal(oks.length, 2);
+    for (const o of oks) {
+      assert.equal("unjudged" in o, false);
+      assert.equal("skipped" in o, false);
+    }
+    const d = summarizeRun(
+      events.map((e) => JSON.stringify({ ts: new Date(Date.UTC(2026, 0, 1)).toISOString(), ...e })).join("\n"),
+      { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.UTC(2026, 0, 1) },
+    );
+    assert.equal(d.verification.pages_verified, 2);
+    // NOT unjudged, and NOT `pages_verify_error`: that count is nested inside `pages_unjudged`, and
+    // this page has a real first verdict which it passed. Counting it there would put a judged page
+    // inside the unjudged total and move the rate the nesting exists to protect. Review round 1
+    // caught the README claiming otherwise while this assertion said the opposite.
+    assert.equal(d.verification.pages_unjudged, 0);
+    assert.equal(d.verification.pages_verify_error, 0);
+    // Which is why it needs a number of its own, and this is it. Without it the page reached NO
+    // counter anywhere — `binding` and `failures` come off `page_correction_recheck`, which does not
+    // fire when there is no verdict, and `errors` needs an `ok: false` this event does not carry —
+    // so the more expensive of the two failure shapes was the silent one.
+    assert.equal(d.verification.rechecks.binding_error, 2);
+    // Disjoint from the verdict-fed fields rather than a subset of them, so the judged-only rate
+    // `(binding_ok - binding_unjudged) / (binding - binding_unjudged)` is untouched by it.
+    assert.equal(d.verification.rechecks.binding, 0);
+    assert.equal(d.verification.rechecks.binding_ok, 0);
+    assert.equal(d.verification.rechecks.failures.length, 0);
+    // And the only other trace it has, which is why the count is worth having: a `rejected` pooled
+    // with the shrink floor and with a rewrite a second verdict genuinely refused.
+    const corrected2 = of(events, "page_corrected");
+    assert.equal(corrected2.length, 2);
+    for (const c of corrected2) assert.equal(c.result, "rejected");
   });
 });
 

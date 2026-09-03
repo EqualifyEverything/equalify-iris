@@ -51,16 +51,21 @@ export function extractJson<T = unknown>(text: string): T | null {
   // on it. Note this is the whole text and not a fenced block's content — the fenced case is
   // reached by the span walk below, which finds an object wherever it sits, and matching a
   // fence FIRST is what bound the scratch template above.
+  const whole = text.trim();
   try {
-    return JSON.parse(text.trim()) as T;
+    return JSON.parse(whole) as T;
   } catch {
     // On to the candidates.
   }
   let last: T | null = null;
+  // Where the answer we settled on ended, for the whole-reply attempt at the bottom. An object
+  // that closes on the reply's last character is the reply's own envelope, however it got there.
+  let lastEnd = -1;
   for (let i = text.indexOf("{"); i !== -1; ) {
     const read = readObjectAt<T>(text, i);
     if (read !== null) {
       last = read.value;
+      lastEnd = read.end;
       // Past the object, because everything inside it belongs to it: a nested
       // `{"name": "table-agent"}` is not a later answer, and counting it as one would make
       // "the last object" mean the innermost one.
@@ -80,7 +85,125 @@ export function extractJson<T = unknown>(text: string): T | null {
     // missing the field it needs, which is the reported-failure path either way (#168).
     i = text.indexOf("{", i + 1);
   }
-  return last;
+  // Last chance for a reply that is nothing BUT one object — opening at the first character and
+  // closing at the last, which is what every one of these prompts asks for — whose escaping the
+  // walk could not repair. Read under the narrower colon rule described above `repairedSpan`, and
+  // taken only where the walk did not already close on the reply's last character
+  // (`walkClosedOnTheLastCharacter`) and this reading's own strings are self-contained
+  // (`stringsAreSelfContained`).
+  //
+  // Every part of that condition is load-bearing, and each is a version of this change that
+  // shipped nothing. The narrow rule cannot go in the walk, because a candidate that newly parses
+  // moves the cursor: on 14 of the 4,100 agent replies in the bench logs a Reader verdict quoting
+  // `{"html":"…` in its prose gets a value-string that never closes, swallows the verdict behind
+  // it, and comes back with one issue in place of five — and putting the narrow rule in as a
+  // per-candidate FALLBACK loses the same 14 the same way. And the brace test is not decoration:
+  // the narrow rule's own failure case is a string the tracker reads as a value where JSON meant a
+  // key, which is what an ABANDONED unterminated string does to it —
+  //
+  //   {"html": "<p>Table 3 continues\n{"html": "<table>…</table>", "log": "ok", …}
+  //
+  // a draft the model gave up on mid-string and restarted inline. The walk reads the restart, which
+  // is the answer; the narrow rule reads one object whose `html` is the abandoned prose with
+  // `{"html": "` glued to the front of it, and that string is delivered to a reader as the page
+  // (#168). Both gates refuse that reading, for different reasons — this restart is one the walk can
+  // read whole, so the walk's answer closes where the REPLY closes, and the abandoned `{` does not
+  // close inside the string — and a decoy the model QUOTED fails neither, so #339's verdict is read
+  // as the rejection it is. (The first of those reasons is stated for this reply, not as a rule about
+  // where restarts appear; see `walkClosedOnTheLastCharacter` below for the width it actually has.)
+  //
+  // TWO EARLIER VERSIONS OF THIS GATE WERE WRONG, and both looked like the same idea. The first
+  // compared KEY SETS — the narrow reading preferred where it carried every field the walk found
+  // plus one more — which is a race the decoy can win: it holds only while the quoted object names
+  // fewer fields than the real envelope, so a four-field `notes` quote ties it, and it depends on
+  // field ORDER, since a restart preceded by one complete field carries a strict superset and wins.
+  // The second was the brace test alone, which is about the right thing and is not sufficient: one
+  // `}` in the restarted page content rebalances the abandoned string and the envelope reaches the
+  // page again. Neither field count nor a coincidence of braces has anything to do with which
+  // reading is right. What does is whether the walk has already read an object that closes where the
+  // reply closes — and, failing that, whether the model finished writing the object it quoted.
+  const recovered = wholeReplyObject<T>(whole);
+  if (recovered === null) return last;
+  if (walkClosedOnTheLastCharacter(text, lastEnd)) return last;
+  if (!stringsAreSelfContained(recovered)) return last;
+  return recovered;
+}
+
+// Did the walk's answer end on the reply's final character?
+//
+// If it did, the walk read an object whose closing brace is the reply's own, and there is nothing
+// left over for a second reading to recover — so the narrow rule is not tried at all. That is the
+// gate the brace test below could not be, and the claim it rests on is deliberately the narrow one:
+// a restart the walk can read WHOLE leaves nothing after it, and a restart the walk cannot read
+// whole is the brace test's case. What it does NOT claim is that a restart is always the last thing
+// in the reply — a model that restarts, closes the object and then adds a sentence has written a
+// reply where it is not, and that reply is refused by `wholeReplyObject`'s `span.end` check instead,
+// independently of where the walk stopped. Three revisions of this argument were retired for
+// asserting an invariant one shape wider than the code relied on; this is the width it relies on.
+//
+// The brace test catches the abandoned-draft shape only while the abandoned prose leaves its `{`
+// unbalanced, and one `}` anywhere in the restarted content — a code listing, template syntax, a
+// math brace, all ordinary page content — rebalances it and hands #168 back:
+//
+//   {"html": "<p>draft continues\n{"html": "<p>use the } token</p>", "log": "ok", …}
+//
+// Whereas a decoy the model QUOTED sits inside a field of an envelope that closes after it, so the
+// walk's reading of it stops short of the reply's end and this gate lets the narrow rule run.
+//
+// Both tests are kept because each is free in the same direction and neither implies the other: a
+// restart whose own object does not parse leaves the walk on a fragment mid-reply, which only the
+// brace test refuses. Rejecting a reading always answers with the walk's result, which is the
+// result `main` gives, so a gate here can only ever return behaviour to the base.
+function walkClosedOnTheLastCharacter(text: string, lastEnd: number): boolean {
+  return lastEnd === text.trimEnd().length;
+}
+
+// One object spanning the whole reply, read with the colon rule confined to keys. Null unless the
+// reply is exactly that: a `{` first, its match last, and JSON on the other side of the repair.
+function wholeReplyObject<T>(whole: string): T | null {
+  if (!whole.startsWith("{")) return null;
+  const span = repairedSpan(whole, 0, false);
+  if (span === null || span.end !== whole.length) return null;
+  try {
+    return JSON.parse(span.text) as T;
+  } catch {
+    return null;
+  }
+}
+
+// Does every `{` inside this object's strings close inside the same string?
+//
+// The second of the two gates, and the one that catches a restart the walk could not read whole: a
+// model QUOTING an object writes the whole thing — `"I read it as { "faithful": true, "problems": []
+// } at first"` — so the braces inside that string balance. A model that ABANDONS an object
+// mid-string and restarts has written a `{` whose `}` belongs to the restarted object, so the narrow
+// reading swallows the opener and leaves it unbalanced. Nothing about field order, field count, or
+// which reading is longer enters into it.
+//
+// What it is NOT is a complete discriminator, which is worth stating because a comment here once
+// claimed it was: the invariant holds only while the abandoned string's own braces stay unbalanced,
+// and a single `}` in the restarted content rebalances it. `walkClosedOnTheLastCharacter` is what
+// closes that, and it is the gate to reach for first.
+//
+// False negatives cost exactly nothing, which is why this can afford to be strict: a page that
+// legitimately prints a lone `{` makes the narrow reading unusable, and an unusable narrow reading
+// means `extractJson` answers with the walk's result — the answer `main` gives. That is the safety
+// property to keep in mind when editing this. Head and base can differ ONLY on a reply where the
+// narrow reading is preferred, so every gate here can only ever return behaviour to the base.
+function stringsAreSelfContained(value: unknown): boolean {
+  if (typeof value === "string") {
+    let depth = 0;
+    for (const c of value) {
+      if (c === "{") depth++;
+      else if (c === "}" && --depth < 0) return false;
+    }
+    return depth === 0;
+  }
+  if (Array.isArray(value)) return value.every(stringsAreSelfContained);
+  if (value !== null && typeof value === "object") {
+    return Object.values(value).every(stringsAreSelfContained);
+  }
+  return true;
 }
 
 // The entries of an array field that DID arrive complete, out of a reply that stopped partway
@@ -142,7 +265,7 @@ function readObjectAt<T>(text: string, start: number): { value: T; end: number }
   // past an object whose strings contain the page's own punctuation. It is tried even when
   // the strict walk found a span, because a stray quote makes the two disagree about where
   // the object ends.
-  const repaired = repairedSpan(text, start);
+  const repaired = repairedSpan(text, start, true);
   if (repaired !== null) {
     try {
       return { value: JSON.parse(repaired.text) as T, end: repaired.end };
@@ -233,9 +356,68 @@ function strictSpan(candidate: string, start: number): Span | null {
 //     the document. What comes back is whichever sub-object IS valid JSON, which does not carry
 //     `issues` or `faithful`, so the verdict reads as "nothing to say" rather than as a guess.
 //
+// That rule has a SECOND reading, used in exactly one place — `extractJson`'s whole-reply attempt,
+// not the candidate walk — and the reason is a verdict rather than a page. A `"` followed by `:`
+// closes a KEY; that is the only place JSON puts a colon after a string, since after a VALUE comes
+// `,`, `}` or `]`. So on prose that quotes a field name back the wider rule ends the value early.
+// In
+//
+//   { "faithful": false, "problems": [{ … }],
+//     "notes": "I first read the contract as { "faithful": true, "problems": [] }; it is not." }
+//
+// the quote after the inner `faithful` is followed by `:`, the value-string ended there, the walk
+// read the rest of the sentence as object syntax, and the envelope did not parse. The decoy the
+// model was quoting DID — `extractJson` resumed inside the failed candidate and returned
+// `{ faithful: true, problems: [] }`. That is the one sub-object shape the null-is-safe argument
+// below does NOT cover: it carries `faithful`, so a rejected page with a missing table row read as
+// a confident pass, `ok: true` with no `unjudged` flag on it (issue #339, `verifyAgentOutput`).
+//
+// Which is NOT an argument for narrowing the rule generally, and the corpus said so before this
+// shipped. Applied to every candidate it changes 14 of the 4,100 replies in the bench logs and
+// worsens all 14: each is a Reader verdict whose prose quotes `{"html":"…`, `"log": "…"`,
+// `"suggested_agent": null}` ahead of the answer, and under the narrow rule that value-string never
+// closes, so the prose candidate swallows the real envelope behind it and the walk comes back with
+// the LAST issue of the verdict in place of all of them — one issue instead of five. A runaway
+// string is the failure the wider rule holds shut. Nor does trying it as a per-candidate FALLBACK
+// help, which is the version that looked obviously safe and is not: at that prose brace both wider
+// readings fail, so the fallback runs, succeeds on a span that ends past the real envelope, and
+// `extractJson` resumes beyond the answer. Same 14 replies, same loss.
+//
+// What is safe is the narrow rule on the whole reply and nowhere else — one object, first character
+// to last. Those 14 all open with prose, so the shape excludes them by construction, and over the
+// same 4,100 replies it leaves 4,100 byte-identical while reading the verdict above correctly.
+//
 // The known limit within the rule is content whose unescaped quote is itself followed by a
 // comma or a brace — `<p>She said "hello", he replied</p>` — which reads as a terminator and
-// fails the parse. That is the failure this had before, not a new one.
+// fails the parse. That is the failure this had before, not a new one. It also bounds what the
+// whole-reply attempt fixes, and the bound is worth stating because a verdict is on the other side
+// of it. Three kinds of residual still leave the decoy as the last readable object — and the last of
+// them is a CLASS rather than a shape, so this list is not countable and said "four shapes" until the
+// bullet below was widened. All of them are unchanged from before this repair rather than opened by it:
+//
+//   * the same `notes` inside a code fence, or after a sentence of preamble — the reply no longer
+//     opens with `{`, so the whole-reply attempt does not apply to it at all;
+//   * a quote of `"faithful",` rather than `"faithful":`, where the wide rule ends the value early
+//     for a reason the narrow rule shares;
+//   * a decoy containing ANY quoted string value at all — the `"` that opens it follows a `:` and the
+//     `"` that closes it is followed by `,`, `}` or `]`, so the narrow rule ends the real `notes`
+//     value at that point, the span stops before the end of the reply, and the whole-reply attempt
+//     yields nothing. This is a CLASS, and it is the one the new `notes` field most invites. The
+//     minimal instance is `{ …, "notes": "" }`; an earlier revision of this list named that instance
+//     as if it were the trigger, which is the same error as the tail claim above but in the more
+//     expensive direction — a residual understated is a residual someone closes by making the pin for
+//     the special case pass. What this repair DOES fix is the decoy with no string values in it, which
+//     is the shape issue #339 produced.
+//
+// A parser cannot close those in one pass — a `"` before `}` is a terminator on every reply that
+// needed this repair in the first place — so they are closed twice elsewhere instead:
+// `agents/feedback.md` asks the verifier for no quoted JSON in `notes` at all, and
+// `verifyAgentOutput` refuses to read anything carrying fewer than both decision flags as a verdict.
+// The last of these — the whole class of it, not just the empty-string instance — defeats BOTH of
+// those, since the quoted contract it produces carries both flags as booleans, and a reply that quotes
+// the whole contract back is indistinguishable in one pass from a reply that IS the contract. It reads as a pass on a page the verifier rejected, on
+// `main` and here alike; what makes it acceptable to leave is that the prompt clause removes the
+// only reason such a string would be written.
 
 // Is the backslash at `i` the start of one of the six escapes JSON allows, or of a `\uXXXX`
 // with its four hex digits? Anything else is a backslash the model wrote as itself.
@@ -246,18 +428,40 @@ function isEscape(candidate: string, i: number): boolean {
   return '"\\/bfnrt'.includes(next);
 }
 
-function repairedSpan(candidate: string, start: number): Span | null {
+// `colonClosesValues` is the difference between the two readings `readObjectAt` tries. True is the
+// original rule: a `"` followed by `:` ends the string wherever it appears. False confines that to
+// a string in KEY position, which is the only place JSON puts a colon after one.
+function repairedSpan(candidate: string, start: number, colonClosesValues: boolean): Span | null {
   let out = "";
   let depth = 0;
   let inStr = false;
   let esc = false;
+  // Which containers we are inside, innermost last, and whether a string opened here would be a
+  // key. Both exist only to answer that question for the `":` case below; `depth` still decides
+  // where the object ends, unchanged, so a reply with unbalanced `[` cannot change the span.
+  const stack: ("obj" | "arr")[] = [];
+  let expectKey = false;
+  let keyString = false;
   for (let i = start; i < candidate.length; i++) {
     const c = candidate[i];
     if (!inStr) {
       out += c;
-      if (c === '"') inStr = true;
-      else if (c === "{") depth++;
-      else if (c === "}") {
+      if (c === '"') {
+        inStr = true;
+        keyString = stack[stack.length - 1] === "obj" && expectKey;
+      } else if (c === ":") expectKey = false;
+      else if (c === ",") expectKey = stack[stack.length - 1] === "obj";
+      else if (c === "[") stack.push("arr");
+      else if (c === "]") {
+        stack.pop();
+        expectKey = false;
+      } else if (c === "{") {
+        stack.push("obj");
+        expectKey = true;
+        depth++;
+      } else if (c === "}") {
+        stack.pop();
+        expectKey = false;
         depth--;
         // `end` is an index in the SOURCE, not in `out`: the repair adds characters, so the
         // two lengths differ and a caller resuming at `start + out.length` would land past
@@ -291,11 +495,19 @@ function repairedSpan(candidate: string, start: number): Span | null {
       continue;
     }
     if (c === '"') {
-      // Whatever follows this quote decides what it was.
+      // Whatever follows this quote decides what it was — except a `:`, which decides it only
+      // when this string is a key. In a value it is a colon the model wrote inside its prose,
+      // and the string carries on (issue #339; see the note above `isEscape`).
       let j = i + 1;
       while (j < candidate.length && /\s/.test(candidate[j])) j++;
       const next = candidate[j];
-      if (next === "," || next === "}" || next === "]" || next === ":" || next === undefined) {
+      const closes =
+        next === "," ||
+        next === "}" ||
+        next === "]" ||
+        next === undefined ||
+        (next === ":" && (colonClosesValues || keyString));
+      if (closes) {
         out += c;
         inStr = false;
       } else {

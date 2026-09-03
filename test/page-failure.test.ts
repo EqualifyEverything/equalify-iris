@@ -659,3 +659,83 @@ test("a page that failed and came back blank leaves the failed set", () => {
   assert.deepEqual(d.pages_failed, []);
   assert.deepEqual(d.pages_blank, [4]);
 });
+
+// --- pages with no log -------------------------------------------------------
+
+// A page rescued by `bareHtml`: the reply was markup rather than the envelope, so it delivered a
+// usable page and carried no `"log"` field at all. It is in neither set above — it did not fail and
+// it is not blank — which is why it shipped unnamed until #349, at 13.7% of pages across four
+// deployed rounds of one PDF. What is lost is everything `agents/page.md` asks for in the log and
+// nowhere else, unmet and unreported on about one page in seven.
+test("a page whose reply carried no envelope is reported apart from a failed or blank one", () => {
+  const d = diag([
+    { type: "page_extraction_failed", image: "page-002.png", page: 2, error: "x" },
+    { type: "page_blank", image: "page-003.png", page: 3, log: "This page is blank." },
+    { type: "page_bare_html", image: "page-004.png", page: 4, chars: 1800, html_chars: 1800 },
+    { type: "run_complete", failed_pages: [2] },
+  ]);
+  assert.deepEqual(d.pages_failed, [2]);
+  assert.deepEqual(d.pages_blank, [3]);
+  // Three states, three fields: page 4's HTML is in the document and its log is not, and a reader
+  // told only about 2 and 3 has no way to ask about it.
+  assert.deepEqual(d.pages_bare_html, [4]);
+});
+
+test("a page re-extracted with a proper envelope has a log and leaves the set", () => {
+  // The withdrawal is what does the work: there is no `page_enveloped` event, so the round that
+  // delivers a log says so by NOT saying the page was bare. Same rule as `pages_blank` — what the
+  // log says last about a page is what is true of the document it shipped.
+  const d = diag([
+    { type: "page_bare_html", image: "page-004.png", page: 4, chars: 1800, html_chars: 1800 },
+    { type: "reextract_start", pages: [4], of: 5 },
+    { type: "reextract_complete", pages: [4] },
+    { type: "run_complete" },
+  ]);
+  assert.deepEqual(d.pages_bare_html, []);
+});
+
+test("a page that came back bare again still has no log", () => {
+  const d = diag([
+    { type: "page_bare_html", image: "page-004.png", page: 4, chars: 1800, html_chars: 1800 },
+    { type: "reextract_start", pages: [4], of: 5 },
+    { type: "page_bare_html", image: "page-004.png", page: 4, chars: 1750, html_chars: 1750, reextract: true },
+    { type: "reextract_complete", pages: [4] },
+    { type: "run_complete" },
+  ]);
+  assert.deepEqual(d.pages_bare_html, [4]);
+});
+
+test("a re-extraction that threw leaves a page with no log", () => {
+  // The one path that produces no new answer: the throw keeps the prior fragment, and the prior
+  // fragment is the one that came without a log. Dropping the page here would report a document
+  // whose logs are complete when nothing about it changed.
+  const d = diag([
+    { type: "page_bare_html", image: "page-004.png", page: 4, chars: 1800, html_chars: 1800 },
+    { type: "reextract_start", pages: [4], of: 5 },
+    { type: "page_extraction_failed", image: "page-004.png", page: 4, error: "x", kept: "prior" },
+    { type: "reextract_complete", pages: [], failed: [4] },
+    { type: "run_complete" },
+  ]);
+  assert.deepEqual(d.pages_bare_html, [4]);
+  assert.deepEqual(d.pages_failed, [], "and the round that failed to improve it lost nothing");
+});
+
+test("a round that re-extracts other pages leaves a bare page where it was", () => {
+  // The withdrawal is scoped to the pages the round actually re-ran. A round targeting page 2 says
+  // nothing about page 4, and a fold that cleared the whole set on `reextract_start` would report a
+  // document whose logs are complete because one unrelated page was refined.
+  const d = diag([
+    { type: "page_bare_html", image: "page-004.png", page: 4, chars: 1800, html_chars: 1800 },
+    { type: "reextract_start", pages: [2], of: 5 },
+    { type: "reextract_complete", pages: [2] },
+    { type: "run_complete" },
+  ]);
+  assert.deepEqual(d.pages_bare_html, [4]);
+});
+
+test("a whole run reports no pages without a log", () => {
+  const d = diag([{ type: "run_complete" }]);
+  // Always an array, like the two sets beside it: a client reading `[]` learns that the run looked
+  // and found none, which is not what a missing field says.
+  assert.deepEqual(d.pages_bare_html, []);
+});

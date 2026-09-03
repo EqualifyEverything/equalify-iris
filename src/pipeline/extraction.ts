@@ -281,11 +281,33 @@ Thirteen structures are easy to render as something that merely looks right, so 
   under a stave, the data table under a chart), where describing it as well hands a screen-reader
   user the same content twice. Everything else is informative and is described: words printed
   inside the image, a logo, seal or badge, a diagram, a photograph, a chart, a cover whose
-  appearance is itself the content. Sitting beside a heading that names the section does not make
+  appearance is itself the content. Where an image satisfies both of those clauses, informative
+  wins: the also-carried-in-full exemption is for a graphic the page repeats BESIDE it, never for
+  a graphic the page IS, so a cover, a title page or a designed divider is described even where
+  every word printed on it is transcribed alongside. What that description carries is the
+  appearance — the colours, the layout, the shape of the type — which is the half the
+  transcription does not carry, and not the words, which it does.
+  Sitting beside a heading that names the section does not make
   an image decorative, and neither does being hard to describe — a heading names the section, the
   alt text says what the picture shows. Where you cannot make an image out with confidence,
   describe what you can and say so in the "log" field: never leave the attribute off, and never
   leave a filename in it.
+  A number the page prints about its own picture is transcribed evidence, and checking a description
+  against it costs nothing: where the page states how many things a category holds — a subtitle's
+  "eight of the twelve states", a total row, an "of which" — and your description enumerates that
+  category's members, count your own list and make the two agree before you emit. Where they
+  disagree it is the list that is wrong, because the number came off the page and the list is your
+  reading of the picture: name only the members you can actually distinguish, and say that the page
+  states this many while you could place that many — in the alt text itself, and in the "log" field
+  either way, never as a sentence of your own added beside the figure, which is text the page does
+  not print. Never pad the list to reach the number and never drop members to fit it. Transcribe the
+  printed count where the page prints it, in the caption or label that carries it: it is the only
+  thing a reader who cannot see the picture has to check the list against, and where the picture's
+  own ink is ambiguous it is frequently the only thing that says which reading is right. A count
+  standing in both places is not the repetition the next rule forbids: that rule is about the NAME
+  of the thing pictured, which a caption beside the image already announces on its own, and a
+  number is the opposite case — it is transcription where the page prints it, and in the alt text
+  it is the bound on the list that only that text contains.
   Do not spend the description on what the page has already said. A screen reader announces a
   <figcaption>, a label and a heading as well as the alt text, so where the name of the thing
   pictured is printed beside the image — in its caption, in the label that follows it, in the
@@ -296,6 +318,22 @@ Thirteen structures are easy to render as something that merely looks right, so 
   it repeats, because those are words on the page and dropping them takes them from every reader.
   What is forbidden is adding the repetition yourself — never extend a printed caption with the
   product, section or category name its heading already gives.
+  A claim the page makes in words about a whole REGION is the same kind of evidence as a printed
+  count, and reading it costs no more ink: where the page says that some named group of places runs
+  highest or lowest — "the New England and Mideastern states, the highest" — and your description
+  sorts individual places into bands, read your own bands back against that sentence before you
+  emit. What such a sentence can contradict is the SET and not one member: it is a generalisation
+  and leaves room for exceptions, so one place out of step with its region is nothing, while a
+  region the page calls highest with NOT ONE of its members in your highest band — or one it calls
+  lowest with not one of them in your lowest — contradicts the page's own words. Where that happens the ink is what you re-read, because the sentence came off
+  the page and the bands are your reading of the picture. Do not move places between bands to
+  satisfy the sentence: it says which region runs high and never which place sits in which band, so
+  it can tell you a reading is wrong and cannot tell you which reading is right. Where re-reading
+  cannot settle it, say in the alt text which places you could place with confidence and which you
+  could not, and say so in the "log" field — a band you cannot see well enough to assign is left
+  unassigned and said to be, not filled in from the sentence. Make this comparison only where you
+  are sure which places the named region covers: where you are not, there is nothing on the page to
+  compare and you make no such report.
   Where the same subject is pictured more than once with no visible difference between the
   occurrences, describe them the same way and in the same detail — a fuller description of one
   tells a reader that the other differs.
@@ -546,6 +584,25 @@ Thirteen structures are easy to render as something that merely looks right, so 
   a naming attribute on it is prohibited. The gate demotes that finding rather than reporting it,
   because the element has text of its own, which is the same silence that let a labelled <p> page
   marker ship.
+  A key whose symbol is an area of ink is this rule's other case: the bands of a shaded map, the
+  fills of a cartogram, the hatchings of a chart. Its symbol half has no words anywhere on the
+  page, so the words are yours to write and writing them is transcription rather than the invented
+  expansion the first clause forbids — describe the ink as the <dt> and transcribe the page's
+  printed wording as its <dd>. Describe it in words and never in markup: a style attribute or a
+  coloured <span> hands a screen-reader user nothing, and the description has to survive being
+  read aloud. Read each swatch's tone off the swatch itself and never off the order of its labels
+  — a key's shades run in the order the printer chose and frequently not in the order its entries
+  are listed, so an assumed ramp is a guess that reaches the reader as a fact. Say how many
+  entries the key prints — in the alt text where you are describing the key there, since a
+  description is scaffolding this prompt asks for by name, and in the "log" field either way.
+  Never as a sentence of your own beside the <dl>: that is the prose this rule forbids two
+  paragraphs above, and it reads to a verifier as text the page does not print.
+  And where two swatches are not distinguishable in the reproduction you
+  were given, say exactly that — in the <dt> describing the ink, or in the alt text where you are
+  describing the key there, and in the "log" field either way — rather than dividing
+  items between them: an item you cannot match to a swatch is left unclassified and said to be
+  unclassified, because a reader loses less from a gap the page admits than from a confident
+  assignment to the wrong band.
 - SIGNATURE AND FILL-IN BLOCKS: a block of fields the page provides for someone to complete — a
   signature block, an application section, a run of fill-in lines — is a form even where it has
   already been filled in. Render the whole block as a <form> with one <fieldset>/<legend> per
@@ -2199,6 +2256,41 @@ async function renderPage(
       : `no HTML (${shape}, ${res.text.length} chars)`;
     throw new Error(`page agent returned ${arrived}`);
   }
+  // A page rescued by `bareHtml`: the reply was markup rather than the envelope, so it delivers
+  // a real page and nothing else. `log` is `""` and `suggested_agent` is absent — not because
+  // the model had nothing to say, but because there was no field to say it in.
+  //
+  // Said out loud because until now it was the one page outcome with no line of its own. A blank
+  // page has `page_blank`, an unreadable reply has `page_no_output`, a lost page has
+  // `page_extraction_failed`; this one shipped as an ordinary success. It is not rare: 41 of 300
+  // first page calls across two multi-vendor bench rounds and 54 of 400 across four deployed
+  // rounds, and 0 of those 41 left any other line behind (#349). `agents/page.md` discharges
+  // obligations in the log that it discharges nowhere else — a page ending mid-sentence, a heading
+  // with no parent, a symbol with no key, a placeholder image source, a language change, an
+  // irregular table — so on those pages every one of them is unmet and unreported, while the HTML
+  // is perfectly usable and the run says 100 of 100 delivered.
+  //
+  // It is the discriminator for the other reading of an empty log, too. `log: ""` on a page with
+  // this line means the reply had no envelope; `log: ""` without it means the model sent an
+  // envelope and left the field empty, which is a prompt-compliance question and not a parse one.
+  // Nothing could tell those apart before, and they have opposite remedies. Which of the two the
+  // deployed models do is now answerable: over 67 round logs on file, 2,320 `page.md` replies are
+  // 2,001 with a non-empty log and 319 bare, and 0 with an envelope whose log is empty — so this
+  // line accounts for every page that has no log, and the second reading is a shape nothing has
+  // produced yet rather than a share of the 13.7%.
+  //
+  // `reextract` marks the feedback round rather than the first pass, because #349's rate is over
+  // first calls and a count that pools rounds is not comparable with it. Absent on a first pass,
+  // so no older line changes shape.
+  if (!parsed) {
+    ctx.log.event("page_bare_html", {
+      image: img.name,
+      page: img.order,
+      chars: res.text.length,
+      html_chars: html.trim().length,
+      ...(previous ? { reextract: true } : {}),
+    });
+  }
   const sa = parsed?.suggested_agent;
   return {
     html,
@@ -2402,17 +2494,39 @@ function unresolvedCandidates(ctx: PipelineContext): { candidates: string[]; dec
   return { candidates: libraryAgentNames(ctx), declined_types: [...STANDARD_AGENTS].sort() };
 }
 
+// Both unresolved branches below report the same thing, and say it from one place: a name the
+// model wrote that no available agent answers to. They differ only in whether the name was empty
+// or merely unknown, which is a distinction for the log line and not for the verifier.
+const NO_SUCH_AGENT = "No agent of that name was available";
+
 // If a page flagged a content type that an EXISTING library agent handles, run
 // that specialist on the page and merge its higher-fidelity fragment into the
 // page output. Non-blocking: any failure leaves the page output unchanged.
 // dispatched=true means a library specialist ran (so the suggestion is already
 // covered and should not be re-filed as a new-agent issue).
+//
+// `unmet` is a separate question from `dispatched`, and they disagree on four of the six
+// exits below, so `dispatched` cannot stand in for it (it was tried, and mislabelled all
+// four). Three of the four were silent — no content, a throw, and a fragment that would not
+// merge all return `dispatched: true` and so said nothing about a request that went unmet.
+// The fourth is the standard-type decline, and it is the one that shipped a wrong ANSWER
+// rather than none: `dispatched: false` there, so the verifier was told "no agent of that
+// name was available" about a type declined by policy, on the commonest suggestion shape
+// there is. Counting only the silent three reads as `dispatched` being incomplete, which
+// undersells it. `dispatched` answers "is this suggestion already covered, or should it be filed
+// as a new-agent issue"; `unmet` answers "did specialist content reach the HTML the
+// verifier is about to judge". A dispatch that ran and returned nothing, threw, or produced
+// a fragment that would not merge is dispatched-and-unmet: the delivered page is the page
+// agent's own unaided work, which is exactly the case the caution exists to report. Set as
+// a phrase rather than a flag because the four ways a request goes unmet are not
+// interchangeable in the message — telling the verifier "no agent of that name was
+// available" about a specialist that ran and failed is simply false.
 async function dispatchSpecialist(
   ctx: PipelineContext,
   img: InputImage,
   pageHtml: string,
   suggestion: { name: string; reason: string },
-): Promise<{ html: string; dispatched: boolean }> {
+): Promise<{ html: string; dispatched: boolean; unmet?: string }> {
   // Normalized by the shared `logicalType`, and tested for standardness by the shared
   // `isStandardType`, so this site and `runContribution` cannot disagree about what a
   // name means. They did once: trim-then-strip versus strip-then-trim differed on
@@ -2446,7 +2560,7 @@ async function dispatchSpecialist(
       reason: "empty name",
       ...unresolvedCandidates(ctx),
     });
-    return { html: pageHtml, dispatched: false };
+    return { html: pageHtml, dispatched: false, unmet: NO_SUCH_AGENT };
   }
   if (isStandardType(logical)) {
     // Not a failure: the general page pass already covers the standard types, so
@@ -2458,6 +2572,15 @@ async function dispatchSpecialist(
     // a deployment added one, and dispatch the very specialist this rule forbids. The
     // name is logged as the model wrote it, since that is what a maintainer reading the
     // log has to recognize.
+    // No `unmet`, and this is the one exit where that is a judgement rather than a fact. No
+    // specialist ran, so the page agent's request was literally not granted — but it was
+    // ANSWERED, by a policy that says the general pass is this type's intended handler and not
+    // a fallback for it. Cautioning here would narrow what the verifier may assert on the
+    // commonest suggestion shape there is (see the STANDARD list), which on a table page means
+    // declining to say a cell reads wrongly, and it would buy nothing measured: of the 7
+    // requests behind #353, 0 were standard types — every one named a map specialist and every
+    // one landed on the unresolved branch below. A narrowed licence on the pages where the
+    // pipeline believes the general pass is adequate is cost without a case.
     ctx.log.event("specialist_declined", { agent: logical, image: img.name, reason: "standard type" });
     return { html: pageHtml, dispatched: false };
   }
@@ -2472,21 +2595,86 @@ async function dispatchSpecialist(
       reason: "no agent file of that name",
       ...unresolvedCandidates(ctx),
     });
-    return { html: pageHtml, dispatched: false };
+    return { html: pageHtml, dispatched: false, unmet: NO_SUCH_AGENT };
   }
   try {
     const fragment = await runSpecialist(ctx, specialist, img);
     if (!fragment) {
       ctx.log.event("specialist_no_content", { agent: specialist.file, image: img.name });
-      return { html: pageHtml, dispatched: true };
+      return { html: pageHtml, dispatched: true, unmet: "The specialist that ran returned no content of its type" };
     }
     const merged = await mergeSpecialist(ctx, img, pageHtml, specialist.name, suggestion.reason, fragment);
     ctx.log.event("specialist_dispatched", { agent: specialist.file, image: img.name, merged: Boolean(merged) });
-    return { html: merged ?? pageHtml, dispatched: true };
+    // The only exit that met the request, and only when the merge produced something: a
+    // fragment that was written and then not spliced leaves the same page behind as no
+    // fragment at all, so it is reported as unmet even though the specialist did its part.
+    return merged
+      ? { html: merged, dispatched: true }
+      : { html: pageHtml, dispatched: true, unmet: "The specialist's fragment could not be merged into the page" };
   } catch (e) {
     ctx.log.event("specialist_dispatch_failed", { agent: specialist.file, image: img.name, error: (e as Error).message });
-    return { html: pageHtml, dispatched: true };
+    return { html: pageHtml, dispatched: true, unmet: "The specialist call failed" };
   }
+}
+
+// What the page agent said about its own weakest work, in the words it used, for the verifier to be
+// told alongside the output. A page that asked for a specialist and did not get one is a page whose
+// own author said it could not do this content reliably — the request names the content and carries
+// its reason — and until now `dispatchSpecialist` was the only thing that read it: the request was
+// routed, the outcome logged (`specialist_unresolved`), and the judgement of the page never heard
+// about it.
+//
+// What that cost, measured. In one 100-page bench round across two page-model arms there were 7
+// requests on 5 pages under 6 different names, every one of them a map specialist, 0 dispatched. The
+// 5 pages were every page in the round whose verdict turned on reading ink. On one of them the page
+// agent asked for help producing "a structured data table of each state's classification", got the
+// classification wrong, and the verify step — not told any of this — ADDED a state to a category the
+// page does not put it in; the correction obeyed, and a false sentence shipped in the delivered
+// document (#353).
+//
+// Two limits, stated because the prompt is written to survive them rather than to rely on their
+// being better than they are. It is page-level and not per-arm: 4 of those 7 requests came from the
+// OTHER arm's reader on the same images, so a run reads its own reader's suggestions and not the
+// union that made the count look strong. And it missed 2 of that round's hard pages outright. So
+// this is not a detector and `agents/feedback.md` does not treat it as one — it narrows what the
+// verifier may assert on a page rather than deciding anything about the page, which is a use that
+// costs nothing when the flag is wrong.
+//
+// The test is `unmet` and not `dispatched`: those two answer different questions and disagree on
+// four of `dispatchSpecialist`'s six exits, so keying on `dispatched` claimed "no agent of that
+// name was available" about a standard type that was declined by policy, and said nothing at all
+// about a specialist that ran and returned nothing, threw, or produced a fragment that would not
+// merge — the last three being verbatim the case this caution is for. `unmet` carries the phrase
+// too, so the sentence names which of the four it was.
+//
+// Both interpolated strings are free text a model wrote, landing in a message that already
+// carries a fenced ```html block, so they are flattened and clipped: an unbounded reason
+// containing a fence of its own would restructure the message after the block, and a long one
+// buries the block it is supposed to annotate. The cap is generous for a sentence and short of
+// anything that could crowd the output being judged.
+function specialistCaution(
+  suggestion: { name: string; reason: string } | undefined,
+  unmet: string | undefined,
+): string | undefined {
+  if (!suggestion?.name || !unmet) return undefined;
+  const name = oneLine(suggestion.name, 80);
+  const why = oneLine(suggestion.reason, 300);
+  if (!name) return undefined;
+  return (
+    `The page agent asked for a specialist it did not get: "${name}"` +
+    `${why ? `, because "${why}"` : ""}. ${unmet}, so the HTML above is ` +
+    `its own unaided attempt at the content it wanted help with.`
+  );
+}
+
+// Backticks and newlines out, then clipped to a sentence's worth. Backticks rather than only
+// the triple: a single one opens inline code, which is enough to swallow the punctuation the
+// sentence around it depends on. Flattening the newlines is the sharper half of the two,
+// though, and not only a tidiness measure: the verify message is structured by `##` headings,
+// and a string that cannot start a line cannot forge one.
+function oneLine(s: string, max: number): string {
+  const flat = s.replace(/`/g, "'").replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max).trimEnd()}…` : flat;
 }
 
 interface PageOutcome {
@@ -2554,6 +2742,62 @@ function truncationEvidence(e: unknown): Record<string, unknown> {
   return { truncated: true, reply_chars: e.chars, ...replyExcerpt(e.text) };
 }
 
+// A VERDICT THAT CANNOT BE OBTAINED IS NOT A PAGE THAT CANNOT BE EXTRACTED, and until #364 this
+// file could not tell those apart on the one path that matters most. `verifyAgentOutput` is already
+// non-blocking for an absent Feedback Agent and for a reply that will not parse, but a PROVIDER error
+// is rethrown — and the first verify call had nothing to catch it, so a throttle or an output-ceiling
+// overrun on the CHECK propagated out of `extractPage` into `failedPage`, which logged
+// `page_extraction_failed` and shipped a `@page-failed` marker for a page whose extraction had
+// succeeded and was sitting in `innerHtml`. Measured once on a 100-page bench arm: `acir-p049` was
+// extracted as 8,855 characters of HTML — a complete statistical table, 568 words — and delivered as a
+// 156-byte comment, because its verify call spent a full 32,000-token ceiling and threw. $0.5051 of
+// the page's $0.6634 was the call that deleted it, 3.2x what the extraction it was checking cost.
+//
+// This is the same defect #171 fixed for the correction pass and the sampled recheck, arriving one
+// call earlier, and the policy it is fixed to is this file's own: a specialist that fails leaves the
+// page as the general pass wrote it, and a fidelity check that cannot run counts as nothing to
+// correct. An unobtainable verdict IS a fidelity check that cannot run.
+//
+// Three things the misattribution cost besides the page, and they are the reason this has its own
+// event rather than a quieter `.catch`. The delivered document said "the source pages above could not
+// be extracted and none of their content is here" (`wrapDocument`), which was false. `pages_failed`
+// and every triage of why pages fail recorded a vision failure, so anyone tuning the page agent on
+// that signal was tuning the wrong agent. And the marker told the operator to raise
+// `providers.*.max_tokens`, which buys the verifier room to write MORE about a page it has already
+// judged — the wrong lever, pushing the wrong way, on the one line an operator was given.
+//
+// `page_verify_error` and not a `page_verify_ok` field alone, because the evidence is the same
+// evidence `page_correction_failed` carries and is worth the same: `truncated` names the one shape
+// with a configuration remedy, and `reply_chars` with both ends of the reply is what distinguishes a
+// verifier that needed the room from one that wrote an essay. `step` is on the line because two call
+// sites reach here and they are not the same event — one is the check that decides whether a
+// correction is bought, the other the gate on keeping one.
+//
+// The third verify call, the SAMPLED recheck, keeps the `page_correction_recheck_failed` event #171
+// gave it and is not folded in here. Two reasons, and neither is inertia: that event predates this
+// one and has been read across rounds, so renaming it would split one measurement across two names
+// in the logs it is compared against; and it is the one verify failure that costs nothing at all,
+// because the sampled recheck decides nothing whether it answers or not. The two failures on this
+// line cost something — a correction not bought, or a correction bought and discarded — so the pair
+// that belongs together is the pair that is together.
+function verifyUnobtainable(
+  ctx: PipelineContext,
+  img: InputImage,
+  step: "verify" | "recheck_binding",
+  e: unknown,
+  extra: Record<string, unknown> = {},
+): void {
+  const message = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim();
+  ctx.log.event("page_verify_error", {
+    image: img.name,
+    page: img.order,
+    step,
+    error: message,
+    ...truncationEvidence(e),
+    ...extra,
+  });
+}
+
 function failedPage(ctx: PipelineContext, pageAgent: AgentSpec, img: InputImage, e: unknown): PageOutcome {
   const message = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim();
   // No `ceiling` beside the evidence, unlike `page_correction_failed`: a first pass asks for no cap
@@ -2600,6 +2844,7 @@ async function extractPage(
   let innerHtml = html;
   let logNote = log;
   let dispatched = false;
+  let unmet: string | undefined;
 
   // Specialist dispatch: if the page flagged a content type that an existing
   // library agent handles (e.g. a chart), run that agent and merge its
@@ -2607,6 +2852,7 @@ async function extractPage(
   if (suggestion?.name) {
     const result = await dispatchSpecialist(ctx, img, innerHtml, suggestion);
     dispatched = result.dispatched;
+    unmet = result.unmet;
     if (result.html !== innerHtml) {
       innerHtml = result.html;
       logNote = logNote ? `${logNote}; merged ${suggestion.name}` : `merged ${suggestion.name}`;
@@ -2641,10 +2887,38 @@ async function extractPage(
   // hedged declaration before it can reach this line at all (`blank_vetoed` on `page_no_output`).
   // A confident-but-wrong declaration would leave a `page_blank` line and a blank count in
   // diagnostics as its evidence, and no verdict.
+  // Computed once, above the check and both rechecks: it is a fact about this page's render, so a
+  // recheck of a correction to that render carries the same one. It is read from `suggestion` and
+  // the dispatch's own return rather than from the log, so the caution and the routing line cannot
+  // disagree about whether the request was met. `unmet` stays undefined when no suggestion was made
+  // at all, which is the same no-caution answer by a different route.
+  const caution = specialistCaution(suggestion, unmet);
   const blankSkip = blank === true && innerHtml === "";
+  // Which KIND of unjudged this page is, for `page_verify_ok`'s `skipped` below. It cannot be read off
+  // the verdict: `unjudgedVerdict()` is deliberately one shape for every page nothing looked at, and a
+  // call that threw is the one kind of unjudged that COST money, so a reader pricing the skips must be
+  // able to subtract it.
+  let verifyErrored = false;
   const verdict = blankSkip
     ? unjudgedVerdict()
-    : await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml }], "verify");
+    : // `logNote` and not `log`: where a specialist merged, the note says so, and the fragment the
+      // verifier is judging is the merged one. This is the only verify call whose log describes the
+      // fragment it is about — both rechecks judge a CORRECTED fragment, and a correction reply is
+      // parsed for `html` alone (`correctPage`), so there is no log of it to send and the first
+      // pass's note is about text that has since been rewritten. Sending that would invite exactly
+      // the false problem #349 measured, one round later.
+      // And `.catch` for the reason `verifyUnobtainable` is written out at length: a check that
+      // throws must not be able to delete the page it was checking (#364). What it returns is the
+      // verdict for a page nothing looked at, which is what this call failing MEANS — no problems, so
+      // no correction is bought, and the page ships exactly as it would have with no verifier
+      // configured at all.
+      await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml, caution, log: logNote }], "verify").catch(
+        (e: unknown) => {
+          verifyUnobtainable(ctx, img, "verify", e);
+          verifyErrored = true;
+          return unjudgedVerdict();
+        },
+      );
 
   // Whether the page's links arrived is checked here rather than left to the
   // Feedback Agent: it verifies the output against the IMAGE, which is the one place
@@ -2707,10 +2981,16 @@ async function extractPage(
     // either way — but they are different facts about a run, and only one of them is a saving. A
     // reader counting these lines is the only way to price the skip after the fact, so the reason is
     // on the line rather than inferred from a `page_blank` on the same image (issue #294).
+    // `"error"` is the second value the sentence above always described and nothing had ever emitted
+    // (#364): the call that could not be made, as against the one that was not bought. Both stay out
+    // of any pass rate, and only `blank` is a saving — an `error` page was billed for a full ceiling of
+    // output and got no verdict for it, so a reader adding the two together would price a loss as a
+    // saving. `page_verify_error` above carries the evidence; this field is what makes the page
+    // countable beside the others without reading two event streams.
     ctx.log.event("page_verify_ok", {
       image: img.name,
       ...(verdict.unjudged ? { unjudged: true } : {}),
-      ...(blankSkip ? { skipped: "blank" } : {}),
+      ...(blankSkip ? { skipped: "blank" } : verifyErrored ? { skipped: "error" } : {}),
     });
     // The verdict that describes a defect and then passes the page. `ok` is the verdict's
     // `faithful`/`accessible` FLAGS, and `failedCheck` needs a false flag AND a named problem
@@ -2982,9 +3262,28 @@ async function extractPage(
           chars_after: corrected.length,
         });
       } else if (!verifyFailed) {
-        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }], "recheck_binding");
-        keep = !failedCheck(recheck);
-        if (!keep) {
+        // GUARDED FOR THE SAME REASON AS THE FIRST CHECK, and this call site is not in #364's report:
+        // it is the third verify call in the file and the second with nothing to catch a provider
+        // error, so a throttle here deleted a page that had rendered, PASSED, and been corrected —
+        // two model calls' work thrown away instead of one, by the same route into `failedPage`.
+        //
+        // What it costs when it fires is a decision rather than a default, and this is the
+        // conservative side of it: no verdict is no licence. This recheck exists to stop a correction
+        // bought for a link or a placeholder alt from damaging a page that had already passed its
+        // fidelity check, so where the verdict cannot be obtained the correction is not kept and the
+        // page ships as it was — the status quo, which is a page that passed, and the same answer this
+        // branch gives to a verdict that fails. The alternative (keep an unverified rewrite of a page
+        // known to be good) is the harm the branch was written to prevent. The correction is billed
+        // either way; `correction_discarded` on the event is what says the money bought nothing, so
+        // the discard is on the record rather than inferred from a missing rejection line.
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected, caution }], "recheck_binding").catch(
+          (e: unknown) => {
+            verifyUnobtainable(ctx, img, "recheck_binding", e, { trigger, correction_discarded: true });
+            return null;
+          },
+        );
+        keep = recheck !== null && !failedCheck(recheck);
+        if (recheck !== null && !keep) {
           // Named `page_links_correction_rejected` since before there was anything else on this
           // branch, and kept: it is the rejection of a correction bought for a page that had
           // PASSED, and renaming it would split one measurement across two event names in a log
@@ -3056,7 +3355,7 @@ async function extractPage(
         // taken: it is logged, the slot stays spent (a refund would let a throttled
         // provider be retried once per corrected page, which is the cost this bounds),
         // and the page ships exactly as it would have with no measurement at all.
-        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }], "recheck_sampled").catch(
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected, caution }], "recheck_sampled").catch(
           (e: unknown) => {
             ctx.log.event("page_correction_recheck_failed", {
               image: img.name,

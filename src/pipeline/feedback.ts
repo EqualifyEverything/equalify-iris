@@ -38,6 +38,16 @@ interface VerifyOutput {
   // shapes it arrives in (a list of strings, a list of `{kind, problem}` objects) are both
   // valid replies to a contract that has said both things — see `readProblems`.
   problems?: unknown;
+  // `notes` is deliberately NOT here. The verify contract invites the agent's working-out into
+  // a `notes` string precisely so that it lands somewhere nothing acts on, and the prompt tells
+  // the model as much in so many words: "read by nothing: no correction pass, no other agent,
+  // no part of the delivered document". Adding it to this interface is the first half of
+  // breaking that promise — the reply's prose reached the corrector before, on 14 of 71
+  // rejections in a 45-page control round, and `problems` is the only thing `correctPage` is
+  // licensed to change (issue #339). If a future reader wants that text, it is already
+  // persisted verbatim on the `agent_call` line and can be read there without giving the
+  // pipeline a path to it. Declaring the field would not itself fail a test — the pin in
+  // `test/verify-notes-field.test.ts` is behavioural, and fails as soon as anything READS it.
 }
 
 interface ClassifyOutput {
@@ -181,6 +191,31 @@ function diffPreview(before: string, after: string, maxLines = 80): string {
 // Build-time verification (source-fidelity, PRD §7.5/§7.12)
 // ---------------------------------------------------------------------------
 
+// A model-written log, made safe to interpolate into the verify message.
+//
+// The message is STRUCTURED, and the verifier reads that structure: `##` headings separate the
+// contract from the output from the annotations, and the output arrives inside a ```html fence. So
+// a string that can begin a line can forge a heading, and a single backtick opens inline code that
+// swallows the punctuation after it. That is the argument `oneLine` makes for the specialist caution
+// in extraction.ts, where the caution's own producer flattens it; this one is flattened HERE rather
+// than at the call site, so the calibration harness and the regression gate cannot pass an
+// unflattened log by taking the other route into this function.
+//
+// The clip is a ceiling and not a budget, and the difference decides the number. A page log is
+// long — over 2,001 enveloped page replies in 67 bench round logs on file the median is 671
+// characters, p90 1,147, p99 1,741 and the longest 2,566 — and it is long because `agents/page.md`
+// asks for it by name in 26 places. Two of those records exist in the log and nowhere else, and for
+// the rest the log is the verifier's evidence that the DOCUMENT owes its half — a page that says
+// where it stopped owes the `[page not fully transcribed]` marker. Either way the record sits at the
+// end of the entry. Cutting one short cuts those off its END, which is precisely the half
+// `agents/feedback.md` now relies on to avoid a false "unrecorded" finding, so a clip that bites a
+// real log would make this change worse than not making it. 3,000 is reached by 0 of those 2,001:
+// it bounds a pathological reply and truncates nothing observed.
+function flattenLog(log: string | undefined): string {
+  const flat = (log ?? "").replace(/`/g, "'").replace(/\s+/g, " ").trim();
+  return flat.length > 3000 ? `${flat.slice(0, 3000).trimEnd()}…` : flat;
+}
+
 // Ask the Feedback Agent (VERIFY task) whether an agent's output faithfully and
 // accessibly captures its source image. In the single-pass pipeline this verifies
 // the page agent's per-page output; it is also reused by the regression gate.
@@ -196,7 +231,22 @@ export async function verifyAgentOutput(
   ctx: PipelineContext,
   agent: AgentSpec,
   img: InputImage,
-  blocks: { html: string }[],
+  // `caution` is something the agent under test said about its OWN output, carried through to the
+  // judgement of it. It rides on the block rather than on a sixth parameter so that `step` stays the
+  // last argument of every call site — which is what `test/step-attribution.test.ts` reads them with,
+  // and a per-call vocabulary check is worth more than the argument shape it depends on. Optional,
+  // deduplicated, and absent by default: a judgement with nothing to carry sends exactly the bytes
+  // it always did.
+  // `log` is the `"log"` field of the reply that produced this block — the agent's own note about
+  // what it did with the page. Carried for the reason `caution` is: the contract quoted above
+  // places obligations there and nowhere else, and a judge asked to confirm the contract was met
+  // with that field withheld can only ignore the rule or look for its evidence in the HTML, where
+  // the contract does not put it. Across 311 verify replies in two bench rounds, 35 problems on 26
+  // replies demanded something of the log, and 26 of those 35 were about a log that existed and was
+  // not shown (#349). Optional, and absent wherever the reply being judged has no log of its own:
+  // a correction reply is parsed for `html` alone, so both rechecks send this empty rather than
+  // sending the first pass's note about a fragment that has since been rewritten.
+  blocks: { html: string; caution?: string; log?: string }[],
   step: Extract<
     PipelineStep,
     "verify" | "recheck_binding" | "recheck_sampled" | "agent_calibrate" | "agent_regression"
@@ -206,6 +256,8 @@ export async function verifyAgentOutput(
   if (!fb || blocks.length === 0) return unjudgedVerdict();
 
   const html = blocks.map((b) => b.html).join("\n\n");
+  const cautions = [...new Set(blocks.map((b) => b.caution?.trim()).filter((c): c is string => !!c))];
+  const logs = [...new Set(blocks.map((b) => flattenLog(b.log)).filter((l) => !!l))];
   // Everything this task says that is not about the page in front of it: the task marker
   // and the whole contract of the agent being judged. It is the same bytes on every page
   // of a document — `agents/page.md` is 16 KB of it, re-sent per page and per correction
@@ -234,9 +286,26 @@ export async function verifyAgentOutput(
   const contract =
     `TASK: verify\n\n` +
     `## Agent under test: ${agent.file}\n\`\`\`markdown\n${agent.content}\n\`\`\`\n\n`;
+  // The cautions go here, AFTER the cached prefix and after the output they are about. They are
+  // per-page by construction, so a copy of one inside `contract` would change the invariant head on
+  // the page that has it and cost every other page in the document its cache read — the saving the
+  // comment above is written to protect. `agents/feedback.md` says what a caution narrows: the
+  // verifier may ask for an unsupported reading to be hedged or removed and may not supply one of
+  // its own.
+  // The log goes here for the same reason the cautions do — it is per-page, so a copy inside
+  // `contract` would break the invariant head and cost every other page in the document its cache
+  // read. It is quoted rather than summarised, and labelled as a claim: it is the transcriber's
+  // account of its own work, so it is evidence about the page and not a second source image.
+  // `agents/feedback.md` says what may be done with it, and the short version is that it can only
+  // ever support a finding about the HTML: a problem naming the log is a problem the correction pass
+  // cannot resolve, because that pass is parsed for `html` alone and writes no log at all.
   const user =
     contract +
     `## The agent's output for source image "${img.name}"\n\`\`\`html\n${html}\n\`\`\`\n\n` +
+    (logs.length ? `## What the agent recorded in its own "log" field\n${logs.map((l) => `- ${l}`).join("\n")}\n\n` : "") +
+    (cautions.length
+      ? `## What the agent said about its own output\n${cautions.map((c) => `- ${c}`).join("\n")}\n\n`
+      : "") +
     `Compare the output against the attached source image.`;
 
   const res = await ctx.router.complete(
@@ -251,7 +320,21 @@ export async function verifyAgentOutput(
   ctx.log.agentCall({ agent: fb, phase: "extraction", image: img.name, output: res.text });
 
   const parsed = extractJson<VerifyOutput>(res.text);
-  if (!parsed) return unjudgedVerdict();
+  // Both flags, as booleans, or this is not a verdict. The contract asks for both and every one of
+  // the 1,342 readable verify replies in the bench logs answers both — so the check costs nothing
+  // measurable, and what it buys is the failure mode #339's `notes` field opens. `extractJson`
+  // returns the LAST readable object in a reply, and a `notes` string that quotes the contract back
+  // ends with one: an unescaped `{ "faithful": true, "problems": [] }` inside the prose, which read
+  // as a confident PASS on a page the verifier had just rejected for a missing table row — `ok`
+  // true, `problems` empty, no `unjudged` flag, and a plain `page_verify_ok` line over it. The
+  // whole-reply repair in `src/util/json.ts` reads the envelope correctly when the reply is nothing
+  // but its JSON, which is what the prompt asks for; this is the half that also holds when the
+  // model fences it or writes a sentence first, and it degrades to a page nobody judged rather than
+  // to a page that passed. `pages_unjudged` counts those, which is why the after-check in prd.md
+  // §7.4 names it.
+  if (!parsed || typeof parsed.faithful !== "boolean" || typeof parsed.accessible !== "boolean") {
+    return unjudgedVerdict();
+  }
   const ok = parsed.faithful !== false && parsed.accessible !== false;
   return { ok, ...readProblems(parsed.problems) };
 }

@@ -442,3 +442,223 @@ test("docs/models.md §5's per-agent rows sum to the total row they are publishe
     );
   }
 });
+
+// §0's table is the summary, and the sections restate it. That restatement is the document's most
+// frequent defect: five of the false statements PR #327 removed were a claim corrected in one place
+// and left standing in another, and #327 itself merged with §8 still saying "the revert is the one
+// config line" an hour after §5 had been corrected to two. Then #329 flipped `copy_editor` from a
+// keep to a recommended swap, which had to be rewritten in four places — the intro, §0, §4 and §8 —
+// and nothing in the repo could have told anyone if one had been missed.
+//
+// So this pins the join, in both of the ways the two statements can disagree: the SHARE (§0's column
+// is re-quoted in the section's own opener, and a re-run that moves one leaves the other stale) and
+// the DISPOSITION (keep / declined / recommended / applied, which is the thing a reader acts on).
+//
+// Deliberately not a check that either is correct — §0's share is already pinned as a partition by
+// the test above, and no test can say whether "keep" is the right call. This says only that the
+// document gives one answer rather than two. That is the whole of the defect it is written for: at no
+// point was either copy of a drifted claim unverifiable, and at every point both were present.
+//
+// Openers only, not every mention. §6 re-quotes all four shares in its drift note and also quotes
+// #311's two INCORRECT ones (43.2%, 20.8%) on purpose, so a document-wide sweep would fail on the
+// paragraph whose job is to publish a wrong figure — the same trap that made an earlier draft of the
+// §5 test above read a table of verifier counters. The cost of scoping this way is real and worth
+// naming: §6's drift-note shares go unchecked, and so does any share quoted mid-paragraph.
+//
+// The agents checked are LISTED rather than discovered, which is the whole of what makes the
+// disposition half load-bearing (PR #332 review, note 1). The first version of this test skipped any
+// pair it could not classify — `if (want === null || got === null) continue` — so rewording §0's
+// cell to "swap pending a decision" disabled the check silently and let §4 go on saying whatever it
+// liked. An unclassifiable cell is now a FAILURE for these four, because "§0 stopped stating a
+// disposition in words this test knows" is itself the thing worth being told about: either the
+// vocabulary below needs a phrase adding, or the summary stopped answering the question a reader
+// came for.
+//
+// Four, not five: `page`, `reader`, `copy_editor` and `feedback` are the agents a model decision has
+// been taken or recommended on. `builder` is exempt because it genuinely has no disposition in this
+// vocabulary — its §0 cell is a zero with a date on it, not a keep or a swap — and forcing it into
+// one would be inventing a decision nobody took. Add an agent here when a decision is taken on it.
+const DECIDED = ["page", "reader", "copy_editor", "feedback"] as const;
+
+const DISPOSITIONS = [
+  // The order of this list decides NOTHING — do not add a phrase here on the assumption that putting
+  // it earlier wins. It used to: the phrases overlap ("swap recommended, not yet applied" holds
+  // `applied`), first match won, and reordering reclassified documents. That was the defect, because
+  // both halves of the check below read this same list in the same order, so an overlapping clause
+  // made them agree on the wrong word instead of disagreeing. A clause matching two entries now
+  // FAILS. The text each entry is matched against is still cut at the first comma or dash, so a later
+  // clause cannot reclassify a paragraph.
+  //
+  // `open` was added an hour after this test was written, and by the route the comment above
+  // predicted: the seat that ran the verifier round retracted its headline, `feedback`'s keep became
+  // undecided, and both §0 and §4 stopped stating a disposition in the four words this list knew. The
+  // test failed rather than skipping the pair, which is the whole point of listing DECIDED — a
+  // decision can be *un*-taken, and "no answer yet" is a disposition a reader has to be told.
+  ["open", /\bopen\b|\bundecided\b/i],
+  ["declined", /declin/i],
+  ["recommended", /recommend/i],
+  ["keep", /\bkeep\b/i],
+  ["applied", /\bswapped\b|\bapplied\b|\blive\b/i],
+] as const;
+
+// EVERY match, not the first one. Resolving a clause that carries two dispositions by list order is
+// the same off-switch as skipping one that carries none: both halves of the check below read the same
+// vocabulary in the same order, so they would shadow identically and *agree on the wrong word* rather
+// than disagree. `feedback` reached "swap recommended … still open" in one revision and stopped one
+// comma short of this. An ambiguous clause fails and says which two it matched.
+function dispositions(text: string): string[] {
+  const clause = text.split(/,| — |\s—\s/)[0]!;
+  return DISPOSITIONS.filter(([, re]) => re.test(clause)).map(([d]) => d);
+}
+
+test("docs/models.md's sections agree with §0 about each agent's share and disposition", () => {
+  const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
+  const summary = doc.split(/^## /m).find((s) => s.startsWith("0."));
+  assert.ok(summary, "docs/models.md has no `## 0.` summary section any more");
+
+  // agent -> [share, status cell], from the rows the test above already treats as the claim.
+  const stated = new Map<string, [number, string]>();
+  for (const m of summary.matchAll(/^\| `([^`]+)` \|\s*\*{0,2}([\d.]+)%\*{0,2}\s*\|([^|]*)\|/gm)) {
+    stated.set(m[1]!, [Number(m[2]!), m[3]!]);
+  }
+  assert.ok(stated.size >= 4, `§0 yielded ${stated.size} agent rows; expected one per dispatched agent`);
+
+  // A section's opener: a bolded lead-in naming a backticked agent and re-quoting its share. Any
+  // further parenthetical between the share and the dash is tolerated — `(0% in this round)` carries
+  // a caveat rather than a second figure, and §4's `builder` opener names the specialists too.
+  const openers = new Map<string, [string, string]>();
+  for (const m of doc.matchAll(/^\*\*`([a-z_]+)` \((\d[\d.]*)%[^—]*—\s*([^*]+)\*\*/gm)) {
+    openers.set(m[1]!, [m[2]!, m[3]!]);
+  }
+
+  for (const name of DECIDED) {
+    const row = stated.get(name);
+    assert.ok(row, `\`${name}\` has a model decision on it but no row in §0's table`);
+    const [share0, status] = row;
+    const opener = openers.get(name);
+    assert.ok(
+      opener,
+      `no section of docs/models.md opens with \`**\`${name}\` (share%) — disposition**\`, so its ` +
+        `share and its disposition are stated only in §0 and nothing checks the section a reader ` +
+        `is sent to. \`page\` and \`reader\` were both in this position until PR #332.`,
+    );
+    const [share, text] = opener;
+    assert.equal(
+      Number(share),
+      share0,
+      `\`${name}\` is ${share0}% in §0's table and ${share}% in its own section's opener. One of ` +
+        `the two was updated from a newer round and the other was not; §0's is the partition that ` +
+        `is checked to sum to 100%, so the opener is the likelier stale copy.`,
+    );
+    // Both sides must classify, exactly once. Neither a null nor a tie here is a pass — see the two
+    // notes above the vocabulary.
+    const wants = dispositions(status!);
+    const gots = dispositions(text);
+    const want = wants[0] ?? null;
+    const got = gots[0] ?? null;
+    const vocabulary = DISPOSITIONS.map(([d]) => d).join(", ");
+    for (const [side, matches, quoted] of [
+      ["§0's table cell", wants, status!],
+      ["its own section's opener", gots, text],
+    ] as const) {
+      assert.ok(
+        matches.length < 2,
+        `\`${name}\`'s ${side} reads as "${matches.join('" and "')}" at once: ` +
+          `"${quoted.trim().slice(0, 80)}". Which one wins is decided by the order of DISPOSITIONS, ` +
+          `and both halves of this check read that same order — so they would agree on the wrong ` +
+          `word instead of disagreeing, and this test would pass on a document that states two ` +
+          `dispositions for one agent. Say one thing before the first comma.`,
+      );
+    }
+    assert.ok(
+      want,
+      `§0's \`${name}\` cell no longer states a disposition this test can read (${vocabulary}): ` +
+        `"${status!.trim().slice(0, 80)}". §0 is the table a reader takes the decision from, so ` +
+        `either say which of those it is, or add the new phrasing to DISPOSITIONS deliberately.`,
+    );
+    assert.ok(
+      got,
+      `\`${name}\`'s own section opens without a disposition this test can read (${vocabulary}): ` +
+        `"${text.trim().slice(0, 80)}". Skipping this pair is how the check disabled itself.`,
+    );
+    assert.equal(
+      got,
+      want,
+      `§0 says \`${name}\` is "${want}" and its own section says "${got}". This is the sentence a ` +
+        `reader acts on, and it is the defect that recurred most in this document: a decision ` +
+        `changed in the summary and left standing in the section, or the reverse.`,
+    );
+  }
+});
+
+// The last defect in this document that shipped past every gate was a rendering one: fixing a figure
+// above, I wrapped a clause in `**` inside a sentence that was already bold, and the outer run was
+// left open. It renders as two literal asterisks in front of the sentence stating the price of a
+// decision. tsc was clean, all 1328 tests passed, and nothing else in the file reads that paragraph —
+// the only thing that caught it was a person reading the diff (PR #332 review round 2).
+//
+// So this checks the one property a markdown document can lose without anything else noticing: every
+// `**` run closes inside the paragraph that opened it. Per paragraph rather than per file, because a
+// file-wide count comes back even as soon as a second paragraph breaks the other way, and per
+// paragraph is also where the render actually goes wrong.
+//
+// The unit is a rendered block, NOT a blank-line-delimited chunk. Counting parity over a whole chunk
+// lets two odd bullets in one list cancel — an unclosed run in one bullet and another in the next add
+// to an even total and the check comes back clean, which is the same off-switch as a guard that skips
+// what it cannot classify. So a list item and a table row each start a fresh count; their wrapped
+// continuation lines belong to the item they continue, because a `**` legitimately spans those.
+//
+// Two limits, stated because both will eventually fire on innocent text. This is a parity count, not
+// a parser: (1) a deliberate literal `**` in prose fails it, and the fix then is to fence or escape
+// that text, not to delete the test — fenced blocks are skipped for the same reason, since they quote
+// markup rather than use it. (2) The split below tests what a line *looks* like, so a prose line that
+// happens to wrap onto `- and that is the point` or `3. Undecided, because…` starts a fresh count
+// mid-sentence, and a `**` run spanning that wrap then reports as two odd blocks. That is a false
+// positive and the fix is to reflow the paragraph, not to widen the guard. It is latent here — this
+// document's minus signs are U+2212, which the ASCII `[-*+]` class does not match, and no line wraps
+// onto an ordered marker — but §4's numbered list is where a future edit would hit it first.
+test("docs/models.md's bold runs close in the block that opens them", () => {
+  const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
+  const unclosed: string[] = [];
+  let fenced = false;
+  // [line number, text] per line, so the message can name the run that is left open rather than the
+  // top of the block — round 3 asked for that and it is the line an editor has to go and look at.
+  let block: [number, string][] = [];
+
+  const finish = () => {
+    const runs = block.flatMap(([n, text]) => (text.match(/\*\*/g) ?? []).map(() => n));
+    if (runs.length % 2 !== 0) {
+      const [openerLine, opener] = block[0]!;
+      unclosed.push(
+        `line ${runs.at(-1)} (block opens at line ${openerLine}: ${opener.trim().slice(0, 70)})`,
+      );
+    }
+    block = [];
+  };
+
+  for (const [i, line] of doc.split("\n").entries()) {
+    if (line.startsWith("```")) {
+      finish();
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    if (line.trim() === "") {
+      finish();
+      continue;
+    }
+    // A new list item or table row is its own render unit; anything else continues the current one.
+    if (/^\s*(?:[-*+]|\d+\.)\s/.test(line) || line.trimStart().startsWith("|")) finish();
+    block.push([i + 1, line]);
+  }
+  finish();
+
+  assert.deepEqual(
+    unclosed,
+    [],
+    `docs/models.md has ${unclosed.length} block(s) with an odd number of \`**\` runs, so a bold ` +
+      `run opens and never closes and the asterisks render literally. Each entry names the line ` +
+      `carrying the run that is left open — a paragraph, one list item or one table row:\n  ` +
+      `${unclosed.join("\n  ")}`,
+  );
+});

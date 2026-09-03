@@ -211,6 +211,24 @@ export interface Diagnostics {
     // on whether the agent loaded — it would make one field mean two things, and it would put a disk
     // check in the extraction path to decide a label.
     pages_skipped_blank: number;
+    // Of those same `pages_unjudged`, the pages whose verify call was bought and THREW: a throttle, a
+    // stall, or a reply that overran the output ceiling (issue #364, `page_verify_ok` with
+    // `skipped: "error"`, and `page_verify_error` for the evidence). Nested the same way, so like the
+    // blank skip it moves nothing above it.
+    //
+    // It is the counterweight to the field above and the reason both are needed rather than one
+    // `skipped` total. A blank skip is a call NOT MADE and is money saved; an error is a call made,
+    // billed for a full ceiling of output, and answered with nothing — on the measured case that was
+    // $0.5051 on a single page, more than twice the average page's whole bill. Adding the two into one
+    // "unjudged for a reason" number would price the most expensive shape of verification failure as a
+    // saving, which is exactly the reading the blank counter was added to prevent for the other
+    // direction. Multiply this one by a full-page verify call, not an empty-fragment one.
+    //
+    // Zero on every log written before #364, and that zero is not a measurement of anything: before the
+    // guard the same failure took the PAGE with it, so those runs recorded it as
+    // `page_extraction_failed` and a page in `pages_failed` — not as an unjudged verify. A run whose
+    // verifier was being throttled reads, on an older log, as a run whose vision was failing.
+    pages_verify_error: number;
     verify_failed: number;
     // `verify_failed` split by what the verifier said was WRONG, counted in pages
     // (pipeline/feedback.ts `VERIFY_KINDS`). Two bench rounds rejected 74 of 94 and 76 of
@@ -443,6 +461,33 @@ export interface Diagnostics {
       binding: number;
       binding_ok: number;
       binding_unjudged: number;
+      // Binding rechecks that were BOUGHT and threw, so they produced no verdict at all
+      // (`page_verify_error` with `step: "recheck_binding"`, issue #364). NOT a subset of
+      // `binding` and not inside any rate above: the three fields above are fed from
+      // `page_correction_recheck`, which does not fire when there is no verdict to report, so
+      // this population is disjoint from all of them and the judged-only rate in the comment
+      // above is unaffected by it.
+      //
+      // It is here rather than in `pages_verify_error` two levels up, and the distinction is the
+      // one that field is nested for: that count is a subset of `pages_unjudged`, and a page whose
+      // BINDING recheck threw is not unjudged — it has a real first verdict and it PASSED. Putting
+      // it there would put a judged page inside the unjudged count and move a published rate.
+      //
+      // Without it this failure reaches no number anywhere, which is the wrong silence to leave:
+      // it is the more expensive of the two shapes, because the page had already been rendered,
+      // verified AND corrected, so two calls' work is discarded rather than one. Its only other
+      // trace in this fold is `page_corrected` `result: "rejected"`, pooled with the shrink floor
+      // and with a rewrite a second verdict actually refused — and those two are a correction
+      // judged and found wanting, while this one was never judged. Before #364 the page was
+      // counted, in `pages_failed`, which was wrong about the cause but not silent.
+      //
+      // The sampled recheck's own failure (`page_correction_recheck_failed`, #171) still has no
+      // counter, and that gap is deliberately left alone here: it predates this and it is the one
+      // verify failure that costs nothing, since the sample decides nothing whether it answers or
+      // not. So the asymmetry in this object is a real difference between the two populations and
+      // not an oversight — read `binding_error` as "a gate that could not be applied", which is
+      // the only one of the two that changes what ships.
+      binding_error: number;
       // The failing verdicts themselves — not a count; the counts are `sampled - sampled_ok`
       // and `binding - binding_ok`. One entry per recheck that named a problem, carrying the
       // prose it named it in, because that prose is the whole answer to "what is still wrong
@@ -495,6 +540,35 @@ export interface Diagnostics {
   // round 1 and came back blank in round 3 has been answered, so it leaves `pages_failed`
   // (as `page_recovered`) and arrives here.
   pages_blank: number[];
+  // Source pages whose fragment came from a reply that was markup rather than the envelope, so it
+  // carried no `"log"` field for the agent to record anything in (pipeline/extraction.ts
+  // `bareHtml`, event `page_bare_html`). These pages ordinarily SHIP and are in neither set above:
+  // the HTML is usable, which is why the rescue exists, and 0 of the 41 in two 100-page bench rounds
+  // left any other line behind. "Ordinarily" rather than "always", because this event is emitted in
+  // `renderPage` and the binding verify call that follows it is unwrapped — a provider error there
+  // reaches `failedPage` through `runExtraction`'s `.catch`, so a bare page CAN also appear in
+  // `pages_failed`. Nothing has been observed doing it and no rate here is computed from the
+  // difference, so it is stated rather than engineered around. What is missing is every record
+  // `agents/page.md` asks for in the log — a page ending mid-sentence, an orphan heading, an unkeyed
+  // symbol, a placeholder image source, a language change, an irregular table — unmet and unreported
+  // on about one page in seven (#349). Two of those six exist in the log and nowhere else; the other
+  // four also oblige the HTML, so on a bare page what is lost is the record, not always the remedy.
+  //
+  // Named for the reply shape and not for the consequence, because it is the narrower claim: an
+  // enveloped reply that simply leaves `"log"` empty ALSO has no log, has a different remedy (a
+  // prompt-compliance question rather than a parse one), and is not counted here. That sibling is
+  // not merely uncounted, it is unobserved: across 67 bench round logs on file, 2,320 `page.md`
+  // replies split into 2,001 with a non-empty log and 319 bare-HTML, with 0 carrying an envelope
+  // whose log was empty or absent. So today this is the whole population of pages with no log and
+  // not a lower bound on it — but the name still says which of the two it counts, because the day
+  // the other shape appears is the day the distinction pays for itself.
+  //
+  // Folded across feedback rounds like `pages_blank`: a page re-extracted with a proper envelope
+  // has a log now and leaves the set, a page bare again stays, and a re-extraction that threw
+  // keeps the prior fragment and so keeps the page — the field describes the DOCUMENT that
+  // shipped, not every render that happened. The per-round lines are all in log.jsonl, where
+  // `reextract` tells them apart.
+  pages_bare_html: number[];
   // Fidelity discrepancies the Copy Editor noticed on a page whose image it had and was not
   // asked about (pipeline/review.ts `readFidelityObserved`, issue #183). The first fidelity
   // signal in the pipeline that does not come from the check that produced the page: VERIFY
@@ -931,6 +1005,7 @@ export function summarizeRun(
     pages_verified: 0,
     pages_unjudged: 0,
     pages_skipped_blank: 0,
+    pages_verify_error: 0,
     verify_failed: 0,
     verify_kinds: {
       content_missing: 0,
@@ -964,6 +1039,7 @@ export function summarizeRun(
       binding: 0,
       binding_ok: 0,
       binding_unjudged: 0,
+      binding_error: 0,
       failures: [],
       verdicts_omitted: 0,
     },
@@ -982,6 +1058,23 @@ export function summarizeRun(
       // future `skipped` for some other reason lands in `pages_unjudged` and not here, which is the
       // right default — this field is named for the one thing it prices.
       if (e.unjudged === true && e.skipped === "blank") verification.pages_skipped_blank += 1;
+      // And the second value that sentence describes, on the same terms (issue #364). Two `if`s rather
+      // than one `switch` on `skipped`, so that a third value still lands in `pages_unjudged` and in
+      // neither of these — the default the comment above commits to.
+      if (e.unjudged === true && e.skipped === "error") verification.pages_verify_error += 1;
+    } else if (e.type === "page_verify_error") {
+      // The gate that could not be applied. Only the BINDING step is counted here, and the step
+      // is matched strictly rather than treated as "not the first check": the `verify` step is
+      // already counted, one page at a time, off `page_verify_ok`'s `skipped` above, so reading
+      // both events for it would double it. A `step` this reader does not know adds to neither,
+      // which is the same default `skipped` has — a new call site gets a line in the log and no
+      // silent contribution to a rate that was defined without it.
+      //
+      // Nothing else on this event feeds a number. It deliberately does NOT reach `errors`: that
+      // list is read as "the run is in doubt", and a page whose check could not be obtained ships
+      // its content exactly as extracted, so putting it there would report a delivered document
+      // as a failed one — which is the whole misattribution issue #364 is about, relocated.
+      if (e.step === "recheck_binding") verification.rechecks.binding_error += 1;
     } else if (e.type === "page_verify_failed") {
       verification.pages_verified += 1;
       verification.verify_failed += 1;
@@ -1164,6 +1257,14 @@ export function summarizeRun(
   // (`page_no_output`, `page_extraction_failed` with `kept: "prior"`).
   const blankSet = new Set<number>();
   let staleBlank = new Set<number>();
+  // The no-envelope pages fold on the same three events and for the same reason — see
+  // `pages_bare_html`. One difference worth naming: a re-extraction that DELIVERS is what takes a
+  // page out of this set, and it does so by writing no `page_bare_html` line, so the withdrawal at
+  // `reextract_start` is what does the work here rather than a positive answer of its own. There is
+  // no `page_enveloped` event and there should not be one; the ordinary case is not worth a line
+  // per page.
+  const bareSet = new Set<number>();
+  let staleBare = new Set<number>();
   for (const e of events) {
     if (e.type === "page_extraction_failed" && typeof e.page === "number" && e.kept !== "prior") {
       failedSet.add(e.page);
@@ -1183,9 +1284,23 @@ export function summarizeRun(
     ) {
       blankSet.add(e.page);
     }
+    if (e.type === "page_bare_html" && typeof e.page === "number") {
+      bareSet.add(e.page);
+    } else if (e.type === "reextract_start" && Array.isArray(e.pages)) {
+      staleBare = new Set(e.pages.filter((p): p is number => typeof p === "number" && bareSet.has(p)));
+      for (const p of staleBare) bareSet.delete(p);
+    } else if (
+      e.type === "page_extraction_failed" &&
+      e.kept === "prior" &&
+      typeof e.page === "number" &&
+      staleBare.has(e.page)
+    ) {
+      bareSet.add(e.page);
+    }
   }
   const pagesFailed = [...failedSet].sort((a, b) => a - b);
   const pagesBlank = [...blankSet].sort((a, b) => a - b);
+  const pagesBareHtml = [...bareSet].sort((a, b) => a - b);
 
   // The Copy Editor's fidelity observations, summed over every round it ran — one line per round
   // that had any, so a document reviewed in three rounds can contribute three lines about the same
@@ -1261,6 +1376,7 @@ export function summarizeRun(
     verification,
     pages_failed: pagesFailed,
     pages_blank: pagesBlank,
+    pages_bare_html: pagesBareHtml,
     fidelity_observed: observed,
   };
 }
