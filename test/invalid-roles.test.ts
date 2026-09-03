@@ -325,15 +325,54 @@ test("a `role=` inside another attribute's value is prose, and is not an attribu
 // element axe sees: rewriting the second would edit a string nothing reads, and report a strip that
 // changed nothing about the document. The valueless case is the same rule — an empty role is
 // ignored, so the element has nothing invalid on it however the second copy is spelled.
-test("a repeated role is the first one, which is the only one that exists", () => {
+//
+// **The order that matters is the invalid one FIRST, and there the tag is declined, because
+// removing the first role PROMOTES the second.** That is the one case where this pass would not
+// remove something inert but hand the element a role it never had, which every argument in
+// roles.ts's headers says it does not do. The gate assertion below is the point: it is not that the
+// edit is untidy, it is that it trades one violation for two different ones and gives a `<div>` of
+// notes the document's main landmark.
+test("a repeated role is the first one, and removing it would promote the second", async () => {
   const inert = '<li role="listitem" role="doc-notes">n</li>';
   assert.equal(stripInvalidRoles(inert).html, inert);
   assert.deepEqual(stripInvalidRoles(inert).stripped, []);
   const valueless = '<div role role="doc-notes">n</div>';
   assert.equal(stripInvalidRoles(valueless).html, valueless);
-  // The other order does strip, and leaves the repeat behind — the pass is not in the business of
-  // tidying duplicate attributes, only of removing a role that is not a role.
-  assert.equal(stripInvalidRoles('<li role="doc-notes" role="listitem">n</li>').html, '<li role="listitem">n</li>');
+  const promoting = '<div role="doc-footnotes" role="main"><p>notes</p></div>';
+  const strip = stripInvalidRoles(promoting);
+  assert.equal(strip.html, promoting, "declined, because the edit would put role=main into effect");
+  assert.deepEqual(strip.stripped, []);
+  assert.equal(strip.nodes, 0);
+  // What declining costs and what it avoids, both read off the shipped gate rather than argued.
+  const before = await rules(`<h1>M</h1>${promoting}`);
+  const after = await rules('<h1>M</h1><div role="main"><p>notes</p></div>');
+  if (before === null || after === null) return;
+  assert.ok(before.includes("aria-roles[critical]"), `the declined tag still fails the gate, got: ${before.join(", ")}`);
+  assert.ok(
+    after.some((v) => v.startsWith("landmark-")),
+    `stripping it would have introduced a landmark violation instead, got: ${after.join(", ") || "none"}`,
+  );
+  assert.ok(!after.includes("aria-roles[critical]"), "and the promoted role is valid, so nothing reports the swap");
+  // The deprecated strip declines the same shape for the same reason: `doc-endnote` is reported at
+  // minor, and promoting `main` past it is a worse document than the one that arrived.
+  const dep = '<li role="doc-endnote" role="main">n</li>';
+  assert.equal(stripDeprecatedRoles(dep).html, dep);
+});
+
+// A solidus between attributes is a separator, not part of a name. The parser treats an unexpected
+// `/` inside a tag by going back to reading an attribute name, so this element really does carry the
+// role, and reading `/role` as the name would miss it — a miss and not damage, since the gate still
+// reports it, but this pass argues that it closes the class and not the instance.
+test("a role after a stray solidus is still a role", () => {
+  assert.equal(stripInvalidRoles('<div/role="doc-footnotes">n</div>').html, "<div>n</div>");
+  assert.equal(stripInvalidRoles('<div id="x" /role="doc-notes">n</div>').html, '<div id="x">n</div>');
+  // The neighbouring unquoted case is NOT this: the parser reads `<hr role=doc-pagebreak/>` as the
+  // value `doc-pagebreak/`, which is genuinely not a role name, so stripping agrees with the gate.
+  assert.equal(stripInvalidRoles("<hr role=doc-pagebreak/>").html, "<hr>");
+  // And a real role is left alone whichever way the tag closes itself.
+  for (const body of ['<hr role="doc-pagebreak" />', '<hr role="doc-pagebreak"/>']) {
+    assert.equal(stripInvalidRoles(body).html, body);
+  }
 });
 
 // The same defect, in the pass that has been shipping since #187, and this half is live on `main`.

@@ -82,17 +82,27 @@ const START_TAG = /<([a-z][a-z0-9-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
 // `role` after it in place: the document went on failing the gate, now with mangled markup, and
 // the log said a strip had happened.
 //
-// Only the FIRST `role` attribute is returned, which is the only one that exists as far as
-// anything downstream is concerned. The HTML parser drops a repeated attribute and keeps the
-// first, so `<li role="listitem" role="doc-endnote">` is `<li role="listitem">` in the tree,
-// axe never sees the deprecated one, and rewriting it here would edit a string nobody reads.
-// (anchors.ts's source scan takes the first of a repeated attribute for the same reason.)
+// Only the FIRST `role` attribute counts, which is the only one that exists as far as anything
+// downstream is concerned. The HTML parser drops a repeated attribute and keeps the first, so
+// `<li role="listitem" role="doc-endnote">` is `<li role="listitem">` in the tree, axe never sees
+// the deprecated one, and rewriting it would edit a string nobody reads. (anchors.ts's source scan
+// takes the first of a repeated attribute for the same reason.)
+//
+// **A repeated `role` is DECLINED rather than edited, because removing the first PROMOTES the
+// second**, and that turns a removal into a gift. `<div role="doc-footnotes" role="main">` computes
+// to *generic* today — the parser keeps the invalid first value, so the element has no role — and
+// stripping it leaves `<div role="main">`, an element handed a landmark it never had. Through the
+// shipped gate that trades `aria-roles[critical]` for `landmark-main-is-top-level` and
+// `landmark-no-duplicate-main`. Every argument for this file is that removing an invalid role
+// changes nothing a reader is given; that holds of removing a token and not of promoting the next
+// attribute into effect, so the tag is left for the gate to report.
 type RoleAttr =
   // No `role` attribute, or one with no value — an empty role is ignored by ARIA and by the
   // gate, so there is nothing to remove.
   | { kind: "none" }
-  // A `role` whose value cannot be read to its end, which is the JSON-escaping leak's shape.
-  // Both passes leave the whole tag alone; see the comment at the call sites.
+  // The tag is left exactly as it arrived, for one of two reasons: a `role` whose value cannot be
+  // read to its end (the JSON-escaping leak's shape — see the comment at the call sites), or a
+  // repeated `role` whose first copy is the one that would be edited.
   | { kind: "declined" }
   | {
       kind: "found";
@@ -109,58 +119,73 @@ type RoleAttr =
 
 const WS = /\s/;
 
+// A `/` between attributes is a separator and not part of a name, which is what the parser does
+// with it: a solidus in a tag that is not followed by `>` is an "unexpected solidus" and the parser
+// goes back to reading an attribute name, so `<div/role="doc-footnotes">` really does carry that
+// role. Reading `/role` as the name would miss it — a miss and not damage, since the gate still
+// reports it, but this file argues that it closes the class rather than the instance.
+//
+// A `/` is NOT a terminator for an unquoted VALUE, deliberately: the parser reads
+// `<hr role=doc-pagebreak/>` as the value `doc-pagebreak/`, which is genuinely not a role name, so
+// stripping it is the same judgement the gate makes.
+const SEP = /[\s/]/;
+
 function findRoleAttribute(attrs: string): RoleAttr {
+  let first: (RoleAttr & { kind: "found" }) | null = null;
+  // Whatever the first `role` turns out to be, a second one means the first is the one the parser
+  // keeps and the one this would edit — so the edit would promote the second. Declining is the
+  // answer wherever that is discovered, which is why every `isRole` branch below asks.
+  const seen = () => (first === null ? null : ({ kind: "declined" } as const));
   let i = 0;
   while (i < attrs.length) {
     const start = i;
-    while (i < attrs.length && WS.test(attrs[i]!)) i++;
+    while (i < attrs.length && SEP.test(attrs[i]!)) i++;
     const gap = attrs.slice(start, i);
     if (i >= attrs.length) break;
     const nameStart = i;
-    while (i < attrs.length && !WS.test(attrs[i]!) && attrs[i] !== "=") i++;
+    while (i < attrs.length && !SEP.test(attrs[i]!) && attrs[i] !== "=") i++;
     const isRole = attrs.slice(nameStart, i).toLowerCase() === "role";
     // The `=` may be separated from the name by whitespace, and so may the value from the `=`.
     let j = i;
     while (j < attrs.length && WS.test(attrs[j]!)) j++;
     if (attrs[j] !== "=") {
       // A valueless attribute. `i` already sits after the name, so the next turn reads the
-      // whitespace before whatever follows.
-      if (isRole) return { kind: "none" };
+      // separator before whatever follows.
+      if (isRole) return seen() ?? { kind: "none" };
       continue;
     }
     j++;
     while (j < attrs.length && WS.test(attrs[j]!)) j++;
     const quote = attrs[j];
+    let whole: string;
+    let value: { dq?: string } | { sq?: string } | { bare?: string };
     if (quote === '"' || quote === "'") {
       const end = attrs.indexOf(quote, j + 1);
-      // Unreachable from START_TAG, whose quoted branches only match closed pairs, so this is
-      // for a caller passing attribute text of its own: a value with no end is a value that
-      // cannot be read, which is the declined case.
-      if (end === -1) return isRole ? { kind: "declined" } : { kind: "none" };
-      if (isRole) {
-        const value = attrs.slice(j + 1, end);
-        return {
-          kind: "found",
-          index: start,
-          whole: attrs.slice(start, end + 1),
-          gap,
-          ...(quote === '"' ? { dq: value } : { sq: value }),
-        };
-      }
+      // Unreachable from START_TAG, whose quoted branches only match closed pairs, so this is for a
+      // caller passing attribute text of its own: a value with no end cannot be read, which is the
+      // declined case. For any other attribute there is nothing further to read either.
+      if (end === -1) return isRole || first !== null ? { kind: "declined" } : { kind: "none" };
+      whole = attrs.slice(start, end + 1);
+      const text = attrs.slice(j + 1, end);
+      value = quote === '"' ? { dq: text } : { sq: text };
       i = end + 1;
-      continue;
+    } else {
+      // A bare value, ending at whitespace — or at a quote, which means the value ran into one and
+      // cannot be read whole.
+      let k = j;
+      while (k < attrs.length && !WS.test(attrs[k]!) && attrs[k] !== '"' && attrs[k] !== "'" && attrs[k] !== ">") k++;
+      if (isRole && k < attrs.length && !WS.test(attrs[k]!)) return { kind: "declined" };
+      whole = attrs.slice(start, k);
+      value = { bare: attrs.slice(j, k) };
+      i = k;
     }
-    // A bare value, ending at whitespace — or at a quote, which means the value ran into one
-    // and cannot be read whole.
-    let k = j;
-    while (k < attrs.length && !WS.test(attrs[k]!) && attrs[k] !== '"' && attrs[k] !== "'" && attrs[k] !== ">") k++;
     if (isRole) {
-      if (k < attrs.length && !WS.test(attrs[k]!)) return { kind: "declined" };
-      return { kind: "found", index: start, whole: attrs.slice(start, k), gap, bare: attrs.slice(j, k) };
+      const repeat = seen();
+      if (repeat) return repeat;
+      first = { kind: "found", index: start, whole, gap, ...value };
     }
-    i = k;
   }
-  return { kind: "none" };
+  return first ?? { kind: "none" };
 }
 
 // Splice a new `role` attribute — or nothing — into a start tag, by position. `attrs` is the
@@ -330,7 +355,9 @@ export function stripInvalidRoles(html: string): InvalidRoleStrip {
     // character out of the middle of an attribute leaves `<hr"doc-pagebreak\" …>` — markup mangled
     // worse than the violation it was fixing. The strip above can only reach that shape through a
     // stray token that happens to be one of three known names; this pass removes everything it does
-    // not recognise, so it meets the case on every leaked marker.
+    // not recognise, so it meets the case on every leaked marker. A repeated `role` is declined
+    // here too, for the different reason given at `RoleAttr`: removing the first promotes the
+    // second, which is the one case where a removal GIVES the element a role.
     if (found.kind !== "found") return tag;
     const { whole, gap, dq, sq, bare, index } = found;
     const value = dq ?? sq ?? bare ?? "";
