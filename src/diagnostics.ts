@@ -461,6 +461,33 @@ export interface Diagnostics {
       binding: number;
       binding_ok: number;
       binding_unjudged: number;
+      // Binding rechecks that were BOUGHT and threw, so they produced no verdict at all
+      // (`page_verify_error` with `step: "recheck_binding"`, issue #364). NOT a subset of
+      // `binding` and not inside any rate above: the three fields above are fed from
+      // `page_correction_recheck`, which does not fire when there is no verdict to report, so
+      // this population is disjoint from all of them and the judged-only rate in the comment
+      // above is unaffected by it.
+      //
+      // It is here rather than in `pages_verify_error` two levels up, and the distinction is the
+      // one that field is nested for: that count is a subset of `pages_unjudged`, and a page whose
+      // BINDING recheck threw is not unjudged — it has a real first verdict and it PASSED. Putting
+      // it there would put a judged page inside the unjudged count and move a published rate.
+      //
+      // Without it this failure reaches no number anywhere, which is the wrong silence to leave:
+      // it is the more expensive of the two shapes, because the page had already been rendered,
+      // verified AND corrected, so two calls' work is discarded rather than one. Its only other
+      // trace in this fold is `page_corrected` `result: "rejected"`, pooled with the shrink floor
+      // and with a rewrite a second verdict actually refused — and those two are a correction
+      // judged and found wanting, while this one was never judged. Before #364 the page was
+      // counted, in `pages_failed`, which was wrong about the cause but not silent.
+      //
+      // The sampled recheck's own failure (`page_correction_recheck_failed`, #171) still has no
+      // counter, and that gap is deliberately left alone here: it predates this and it is the one
+      // verify failure that costs nothing, since the sample decides nothing whether it answers or
+      // not. So the asymmetry in this object is a real difference between the two populations and
+      // not an oversight — read `binding_error` as "a gate that could not be applied", which is
+      // the only one of the two that changes what ships.
+      binding_error: number;
       // The failing verdicts themselves — not a count; the counts are `sampled - sampled_ok`
       // and `binding - binding_ok`. One entry per recheck that named a problem, carrying the
       // prose it named it in, because that prose is the whole answer to "what is still wrong
@@ -1012,6 +1039,7 @@ export function summarizeRun(
       binding: 0,
       binding_ok: 0,
       binding_unjudged: 0,
+      binding_error: 0,
       failures: [],
       verdicts_omitted: 0,
     },
@@ -1034,6 +1062,19 @@ export function summarizeRun(
       // than one `switch` on `skipped`, so that a third value still lands in `pages_unjudged` and in
       // neither of these — the default the comment above commits to.
       if (e.unjudged === true && e.skipped === "error") verification.pages_verify_error += 1;
+    } else if (e.type === "page_verify_error") {
+      // The gate that could not be applied. Only the BINDING step is counted here, and the step
+      // is matched strictly rather than treated as "not the first check": the `verify` step is
+      // already counted, one page at a time, off `page_verify_ok`'s `skipped` above, so reading
+      // both events for it would double it. A `step` this reader does not know adds to neither,
+      // which is the same default `skipped` has — a new call site gets a line in the log and no
+      // silent contribution to a rate that was defined without it.
+      //
+      // Nothing else on this event feeds a number. It deliberately does NOT reach `errors`: that
+      // list is read as "the run is in doubt", and a page whose check could not be obtained ships
+      // its content exactly as extracted, so putting it there would report a delivered document
+      // as a failed one — which is the whole misattribution issue #364 is about, relocated.
+      if (e.step === "recheck_binding") verification.rechecks.binding_error += 1;
     } else if (e.type === "page_verify_failed") {
       verification.pages_verified += 1;
       verification.verify_failed += 1;

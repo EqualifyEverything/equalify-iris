@@ -1504,6 +1504,10 @@ test("a verify call that overruns its ceiling keeps the page it was judging", as
     assert.equal(d.verification.pages_skipped_blank, 0);
     assert.equal(d.verification.verify_failed, 0);
     assert.deepEqual(d.pages_failed, []);
+    // And the first check's failure is counted ONCE. `page_verify_error` and `page_verify_ok` both
+    // fire for it, so the fold matches `step` strictly rather than reading "not the recheck" — a
+    // `binding_error` here would be this page counted twice under two names.
+    assert.equal(d.verification.rechecks.binding_error, 0);
   });
 });
 
@@ -1601,9 +1605,27 @@ test("an unobtainable binding recheck discards the correction and keeps the page
       { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.UTC(2026, 0, 1) },
     );
     assert.equal(d.verification.pages_verified, 2);
+    // NOT unjudged, and NOT `pages_verify_error`: that count is nested inside `pages_unjudged`, and
+    // this page has a real first verdict which it passed. Counting it there would put a judged page
+    // inside the unjudged total and move the rate the nesting exists to protect. Review round 1
+    // caught the README claiming otherwise while this assertion said the opposite.
     assert.equal(d.verification.pages_unjudged, 0);
     assert.equal(d.verification.pages_verify_error, 0);
+    // Which is why it needs a number of its own, and this is it. Without it the page reached NO
+    // counter anywhere — `binding` and `failures` come off `page_correction_recheck`, which does not
+    // fire when there is no verdict, and `errors` needs an `ok: false` this event does not carry —
+    // so the more expensive of the two failure shapes was the silent one.
+    assert.equal(d.verification.rechecks.binding_error, 2);
+    // Disjoint from the verdict-fed fields rather than a subset of them, so the judged-only rate
+    // `(binding_ok - binding_unjudged) / (binding - binding_unjudged)` is untouched by it.
     assert.equal(d.verification.rechecks.binding, 0);
+    assert.equal(d.verification.rechecks.binding_ok, 0);
+    assert.equal(d.verification.rechecks.failures.length, 0);
+    // And the only other trace it has, which is why the count is worth having: a `rejected` pooled
+    // with the shrink floor and with a rewrite a second verdict genuinely refused.
+    const corrected2 = of(events, "page_corrected");
+    assert.equal(corrected2.length, 2);
+    for (const c of corrected2) assert.equal(c.result, "rejected");
   });
 });
 
