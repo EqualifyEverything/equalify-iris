@@ -11,7 +11,7 @@ import {
 } from "../providers/types.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { wrapDocument } from "./assembly.ts";
-import { stripDeprecatedRoles } from "./roles.ts";
+import { stripDeprecatedRoles, stripInvalidRoles } from "./roles.ts";
 import { stripNestedMain } from "./landmarks.ts";
 import { destroyedBody, EDITOR_SHRINK_FLOOR, structureCounts, visibleText } from "./correction.ts";
 import { runAxe, lintErrorFields, lintDebrisFields, type LintResult } from "./lint.ts";
@@ -2748,6 +2748,22 @@ export async function runReview(
         iteration: iterations,
         roles: [...new Set(roles.stripped)].sort(),
         nodes: roles.nodes,
+      });
+    }
+    // And a role that is not a role at all (roles.ts, #345), at the same point and for the same
+    // three reasons: ahead of `changed` so a round whose only effect was a name this strips is not
+    // credited as a change, ahead of the re-lint so the gate is not shown a violation about to be
+    // removed, and at this end as well as assembly's because the editor writes fresh markup on
+    // every round. It has the editor's own precedent: #187's deprecated role survived a round in
+    // which the editor was TOLD the rule failed and rewrote five sections around it.
+    const invalid = stripInvalidRoles(body);
+    if (invalid.nodes > 0) {
+      body = invalid.html;
+      ctx.log.event("invalid_roles_stripped", {
+        stage: "correction_round",
+        iteration: iterations,
+        roles: [...new Set(invalid.stripped)].sort(),
+        nodes: invalid.nodes,
       });
     }
     // A `<main>` the editor introduced, dropped here for the same reason and at the same point

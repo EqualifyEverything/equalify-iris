@@ -30,7 +30,7 @@ import { RunLog } from "../store/runlog.ts";
 import type { InputImage, PipelineContext } from "./context.ts";
 import { runExtraction, reExtractPages } from "./extraction.ts";
 import { runAssembly, assembleBody, wrapDocument } from "./assembly.ts";
-import { stripDeprecatedRoles } from "./roles.ts";
+import { stripDeprecatedRoles, stripInvalidRoles } from "./roles.ts";
 import { stripNestedMain } from "./landmarks.ts";
 import { markerCounts, MARKER_PAGE_INCOMPLETE, runReview, type ReviewResult } from "./review.ts";
 import { runAxe, lintErrorFields, lintDebrisFields } from "./lint.ts";
@@ -195,6 +195,20 @@ export async function runPipeline(args: {
           stage: "feedback_prior_body",
           roles: [...new Set(priorRoles.stripped)].sort(),
           nodes: priorRoles.nodes,
+        });
+      }
+      // And an invented role in the same stored body (roles.ts, #345). This path is where such a
+      // role is likeliest to have survived: the strip is new, so every body stored before it can
+      // still be carrying one, and a re-run whose Reader is satisfied or that converges on the
+      // first round has no correction round in it to catch anything. Ahead of the re-lint and the
+      // diff baseline for the same two reasons as the strip above.
+      const priorInvalid = stripInvalidRoles(beforeBody);
+      if (priorInvalid.nodes > 0) {
+        beforeBody = priorInvalid.html;
+        log.event("invalid_roles_stripped", {
+          stage: "feedback_prior_body",
+          roles: [...new Set(priorInvalid.stripped)].sort(),
+          nodes: priorInvalid.nodes,
         });
       }
       // And a `<main>` a page emitted for itself, on the same argument (landmarks.ts, #251):

@@ -1,3 +1,5 @@
+import axe from "axe-core";
+
 // Drop a deprecated ARIA role from the element that already says what it said (issue #187).
 //
 // ARIA deprecates exactly three roles — `directory`, `doc-biblioentry`, `doc-endnote` — and
@@ -43,6 +45,11 @@ const REDUNDANT_ON: Record<string, string[]> = {
 // transcribed page that mentions a staff directory should not pay for a scan of the whole
 // joined body. Still only a pre-check — it matches `role=directory` written in text too, and a
 // false positive costs the scan below, which then finds no tag to change.
+//
+// That last clause was not true until the attribute was located by walking: a page saying
+// `role=directory` inside an `<ul aria-label="…">` matched here AND matched in the scan, and the
+// word came out of the accessible name. `directory` being an ordinary English word is the reason
+// this comment exists, and was the reason that was reachable. See `findRoleAttribute`.
 const ANY_DEPRECATED = /role\s*=\s*["']?[^"'>]*(?:doc-endnote|doc-biblioentry|directory)\b/i;
 
 // A start tag, with its attributes read as text-or-quoted-string so a `>` inside an
@@ -54,17 +61,180 @@ const ANY_DEPRECATED = /role\s*=\s*["']?[^"'>]*(?:doc-endnote|doc-biblioentry|di
 // mis-sliced, because the only edit made is to a `role` attribute found INSIDE the slice.
 const START_TAG = /<([a-z][a-z0-9-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
 
-// `role` in the attribute text: double-quoted, single-quoted, or bare. The leading
-// whitespace is captured so the attribute can be removed WITH its separator when the last
-// token goes, rather than leaving `<li  id="x">`.
+// Where a `role` attribute is, found by walking the attribute text as a sequence of
+// `name(=value)?` pairs from position 0 — the way a parser reads it — rather than by searching
+// it for something shaped like `role=`.
 //
-// Non-global, so only the FIRST `role` in a start tag is considered — which is the only one
-// that exists as far as anything downstream is concerned. The HTML parser drops a repeated
-// attribute and keeps the first, so `<li role="listitem" role="doc-endnote">` is
-// `<li role="listitem">` in the tree, axe never sees the deprecated one, and rewriting it here
-// would edit a string nobody reads. (anchors.ts's source scan takes the first of a repeated
-// attribute for the same reason.)
-const ROLE_ATTR = /(\s+)role\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i;
+// **The walk is what makes a match inside a quoted value impossible, and that is the whole
+// reason it is not a regex.** A search for `\s+role\s*=\s*(…)` matches inside another
+// attribute's value, and the values on these elements are prose out of a document: `alt`,
+// `aria-label`, `title`. `role\s*=\s*` accepts the spaced form, which is how the phrase
+// appears in English — an `alt` reading "each user and role = admin, editor or viewer" put
+// `admin,` where a role name goes, and the word was cut out of the middle of the alt text. The
+// same search damaged an `<ol title="role = directory listings">`, because `directory` is an
+// ordinary English word and `<ol>` is one of its hosts, so the table above was no protection.
+// Both losses are unreportable: the name is still non-empty and not generic, so nothing in the
+// gate can see a word has gone, and the log line names the eaten word as an invented role —
+// evidence pointing at the page agent for something this file did.
+//
+// It also finds the role wherever it sits rather than wherever the first lookalike sits. The
+// old search, stopping at the first match, could damage a `title` and leave a genuinely invalid
+// `role` after it in place: the document went on failing the gate, now with mangled markup, and
+// the log said a strip had happened.
+//
+// Only the FIRST `role` attribute counts, which is the only one that exists as far as anything
+// downstream is concerned. The HTML parser drops a repeated attribute and keeps the first, so
+// `<li role="listitem" role="doc-endnote">` is `<li role="listitem">` in the tree, axe never sees
+// the deprecated one, and rewriting it would edit a string nobody reads. (anchors.ts's source scan
+// takes the first of a repeated attribute for the same reason.)
+//
+// **Where the value loses every token and a second `role` follows it, the attribute is EMPTIED
+// rather than removed**, because removing it would PROMOTE the second and turn a removal into a
+// gift. `<div role="doc-footnotes" role="main">` computes to *generic* today — the parser keeps the
+// invalid first value, so the element has no role — and deleting the attribute leaves
+// `<div role="main">`, an element handed a landmark it never had; measured through the shipped gate,
+// that trades `aria-roles[critical]` for `landmark-main-is-top-level` and
+// `landmark-no-duplicate-main`. Leaving `role=""` in its place keeps the attribute the parser reads
+// in the position the parser reads it, so the second copy stays as inert as it already was: ARIA
+// treats a value with no valid token as no role at all, so the element computes to exactly what it
+// computes to today, and the gate reads it clean. Verified rather than reasoned —
+// `<div role="" role="main">` is clean, `<div role="main">` is two landmark violations.
+//
+// Emptying is what makes this file's argument hold on the shape, rather than an exception to it. The
+// argument is that removing an invalid role changes nothing a reader is given; it is about a role
+// TOKEN, and the token really does go. What must not change is which attribute the parser keeps.
+//
+// It is also why no implicit-role table is needed to tell a harmless promotion from a costly one.
+// The alternative was to permit the deletion where the promoted value is the host's own implicit
+// role (`listitem` on an `<li>`, `list` on a `<ul>`), which needs a table whose wrong entries hand
+// elements roles — and it would still have shipped a violation wherever it declined. Emptying is
+// clean on every shape measured: `<ol><li role="doc-endnote" role="listitem">` and
+// `<ul role="directory" role="list">` were delivered clean before this file located attributes by
+// walking, and are delivered clean again.
+type RoleAttr =
+  // No `role` attribute, or one with no value — an empty role is ignored by ARIA and by the
+  // gate, so there is nothing to remove.
+  | { kind: "none" }
+  // The tag is left exactly as it arrived, because a `role` on it has a value that cannot be read to
+  // its end — the JSON-escaping leak's shape, see the comment at the call sites. Asked of every
+  // `role` on the tag and not only the first, so debris in a repeat declines it too.
+  | { kind: "declined" }
+  | {
+      kind: "found";
+      // Offset into the attribute text, and the exact text to splice out — the leading
+      // whitespace included, so the attribute can go WITH its separator when the last token
+      // goes, rather than leaving `<li  id="x">`.
+      index: number;
+      whole: string;
+      gap: string;
+      dq?: string;
+      sq?: string;
+      bare?: string;
+      // Whether another `role` follows this one. It changes what an emptied value leaves behind and
+      // nothing else: the attribute must stay so the parser goes on reading THIS one.
+      repeated: boolean;
+    };
+
+const WS = /\s/;
+
+// A `/` between attributes is a separator and not part of a name, which is what the parser does
+// with it: a solidus in a tag that is not followed by `>` is an "unexpected solidus" and the parser
+// goes back to reading an attribute name, so `<div/role="doc-footnotes">` really does carry that
+// role. Reading `/role` as the name would miss it — a miss and not damage, since the gate still
+// reports it, but this file argues that it closes the class rather than the instance.
+//
+// A `/` is NOT a terminator for an unquoted VALUE, deliberately: the parser reads
+// `<hr role=doc-pagebreak/>` as the value `doc-pagebreak/`, which is genuinely not a role name, so
+// stripping it is the same judgement the gate makes.
+const SEP = /[\s/]/;
+
+function findRoleAttribute(attrs: string): RoleAttr {
+  let first: (RoleAttr & { kind: "found" }) | null = null;
+  // The walk does not stop at the first `role`, because whether a second one follows decides what an
+  // emptied value may leave behind — and because a repeat with an unreadable value declines the tag
+  // just as the first one would.
+  let repeated = false;
+  let i = 0;
+  while (i < attrs.length) {
+    const start = i;
+    while (i < attrs.length && SEP.test(attrs[i]!)) i++;
+    const gap = attrs.slice(start, i);
+    if (i >= attrs.length) break;
+    const nameStart = i;
+    while (i < attrs.length && !SEP.test(attrs[i]!) && attrs[i] !== "=") i++;
+    const isRole = attrs.slice(nameStart, i).toLowerCase() === "role";
+    // The `=` may be separated from the name by whitespace, and so may the value from the `=`.
+    let j = i;
+    while (j < attrs.length && WS.test(attrs[j]!)) j++;
+    if (attrs[j] !== "=") {
+      // A valueless attribute. `i` already sits after the name, so the next turn reads the
+      // separator before whatever follows.
+      if (isRole) {
+        // A valueless FIRST `role` is the empty role the parser builds, which ARIA and the gate both
+        // ignore: there is no token to remove and nothing after it is reachable, so the walk is over.
+        if (first === null) return { kind: "none" };
+        repeated = true;
+      }
+      continue;
+    }
+    j++;
+    while (j < attrs.length && WS.test(attrs[j]!)) j++;
+    const quote = attrs[j];
+    let whole: string;
+    let value: { dq?: string } | { sq?: string } | { bare?: string };
+    if (quote === '"' || quote === "'") {
+      const end = attrs.indexOf(quote, j + 1);
+      // Unreachable from START_TAG, whose quoted branches only match closed pairs, so this is for a
+      // caller passing attribute text of its own: a value with no end cannot be read, which is the
+      // declined case. For any other attribute there is nothing further to read either.
+      if (end === -1) return isRole || first !== null ? { kind: "declined" } : { kind: "none" };
+      whole = attrs.slice(start, end + 1);
+      const text = attrs.slice(j + 1, end);
+      value = quote === '"' ? { dq: text } : { sq: text };
+      i = end + 1;
+    } else {
+      // A bare value, ending at whitespace — or at a quote, which means the value ran into one and
+      // cannot be read whole.
+      let k = j;
+      while (k < attrs.length && !WS.test(attrs[k]!) && attrs[k] !== '"' && attrs[k] !== "'" && attrs[k] !== ">") k++;
+      if (isRole && k < attrs.length && !WS.test(attrs[k]!)) return { kind: "declined" };
+      whole = attrs.slice(start, k);
+      value = { bare: attrs.slice(j, k) };
+      i = k;
+    }
+    if (isRole) {
+      if (first === null) first = { kind: "found", index: start, whole, gap, repeated: false, ...value };
+      else repeated = true;
+    }
+  }
+  return first === null ? { kind: "none" } : { ...first, repeated };
+}
+
+// Splice a new `role` attribute — or nothing — into a start tag, by position. `attrs` is the
+// last thing in the tag before its `>`, so its offset is fixed by the two lengths; nothing is
+// searched for, so a value that happens to contain the attribute text cannot be edited instead.
+function spliceAttr(tag: string, attrs: string, at: number, len: number, replacement: string): string {
+  const attrsAt = tag.length - 1 - attrs.length;
+  return tag.slice(0, attrsAt + at) + replacement + tag.slice(attrsAt + at + len);
+}
+
+// What the `role` attribute becomes once the tokens this pass refuses have gone. Shared by both
+// passes, because the three outcomes are a property of the attribute and not of which tokens went.
+//
+// The quoting style the page used is kept for the tokens that survive. A value that loses every
+// token loses the whole attribute, and the whitespace that introduced it with it, so nothing is
+// left behind saying anything about the element — except where another `role` follows, where the
+// attribute stays with an empty value, because deleting it would make the next one the parser's
+// choice. See the promotion paragraph at `RoleAttr`; the emptied form is what the element already
+// computes to and the gate reads it clean.
+function rewrite(kept: string[], found: RoleAttr & { kind: "found" }): string {
+  const { gap, dq, sq, repeated } = found;
+  const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : "";
+  if (kept.length > 0) return `${gap}role=${quote}${kept.join(" ")}${quote}`;
+  // Quoted even where the page wrote a bare value, because `role=` with nothing after it is not an
+  // empty value — the next attribute would be read as one.
+  return repeated ? `${gap}role=${sq !== undefined ? "''" : '""'}` : "";
+}
 
 export interface RoleStrip {
   html: string;
@@ -83,9 +253,13 @@ export function stripDeprecatedRoles(html: string): RoleStrip {
   const stripped: string[] = [];
   let nodes = 0;
   const out = html.replace(START_TAG, (tag, name: string, attrs: string) => {
-    const m = ROLE_ATTR.exec(attrs);
-    if (!m) return tag;
-    const [whole, gap, dq, sq, bare] = m;
+    const found = findRoleAttribute(attrs);
+    // A value the walk cannot read whole is left alone rather than edited — see the guard's
+    // comment in `stripInvalidRoles`, which is where that shape was observed. This pass could
+    // only reach it through a stray token that happened to be one of three names, but the
+    // outcome would be the same mangling, so it declines for the same reason.
+    if (found.kind !== "found") return tag;
+    const { whole, dq, sq, bare, index } = found;
     const value = dq ?? sq ?? bare ?? "";
     // ARIA takes the first token it recognises, so a deprecated token after a good one is
     // already inert — removed anyway, because an inert token is still text in the file that
@@ -99,14 +273,151 @@ export function stripDeprecatedRoles(html: string): RoleStrip {
     });
     if (kept.length === tokens.length) return tag;
     nodes++;
-    // The quoting style the page used is kept for the tokens that survive; a value that
-    // loses every token loses the attribute and the whitespace that introduced it.
-    const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : "";
-    const replacement = kept.length === 0 ? "" : `${gap}role=${quote}${kept.join(" ")}${quote}`;
-    // Replaced through a function so a `$` in a surviving token is a character rather than a
-    // `$&`-style reference, and searched from the start of the tag — where `whole` begins with
-    // whitespace and `<name` has none, so the first hit is the attribute just matched.
-    return tag.replace(whole, () => replacement);
+    return spliceAttr(tag, attrs, index, whole.length, rewrite(kept, found));
+  });
+  return { html: out, stripped, nodes };
+}
+
+// Drop a role that is not an ARIA role at all (issue #345).
+//
+// The observed case is `role="doc-footnotes"`, which does not exist: DPUB defines `doc-footnote`
+// for one note and `doc-endnotes` for a collection, and never a plural of the first. The shipped
+// page model emitted it on 3 of the 22 occasions it had to name that role, axe reports
+// `aria-roles` at **critical** — the most severe thing the gate says about any document Iris has
+// produced — and it reached a delivered `output.html` on a round where the lint had degraded to
+// did not run. Both models in the loop passed it every time, twice on pages they had failed for
+// other reasons and bought a correction for, once on a page failed for an accessibility finding
+// specifically. So neither the prompt nor the checker is the part that can be relied on here.
+//
+// **This is the easiest case in the class, and that is the argument for taking it generally.** The
+// strip above has to name three roles and the elements they are redundant on, because a
+// deprecated role still MEANS something and deleting it can leave an element with nothing saying
+// what it was. An invalid role means nothing to anybody: assistive technology already ignores it
+// and computes the element's implicit role, which is exactly what the element computes to with the
+// attribute gone. So removing it cannot lose a reader anything, on any element, and no host table
+// is needed. It also closes the class rather than the instance — the next model to invent
+// `doc-footer` or `doc-notes` is covered by code that was written before it existed.
+//
+// That argument is about a role TOKEN, though, and holds of nothing else — which is why the
+// attribute is located by walking the start tag's attributes rather than by searching them, and why
+// `findRoleAttribute` below carries the longest comment in this file. A pass that removes anything
+// it does not recognise, pointed at a `role=` that was really prose inside an `alt`, deletes a word
+// from an accessible name and reports it as an invented role.
+//
+// What it does NOT do is name the block. A stripped `<section role="doc-footnotes">` is a
+// `<section>` with no accessible name, which is compliant and anonymous, and the model's intent
+// was reasonable. That half is the FOOTNOTES rule in `agents/page.md`, which now says the plural
+// does not exist and gives the shapes that work.
+//
+// It is also not a repair for the JSON-escaping leak (#233/#234/#257), which puts things like
+// `\"doc-pagebreak\"` in a `role`. That shape is DECLINED rather than stripped — see the guard in
+// the scan — and it should be: the leak's other symptoms are the ones worth having, and they are
+// untouched. The marker's `aria-label` still announces the wrong text, its `id` is still a dead
+// target, `LintResult.malformedAttributes` still counts the debris and names it, and the gate still
+// reports the role. A clean `aria-roles` column would not have made that a clean document.
+
+// Whether axe will accept a token in a `role`, asked of axe rather than written down here. The set
+// is finite but long (120 names) and moves with the spec, and a list of it in this file would be a
+// second opinion about what the gate accepts: stale by one release, it either strips a role axe
+// considers valid or delivers one it does not. Asking axe makes the guard and the gate the same
+// judgement by construction.
+//
+// It is not QUITE the same function, and the one place it differs is asked about at the call below:
+// `isValidRole` is case-sensitive and the `aria-roles` rule folds a role token, so this predicate
+// alone calls `DOC-ENDNOTES` invalid on a document the gate passes.
+//
+// Abstract roles (`roletype`, `widget`, `section`, …) are invalid to use, and `isValidRole`
+// says so with its default arguments — which is the reading the gate takes, and the reason the
+// probe below asks about one.
+//
+// **This throws on module load rather than degrading**, which is deliberate and is the #164
+// lesson: a check that cannot run must not report the answer a passing document gives. If the
+// oracle were missing and this file went on returning "nothing invalid found", every invalid role
+// would ship with a log line saying the document was clean. The only thing that can break the
+// oracle is an axe-core upgrade, which is a deliberate change with `npm test` in front of it, so
+// the failure lands on whoever makes it rather than on a user's document.
+const isValidRole: (role: string) => boolean = (() => {
+  const ask = (axe as { commons?: { aria?: { isValidRole?: (role: string) => boolean } } }).commons?.aria?.isValidRole;
+  // One probe each way, because a predicate that answers `true` to everything and one that
+  // answers `false` to everything are both catastrophic here and neither is detectable from one
+  // question: all-true delivers every invented role, all-false strips `doc-endnotes` and
+  // `doc-pagebreak` out of every document Iris assembles.
+  if (typeof ask !== "function" || !ask("doc-endnotes") || ask("doc-footnotes") || ask("roletype")) {
+    throw new Error(
+      "axe-core does not answer isValidRole as this build expects, so src/pipeline/roles.ts cannot " +
+        "tell an invented role from a real one. Fix the oracle rather than removing the check: " +
+        "returning 'nothing invalid' would ship every invalid role with a clean log line. " +
+        "test/invalid-roles.test.ts pins these probes and what each of them catches.",
+    );
+  }
+  return ask;
+})();
+
+// Cheap pre-check. Unlike `ANY_DEPRECATED` this cannot name what it is looking for — any role at
+// all might be invalid — so it only asks whether the document has a `role` attribute anywhere.
+// That is true of most documents Iris assembles, because the page marker carries
+// `role="doc-pagebreak"`, so the scan below usually runs. It is one pass of the same start-tag
+// regex the strip above uses, on a body that several other passes already walk.
+const ANY_ROLE = /role\s*=/i;
+
+// A recorded name is cut to this, because unlike the three deprecated names these are unbounded
+// text out of a user's document and this field is logged. The longest name in axe's whole role
+// table is `doc-acknowledgments` at 19 characters, so anything reaching this cut is not a
+// misspelled role but a value that is not a name at all, and its first characters are enough to
+// recognise that.
+const NAME_CHARS = 40;
+
+export interface InvalidRoleStrip {
+  html: string;
+  // One entry per token removed, in document order, cut to NAME_CHARS each — so `new Set(stripped)`
+  // is which names were invented. Case as written, because `DOC-FOOTNOTES` and `doc-footnotes` are
+  // evidence about different mistakes.
+  stripped: string[];
+  // Elements edited, which is the figure `aria-roles` would have reported for the tokens that went.
+  // Not the same as `stripped.length` where one element carried two invented names.
+  nodes: number;
+}
+
+export function stripInvalidRoles(html: string): InvalidRoleStrip {
+  if (!ANY_ROLE.test(html)) return { html, stripped: [], nodes: 0 };
+  const stripped: string[] = [];
+  let nodes = 0;
+  const out = html.replace(START_TAG, (tag, _name: string, attrs: string) => {
+    const found = findRoleAttribute(attrs);
+    // An unquoted value the walk could not read to its end, because the next character is a quote
+    // the value ran into. The whole tag is declined there, and that decline is load bearing rather
+    // than tidiness: the escaping leak (#233/#234/#257) delivers `<hr role=\"doc-pagebreak\" …>`,
+    // where the unquoted value reads as the single character `\`. Removing a "token" that is one
+    // character out of the middle of an attribute leaves `<hr"doc-pagebreak\" …>` — markup mangled
+    // worse than the violation it was fixing. The strip above can only reach that shape through a
+    // stray token that happens to be one of three known names; this pass removes everything it does
+    // not recognise, so it meets the case on every leaked marker. Debris in a REPEATED `role`
+    // declines the tag too, for the same reason and not for the promotion one: a repeat whose value
+    // can be read is handled by emptying rather than deleting, at `rewrite`.
+    if (found.kind !== "found") return tag;
+    const { whole, dq, sq, bare, index } = found;
+    const value = dq ?? sq ?? bare ?? "";
+    const tokens = value.split(/\s+/).filter((t) => t.length > 0);
+    const kept = tokens.filter((t) => {
+      // Asked in lower case, because that is the question the gate asks and the one a browser
+      // answers. `isValidRole` on its own is case-SENSITIVE — it rejects `DOC-ENDNOTES` — while
+      // `aria-roles` passes that document and HTML-AAM matches a role token ASCII
+      // case-insensitively, so an oracle asked about the token as written disagrees with both. It
+      // disagrees in the expensive direction: `role="DOC-ENDNOTES"` is a real landmark on a real
+      // footnote list, and this pass would have deleted it while the gate said the document was
+      // fine. Recorded as written, though — `DOC-FOOTNOTES` and `doc-footnotes` are evidence about
+      // different mistakes, and only one of them is about the plural.
+      if (isValidRole(t.toLowerCase())) return true;
+      stripped.push(t.slice(0, NAME_CHARS));
+      return false;
+    });
+    if (kept.length === tokens.length) return tag;
+    nodes++;
+    // A value with one good token and one invented one already computed to the good one — ARIA
+    // takes the first token it recognises — so this case is not a violation the gate reported and
+    // the edit changes nothing a reader is given. It is made anyway, for the reason the strip
+    // above makes it: an inert token is still text in the file saying the wrong thing.
+    return spliceAttr(tag, attrs, index, whole.length, rewrite(kept, found));
   });
   return { html: out, stripped, nodes };
 }
