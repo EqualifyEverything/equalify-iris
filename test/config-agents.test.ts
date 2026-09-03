@@ -498,9 +498,14 @@ const DISPOSITIONS = [
   ["applied", /\bswapped\b|\bapplied\b|\blive\b/i],
 ] as const;
 
-function disposition(text: string): string | null {
+// EVERY match, not the first one. Resolving a clause that carries two dispositions by list order is
+// the same off-switch as skipping one that carries none: both halves of the check below read the same
+// vocabulary in the same order, so they would shadow identically and *agree on the wrong word* rather
+// than disagree. `feedback` reached "swap recommended … still open" in one revision and stopped one
+// comma short of this. An ambiguous clause fails and says which two it matched.
+function dispositions(text: string): string[] {
   const clause = text.split(/,| — |\s—\s/)[0]!;
-  return DISPOSITIONS.find(([, re]) => re.test(clause))?.[0] ?? null;
+  return DISPOSITIONS.filter(([, re]) => re.test(clause)).map(([d]) => d);
 }
 
 test("docs/models.md's sections agree with §0 about each agent's share and disposition", () => {
@@ -542,10 +547,26 @@ test("docs/models.md's sections agree with §0 about each agent's share and disp
         `the two was updated from a newer round and the other was not; §0's is the partition that ` +
         `is checked to sum to 100%, so the opener is the likelier stale copy.`,
     );
-    // Both sides must classify. A null here is not a pass — see the note above the vocabulary.
-    const want = disposition(status!);
-    const got = disposition(text);
+    // Both sides must classify, exactly once. Neither a null nor a tie here is a pass — see the two
+    // notes above the vocabulary.
+    const wants = dispositions(status!);
+    const gots = dispositions(text);
+    const want = wants[0] ?? null;
+    const got = gots[0] ?? null;
     const vocabulary = DISPOSITIONS.map(([d]) => d).join(", ");
+    for (const [side, matches, quoted] of [
+      ["§0's table cell", wants, status!],
+      ["its own section's opener", gots, text],
+    ] as const) {
+      assert.ok(
+        matches.length < 2,
+        `\`${name}\`'s ${side} reads as "${matches.join('" and "')}" at once: ` +
+          `"${quoted.trim().slice(0, 80)}". Which one wins is decided by the order of DISPOSITIONS, ` +
+          `and both halves of this check read that same order — so they would agree on the wrong ` +
+          `word instead of disagreeing, and this test would pass on a document that states two ` +
+          `dispositions for one agent. Say one thing before the first comma.`,
+      );
+    }
     assert.ok(
       want,
       `§0's \`${name}\` cell no longer states a disposition this test can read (${vocabulary}): ` +
