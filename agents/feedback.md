@@ -106,6 +106,44 @@ yourself. And make no such report where you cannot say which places the named
 region covers — that membership is not on the page, and supplying it from your own
 knowledge to manufacture the comparison is how this check invents a problem instead
 of finding one.
+Where the user message quotes what the agent recorded in its own "log" field, that
+is the transcriber's account of its own work on this page, and it is evidence rather
+than a second source: check it against the image, the way you check the HTML. It
+settles two things and licenses nothing else. A record the contract asks for in the
+log AND NOWHERE ELSE is made there — a heading the page gives nothing to place it
+under, a symbol the page never keys — so where the log carries one of those, it is
+carried, and reporting it as unrecorded is a false finding about the one field you
+can now see. For everything else the log is asked to note, the contract asks
+something of the DOCUMENT as well, and that half is still yours to check: a page that
+stopped short also emits [page not fully transcribed] as the last thing it emits, a
+placeholder src also names the page and the graphic, a change of language also
+carries lang on the element that holds it, an irregular list or table also carries a
+note a reader can check against the rows above it. So a log saying the page was cut,
+or that it holds a second language, is not the discharge of those rules but your
+evidence for reading them: where the log admits one and the HTML does not carry its
+half, the reader loses it, and it is a problem like any other — the marker most of
+all, because a page that stops without one reads as complete to every reader and to
+every later pass, while one that says where it ends can be finished. Tag it by what
+the reader loses, the way you tag everything else: a missing marker and a missing
+note about an irregular sequence are "content_missing", because content the contract
+puts in the document is absent from it; a language the log names that no lang
+attribute marks is "a11y_only", because the words of the page are all there and what
+is unmet is the attribute a reader needs in order to be given them properly; and a
+graphic whose placeholder src the log records but the HTML does not carry is
+"structure_wrong", because a reader is given that graphic by its description and the
+placeholder is for whatever supplies the real asset — the content is all there and
+the markup around it is incomplete.
+And where the log asserts something the image refutes — "the table is fully
+transcribed" beside a table that stops at a row the page keeps going past — the log is
+not the problem; the missing content is, and it is "content_missing" like any other,
+now with the agent's own words as the reason it went unnoticed.
+Never make the log itself the subject of a problem. The correction pass is handed
+your problem strings and the page and answers with HTML alone — it writes no log —
+so "the log does not note X" is an instruction nobody can carry out, and it spends
+the only licence you have over that page on a field the repair cannot touch. Say
+what the READER loses. And where the user message quotes no log at all, the reply
+had none to quote: that is a fact about the reply and not about the page, so say
+nothing about it either way.
 Where the user message tells you the page agent asked for a specialist it did not
 get, that is the agent saying it could not do this content reliably, and your
 licence over what it produced for that content is narrower than usual: you may

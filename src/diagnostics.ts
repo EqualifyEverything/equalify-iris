@@ -495,6 +495,35 @@ export interface Diagnostics {
   // round 1 and came back blank in round 3 has been answered, so it leaves `pages_failed`
   // (as `page_recovered`) and arrives here.
   pages_blank: number[];
+  // Source pages whose fragment came from a reply that was markup rather than the envelope, so it
+  // carried no `"log"` field for the agent to record anything in (pipeline/extraction.ts
+  // `bareHtml`, event `page_bare_html`). These pages ordinarily SHIP and are in neither set above:
+  // the HTML is usable, which is why the rescue exists, and 0 of the 41 in two 100-page bench rounds
+  // left any other line behind. "Ordinarily" rather than "always", because this event is emitted in
+  // `renderPage` and the binding verify call that follows it is unwrapped — a provider error there
+  // reaches `failedPage` through `runExtraction`'s `.catch`, so a bare page CAN also appear in
+  // `pages_failed`. Nothing has been observed doing it and no rate here is computed from the
+  // difference, so it is stated rather than engineered around. What is missing is every record
+  // `agents/page.md` asks for in the log — a page ending mid-sentence, an orphan heading, an unkeyed
+  // symbol, a placeholder image source, a language change, an irregular table — unmet and unreported
+  // on about one page in seven (#349). Two of those six exist in the log and nowhere else; the other
+  // four also oblige the HTML, so on a bare page what is lost is the record, not always the remedy.
+  //
+  // Named for the reply shape and not for the consequence, because it is the narrower claim: an
+  // enveloped reply that simply leaves `"log"` empty ALSO has no log, has a different remedy (a
+  // prompt-compliance question rather than a parse one), and is not counted here. That sibling is
+  // not merely uncounted, it is unobserved: across 67 bench round logs on file, 2,320 `page.md`
+  // replies split into 2,001 with a non-empty log and 319 bare-HTML, with 0 carrying an envelope
+  // whose log was empty or absent. So today this is the whole population of pages with no log and
+  // not a lower bound on it — but the name still says which of the two it counts, because the day
+  // the other shape appears is the day the distinction pays for itself.
+  //
+  // Folded across feedback rounds like `pages_blank`: a page re-extracted with a proper envelope
+  // has a log now and leaves the set, a page bare again stays, and a re-extraction that threw
+  // keeps the prior fragment and so keeps the page — the field describes the DOCUMENT that
+  // shipped, not every render that happened. The per-round lines are all in log.jsonl, where
+  // `reextract` tells them apart.
+  pages_bare_html: number[];
   // Fidelity discrepancies the Copy Editor noticed on a page whose image it had and was not
   // asked about (pipeline/review.ts `readFidelityObserved`, issue #183). The first fidelity
   // signal in the pipeline that does not come from the check that produced the page: VERIFY
@@ -1164,6 +1193,14 @@ export function summarizeRun(
   // (`page_no_output`, `page_extraction_failed` with `kept: "prior"`).
   const blankSet = new Set<number>();
   let staleBlank = new Set<number>();
+  // The no-envelope pages fold on the same three events and for the same reason — see
+  // `pages_bare_html`. One difference worth naming: a re-extraction that DELIVERS is what takes a
+  // page out of this set, and it does so by writing no `page_bare_html` line, so the withdrawal at
+  // `reextract_start` is what does the work here rather than a positive answer of its own. There is
+  // no `page_enveloped` event and there should not be one; the ordinary case is not worth a line
+  // per page.
+  const bareSet = new Set<number>();
+  let staleBare = new Set<number>();
   for (const e of events) {
     if (e.type === "page_extraction_failed" && typeof e.page === "number" && e.kept !== "prior") {
       failedSet.add(e.page);
@@ -1183,9 +1220,23 @@ export function summarizeRun(
     ) {
       blankSet.add(e.page);
     }
+    if (e.type === "page_bare_html" && typeof e.page === "number") {
+      bareSet.add(e.page);
+    } else if (e.type === "reextract_start" && Array.isArray(e.pages)) {
+      staleBare = new Set(e.pages.filter((p): p is number => typeof p === "number" && bareSet.has(p)));
+      for (const p of staleBare) bareSet.delete(p);
+    } else if (
+      e.type === "page_extraction_failed" &&
+      e.kept === "prior" &&
+      typeof e.page === "number" &&
+      staleBare.has(e.page)
+    ) {
+      bareSet.add(e.page);
+    }
   }
   const pagesFailed = [...failedSet].sort((a, b) => a - b);
   const pagesBlank = [...blankSet].sort((a, b) => a - b);
+  const pagesBareHtml = [...bareSet].sort((a, b) => a - b);
 
   // The Copy Editor's fidelity observations, summed over every round it ran — one line per round
   // that had any, so a document reviewed in three rounds can contribute three lines about the same
@@ -1261,6 +1312,7 @@ export function summarizeRun(
     verification,
     pages_failed: pagesFailed,
     pages_blank: pagesBlank,
+    pages_bare_html: pagesBareHtml,
     fidelity_observed: observed,
   };
 }

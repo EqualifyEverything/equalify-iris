@@ -195,6 +195,96 @@ test("the verify task compares a region the page names against the bands the HTM
   }
 });
 
+// #349. `agents/page.md` asks for the "log" field by name in 26 places, and for six kinds of
+// obligation it asks for a log entry — a page ending mid-sentence, an orphan heading, an unkeyed
+// symbol, a placeholder image source, a language change, an irregular table. The verifier judging the
+// page against that contract was never shown the field, so it could only ignore those rules or hunt
+// for their evidence in the HTML: across 311 verify replies in two bench rounds, 35 problems on 26
+// replies demanded something of the log, and 26 of the 35 were about a log that existed and was not
+// shown. `verifyAgentOutput` now quotes it (test/page-log-to-verifier.test.ts pins the carrying,
+// including that a recheck is sent none).
+//
+// **Only TWO of the six are log-only, and the first draft of this clause said all six were.** The
+// other four have an HTML half that is the load-bearing one — `[page not fully transcribed]` as the
+// last content emitted (`page.md:49-51` calls the marker "the part that matters", because "log" is
+// not delivered as the document), a placeholder `src` naming the page and the graphic (`:313`), `lang`
+// on the element that changes language (`:602`), a reader-checkable note on an irregular sequence
+// (`:513`). Telling the verifier the OBLIGATION is discharged by the log suppresses exactly those
+// four in the HTML, on pages whose log admits them — so a truncated page whose log says where it
+// stopped would ship without the marker `test/e2e.sh` §9i requires, and a Korean page whose log names
+// its languages would ship declared English. The clause now discharges the RECORD and hands the log
+// back as evidence FOR reading the HTML half, which is why the pins below are split in two.
+//
+// This pins what the prompt does with it, and the prohibition is the half that pays. Showing the
+// field without a rule invites MORE log-directed demands, and every one of them is unsatisfiable by
+// construction: `correctPage` is handed the problem strings and parsed for `html` alone, so "the log
+// does not note X" spends the page's only licence on a field the repair cannot write.
+test("the verify task reads a quoted log as evidence and never makes it the subject", () => {
+  for (const [what, re] of [
+    ["a quoted log is the transcriber's own account, to be checked rather than trusted",
+      /that is the transcriber's account of its own work on this page, and it is evidence rather than a second source: check it against the image, the way you check the HTML/],
+    ["a record the contract asks for in the log and nowhere else is made there",
+      /A record the contract asks for in the\s+log AND NOWHERE ELSE is made there/],
+    // The two that really are log-only, named — the general rule is the one the verifier applies to
+    // the HTML, and these are the two cases where the evidence is nowhere else to be found.
+    ["with the two log-only records named",
+      /a heading the page gives nothing to place it\s+under, a symbol the page never keys/],
+    ["and what it costs to report one of them as unrecorded",
+      /where the log carries one of those, it is\s+carried, and reporting it as unrecorded is a false finding/],
+    // And the four with an HTML half, each named with the half the DOCUMENT owes — the whole point of
+    // the split. A verifier told the log discharges these stops checking the marker and the `lang`.
+    ["the four with an HTML half say the document's half is still the verifier's",
+      /the contract asks\s+something of the DOCUMENT as well, and that half is still yours to check/],
+    ["with each document-side obligation named",
+      /\[page not fully transcribed\] as the last thing it emits, a\s+placeholder src also names the page and the graphic, a change of language also\s+carries lang on the element that holds it, an irregular list or table also carries a\s+note a reader can check/],
+    // The inversion that makes the change earn its cost rather than just not regress: an admission in
+    // the log is EVIDENCE the HTML half is owed, so it turns a silent loss into a `content_missing`.
+    ["and the log is evidence FOR that reading, not a discharge of it",
+      /is not the discharge of those rules but your\s+evidence for reading them: where the log admits one and the HTML does not carry its\s+half, the reader loses it, and it is a problem like any other/],
+    // Named because it is the one of the four with a downstream gate on it: `test/e2e.sh` §9i treats
+    // the marker as the thing that must survive the review loop.
+    ["with the marker singled out, in page.md's own words",
+      /the marker most of\s+all, because a page that stops without one reads as complete to every reader/],
+    // Review round 2, non-blocking. The four dual obligations do NOT share one `kind`: the taxonomy at
+    // :157 puts a WCAG requirement unmet over faithful content in `a11y_only`, and :160's
+    // earliest-in-list tiebreak cannot rescue a missing `lang` into `content_missing`, because nothing
+    // is absent. `kind` gates nothing today (extraction.ts records the kind-gated fail as deliberately
+    // unimplemented) — but it is the count #349's own §7.4 argument is measured in, and it becomes a
+    // behaviour difference the day that gate is priced off these counts.
+    ["the four are tagged by what the reader loses and not all as content_missing",
+      /Tag it by what\s+the reader loses, the way you tag everything else/],
+    ["with the content-side two named",
+      /a missing marker and a missing\s+note about an irregular sequence are "content_missing"/],
+    ["with the language case as a11y_only",
+      /a language the log names that no lang\s+attribute marks is "a11y_only"/],
+    // Review round 3, non-blocking, and the tag it corrects was mine rather than round 2's. `a11y_only`
+    // is defined at :157 as a WCAG 2.2 AA requirement unmet, and an absent placeholder `src` is not
+    // one: `page.md:313-314` puts the placeholder there "for whatever supplies the real asset", while
+    // the reader is given the graphic by its alt text, which is present by hypothesis. So the fourth
+    // obligation is `structure_wrong` — content all there, markup around it incomplete — which is also
+    // where :160's earliest-in-list tiebreak would land it if both kinds were argued.
+    ["and the placeholder src as structure_wrong rather than a11y_only",
+      /a\s+graphic whose placeholder src the log records but the HTML does not carry is\s+"structure_wrong"/],
+    // The other direction: a log that overstates what was done is not a licence to argue with the
+    // log, it is evidence about the page — and the finding it supports is the ordinary one.
+    ["a log the image refutes makes the missing content the problem, not the log",
+      /the log is not the problem; the missing content is, and it is "content_missing" like any other/],
+    ["the log is never the subject of a problem",
+      /Never make the log itself the subject of a problem/],
+    ["with the mechanism, so the rule is not read as a matter of taste",
+      /The correction pass is handed your problem strings and the page and answers with HTML alone — it writes no log/],
+    ["and what such a problem costs the page",
+      /it spends the only licence you have over that page on a field the repair cannot touch/],
+    // The absence case. 13.7% of pages reach the verifier from a reply that had no envelope and so
+    // no log field at all, and "the agent recorded nothing" is a claim about the page that the
+    // silence does not support.
+    ["a message with no log quoted says nothing about the page",
+      /where the user message quotes no log at all, the reply had none to quote: that is a fact about the reply and not about the page, so say nothing about it either way/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
+  }
+});
+
 // Also #353. The page agent can ask for a specialist (`suggested_agent`); `dispatchSpecialist` routes
 // it and logs the outcome, and nothing else read it. In a 100-page round there were 7 such requests
 // on 5 pages under 6 names, every one a map specialist, none resolved — and those 5 were every page
