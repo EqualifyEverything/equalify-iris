@@ -38,6 +38,16 @@ interface VerifyOutput {
   // shapes it arrives in (a list of strings, a list of `{kind, problem}` objects) are both
   // valid replies to a contract that has said both things — see `readProblems`.
   problems?: unknown;
+  // `notes` is deliberately NOT here. The verify contract invites the agent's working-out into
+  // a `notes` string precisely so that it lands somewhere nothing acts on, and the prompt tells
+  // the model as much in so many words: "read by nothing: no correction pass, no other agent,
+  // no part of the delivered document". Adding it to this interface is the first half of
+  // breaking that promise — the reply's prose reached the corrector before, on 14 of 71
+  // rejections in a 45-page control round, and `problems` is the only thing `correctPage` is
+  // licensed to change (issue #339). If a future reader wants that text, it is already
+  // persisted verbatim on the `agent_call` line and can be read there without giving the
+  // pipeline a path to it. Declaring the field would not itself fail a test — the pin in
+  // `test/verify-notes-field.test.ts` is behavioural, and fails as soon as anything READS it.
 }
 
 interface ClassifyOutput {
@@ -251,7 +261,21 @@ export async function verifyAgentOutput(
   ctx.log.agentCall({ agent: fb, phase: "extraction", image: img.name, output: res.text });
 
   const parsed = extractJson<VerifyOutput>(res.text);
-  if (!parsed) return unjudgedVerdict();
+  // Both flags, as booleans, or this is not a verdict. The contract asks for both and every one of
+  // the 1,342 readable verify replies in the bench logs answers both — so the check costs nothing
+  // measurable, and what it buys is the failure mode #339's `notes` field opens. `extractJson`
+  // returns the LAST readable object in a reply, and a `notes` string that quotes the contract back
+  // ends with one: an unescaped `{ "faithful": true, "problems": [] }` inside the prose, which read
+  // as a confident PASS on a page the verifier had just rejected for a missing table row — `ok`
+  // true, `problems` empty, no `unjudged` flag, and a plain `page_verify_ok` line over it. The
+  // whole-reply repair in `src/util/json.ts` reads the envelope correctly when the reply is nothing
+  // but its JSON, which is what the prompt asks for; this is the half that also holds when the
+  // model fences it or writes a sentence first, and it degrades to a page nobody judged rather than
+  // to a page that passed. `pages_unjudged` counts those, which is why the after-check in prd.md
+  // §7.4 names it.
+  if (!parsed || typeof parsed.faithful !== "boolean" || typeof parsed.accessible !== "boolean") {
+    return unjudgedVerdict();
+  }
   const ok = parsed.faithful !== false && parsed.accessible !== false;
   return { ok, ...readProblems(parsed.problems) };
 }

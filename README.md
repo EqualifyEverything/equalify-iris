@@ -1500,6 +1500,82 @@ each — so treat the per-defect rates as directional. Both runs of it produced 
 the dry run over the same five sessions still reports the same 11 pages and 30 damaged copies after
 the injector guards were tightened, so these numbers are the current code's.
 
+The verdict's other contract problem runs the opposite way, and the two are a matched pair: not a page
+that passes on a defect it described, but a page that fails on a problem it has already withdrawn.
+`problems` is handed to the correction pass verbatim under "resolve every problem", and since issue
+#132 it is also the only thing that pass may change — so an entry reasoning its way to "on closer
+inspection this is correct, disregard" is both work to do and permission to alter text the verifier
+had just confirmed was right. Over 45 undamaged control pages read three times each, the deployed
+verifier retracted **32 of its 244 problems inside their own strings**, on 7 pages of 45, and 14 of
+its 71 rejections carried at least one of them to the corrector (issue #339). **Every model does it**,
+and how often depends on the corpus rather than the vendor: on those undamaged control pages a candidate
+at another vendor did it 0 times in 273 problems, but on a real 100-page document the three models
+measured 2.7%, 3.1% and 4.5% — a factor of 1.7, not an infinity, and 4.5% is the figure a production run
+sees. An earlier revision of this section quoted the control-page 0 as evidence that the behaviour is not
+inherent to the task; it is not that, and the same round found that 13.1% itself did not reproduce on a
+10-page subset of the very same pages (0.0%), so the control rate is a noisy measurement of a real
+defect rather than a vendor difference. No page in that round was rejected *solely* on retracted items —
+though one page in a later verify-only round was, so that bound is low rather than zero — so the cost is
+mixed instructions rather than wasted rounds, which is the expensive kind here, because the page agent
+does as it is told, including replacing words that were already right.
+
+The cause is the reply shape rather than the model: `{ faithful, accessible, problems }` left nowhere
+to think, so the thinking went to the only free-text field there was, and that field is the one that
+drives the corrector. `agents/feedback.md` now defines `problem` as the conclusion only, says an item
+concluded **not** to be a problem is omitted rather than narrated, and gives the working-out a
+destination — `notes`, read by nothing: not `readProblems`, not the correction prompt, not the
+delivered document. Naming a destination rather than only forbidding the narration is issue #303's
+lesson read the other way round, since what the Reader stopped writing as prose partly came back as
+issues asking for no change. That every model does it on real pages is the strongest form of the
+schema argument — one of the specimens declares the entry "excluded from problems count" from inside
+the problems array, which is the case for a destination made by the model itself. It also means the
+**instruction** half has no proof of sufficiency: no model has been shown going to zero by instruction
+alone, so the omit-rather-than-narrate sentence is shipped as cheap and plausible, not as demonstrated.
+`test/verify-notes-field.test.ts` pins both halves — the clause, and the
+promise the clause makes to the model about where `notes` goes, which is the half a later change could
+quietly falsify. What it costs is 1,253 characters of prompt on every verify call; what it buys is
+**not** measured — the behaviour was counted and the fix was not — and `pages_unjudged` is the number
+to read beside any re-count, because an invited free-text field makes a reply longer and a verify
+reply that stops mid-object is a page nothing judged, shipping under a `page_verify_ok` line.
+
+Inviting prose also invites a reply that quotes the contract back, and `extractJson` returns the LAST
+readable object in a reply. So an unescaped `{ "faithful": true, "problems": [] }` inside `notes` ends
+the reply with a second object that carries the decision flag, and reading it turns a page the
+verifier rejected for a missing table row into a confident pass — no problems, no `unjudged` marker,
+a plain `page_verify_ok` line, the one shape `pages_unjudged` cannot count. Two things close it. A
+reply that is nothing but its object is now read with the repair rule's colon case confined to keys,
+which is where JSON puts a colon after a string — and that reading is taken only where the ordinary walk
+did **not** already close on the reply's last character, and where the reading's own strings are
+self-contained, every `{` inside them closing inside the same string. Every limit there is measured.
+Applied to every candidate in the walk the narrow rule changes 14 of 4,100 bench replies and loses on
+all 14: a Reader verdict quoting `{"html":"…` in its prose gets a string that never closes and swallows
+the verdict, returning one issue instead of five. Its own weak case is a draft abandoned mid-string and
+restarted inline, where it returns the abandoned prose glued to the front of the page. Two gates refuse
+that, and it took both: a restart the walk can read **whole** closes where the reply closes, so nothing
+is left for a second reading to recover; and the abandoned `{` does not close inside its string, which
+catches a restart the walk could only read in part. The brace test alone is not enough, because one `}` in the restarted page
+content — a code listing, template syntax, a math brace — rebalances the abandoned string.
+Discarding the reading costs nothing: it answers with the walk's result, which is the answer before any
+of this. And because a fenced reply is beyond any one-pass reader,
+`verifyAgentOutput` now refuses to read anything carrying fewer than both boolean flags as a verdict:
+1,342 of 1,342 readable verify replies in those logs carry both, so the check costs nothing measurable
+and converts a silent pass into a counted `unjudged` page. What it does cost is the opposite shape — a
+`faithful: false` reply that omits `accessible` no longer buys a correction — and that page is counted
+rather than corrected, which is the trade made knowingly.
+
+A whole class of decoy defeats both, and it is named here at its real width because it is the class the
+new field most invites: **a quoted decoy containing any string value at all**. Every reading here treats
+a `"` after a `:` as an opener and a `"` before `,`, `}` or `]` as a terminator, so the real `notes` value
+ends inside the quoted sentence, no whole-reply object is available to prefer, and the quoted contract —
+carrying both flags as booleans — is what the flags gate sees. It reads as a pass on a rejected page, on
+`main` and after this change alike. What the parser change fixes is only the decoy with **no** string
+values, which is the shape the issue produced; an earlier revision of this section called the residual
+"one shape … a decoy quoting an **empty** string", which had the mechanism right and the width wrong in
+the expensive direction, since the empty string is the minimal instance rather than the trigger. What
+removes the class is the prompt clause asking for no quoted JSON in `notes` at all, which is why that
+clause is not treated as decoration. Both an empty and a non-empty instance are pinned as
+failing-by-design assertions in `test/envelope-as-content.test.ts`.
+
 ## Automated code review
 
 Every PR is reviewed by Claude in CI before a human reads it
