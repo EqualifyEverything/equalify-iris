@@ -1500,6 +1500,32 @@ each — so treat the per-defect rates as directional. Both runs of it produced 
 the dry run over the same five sessions still reports the same 11 pages and 30 damaged copies after
 the injector guards were tightened, so these numbers are the current code's.
 
+The verdict's other contract problem runs the opposite way, and the two are a matched pair: not a page
+that passes on a defect it described, but a page that fails on a problem it has already withdrawn.
+`problems` is handed to the correction pass verbatim under "resolve every problem", and since issue
+#132 it is also the only thing that pass may change — so an entry reasoning its way to "on closer
+inspection this is correct, disregard" is both work to do and permission to alter text the verifier
+had just confirmed was right. Over 45 undamaged control pages read three times each, the deployed
+verifier retracted **32 of its 244 problems inside their own strings**, on 7 pages of 45, and 14 of
+its 71 rejections carried at least one of them to the corrector; a candidate model at another vendor
+did it 0 times in 273 problems (issue #339). No page was rejected *solely* on retracted items, so the
+cost is mixed instructions rather than wasted rounds — which is the expensive kind here, because the
+page agent does as it is told, including replacing words that were already right.
+
+The cause is the reply shape rather than the model: `{ faithful, accessible, problems }` left nowhere
+to think, so the thinking went to the only free-text field there was, and that field is the one that
+drives the corrector. `agents/feedback.md` now defines `problem` as the conclusion only, says an item
+concluded **not** to be a problem is omitted rather than narrated, and gives the working-out a
+destination — `notes`, read by nothing: not `readProblems`, not the correction prompt, not the
+delivered document. Naming a destination rather than only forbidding the narration is issue #303's
+lesson read the other way round, since what the Reader stopped writing as prose partly came back as
+issues asking for no change. `test/verify-notes-field.test.ts` pins both halves — the clause, and the
+promise the clause makes to the model about where `notes` goes, which is the half a later change could
+quietly falsify. What it costs is 1,102 characters of prompt on every verify call; what it buys is
+**not** measured — the behaviour was counted and the fix was not — and `pages_unjudged` is the number
+to read beside any re-count, because an invited free-text field makes a reply longer and a verify
+reply that stops mid-object is a page nothing judged, shipping under a `page_verify_ok` line.
+
 ## Automated code review
 
 Every PR is reviewed by Claude in CI before a human reads it

@@ -67,9 +67,24 @@ KIND of problem it is — one of exactly these five:
 Tag each problem by what a reader LOSES. When more than one kind applies, the earliest
 in that list wins: content that is absent is "content_missing" even though it is also a
 WCAG failure, and an image with no description at all is "content_missing", not
-"alt_quality". Use no kind outside those five. Respond with ONLY:
+"alt_quality". Use no kind outside those five.
+Every string in "problems" is handed to a correction pass verbatim, under the
+instruction to resolve every problem and to change nothing the list does not
+name — so a problem is a licence to alter the page, and the only licence that
+pass has. An item you conclude is NOT a problem must therefore be OMITTED from
+"problems" rather than reported and then withdrawn inside its own text: "on
+closer inspection this is correct, disregard" arrives at that pass as work to do
+on output you have just confirmed was right. Each "problem" is the conclusion
+only. Working-out goes in "notes" instead — a reading you checked and ruled out,
+a rule you had to re-read, anything you decided was fine. "notes" is read by
+nothing: no correction pass, no other agent, no part of the delivered document.
+It is ONE string for the whole reply, never a field on a problem, and every
+entry of "problems" still needs its "problem" text. Use it only for text you
+would otherwise have written into a problem, and leave the field out when you
+have none. Respond with ONLY:
 { "faithful": true|false, "accessible": true|false,
-  "problems": [{ "kind": "content_missing", "problem": "..." }] }
+  "problems": [{ "kind": "content_missing", "problem": "..." }],
+  "notes": "working-out, read by nothing — omit when you have none" }
 
 TASK: scope
 You are given a user-feedback message and a list of the document's pages (page

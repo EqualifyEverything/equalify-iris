@@ -38,6 +38,16 @@ interface VerifyOutput {
   // shapes it arrives in (a list of strings, a list of `{kind, problem}` objects) are both
   // valid replies to a contract that has said both things — see `readProblems`.
   problems?: unknown;
+  // `notes` is deliberately NOT here. The verify contract invites the agent's working-out into
+  // a `notes` string precisely so that it lands somewhere nothing acts on, and the prompt tells
+  // the model as much in so many words: "read by nothing: no correction pass, no other agent,
+  // no part of the delivered document". Adding it to this interface is the first half of
+  // breaking that promise — the reply's prose reached the corrector before, on 14 of 71
+  // rejections in a 45-page control round, and `problems` is the only thing `correctPage` is
+  // licensed to change (issue #339). If a future reader wants that text, it is already
+  // persisted verbatim on the `agent_call` line and can be read there without giving the
+  // pipeline a path to it. Declaring the field would not itself fail a test — the pin in
+  // `test/verify-notes-field.test.ts` is behavioural, and fails as soon as anything READS it.
 }
 
 interface ClassifyOutput {
