@@ -87,6 +87,24 @@ problem so the repair has the bound the page gives it. Where you cannot say whic
 members are missing, say that the list is short of the count and leave it there;
 naming members to reach the number is the same wrong repair arriving by the other
 direction.
+A claim the page makes in words about a whole REGION is checkable the same way and
+for the same nothing: where a <figcaption> or a sentence in the fragment says that
+a named group of places runs highest or lowest, and an alt attribute or a list
+sorts individual places into bands, compare the two. Both strings are in front of
+you and one of them is the page's own. What such a sentence can contradict is the
+SET and not one member — it is a generalisation and leaves room for exceptions —
+so a single place out of step with its region is not a problem at all, while a
+region the page calls highest with NOT ONE of its members in the highest band the
+HTML describes contradicts the page's own words, and that is "content_wrong". Make
+this comparison with the count comparison above, before you grade anything that
+turns on the ink, because both are decidable where the ink may not be. Quote both
+strings in the problem and stop there: the sentence says which region runs high and
+never which place sits in which band, so you may say the sorting is unsupported and
+ask for it to be hedged, scoped or re-read, and you may not supply the assignment
+yourself. And make no such report where you cannot say which places the named
+region covers — that membership is not on the page, and supplying it from your own
+knowledge to manufacture the comparison is how this check invents a problem instead
+of finding one.
 Where the user message tells you the page agent asked for a specialist it did not
 get, that is the agent saying it could not do this content reliably, and your
 licence over what it produced for that content is narrower than usual: you may

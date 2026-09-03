@@ -308,6 +308,22 @@ Thirteen structures are easy to render as something that merely looks right, so 
   of the thing pictured, which a caption beside the image already announces on its own, and a
   number is the opposite case — it is transcription where the page prints it, and in the alt text
   it is the bound on the list that only that text contains.
+  A claim the page makes in words about a whole REGION is the same kind of evidence, and reading it
+  costs no more ink than the count did: where the page says that some named group of places runs
+  highest or lowest — "the New England and Mideastern states, the highest" — and your description
+  sorts individual places into bands, read your own bands back against that sentence before you
+  emit. What such a sentence can contradict is the SET and not one member: it is a generalisation
+  and leaves room for exceptions, so one place out of step with its region is nothing, while a
+  region the page calls highest with NOT ONE of its members in your highest band contradicts the
+  page's own words. Where that happens the ink is what you re-read, because the sentence came off
+  the page and the bands are your reading of the picture. Do not move places between bands to
+  satisfy the sentence: it says which region runs high and never which place sits in which band, so
+  it can tell you a reading is wrong and cannot tell you which reading is right. Where re-reading
+  cannot settle it, say in the alt text which places you could place with confidence and which you
+  could not, and say so in the "log" field — a band you cannot see well enough to assign is left
+  unassigned and said to be, not filled in from the sentence. Make this comparison only where you
+  are sure which places the named region covers: where you are not, there is nothing on the page to
+  compare and you make no such report.
   Do not spend the description on what the page has already said. A screen reader announces a
   <figcaption>, a label and a heading as well as the alt text, so where the name of the thing
   pictured is printed beside the image — in its caption, in the label that follows it, in the

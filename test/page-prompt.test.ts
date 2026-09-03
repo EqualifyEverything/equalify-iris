@@ -782,6 +782,39 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     // described swatch as invention and deleted it (#347). Stated instead of derived.
     ["the count standing in both places is excluded from the redundancy rule that follows",
       /A count standing in both places is not the repetition the next rule forbids: that rule is about the NAME of the thing pictured/],
+    // #355, the sibling of that check on the other axis: the count compares an enumeration's LENGTH
+    // against a printed size, this compares its MEMBERSHIP against a printed region. Same map, same
+    // fragment. The <figcaption> transcribed "The South, in General, Has the Lowest Effective Rates;
+    // the New England and Mideastern States, the Highest" while the alt ten lines above put 0 of 6
+    // New England and 0 of 6 Mideast jurisdictions in its highest band — all twelve in the
+    // second-LOWEST — with the South as a clean control at 6 of 6 in the lightest. Two regional
+    // claims, both inverted, and no pixel needed to see it.
+    ["a printed claim about a region is evidence the description's bands are checked against",
+      /A claim the page makes in words about a whole REGION is the same kind of evidence, and reading it costs no more ink than the count did/],
+    ["the check is named with the shape such a claim comes in",
+      /where the page says that some named group of places runs highest or lowest — "the New England and Mideastern states, the highest" — and your description sorts individual places into bands, read your own bands back against that sentence before you emit/],
+    // The trigger is pinned as a SET predicate, because the caption's own words are hedged: "in
+    // general" licenses exceptions, so one place out of its region's band is not evidence of
+    // anything, and a rule that fired on one would fire on most correct maps. Nought of six twice
+    // over is not an exception.
+    ["what the sentence contradicts is the whole set, never one member",
+      /What such a sentence can contradict is the SET and not one member: it is a generalisation and leaves room for exceptions, so one place out of step with its region is nothing/],
+    ["a region called highest with no member in the highest band is the contradiction",
+      /a region the page calls highest with NOT ONE of its members in your highest band contradicts the page's own words/],
+    // Which of the two gives way, and how far. The sentence is transcription and the bands are a
+    // reading, so the reading is what gets re-examined — but a regional generalisation cannot say
+    // which place sits in which band, so it licenses no reassignment. Without this, a model told two
+    // strings disagree has an obvious repair available: move states until the caption is satisfied,
+    // which on this plate would have written a second wrong answer over the first.
+    ["the ink is re-read, and places are not moved between bands to satisfy the sentence",
+      /Do not move places between bands to satisfy the sentence: it says which region runs high and never which place sits in which band/],
+    ["an unresolved band is left unassigned and said to be, not filled in from the sentence",
+      /a band you cannot see well enough to assign is left unassigned and said to be, not filled in from the sentence/],
+    // And the bound that keeps this from inventing work: which places a named region covers is world
+    // knowledge, not text on the page. Where the model is not sure of the membership there is no
+    // second string to compare, and guessing one manufactures the disagreement it then reports.
+    ["the check applies only where the region's membership is not in doubt",
+      /Make this comparison only where you are sure which places the named region covers: where you are not, there is nothing on the page to compare and you make no such report/],
     // #122, #124, #125: the position title, the product name and the caption were each
     // repeated into the alt text of the image they sat beside.
     ["a name the page prints beside the image is not repeated in its description",

@@ -316,10 +316,9 @@ export function structureCounts(html: string): StructureCounts {
   return out;
 }
 
-// Every alt attribute's value, in document order, joined on a separator an attribute
-// value cannot itself contain. A space would let a rewrite that moves one word from one
-// image's description into the next one's compare equal to the original: both descriptions
-// changed, and only the boundary between them says so.
+// Every alt attribute's value, in document order. Kept as the values rather than one string
+// because `altRelocations` below asks a question about a single description — which members it
+// lists alongside which — and a join is exactly the boundary that question needs to keep.
 //
 // `\b` would open on the `alt` in `data-alt=` and in any other attribute ending in those
 // three letters, so the name has to start on something that is not part of a longer one.
@@ -327,12 +326,169 @@ export function structureCounts(html: string): StructureCounts {
 // the same way, so such a fragment is compared consistently and a rewrite of it is reported
 // as an alt change, which is the wrong bucket but not a wrong answer about whether the page
 // moved.
-function altText(html: string): string {
+function altValues(html: string): string[] {
   const values: string[] = [];
   for (const m of html.matchAll(/(?<![-\w])alt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
     values.push(decodeEntities(m[1] ?? m[2] ?? m[3] ?? "").replace(/\s+/g, " ").trim());
   }
-  return values.join("\u0000");
+  return values;
+}
+
+function altText(html: string): string {
+  return altValues(html).join("\u0000");
+}
+
+// Where one enumeration inside a description ends and the next begins. A member list is written with
+// commas, and what separates two such lists is heavier punctuation: "the darkest states are Ohio,
+// Wisconsin and Wyoming; cross-hatched are Iowa, Kansas and Missouri".
+//
+// The period is admitted only after a lowercase letter or a closing quote or bracket, which keeps
+// this off the two shapes that carry one INSIDE a member: an abbreviation ("MO.", "N.D.", "D.C.")
+// and a decimal ("the 1.5 thru 1.9 category"). Both are ordinary on the maps this reads, and
+// splitting either mid-member would cut a bucket in half and report every member on the far side of
+// the cut as having moved. Erring this way costs recall instead — two lists written as two sentences
+// with no semicolon between them read as ONE bucket here, and a member crossing between them is not
+// seen — and that is the right side to err on for a signal with no ground truth to check it against.
+const ENUMERATION_BREAK = /(?<=[a-z)"'\]])\.(?=\s|$)|[;:]/;
+
+// The longest a member of an enumeration gets. Members are names — "Missouri", "New Hampshire",
+// "District of Columbia" — while the prose that introduces them is not, and prose broken by commas
+// is otherwise indistinguishable from a list of two. Without a bound, "which appears cross-hatched
+// on the map, placing it in the second band" is two members, and a rewording of that clause reads as
+// two relocations. Nothing about a name needs 40 characters.
+const MEMBER_MAX = 40;
+
+// The fewest names a comma-separated run must hold to be read as a list at all.
+const LIST_MIN = 2;
+
+// One description's enumerations: the member sets of each comma-separated list in it, and where in
+// them each member sits.
+//
+// Keyed on a normalised form, so a member re-typed in another case or with its spacing changed is
+// the same member — the question here is whether a member MOVED, and one that merely gained a
+// capital letter has not. A member occurring more than once is dropped outright rather than resolved
+// to one of its occurrences: which of two "Missouri"s the one in the corrected reply corresponds to
+// is exactly what this cannot know, and settling it by position would be a guess reported as a
+// measurement.
+function enumerationsIn(alt: string): {
+  buckets: Set<string>[];
+  memberOf: Map<string, { shown: string; bucket: number }>;
+} {
+  const buckets: Set<string>[] = [];
+  const memberOf = new Map<string, { shown: string; bucket: number }>();
+  const dropped = new Set<string>();
+  for (const bucket of alt.split(ENUMERATION_BREAK)) {
+    const members: { key: string; shown: string }[] = [];
+    for (const piece of (bucket ?? "").split(",")) {
+      for (const item of piece.split(/\s+(?:and|or)\s+/i)) {
+        const shown = item.replace(/^(?:&|and|or)\s+/i, "").replace(/\s+/g, " ").trim();
+        if (!shown || shown.length > MEMBER_MAX) continue;
+        // A trailing period is not part of the name, and whether a member keeps one depends on where
+        // in its list it fell rather than on anything about the member: "Wyo." at the end of a
+        // description loses its dot to the sentence break above, and the same abbreviation before a
+        // comma keeps it. Left in the key, `Wyo` and `Wyo.` are two members and a move between the
+        // two lists would be invisible — which is precisely the shape of description this reads.
+        members.push({ key: shown.toLowerCase().replace(/\.+$/, ""), shown });
+      }
+    }
+    // One name is not a list, and two is the whole floor here: what keeps this off reworded prose is
+    // `DESTINATION_OVERLAP` below, which in demanding two names that were already listed together puts
+    // the list a member JOINS at three however low this sits. Both directions are pinned, because a
+    // first draft demanded three at each end and nothing in the tests objected — it was a second guard
+    // on a shape the destination clause already refuses, and it silently declined #355's own shape at
+    // its smallest, a two-name band losing a member into a band that already existed. Below two, a
+    // lone name in a clause reads as a category of one, and a member that was listed with nobody has
+    // no first company for this to compare its second against.
+    if (members.length < LIST_MIN) continue;
+    const index = buckets.length;
+    buckets.push(new Set(members.map((m) => m.key)));
+    for (const m of members) {
+      if (memberOf.has(m.key) || dropped.has(m.key)) {
+        memberOf.delete(m.key);
+        dropped.add(m.key);
+        continue;
+      }
+      memberOf.set(m.key, { shown: m.shown, bucket: index });
+    }
+  }
+  return { buckets, memberOf };
+}
+
+// How many of a member's new neighbours have to have been listed together BEFORE for the list it
+// joined to count as one that already existed. Two: one shared name is a coincidence between any two
+// pieces of prose about the same picture, and this is the clause that separates "moved from one list
+// into another" from "the sentence around it was rewritten".
+const DESTINATION_OVERLAP = 2;
+
+const without = (set: Set<string>, key: string): Set<string> =>
+  new Set([...set].filter((k) => k !== key));
+
+const shared = (a: Set<string>, b: Set<string>): number => [...a].filter((k) => b.has(k)).length;
+
+// The most one correction reports, so that a wholesale rewrite of a description cannot put a hundred
+// names on a log line. A relocation is a shape to go and look at, and the first few names are enough
+// to find the page.
+const RELOCATED_MAX = 6;
+
+// Members a correction moved from one enumeration into a DISJOINT one: listed with one set of names
+// before, and after with a set sharing none of them. Both replies put the member in some category
+// and they named different categories, which where the categories are mutually exclusive means the
+// correction asserts of that member exactly what the reply it corrected denied.
+//
+// #355 is the case. On a shaded map of state property tax rates the verify pass made ONE edit to the
+// description's bands, and it moved Missouri out of "darkest" into "cross-hatched". Measuring the
+// plate put Missouri on the flat side of the legend's own dispersion gap by 1.9×, and 2.8× below a
+// confirmed cross-hatched state at the identical level on the same plate — so $0.045 converted a
+// classification the image permits into the one it excludes. Nothing recorded that a member had
+// crossed: both replies existed, one after the other, and no code compared them.
+//
+// This reports the shape and takes no view on which reply is right. It cannot have one — on that
+// plate the two dark categories are 13 units apart under a 112-unit lighting gradient, so the level
+// axis refuses the question outright — and a guard that REFUSED such a correction would as often be
+// refusing the fix. What it hands a reader of the log is the name to go and check, which is why the
+// members are named rather than counted: a boolean saying something moved somewhere is not a claim
+// anybody can verify afterwards.
+//
+// Reordering is not relocation, and the disjointness is what says so: a pass that rewrites "Ohio,
+// Wisconsin, Wyoming" as "Wisconsin, Ohio, Wyoming" leaves every member listed with the same
+// company, so the two sets intersect. A member the correction ADDED or DROPPED is likewise not
+// reported — it has no pair of lists to compare, and the sizes already on the effect are what say
+// whether a description gained or lost content.
+//
+// Two conditions past being a list at all, and the second is the one that makes this quiet enough to
+// read. The two lists must share no member, or the member did not leave; and the list it joined must
+// be one that ALREADY EXISTED in the description it corrected (`DESTINATION_OVERLAP`) — a member
+// whose new neighbours are all new text is a member whose sentence was rewritten around it, which is
+// the commonest thing a correction does and nothing at all like a reclassification. Neither end needs
+// a size check of its own: `LIST_MIN` leaves the source with a sibling and the overlap leaves the
+// destination with two.
+export function altRelocations(before: string, after: string): string[] {
+  const from = altValues(before);
+  const to = altValues(after);
+  // Descriptions are paired by position, so a correction that added or removed an image has shifted
+  // every pairing after it and this can say nothing: comparing one image's alt against its
+  // neighbour's would report every member of both as relocated. A correction that changes how many
+  // images there are is a change `structure_changed` already names.
+  if (from.length !== to.length) return [];
+  const moved: string[] = [];
+  for (const [i, alt] of from.entries()) {
+    const wasIn = enumerationsIn(alt);
+    const nowIn = enumerationsIn(to[i]);
+    for (const [key, was] of wasIn.memberOf) {
+      const now = nowIn.memberOf.get(key);
+      if (!now) continue;
+      const left = without(wasIn.buckets[was.bucket], key);
+      const joined = without(nowIn.buckets[now.bucket], key);
+      if (shared(left, joined) > 0) continue;
+      const existed = wasIn.buckets.some(
+        (b, at) => at !== was.bucket && shared(without(b, key), joined) >= DESTINATION_OVERLAP,
+      );
+      if (!existed) continue;
+      moved.push(was.shown);
+      if (moved.length === RELOCATED_MAX) return moved;
+    }
+  }
+  return moved;
 }
 
 // Every attribute EXCEPT alt, tag by tag, in document order.
@@ -407,6 +563,12 @@ export interface CorrectionEffect {
   alt_changed: boolean;
   attrs_changed: boolean;
   structure_changed: boolean;
+  // Which members a description now lists in a different category than it did — see
+  // `altRelocations`. Absent where none did, which is the ordinary case, so this adds nothing to
+  // the line for a correction that did not reshuffle a list; present with the names, because the
+  // names are the whole use of it. Not one of the four ways above and not a fifth: a relocation
+  // always shows up as `alt_changed` too, and what it adds is what KIND of alt change it was.
+  alt_relocated?: string[];
 }
 
 export function correctionEffect(before: string, after: string): CorrectionEffect {
@@ -415,6 +577,7 @@ export function correctionEffect(before: string, after: string): CorrectionEffec
   // question about it is work for nothing.
   const textBefore = visibleText(before);
   const textAfter = visibleText(after);
+  const relocated = altRelocations(before, after);
   return {
     chars_before: before.length,
     chars_after: after.length,
@@ -424,6 +587,7 @@ export function correctionEffect(before: string, after: string): CorrectionEffec
     alt_changed: altText(before) !== altText(after),
     attrs_changed: attrText(before) !== attrText(after),
     structure_changed: tagShape(before) !== tagShape(after),
+    ...(relocated.length ? { alt_relocated: relocated } : {}),
   };
 }
 

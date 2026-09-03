@@ -148,6 +148,49 @@ test("the verify task compares an enumeration against a count the page prints", 
   }
 });
 
+// #355, the same free check on the other axis. The count check above compares an enumeration's
+// LENGTH against a size the page prints; this compares its MEMBERSHIP against a region the page
+// names. On the same map, in the same fragment, the <figcaption> read "The South, in General, Has the
+// Lowest Effective Rates; the New England and Mideastern States, the Highest" while the alt filed
+// 0 of 6 New England and 0 of 6 Mideast jurisdictions in its highest band — all twelve of them in the
+// second-lowest — with the South passing as a control at 6 of 6 in the lightest. The paid verify pass
+// on that page cost $0.04529 (67.4% of the page) and made one edit, which the ink says was wrong;
+// this comparison was available to it for nothing and it never made it.
+test("the verify task compares a region the page names against the bands the HTML sorts into", () => {
+  for (const [what, re] of [
+    ["the free check is named, and named as free",
+      /A claim the page makes in words about a whole REGION is checkable the same way and for the same nothing/],
+    ["with the shape such a claim comes in, and what it is compared against",
+      /where a <figcaption> or a sentence in the fragment says that a named group of places runs highest or lowest, and an alt attribute or a list sorts individual places into bands, compare the two/],
+    // Pinned as a SET predicate, because the caption's own words are hedged — "in General" licenses
+    // exceptions. A rule that fired on one member out of its region's band would fire on most
+    // correct maps, and the finding here is not one member: it is nought of six, twice.
+    ["what the sentence contradicts is the whole set, and one member is not a problem at all",
+      /What such a sentence can contradict is the SET and not one member — it is a generalisation and leaves room for exceptions — so a single place out of step with its region is not a problem at all/],
+    ["a region called highest with no member in the highest band is the finding, with its kind",
+      /a region the page calls highest with NOT ONE of its members in the highest band the HTML describes contradicts the page's own words, and that is "content_wrong"/],
+    // Ordered with the count check for the same reason the count check is ordered: this verifier's
+    // ink readings are graded 5 wrong of 6 on the pages whose verdict turns on one, and both of
+    // these checks are decidable without the picture at all.
+    ["the free check is ordered ahead of the ones that need the picture",
+      /Make this comparison with the count comparison above, before you grade anything that turns on the ink, because both are decidable where the ink may not be/],
+    // The licence bound, which is the operative half. A regional generalisation says which region
+    // runs high and never which place sits in which band, so the verifier has evidence that a
+    // reading is wrong and no evidence of what is right — and a problem string is an instruction the
+    // correction obeys literally. On this page the one thing the paid pass did buy was a state moved
+    // between two mutually exclusive bands, into the only one the ink rules out.
+    ["the problem quotes both strings and supplies no assignment of its own",
+      /Quote both strings in the problem and stop there: the sentence says which region runs high and never which place sits in which band, so you may say the sorting is unsupported and ask for it to be hedged, scoped or re-read, and you may not supply the assignment yourself/],
+    // And the bound that keeps the check from inventing work: which places a region covers is world
+    // knowledge, not text in the fragment. Supplying that membership to make the comparison possible
+    // manufactures the disagreement, and this verifier's guesses are what the whole rule distrusts.
+    ["the check is refused where the region's membership is not on the page",
+      /make no such report where you cannot say which places the named region covers — that membership is not on the page, and supplying it from your own knowledge to manufacture the comparison is how this check invents a problem instead of finding one/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
+  }
+});
+
 // Also #353. The page agent can ask for a specialist (`suggested_agent`); `dispatchSpecialist` routes
 // it and logs the outcome, and nothing else read it. In a 100-page round there were 7 such requests
 // on 5 pages under 6 names, every one a map specialist, none resolved — and those 5 were every page

@@ -1614,8 +1614,8 @@ finding, so that direction stays reportable with the printed number quoted as it
 verifier that cannot say which members are missing says the list is short rather than naming three.
 The second check is a signal the pipeline already emitted and nothing consumed: the page agent's
 `suggested_agent` request, which in one 100-page round fired 7 times on 5 pages under 6 names, every
-one a map specialist, none resolvable — and those 5 were every page whose verdict turned on reading
-ink. An unmet request is now carried into the verify message (`specialistCaution` in
+one a map specialist, none resolvable — and those 5 held 4 of the 5 pages whose ink reading has since
+been graded wrong. An unmet request is now carried into the verify message (`specialistCaution` in
 `src/pipeline/extraction.ts`, after the cached prefix so one page's note cannot cost the document its
 cache reads), where it narrows what the verifier may assert: it can ask for an unsupported reading to
 be hedged or removed, and may not supply one of its own. **Unmet** is not the same question as
@@ -1630,6 +1630,42 @@ the four it was. It is not treated as a detector — it is
 page-level rather than per-arm and it missed two hard pages in that round — so that licence bound
 holds on every page and the flag only says where the model has already admitted the difficulty.
 `prd.md` §7.4 v1.11, with the carrying pinned in `test/verify-specialist-caution.test.ts`.
+
+The third check is the same comparison on the other axis, and it is the one that fires on the page
+above (issue #355). Its `<figcaption>` also read *"The South, in General, Has the Lowest Effective
+Rates; the New England and Mideastern States, the Highest"*, and the `alt` filed **0 of 6** New England
+and **0 of 6** Mideast jurisdictions in its highest band — eleven of the twelve in the *second-lowest*
+— while the South passed as a control at 6 of 6 in the lightest. Where the count check compares a
+list's length against a printed number, this compares its membership against a printed region, and
+both prompts now make it before anything that turns on the ink. Three properties of that sentence
+shape the rule. It is a generalisation — *"in General"* is the page's own hedge — so what it can
+contradict is the whole set and never one member. It says which region runs high and never which place
+sits in which band, so it licenses no reassignment: the reader re-reads the ink, and the verifier may
+ask for the sorting to be hedged, scoped or re-read and may not supply the assignment itself. And
+which places a region covers is world knowledge rather than text on the page, so both prompts refuse
+the comparison where that membership is not certain, because supplying it manufactures the
+disagreement it would then report. The ink agrees with that refusal to referee: New York's fill is
+darker than Pennsylvania's by about a category step while the `alt` files both in the same band, and
+the absolute category of either is unavailable — the paper under the legend reads ~72 against ~90–98
+at the states, a baseline shift larger than the 13-unit gap between the categories being decided.
+
+That page also paid **$0.04529, 67.4% of its own cost**, for one edit: Missouri moved from `darkest`
+into `cross-hatched`, which the plate's texture puts on the flat side of the legend's own gap (sd 9.1,
+against 17.2 for the hatched swatch, at most 7.1 for the three flat ones, and 25.7 for Wisconsin at
+the identical median). The log line for that correction said `alt_changed: true` and nothing else, so
+`correctionEffect` now also names **which members a correction moved from one list into a disjoint
+one** (`alt_relocated` on `page_corrected`). It passes no judgement on which of the two replies is
+right — on that plate the two dark categories are 13 units apart under a 112-unit lighting vignette,
+so nothing can — and it is not a gate: what ships is unchanged. The members are named rather than
+counted, because a boolean saying something moved somewhere is not a claim anyone can check. Two
+conditions keep it quiet: the two lists must share no member, and the list joined must be one that
+already existed in the description being corrected, by two or more names already listed together — a
+member whose new neighbours are all new text is a sentence someone rewrote around it. A list starts at
+two names, a floor pinned in both directions: three at each end failed no test, since the destination
+condition already refuses the two-phrase false positive it was aimed at, and it declined the real shape
+at its smallest. `prd.md` §7.4 v1.12, with both
+halves pinned in `test/page-prompt.test.ts`, `test/feedback-prompt.test.ts` and
+`test/verification.test.ts`.
 
 ## Automated code review
 

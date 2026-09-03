@@ -134,6 +134,168 @@ test("an attribute that merely ends in alt is not an alt", () => {
   assert.equal(e.text_changed, false);
 });
 
+// --- a member that crossed between two lists (#355) ---------------------------
+
+// The p095 shape, at its own scale. A shaded map of state property tax rates, the verify pass made
+// exactly ONE edit to the description's bands, and the edit moved Missouri out of the darkest list
+// and into the cross-hatched one. Measuring the plate put Missouri on the flat side of the legend's
+// own dispersion gap by 1.9×, so the $0.045 pass turned a classification the image permits into the
+// one it excludes — and nothing in the log said a state had crossed, because nothing compared the
+// two replies.
+const BANDS_BEFORE =
+  `<figure><img src="p095-map.png" alt="A map of the United States shaded in four bands. ` +
+  `Darkest, 2.0 percent and over: Ohio, Wisconsin, Wyoming, Missouri; ` +
+  `cross-hatched, 1.5 thru 1.9 percent: Michigan, Iowa, Kansas, N.D., Illinois, Minnesota">` +
+  `<figcaption>Effective Property Tax Rates Vary.</figcaption></figure>`;
+const BANDS_AFTER = BANDS_BEFORE
+  .replace("Ohio, Wisconsin, Wyoming, Missouri", "Ohio, Wisconsin, Wyoming")
+  .replace("Michigan, Iowa", "Michigan, Missouri, Iowa");
+
+test("a member the correction moved into another list is named", () => {
+  const e = correctionEffect(BANDS_BEFORE, BANDS_AFTER);
+  assert.deepEqual(e.alt_relocated, ["Missouri"]);
+  // It is an alt change and nothing else: no word of the page moved, so a log line built on the
+  // four booleans alone reports this page as an alt refinement — the same bucket as "orange kayak"
+  // becoming "orange-yellow kayak".
+  assert.equal(e.alt_changed, true);
+  assert.equal(e.text_changed, false);
+  assert.equal(e.structure_changed, false);
+  // And the two sizes are three characters apart, which is the other thing that would have had to
+  // stand in for a reclassification.
+  assert.equal(e.chars_before - e.chars_after, 0);
+});
+
+test("the member is named from the description that carried it, whatever the correction typed", () => {
+  // Read on the normalised key and reported as it was written: a correction that lowercases a name
+  // has still moved it, and the name a reader of the log needs is the one they can search the
+  // fragment for.
+  const e = correctionEffect(BANDS_BEFORE, BANDS_AFTER.replace("Michigan, Missouri", "Michigan, missouri"));
+  assert.deepEqual(e.alt_relocated, ["Missouri"]);
+});
+
+test("a list reordered, or reworded around, is not a member changing lists", () => {
+  // Every correction re-emits the whole description, so a pass asked to fix one thing rewrites
+  // everything else in place. None of these may report a relocation.
+  const reordered = BANDS_BEFORE.replace(
+    "Ohio, Wisconsin, Wyoming, Missouri",
+    "Wisconsin, Missouri, Ohio, Wyoming",
+  );
+  assert.equal(correctionEffect(BANDS_BEFORE, reordered).alt_relocated, undefined);
+  // The list intact and the prose around it rewritten.
+  const reworded = BANDS_BEFORE.replace("A map of the United States shaded in four bands.", "A U.S. map, four bands.");
+  assert.equal(correctionEffect(BANDS_BEFORE, reworded).alt_relocated, undefined);
+  // A member added to one list and a member dropped from another. Both change what the page says
+  // and neither is a member asserted into a category the same reply had denied it — there is no pair
+  // of lists to compare — and the sizes on the effect are what report them.
+  const added = BANDS_BEFORE.replace("Michigan, Iowa", "Michigan, Indiana, Iowa");
+  assert.equal(correctionEffect(BANDS_BEFORE, added).alt_relocated, undefined);
+  const dropped = BANDS_BEFORE.replace("Ohio, Wisconsin, Wyoming, Missouri", "Ohio, Wisconsin, Wyoming");
+  assert.equal(correctionEffect(BANDS_BEFORE, dropped).alt_relocated, undefined);
+});
+
+test("a two-part description whose halves are reworded is not a relocation", () => {
+  // The false positive this is bounded to avoid: an alt of two comma-separated phrases has the same
+  // shape as a list of two, so any rewording of one phrase leaves the other sitting with entirely
+  // new company. Corrections do this constantly. What refuses it is the destination clause and not a
+  // size floor — the "list" the surviving half joins holds one name, and one name cannot have been
+  // listed with two others beforehand. That is measured rather than assumed: a draft that also
+  // demanded three names at each end was mutated back to one, and this test stayed green either way.
+  const e = correctionEffect(
+    `<img src="a.png" alt="a bar chart, revenue by quarter"><img src="b.png" alt="a map, three shades">`,
+    `<img src="a.png" alt="a bar chart, quarterly revenue"><img src="b.png" alt="a map, four bands">`,
+  );
+  assert.equal(e.alt_changed, true);
+  assert.equal(e.alt_relocated, undefined);
+});
+
+test("a member whose new neighbours are all new text moved nowhere", () => {
+  // The third condition, on its own. Missouri leaves a real list of four, and what it is listed with
+  // afterwards is a clause that did not exist in the description being corrected — so the evidence
+  // is that this sentence was rewritten, not that a category was reassigned. One shared name would
+  // be a coincidence between any two sentences about the same map; two is a list.
+  const rewritten = BANDS_BEFORE
+    .replace("Ohio, Wisconsin, Wyoming, Missouri", "Ohio, Wisconsin, Wyoming")
+    .replace(
+      "cross-hatched, 1.5 thru 1.9 percent: Michigan, Iowa, Kansas, N.D., Illinois, Minnesota",
+      "hard to place at this scale: Missouri, two Gulf states, several plains states",
+    );
+  assert.equal(correctionEffect(BANDS_BEFORE, rewritten).alt_relocated, undefined);
+});
+
+test("a member leaving a two-name band for one that already existed is still a move", () => {
+  // The shape a floor of three at the SOURCE end declined in silence. Two states share the darkest
+  // band and one of them crosses into the cross-hatched list, and nothing about that evidence is
+  // weaker than p095's: the band it joined is the band it was not in, named by the same six members
+  // in both replies. The floor that remains is two names, so that a member has a sibling it can be
+  // listed with at all, and the destination clause is what makes the reading safe.
+  const before = BANDS_BEFORE.replace("Ohio, Wisconsin, Wyoming, Missouri", "Wyoming, Missouri");
+  const after = before
+    .replace("Wyoming, Missouri", "Wyoming")
+    .replace("Michigan, Iowa", "Michigan, Missouri, Iowa");
+  assert.deepEqual(correctionEffect(before, after).alt_relocated, ["Missouri"]);
+});
+
+test("a member that was alone in its clause did not leave a list", () => {
+  // The other side of that floor, and why it is two rather than one. Missouri is the only name in the
+  // clause it sits in beforehand, so there is no set of names it was listed WITH — and this reports a
+  // member listed with one company and then another, which needs both. A lone name in a clause is as
+  // likely to be prose as a category of one, and reading it as a category would report a relocation
+  // off the strength of the destination alone.
+  const before = `<img alt="Too faint to place: Missouri; cross-hatched, 1.5 thru 1.9 percent: Michigan, Iowa, Kansas, Minnesota">`;
+  const after = `<img alt="cross-hatched, 1.5 thru 1.9 percent: Michigan, Missouri, Iowa, Kansas, Minnesota">`;
+  const e = correctionEffect(before, after);
+  assert.equal(e.alt_changed, true);
+  assert.equal(e.alt_relocated, undefined);
+});
+
+test("an abbreviation or a decimal inside a member does not cut its list in half", () => {
+  // Both are ordinary on a shaded map — "N.D.", "1.5 thru 1.9" — and a sentence split that took
+  // either for the end of a list would put the members after it in a list of their own, then report
+  // every one of them as having moved the next time the description was re-emitted. This is the
+  // whole reason `ENUMERATION_BREAK` will not open on a period after a capital or a digit.
+  const before = `<img alt="Shaded 1.5 thru 1.9: N.D., S.D., Kan., Mo.; shaded 2.0 and over: Ohio, Wis., Wyo.">`;
+  const reordered = `<img alt="Shaded 1.5 thru 1.9: S.D., Kan., N.D., Mo.; shaded 2.0 and over: Wis., Ohio, Wyo.">`;
+  assert.equal(correctionEffect(before, reordered).alt_relocated, undefined);
+  // And the move itself is still seen through the same punctuation. "Mo." keeps its period in one
+  // reply and loses it to the sentence break at the end of the other, which is why the key a member
+  // is matched on drops a trailing one: left in, this move would be two different members and
+  // nothing would have crossed.
+  const moved = `<img alt="Shaded 1.5 thru 1.9: N.D., S.D., Kan.; shaded 2.0 and over: Ohio, Wis., Wyo., Mo.">`;
+  assert.deepEqual(correctionEffect(before, moved).alt_relocated, ["Mo."]);
+});
+
+test("a name listed twice in one description is not resolved to one of its places", () => {
+  // Which of the two the corrected reply's "Michigan" corresponds to is exactly what this cannot
+  // know, and settling it by position would be a guess reported as a measurement. Here Michigan is
+  // filed in two bands at once — a first-read defect of its own, and one this says nothing about.
+  const twice =
+    `<img alt="Darkest: Ohio, Wisconsin, Wyoming, Michigan; cross-hatched: Iowa, Kansas, Minnesota, ` +
+    `Illinois; lightest: Texas, Georgia, Michigan">`;
+  // A correction that drops the duplicate is not a member changing lists, and reading the repeat as
+  // its first occurrence would report exactly that: Michigan listed with Ohio and Wisconsin before,
+  // with Texas and Georgia after, and both of those are real lists that existed all along.
+  const deduped = twice.replace("Ohio, Wisconsin, Wyoming, Michigan", "Ohio, Wisconsin, Wyoming");
+  assert.equal(correctionEffect(twice, deduped).alt_relocated, undefined);
+  // And the other members of a list holding a repeat are still read, so one ambiguous name does not
+  // cost the description the check.
+  const moved = twice
+    .replace("Ohio, Wisconsin, Wyoming, Michigan", "Ohio, Wisconsin, Michigan")
+    .replace("Iowa, Kansas", "Iowa, Wyoming, Kansas");
+  assert.deepEqual(correctionEffect(twice, moved).alt_relocated, ["Wyoming"]);
+});
+
+test("a correction that changed how many images there are reports no relocation", () => {
+  // Descriptions are paired by position, so an image added or dropped shifts every pairing after it
+  // and every member of both lists would read as relocated. That correction is a structural change
+  // and is reported as one.
+  const e = correctionEffect(
+    BANDS_BEFORE,
+    `<img src="new.png" alt="a chart">${BANDS_AFTER}`,
+  );
+  assert.equal(e.structure_changed, true);
+  assert.equal(e.alt_relocated, undefined);
+});
+
 test("a re-typed href is a change, though no word on the page moves", () => {
   // The correction the links pass exists to buy: links.ts asks for "exactly that URL —
   // without changing anything else about the page", so a model that obeys, on an anchor it
@@ -405,6 +567,54 @@ test("a correction that changed the page says what it changed", async () => {
     );
     // And the document is the corrected page, unchanged by any of this.
     assert.match(result.fragments[0].innerHtml, /facing away/);
+  });
+});
+
+// #355. The unit tests above are on `correctionEffect`; this one is on the line an operator reads.
+// A relocation that no event carries is a measurement nobody has, which is the state the issue
+// reported: both replies existed, one after the other, and the log said `alt_changed: true`.
+test("a member that crossed between two lists reaches the correction's log line", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    await runExtraction(
+      makeCtx(dir, events, {
+        html: () => BANDS_BEFORE,
+        problems: (o) =>
+          o === 1
+            ? [{ kind: "content_wrong", problem: "Missouri appears cross-hatched, not in the darkest band" }]
+            : [],
+        corrected: () => BANDS_AFTER,
+      }),
+    );
+    const corrected = of(events, "page_corrected");
+    assert.equal(corrected.length, 1);
+    assert.deepEqual(corrected[0].alt_relocated, ["Missouri"]);
+    // Beside the fields that were the whole of this line before, and which cannot say it: the page's
+    // words did not move, its structure did not move, and one description was refined.
+    assert.equal(corrected[0].alt_changed, true);
+    assert.equal(corrected[0].text_changed, false);
+    assert.equal(corrected[0].result, "kept");
+    // The verdict that bought the correction is on the same line, so the pair reads as one fact: a
+    // `content_wrong` finding was acted on, and what it moved was a state between two bands.
+    assert.deepEqual(corrected[0].kinds, ["content_wrong"]);
+  });
+});
+
+test("an ordinary correction leaves the relocation field off the line entirely", async () => {
+  // The field is absent rather than empty, so it costs nothing on the corrections that are not this
+  // — and a consumer counting relocations counts lines that have it.
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<h2>Findings</h2><img src="a.png" alt="a kayak">`,
+        problems: (o) => (o === 1 ? [{ kind: "alt_quality", problem: "the alt text is thin" }] : []),
+        corrected: () => `<h2>Findings</h2><img src="a.png" alt="a kayak, the paddler facing away">`,
+      }),
+    );
+    const corrected = of(events, "page_corrected");
+    assert.equal(corrected.length, 1);
+    assert.ok(!("alt_relocated" in corrected[0]));
   });
 });
 
