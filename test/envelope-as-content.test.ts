@@ -1531,6 +1531,159 @@ test("a contradicted blank declaration says what the log claimed was there", () 
   );
 });
 
+// --- blankness the reply STATES, rather than blankness read out of its prose (#371) ---------------
+//
+// Everything above decides whether an English sentence means "this page is empty", and five pages have
+// been lost to five different words while it was being got right: #190 to `resolve`, #194 to a
+// contradiction that was not one, #220 to a negator four tokens behind its noun, #343 to `image`,
+// #367 to `document`. Each fix bought the word it was written for. The reply can now say so in a field
+// instead, which is the one change that is not about a word — the tests here are what that field is and
+// is not allowed to do.
+test("a reply that states blankness in a field does not have to say it in a sentence", () => {
+  // The three logs measured on this branch, verbatim: two from the issues that reported them and one
+  // from the bench corpus, where it is the single declaration of 125 that base refuses. All three are
+  // logs about a page that is empty, and every one of them is read as saying something is on it.
+  const lost: [string, string][] = [
+    [
+      "#343, and the `affirmed` is its filename sentence",
+      "Page 14 is blank. Contains only minimal dust/specks visible in the image; no printed content, no page number, no marks that resolve into characters. Image filename indicates this is page 14 of 25 in document acir.",
+    ],
+    [
+      "#367, where `document` stands between the negator and the noun",
+      "The page is blank apart from a few scattered specks/dots that appear to be artifacts rather than content. No text, images, tables, or other document content is visible.",
+    ],
+    [
+      "the bench corpus's one refused declaration, which says the page is blank three times",
+      "Source image is entirely blank/white with no visible content, text, graphics, or printed page number. No page-break marker can be emitted because no folio number is visible on the page. No content to transcribe.",
+    ],
+  ];
+  for (const [name, log] of lost) {
+    assert.equal(declaredBlank({ html: "", log }), false, `${name}: the prose read still loses this page`);
+    assert.equal(declaredBlank({ html: "", log, blank: true }), true, `${name}: the field states it and is believed`);
+    // And what the prose read decided is still on the record, because it is the thing that costs a
+    // verify call now instead of a page: `affirmed` survives the field.
+    assert.ok(blankDeclaration({ html: "", log, blank: true }).affirmed, `${name}: the misreading is kept`);
+  }
+});
+
+test("the blank field can state blankness and cannot deny it", () => {
+  // One direction, deliberately. A field that could say `false` would let one wrong token delete a page
+  // the prose describes correctly — the same class of loss as the five above, arriving through the
+  // remedy for them — so a `false` is read as no answer at all and the prose read decides, exactly as
+  // it does for every reply sent before this field existed.
+  assert.deepEqual(blankDeclaration({ html: "", log: "Page is blank.", blank: false }), {
+    asserted: true,
+    blank: true,
+    vetoes: [],
+  });
+  assert.equal("stated" in blankDeclaration({ html: "", log: "Page is blank.", blank: false }), false);
+  // The shapes that ARE a statement. `"true"` because a JSON field a prompt asks for comes back as a
+  // string often enough to be worth reading (the same reason `extractJson` types it `unknown`), and
+  // case and space because that is what a model's string looks like.
+  for (const blank of [true, "true", "True", " TRUE "]) {
+    const d = blankDeclaration({ html: "", log: "", blank });
+    assert.equal(d.blank, true, JSON.stringify(blank));
+    assert.equal(d.stated, true, JSON.stringify(blank));
+  }
+  // And everything else is silence, including the truthy things. `1` and `"yes"` and `"blank"` are not
+  // the answer the prompt asks for, and a field read loosely enough to accept them is a field that
+  // deletes a page on a typo.
+  for (const blank of [false, "false", "yes", 1, "1", {}, [], null, undefined, "blank"]) {
+    assert.equal(blankDeclaration({ html: "", log: "", blank }).asserted, false, JSON.stringify(blank) ?? "undefined");
+  }
+  // A stated blank needs no log at all — the log is where the prose read looks, and the field does not
+  // need it. `BLANK_LOG` is still what a prose-only declaration turns on.
+  assert.deepEqual(blankDeclaration({ html: "", blank: true }), {
+    asserted: true,
+    blank: true,
+    vetoes: [],
+    stated: true,
+  });
+  assert.equal(blankDeclaration({ html: "", log: "Converted the page." }).asserted, false);
+  // And the field cannot declare a page blank that came back with a page on it: `carriesContent` decides
+  // that, as it did before, so a reply that says both is not a declaration at all.
+  assert.equal(blankDeclaration({ html: "<p>Chapter 1</p>", log: "Page is blank.", blank: true }).asserted, false);
+  // A marker and nothing else still is one, which is a third of the declarations in the bench corpus.
+  assert.deepEqual(
+    blankDeclaration({ html: '<hr role="doc-pagebreak" aria-label="Page 14" id="page-14">', blank: true }),
+    { asserted: true, blank: true, vetoes: [], stated: true },
+  );
+});
+
+test("a stated blank is still refused where the log doubts the reading", () => {
+  // The half of the trade the field must NOT buy. A doubt word says the model could not see the page,
+  // and a page it could not see is not a page it can state anything about — including that it is empty.
+  // #190's four pages are the record of what the veto is for, and the field does not override it.
+  for (const [log, vetoes] of [
+    ["The page is blank; the scan is too dark to resolve any text.", ["too dark to", "resolve", "dark"]],
+    ["The page appears blank, though the scan is too faint to be sure.", ["too faint to", "faint"]],
+    ["Page is blank. The image is illegible.", ["illegible"]],
+  ] as [string, string[]][]) {
+    const d = blankDeclaration({ html: "", log, blank: true });
+    assert.equal(d.blank, false, log);
+    assert.deepEqual(d.vetoes, vetoes, log);
+    // The field it declined to act on is still recorded, so a run can tell this refusal from the same
+    // refusal of a reply that never used the field.
+    assert.equal(d.stated, true, log);
+  }
+  // A contradiction is the other answer and behaves the other way, which is the whole of #371's third
+  // route: nothing here doubts the reading, so the page is delivered as the field says AND the claim is
+  // carried out of this function for the verifier to be shown (`blankContradicted`, extractPage).
+  const contradicted = blankDeclaration({
+    html: "",
+    log: "Page is blank. There is handwriting on the page.",
+    blank: true,
+  });
+  assert.equal(contradicted.blank, true);
+  assert.equal(contradicted.affirmed, "there is handwriting");
+  assert.equal(contradicted.stated, true);
+  // Without the field the same reply is the refusal #194 made it, unchanged.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. There is handwriting on the page." }), false);
+});
+
+test("the scan the model was handed is not a thing on the page, whichever word names it", () => {
+  // #343's mechanism, and the second half of this branch. The reply describes an IMAGE of a page, so
+  // "visible in the image" locates the specks on the scan — but `image` is in `TEXT_NOUN`, because "an
+  // image is visible" is a page with a picture on it, and standing in the middle of #343's log it broke
+  // the anchor that exempts a marks phrase. The denial's own verb then refused the page: `resolve`.
+  //
+  // Stripped by the relation and not the phrase: a locative preposition, a definite determiner, and a
+  // name for the input. All four of these are the same sentence with one noun changed, and every one of
+  // them lost the page.
+  for (const log of [
+    "Page is blank. Dust/specks visible in the image; no marks that resolve into characters.",
+    "Page is blank. Dust/specks visible in the figure; no marks that resolve into characters.",
+    "Page is blank. Dust/specks visible in the scan; no marks that resolve into characters.",
+    "Page is blank. Dust/specks visible in this photograph; no marks that resolve into characters.",
+    // A modifier or two in front of the noun is the same relation.
+    "Page is blank. Dust/specks visible in the scanned image; no marks that resolve into characters.",
+    // And the substrate the affirmation read already knew about is unaffected: this one was delivered
+    // before this branch and still is.
+    "Page is blank. Dust/specks visible on the page; no marks that resolve into characters.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+  // An INDEFINITE one is left alone, and stays a refused page even with the field: "in an image" is as
+  // likely to be a picture on the paper as the scan, and the definite article is the discriminator the
+  // affirmation machinery already uses for exactly this ambiguity (`LOCATIVE_SUBSTRATE` with
+  // `definiteBefore`). Pinned as the reading chosen rather than the only defensible one — what it costs
+  // is this page, refused, with `resolve` as the reason given, and that reason names the marks anchor
+  // rather than anything about the scan.
+  const indefinite = "Page is blank. Dust/specks visible in an image; no marks that resolve into characters.";
+  assert.deepEqual(blankDeclaration({ html: "", log: indefinite }).vetoes, ["resolve"]);
+  assert.equal(declaredBlank({ html: "", log: indefinite, blank: true }), false, "a doubt veto is not overridden");
+  // What the strip must not take with it: the veto words. It removes a preposition, a determiner and a
+  // noun, and every doubt word in both lists is outside that phrase — so a log that names the input AND
+  // says the reading failed still refuses, whether the veto word sits inside the stripped phrase's
+  // clause or beside it.
+  assert.deepEqual(blankDeclaration({ html: "", log: "Page is blank. Everything in the image is dark." }).vetoes, [
+    "dark",
+  ]);
+  assert.deepEqual(blankDeclaration({ html: "", log: "Page is blank. The text in the image is blurry." }).vetoes, [
+    "blurry",
+  ]);
+});
+
 // --- through the pipeline ------------------------------------------------------
 
 interface Event {

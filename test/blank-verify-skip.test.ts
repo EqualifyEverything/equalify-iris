@@ -40,6 +40,10 @@ interface Recorded {
   // The output ceiling each `correct` call asked for, in order. Only the correction is capped
   // (#285), and on a blank page there is no first pass to take a cap from.
   caps: (number | undefined)[];
+  // The `user` message of every verify call, in order. Optional, and collected only by the tests that
+  // are about what the JUDGE was told rather than about whether it was called (#371): a caution is only
+  // worth adding if it reaches the message, and `page_blank`'s fields cannot show that.
+  verifyUsers?: string[];
 }
 
 const BLANK = JSON.stringify({ html: "", log: "This page is blank." });
@@ -103,6 +107,7 @@ function makeCtx(
         rec.calls.push(`${o.step}:${order}`);
         if (o.step === "correct") rec.caps.push(o.maxOutputTokens);
         if (user.includes("TASK: verify")) {
+          rec.verifyUsers?.push(user);
           const problems = (opts.problems ?? (() => []))(order);
           return { text: JSON.stringify({ faithful: problems.length === 0, accessible: true, problems }) };
         }
@@ -282,5 +287,90 @@ test("a page with content on it is verified exactly as it always was", async () 
     const { verification } = fold(rec);
     assert.equal(verification.pages_skipped_blank, 0, "no page was declared blank, so nothing was skipped");
     assert.equal(verification.pages_unjudged, 0);
+  });
+});
+
+// The reply can now STATE blankness in a field instead of leaving it to be read out of a sentence
+// (#371). The saving above is unchanged by that — a stated blank is a blank page and buys no verdict —
+// but the field adds one page that IS judged, and these two tests are the pair: which of them a reply
+// gets, and what the judgement it buys is told.
+const STATED = JSON.stringify({ html: "", log: "This page is blank.", blank: true });
+const STATED_CONTRADICTED = JSON.stringify({
+  html: "",
+  log: "Page is blank. A heading is visible at the top.",
+  blank: true,
+});
+
+test("a page that states blankness in the field costs no more than one that said it in prose", async () => {
+  await withTemp(async (dir) => {
+    const rec: Recorded = { events: [], calls: [], caps: [] };
+    await runExtraction(makeCtx(dir, rec, { render: (o) => (o === 2 ? STATED : good(o)) }));
+    assert.equal(rec.calls.includes("verify:2"), false, "the saving is the same saving");
+    assert.deepEqual(rec.calls.filter((c) => c.startsWith("verify:")).sort(), ["verify:1", "verify:3"]);
+    // And the run can count how often the field is actually used, which is the thing #371 turns on:
+    // `blank_stated` says this declaration came from the field rather than from the prose read, and
+    // the two behave differently from here on, so a log that could not tell them apart could not price
+    // either. The `skipped` line is unchanged, because the page is unchanged.
+    const blankLine = of(rec, "page_blank")[0];
+    assert.equal(blankLine.page, 2);
+    assert.equal(blankLine.blank_stated, true);
+    assert.equal("blank_contradicted" in blankLine, false, "nothing in this log claims anything is on the page");
+    const ok = of(rec, "page_verify_ok").find((e) => e.image === "page-002.png")!;
+    assert.equal(ok.skipped, "blank");
+    assert.equal(fold(rec).verification.pages_skipped_blank, 1);
+    // A prose declaration carries no such field, so the flag reads as the question it looks like.
+    const plain: Recorded = { events: [], calls: [], caps: [] };
+    await withTemp(async (other) => runExtraction(makeCtx(other, plain)));
+    assert.equal("blank_stated" in of(plain, "page_blank")[0], false);
+  });
+});
+
+test("a stated blank its own log contradicts is judged, and the judge is shown the contradiction", async () => {
+  await withTemp(async (dir) => {
+    // #371's third answer. Before the field there were two: believe the prose and drop the page in
+    // silence (#194's loss), or refuse it and report a page nobody has. Where the reply STATES the page
+    // is empty and its log names a heading on it, the page can be delivered AND looked at — so a log
+    // that was right buys a correction, and a log the regex misread costs a verify call instead of a
+    // page. The one such declaration in the whole bench corpus is the second kind.
+    const rec: Recorded = { events: [], calls: [], caps: [], verifyUsers: [] };
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, rec, {
+        render: (o) => (o === 2 ? STATED_CONTRADICTED : good(o)),
+        problems: (o) => (o === 2 ? ["The page has a heading on it. The output has nothing."] : []),
+        correct: () => JSON.stringify({ html: "<h2>Appendix B</h2>" }),
+      }),
+    );
+    // The page is not a loss, and it is not a skip either: it is the one blank page that buys a verdict.
+    assert.deepEqual(failedPages, []);
+    assert.equal(rec.calls.includes("verify:2"), true);
+    // And the arithmetic docs/API.md §7b now states off these two counts: the declarations that cost a
+    // verify call are `pages_blank - pages_skipped_blank`, which is this page and only this page.
+    const folded = fold(rec);
+    assert.equal(folded.verification.pages_skipped_blank, 0, "a contradicted declaration is not a saving");
+    assert.deepEqual(folded.pages_blank, [2], "it is still a blank page, and still counted as one");
+    const ok = of(rec, "page_verify_ok").map((e) => e.image);
+    assert.equal(ok.includes("page-002.png"), false, "it failed its check rather than skipping one");
+    assert.deepEqual(of(rec, "page_verify_failed").map((e) => e.image), ["page-002.png"]);
+    // And the verdict recovers the page, which is the whole reason to spend the call.
+    assert.deepEqual(of(rec, "page_corrected").map((e) => e.page), [2]);
+    assert.match(String(fragments.find((f) => f.order === 2)!.innerHtml), /Appendix B/);
+    // What the judge was TOLD. Without this the call asks whether an empty fragment is faithful to the
+    // image — the question answered "no problems" on all 36 blank pages it was ever put (#294) — so the
+    // contradiction rides in the caution channel, in the log's own words, as something the agent under
+    // test said about its own output.
+    const asked = rec.verifyUsers!.find((u) => u.includes("page-002.png"))!;
+    assert.match(asked, /returned NO page for this image/);
+    assert.match(asked, /"heading is visible"/);
+    assert.match(asked, /disagree about whether this page has anything on it/);
+    // And nothing like it is sent for the ordinary pages, whose replies said nothing of the sort.
+    for (const image of ["page-001.png", "page-003.png"]) {
+      assert.equal(rec.verifyUsers!.find((u) => u.includes(image))!.includes("returned NO page"), false, image);
+    }
+    // The line a reader triages from, with both fields: the field was used, and the log contradicted
+    // it. `blank_contradicted` is the same field name `page_no_output` carries for the refusal, so one
+    // grep finds the pages this cost and the pages it did not.
+    const blankLine = of(rec, "page_blank")[0];
+    assert.equal(blankLine.blank_stated, true);
+    assert.equal(blankLine.blank_contradicted, "heading is visible");
   });
 });

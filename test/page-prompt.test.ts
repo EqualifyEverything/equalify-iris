@@ -514,8 +514,19 @@ test("the page agent is told not to contradict its own blank answer, and why tha
   for (const [what, re] of [
     ["naming content in the log of a blank answer is the shape that is forbidden",
       /A log that reports the page blank and then names something on it — a heading, a caption, a signature, handwriting, an image — contradicts the answer it is attached to/],
-    ["what it costs: the contradiction is believed, and the page is reported as untranscribed",
-      /the contradiction is what gets believed: the reply is refused and the page is reported as one nobody transcribed/],
+    // Two costs now, because the reply can state its answer in a field (#371). The refusal is what a
+    // contradiction costs a declaration made in PROSE, and the prompt has to say which is which — a
+    // rule that threatens the page for a shape that no longer loses it is a rule the model pays for
+    // twice, and one that promises safety it does not have is worse.
+    ["what a contradiction costs a prose declaration: it is believed, and the page is reported as untranscribed",
+      /Without the field, the contradiction is what gets believed: the reply is refused and the page is reported as one nobody transcribed/],
+    ["what it costs a stated one: the page is delivered, looked at again, and re-rendered if the naming was right",
+      /With "blank": true on the reply the field is believed and the page is delivered empty, but naming content still costs it: the page is looked at again, and where that second look finds the thing you named, it is rendered again/],
+    // The half of the trade the field must NOT be read as covering: `blankDeclaration` still lets the
+    // doubt words refuse a stated declaration, and a prompt that did not say so would be inviting
+    // `"blank": true` on the unreadable pages the veto exists for.
+    ["doubt is the one thing the field does not carry past",
+      /a log that hedges the blankness it declares \("appears blank, though the scan is very faint"\) or describes an image too dark or too poor to read is a page you could not read, and it is read that way with the field or without it/],
     ["the way out is the content, not a quieter log",
       /Anything on the paper worth naming in the log is worth putting in "html", and anything you could see but not read is worth \[not legible\] inside the element it belongs to/],
     ["describing the specks that establish a blank page stays welcome",
@@ -523,6 +534,47 @@ test("the page agent is told not to contradict its own blank answer, and why tha
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
+});
+
+// The prompt half of #371. Whether a page is blank is a yes-or-no question, and until this field
+// existed the answer arrived as a paragraph that `blankDeclaration` had to interpret: five times the
+// interpretation went wrong and the page was deleted (#190, #194, #220, #343, #367), and four of ten
+// ordinary ways of writing the sentence lose it today. The field is the answer; the sentence becomes
+// the cross-check.
+//
+// So the clause has to do two things a shorter one would not. It must say the field is what decides —
+// a model that reads "also say it in a field" as decoration keeps the prose path and keeps the defect
+// — and it must fence the field to a page with nothing on it, because a `"blank": true` on a page that
+// has content is the one direction of this change that costs a reader anything. The example is quoted
+// from the real reply that lost page 86, so the rule names the shape rather than describing it.
+test("the page agent is asked for blankness as a field, and told what the field is not for", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["the field is asked for beside the empty html",
+      /Say it in the reply's shape as well as in words: put "blank": true beside the empty "html"/],
+    ["the field decides and the sentence only checks it",
+      /That field is the answer, and the sentence in your log is only read to check it/],
+    ["why: without it a machine has to read the English, and has lost a page doing so",
+      /"No text, images, tables, or other document content is visible" was read as an assertion that content IS visible, because a word stood between the "No" and the noun it denies, and the page was thrown away/],
+    ["it belongs on no other page, and is not a way to report a page that was hard to read",
+      /"blank": true is not a way of saying a page was hard to read or that you returned little: it says the paper is empty, and on a page that is not, it costs a reader everything the page held/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// The response-shape half of the same change. The keys test above holds the two copies to each other;
+// this holds the shape block to the rule, because the block is what a model copies: a `"blank": true`
+// shown in it with no note would be sent on every page, which is the one direction of #371 that loses
+// content rather than saving it.
+test("the response shape says where the blank field belongs", () => {
+  const contract = normalize(section("Output contract")!);
+  assert.match(contract, /"blank": true/, "the response shape no longer shows the blank field");
+  assert.match(
+    contract,
+    /"blank" belongs on a page with nothing on it and on no other page: omit it everywhere else rather than sending false, and never send it for a page you could not read/,
+    "the response shape no longer fences the blank field to a blank page",
+  );
 });
 
 // The numbering and abbreviation rules (issues #98, #100, #101) came from one

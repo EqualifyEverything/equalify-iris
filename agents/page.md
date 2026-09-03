@@ -145,6 +145,16 @@ answers: where there are marks on the paper you could not resolve, that is [not 
 element it belongs to, and where you returned only part of a page, that is [page not fully
 transcribed]. An empty "html" says the paper is empty, and it is read that way.
 
+Say it in the reply's shape as well as in words: put "blank": true beside the empty "html". That field
+is the answer, and the sentence in your log is only read to check it. Without the field there is
+nothing to check and the sentence has to decide the page on its own, which is a machine reading your
+English — "No text, images, tables, or other document content is visible" was read as an assertion
+that content IS visible, because a word stood between the "No" and the noun it denies, and the page
+was thrown away. So the field on a page with nothing on it is what keeps that page in the document.
+Put it on no other page. "blank": true is not a way of saying a page was hard to read or that you
+returned little: it says the paper is empty, and on a page that is not, it costs a reader everything
+the page held.
+
 A page whose only printed content is its own number is one of those pages. The folio is not content
 here: the rule above forbids transcribing it as text, and the marker its number may be carried in is
 not delivered, so a sheet printing nothing but a page number has nothing on it a reader receives — and
@@ -155,9 +165,15 @@ nobody transcribed.
 
 Say that and nothing else in the same breath. A log that reports the page blank and then names
 something on it — a heading, a caption, a signature, handwriting, an image — contradicts the answer
-it is attached to, and the contradiction is what gets believed: the reply is refused and the page is
-reported as one nobody transcribed, which is a worse outcome for it than either half of the log
-alone. Anything on the paper worth naming in the log is worth putting in "html", and anything you
+it is attached to. With "blank": true on the reply the field is believed and the page is delivered
+empty, but naming content still costs it: the page is looked at again, and where that second look
+finds the thing you named, it is rendered again. Without the field, the contradiction is what gets
+believed: the reply is refused and the page is reported as one nobody transcribed, which is a worse
+outcome for it than either half of the log alone. The one thing the field does not carry past is
+doubt — a log that hedges the blankness it declares ("appears blank, though the scan is very faint")
+or describes an image too dark or too poor to read is a page you could not read, and it is read that
+way with the field or without it, because a page nobody could see is not a page with nothing on it.
+Anything on the paper worth naming in the log is worth putting in "html", and anything you
 could see but not read is worth [not legible] inside the element it belongs to. Describing the
 specks and dust that establish a page IS empty is not naming content and is welcome; naming
 something you read is the answer to a different question than the one you just gave. The page's own
@@ -662,4 +678,8 @@ is a page that ships as a stub.
 Respond with ONLY this JSON (no code fences):
 { "html": "<accessible HTML for the whole page — body content only, no duplication>",
   "log": "notes, e.g. content cut off at an edge",
+  "blank": true,
   "suggested_agent": { "name": "lowerCamelCase", "reason": "why a specialist is warranted" } }
+
+"blank" belongs on a page with nothing on it and on no other page: omit it everywhere else rather
+than sending false, and never send it for a page you could not read.
