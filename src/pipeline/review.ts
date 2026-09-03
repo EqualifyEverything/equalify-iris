@@ -98,9 +98,13 @@ export interface ReviewResult {
   // deployment reading 0.3 has an editor that would be flattening headings out of a third of its
   // documents without it.
   //
-  // A 0 is NOT evidence that no round demotes a heading. The reading behind it is computed on the
-  // block-patch round only; `editorSectionCall` and the whole-body reply path check the size floor
-  // and nothing else, so a demotion on either is applied and delivered and never reaches this.
+  // A 0 is NOT evidence that no round demotes a heading. The GATE behind it is on the block-patch
+  // round only, which is where a fall can be attributed to the block that dropped it and that block
+  // alone handed back; `editorSectionCall` and the whole-body reply path adopt a reply whole and
+  // check a prose floor a demotion cannot move, so a demotion on either is applied and delivered and
+  // never reaches this. Since #375 both of those paths compute the same reading and log it as
+  // `editor_navigation`, refusing nothing (`reportNavigation`), so the population this number cannot
+  // see can be collected — and no lines at all is an empty population, not a reading of 0.
   //
   // Per DOCUMENT, not per round, and accumulated over the loop rather than read off its last round:
   // the round is retried, so the body that ships is normally one a later round corrected cleanly,
