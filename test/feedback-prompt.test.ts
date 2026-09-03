@@ -102,6 +102,81 @@ test("the verify task will not score a described swatch as invented, or overturn
   }
 });
 
+// #353: the verifier had both strings in front of it and did not compare them. On a map of state
+// income categories the fragment's <figcaption> transcribed the page's own subtitle — "Eight of the
+// Twelve States That Shift…" — and the alt attribute ten lines above it enumerated 40 states as
+// above-average. The verifier quoted the legend's labels verbatim in its own first problem, ratified
+// the list, and then LENGTHENED it: its third problem asserted a state into the category, the
+// correction obeyed, and the delivered page names 41. Measuring the sheet's three fills put the true
+// partition at 8 and 4 with the rest base map, matching the printed arithmetic exactly — so the
+// verifier's claim was false, and the caption it had already been given was enough to know that.
+//
+// Two things are pinned. The comparison, and its direction: a verifier that may ask for a list to be
+// SHORTENED but never lengthened cannot buy this defect, whatever it thinks it sees in the ink.
+test("the verify task compares an enumeration against a count the page prints", () => {
+  for (const [what, re] of [
+    ["the free check is named, and named as free",
+      /A count the page prints about its own picture settles more than the picture does, and reading it needs no ink at all/],
+    ["with the shapes such a count comes in, and what it is compared against",
+      /where the HTML transcribes a number for the size of a category — a subtitle's "eight of the twelve states", a total row, an "of which" — and an alt attribute or a list in the same fragment enumerates that category's members, count them and compare the two/],
+    // Which string wins, and why: one of them is transcription and the other is a reading. Without
+    // this the verifier can as easily send back the caption.
+    ["the page's own number is what the list is wrong against, and the kind is named",
+      /Both strings are in front of you and one of them is the page's own, so a list whose length contradicts it is wrong, and it is "content_wrong"/],
+    // The ordering matters because the ink is where this verifier is least reliable — four figure
+    // pages graded, four wrong readings — and this check is decidable where the ink is not.
+    ["the free check is ordered ahead of the ones that need the picture",
+      /Make that comparison BEFORE you grade anything that turns on the ink, because it is free and it is decidable where the ink may not be/],
+    // The asymmetry is the operative half: what shipped on p084 was not a missed check, it was a
+    // problem string that added a member. A verifier that cannot take a list past the page's own
+    // number cannot write this defect however wrong its reading of the picture is.
+    //
+    // Bounded at the count rather than at lengthening, and that bound is the whole of the rule.
+    // "Never ask for it to be lengthened" also bars the one lengthening that is right — a list
+    // that names nine where the page prints twelve is three members missing, which is a real
+    // `content_missing` finding, and an unconditional ban leaves it with no repair path at all.
+    ["the refusal is bounded at the printed count, not at lengthening",
+      /never ask for such a list to be taken PAST the printed count: adding a member to a category the page itself caps is the one repair that cannot be right/],
+    ["so a list short of the count stays reportable, with its kind and its bound",
+      /A list that falls SHORT of the count is a different finding and a real one .* so report it, as "content_missing", and quote the printed number in the problem so the repair has the bound the page gives it/],
+    // Without this the short-list licence reintroduces the defect by the other route: a verifier
+    // that may ask for three more members and cannot read them names three anyway.
+    ["and naming unreadable members to reach the number is refused as the same repair",
+      /Where you cannot say which members are missing, say that the list is short of the count and leave it there; naming members to reach the number is the same wrong repair arriving by the other direction/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
+  }
+});
+
+// Also #353. The page agent can ask for a specialist (`suggested_agent`); `dispatchSpecialist` routes
+// it and logs the outcome, and nothing else read it. In a 100-page round there were 7 such requests
+// on 5 pages under 6 names, every one a map specialist, none resolved — and those 5 were every page
+// in the round whose verdict turned on reading ink. On p084 the page agent asked for help producing
+// "a structured data table of each state's classification", got the classification wrong, and the
+// verify step then added a state to a category the page does not put it in.
+//
+// `specialistCaution` in src/pipeline/extraction.ts now carries the unmet request into the verify
+// message (test/verify-specialist-caution.test.ts pins the carrying). This pins what the prompt does
+// with it — and deliberately pins the UNCONDITIONAL half too, because the flag is not a detector: it
+// is page-level rather than per-arm, it missed two of that round's hard pages, and a rule that only
+// bites on a flagged page would leave the same defect free to ship on the pages it missed.
+test("the verify task may hedge a reading it cannot support and may not replace it", () => {
+  for (const [what, re] of [
+    ["an unmet specialist request is read as the agent doubting its own work",
+      /Where the user message tells you the page agent asked for a specialist it did not get, that is the agent saying it could not do this content reliably/],
+    ["with both halves of the narrowed licence, the permitted one and the refused one",
+      /you may say a reading is unsupported and ask for it to be hedged, scoped or removed, and you may not supply a replacement reading of your own/],
+    // The generalisation, pinned separately: without it the clause reads as being about flagged
+    // pages, and p092 and p095 turned on ink and drew no request at all.
+    ["the bound holds on every page, not only the flagged ones",
+      /That bound is not special to those pages/],
+    ["and the mechanism, so it is not read as caution for its own sake",
+      /a problem is an instruction the correction obeys literally, so asserting what a region of a picture means when you cannot support it writes your guess into the delivered document as a fact/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
+  }
+});
+
 // Also #347, and the generalizable half of it. `correctPage` is told to resolve every problem and
 // change nothing else, so each problem string is a licence — and the licence is shaped by the
 // REASON, not only by the target. p093's third problem said a phrase in the markup was "invented

@@ -260,6 +260,22 @@ Thirteen structures are easy to render as something that merely looks right, so 
   alt text says what the picture shows. Where you cannot make an image out with confidence,
   describe what you can and say so in the "log" field: never leave the attribute off, and never
   leave a filename in it.
+  A number the page prints about its own picture is transcribed evidence, and checking a description
+  against it costs nothing: where the page states how many things a category holds — a subtitle's
+  "eight of the twelve states", a total row, an "of which" — and your description enumerates that
+  category's members, count your own list and make the two agree before you emit. Where they
+  disagree it is the list that is wrong, because the number came off the page and the list is your
+  reading of the picture: name only the members you can actually distinguish, and say that the page
+  states this many while you could place that many — in the alt text itself, and in the "log" field
+  either way, never as a sentence of your own added beside the figure, which is text the page does
+  not print. Never pad the list to reach the number and never drop members to fit it. Transcribe the
+  printed count where the page prints it, in the caption or label that carries it: it is the only
+  thing a reader who cannot see the picture has to check the list against, and where the picture's
+  own ink is ambiguous it is frequently the only thing that says which reading is right. A count
+  standing in both places is not the repetition the next rule forbids: that rule is about the NAME
+  of the thing pictured, which a caption beside the image already announces on its own, and a
+  number is the opposite case — it is transcription where the page prints it, and in the alt text
+  it is the bound on the list that only that text contains.
   Do not spend the description on what the page has already said. A screen reader announces a
   <figcaption>, a label and a heading as well as the alt text, so where the name of the thing
   pictured is printed beside the image — in its caption, in the label that follows it, in the

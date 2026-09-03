@@ -292,6 +292,22 @@ Thirteen structures are easy to render as something that merely looks right, so 
   alt text says what the picture shows. Where you cannot make an image out with confidence,
   describe what you can and say so in the "log" field: never leave the attribute off, and never
   leave a filename in it.
+  A number the page prints about its own picture is transcribed evidence, and checking a description
+  against it costs nothing: where the page states how many things a category holds — a subtitle's
+  "eight of the twelve states", a total row, an "of which" — and your description enumerates that
+  category's members, count your own list and make the two agree before you emit. Where they
+  disagree it is the list that is wrong, because the number came off the page and the list is your
+  reading of the picture: name only the members you can actually distinguish, and say that the page
+  states this many while you could place that many — in the alt text itself, and in the "log" field
+  either way, never as a sentence of your own added beside the figure, which is text the page does
+  not print. Never pad the list to reach the number and never drop members to fit it. Transcribe the
+  printed count where the page prints it, in the caption or label that carries it: it is the only
+  thing a reader who cannot see the picture has to check the list against, and where the picture's
+  own ink is ambiguous it is frequently the only thing that says which reading is right. A count
+  standing in both places is not the repetition the next rule forbids: that rule is about the NAME
+  of the thing pictured, which a caption beside the image already announces on its own, and a
+  number is the opposite case — it is transcription where the page prints it, and in the alt text
+  it is the bound on the list that only that text contains.
   Do not spend the description on what the page has already said. A screen reader announces a
   <figcaption>, a label and a heading as well as the alt text, so where the name of the thing
   pictured is printed beside the image — in its caption, in the label that follows it, in the
@@ -2427,17 +2443,39 @@ function unresolvedCandidates(ctx: PipelineContext): { candidates: string[]; dec
   return { candidates: libraryAgentNames(ctx), declined_types: [...STANDARD_AGENTS].sort() };
 }
 
+// Both unresolved branches below report the same thing, and say it from one place: a name the
+// model wrote that no available agent answers to. They differ only in whether the name was empty
+// or merely unknown, which is a distinction for the log line and not for the verifier.
+const NO_SUCH_AGENT = "No agent of that name was available";
+
 // If a page flagged a content type that an EXISTING library agent handles, run
 // that specialist on the page and merge its higher-fidelity fragment into the
 // page output. Non-blocking: any failure leaves the page output unchanged.
 // dispatched=true means a library specialist ran (so the suggestion is already
 // covered and should not be re-filed as a new-agent issue).
+//
+// `unmet` is a separate question from `dispatched`, and they disagree on four of the six
+// exits below, so `dispatched` cannot stand in for it (it was tried, and mislabelled all
+// four). Three of the four were silent — no content, a throw, and a fragment that would not
+// merge all return `dispatched: true` and so said nothing about a request that went unmet.
+// The fourth is the standard-type decline, and it is the one that shipped a wrong ANSWER
+// rather than none: `dispatched: false` there, so the verifier was told "no agent of that
+// name was available" about a type declined by policy, on the commonest suggestion shape
+// there is. Counting only the silent three reads as `dispatched` being incomplete, which
+// undersells it. `dispatched` answers "is this suggestion already covered, or should it be filed
+// as a new-agent issue"; `unmet` answers "did specialist content reach the HTML the
+// verifier is about to judge". A dispatch that ran and returned nothing, threw, or produced
+// a fragment that would not merge is dispatched-and-unmet: the delivered page is the page
+// agent's own unaided work, which is exactly the case the caution exists to report. Set as
+// a phrase rather than a flag because the four ways a request goes unmet are not
+// interchangeable in the message — telling the verifier "no agent of that name was
+// available" about a specialist that ran and failed is simply false.
 async function dispatchSpecialist(
   ctx: PipelineContext,
   img: InputImage,
   pageHtml: string,
   suggestion: { name: string; reason: string },
-): Promise<{ html: string; dispatched: boolean }> {
+): Promise<{ html: string; dispatched: boolean; unmet?: string }> {
   // Normalized by the shared `logicalType`, and tested for standardness by the shared
   // `isStandardType`, so this site and `runContribution` cannot disagree about what a
   // name means. They did once: trim-then-strip versus strip-then-trim differed on
@@ -2471,7 +2509,7 @@ async function dispatchSpecialist(
       reason: "empty name",
       ...unresolvedCandidates(ctx),
     });
-    return { html: pageHtml, dispatched: false };
+    return { html: pageHtml, dispatched: false, unmet: NO_SUCH_AGENT };
   }
   if (isStandardType(logical)) {
     // Not a failure: the general page pass already covers the standard types, so
@@ -2483,6 +2521,15 @@ async function dispatchSpecialist(
     // a deployment added one, and dispatch the very specialist this rule forbids. The
     // name is logged as the model wrote it, since that is what a maintainer reading the
     // log has to recognize.
+    // No `unmet`, and this is the one exit where that is a judgement rather than a fact. No
+    // specialist ran, so the page agent's request was literally not granted — but it was
+    // ANSWERED, by a policy that says the general pass is this type's intended handler and not
+    // a fallback for it. Cautioning here would narrow what the verifier may assert on the
+    // commonest suggestion shape there is (see the STANDARD list), which on a table page means
+    // declining to say a cell reads wrongly, and it would buy nothing measured: of the 7
+    // requests behind #353, 0 were standard types — every one named a map specialist and every
+    // one landed on the unresolved branch below. A narrowed licence on the pages where the
+    // pipeline believes the general pass is adequate is cost without a case.
     ctx.log.event("specialist_declined", { agent: logical, image: img.name, reason: "standard type" });
     return { html: pageHtml, dispatched: false };
   }
@@ -2497,21 +2544,86 @@ async function dispatchSpecialist(
       reason: "no agent file of that name",
       ...unresolvedCandidates(ctx),
     });
-    return { html: pageHtml, dispatched: false };
+    return { html: pageHtml, dispatched: false, unmet: NO_SUCH_AGENT };
   }
   try {
     const fragment = await runSpecialist(ctx, specialist, img);
     if (!fragment) {
       ctx.log.event("specialist_no_content", { agent: specialist.file, image: img.name });
-      return { html: pageHtml, dispatched: true };
+      return { html: pageHtml, dispatched: true, unmet: "The specialist that ran returned no content of its type" };
     }
     const merged = await mergeSpecialist(ctx, img, pageHtml, specialist.name, suggestion.reason, fragment);
     ctx.log.event("specialist_dispatched", { agent: specialist.file, image: img.name, merged: Boolean(merged) });
-    return { html: merged ?? pageHtml, dispatched: true };
+    // The only exit that met the request, and only when the merge produced something: a
+    // fragment that was written and then not spliced leaves the same page behind as no
+    // fragment at all, so it is reported as unmet even though the specialist did its part.
+    return merged
+      ? { html: merged, dispatched: true }
+      : { html: pageHtml, dispatched: true, unmet: "The specialist's fragment could not be merged into the page" };
   } catch (e) {
     ctx.log.event("specialist_dispatch_failed", { agent: specialist.file, image: img.name, error: (e as Error).message });
-    return { html: pageHtml, dispatched: true };
+    return { html: pageHtml, dispatched: true, unmet: "The specialist call failed" };
   }
+}
+
+// What the page agent said about its own weakest work, in the words it used, for the verifier to be
+// told alongside the output. A page that asked for a specialist and did not get one is a page whose
+// own author said it could not do this content reliably — the request names the content and carries
+// its reason — and until now `dispatchSpecialist` was the only thing that read it: the request was
+// routed, the outcome logged (`specialist_unresolved`), and the judgement of the page never heard
+// about it.
+//
+// What that cost, measured. In one 100-page bench round across two page-model arms there were 7
+// requests on 5 pages under 6 different names, every one of them a map specialist, 0 dispatched. The
+// 5 pages were every page in the round whose verdict turned on reading ink. On one of them the page
+// agent asked for help producing "a structured data table of each state's classification", got the
+// classification wrong, and the verify step — not told any of this — ADDED a state to a category the
+// page does not put it in; the correction obeyed, and a false sentence shipped in the delivered
+// document (#353).
+//
+// Two limits, stated because the prompt is written to survive them rather than to rely on their
+// being better than they are. It is page-level and not per-arm: 4 of those 7 requests came from the
+// OTHER arm's reader on the same images, so a run reads its own reader's suggestions and not the
+// union that made the count look strong. And it missed 2 of that round's hard pages outright. So
+// this is not a detector and `agents/feedback.md` does not treat it as one — it narrows what the
+// verifier may assert on a page rather than deciding anything about the page, which is a use that
+// costs nothing when the flag is wrong.
+//
+// The test is `unmet` and not `dispatched`: those two answer different questions and disagree on
+// four of `dispatchSpecialist`'s six exits, so keying on `dispatched` claimed "no agent of that
+// name was available" about a standard type that was declined by policy, and said nothing at all
+// about a specialist that ran and returned nothing, threw, or produced a fragment that would not
+// merge — the last three being verbatim the case this caution is for. `unmet` carries the phrase
+// too, so the sentence names which of the four it was.
+//
+// Both interpolated strings are free text a model wrote, landing in a message that already
+// carries a fenced ```html block, so they are flattened and clipped: an unbounded reason
+// containing a fence of its own would restructure the message after the block, and a long one
+// buries the block it is supposed to annotate. The cap is generous for a sentence and short of
+// anything that could crowd the output being judged.
+function specialistCaution(
+  suggestion: { name: string; reason: string } | undefined,
+  unmet: string | undefined,
+): string | undefined {
+  if (!suggestion?.name || !unmet) return undefined;
+  const name = oneLine(suggestion.name, 80);
+  const why = oneLine(suggestion.reason, 300);
+  if (!name) return undefined;
+  return (
+    `The page agent asked for a specialist it did not get: "${name}"` +
+    `${why ? `, because "${why}"` : ""}. ${unmet}, so the HTML above is ` +
+    `its own unaided attempt at the content it wanted help with.`
+  );
+}
+
+// Backticks and newlines out, then clipped to a sentence's worth. Backticks rather than only
+// the triple: a single one opens inline code, which is enough to swallow the punctuation the
+// sentence around it depends on. Flattening the newlines is the sharper half of the two,
+// though, and not only a tidiness measure: the verify message is structured by `##` headings,
+// and a string that cannot start a line cannot forge one.
+function oneLine(s: string, max: number): string {
+  const flat = s.replace(/`/g, "'").replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max).trimEnd()}…` : flat;
 }
 
 interface PageOutcome {
@@ -2625,6 +2737,7 @@ async function extractPage(
   let innerHtml = html;
   let logNote = log;
   let dispatched = false;
+  let unmet: string | undefined;
 
   // Specialist dispatch: if the page flagged a content type that an existing
   // library agent handles (e.g. a chart), run that agent and merge its
@@ -2632,6 +2745,7 @@ async function extractPage(
   if (suggestion?.name) {
     const result = await dispatchSpecialist(ctx, img, innerHtml, suggestion);
     dispatched = result.dispatched;
+    unmet = result.unmet;
     if (result.html !== innerHtml) {
       innerHtml = result.html;
       logNote = logNote ? `${logNote}; merged ${suggestion.name}` : `merged ${suggestion.name}`;
@@ -2666,10 +2780,16 @@ async function extractPage(
   // hedged declaration before it can reach this line at all (`blank_vetoed` on `page_no_output`).
   // A confident-but-wrong declaration would leave a `page_blank` line and a blank count in
   // diagnostics as its evidence, and no verdict.
+  // Computed once, above the check and both rechecks: it is a fact about this page's render, so a
+  // recheck of a correction to that render carries the same one. It is read from `suggestion` and
+  // the dispatch's own return rather than from the log, so the caution and the routing line cannot
+  // disagree about whether the request was met. `unmet` stays undefined when no suggestion was made
+  // at all, which is the same no-caution answer by a different route.
+  const caution = specialistCaution(suggestion, unmet);
   const blankSkip = blank === true && innerHtml === "";
   const verdict = blankSkip
     ? unjudgedVerdict()
-    : await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml }], "verify");
+    : await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml, caution }], "verify");
 
   // Whether the page's links arrived is checked here rather than left to the
   // Feedback Agent: it verifies the output against the IMAGE, which is the one place
@@ -3007,7 +3127,7 @@ async function extractPage(
           chars_after: corrected.length,
         });
       } else if (!verifyFailed) {
-        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }], "recheck_binding");
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected, caution }], "recheck_binding");
         keep = !failedCheck(recheck);
         if (!keep) {
           // Named `page_links_correction_rejected` since before there was anything else on this
@@ -3081,7 +3201,7 @@ async function extractPage(
         // taken: it is logged, the slot stays spent (a refund would let a throttled
         // provider be retried once per corrected page, which is the cost this bounds),
         // and the page ships exactly as it would have with no measurement at all.
-        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected }], "recheck_sampled").catch(
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected, caution }], "recheck_sampled").catch(
           (e: unknown) => {
             ctx.log.event("page_correction_recheck_failed", {
               image: img.name,
