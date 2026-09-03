@@ -1729,11 +1729,11 @@ function applyEditorPatch(
   let reverted: number[] = [];
   let unattributable = false;
   if (headingsLost > 0 && !roundRefused) {
-    // Only a block that KEPT ITS WORDS can be re-seated. `content_dropped` is the per-block record of
+    // Only a block that KEPT ITS WORDS can be re-seated. `content_moved` is the per-block record of
     // words or media given up — and a block in it may have given them to another block in the same
     // reply, which the joined prose cannot see because they never left the document. Handing such a
     // block back restores text that is now in two places and a heading over content that has moved out
-    // from under it. Read `content_dropped` and not `lost`, which every block here is in already: a
+    // from under it. Read `content_moved` and not `lost`, which every block here is in already: a
     // heading falling is one of the things `gaveContentUp` reads, so `lost` cannot sort these at all.
     // `headings_gained` does not cover it either:
     // that reads a heading arriving, and the commonest migrant here is a heading's words arriving as
@@ -1746,7 +1746,7 @@ function applyEditorPatch(
     // the block it was in. Deliberately not the mirror remedy — seating the block back and dropping the
     // edit that took the words — because nothing binds a departure to an arrival (see `headings_gained`
     // below), so which other edit received them is not a question this can ask.
-    const seatable = patched.headings_dropped.filter((at) => !patched.content_dropped.includes(at));
+    const seatable = patched.headings_dropped.filter((at) => !patched.content_moved.includes(at));
     if (patched.headings_gained > 0 || seatable.length === 0) {
       unattributable = true;
     } else {
@@ -1823,12 +1823,26 @@ function applyEditorPatch(
     // block a demotion happened in is the difference between an editor that mangles one form and one
     // that is flattening the document as it goes, and the run log is the only place either is visible.
     //
-    // Absent on the round that could not be attributed, where `headings_gained` is present instead and
-    // `discarded` says the whole reply was refused. The two are therefore mutually exclusive on a line,
-    // and that is the reading: `headings_reverted` means part of the reply was kept, `headings_gained`
-    // means none of it was and why.
+    // Absent on the round that could not be attributed, and then one of the other two says WHICH
+    // attribution failed, because `discarded: "headings_lost"` has three reasons behind it and a log
+    // that cannot separate them answers "why was this round refused" for only one of them:
+    //
+    //   - `headings_gained` — a heading arrived somewhere in the same reply, so a departure cannot be
+    //     matched to an arrival. Counted, because one arrival beside one fall is a move and eleven is a
+    //     restructure.
+    //   - `headings_dropped` — no heading arrived, but every block that dropped one also changed its own
+    //     words, so re-seating any of them would print those words twice. These are the blocks that
+    //     fell and could not be handed back, which is the one thing a reader of this line needs and
+    //     cannot get from anywhere else.
+    //   - `headings_reverted` present WITH `discarded` — blocks were handed back and nothing was left to
+    //     apply, so the round changed nothing. That shape is already distinguishable, which is why it
+    //     needs no field of its own.
+    //
+    // So `headings_reverted` without `discarded` means part of the reply was kept, and the other two are
+    // mutually exclusive with each other.
     ...(reverted.length ? { headings_reverted: reverted } : {}),
     ...(unattributable && patched.headings_gained ? { headings_gained: patched.headings_gained } : {}),
+    ...(unattributable && !patched.headings_gained ? { headings_dropped: patched.headings_dropped } : {}),
     ...(discarded ? { discarded } : {}),
   });
   // `usable: false` for the same reason an unparseable reply is one — nothing came back that can

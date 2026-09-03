@@ -848,9 +848,43 @@ test("a block that gave its words to another block is not re-seated, because tha
   assert.ok(!("headings_gained" in (patch?.data ?? {})), "nothing arrived as a heading, which is why the other guard is blind to this");
   assert.ok(!("headings_reverted" in (patch?.data ?? {})), "and the block that dropped it is the block that emptied, so it is not handed back");
   assert.equal(patch?.data.discarded, "headings_lost", "leaving nothing to seat, which is refused whole");
+  assert.deepEqual(patch?.data.headings_dropped, [1], "and the line says WHICH block fell and could not be handed back");
   assert.equal(result.body, SIBLING, "the document that entered — not one carrying `Name` twice");
   assert.equal((result.body.match(/Name/g) ?? []).length, 1, "once, in one place");
   assert.equal(result.editorHeadingsGated, true);
+});
+
+test("a block that sheds the heading's words while GROWING is not re-seated either", async () => {
+  // The reading is an inequality, not a shortfall, and this is the input that settles which. A block
+  // can hand the heading's words to another edit and come back LONGER — reword what survives, gain a
+  // piece of alt text — and "did this block get shorter" calls that no loss at all. The block would
+  // then be re-seated over an edit already holding those words, and the fail-closed re-check cannot
+  // see it: with the `<h4>` back the document's count is whole again.
+  //
+  // Nothing else separates this from the case above. The document's own prose GREW, so the joined
+  // reading is populated; no heading arrived, so `headings_gained` is 0; the block is not shorter, so a
+  // shortfall test passes it. Only "these are not the words it had" refuses it.
+  const GROWN =
+    `<h1>Form</h1>\n` +
+    `<div><h4>Name</h4><p>Enter it.</p></div>\n` +
+    `<form><input id="name"></form>\n`;
+  const { result, events } = await round(() => ({
+    edits: [
+      { block: 1, html: `<div><p>Enter it. Please print clearly in block capitals.</p></div>` },
+      { block: 2, html: `<form><label for="name">Name</label><input id="name"></form>` },
+    ],
+  }), GROWN, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  // `shrunk` is on the line, and it is on it for the HEADING and not for the words: `gaveContentUp`
+  // reads a heading fall as content given up, so every block that drops one is `shrunk` and in `lost`
+  // whatever became of its text. That is why neither can be the seatability reading, and why this
+  // needed one of its own.
+  assert.equal(patch?.data.shrunk, 1);
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 1 }, "and the document still lost a heading");
+  assert.ok(!("headings_reverted" in (patch?.data ?? {})), "so it is not handed back");
+  assert.equal(patch?.data.discarded, "headings_lost");
+  assert.equal(result.body, GROWN, "the document that entered");
+  assert.equal((result.body.match(/Name/g) ?? []).length, 1, "`Name` once, not once in the heading and once in the label");
 });
 
 test("a reorder in the same reply as a demotion is refused whole, because neither can be told from the other", async () => {
