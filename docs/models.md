@@ -43,7 +43,7 @@ the same kind of decision.
   mostly **real defects the incumbent passed**. Then the unit turned out to be wrong: **a verify
   verdict is not a deliverable**, it triggers one correction pass billed to whichever model runs
   `page`, and the cheap verifier rejects far more pages. Priced that way the swap is **−50.9% of the
-  total cost per page judged under the corrector actually deployed, and −2.0% under the incumbent
+  total cost per page judged under the corrector actually deployed, and −1.3% under the incumbent
   one** — the same swap worth 2% or 51% according to a price that is not the verifier's, where on the
   verify line *alone* it is −71% under both and decides nothing (§7's eighth limit). Both measured
   corrector prices sit under the **$0.0644/pass** that would reverse it, **so the price favours the
@@ -75,7 +75,7 @@ resolve.
 |---|---|---|
 | `page` | **42.0%** | **swapped and live since 2026-09-02** (#312) — −44.8% of the priced bill measured on 100 pages, at a named content cost: `content_missing` on 42 pages against 15 (§5) |
 | `copy_editor` | **33.1%** | **swap recommended, not yet applied** (#329) — `openai.gpt-5.6-luna` at 9.5% of the cost and *ahead* on both quality halves, once the page images the agent actually receives are attached (§4) |
-| `feedback` | 15.6% | **open** (#330) — five dispositions in one sprint, and the last two were a swap to `openai.gpt-5.6-luna` and its withdrawal by the seat that ran the round. On 45 pages the two arms tie on detection (40/45 against 39/45) and the cheap arm's extra rejections are mostly real. Total cost per page, including the correction pass a rejection triggers, favours the swap at **−50.9%** under the deployed corrector and −2.0% under the incumbent one, so the price is not what leaves this open: an unbounded rate of invented defects and a verdict that rejects 44 of 45 clean pages, reproducibly on 32 of them, are (§4) |
+| `feedback` | 15.6% | **open** (#330) — five dispositions in one sprint, and the last two were a swap to `openai.gpt-5.6-luna` and its withdrawal by the seat that ran the round. On 45 pages the two arms tie on detection (40/45 against 39/45) and the cheap arm's extra rejections are mostly real. Total cost per page, including the correction pass a rejection triggers, favours the swap at **−50.9%** under the deployed corrector and −1.3% under the incumbent one, so the price is not what leaves this open: an unbounded rate of invented defects and a verdict that rejects 44 of 45 clean pages, reproducibly on 32 of them, are (§4) |
 | `reader` | 9.3% | **declined** (#313) — 78% of the incumbent's own agreement floor at −77%, and §3 says what the 22% is |
 | `builder` | 0% | 0 in this round, **not zero any more**: it ran twice on the swapped deployment, at about $0.04 a call (§4) |
 | specialists | 0% | still 0 calls, and §4 says why that is a fact about `agents_dir` rather than about the corpus |
@@ -578,7 +578,8 @@ other two are what leave this open:**
   asserted wrongly in an earlier revision, on the strength of a plausible identifier in the same
   repository). The cheap finalist triggers that pass on **85.2%** of control calls against the
   incumbent's **52.6%**, so ≈**33 more correction passes per 100 pages judged**, of which #288 says
-  **26%** clear the verifier and the rest ship the page with its flag standing and, per
+  **26% per draw** clear the verifier — 19% of pages on a majority of three draws — and the rest ship
+  the page with its flag standing and, per
   [#328](https://github.com/EqualifyEverything/equalify-iris/issues/328), nothing in the delivered
   document saying so. That remains a quality cost. As a *cost* cost it is small, and the next table is
   why.
@@ -606,40 +607,68 @@ cache reads while paying 1.5M cache-write tokens where the incumbent gets 79.7% 
 ratio is measured at Luna's *worst* caching. **But a verify verdict is not a deliverable.** It triggers
 a correction pass, that pass is billed to whichever model runs `page`, and the cheap verifier triggers
 62% more of them (85.2% of calls against 52.6%). Total cost per page judged, with the trigger rate
-measured per draw on the 135 control calls and the correction price measured rather than assumed:
+measured per draw on the 135 control calls and the correction price measured rather than assumed — and
+measured on a round whose `page.md` **blob** sha matches the one the trigger rates were taken at, which
+is not the same test as matching `iris_sha` and is the reason the sonnet figure here is $0.0619 rather
+than the $0.0607 an earlier revision published (#330, and §6):
 
 | operating point | detect | trigger | $verify | $correct | **$total/page** | vs incumbent | $/page actually fixed |
 |---|---|---|---|---|---|---|---|
-| corrector = `claude-sonnet-4-6`, **$0.0607/pass** | | | | | | | |
-| incumbent alone | 88.9% | 52.6% | $0.0296 | $0.0319 | **$0.0615** | — | $0.4499 |
-| `openai.gpt-5.6-luna` alone | 86.7% | 85.2% | $0.0086 | $0.0517 | **$0.0603** | **−2.0%** | $0.2723 |
-| union — either rejects | **97.8%** | 88.9% | $0.0382 | $0.0540 | **$0.0922** | +49.8% | $0.3987 |
-| intersection — both reject | 77.8% | 48.9% | $0.0382 | $0.0297 | **$0.0679** | +10.3% | $0.5339 |
+| corrector = `claude-sonnet-4-6`, **$0.0619/pass** | | | | | | | |
+| incumbent alone | 88.9% | 52.6% | $0.0296 | $0.0326 | **$0.0622** | — | $0.4545 |
+| `openai.gpt-5.6-luna` alone | 86.7% | 85.2% | $0.0086 | $0.0527 | **$0.0613** | **−1.3%** | $0.2769 |
+| union — either rejects | **97.8%** | 88.9% | $0.0382 | $0.0550 | **$0.0932** | +50.0% | $0.4033 |
+| intersection — both reject | 77.8% | 48.9% | $0.0382 | $0.0303 | **$0.0685** | +10.2% | $0.5385 |
 | corrector = `moonshotai.kimi-k2.5`, **$0.0100/pass — what `page` has run since #312/#324** | | | | | | | |
 | incumbent alone | 88.9% | 52.6% | $0.0296 | $0.0053 | **$0.0349** | — | $0.2549 |
 | `openai.gpt-5.6-luna` alone | 86.7% | 85.2% | $0.0086 | $0.0085 | **$0.0171** | **−50.9%** | **$0.0773** |
 | union | **97.8%** | 88.9% | $0.0382 | $0.0089 | **$0.0471** | +35.1% | $0.2037 |
 | intersection | 77.8% | 48.9% | $0.0382 | $0.0049 | **$0.0431** | +23.6% | $0.3389 |
 
-Same verifiers, same detection, same trigger rates: **the swap is worth 2% or 51% according to a price
-that belongs to a different agent.** A 71% discount on the verify call becomes a 2% saving on the bill
+Same verifiers, same detection, same trigger rates: **the swap is worth 1% or 51% according to a price
+that belongs to a different agent.** A 71% discount on the verify call becomes a 1.3% saving on the bill
 when the corrector is expensive, because the extra passes eat it. **Break-even is $0.0644 a
 correction pass** — under it the extra rejections are affordable, over it the incumbent wins. Both
 measured corrector prices are under it, so **the cost question is settled in the direction of the
-swap**; the incumbent corrector sits only 6% under, so the margin there is thin and the deployed one is
-not. An earlier revision of this section treated that as sufficient and published a recommendation. It
-is not sufficient: everything in this table is a price, and both of the things holding the swap up are
-rates the round cannot bound. A settled cost case removes an objection; it does not supply a reason.
+swap**; the incumbent corrector sits only 3.9% under, so the margin there is inside the noise and the
+deployed one is nowhere near it. An earlier revision of this section treated that as sufficient and
+published a recommendation. It is not sufficient: everything in this table is a price, and both of the
+things holding the swap up are rates the round cannot bound. A settled cost case removes an objection;
+it does not supply a reason.
+
+**#330 now publishes a second set of inputs for the same round, and the decision is invariant across
+both.** Its later reading gives $0.0305/$0.0080 a verify call and an 84.4% trigger rate where this
+document derived $0.0296/$0.0086 and 85.2% — a third disagreement about `runs-digits-45`'s controls,
+and #330's to settle. It matters less than it looks: that set moves break-even to $0.0708, which is
+*further* from both corrector prices, and puts the swap at −4.5% under the sonnet corrector and −54.0%
+under the deployed one. Across four corrector prices ($0.0100, $0.0137, $0.0607, $0.0619) and both
+input sets, the challenger is cheaper in **every** combination, by between 1.3% and 54%. The sign has
+never been the uncertain part; only the size, and the size is set by an agent that is not under test.
+
+**Why this row is `open` and not `declined`, when #330 now says "do not swap the page verifier".** That
+recommendation is priced against a page agent running `claude-sonnet-4-6` — 4.4 points from break-even,
+which is a fair reading of that arm and is not the deployed one. `page` has run
+`moonshotai.kimi-k2.5` since #312, and on the cheap corrector both readings agree that **no reachable
+rejection rate makes the verify swap unprofitable**: the challenger would have to trigger corrections on
+more than 100% of pages. So the cost case does not decline this swap under the deployment that exists,
+and declining it on a price computed for a corrector nobody is running would repeat the mistake this
+section has already made twice in the opposite direction. What is undecided is verdict quality, which is
+unmeasured, and `open` is the disposition for unmeasured. If the two rates come back bad this becomes
+`declined` on evidence; if `page` moves back to an expensive corrector it becomes `declined` on price.
 
 Three things follow that the verify-price framing hid. **A second opinion is the best detector and the
 worst buy:** running both and rejecting if either rejects closes 4 of the incumbent's 5 blind spots for
 97.8% detection, and costs +35.1% to +49.8%. **The intersection is worse than either alone** — it pays
 for two verifiers and then discards the detection they were bought for. And **`$/page actually fixed`
-ranks Luna best under both correctors**, a column whose *ranking* does not depend on #288's 26% clear
-rate at all, since that rate is a common factor across arms; only its level does. **That column has one
-assumption worth stating where it is read rather than only in the blocker below: its denominator is
-`trigger × 26%`, so it credits an arm for every correction that clears — including one that clears
-against a defect the verifier invented.** Blocker 2 says at least two such defects exist in 45 pages
+ranks Luna best under both correctors**, a column whose *ranking* does not depend on #288's clear
+rate at all, since that rate is a common factor across arms; only its level does. That level is **26%
+per draw**, which is the unit used here because production runs one draw — #288 has since corrected the
+label it was quoted under, and per *page* over three draws the same data gives 19% on a majority and 33%
+on any, so a reader taking the column's level rather than its ranking should know which of the three it
+is built from. **The column has one further assumption worth stating where it is read rather than only
+in the blocker below: its denominator is `trigger × 26%`, so it credits an arm for every correction that
+clears — including one that clears against a defect the verifier invented.** Blocker 2 says at least
+two such defects exist in 45 pages
 and that their rate is unmeasured, so the column is most generous exactly where the arm it favours
 is least measured. It is a bound on the value of the cheap arm, not independent support for it.
 
@@ -666,8 +695,8 @@ word, a broken list, alt text duplicating its caption, headings emitted as itali
 agent numbers 5 of 91 markers by file position instead of the printed folio, against a clause in its
 own prompt. The verifier swap priced above is worth, at most, about **$1.61 per 100 document pages** —
 $0.0177 per page *judged* under the deployed corrector, and only ≈91 of every 100 pages are judged
-since #294 stopped sending blank versos; under the incumbent corrector the same swap is worth **$0.11**,
-a ≈15x spread in dollars, which §7's eighth limit states as 2.0% against 50.9% — a ≈25x spread,
+since #294 stopped sending blank versos; under the incumbent corrector the same swap is worth **$0.08**,
+a ≈22x spread in dollars, which §7's eighth limit states as 1.3% against 50.9% — a ≈39x spread,
 because the two percentages carry different denominators. Two correct ratios of the same two arms,
 and neither is a substitute for the other. These are
 defects a reader can catch the service out on, and fixing the extraction is worth more than changing
@@ -793,7 +822,7 @@ share column above), so the next win has to come from asking an agent to do less
 | editor capability, confinement, $/doc | `runs-editor-2` | `2566c8b`, recorded in the round | **yes** — one arm per model, and §4 names the one document that carries the capability size |
 | the editor round that could not separate its finalists | `runs-editor-1` | graded at `917bb38` | **no. Superseded** — it sent the editor no page images, so it measured a different agent (§7) |
 | verifier `digits_changed` detection, table-vs-year split, control adjudication, $/call, scratchpad share | `runs-digits-45` (+ `runs-digits-repro`) | `2566c8b`, recorded | **yes** — 45 pages of one document, one damaged read per page and three control reads; the control rows are quoted both per draw (135, what the pricing uses) and per page (45, what §7's ninth limit is about). `runs-digits-repro` is the 10 pages either finalist missed, at three repeats, so its detection rate is not a corpus rate and is not quoted as one |
-| §4's operating-point table: `$total/page`, the −2.0%/−50.9% pair, the $0.0644 break-even | trigger rates and $verify from `runs-digits-45`'s controls; **correction-pass price from `runs-extract100-1`** ($0.0607 sonnet) and a **3-page kimi probe** ($0.0100) | `2566c8b` | **partly.** Every cell re-derives from the four published inputs and does so exactly. But the row that carries the swap's size rests on that 3-page probe, drawn from front matter, which is the cheap part of a document. The table settles the cost question only; §4 says why that is no longer the question. A 100-page kimi extraction round was running when this was written; **the figure to replace $0.0100 with, and the break-even to test it against, are both stated so that landing it does not need a new round** |
+| §4's operating-point table: `$total/page`, the −1.3%/−50.9% pair, the $0.0644 break-even | trigger rates and $verify from `runs-digits-45`'s controls; **correction-pass price from `runs-extract100-frozen`** ($0.0619 sonnet) and a **3-page kimi probe** ($0.0100) | `2566c8b` | **partly.** Every cell re-derives from the four published inputs and does so exactly. Two caveats, both about *which round* a price came from rather than the arithmetic. (1) The sonnet price was $0.0607 from `runs-extract100-1` until #330 showed that round's `page.md` **blob** sha (`00009549`) differs from the one the trigger rates were measured at (`635267ac`) — two prompt generations, across #284's UNDERLINED TEXT rule. `runs-extract100-frozen` matches the blob and prices a correction 2.0% dearer, which is why the sonnet rows moved and −2.0% became −1.3%. **`iris_sha` does not answer this question and the blob sha does, in both directions** — #330 also found two rounds 10 commits apart whose blobs are byte-identical. (2) The kimi $0.0100 probe has **not** been blob-matched, so it carries the same hazard unchecked, on top of being 3 pages of front matter. A 100-page kimi round was running when this was written; **the figure to replace $0.0100 with, and the break-even to test it against, are both stated so that landing it does not need a new round** |
 | verifier self-contradiction, $/call, `para_deleted` + `row_deleted` | `runs-verifier-1` | `da78e0b`, recorded | **partly.** Its `digits_changed` column is **superseded** by the row above — 9/9 became 40/45 at 4x the corpus. The other two classes have never been re-run wider, and its *undamaged-control* column is measured against a superseded `agents/page.md` |
 | cost shares (44.5 / 25.0 / 18.0 / 12.6) | `runs-bystep-100` | `158e3d9` (derived, below) | **superseded** by the row above; see the drift note |
 | $0.1786/page, $17.86/100 pages | `runs-bystep-100` | `158e3d9` | **no. Superseded** — it was never a price to quote forward |
@@ -885,7 +914,7 @@ so an unreported round is invisible in it by construction. When auditing this do
 claims into ones that cite a source and ones that assert a negative. The negatives are the unaudited
 set.
 
-## 7. Nine limits worth knowing before re-benchmarking
+## 7. Ten limits worth knowing before re-benchmarking
 
 - **There is a ceiling and it is about 84%.** The incumbent reader agrees with its own previous
   pass on 84–85% of issues. Every "% of floor" number is against that, not against truth. A raw
@@ -934,7 +963,7 @@ set.
   call really is 29.0% of the incumbent's, and the detection rates really are tied. It decided nothing
   because **a verify verdict is not a deliverable** — it triggers exactly one correction pass, that
   pass is billed to whichever model runs `page`, and the cheap verifier triggers 62% more of them.
-  Costed per page instead of per call, the same swap is −2.0% or −50.9% depending on a price that
+  Costed per page instead of per call, the same swap is −1.3% or −50.9% depending on a price that
   is not the verifier's at all, and the ranking flips at $0.0644 a pass. Two general forms: **ask what
   an agent's output causes to happen next, and whether that is inside the unit being quoted**; and
   measure a rate in the unit the pipeline pays for, since OR-ing this round's reject flag across a
@@ -958,6 +987,17 @@ set.
   cheapest check for it is to print both denominators and the reads-agreeing count beside every rate
   taken over repeats. §7's own advice to prefer a wider corpus to more repeats stands, but repeats you
   have already paid for should be read before they are pooled.
+- **A commit distance is not a code distance, in either direction, and the prompt's blob sha is what
+  answers it.** Every round here records an `iris_sha`, and combining two rounds' numbers into one
+  table silently assumes they measured the same pipeline. `iris_sha` cannot tell you that.
+  §4's operating-point table quoted a correction price from a round two `page.md` generations behind the
+  round its trigger rates came from — same-looking provenance, different prompt, across #284's
+  UNDERLINED TEXT rule — and re-pricing on the matched round moved the swap from −2.0% to −1.3%. The
+  error also runs the other way: two rounds **10 commits apart** turned out byte-identical across
+  `extraction.ts`, `lint.ts`, `config.ts`, `page.md` and `feedback.md`, so a comparison that looked
+  unusable was fine (#330). **Before combining rounds, diff the blob shas of the prompts and the
+  pipeline files, not the commits** — it is free, it answers both questions, and a wrong answer here
+  does not look like an error anywhere downstream.
 
 ## 8. What would change these answers
 
@@ -1000,7 +1040,9 @@ set.
   self-retracting `problems` with a prompt clause. One price is still worth having, since it decides
   how much the swap would be worth if the rates come good: **the corrector's real price** (the −50.9%
   row rests on a 3-page probe at $0.0100 a pass; anything above **$0.0644** hands it back to the
-  incumbent, and a 100-page kimi round was in flight when this was written). What would *not* change
+  incumbent, and a 100-page kimi round was in flight when this was written). Take that round's
+  `page.md` **blob** sha before quoting it against these trigger rates — that check is what moved the
+  sonnet corrector from $0.0607 to $0.0619, and the kimi probe has not had it. What would *not* change
   the answer is more detection data on `digits_changed`; the arms are tied there and nothing rests on
   it. The paid round worth running instead is against the `page` agent: 12 of 12 disputed pages carry
   extraction defects the verifier is passing, plus #333.
@@ -1024,13 +1066,17 @@ node verifyregrade.mjs runs-verifier-1                            # §4's 11-pag
 node verifyregrade.mjs runs-digits-45                             # §4's 45-page detection split, free
 node verifyregrade.mjs runs-digits-repro                           # §4's stability check, free
 node verifierfinds-perpage.mjs runs-digits-45                     # §4's per-page control table, free
+node verifyswapcost.mjs                                           # both corrector generations, free
 ```
 
 §4's operating-point table is arithmetic over four published inputs — the two `$verify` prices and the
 two trigger rates from `runs-digits-45`, and a correction-pass price — so it needs no round of its own:
 `$total = $verify + trigger × $pass`, and the arm that wins flips at `$pass = ($0.0296 − $0.0086) ÷
 (0.852 − 0.526) = $0.0644`. Substituting a newly measured `$pass` is a line of arithmetic, which is the
-point of publishing the break-even beside the table rather than only the side of it we are on.
+point of publishing the break-even beside the table rather than only the side of it we are on. Two
+things to do before substituting one: check the new round's `page.md` blob sha against the round the
+trigger rates came from (§7's tenth limit), and, if you are using #330's later `$verify`/trigger set
+instead of this document's, recompute the break-even too — it is $0.0708 there, not $0.0644.
 
 `mixedcost.mjs` exists because `report.mjs` prices a whole document at its `primaryModel`, which was
 safe for exactly as long as one model served every agent. After a per-agent swap it charges the
