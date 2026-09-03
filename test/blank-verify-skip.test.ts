@@ -374,3 +374,45 @@ test("a stated blank its own log contradicts is judged, and the judge is shown t
     assert.equal(blankLine.blank_contradicted, "heading is visible");
   });
 });
+
+test("a contradicted stated blank the verifier passes ships empty, and its line says it was judged", async () => {
+  await withTemp(async (dir) => {
+    // The other half of the branch above, and the case the change trades INTO: the verify call is
+    // bought, the verifier looks at the image and the empty fragment and says the fragment is faithful.
+    // Then the page ships empty and no marker in the document says a reader lost anything — the log's
+    // named heading is simply unresolved. It is the shape docs/API.md §7b states as the invariant (a
+    // contradicted stated blank carries no `skipped` on its own line), and it is only reachable on a
+    // PASSING verdict, so the failing-verdict test above cannot pin it: `page_verify_failed` has no
+    // `skipped` field to omit.
+    const rec: Recorded = { events: [], calls: [], caps: [], verifyUsers: [] };
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, rec, { render: (o) => (o === 2 ? STATED_CONTRADICTED : good(o)) }),
+    );
+    assert.equal(rec.calls.includes("verify:2"), true, "the call is bought whatever the answer is");
+    // Judged, not skipped and not unjudged. A `skipped` here would put the page back in the saving it
+    // is deliberately outside of, and an `unjudged` would keep a page a verdict WAS paid for out of
+    // every pass rate computed off these logs — the two mistakes the fields exist to tell apart.
+    const line = of(rec, "page_verify_ok").find((e) => e.image === "page-002.png")!;
+    assert.equal("skipped" in line, false, "a page a verdict was bought for is not a skip");
+    assert.equal("unjudged" in line, false, "and it is not unjudged either");
+    assert.equal(of(rec, "page_verify_failed").length, 0);
+    // Nothing was repaired, because nothing was found: the page is delivered as the empty fragment it
+    // was declared as. This is the loss the design accepts in exchange for #194's page — stated on the
+    // PR and in §7a — and the only evidence it leaves is the `page_blank` line's own two fields.
+    assert.equal(of(rec, "page_corrected").length, 0);
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "");
+    assert.deepEqual(failedPages, [], "an empty page delivered is not a failed page, so no marker names it");
+    const blankLine = of(rec, "page_blank")[0];
+    assert.equal(blankLine.blank_stated, true);
+    assert.equal(blankLine.blank_contradicted, "heading is visible");
+    // And the arithmetic reads the same either way: the declaration cost a call, so it is not a saving.
+    const { verification, pages_blank } = fold(rec);
+    assert.equal(verification.pages_skipped_blank, 0);
+    assert.equal(verification.pages_unjudged, 0);
+    assert.equal(verification.pages_verified, 3);
+    assert.deepEqual(pages_blank, [2]);
+    // The judge was still told what the reply said about itself; a pass on a page nobody warned is a
+    // different (and cheaper) event than a pass on a page the caution named.
+    assert.match(rec.verifyUsers!.find((u) => u.includes("page-002.png"))!, /returned NO page for this image/);
+  });
+});

@@ -2338,12 +2338,23 @@ async function renderPage(
     // folio the paper never printed — which is the difference #219 had to reconstruct by replaying
     // 818 replies, and the field that would have shown it in one grep.
     const dropped = html?.trim() ? { dropped: html.trim().slice(0, 200) } : {};
+    // On all three lines a declaration can land on, because the field's own failure mode is invisible
+    // from the one that honoured it. `blank_stated` here says the field was SENT, not that it was
+    // believed: a run reading only `page_blank` can count how often the answer arrived in the shape
+    // the prompt asks for and cannot count how often it arrived for a page the model had just said it
+    // could not read, or for a page Iris already holds content for. Those two are the misuse the
+    // prompt paragraph warns about in as many words ("never send it for a page you could not read"),
+    // and they are the one signal that would say this change had gone wrong — a model stamping
+    // `"blank": true` on unreadable pages costs nothing today (the doubt veto still refuses it) and
+    // would be the reason to take the field back out. Neither line can show it unless it is on them.
+    const stated = declaration.stated ? { blank_stated: true as const } : {};
     if (declaration.blank && previous?.trim()) {
       ctx.log.event("page_blank_refused", {
         image: img.name,
         page: img.order,
         chars_kept: previous.trim().length,
         log: parsed?.log ?? "",
+        ...stated,
         ...dropped,
       });
       throw new Error(
@@ -2354,13 +2365,15 @@ async function renderPage(
       // `blank_stated` says which of the two asked-for answers this was, because they no longer behave
       // alike: a stated one survives a self-contradiction and a prose one does not, so a run that
       // wants to know how often the field is actually sent — the thing the whole of #371 turns on —
-      // has to be able to count it. `blank_contradicted` is the same field name `page_no_output`
+      // has to be able to count it. On this line it means the field was believed; the same field on
+      // the two refusals above and below means it was sent and refused, which is the paragraph at
+      // `stated`. `blank_contradicted` is the same field name `page_no_output`
       // carries for the refusal, so one grep finds both the pages this cost and the pages it did not.
       ctx.log.event("page_blank", {
         image: img.name,
         page: img.order,
         log: parsed?.log ?? "",
-        ...(declaration.stated ? { blank_stated: true } : {}),
+        ...stated,
         ...(declaration.affirmed ? { blank_contradicted: declaration.affirmed } : {}),
         ...dropped,
       });
@@ -2396,6 +2409,12 @@ async function renderPage(
       shape,
       ...dropped,
       ...(declaration.asserted ? { blank_vetoed: declaration.vetoes, log: parsed?.log ?? "" } : {}),
+      // The misuse case, and the reason `blank_stated` is not confined to the line that honoured the
+      // field: a stated blank refused HERE is a model that said the page was unreadable and stamped
+      // the field on it anyway. `blank_vetoed` names the words and this names where the answer came
+      // from, so the two together separate a prompt that is being followed badly from one that is not
+      // being followed at all.
+      ...stated,
       ...(declaration.affirmed ? { blank_contradicted: declaration.affirmed } : {}),
     });
     // The message says what arrived, which for a fragment carrying nothing is not "no HTML": a reply
@@ -3334,6 +3353,15 @@ async function extractPage(
     // repair is the safety net the skip above rests on, so capping it at a bound taken from the
     // reply that got the page wrong is the wrong side of #285's own argument (the cap exists to
     // bound a runaway, and this call has nothing to run away from being asked to produce).
+    //
+    // Since #371 the links check is not the only caller that gets here with an empty page. A blank
+    // declaration STATED in the field whose own log names something on the page is delivered and
+    // judged, so a failed verdict reaches this call with `trigger: "verify"` (or `both`, where a link
+    // is missing too) and the same empty first pass. The exemption is unchanged and so is the reason
+    // for it — the reply that measured nothing is still the reply that got the page wrong, and this
+    // is still a re-render from the image rather than an edit — but the argument no longer rests on
+    // the link repair alone: this is now the repair that decides whether that verify call bought
+    // anything, and a cap taken from the empty render would spend it and lose the page anyway.
     const ceiling = html === "" ? undefined : correctionCeiling({ outputTokens, chars: html.length }, before.length);
     const attempt = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons, ceiling).then(
       (html) => ({ html, error: null as unknown }),
@@ -3367,8 +3395,10 @@ async function extractPage(
         // remedy is a config edit or `correctionCeiling`'s multiple. Absent where the call ran
         // uncapped, which is two causes and not one: the first pass reported no usage, so there was
         // no measurement to cap from, or the page rendered nothing and was delivered blank, whose
-        // correction is a re-render rather than an edit (#294, and the only trigger that reaches it
-        // there is `links`). Both leave the deployment's ceiling as the one that bound the call, so
+        // correction is a re-render rather than an edit (#294; `links` on a page nothing judged, and
+        // since #371 `verify` or `both` on a stated blank whose own log contradicted it, which is the
+        // one blank page a verdict is bought for). Both leave the deployment's ceiling as the one that
+        // bound the call, so
         // the remedy on the line is the same; what differs is whether anything here could have
         // capped it, which is what an operator reading this field is asking.
         ...(ceiling !== undefined ? { ceiling } : {}),

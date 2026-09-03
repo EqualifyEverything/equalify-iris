@@ -1993,6 +1993,43 @@ test("a markup-spelled declaration the veto refuses is the failed page an empty 
   });
 });
 
+test("a stated blank the veto refuses says on the failure line that the field was sent", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The one shape the new prompt paragraph forbids in as many words — "never send it for a page you
+    // could not read" — so it is the signal that would say the field had gone wrong, and it lands on a
+    // line that would otherwise not mention the field at all. `blank_stated` is on all three lines a
+    // declaration can reach for that reason: a run that recorded it only where it was BELIEVED could
+    // count the field working and never count it failing.
+    const { failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) =>
+          o === 2
+            ? JSON.stringify({ html: "", log: "The page is blank, though the scan is too dark to be sure.", blank: true })
+            : good(o),
+      }),
+    );
+    assert.deepEqual(failedPages, [2], "the field does not override the doubt veto");
+    assert.equal(of(events, "page_blank").length, 0);
+    const refused = of(events, "page_no_output");
+    assert.equal(refused.length, 1);
+    assert.equal(refused[0].blank_stated, true, "the field was sent, and this line is where that is visible");
+    assert.deepEqual(refused[0].blank_vetoed, ["too dark to", "dark"]);
+    // A prose declaration refused the same way carries no such field, so the flag reads as the question
+    // it looks like rather than as a default.
+    const prose: Event[] = [];
+    await withTemp(async (other) =>
+      runExtraction(
+        makeCtx(other, prose, {
+          render: (o) =>
+            o === 2 ? JSON.stringify({ html: "", log: "The page is blank, though the scan is too dark to be sure." }) : good(o),
+        }),
+      ),
+    );
+    assert.equal("blank_stated" in of(prose, "page_no_output")[0], false);
+  });
+});
+
 test("a page the agent could not read is still a lost page, not a blank one", async () => {
   await withTemp(async (dir) => {
     const events: Event[] = [];
