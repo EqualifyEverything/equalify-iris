@@ -1667,6 +1667,38 @@ at its smallest. `prd.md` §7.4 v1.12, with both
 halves pinned in `test/page-prompt.test.ts`, `test/feedback-prompt.test.ts` and
 `test/verification.test.ts`.
 
+The fourth check is not a comparison at all but a field the verifier was never shown: the page
+agent's own `"log"`. `agents/page.md` asks for it by name in **26** places, and for six kinds of
+finding it is the only place asked — a page ending mid-sentence, a heading with no parent on the page,
+a symbol with no key, a placeholder image source, a language change, an irregular table. The verifier
+judges the HTML against that contract and was given the HTML alone, so on all six it could only ignore
+the rule or hunt for its evidence in the markup, where the contract does not put it. Across **311
+verify replies, 35 problems on 26 replies demanded something of the log, and 26 of the 35 were about a
+log that existed and was not shown** (issue #349). It is now quoted in the verify message, after the
+cached prefix like the caution and clipped at a bound no observed log reaches (median 671 characters,
+longest 2,566 over 2,001 replies). What the prompt may do with it is deliberately small: the log is the
+transcriber's account of its own work, so an obligation recorded there is **discharged** and reporting
+it as unrecorded is a false finding, while a log the image refutes makes the missing content the
+problem with the agent's own words as the reason. The log is never the subject of a problem — the
+correction pass is parsed for `html` alone and writes no log, so "the log does not note X" is an
+instruction nobody can carry out and it spends the page's only licence. Both rechecks of a correction
+are sent none, because the log they would carry describes a fragment that has since been rewritten.
+
+That field is also missing outright on **13.7%** of pages, and nothing said so. When a reply arrives as
+markup rather than as the envelope, `bareHtml` rescues the page from the text as it stands — a usable
+page with no `"log"`, no `suggested_agent` and no blank declaration — and it shipped as an ordinary
+success: 41 of 300 first page calls in two multi-vendor rounds, 54 of 400 across four deployed rounds
+of one PDF, and 0 of those 41 left any other line behind. `page_bare_html` now says it and
+`pages_bare_html` carries it in diagnostics beside `pages_failed` and `pages_blank`, named for the
+reply's shape rather than the consequence because an enveloped reply that merely leaves the field empty
+has a different remedy — and is 0 of 2,320 page replies across 67 round logs, so today the line
+accounts for every page with no log. In the same change `agent_sha` stops being null on every deployed
+round: it was `git rev-parse HEAD:./<file>`, which needs a `.git` the deployment container does not
+ship, and it is now computed from the prompt text, which is the same number `git hash-object` gives.
+Four deployed rounds of one PDF moved a defect from 0 pages to 28 of 100 with no log among them able to
+say which prompt each ran. `prd.md` §7.4 v1.13, pinned in `test/page-log-to-verifier.test.ts`,
+`test/feedback-prompt.test.ts`, `test/agent-sha.test.ts` and `test/page-failure.test.ts`.
+
 ## Automated code review
 
 Every PR is reviewed by Claude in CI before a human reads it

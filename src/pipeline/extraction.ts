@@ -2256,6 +2256,41 @@ async function renderPage(
       : `no HTML (${shape}, ${res.text.length} chars)`;
     throw new Error(`page agent returned ${arrived}`);
   }
+  // A page rescued by `bareHtml`: the reply was markup rather than the envelope, so it delivers
+  // a real page and nothing else. `log` is `""` and `suggested_agent` is absent — not because
+  // the model had nothing to say, but because there was no field to say it in.
+  //
+  // Said out loud because until now it was the one page outcome with no line of its own. A blank
+  // page has `page_blank`, an unreadable reply has `page_no_output`, a lost page has
+  // `page_extraction_failed`; this one shipped as an ordinary success. It is not rare: 41 of 300
+  // first page calls across two multi-vendor bench rounds and 54 of 400 across four deployed
+  // rounds, and 0 of those 41 left any other line behind (#349). `agents/page.md` discharges
+  // obligations in the log that it discharges nowhere else — a page ending mid-sentence, a heading
+  // with no parent, a symbol with no key, a placeholder image source, a language change, an
+  // irregular table — so on those pages every one of them is unmet and unreported, while the HTML
+  // is perfectly usable and the run says 100 of 100 delivered.
+  //
+  // It is the discriminator for the other reading of an empty log, too. `log: ""` on a page with
+  // this line means the reply had no envelope; `log: ""` without it means the model sent an
+  // envelope and left the field empty, which is a prompt-compliance question and not a parse one.
+  // Nothing could tell those apart before, and they have opposite remedies. Which of the two the
+  // deployed models do is now answerable: over 67 round logs on file, 2,320 `page.md` replies are
+  // 2,001 with a non-empty log and 319 bare, and 0 with an envelope whose log is empty — so this
+  // line accounts for every page that has no log, and the second reading is a shape nothing has
+  // produced yet rather than a share of the 13.7%.
+  //
+  // `reextract` marks the feedback round rather than the first pass, because #349's rate is over
+  // first calls and a count that pools rounds is not comparable with it. Absent on a first pass,
+  // so no older line changes shape.
+  if (!parsed) {
+    ctx.log.event("page_bare_html", {
+      image: img.name,
+      page: img.order,
+      chars: res.text.length,
+      html_chars: html.trim().length,
+      ...(previous ? { reextract: true } : {}),
+    });
+  }
   const sa = parsed?.suggested_agent;
   return {
     html,
@@ -2805,7 +2840,13 @@ async function extractPage(
   const blankSkip = blank === true && innerHtml === "";
   const verdict = blankSkip
     ? unjudgedVerdict()
-    : await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml, caution }], "verify");
+    : // `logNote` and not `log`: where a specialist merged, the note says so, and the fragment the
+      // verifier is judging is the merged one. This is the only verify call whose log describes the
+      // fragment it is about — both rechecks judge a CORRECTED fragment, and a correction reply is
+      // parsed for `html` alone (`correctPage`), so there is no log of it to send and the first
+      // pass's note is about text that has since been rewritten. Sending that would invite exactly
+      // the false problem #349 measured, one round later.
+      await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml, caution, log: logNote }], "verify");
 
   // Whether the page's links arrived is checked here rather than left to the
   // Feedback Agent: it verifies the output against the IMAGE, which is the one place

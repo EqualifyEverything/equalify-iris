@@ -106,6 +106,25 @@ yourself. And make no such report where you cannot say which places the named
 region covers — that membership is not on the page, and supplying it from your own
 knowledge to manufacture the comparison is how this check invents a problem instead
 of finding one.
+Where the user message quotes what the agent recorded in its own "log" field, that
+is the transcriber's account of its own work on this page, and it is evidence rather
+than a second source: check it against the image, the way you check the HTML. It
+settles two things and licenses nothing else. An obligation the contract puts in the
+log and nowhere else is DISCHARGED there — a page ending mid-sentence, a heading with
+no parent on the page, a symbol with no key, a placeholder image source, a language
+change, an irregular table — so where the log records one of those, it is recorded,
+and reporting it as unrecorded is a false finding about the one field you can now
+see. And where the log asserts something the image refutes — "the table is fully
+transcribed" beside a table that stops at a row the page keeps going past — the log is
+not the problem; the missing content is, and it is "content_missing" like any other,
+now with the agent's own words as the reason it went unnoticed.
+Never make the log itself the subject of a problem. The correction pass is handed
+your problem strings and the page and answers with HTML alone — it writes no log —
+so "the log does not note X" is an instruction nobody can carry out, and it spends
+the only licence you have over that page on a field the repair cannot touch. Say
+what the READER loses. And where the user message quotes no log at all, the reply
+had none to quote: that is a fact about the reply and not about the page, so say
+nothing about it either way.
 Where the user message tells you the page agent asked for a specialist it did not
 get, that is the agent saying it could not do this content reliably, and your
 licence over what it produced for that content is narrower than usual: you may

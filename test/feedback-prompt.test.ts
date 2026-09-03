@@ -195,6 +195,51 @@ test("the verify task compares a region the page names against the bands the HTM
   }
 });
 
+// #349. `agents/page.md` asks for the "log" field by name in 26 places, and for six kinds of
+// obligation the log is the only place it asks — a page ending mid-sentence, an orphan heading, an
+// unkeyed symbol, a placeholder image source, a language change, an irregular table. The verifier
+// judging the page against that contract was never shown the field, so it could only ignore those
+// rules or hunt for their evidence in the HTML: across 311 verify replies in two bench rounds, 35
+// problems on 26 replies demanded something of the log, and 26 of the 35 were about a log that
+// existed and was not shown. `verifyAgentOutput` now quotes it (test/page-log-to-verifier.test.ts
+// pins the carrying, including that a recheck is sent none).
+//
+// This pins what the prompt does with it, and the prohibition is the half that pays. Showing the
+// field without a rule invites MORE log-directed demands, and every one of them is unsatisfiable by
+// construction: `correctPage` is handed the problem strings and parsed for `html` alone, so "the log
+// does not note X" spends the page's only licence on a field the repair cannot write.
+test("the verify task reads a quoted log as evidence and never makes it the subject", () => {
+  for (const [what, re] of [
+    ["a quoted log is the transcriber's own account, to be checked rather than trusted",
+      /that is the transcriber's account of its own work on this page, and it is evidence rather than a second source: check it against the image, the way you check the HTML/],
+    ["an obligation the contract puts in the log alone is discharged there",
+      /An obligation the contract puts in the log and nowhere else is DISCHARGED there/],
+    // The six by name, because the general rule is the one a verifier applies to the HTML and these
+    // are the cases where the evidence is nowhere else to be found.
+    ["with the six such obligations named",
+      /a page ending mid-sentence, a heading with no parent on the page, a symbol with no key, a placeholder image source, a language change, an irregular table/],
+    ["and what it costs to report one of them as unrecorded",
+      /where the log records one of those, it is recorded, and reporting it as unrecorded is a false finding/],
+    // The other direction: a log that overstates what was done is not a licence to argue with the
+    // log, it is evidence about the page — and the finding it supports is the ordinary one.
+    ["a log the image refutes makes the missing content the problem, not the log",
+      /the log is not the problem; the missing content is, and it is "content_missing" like any other/],
+    ["the log is never the subject of a problem",
+      /Never make the log itself the subject of a problem/],
+    ["with the mechanism, so the rule is not read as a matter of taste",
+      /The correction pass is handed your problem strings and the page and answers with HTML alone — it writes no log/],
+    ["and what such a problem costs the page",
+      /it spends the only licence you have over that page on a field the repair cannot touch/],
+    // The absence case. 13.7% of pages reach the verifier from a reply that had no envelope and so
+    // no log field at all, and "the agent recorded nothing" is a claim about the page that the
+    // silence does not support.
+    ["a message with no log quoted says nothing about the page",
+      /where the user message quotes no log at all, the reply had none to quote: that is a fact about the reply and not about the page, so say nothing about it either way/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
+  }
+});
+
 // Also #353. The page agent can ask for a specialist (`suggested_agent`); `dispatchSpecialist` routes
 // it and logs the outcome, and nothing else read it. In a 100-page round there were 7 such requests
 // on 5 pages under 6 names, every one a map specialist, none resolved — and those 5 were every page
