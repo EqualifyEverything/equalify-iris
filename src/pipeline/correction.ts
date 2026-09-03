@@ -382,14 +382,23 @@ function enumerationsIn(alt: string): {
     const pieces = (bucket ?? "").split(",");
     for (const [at, piece] of pieces.entries()) {
       // A conjunction joins a list only at its END — "Ohio, Wisconsin and Wyoming" — so only the last
-      // comma-separated piece is opened on one. Anywhere earlier, "and" and "or" belong to the name
-      // that carries them, and there are plenty: "Trinidad and Tobago", "Bosnia and Herzegovina",
-      // "Antigua and Barbuda", "Health and Human Services". Split there, such a name becomes two
-      // phantom members that always travel together, and the two halves then share company in both
-      // replies — so the disjointness test below can never hold and the member could never be
-      // reported however far it moved (#358 review, note 4). A single-piece bucket is its own last
-      // piece, which keeps a comma-less "Ohio and Wisconsin" a list of two.
-      for (const item of at === pieces.length - 1 ? piece.split(/\s+(?:and|or)\s+/i) : [piece]) {
+      // comma-separated piece is opened on one, and there only on the FIRST conjunction in it. Both
+      // halves of that rule are about the same hazard: "and" and "or" are inside plenty of names —
+      // "Trinidad and Tobago", "Bosnia and Herzegovina", "Antigua and Barbuda", "Health and Human
+      // Services" — and a name split down its conjunction becomes two phantom members that always
+      // travel together, so the two halves share company in both replies, the disjointness test below
+      // can never hold, and the member is unreportable however far it moves (#358 review). Opening
+      // only the last piece leaves such a name safe everywhere before the list's end; opening it at
+      // the first conjunction leaves it safe at the end too, since "Suriname and Trinidad and Tobago"
+      // separates into the member and the name and not into the name's halves. A single-piece bucket
+      // is its own last piece, which keeps a comma-less "Ohio and Wisconsin" a list of two.
+      //
+      // What is left is one genuinely ambiguous position, and it is left rather than guessed at: a
+      // conjunction name as the FIRST half of the last piece — "Health and Human Services and
+      // Education" — reads as three members, because nothing in the string says which "and" is the
+      // list's. That shape is a silent miss and is stated as one wherever these limits are.
+      const split = at === pieces.length - 1 ? piece.match(/^(.*?)\s+(?:and|or)\s+(.*)$/i) : null;
+      for (const item of split ? [split[1], split[2]] : [piece]) {
         const shown = item.replace(/^(?:&|and|or)\s+/i, "").replace(/\s+/g, " ").trim();
         if (!shown || shown.length > MEMBER_MAX) continue;
         // A trailing period is not part of the name, and whether a member keeps one depends on where

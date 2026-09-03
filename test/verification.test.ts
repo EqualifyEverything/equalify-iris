@@ -248,6 +248,13 @@ test("a name that contains \"and\" is one member, and can move like one", () => 
   const joined = `<img alt="Darkest: Ohio, Wisconsin and Wyoming; cross-hatched: Iowa, Kansas and Minnesota">`;
   const movedOut = `<img alt="Darkest: Ohio and Wisconsin; cross-hatched: Iowa, Wyoming, Kansas and Minnesota">`;
   assert.deepEqual(correctionEffect(joined, movedOut).alt_relocated, ["Wyoming"]);
+  // The same name in the position English usually writes a list's last member in, which the first
+  // version of this fix still split: the last piece is opened on its FIRST conjunction, so
+  // "Suriname and Trinidad and Tobago" separates into the member and the name rather than into the
+  // name's two halves.
+  const last = `<img alt="Darkest: Guyana, Suriname and Trinidad and Tobago; lightest: Belize, Panama, Costa Rica">`;
+  const lastMoved = `<img alt="Darkest: Guyana and Suriname; lightest: Belize, Panama, Costa Rica and Trinidad and Tobago">`;
+  assert.deepEqual(correctionEffect(last, lastMoved).alt_relocated, ["Trinidad and Tobago"]);
 });
 
 test("a member that was alone in its clause did not leave a list", () => {
