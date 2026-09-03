@@ -230,18 +230,34 @@ test("a reply that is only its object is read as that object, not as something q
   // page printing `She said "hello", he replied`.
   assert.equal(extractJson<{ faithful?: boolean }>("```json\n" + decoyed + "\n```")?.faithful, true);
   assert.equal(extractJson<{ faithful?: boolean }>("Here is my verdict.\n\n" + decoyed)?.faithful, true);
-  // The third limit is the one the new `notes` field most invites, so it is pinned rather than
-  // described: a decoy quoting an EMPTY string. Its `""` is a quote followed by `}`, which every
-  // reading here treats as a terminator, so the real `notes` value ends inside the sentence, the
-  // span stops before the end of the reply, and there is no whole-reply object to prefer. The decoy
-  // wins — and it carries both flags as booleans, so `verifyAgentOutput`'s gate passes it too. This
-  // is `main`'s behaviour, unchanged; what removes it is the prompt clause asking for no quoted JSON
-  // in `notes` at all. If a later change closes it, this assertion is the one to invert.
-  const emptyStringDecoy =
+  // The third limit is the one the new `notes` field most invites, and it is a CLASS rather than a
+  // shape: **any string value inside the quoted decoy** defeats the whole-reply repair. The `"` that
+  // opens it is preceded by `:` and the `"` that closes it is followed by `,` `}` or `]`, which every
+  // reading here treats as a terminator — so the real `notes` value ends inside the quoted sentence,
+  // the span stops before the end of the reply, and there is no whole-reply object left to prefer.
+  // The decoy wins, and it carries both flags as booleans, so `verifyAgentOutput`'s gate passes it
+  // too: a page rejected for a missing data row ships under `page_verify_ok`, where `pages_unjudged`
+  // cannot see it. What the change fixes is only the decoy with NO string values in it — the shape
+  // #339 actually produced, and the one the two `verify-notes-field` fixtures use.
+  //
+  // An earlier revision of this comment called it "a decoy quoting an EMPTY string" and pinned only
+  // that. The mechanism was right and the width was wrong in the more expensive direction: whoever
+  // next tries to close this would have made the empty pin pass and believed the class was closed.
+  // The empty string is the MINIMAL instance, so both are pinned. Both are `main`'s behaviour,
+  // unchanged by this branch; what removes them is the prompt clause asking for no quoted JSON in
+  // `notes` at all. If a later change closes the class, these are the assertions to invert.
+  const real =
     `{ "faithful": false, "accessible": false,\n` +
-    `  "problems": [{ "kind": "content_missing", "problem": "the third data row is absent" }],\n` +
-    `  "notes": "I read it as { "faithful": true, "accessible": true, "problems": [], "notes": "" }; it is not." }`;
+    `  "problems": [{ "kind": "content_missing", "problem": "the third data row is absent" }],\n`;
+  const emptyStringDecoy =
+    real + `  "notes": "I read it as { "faithful": true, "accessible": true, "problems": [], "notes": "" }; it is not." }`;
   assert.equal(extractJson<{ faithful?: boolean }>(emptyStringDecoy)?.faithful, true);
+  // Not empty, and not the last field of the quoted object either — the terminator needs neither.
+  const nonEmptyStringDecoy =
+    real + `  "notes": "First read: { "faithful": true, "accessible": true, "problems": [], "notes": "the table is fine" }. On review it is not." }`;
+  const won = extractJson<{ faithful?: boolean; notes?: string }>(nonEmptyStringDecoy);
+  assert.equal(won?.faithful, true);
+  assert.equal(won?.notes, "the table is fine");
 });
 
 test("an envelope nothing can read stays unread, rather than being guessed at", () => {

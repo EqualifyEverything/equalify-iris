@@ -37,6 +37,11 @@
 // property that could. The unescaped shape is pinned below on both sides — read correctly when the
 // reply is nothing but its object (`src/util/json.ts`), and refused as a verdict at all when it is
 // fenced or prefixed, because a verdict answers both flags and a swallowed envelope answers one.
+// Note the WIDTH of the first of those, since the fixtures here sit on the narrow side of it: the
+// parser reads the decoy correctly only when the quoted object has no string values in it, which is
+// the shape #339 produced and the shape both fixtures below use. A decoy carrying any string value
+// ends the real field early and still wins, on `main` and here alike — pinned as the class it is in
+// `test/envelope-as-content.test.ts`, and reachable only by the prompt clause.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

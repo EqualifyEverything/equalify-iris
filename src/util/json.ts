@@ -106,9 +106,11 @@ export function extractJson<T = unknown>(text: string): T | null {
   // a draft the model gave up on mid-string and restarted inline. The walk reads the restart, which
   // is the answer; the narrow rule reads one object whose `html` is the abandoned prose with
   // `{"html": "` glued to the front of it, and that string is delivered to a reader as the page
-  // (#168). Both gates refuse that reading, for different reasons — the restart is the tail of the
-  // reply, and the abandoned `{` does not close inside the string — and a decoy the model QUOTED
-  // fails neither, so #339's verdict is read as the rejection it is.
+  // (#168). Both gates refuse that reading, for different reasons — this restart is one the walk can
+  // read whole, so the walk's answer closes where the REPLY closes, and the abandoned `{` does not
+  // close inside the string — and a decoy the model QUOTED fails neither, so #339's verdict is read
+  // as the rejection it is. (The first of those reasons is stated for this reply, not as a rule about
+  // where restarts appear; see `walkClosedOnTheLastCharacter` below for the width it actually has.)
   //
   // TWO EARLIER VERSIONS OF THIS GATE WERE WRONG, and both looked like the same idea. The first
   // compared KEY SETS — the narrow reading preferred where it carried every field the walk found

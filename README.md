@@ -1563,13 +1563,18 @@ and converts a silent pass into a counted `unjudged` page. What it does cost is 
 `faithful: false` reply that omits `accessible` no longer buys a correction — and that page is counted
 rather than corrected, which is the trade made knowingly.
 
-One shape defeats both, and it is named here because it is the one the new field most invites: a decoy
-quoting an **empty** string, `{ …, "notes": "" }`. Every reading here treats a `"` before `}` as a
-terminator, so the real `notes` value ends inside the quoted sentence, no whole-reply object is
-available to prefer, and the quoted contract — carrying both flags as booleans — is what the flags gate
-sees. It reads as a pass on a rejected page, on `main` and after this change alike; what removes it is
-the prompt clause asking for no quoted JSON in `notes` at all, which is why that clause is not treated
-as decoration. It is pinned as a failing-by-design assertion in `test/envelope-as-content.test.ts`.
+A whole class of decoy defeats both, and it is named here at its real width because it is the class the
+new field most invites: **a quoted decoy containing any string value at all**. Every reading here treats
+a `"` after a `:` as an opener and a `"` before `,`, `}` or `]` as a terminator, so the real `notes` value
+ends inside the quoted sentence, no whole-reply object is available to prefer, and the quoted contract —
+carrying both flags as booleans — is what the flags gate sees. It reads as a pass on a rejected page, on
+`main` and after this change alike. What the parser change fixes is only the decoy with **no** string
+values, which is the shape the issue produced; an earlier revision of this section called the residual
+"one shape … a decoy quoting an **empty** string", which had the mechanism right and the width wrong in
+the expensive direction, since the empty string is the minimal instance rather than the trigger. What
+removes the class is the prompt clause asking for no quoted JSON in `notes` at all, which is why that
+clause is not treated as decoration. Both an empty and a non-empty instance are pinned as
+failing-by-design assertions in `test/envelope-as-content.test.ts`.
 
 ## Automated code review
 
