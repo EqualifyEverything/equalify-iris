@@ -373,15 +373,20 @@ export const SIGNAL_EDITOR_TRUNCATED_LOST = "iris:editor-truncated-lost";
 // deployment could confirm or refute.
 //
 // WHAT A 0 IS NOT: evidence that no round demotes a heading, and therefore not on its own a
-// reason to retire the guard. The reading behind this signal is computed on the BLOCK-PATCH
-// round only. The sectioned round and the whole-body reply check the size floor and nothing
-// else (`editorSectionCall` and its neighbour in pipeline/review.ts), so a demotion on either
-// is applied and delivered and never reaches this. The sectioned round is also the loop's LAST
-// round, which is the permanence #331 rests on. So a 0 is equally consistent with a guard that
-// never fires and with one that is watching a path the demotions are not on, and separating
-// those two means reading `navigation_lost` off the run logs of documents that took a sectioned
-// round. Deciding from a 0 that the two false positives named in `GATED` are not worth a round
-// is a decision made on a number that cannot see the population it would be about.
+// reason to retire the guard. The GATE behind this signal is on the BLOCK-PATCH round only,
+// which is where a fall can be attributed to the block that dropped it and that block alone
+// handed back. The sectioned round and the whole-body reply adopt a reply whole and check the
+// size floor, which a demotion cannot move — it keeps every word and grows the bytes — so a
+// demotion on either is applied and delivered and never reaches this. The sectioned round is
+// also the loop's LAST round, which is the permanence #331 rests on. So a 0 is equally
+// consistent with a guard that never fires and with one that is watching a path the demotions
+// are not on. Separating those two used to mean reading `navigation_lost` off the run logs of
+// documents that took a sectioned round, where it was never computed; since #375 both paths
+// compute the same reading and log it as `editor_navigation`, refusing nothing, on every
+// delivered reply so the denominator is there too (`reportNavigation` in pipeline/review.ts).
+// That is the population this number cannot see, and it is now on the record rather than
+// inferred — so deciding from a 0 that the two false positives named in `GATED` are not worth a
+// round is still a decision made on the wrong number, but the right one exists to make it on.
 //
 // Not derivable from anything else here: the blocks that were handed back leave no length, no
 // rule and no `unresolved` row behind them. A round refused whole adds a round to `mean_rounds`,
