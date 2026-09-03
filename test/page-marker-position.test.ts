@@ -186,8 +186,10 @@ test("no offset holding a majority decides nothing", () => {
   ];
   const { pages: out, report } = stripPositionalMarkers(pages);
   assert.deepEqual(report.stripped, []);
+  // The best run is named too, so a reader can tell a document that agreed on nothing from one whose
+  // agreement was a pair — the two are different sizes of blind spot and `stripped: []` says neither.
   assert.ok(
-    report.systems.includes("arabic: no offset holds 4 markers"),
+    report.systems.includes("arabic: no offset holds 4 markers (best: 2)"),
     `the undecidable document did not say so: ${report.systems.join(" ; ")}`,
   );
   assert.equal(report.undecided, 2, "the labels the check could not decide were not counted");
@@ -205,17 +207,93 @@ test("a numbering system with fewer than three markers is not asked", () => {
   assert.deepEqual(out, pages.map((p) => p.html));
 });
 
-test("a leak on EVERY page is the majority, and is not visible from here", () => {
-  // Stated because it reads as a clean document. When every label is the position, the leak IS the
-  // modal offset and there is nothing left to disagree with it. The check can only ever act on a
-  // minority, and this is the shape of the miss.
+test("three markers are enough to ask and not enough to act: a pair is not a run", () => {
+  // The population gate and the agreement gate are different gates. A strict majority of three
+  // markers is two, so without the second gate `Page 1` and `Page 2` would hold an offset and take
+  // the third page's number off it. Two markers are a coincidence a two-page document produces.
+  const pages: MarkerPage[] = [
+    page(1, "s-p1.png", "Page 1"),
+    page(2, "s-p2.png", "Page 2"),
+    page(3, "s-p9.png", "Page 9"),
+  ];
+  const { pages: out, report } = stripPositionalMarkers(pages);
+  assert.deepEqual(report.stripped, [], "a pair of markers deleted a third page's number");
+  assert.ok(
+    report.systems.includes("arabic: no offset holds 3 markers (best: 2)"),
+    `the pair was treated as a run: ${report.systems.join(" ; ")}`,
+  );
+  assert.deepEqual(out, pages.map((p) => p.html));
+});
+
+test("a document whose honest labels repeat their own filenames is refused, not acted on", () => {
+  // The rule rests on a true label NOT repeating the number in its own filename, and there are
+  // ordinary inputs where it does. This is one input read two ways: a model that leaked the position
+  // on all 25 pages, and a plain report submitted whole whose sheets really do print 1..25. They are
+  // the same bytes, so nothing here can act on either — and the reason is logged rather than passed
+  // off as a document this checked and agreed with.
   const every = Array.from({ length: 25 }, (_, i) =>
     page(i + 1, `acir-p${String(i + 1).padStart(3, "0")}.png`, `Page ${i + 1}`),
   );
   const { pages: out, report } = stripPositionalMarkers(every);
   assert.deepEqual(report.stripped, []);
   assert.deepEqual(out, every.map((p) => p.html));
-  assert.ok(report.systems.includes("arabic: offset 0 on 25 of 25"));
+  assert.ok(
+    report.systems.includes("arabic: offset 0 on 25 of 25, 25 of them repeating their own filename"),
+    `the refusal was not reported: ${report.systems.join(" ; ")}`,
+  );
+  assert.equal(report.undecided, 25, "the labels the check declined to judge were not counted");
+});
+
+test("a gapped submission of Iris's own render keeps its correct numbers", () => {
+  // `acir-p001..008` plus `acir-p020` and `acir-p021`, submitted as positions 1-10, every label the
+  // number its sheet prints. The prefix holds offset 0 and the two pages after the gap depart from
+  // it while repeating their filenames — the exact shape the rule acts on, and here every label is
+  // true. What separates it from the defect is the prefix: those honest labels repeat their own
+  // filenames too, so the positional test cannot discriminate on this document and is refused.
+  const pages: MarkerPage[] = [1, 2, 3, 4, 5, 6, 7, 8, 20, 21].map((n, i) =>
+    page(i + 1, `acir-p${String(n).padStart(3, "0")}.png`, `Page ${n}`),
+  );
+  const { pages: out, report } = stripPositionalMarkers(pages);
+  assert.deepEqual(report.stripped, [], "correct page numbers were removed from a gapped submission");
+  assert.deepEqual(out, pages.map((p) => p.html));
+  assert.ok(
+    report.systems.includes("arabic: offset 0 on 8 of 10, 8 of them repeating their own filename"),
+    `the refusal was not reported: ${report.systems.join(" ; ")}`,
+  );
+});
+
+test("only the last number in a filename is positional, because the rest is the document's", () => {
+  // `util/pdf.ts` renders a PDF as `<base>-p<N>.png` where `<base>` is the uploaded file's own name,
+  // so a PDF called `volume-1.pdf` puts a 1 in all 20 filenames. Reading every integer in the name
+  // convicts the sheet that really does print 1 for being the thirteenth page of a file the caller
+  // named `volume-1` — the same document called `report.pdf` keeps its label. Numbering restarts at
+  // position 13, so the label is a true departure from the majority's offset and everything else
+  // about it looks exactly like the defect.
+  const restart = (base: string): MarkerPage[] =>
+    Array.from({ length: 20 }, (_, i) => page(i + 1, `${base}-p${i + 1}.png`, `Page ${i < 12 ? i + 1 : i - 11}`));
+  for (const base of ["volume-1", "part 2", "report"]) {
+    const { pages: out, report } = stripPositionalMarkers(restart(base));
+    assert.deepEqual(report.stripped, [], `a true label was removed on a ${base}.pdf document`);
+    assert.deepEqual(out, restart(base).map((p) => p.html));
+  }
+});
+
+test("a marker on a page with no filename is reported as unchecked, not as agreed with", () => {
+  // The filename is the one input here that comes from the store rather than from this pass, and a
+  // fragment written before `image` was recorded has none. Losing the document over that would be
+  // the wrong trade, and so would logging `readable: 4, stripped: []` — which is what a document
+  // this checked and agreed with looks like. The count is what separates them.
+  const pages: MarkerPage[] = [
+    page(1, "", "Page 1"),
+    page(2, "", "Page 2"),
+    page(3, "", "Page 3"),
+    page(4, "", "Page 40"),
+  ];
+  const { pages: out, report } = stripPositionalMarkers(pages);
+  assert.deepEqual(report.stripped, []);
+  assert.equal(report.readable, 4);
+  assert.equal(report.unchecked, 4, "markers with no filename to check against were not counted");
+  assert.deepEqual(out, pages.map((p) => p.html));
 });
 
 test("a sectioned folio is unreadable, not positional", () => {
@@ -337,6 +415,9 @@ test("runAssembly logs the check even when it stripped nothing", async () => {
   assert.deepEqual(clean[0]!.data.stripped, []);
   assert.deepEqual(clean[0]!.data.systems, ["arabic: offset -11 on 25 of 25"]);
   assert.equal(clean[0]!.data.readable, 25);
+  // And the filenames reached the check through the assembly wiring: had the name not been carried
+  // from the fragment, every one of these would be `unchecked` and none of them checkable.
+  assert.equal(clean[0]!.data.unchecked, 0, "the page filenames did not reach the check");
 
   events.length = 0;
   await runAssembly(ctx, body({ 2: "Page 52" }, 51).map((p) => frag(p.order, p.name, p.html)));

@@ -658,6 +658,7 @@ export async function runAssembly(
       stripped: markers.stripped,
       off_mode: markers.offMode,
       undecided: markers.undecided,
+      unchecked: markers.unchecked,
     });
   }
   if (anchors.collisions.length > 0 || anchors.ambiguous.length > 0) {

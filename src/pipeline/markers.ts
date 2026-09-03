@@ -13,10 +13,11 @@
 // **The number is checkable because Iris is the one who supplied it.** The page agent is handed
 // `filename: acir-p052.png, page 2 of 25` in its user message (extraction.ts), so there are exactly two
 // positional numbers a page could be leaking, and both of them are known here. The one tested is the
-// FILENAME's. A label is only touched when it repeats a number written in the image's own name AND the
-// rest of the document's markers say the folio is something else. That is evidence rather than
+// FILENAME's — its last integer, which is the part Iris writes. A label is only touched when it repeats
+// that number, AND the rest of the document's markers say the folio is something else, AND those markers
+// name their own folios from somewhere other than their own filenames. That is evidence rather than
 // inference: the model was told this number, it put it in the label, and 20-odd other pages disagree
-// about what page that sheet is.
+// about what page that sheet is while demonstrating that a true label here does not read like this one.
 //
 // The `page N of M` half of the message is deliberately not tested, and the reason is measured. Replayed
 // over 61 chunks of already-paid rounds, 29 of the 30 labels this removed repeated the filename's number;
@@ -24,10 +25,11 @@
 // of an already-rendered document, so the sheet printing `iv` arrived 4th, and a check reading `order`
 // convicted a true label on the coincidence. Testing `order` costs a real page its number in exchange
 // for nothing observed: no arm in any round leaked `order` where the two numbers differed. It also loses
-// very little, because where Iris rasterizes the pages itself the two numbers are the same one —
-// `util/pdf.ts` names them `<base>-p<N>.png` with N the submitted position. What is left uncovered is a
-// caller who uploads images whose names carry no position, where a leak of the stated `page N of M` is
-// invisible from here.
+// very little, because where Iris rasterizes a whole PDF itself the two numbers are the same one —
+// `util/pdf.ts` names the pages `<base>-p<N>.png` with N the submitted position, so on that path a leak
+// of `order` is a leak of the filename. What is left uncovered is a caller who uploads images whose names
+// carry no position, where a leak of the stated `page N of M` is invisible from here; those markers are
+// counted as `unchecked` rather than passed off as agreeing.
 //
 // The disagreement is read as an OFFSET, per numbering system. A document's markers sit at a constant
 // distance from their positions wherever its numbering is regular — the reference corpus prints roman
@@ -62,15 +64,19 @@
 //     as unreadable and left alone. Luna's `Page M-16` on a cover (#333 §D) is one, and it is a
 //     different defect anyway: the page really does print `M — 16` and put it nowhere a reader gets it.
 //   - A document whose ARABIC numbering restarts partway through, where the minority run's folios
-//     happen to coincide with the numbers in their own filenames. Those labels are true and are removed,
-//     because from here they are indistinguishable from the defect: the label repeats a number Iris
-//     handed the model and the majority of the document contradicts it. The per-system offset counts are
-//     logged so that a corpus which pays for this can say so with data. Sectioned numbering, which is the
-//     usual way a document restarts per chapter, is already out of reach above.
-//   - A caller who names the files after the printed folios — `report-p38.png` for the sheet printing 38.
-//     Then a true label repeats its filename by construction, and a page whose folio departs from the
-//     document's modal offset loses a correct name. Iris's own renders name by position instead
-//     (`util/pdf.ts`), so this needs a caller supplying images and numbering them by hand.
+//     coincide with the numbers in their own filenames while the majority's do not. Those labels are true
+//     and are removed, because from here they are indistinguishable from the defect: the label repeats a
+//     number Iris handed the model and the majority of the document contradicts it. The per-system offset
+//     counts are logged so that a corpus which pays for this can say so with data. The commoner shapes of
+//     this are caught: where the honest majority repeats its filenames too, the system is refused
+//     outright, and sectioned numbering — the usual way a document restarts per chapter — is unreadable
+//     above.
+//   - Any document where the positional test is refused: the check is off there, so a real leak on it is
+//     missed as well. That is the trade this makes on purpose, and `systems` names it every time.
+//   - A positional number announced as `aria-labelledby` instead, pointing at an element whose text is
+//     `Page 52`. Only `aria-label` is read. #333's shape is `aria-label` on both failing arms, and
+//     resolving an ID reference into another element's text is a different pass on a different input —
+//     what the review loop reads for the same claim is the delivered body, not one page's fragment.
 //
 // A document with nothing to strip comes back byte-identical: this rewrites the matched `aria-label`
 // inside a matched start tag and touches nothing else. The review loop decides a round changed nothing
@@ -230,16 +236,28 @@ export function folio(label: string): Folio | null {
   return value > 0 && spellRoman(value) === letters ? { value, system: "roman" } : null;
 }
 
-// Every integer written in the image's filename, which is the positional number this checks a label
-// against. `acir-p052.png` gives 52; a name carrying a year gives that too, which costs little — a label
-// is only acted on when the document's own numbering already contradicts it.
+// The positional number written in the image's own filename: the LAST integer in the name, with the
+// extension dropped. `acir-p052.png` gives 52.
 //
-// A page with no filename recorded contributes no numbers rather than throwing: the name is the one
-// input here that comes from the store rather than from this pass, and a document is not worth losing
-// over a missing one. What it costs is this check on that page, which is the right direction — with no
-// name there is nothing to say the label repeats.
-function filenameNumbers(name: string): Set<number> {
-  return new Set(((name ?? "").match(/[0-9]+/g) ?? []).map((n) => parseInt(n, 10)).filter((n) => n > 0));
+// The last one and not every one, because the rest of the name is the document's, not the page's.
+// `util/pdf.ts` renders a PDF as `<base>-p<N>.png` where `<base>` is the UPLOADED FILE'S OWN NAME, so
+// `volume-1.pdf` produces `volume-1-p13.png` — and a check reading every integer in that would find the
+// label `Page 1` written in the filename of the thirteenth sheet and take a true page number off a
+// document whose only sin was being called `volume-1`. `part 2.pdf`, `doc_1.pdf` and `M-16.pdf` all do
+// that. The last integer is also where a hand-named file puts its position (`page-13.png`,
+// `scan_013.png`); where a name carries no position at all, this finds a number that means something
+// else, which is what the majority test below is for.
+//
+// A page with no filename recorded contributes no number rather than throwing: the name is the one input
+// here that comes from the store rather than from this pass, and a document is not worth losing over a
+// missing one. What it costs is this check on that page, which is the right direction — with no name
+// there is nothing to say the label repeats. Those markers are counted (`unchecked`) so a run cannot
+// read as checked-and-agreed when nothing could be checked.
+function filenamePosition(name: string): number | null {
+  const digits = (name ?? "").replace(/\.[a-z0-9]+$/i, "").match(/[0-9]+/g);
+  if (!digits) return null;
+  const value = parseInt(digits[digits.length - 1]!, 10);
+  return value > 0 ? value : null;
 }
 
 interface Marker {
@@ -247,7 +265,8 @@ interface Marker {
   occurrence: number; // which marker this is within its page, in document order
   label: string | null; // `null` for a marker carrying no `aria-label` at all
   folio: Folio | null;
-  positional: boolean; // the label repeats a number written in the page's own filename
+  position: number | null; // the number in the page's own filename, or `null` where it carries none
+  positional: boolean; // the label repeats that number
 }
 
 // Every page-break marker in one page's fragment, with its label read. The whole fragment is scanned
@@ -255,7 +274,7 @@ interface Marker {
 // a marker written somewhere else carries the same wrong number to the same reader.
 function readMarkers(page: MarkerPage): Marker[] {
   if (!ANY_ROLE.test(page.html)) return [];
-  const numbers = filenameNumbers(page.name);
+  const position = filenamePosition(page.name);
   const out: Marker[] = [];
   let occurrence = 0;
   START_TAG.lastIndex = 0;
@@ -271,7 +290,8 @@ function readMarkers(page: MarkerPage): Marker[] {
       occurrence: occurrence++,
       label: label?.value ?? null,
       folio: read,
-      positional: read !== null && numbers.has(read.value),
+      position,
+      positional: read !== null && position !== null && read.value === position,
     });
   }
   return out;
@@ -292,11 +312,14 @@ function stripLabels(html: string, occurrences: Set<number>): string {
   });
 }
 
-// How many markers one numbering system needs before an offset derived from it is worth acting on. Two
-// agreeing markers are already a regularity no model produces by accident, but a page's number is being
-// deleted on the strength of this, and a third marker is the cheapest thing to insist on: it is what
-// makes the agreement a run rather than a pair.
+// How many markers one numbering system needs before an offset is derived from it at all.
 const MIN_MARKERS = 3;
+// How many of them have to AGREE before that offset is acted on. Both gates are needed and they are not
+// the same gate: a strict majority of three markers is two, and two agreeing markers are a pair rather
+// than a run — `Page 1`, `Page 2`, `Page 9` would have the first two delete the third's number. A page's
+// number is being removed on the strength of this, so the run has to be a run. The smallest document that
+// can lose a label is therefore four markers: three holding the offset and one departing from it.
+const MIN_AGREED = 3;
 // A label is logged, and a label that reaches this length is not a folio — `folio` above only reads a
 // numeral with an optional word in front of it, so this is a bound rather than a cut anything real
 // meets.
@@ -307,22 +330,30 @@ export interface MarkerReport {
   readable: number; // labels that are a numeral this can read
   unreadable: number; // labels that are not (`A-3`, `M-16`), plus markers carrying no label at all
   // One entry per numbering system that produced enough markers to be asked, written as
-  // `arabic: offset 14 on 23 of 25` — or `arabic: no offset holds 12 markers` where no offset held a
-  // majority. The denominators are here on purpose: without them a run cannot tell a document with no
-  // leak from one this could not decide, and the two look identical from `stripped: []`.
+  // `arabic: offset 14 on 23 of 25` — or, where nothing was acted on, one of the two ways that happens:
+  // `arabic: no offset holds 12 markers (best: 5)`, or `arabic: offset 0 on 8 of 10, 8 of them repeating
+  // their own filename`. The denominators are here on purpose: without them a run cannot tell a document
+  // with no leak from one this could not decide, and the two look identical from `stripped: []`.
   systems: string[];
   // One entry per label removed, `page 52: "Page 52" → 38`, with the derived folio omitted where the
-  // page sits outside the range the offset was derived over and the derivation names a number below 1.
+  // derivation names a number below 1.
   stripped: string[];
   // Readable labels that disagree with their system's offset and were NOT touched, because they repeat
   // no number in the page's own filename: a page printing `ix` labelled `Page 9` is
   // one. A wrong label all the same, and this count is the only trace of it — nothing here can tell a
   // misread folio from a numbering irregularity, so it is counted and left.
   offMode: number;
-  // Labels that repeat a positional number where the check could not decide anything: too few markers
-  // in that numbering system, or no offset holding a majority of them. The check's own blind spot, and
-  // the figure that says how big it was on this document.
+  // Labels that repeat a positional number where the check could not decide anything: too few markers in
+  // that numbering system, no offset holding a run of them, or a document whose honest labels repeat
+  // their own filenames so the positional test carries no information (`systems` says which). The check's
+  // own blind spot, and the figure that says how big it was on this document.
   undecided: number;
+  // Readable labels on a page whose filename carries no number to check them against — no name was
+  // recorded for the page, or the name has no digits in it. They still count towards the offset, since
+  // the label is evidence about the document's numbering either way, but nothing on those pages can be
+  // acted on. Here so that a document this could not check does not read as one it checked and agreed
+  // with: `readable: 25, stripped: []` says the same thing in both cases and this is what separates them.
+  unchecked: number;
 }
 
 export interface MarkerPage {
@@ -332,12 +363,21 @@ export interface MarkerPage {
 }
 
 export function emptyMarkerReport(): MarkerReport {
-  return { markers: 0, readable: 0, unreadable: 0, systems: [], stripped: [], offMode: 0, undecided: 0 };
+  return {
+    markers: 0,
+    readable: 0,
+    unreadable: 0,
+    systems: [],
+    stripped: [],
+    offMode: 0,
+    undecided: 0,
+    unchecked: 0,
+  };
 }
 
-// The offset a numbering system's markers agree on, and how many of them agree. `null` where no offset
-// holds a strict majority: a document whose numbering restarts, or a model that got it wrong as often
-// as it got it right, gives nothing to act on and the pages keep their labels.
+// The offset the most of a numbering system's markers sit at, and how many of them do. `null` only for
+// an empty list; whether that plurality is enough to act on is the caller's question, because a
+// plurality that fails the gates is still worth logging as the best there was.
 function modalOffset(offsets: number[]): { offset: number; agreed: number } | null {
   const counts = new Map<number, number>();
   for (const o of offsets) counts.set(o, (counts.get(o) ?? 0) + 1);
@@ -345,7 +385,7 @@ function modalOffset(offsets: number[]): { offset: number; agreed: number } | nu
   for (const [offset, agreed] of counts) {
     if (!best || agreed > best.agreed) best = { offset, agreed };
   }
-  return best && best.agreed * 2 > offsets.length ? best : null;
+  return best;
 }
 
 export function stripPositionalMarkers(pages: MarkerPage[]): { pages: string[]; report: MarkerReport } {
@@ -358,12 +398,34 @@ export function stripPositionalMarkers(pages: MarkerPage[]): { pages: string[]; 
     const mine = all.filter((m) => m.folio?.system === system);
     if (mine.length < MIN_MARKERS) continue;
     const mode = modalOffset(mine.map((m) => m.page - m.folio!.value));
+    // A document whose numbering restarts, or a model that got it wrong about as often as it got it
+    // right, has nothing here to act on: the pages keep their labels and the count says how close it came.
+    if (!mode || mode.agreed < MIN_AGREED || mode.agreed * 2 <= mine.length) {
+      derived.set(system, null);
+      report.systems.push(
+        `${system}: no offset holds ${mine.length} markers${mode ? ` (best: ${mode.agreed})` : ""}`,
+      );
+      continue;
+    }
+    // Whether the positional test can say anything about THIS document, asked of the run itself. The
+    // whole rule rests on a true label not repeating the number in its own filename — and there are
+    // ordinary inputs where it does: a plain report submitted whole prints 1 on the sheet Iris named
+    // `-p1.png`, and a caller who names their images after the printed folios does it by construction.
+    // Where the markers holding the offset are themselves positional, a label repeating its filename is
+    // the shape of a CORRECT label here, the test carries no information, and the system is refused
+    // rather than acted on. Asked of the agreeing run and not of the document, because the departures are
+    // the labels in question: counting them would let the defect vote to protect itself.
+    const agreedPositional = mine.filter((m) => m.page - m.folio!.value === mode.offset && m.positional).length;
+    if (agreedPositional * 2 > mode.agreed) {
+      derived.set(system, null);
+      report.systems.push(
+        `${system}: offset ${mode.offset} on ${mode.agreed} of ${mine.length}, ` +
+          `${agreedPositional} of them repeating their own filename`,
+      );
+      continue;
+    }
     derived.set(system, mode);
-    report.systems.push(
-      mode
-        ? `${system}: offset ${mode.offset} on ${mode.agreed} of ${mine.length}`
-        : `${system}: no offset holds ${mine.length} markers`,
-    );
+    report.systems.push(`${system}: offset ${mode.offset} on ${mode.agreed} of ${mine.length}`);
   }
   const strip = new Map<number, Set<number>>();
   for (const m of all) {
@@ -372,6 +434,7 @@ export function stripPositionalMarkers(pages: MarkerPage[]): { pages: string[]; 
       continue;
     }
     report.readable++;
+    if (m.position === null) report.unchecked++;
     const mode = derived.get(m.folio.system) ?? null;
     if (!mode) {
       if (m.positional) report.undecided++;
