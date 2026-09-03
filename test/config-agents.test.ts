@@ -602,22 +602,33 @@ test("docs/models.md's sections agree with §0 about each agent's share and disp
 // file-wide count comes back even as soon as a second paragraph breaks the other way, and per
 // paragraph is also where the render actually goes wrong.
 //
+// The unit is a rendered block, NOT a blank-line-delimited chunk. Counting parity over a whole chunk
+// lets two odd bullets in one list cancel — an unclosed run in one bullet and another in the next add
+// to an even total and the check comes back clean, which is the same off-switch as a guard that skips
+// what it cannot classify. So a list item and a table row each start a fresh count; their wrapped
+// continuation lines belong to the item they continue, because a `**` legitimately spans those.
+//
 // Its limit, stated because it will eventually fire on innocent text: this is a parity count, not a
 // parser. A deliberate literal `**` in prose fails it, and the fix then is to fence or escape that
 // text, not to delete the test. Fenced blocks are skipped for the same reason — they quote markup
 // rather than use it.
-test("docs/models.md's bold runs close in the paragraph that opens them", () => {
+test("docs/models.md's bold runs close in the block that opens them", () => {
   const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
   const unclosed: string[] = [];
   let fenced = false;
-  let para: string[] = [];
-  let start = 0;
+  // [line number, text] per line, so the message can name the run that is left open rather than the
+  // top of the block — round 3 asked for that and it is the line an editor has to go and look at.
+  let block: [number, string][] = [];
 
   const finish = () => {
-    if (para.length > 0 && (para.join("\n").match(/\*\*/g) ?? []).length % 2 !== 0) {
-      unclosed.push(`line ${start}: ${para[0]!.trim().slice(0, 90)}`);
+    const runs = block.flatMap(([n, text]) => (text.match(/\*\*/g) ?? []).map(() => n));
+    if (runs.length % 2 !== 0) {
+      const [openerLine, opener] = block[0]!;
+      unclosed.push(
+        `line ${runs.at(-1)} (block opens at line ${openerLine}: ${opener.trim().slice(0, 70)})`,
+      );
     }
-    para = [];
+    block = [];
   };
 
   for (const [i, line] of doc.split("\n").entries()) {
@@ -631,15 +642,18 @@ test("docs/models.md's bold runs close in the paragraph that opens them", () => 
       finish();
       continue;
     }
-    if (para.length === 0) start = i + 1;
-    para.push(line);
+    // A new list item or table row is its own render unit; anything else continues the current one.
+    if (/^\s*(?:[-*+]|\d+\.)\s/.test(line) || line.trimStart().startsWith("|")) finish();
+    block.push([i + 1, line]);
   }
   finish();
 
   assert.deepEqual(
     unclosed,
     [],
-    `docs/models.md has ${unclosed.length} paragraph(s) with an odd number of \`**\` runs, so a bold ` +
-      `run opens and never closes and the asterisks render literally:\n  ${unclosed.join("\n  ")}`,
+    `docs/models.md has ${unclosed.length} block(s) with an odd number of \`**\` runs, so a bold ` +
+      `run opens and never closes and the asterisks render literally. Each entry names the line ` +
+      `carrying the run that is left open — a paragraph, one list item or one table row:\n  ` +
+      `${unclosed.join("\n  ")}`,
   );
 });
