@@ -211,6 +211,24 @@ export interface Diagnostics {
     // on whether the agent loaded — it would make one field mean two things, and it would put a disk
     // check in the extraction path to decide a label.
     pages_skipped_blank: number;
+    // Of those same `pages_unjudged`, the pages whose verify call was bought and THREW: a throttle, a
+    // stall, or a reply that overran the output ceiling (issue #364, `page_verify_ok` with
+    // `skipped: "error"`, and `page_verify_error` for the evidence). Nested the same way, so like the
+    // blank skip it moves nothing above it.
+    //
+    // It is the counterweight to the field above and the reason both are needed rather than one
+    // `skipped` total. A blank skip is a call NOT MADE and is money saved; an error is a call made,
+    // billed for a full ceiling of output, and answered with nothing — on the measured case that was
+    // $0.5051 on a single page, more than twice the average page's whole bill. Adding the two into one
+    // "unjudged for a reason" number would price the most expensive shape of verification failure as a
+    // saving, which is exactly the reading the blank counter was added to prevent for the other
+    // direction. Multiply this one by a full-page verify call, not an empty-fragment one.
+    //
+    // Zero on every log written before #364, and that zero is not a measurement of anything: before the
+    // guard the same failure took the PAGE with it, so those runs recorded it as
+    // `page_extraction_failed` and a page in `pages_failed` — not as an unjudged verify. A run whose
+    // verifier was being throttled reads, on an older log, as a run whose vision was failing.
+    pages_verify_error: number;
     verify_failed: number;
     // `verify_failed` split by what the verifier said was WRONG, counted in pages
     // (pipeline/feedback.ts `VERIFY_KINDS`). Two bench rounds rejected 74 of 94 and 76 of
@@ -960,6 +978,7 @@ export function summarizeRun(
     pages_verified: 0,
     pages_unjudged: 0,
     pages_skipped_blank: 0,
+    pages_verify_error: 0,
     verify_failed: 0,
     verify_kinds: {
       content_missing: 0,
@@ -1011,6 +1030,10 @@ export function summarizeRun(
       // future `skipped` for some other reason lands in `pages_unjudged` and not here, which is the
       // right default — this field is named for the one thing it prices.
       if (e.unjudged === true && e.skipped === "blank") verification.pages_skipped_blank += 1;
+      // And the second value that sentence describes, on the same terms (issue #364). Two `if`s rather
+      // than one `switch` on `skipped`, so that a third value still lands in `pages_unjudged` and in
+      // neither of these — the default the comment above commits to.
+      if (e.unjudged === true && e.skipped === "error") verification.pages_verify_error += 1;
     } else if (e.type === "page_verify_failed") {
       verification.pages_verified += 1;
       verification.verify_failed += 1;

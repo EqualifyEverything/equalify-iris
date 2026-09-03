@@ -2742,6 +2742,62 @@ function truncationEvidence(e: unknown): Record<string, unknown> {
   return { truncated: true, reply_chars: e.chars, ...replyExcerpt(e.text) };
 }
 
+// A VERDICT THAT CANNOT BE OBTAINED IS NOT A PAGE THAT CANNOT BE EXTRACTED, and until #364 this
+// file could not tell those apart on the one path that matters most. `verifyAgentOutput` is already
+// non-blocking for an absent Feedback Agent and for a reply that will not parse, but a PROVIDER error
+// is rethrown — and the first verify call had nothing to catch it, so a throttle or an output-ceiling
+// overrun on the CHECK propagated out of `extractPage` into `failedPage`, which logged
+// `page_extraction_failed` and shipped a `@page-failed` marker for a page whose extraction had
+// succeeded and was sitting in `innerHtml`. Measured once on a 100-page bench arm: `acir-p049` was
+// extracted as 8,855 characters of HTML — a complete statistical table, 568 words — and delivered as a
+// 156-byte comment, because its verify call spent a full 32,000-token ceiling and threw. $0.5051 of
+// the page's $0.6634 was the call that deleted it, 3.2x what the extraction it was checking cost.
+//
+// This is the same defect #171 fixed for the correction pass and the sampled recheck, arriving one
+// call earlier, and the policy it is fixed to is this file's own: a specialist that fails leaves the
+// page as the general pass wrote it, and a fidelity check that cannot run counts as nothing to
+// correct. An unobtainable verdict IS a fidelity check that cannot run.
+//
+// Three things the misattribution cost besides the page, and they are the reason this has its own
+// event rather than a quieter `.catch`. The delivered document said "the source pages above could not
+// be extracted and none of their content is here" (`wrapDocument`), which was false. `pages_failed`
+// and every triage of why pages fail recorded a vision failure, so anyone tuning the page agent on
+// that signal was tuning the wrong agent. And the marker told the operator to raise
+// `providers.*.max_tokens`, which buys the verifier room to write MORE about a page it has already
+// judged — the wrong lever, pushing the wrong way, on the one line an operator was given.
+//
+// `page_verify_error` and not a `page_verify_ok` field alone, because the evidence is the same
+// evidence `page_correction_failed` carries and is worth the same: `truncated` names the one shape
+// with a configuration remedy, and `reply_chars` with both ends of the reply is what distinguishes a
+// verifier that needed the room from one that wrote an essay. `step` is on the line because two call
+// sites reach here and they are not the same event — one is the check that decides whether a
+// correction is bought, the other the gate on keeping one.
+//
+// The third verify call, the SAMPLED recheck, keeps the `page_correction_recheck_failed` event #171
+// gave it and is not folded in here. Two reasons, and neither is inertia: that event predates this
+// one and has been read across rounds, so renaming it would split one measurement across two names
+// in the logs it is compared against; and it is the one verify failure that costs nothing at all,
+// because the sampled recheck decides nothing whether it answers or not. The two failures on this
+// line cost something — a correction not bought, or a correction bought and discarded — so the pair
+// that belongs together is the pair that is together.
+function verifyUnobtainable(
+  ctx: PipelineContext,
+  img: InputImage,
+  step: "verify" | "recheck_binding",
+  e: unknown,
+  extra: Record<string, unknown> = {},
+): void {
+  const message = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim();
+  ctx.log.event("page_verify_error", {
+    image: img.name,
+    page: img.order,
+    step,
+    error: message,
+    ...truncationEvidence(e),
+    ...extra,
+  });
+}
+
 function failedPage(ctx: PipelineContext, pageAgent: AgentSpec, img: InputImage, e: unknown): PageOutcome {
   const message = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim();
   // No `ceiling` beside the evidence, unlike `page_correction_failed`: a first pass asks for no cap
@@ -2838,6 +2894,11 @@ async function extractPage(
   // at all, which is the same no-caution answer by a different route.
   const caution = specialistCaution(suggestion, unmet);
   const blankSkip = blank === true && innerHtml === "";
+  // Which KIND of unjudged this page is, for `page_verify_ok`'s `skipped` below. It cannot be read off
+  // the verdict: `unjudgedVerdict()` is deliberately one shape for every page nothing looked at, and a
+  // call that threw is the one kind of unjudged that COST money, so a reader pricing the skips must be
+  // able to subtract it.
+  let verifyErrored = false;
   const verdict = blankSkip
     ? unjudgedVerdict()
     : // `logNote` and not `log`: where a specialist merged, the note says so, and the fragment the
@@ -2846,7 +2907,18 @@ async function extractPage(
       // parsed for `html` alone (`correctPage`), so there is no log of it to send and the first
       // pass's note is about text that has since been rewritten. Sending that would invite exactly
       // the false problem #349 measured, one round later.
-      await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml, caution, log: logNote }], "verify");
+      // And `.catch` for the reason `verifyUnobtainable` is written out at length: a check that
+      // throws must not be able to delete the page it was checking (#364). What it returns is the
+      // verdict for a page nothing looked at, which is what this call failing MEANS — no problems, so
+      // no correction is bought, and the page ships exactly as it would have with no verifier
+      // configured at all.
+      await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml, caution, log: logNote }], "verify").catch(
+        (e: unknown) => {
+          verifyUnobtainable(ctx, img, "verify", e);
+          verifyErrored = true;
+          return unjudgedVerdict();
+        },
+      );
 
   // Whether the page's links arrived is checked here rather than left to the
   // Feedback Agent: it verifies the output against the IMAGE, which is the one place
@@ -2909,10 +2981,16 @@ async function extractPage(
     // either way — but they are different facts about a run, and only one of them is a saving. A
     // reader counting these lines is the only way to price the skip after the fact, so the reason is
     // on the line rather than inferred from a `page_blank` on the same image (issue #294).
+    // `"error"` is the second value the sentence above always described and nothing had ever emitted
+    // (#364): the call that could not be made, as against the one that was not bought. Both stay out
+    // of any pass rate, and only `blank` is a saving — an `error` page was billed for a full ceiling of
+    // output and got no verdict for it, so a reader adding the two together would price a loss as a
+    // saving. `page_verify_error` above carries the evidence; this field is what makes the page
+    // countable beside the others without reading two event streams.
     ctx.log.event("page_verify_ok", {
       image: img.name,
       ...(verdict.unjudged ? { unjudged: true } : {}),
-      ...(blankSkip ? { skipped: "blank" } : {}),
+      ...(blankSkip ? { skipped: "blank" } : verifyErrored ? { skipped: "error" } : {}),
     });
     // The verdict that describes a defect and then passes the page. `ok` is the verdict's
     // `faithful`/`accessible` FLAGS, and `failedCheck` needs a false flag AND a named problem
@@ -3184,9 +3262,28 @@ async function extractPage(
           chars_after: corrected.length,
         });
       } else if (!verifyFailed) {
-        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected, caution }], "recheck_binding");
-        keep = !failedCheck(recheck);
-        if (!keep) {
+        // GUARDED FOR THE SAME REASON AS THE FIRST CHECK, and this call site is not in #364's report:
+        // it is the third verify call in the file and the second with nothing to catch a provider
+        // error, so a throttle here deleted a page that had rendered, PASSED, and been corrected —
+        // two model calls' work thrown away instead of one, by the same route into `failedPage`.
+        //
+        // What it costs when it fires is a decision rather than a default, and this is the
+        // conservative side of it: no verdict is no licence. This recheck exists to stop a correction
+        // bought for a link or a placeholder alt from damaging a page that had already passed its
+        // fidelity check, so where the verdict cannot be obtained the correction is not kept and the
+        // page ships as it was — the status quo, which is a page that passed, and the same answer this
+        // branch gives to a verdict that fails. The alternative (keep an unverified rewrite of a page
+        // known to be good) is the harm the branch was written to prevent. The correction is billed
+        // either way; `correction_discarded` on the event is what says the money bought nothing, so
+        // the discard is on the record rather than inferred from a missing rejection line.
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected, caution }], "recheck_binding").catch(
+          (e: unknown) => {
+            verifyUnobtainable(ctx, img, "recheck_binding", e, { trigger, correction_discarded: true });
+            return null;
+          },
+        );
+        keep = recheck !== null && !failedCheck(recheck);
+        if (recheck !== null && !keep) {
           // Named `page_links_correction_rejected` since before there was anything else on this
           // branch, and kept: it is the rejection of a correction bought for a page that had
           // PASSED, and renaming it would split one measurement across two event names in a log
