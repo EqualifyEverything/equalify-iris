@@ -398,6 +398,13 @@ function enumerationsIn(alt: string): {
       // reading it as two puts a name nobody wrote — "Wisconsin and Wyoming" — where a key should be,
       // which loses the real member silently. So every conjunction opens there.
       //
+      // Opening every conjunction of a comma-less run also lets a word that is not a NAME onto the
+      // line, which is the price of reading a run-on at all: "the legend runs pale and light and medium
+      // and dark" separates into band words, and a correction that moves one of them across a semicolon
+      // is a token that changed bucket exactly as this field says. So an entry here is a token and not
+      // necessarily a place, and that is said wherever these limits are — a corpus counted off this
+      // line needs to know that some of its members are adjectives.
+      //
       // One genuinely ambiguous position is left rather than guessed at: a conjunction name as the
       // FIRST half of the last piece of a comma'd list — "Darkest: Ohio, Health and Human Services and
       // Education" — reads as three members, because nothing in the string says which "and" is the
