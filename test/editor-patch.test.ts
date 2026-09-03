@@ -932,7 +932,9 @@ test("a block that sheds the heading's words while GROWING is not re-seated eith
   //
   // Nothing else separates this from the case above. The document's own prose GREW, so the joined
   // reading is populated; no heading arrived, so `headings_gained` is 0; the block is not shorter, so a
-  // shortfall test passes it. Only "these are not the words it had" refuses it.
+  // shortfall test passes it. Only "the words it gave up are in block 2 now" refuses it — and the
+  // length licence #376 refutes passes it by a mile, the re-applied body being 24 characters of prose
+  // against the patched body's 59, because the edit that grew is the one being reverted.
   const GROWN =
     `<h1>Form</h1>\n` +
     `<div><h4>Name</h4><p>Enter it.</p></div>\n` +
@@ -954,6 +956,178 @@ test("a block that sheds the heading's words while GROWING is not re-seated eith
   assert.equal(patch?.data.discarded, "headings_lost");
   assert.equal(result.body, GROWN, "the document that entered");
   assert.equal((result.body.match(/Name/g) ?? []).length, 1, "`Name` once, not once in the heading and once in the label");
+  assert.deepEqual(patch?.data.headings_dropped, [1], "the block that fell and could not be handed back");
+  assert.ok(!("headings_recheck" in (patch?.data ?? {})), "refused because the words landed, not by the fail-closed re-check");
+});
+
+test("a block that demoted a heading and corrected its own words is handed back, not the round", async () => {
+  // The case #336 left paying the whole-round price (#376). A block can demote a heading AND fix a typo
+  // in the same edit — one `<div>`, two things done to it, one of them wanted — and "are these the words
+  // it had" is false for the typo, so the block was unseatable, so a reply whose only demotion was this
+  // block was refused entire. Nothing moved anywhere: the words the block gave up are `teh`, and no
+  // other edit took them.
+  //
+  // The typo has to be length-preserving for the round to reach the gate at all, and that is the
+  // reading's documented coarseness rather than a property of this test: a correction that SHORTENS the
+  // document's prose silences `navigation_lost` for the whole round (see `navigationLost`), so the
+  // demotion beside it ships unseen. `teh` -> `the` is a transposition, so the prose is 34 characters
+  // either side and the fall is read.
+  const TYPO =
+    `<h1>Pay</h1>\n` +
+    `<div><h2>Standby Pay.</h2><p>Paid at teh rate.</p></div>\n` +
+    `<img src="seal.png">\n`;
+  const { result, events } = await round(() => ({
+    edits: [
+      { block: 1, html: `<div><p><strong>Standby Pay.</strong></p><p>Paid at the rate.</p></div>` },
+      { block: 2, html: `<img src="seal.png" alt="Department seal.">` },
+    ],
+  }), TYPO, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 1 }, "the fall is read: the prose did not move");
+  assert.deepEqual(patch?.data.headings_reverted, [1], "and the block is handed back, which is what #376 asked for");
+  assert.ok(!("discarded" in (patch?.data ?? {})), "the round is NOT refused — this is the whole change");
+  assert.ok(!("headings_dropped" in (patch?.data ?? {})), "nothing was unattributable");
+  assert.equal(patch?.data.applied, 1, "so the other correction in the reply ships");
+  assert.match(result.body, /alt="Department seal\."/, "the alt text is in the delivered document");
+  assert.match(result.body, /<h2>Standby Pay\.<\/h2>/, "and the heading is back");
+  // What the re-seat costs, stated rather than hidden: the block goes back as it stood, so its typo fix
+  // goes back with it. The alternative was losing that fix AND the alt text AND the round.
+  assert.match(result.body, /Paid at teh rate\./, "the typo the same edit fixed is reverted with the block");
+  assert.equal(result.editorHeadingsGated, true, "the guard fired, and says so, on a round it did not refuse");
+});
+
+test("the words are matched as words, so a label that repunctuates them is still not re-seated", async () => {
+  // Why the containment reading is not a string comparison. The words are RE-EXPRESSED where they land
+  // rather than copied: `<h4>Name</h4>` emptied while the `<label>` that takes its place writes `Name:`.
+  // A comparison of the block's visible text against the landing block's would see two different
+  // strings and hand the `<h4>` back over a `<label>` already holding it.
+  const COLON =
+    `<h1>Form</h1>\n` +
+    `<h4>Name</h4>\n` +
+    `<form><p>Enter it.</p><input id="name"></form>\n`;
+  const { result, events } = await round(() => ({
+    edits: [
+      { block: 1, html: `` },
+      { block: 2, html: `<form><p>Enter it.</p><label for="name">Name:</label><input id="name"></form>` },
+    ],
+  }), COLON, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 1 });
+  assert.equal(patch?.data.discarded, "headings_lost", "the words landed, so there is nothing to seat");
+  assert.deepEqual(patch?.data.headings_dropped, [1]);
+  assert.equal(result.body, COLON, "and the document is the one that entered");
+  assert.equal((result.body.match(/Name/g) ?? []).length, 1);
+});
+
+test("a block that already had the word is still a landing block, so the arrival is counted not looked up", async () => {
+  // The input that decides multiset against set, which is the mutation this reading has to survive. The
+  // `<form>` already says `Name` in a sentence of its own, so `Name` is in that block before the reply
+  // and after it — a set comparison sees nothing arrive and hands the emptied `<h4>` back over a
+  // `<label>` that is now holding the same word. Counted, the block went from one `Name` to two.
+  const HELD =
+    `<h1>Form</h1>\n` +
+    `<h4>Name</h4>\n` +
+    `<form><p>Name is required.</p><input id="name"></form>\n`;
+  const { result, events } = await round(() => ({
+    edits: [
+      { block: 1, html: `` },
+      { block: 2, html: `<form><p>Name is required.</p><label for="name">Name</label><input id="name"></form>` },
+    ],
+  }), HELD, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 1 });
+  assert.equal(patch?.data.discarded, "headings_lost");
+  assert.ok(!("headings_reverted" in (patch?.data ?? {})), "the emptied block is not handed back");
+  assert.equal(result.body, HELD);
+  assert.equal((result.body.match(/Name/g) ?? []).length, 2, "the two the document already had, not three");
+});
+
+// The media half of the same question, in both directions. A block can hand over something that carries
+// no words at all — an `<img>` or an `<a>` — and no reading of the prose can see it move.
+const FIGURE =
+  `<h1>Report</h1>\n` +
+  `<div><h2>Chart</h2><img src="c.png" alt="Sales by month."></div>\n` +
+  `<p>See the chart.</p>\n`;
+
+test("a block that gave its IMAGE to another block is not re-seated either", async () => {
+  // Demote the heading and hand the image to the `<figure>` another edit builds. Not a word moves in
+  // either block, so nothing but the media reading separates this from a safe re-seat — and re-seating
+  // block 1 would put `c.png` in the document twice.
+  const { result, events } = await round(() => ({
+    edits: [
+      { block: 1, html: `<div><p><strong>Chart</strong></p></div>` },
+      { block: 2, html: `<figure><img src="c.png" alt="Sales by month."><figcaption>See the chart.</figcaption></figure>` },
+    ],
+  }), FIGURE, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 1 }, "the fall is read: the prose did not move");
+  assert.equal(patch?.data.discarded, "headings_lost", "and there is nothing left to seat");
+  assert.deepEqual(patch?.data.headings_dropped, [1]);
+  assert.equal(result.body, FIGURE, "the document that entered");
+  assert.equal((result.body.match(/c\.png/g) ?? []).length, 1, "one copy of the image, not two");
+});
+
+test("media is matched by kind, so a link arriving is not an image that left", async () => {
+  // The same shape with the arrival a different kind of thing. Block 1 demotes and drops the image, which
+  // therefore leaves the DOCUMENT — nothing took it — and block 2 gains a link. Read as "did any media
+  // arrive anywhere", that refuses the round and ships a body with no image and no heading; read by kind,
+  // block 1 goes back with its image and its heading, and the link is delivered.
+  const { result, events } = await round(() => ({
+    edits: [
+      { block: 1, html: `<div><p><strong>Chart</strong></p></div>` },
+      { block: 2, html: `<p>See the <a href="#chart">chart</a>.</p>` },
+    ],
+  }), FIGURE, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 1 });
+  assert.deepEqual(patch?.data.headings_reverted, [1], "handed back, because nothing took what it gave up");
+  assert.ok(!("discarded" in (patch?.data ?? {})));
+  assert.equal(patch?.data.applied, 1, "and the link ships");
+  assert.match(result.body, /<h2>Chart<\/h2>/);
+  assert.match(result.body, /<img src="c\.png"/, "with the image the round would otherwise have dropped");
+  assert.match(result.body, /href="#chart"/);
+});
+
+test("size cannot tell the two shapes apart, and where the words are can", async () => {
+  // The measurement behind #376, pinned so the length licence is not re-proposed. Both shapes are run
+  // through `applyBlockEdits` twice — the whole reply, and the reply with the demoting block's edit
+  // dropped — and compared on the joined prose, which is the comparison that suggests itself.
+  const SHAPES = [
+    {
+      what: "demote and reword in place, safe to re-seat",
+      body: `<h1>Pay</h1>\n<div><h2>Standby Pay.</h2><p>Paid at teh rate.</p></div>\n`,
+      edits: [{ block: 1, html: `<div><p><strong>Standby Pay.</strong></p><p>Paid at the rate.</p></div>` }],
+      landed: [] as number[],
+    },
+    {
+      what: "shed the words and grow, the duplication hazard",
+      body: `<h1>Form</h1>\n<div><h4>Name</h4><p>Enter it.</p></div>\n<form><input id="name"></form>\n`,
+      edits: [
+        { block: 1, html: `<div><p>Enter it. Please print clearly in block capitals.</p></div>` },
+        { block: 2, html: `<form><label for="name">Name</label><input id="name"></form>` },
+      ],
+      landed: [1],
+    },
+  ];
+  const sizes: [number, number][] = [];
+  for (const shape of SHAPES) {
+    const blocks = splitBlocks(shape.body);
+    const patched = applyBlockEdits(blocks, shape.edits);
+    const kept = applyBlockEdits(blocks, shape.edits.filter((e) => e.block !== 1));
+    sizes.push([visibleText(patched.body).length, visibleText(kept.body).length]);
+    assert.deepEqual(patched.headings_dropped, [1], `${shape.what}: the same fall, in the same block`);
+    assert.equal(patched.headings_gained, 0, `${shape.what}: and no heading arrived, so the other guard is blind`);
+    assert.deepEqual(patched.content_landed, shape.landed, `${shape.what}: this is the reading that separates them`);
+  }
+  // `kept <= patched` is true on BOTH — 34 against 34, and 24 against 59 — so it licenses the hazard as
+  // readily as the safe shape. It passes the hazard because the edit that GREW is the one being
+  // reverted, which is the trap: the more content another edit took, the safer the re-seat looks.
+  assert.deepEqual(sizes, [[34, 34], [59, 24]]);
+  for (const [patched, kept] of sizes) assert.ok(kept <= patched, "which is why size is not the licence");
+  // And what the hazard's re-applied body actually contains, which is the reason it must be refused.
+  const hazard = SHAPES[1]!;
+  const kept = applyBlockEdits(splitBlocks(hazard.body), hazard.edits.filter((e) => e.block !== 1));
+  assert.equal((visibleText(kept.body).match(/Name/g) ?? []).length, 2, "`Name` twice, printed by the guard itself");
 });
 
 test("a reorder in the same reply as a demotion is refused whole, because neither can be told from the other", async () => {

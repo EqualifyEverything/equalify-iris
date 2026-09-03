@@ -137,7 +137,7 @@ export type Navigable = (typeof NAVIGABLE)[number];
 // The SAME correction split across two blocks is a different case and is not narrowed: the extractor
 // commonly emits that label as a stray `<h4>` sibling of the form rather than inside it, and the fix is
 // then two edits — empty the sibling, seat the `<label>` in the form. Nothing binds the two, so
-// handing the emptied block back would print its words twice. `content_moved` below is what keeps
+// handing the emptied block back would print its words twice. `content_landed` below is what keeps
 // that block out of the salvage, and a reply with nothing left to seat is refused whole.
 //
 // `items` and `rows` do NOT pass it, and they are reported rather than read (#271 asked for all
@@ -171,26 +171,98 @@ export function proseShortened(before: string, after: string): boolean {
   return visibleText(after).length < visibleText(before).length;
 }
 
-// Whether the block's own CONTENT is still the content it had — its words the same words, its images
-// and links still there. Not a shortfall, an inequality, and that is the whole difference between this
-// and `gaveContentUp`: a block can hand the heading's words to another edit and GROW at the same time,
-// by rewording what is left of it or by gaining alt text, and a length comparison calls that no loss
-// at all. The reply is then re-seated over an edit that is already holding those words and the document
-// prints them twice.
+// What one changed block GAVE UP and what it TOOK: the words, and the two things it holds that carry no
+// words. `after` is `""` for a block the editor emptied.
 //
-// Why a caller re-seating a block needs its own reading rather than `gaveContentUp`: a block that
-// dropped a heading satisfies `gaveContentUp` by construction, so every candidate for re-seating is in
-// `lost` already and `lost` cannot separate them. See `content_moved` on `PatchReport`.
-function contentMoved(before: string, after: string): boolean {
-  return visibleText(after) !== visibleText(before) || mediaGone(before, after);
+// Both directions read once per block rather than per pair, because the question below is asked of every
+// pair of changed blocks and neither side of a pair is the special one.
+interface Traffic {
+  at: number;
+  gave: Map<string, number>;
+  gaveMedia: Media[];
+  took: Map<string, number>;
+  tookMedia: Media[];
 }
 
-// The half of both readings that carries no words: an `<img>` or an `<a>` fewer than the block had. A
-// source block that hands back its figcaption and drops the image is a loss no prose comparison can
-// see, the words being unchanged.
-function mediaGone(before: string, after: string): boolean {
+function trafficOf(at: number, before: string, after: string): Traffic {
+  return {
+    at,
+    gave: wordsGivenUp(before, after),
+    gaveMedia: mediaGivenUp(before, after),
+    // The same two readings with the arguments REVERSED, which is what a gain is: what this block would
+    // have given up had it been edited the other way round.
+    took: wordsGivenUp(after, before),
+    tookMedia: mediaGivenUp(after, before),
+  };
+}
+
+// Whether what this block gave up TURNED UP somewhere else in the same reply. Nothing having landed is
+// the licence to hand the block back — see `content_landed` on `PatchReport` for why the question is
+// about the rest of the reply and cannot be answered from one block alone, and for the length comparison
+// that suggests itself and does not work.
+//
+// A departure is an inequality and not a shortfall, which is the distinction the second review of #336
+// turned on: a block can hand the heading's words to another edit and GROW at the same time, by
+// rewording what is left of it or gaining a piece of alt text, so "did it get shorter" sees no
+// departure at all.
+//
+// Why a caller re-seating a block needs this rather than `gaveContentUp`: a block that dropped a
+// heading satisfies `gaveContentUp` by construction, so every candidate for re-seating is in `lost`
+// already and `lost` cannot separate them.
+function contentLanded(block: Traffic, others: Traffic[]): boolean {
+  if (block.gave.size === 0 && block.gaveMedia.length === 0) return false;
+  return others.some((other) =>
+    block.gaveMedia.some((kind) => other.tookMedia.includes(kind)) ||
+    [...other.took.keys()].some((word) => block.gave.has(word)));
+}
+
+// The visible words a replacement has FEWER of than the block it replaces, as a multiset.
+//
+// Counts and not a set, because a word can be in a block twice and lose one of them, and because the
+// block it lands in may have had it already: a `<form>` whose own sentence says `Name` and which takes
+// the stray `<h4>Name</h4>`'s words into a `<label>` has gained one, and a set comparison sees nothing
+// arrive at all — it would license exactly the re-seat that prints `Name` twice.
+//
+// Compared at word grain, lowercased and cut at every non-letter, which is looser than the text on
+// purpose: the words are RE-EXPRESSED where they land rather than copied. `Standby Pay.` inside
+// `<strong>` is the same string, but the `<label>` that takes `<h4>Name</h4>` may write it `Name:`, and
+// a grain that missed that would miss the commonest form of the hazard. What the looseness costs is a
+// block left reverted where it could have been handed back, which is one block for one round.
+function wordsGivenUp(before: string, after: string): Map<string, number> {
+  const gone = wordCounts(before);
+  for (const [word, n] of wordCounts(after)) {
+    const left = (gone.get(word) ?? 0) - n;
+    if (left > 0) gone.set(word, left);
+    else gone.delete(word);
+  }
+  return gone;
+}
+
+function wordCounts(html: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const word of visibleText(html).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []) {
+    counts.set(word, (counts.get(word) ?? 0) + 1);
+  }
+  return counts;
+}
+
+// The half of every reading here that carries no words: an `<img>` or an `<a>` fewer than the block
+// had. A source block that hands back its figcaption and drops the image is a loss no prose comparison
+// can see, the words being unchanged.
+//
+// Per kind rather than as one flag, because `contentLanded` reads it in both directions and an `<img>`
+// leaving one block while an `<a>` arrives in another is not one thing moving.
+const MEDIA = ["images", "links"] as const;
+
+type Media = (typeof MEDIA)[number];
+
+function mediaGivenUp(before: string, after: string): Media[] {
   const [was, now] = [structureCounts(before), structureCounts(after)];
-  return now.images < was.images || now.links < was.links;
+  return MEDIA.filter((kind) => now[kind] < was[kind]);
+}
+
+function mediaGone(before: string, after: string): boolean {
+  return mediaGivenUp(before, after).length > 0;
 }
 
 // The navigation the DOCUMENT lost, read on the body the blocks assemble into rather than block by
@@ -308,7 +380,7 @@ export interface PatchReport {
   // things `gaveContentUp` reads — but not the same question, and the difference is the whole point
   // of having it: `lost` answers "up to where may a cut reply be applied", and this answers "which
   // blocks may not be applied at all". Because it is a subset, `lost` cannot be used to sort these
-  // into safe and unsafe: that is what `content_moved` is for.
+  // into safe and unsafe: that is what `content_landed` is for.
   //
   // Why per block, when `navigation_lost` is deliberately read on the joined body: the two are
   // answering different halves of one question and neither can answer the other's. The joined reading
@@ -322,18 +394,9 @@ export interface PatchReport {
   // pure reorder fills this in with the source block while the document lost nothing. Both are why the
   // caller reads this only after the joined reading has said there is something to refuse.
   headings_dropped: number[];
-  // Blocks whose own WORDS ARE NOT THE WORDS THEY HAD, or that came back with an `<img>` or an `<a>`
-  // fewer (`contentMoved`). The other half of the licence to re-seat a block, and the half
-  // `headings_gained` is blind to.
-  //
-  // An inequality and not a shortfall, which is the distinction the second review of #336 turned on: a
-  // block can give the heading's words to another edit and grow in the same breath — reword the
-  // paragraph that survives, gain a piece of alt text — and a "did it get shorter" test calls that no
-  // loss. Re-seating it then prints those words twice. The re-seat this exists to license has prose
-  // identical BY CONSTRUCTION (`<h4>Name</h4>` -> `<label for="name">Name</label>` in the same block
-  // moves not one character), so equality costs it nothing, and every case where equality is stricter
-  // than a shortfall is a case where a block's text changed while a heading left it — which is not a
-  // shape anything can re-seat safely.
+  // Blocks that GAVE CONTENT UP TO ANOTHER BLOCK of the same reply: words they no longer have, or an
+  // `<img>` or an `<a>`, turning up where another edit put something new (`contentLanded`). The other
+  // half of the licence to re-seat a block, and the half `headings_gained` is blind to.
   //
   // The hazard it exists for: a heading's words can migrate into another block as something
   // `structureCounts` does not count at all. The extractor emits a field label as a stray `<h4>`
@@ -341,24 +404,37 @@ export interface PatchReport {
   // seat `<label for="name">Name</label>` inside the form. The document keeps every word, so the joined
   // prose is unmoved and `navigation_lost` reports the fall as ordinary; no heading arrived anywhere, so
   // `headings_gained` is 0. Re-seating the emptied block would print "Name" twice and leave an `<h4>`
-  // heading nothing. `content_moved` holds that block and the caller never re-seats it.
+  // heading nothing. This holds that block and the caller never re-seats it.
+  //
+  // WHERE THE WORDS WENT, and not "are these the words it had", which is what this field read until
+  // #376. That reading is an inequality on the block's own text, so a block that demotes a heading AND
+  // corrects its own words in one edit — a typo fixed in the same `<div>` — was in it too: not seatable,
+  // so a reply whose only demotion was that block was refused whole, and nothing had moved anywhere.
+  // Whether the words went somewhere is a question about the REST of the reply, which is why it cannot
+  // be answered while the edits are read one at a time and is a second pass in `applyBlockEdits`.
+  //
+  // NOT a length comparison, which is the licence that suggests itself and is refuted by measurement
+  // (#376): the joined prose of the re-applied body against the fully patched one is 34 against 34 on
+  // the safe shape and 24 against 59 on the duplication hazard, so `kept <= patched` passes the hazard
+  // by a mile — the edit that GREW is the one being reverted, and the body it leaves carries `Name`
+  // twice. Size cannot separate the two shapes; where the words are can.
   //
   // Not `lost`, which is a superset: every block in `headings_dropped` is in `lost` already, because a
   // heading falling is one of the things `gaveContentUp` reads. `lost` also cannot be narrowed to this,
   // because `salvageRound` reads it to find where a cut reply must stop and #271's whole point is that a
   // demotion is a loss worth stopping at.
   //
-  // An emptied block is in this only if it HELD something: `<h2></h2>` -> `""` has no words to move, so
-  // the empty-heading false positive stays the cheap one — that block is re-seated and costs one block
-  // for one round rather than the whole reply.
-  content_moved: number[];
+  // An emptied block is in this only if it HELD something that landed: `<h2></h2>` -> `""` has no words
+  // to move, so the empty-heading false positive stays the cheap one — that block is re-seated and
+  // costs one block for one round rather than the whole reply.
+  content_landed: number[];
   // Heading elements that ARRIVED in some block, summed across the reply. The number that says whether
   // `headings_dropped` can be acted on: a heading that left one block and turned up in another is a
   // reorder EDITOR_SYSTEM sanctions by name, and nothing here binds the two halves together, so a
   // caller reverting the source block on that reply would restore a heading the landing block already
   // has — one heading printed twice, invented by the guard.
   //
-  // 0 is therefore half the licence — `content_moved` is the other half — and it is exactly the
+  // 0 is therefore half the licence — `content_landed` is the other half — and it is exactly the
   // condition the outline guarantee rests on: no block took
   // a heading, so a document-wide fall means the heading is gone rather than moved, so handing back
   // every block that dropped one restores the outline exactly. Non-zero and the caller cannot tell
@@ -414,10 +490,14 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     shrunk: 0,
     lost: [],
     headings_dropped: [],
-    content_moved: [],
+    content_landed: [],
     headings_gained: 0,
     navigation_lost: {},
   };
+  // Every block this reply changed the text of, read as what it gave up and took, for the second pass
+  // below. Whether one block's loss is another's gain cannot be asked while the edits are read one at a
+  // time: the edit that received the words may be the next one in the list.
+  const changed: Traffic[] = [];
   // Both directions of every replaced block's heading count, taken here rather than derived later
   // because the original block text is only in hand while the edit is being applied. Counted with
   // `structureCounts` for the same reason `gaveContentUp` does — folded across h1-h6, so re-levelling
@@ -450,7 +530,7 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
       report.deleted++;
       report.lost.push(at);
       if (headings(blocks[at]!.html) > 0) report.headings_dropped.push(at);
-      if (contentMoved(blocks[at]!.html, "")) report.content_moved.push(at);
+      changed.push(trafficOf(at, blocks[at]!.html, ""));
       continue;
     }
     if (html.trim() === blocks[at]!.html.trim()) {
@@ -470,11 +550,16 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     const delta = headings(html) - headings(blocks[at]!.html);
     if (delta < 0) report.headings_dropped.push(at);
     if (delta > 0) report.headings_gained += delta;
-    if (contentMoved(blocks[at]!.html, html)) report.content_moved.push(at);
+    changed.push(trafficOf(at, blocks[at]!.html, html));
     if (gaveContentUp(blocks[at]!.html, html)) {
       report.shrunk++;
       report.lost.push(at);
     }
+  }
+  // In the order the edits were read, like `lost` and `unknown`, so a reader of the two lists together
+  // is reading one order.
+  for (const block of changed) {
+    if (contentLanded(block, changed.filter((other) => other.at !== block.at))) report.content_landed.push(block.at);
   }
   const body = joinSections(blocks, replacements);
   // Both sides through `joinSections`, so the two are assembled the same way and the reading cannot
