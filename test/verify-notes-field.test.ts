@@ -4,8 +4,13 @@
 // withdrawn item is not noise reaching a log, it is a licence to alter output the verifier had
 // just confirmed was right, and #337 established that the page agent does as it is told.
 // Measured over 45 undamaged control pages at three reads: 32 of 244 problems retracted inside
-// their own text, 7 pages of 45, 14 of 71 rejections carrying one to the corrector — and 0 of
-// 273 on the candidate at the other vendor, which is why the fix is addressed to the schema.
+// their own text, 7 pages of 45, 14 of 71 rejections carrying one to the corrector. The
+// candidate at the other vendor did it 0 of 273 times on those control pages, but 2.7% on a real
+// 100-page document against 3.1% and 4.5% for the other two models — so EVERY model does it, the
+// corpus sets the rate, and it is the SCHEMA the fix is addressed to. The 0 is not evidence the
+// behaviour can be instructed away; an earlier revision of this header read it that way, and the
+// round that produced it withdrew that reading once the control 13.1% failed to reproduce on a
+// 10-page subset of the same pages. Which is why the two halves below are not equally supported.
 //
 // The fix is two clauses of prompt and no code change, so the whole of it is assertable only
 // here. Two halves, and they fail differently:

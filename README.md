@@ -1507,10 +1507,17 @@ that passes on a defect it described, but a page that fails on a problem it has 
 inspection this is correct, disregard" is both work to do and permission to alter text the verifier
 had just confirmed was right. Over 45 undamaged control pages read three times each, the deployed
 verifier retracted **32 of its 244 problems inside their own strings**, on 7 pages of 45, and 14 of
-its 71 rejections carried at least one of them to the corrector; a candidate model at another vendor
-did it 0 times in 273 problems (issue #339). No page was rejected *solely* on retracted items, so the
-cost is mixed instructions rather than wasted rounds — which is the expensive kind here, because the
-page agent does as it is told, including replacing words that were already right.
+its 71 rejections carried at least one of them to the corrector (issue #339). **Every model does it**,
+and how often depends on the corpus rather than the vendor: on those undamaged control pages a candidate
+at another vendor did it 0 times in 273 problems, but on a real 100-page document the three models
+measured 2.7%, 3.1% and 4.5% — a factor of 1.7, not an infinity, and 4.5% is the figure a production run
+sees. An earlier revision of this section quoted the control-page 0 as evidence that the behaviour is not
+inherent to the task; it is not that, and the same round found that 13.1% itself did not reproduce on a
+10-page subset of the very same pages (0.0%), so the control rate is a noisy measurement of a real
+defect rather than a vendor difference. No page in that round was rejected *solely* on retracted items —
+though one page in a later verify-only round was, so that bound is low rather than zero — so the cost is
+mixed instructions rather than wasted rounds, which is the expensive kind here, because the page agent
+does as it is told, including replacing words that were already right.
 
 The cause is the reply shape rather than the model: `{ faithful, accessible, problems }` left nowhere
 to think, so the thinking went to the only free-text field there was, and that field is the one that
@@ -1519,7 +1526,12 @@ concluded **not** to be a problem is omitted rather than narrated, and gives the
 destination — `notes`, read by nothing: not `readProblems`, not the correction prompt, not the
 delivered document. Naming a destination rather than only forbidding the narration is issue #303's
 lesson read the other way round, since what the Reader stopped writing as prose partly came back as
-issues asking for no change. `test/verify-notes-field.test.ts` pins both halves — the clause, and the
+issues asking for no change. That every model does it on real pages is the strongest form of the
+schema argument — one of the specimens declares the entry "excluded from problems count" from inside
+the problems array, which is the case for a destination made by the model itself. It also means the
+**instruction** half has no proof of sufficiency: no model has been shown going to zero by instruction
+alone, so the omit-rather-than-narrate sentence is shipped as cheap and plausible, not as demonstrated.
+`test/verify-notes-field.test.ts` pins both halves — the clause, and the
 promise the clause makes to the model about where `notes` goes, which is the half a later change could
 quietly falsify. What it costs is 1,253 characters of prompt on every verify call; what it buys is
 **not** measured — the behaviour was counted and the fix was not — and `pages_unjudged` is the number
