@@ -84,28 +84,35 @@ export function extractJson<T = unknown>(text: string): T | null {
   // Last chance for a reply that is nothing BUT one object — opening at the first character and
   // closing at the last, which is what every one of these prompts asks for — whose escaping the
   // walk could not repair. Read under the narrower colon rule described above `repairedSpan`, and
-  // taken only where it recovers FIELDS the walk lost: every key the walk found plus at least one
-  // more.
+  // taken only where its own strings are self-contained (`stringsAreSelfContained`).
   //
   // Both halves of that condition are load-bearing, and each is a version of this change that
   // shipped nothing. The narrow rule cannot go in the walk, because a candidate that newly parses
   // moves the cursor: on 14 of the 4,100 agent replies in the bench logs a Reader verdict quoting
   // `{"html":"…` in its prose gets a value-string that never closes, swallows the verdict behind
   // it, and comes back with one issue in place of five — and putting the narrow rule in as a
-  // per-candidate FALLBACK loses the same 14 the same way. And the key test is not decoration: the
-  // narrow rule's own failure case is a string the tracker reads as a value where JSON meant a key,
-  // which is what an ABANDONED unterminated string does to it —
+  // per-candidate FALLBACK loses the same 14 the same way. And the brace test is not decoration:
+  // the narrow rule's own failure case is a string the tracker reads as a value where JSON meant a
+  // key, which is what an ABANDONED unterminated string does to it —
   //
   //   {"html": "<p>Table 3 continues\n{"html": "<table>…</table>", "log": "ok", …}
   //
   // a draft the model gave up on mid-string and restarted inline. The walk reads the restart, which
   // is the answer; the narrow rule reads one object whose `html` is the abandoned prose with
   // `{"html": "` glued to the front of it, and that string is delivered to a reader as the page
-  // (#168). Its key set is the same as the walk's, so the walk keeps it. What the narrow reading is
-  // for carries strictly more: `{ faithful, accessible, problems, notes }` where the decoy quoted
-  // inside `notes` had `{ faithful, problems }` (#339).
+  // (#168). The abandoned `{` never closes inside that string, so the test discards the reading and
+  // the walk's answer stands. A decoy the model QUOTED closes inside its own string, so the test
+  // keeps the reading and #339's verdict is read as the rejection it is.
+  //
+  // An earlier version of this gate compared KEY SETS — the narrow reading preferred where it
+  // carried every field the walk found plus one more — and it is worth saying why that was wrong,
+  // because it looked like the same idea. It is a race the decoy can win: it holds only while the
+  // quoted object names fewer fields than the real envelope, so a four-field `notes` quote ties it,
+  // and it depends on field ORDER, since a restart preceded by one complete field carries a strict
+  // superset and wins. Neither shape has anything to do with which reading is right. What separates
+  // them is whether the model finished writing the object it quoted, and that is what is tested now.
   const recovered = wholeReplyObject<T>(whole);
-  if (recovered !== null && recoversMoreThan(recovered, last)) return recovered;
+  if (recovered !== null && stringsAreSelfContained(recovered)) return recovered;
   return last;
 }
 
@@ -122,15 +129,34 @@ function wholeReplyObject<T>(whole: string): T | null {
   }
 }
 
-// Does `recovered` carry everything the walk found and at least one field more? That is the only
-// case where the narrower reading is preferred, because it is the only case where the walk can be
-// shown to have lost something rather than read something differently.
-function recoversMoreThan(recovered: unknown, found: unknown): boolean {
-  if (found === null || typeof found !== "object") return true;
-  if (recovered === null || typeof recovered !== "object") return false;
-  const have = Object.keys(recovered);
-  const want = Object.keys(found);
-  return have.length > want.length && want.every((k) => have.includes(k));
+// Does every `{` inside this object's strings close inside the same string?
+//
+// This is the whole discriminator between the two shapes the narrow rule cannot tell apart, and it
+// is the difference itself rather than a proxy for it. A model QUOTING an object writes the whole
+// thing — `"I read it as { "faithful": true, "problems": [] } at first"` — so the braces inside that
+// string balance. A model that ABANDONS an object mid-string and restarts has written a `{` whose
+// `}` belongs to the restarted object, so the narrow reading swallows the opener and leaves it
+// unbalanced. Nothing about field order, field count, or which reading is longer enters into it.
+//
+// False negatives cost exactly nothing, which is why this can afford to be strict: a page that
+// legitimately prints a lone `{` makes the narrow reading unusable, and an unusable narrow reading
+// means `extractJson` answers with the walk's result — the answer `main` gives. That is the safety
+// property to keep in mind when editing this. Head and base can differ ONLY on a reply where the
+// narrow reading is preferred, so every gate here can only ever return behaviour to the base.
+function stringsAreSelfContained(value: unknown): boolean {
+  if (typeof value === "string") {
+    let depth = 0;
+    for (const c of value) {
+      if (c === "{") depth++;
+      else if (c === "}" && --depth < 0) return false;
+    }
+    return depth === 0;
+  }
+  if (Array.isArray(value)) return value.every(stringsAreSelfContained);
+  if (value !== null && typeof value === "object") {
+    return Object.values(value).every(stringsAreSelfContained);
+  }
+  return true;
 }
 
 // The entries of an array field that DID arrive complete, out of a reply that stopped partway
@@ -318,11 +344,27 @@ function strictSpan(candidate: string, start: number): Span | null {
 // comma or a brace — `<p>She said "hello", he replied</p>` — which reads as a terminator and
 // fails the parse. That is the failure this had before, not a new one. It also bounds what the
 // whole-reply attempt fixes, and the bound is worth stating because a verdict is on the other side
-// of it: the same `notes` inside a code fence, or after a sentence of preamble, or quoting
-// `"faithful",` rather than `"faithful":`, still leaves the decoy as the last readable object.
-// A parser cannot close that in one pass, so it is closed twice elsewhere instead —
-// `agents/feedback.md` asks the verifier for no quoted JSON in `notes`, and `verifyAgentOutput`
-// refuses to read anything carrying fewer than both decision flags as a verdict at all.
+// of it. Four shapes still leave the decoy as the last readable object, all of them unchanged from
+// before this repair rather than opened by it:
+//
+//   * the same `notes` inside a code fence, or after a sentence of preamble — the reply no longer
+//     opens with `{`, so the whole-reply attempt does not apply to it at all;
+//   * a quote of `"faithful",` rather than `"faithful":`, where the wide rule ends the value early
+//     for a reason the narrow rule shares;
+//   * a decoy containing an EMPTY quoted string, `{ …, "notes": "" }`. Its `""` is a quote followed
+//     by `}`, so the narrow rule closes the real `notes` value there, the span ends before the end
+//     of the reply, and the whole-reply attempt yields nothing. This is the shape the new `notes`
+//     field most invites, and it is the one residual worth knowing about by name.
+//
+// A parser cannot close those in one pass — a `"` before `}` is a terminator on every reply that
+// needed this repair in the first place — so they are closed twice elsewhere instead:
+// `agents/feedback.md` asks the verifier for no quoted JSON in `notes` at all, and
+// `verifyAgentOutput` refuses to read anything carrying fewer than both decision flags as a verdict.
+// The last of the four defeats BOTH of those, since the quoted contract it produces carries both
+// flags as booleans, and a reply that quotes the whole contract back is indistinguishable in one
+// pass from a reply that IS the contract. It reads as a pass on a page the verifier rejected, on
+// `main` and here alike; what makes it acceptable to leave is that the prompt clause removes the
+// only reason such a string would be written.
 
 // Is the backslash at `i` the start of one of the six escapes JSON allows, or of a `\uXXXX`
 // with its four hex digits? Anything else is a backslash the model wrote as itself.

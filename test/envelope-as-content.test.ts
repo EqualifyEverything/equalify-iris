@@ -127,6 +127,16 @@ test("a reply that is only its object is read as that object, not as something q
     ["the third data row is absent"],
   );
 
+  // The same defect with the prose in a `problem` rather than in `notes`, so the quoted object names
+  // exactly the fields the envelope does. Worth its own case because it is what a key-count gate
+  // cannot see — the two readings tie — and it is the shape a verifier writes when it reasons
+  // inside a problem, which is the behaviour #339 measured.
+  const tied =
+    `{ "faithful": false, "accessible": false,\n` +
+    `  "problems": [{ "kind": "content_missing", "problem": "row 3 is absent — I first read the contract as ` +
+    `{ "faithful": true, "accessible": true, "problems": [] } and it is not that" }] }`;
+  assert.equal(extractJson<{ faithful?: boolean }>(tied)?.faithful, false);
+
   // Read that way only because the reply is nothing BUT the object, first character to last, which
   // is what every one of these prompts asks for. The narrow colon rule is confined to that shape
   // for a measured reason: applied to each candidate in the walk it changes 14 of the 4,100 agent
@@ -150,29 +160,66 @@ test("a reply that is only its object is read as that object, not as something q
     [[22, 23], [24]],
   );
 
-  // The narrow reading is also preferred only where it recovers FIELDS the walk lost — every key
-  // the walk found, plus at least one more. Its own failure case is a string the position tracker
+  // The narrow reading is also preferred only where its own strings are SELF-CONTAINED: every `{`
+  // inside them closes inside the same string. Its failure case is a string the position tracker
   // reads as a value where JSON meant a key, and an abandoned unterminated string is exactly what
-  // does that: here a draft the model gave up on mid-string and restarted inline. The walk reads
-  // the restart, which is the answer. The narrow rule reads one object whose `html` is the
-  // abandoned prose with `{"html": "` glued to the front — and that string is delivered to a
-  // reader as the page, which is the whole subject of this file. Same key set as the walk's, so
-  // the walk keeps it.
-  const restarted =
-    `{"html": "<p>Table 3 continues\n` +
-    `{"html": "<table><tr><th>Year</th></tr></table>", "log": "ok", "suggested_agent": null}`;
+  // does that — a draft the model gave up on mid-string and restarted inline. The walk reads the
+  // restart, which is the answer. The narrow rule reads one object whose `html` is the abandoned
+  // prose with `{"html": "` glued to the front, and that string is delivered to a reader as the
+  // page, which is the whole subject of this file. The abandoned `{` never closes inside that
+  // string, so the reading is discarded and the walk's answer stands.
+  //
+  // BOTH FIELD ORDERS, because the gate this replaced could only see one of them. It compared key
+  // sets — the narrow reading preferred where it carried every field the walk found plus one more —
+  // and the abandoned string being the FIRST field is what made the two sets equal. Move one
+  // complete field ahead of it and the narrow reading is a strict superset, so it won and the
+  // envelope reached the page. The brace test does not care where in the object the model gave up.
+  for (const [where, restarted] of [
+    [
+      "first field",
+      `{"html": "<p>Table 3 continues\n` +
+        `{"html": "<table><tr><th>Year</th></tr></table>", "log": "ok", "suggested_agent": null}`,
+    ],
+    [
+      "after a complete field",
+      `{"log": "ok", "html": "<p>Table 3 continues\n` +
+        `{"html": "<table><tr><th>Year</th></tr></table>", "suggested_agent": null}`,
+    ],
+  ] as [string, string][]) {
+    assert.equal(
+      extractJson<{ html?: string }>(restarted)?.html,
+      "<table><tr><th>Year</th></tr></table>",
+      `${where}: the abandoned draft's prose was read as the page`,
+    );
+  }
+
+  // A page that legitimately prints a lone `{` fails the brace test too, and that costs nothing:
+  // discarding the narrow reading answers with the walk's result, which is what this returned
+  // before any of it. The direction is the safety property — head and base can differ only where
+  // the narrow reading is PREFERRED, so a stricter gate can only ever return behaviour to base.
   assert.equal(
-    extractJson<{ html?: string }>(restarted)?.html,
-    "<table><tr><th>Year</th></tr></table>",
-    "the abandoned draft's prose was read as the page",
+    extractJson<{ html?: string }>('{"html": "<p>A block opens with { and the "kind" attribute is set</p>", "log": "ok"}')?.html,
+    '<p>A block opens with { and the "kind" attribute is set</p>',
   );
 
-  // And the limit, stated so it is not mistaken for coverage: wrap the same verdict in a fence or a
-  // sentence and the decoy is the last readable object again. One pass cannot tell that reply from
-  // a page printing `She said "hello", he replied`, so `verifyAgentOutput` refuses a verdict
-  // missing either decision flag instead (test/verify-notes-field.test.ts).
+  // And the limits, stated so none of this is mistaken for coverage. Wrap the same verdict in a
+  // fence or a sentence and the decoy is the last readable object again: the reply no longer opens
+  // with `{`, so the whole-reply attempt does not apply, and one pass cannot tell that reply from a
+  // page printing `She said "hello", he replied`.
   assert.equal(extractJson<{ faithful?: boolean }>("```json\n" + decoyed + "\n```")?.faithful, true);
   assert.equal(extractJson<{ faithful?: boolean }>("Here is my verdict.\n\n" + decoyed)?.faithful, true);
+  // The third limit is the one the new `notes` field most invites, so it is pinned rather than
+  // described: a decoy quoting an EMPTY string. Its `""` is a quote followed by `}`, which every
+  // reading here treats as a terminator, so the real `notes` value ends inside the sentence, the
+  // span stops before the end of the reply, and there is no whole-reply object to prefer. The decoy
+  // wins — and it carries both flags as booleans, so `verifyAgentOutput`'s gate passes it too. This
+  // is `main`'s behaviour, unchanged; what removes it is the prompt clause asking for no quoted JSON
+  // in `notes` at all. If a later change closes it, this assertion is the one to invert.
+  const emptyStringDecoy =
+    `{ "faithful": false, "accessible": false,\n` +
+    `  "problems": [{ "kind": "content_missing", "problem": "the third data row is absent" }],\n` +
+    `  "notes": "I read it as { "faithful": true, "accessible": true, "problems": [], "notes": "" }; it is not." }`;
+  assert.equal(extractJson<{ faithful?: boolean }>(emptyStringDecoy)?.faithful, true);
 });
 
 test("an envelope nothing can read stays unread, rather than being guessed at", () => {
