@@ -1686,20 +1686,31 @@ function applyEditorPatch(
   // exemption from it. `salvageRound` reaches the same answer from the other end: it applies the part
   // of a cut reply in front of the loss rather than vetoing the reply.
   //
-  // So: hand back the blocks that dropped a heading (`headings_dropped`), apply everything else, and
-  // let the loop go round again. The heading is restored because a document-wide fall means no other
-  // block took it; the false positive costs that one block's correction for one round; and the worst
-  // case stops being a document with nothing corrected in it.
+  // So: hand back the blocks that dropped a heading and kept their words (`headings_dropped` minus
+  // `lost`), apply everything else, and let the loop go round again. The heading is restored because a
+  // document-wide fall means no other block took it; the false positive costs that one block's
+  // correction for one round; and the worst case stops being a document with nothing corrected in it.
   //
-  // The one shape this cannot attribute, and the reason `headings_gained` exists. A reply may reorder
+  // TWO shapes this cannot attribute, and they are the same hazard from opposite ends: re-seating a
+  // block is safe only when nothing else in the reply is now holding what that block held.
+  //
+  // The first, and the reason `headings_gained` exists. A reply may reorder
   // (a heading leaves block 3 and arrives in block 9 — sanctioned by name) AND demote in block 14, in
   // which case the document-wide fall is 1 while THREE blocks' counts moved. Handing back every block
   // that dropped one would restore block 3's heading while block 9 still has it: one heading printed
   // twice, invented here. Nothing binds a departure to an arrival, so this does not guess — a non-zero
   // `headings_gained` refuses the round whole, which is the old behaviour kept for the case that needs
-  // it. `headings_gained === 0` is the licence, and it is the same condition the guarantee rests on.
-  // The re-applied report is then checked for a remaining fall before it is trusted, because a
-  // guarantee worth stating in a comment is worth failing closed on.
+  // it.
+  //
+  // The second is that case with the migrant not a heading, which is why `headings_gained` cannot see
+  // it: a block emptied of the words another edit re-seated as a `<label>`, a `<caption>`, a `<th>` or a
+  // `<dt>`. The words never leave the document, so the joined prose is unmoved and the fall is read as
+  // ordinary. `lost` is what catches it — the per-block record of content given up — and a block in it
+  // is never re-seated. See the exclusion below.
+  //
+  // `headings_gained === 0` and at least one block still seatable is the licence, and it is the same
+  // condition the guarantee rests on. The re-applied report is then checked for a remaining fall before
+  // it is trusted, because a guarantee worth stating in a comment is worth failing closed on.
   //
   // NOT read as `refusal_with_loss` although #331 proposed that shape: there is no refusal in this
   // reply, and a log line naming one would send the next reader of it looking for the edit that was
@@ -1718,10 +1729,28 @@ function applyEditorPatch(
   let reverted: number[] = [];
   let unattributable = false;
   if (headingsLost > 0 && !roundRefused) {
-    if (patched.headings_gained > 0) {
+    // Only a block that KEPT ITS WORDS can be re-seated. `content_dropped` is the per-block record of
+    // words or media given up — and a block in it may have given them to another block in the same
+    // reply, which the joined prose cannot see because they never left the document. Handing such a
+    // block back restores text that is now in two places and a heading over content that has moved out
+    // from under it. Read `content_dropped` and not `lost`, which every block here is in already: a
+    // heading falling is one of the things `gaveContentUp` reads, so `lost` cannot sort these at all.
+    // `headings_gained` does not cover it either:
+    // that reads a heading arriving, and the commonest migrant here is a heading's words arriving as
+    // something `structureCounts` does not count at all — a `<label>` seated inside the `<form>` while
+    // the stray `<h4>` sibling that held it is emptied, which is the two-edit form of the same `label`
+    // correction the same-block case above is the one-edit form of.
+    //
+    // Excluding them can empty the list, and then there is nothing to salvage: the round is refused
+    // whole, which is the right answer for a reply that both dropped a heading and moved words out of
+    // the block it was in. Deliberately not the mirror remedy — seating the block back and dropping the
+    // edit that took the words — because nothing binds a departure to an arrival (see `headings_gained`
+    // below), so which other edit received them is not a question this can ask.
+    const seatable = patched.headings_dropped.filter((at) => !patched.content_dropped.includes(at));
+    if (patched.headings_gained > 0 || seatable.length === 0) {
       unattributable = true;
     } else {
-      reverted = [...patched.headings_dropped].sort((a, b) => a - b);
+      reverted = [...seatable].sort((a, b) => a - b);
       // Re-applied over the shorter edit list rather than patched back out of the joined body, for the
       // reason `salvageRound` gives: an edit that must not be applied has already been spliced in by
       // the time there is a body to undo it in, and `joinSections` is the only thing that knows how a

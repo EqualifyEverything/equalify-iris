@@ -120,9 +120,10 @@ export type Navigable = (typeof NAVIGABLE)[number];
 // block, so a field label the extractor emitted as `<h4>Name</h4>` corrected to
 // `<label for="name">Name</label>` keeps every word and takes `headings` down by one. Same for a
 // heading corrected into a `<caption>`, a `<dt>` or a `<th>` where both sit inside one wrapper block.
-// Not compensated for, deliberately: `structureCounts` does not count `<label>` or `<legend>` at all,
-// so a rule that discounted a `headings` fall wherever `captions`/`terms`/`header_cells` rose would
-// cover three of those four cases and miss the one that is likeliest — and it would be machinery for
+// Not compensated for, deliberately: `structureCounts` does not count `<label>`, `<legend>`,
+// `<figcaption>` or `<summary>` at all, so a rule that discounted a `headings` fall wherever
+// `captions`/`terms`/`header_cells` rose would cover three of those cases and miss every one of the
+// four uncounted destinations, including the one that is likeliest — and it would be machinery for
 // a shape no round on file has produced. So the cost is accepted rather than compensated for, and
 // since #331 it is paid with no refusal needed beside it — which is why what it costs had to come
 // down. It is now ONE BLOCK, not the round: the caller hands that block back untouched and applies
@@ -132,6 +133,12 @@ export type Navigable = (typeof NAVIGABLE)[number];
 // until `max_review_iterations` ran out. That is the failure mode the header comment on
 // `applyBlockEdits` exists to rule out, and a gate is not exempt from it. What the measurement below
 // says, if this happens at all, is how often.
+//
+// The SAME correction split across two blocks is a different case and is not narrowed: the extractor
+// commonly emits that label as a stray `<h4>` sibling of the form rather than inside it, and the fix is
+// then two edits — empty the sibling, seat the `<label>` in the form. Nothing binds the two, so
+// handing the emptied block back would print its words twice. `content_dropped` below is what keeps
+// that block out of the salvage, and a reply with nothing left to seat is refused whole.
 //
 // `items` and `rows` do NOT pass it, and they are reported rather than read (#271 asked for all
 // three; this is the half of it the evidence does not support). Both are ambiguous in a way
@@ -151,9 +158,20 @@ export type Navigable = (typeof NAVIGABLE)[number];
 // `PatchReport`), and the gate it feeds is scoped to the block that fell rather than to the reply,
 // precisely because a fall is not a verdict on the round it arrived in.
 function gaveContentUp(before: string, after: string): boolean {
+  if (droppedContent(before, after)) return true;
+  return structureCounts(after).headings < structureCounts(before).headings;
+}
+
+// The words-and-media half of `gaveContentUp`, without its structure clause, because a caller deciding
+// whether a block may be RE-SEATED needs exactly this half and `gaveContentUp` cannot give it: a block
+// that dropped a heading satisfies `gaveContentUp` by construction, so every candidate for re-seating
+// is already in `lost` and `lost` cannot separate them. What makes re-seating unsafe is the block's
+// CONTENT having gone somewhere — the words another edit put back as a `<label>`, the image another
+// block took — and this is the reading that says so. See `content_dropped` on `PatchReport`.
+function droppedContent(before: string, after: string): boolean {
   if (visibleText(after).length < visibleText(before).length) return true;
   const [was, now] = [structureCounts(before), structureCounts(after)];
-  return now.images < was.images || now.links < was.links || now.headings < was.headings;
+  return now.images < was.images || now.links < was.links;
 }
 
 // The navigation the DOCUMENT lost, read on the body the blocks assemble into rather than block by
@@ -263,7 +281,8 @@ export interface PatchReport {
   // (#331, narrowed by the review of #336). A subset of `lost` — a heading falling is one of the
   // things `gaveContentUp` reads — but not the same question, and the difference is the whole point
   // of having it: `lost` answers "up to where may a cut reply be applied", and this answers "which
-  // blocks may not be applied at all".
+  // blocks may not be applied at all". Because it is a subset, `lost` cannot be used to sort these
+  // into safe and unsafe: that is what `content_dropped` is for.
   //
   // Why per block, when `navigation_lost` is deliberately read on the joined body: the two are
   // answering different halves of one question and neither can answer the other's. The joined reading
@@ -277,13 +296,35 @@ export interface PatchReport {
   // pure reorder fills this in with the source block while the document lost nothing. Both are why the
   // caller reads this only after the joined reading has said there is something to refuse.
   headings_dropped: number[];
+  // Blocks whose own WORDS OR MEDIA went — prose shorter, or an `<img>` or `<a>` fewer — ignoring
+  // structure entirely (`droppedContent`). The other half of the licence to re-seat a block, and the
+  // half `headings_gained` is blind to.
+  //
+  // The hazard it exists for: a heading's words can migrate into another block as something
+  // `structureCounts` does not count at all. The extractor emits a field label as a stray `<h4>`
+  // SIBLING of the form, and the fix axe's `label` rule asks for is two edits — empty the stray block,
+  // seat `<label for="name">Name</label>` inside the form. The document keeps every word, so the joined
+  // prose is unmoved and `navigation_lost` reports the fall as ordinary; no heading arrived anywhere, so
+  // `headings_gained` is 0. Re-seating the emptied block would print "Name" twice and leave an `<h4>`
+  // heading nothing. `content_dropped` holds that block and the caller never re-seats it.
+  //
+  // Not `lost`, which is a superset: every block in `headings_dropped` is in `lost` already, because a
+  // heading falling is one of the things `gaveContentUp` reads. `lost` also cannot be narrowed to this,
+  // because `salvageRound` reads it to find where a cut reply must stop and #271's whole point is that a
+  // demotion is a loss worth stopping at.
+  //
+  // An emptied block is in this only if it HELD something: `<h2></h2>` -> `""` has no words to move, so
+  // the empty-heading false positive stays the cheap one — that block is re-seated and costs one block
+  // for one round rather than the whole reply.
+  content_dropped: number[];
   // Heading elements that ARRIVED in some block, summed across the reply. The number that says whether
   // `headings_dropped` can be acted on: a heading that left one block and turned up in another is a
   // reorder EDITOR_SYSTEM sanctions by name, and nothing here binds the two halves together, so a
   // caller reverting the source block on that reply would restore a heading the landing block already
   // has — one heading printed twice, invented by the guard.
   //
-  // 0 is therefore the licence, and it is exactly the condition the guarantee rests on: no block took
+  // 0 is therefore half the licence — `content_dropped` is the other half — and it is exactly the
+  // condition the outline guarantee rests on: no block took
   // a heading, so a document-wide fall means the heading is gone rather than moved, so handing back
   // every block that dropped one restores the outline exactly. Non-zero and the caller cannot tell
   // which source belongs to which arrival, and refuses the round whole rather than guess (see
@@ -338,6 +379,7 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     shrunk: 0,
     lost: [],
     headings_dropped: [],
+    content_dropped: [],
     headings_gained: 0,
     navigation_lost: {},
   };
@@ -373,6 +415,7 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
       report.deleted++;
       report.lost.push(at);
       if (headings(blocks[at]!.html) > 0) report.headings_dropped.push(at);
+      if (droppedContent(blocks[at]!.html, "")) report.content_dropped.push(at);
       continue;
     }
     if (html.trim() === blocks[at]!.html.trim()) {
@@ -392,6 +435,7 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     const delta = headings(html) - headings(blocks[at]!.html);
     if (delta < 0) report.headings_dropped.push(at);
     if (delta > 0) report.headings_gained += delta;
+    if (droppedContent(blocks[at]!.html, html)) report.content_dropped.push(at);
     if (gaveContentUp(blocks[at]!.html, html)) {
       report.shrunk++;
       report.lost.push(at);

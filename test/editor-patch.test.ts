@@ -820,6 +820,39 @@ test("the demotion costs its own block and nothing else in the reply", async () 
   assert.equal(result.editorHeadingsGated, true, "the guard still says it fired");
 });
 
+test("a block that gave its words to another block is not re-seated, because that would print them twice", async () => {
+  // The mirror image of the reorder case, and the one `headings_gained` cannot see: the thing that
+  // migrated is not a heading. The extractor emits the field label as a stray `<h4>` SIBLING of the
+  // form — the ordinary shape, not the same-wrapper shape — so the fix axe's `label` rule asks for is
+  // two edits: empty the stray block, seat the label inside the form. The document keeps every word
+  // (`navigation_lost` is populated at all only because "Name" is still in the body) and `headings`
+  // falls by one, so this reaches the salvage with `headings_gained: 0`.
+  //
+  // Handing block 1 back would put its `<h4>Name</h4>` next to the `<label>Name</label>` that now
+  // holds the same words: content duplicated and a heading invented that heads nothing, in a body
+  // neither the editor nor the extractor produced. The re-applied check cannot catch it, because with
+  // the `<h4>` back the count is whole again. So a block that gave content up is never re-seated, and
+  // a reply with nothing left to hand back is refused whole.
+  const SIBLING =
+    `<h1>Form</h1>\n` +
+    `<h4>Name</h4>\n` +
+    `<form><p>Enter it.</p><input id="name"></form>\n`;
+  const { result, events } = await round(() => ({
+    edits: [
+      { block: 1, html: `` },
+      { block: 2, html: `<form><p>Enter it.</p><label for="name">Name</label><input id="name"></form>` },
+    ],
+  }), SIBLING, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 1 }, "the fall is read: the words stayed, the heading did not");
+  assert.ok(!("headings_gained" in (patch?.data ?? {})), "nothing arrived as a heading, which is why the other guard is blind to this");
+  assert.ok(!("headings_reverted" in (patch?.data ?? {})), "and the block that dropped it is the block that emptied, so it is not handed back");
+  assert.equal(patch?.data.discarded, "headings_lost", "leaving nothing to seat, which is refused whole");
+  assert.equal(result.body, SIBLING, "the document that entered — not one carrying `Name` twice");
+  assert.equal((result.body.match(/Name/g) ?? []).length, 1, "once, in one place");
+  assert.equal(result.editorHeadingsGated, true);
+});
+
 test("a reorder in the same reply as a demotion is refused whole, because neither can be told from the other", async () => {
   // The one shape the per-block revert cannot attribute, and the reason it is not applied blindly.
   // EDITOR_SYSTEM sanctions "reorder blocks", written as two edits — the block content lands in and the

@@ -658,16 +658,19 @@ export interface QualityStats {
   // the one of the two truncation numbers a threshold can be put on — the other rises with
   // document length alone.
   editor_truncated_lost_rate: number;
-  // Share of documents where at least one correction round was refused for demoting a heading
-  // — every edit applied, nothing refused, the prose no shorter, and the document left with
-  // fewer headings in it than it had (#331).
+  // Share of documents where at least one correction round had blocks handed back for demoting a
+  // heading, or was refused whole for it — every edit applied, nothing refused, the prose no
+  // shorter, and the document left with fewer headings in it than it had (#331).
   //
-  // Read it as a rate of ATTEMPTS, not of damage: the round was thrown away and retried, so the
-  // delivered document has its headings. That makes it the one number here that goes UP when a
+  // Read it as a rate of ATTEMPTS, not of damage: the demoting blocks kept the text they had, so
+  // the delivered document has its headings. That makes it the one number here that goes UP when a
   // guard is working, and the reason to read it is what it says about the editor and about the
-  // guard's cost — is this happening at all, and is it happening on documents that then ship
-  // clean (the guard paid for itself) or on documents that ran to `cap` (the editor cannot get
-  // past it, and the prompt is what to look at next; `review_stopped` is where that shows).
+  // guard's cost — is this happening at all, and how often does it take the whole round rather
+  // than a block (`headings_reverted` against `discarded: "headings_lost"` on the run log's
+  // `editor_patch` lines). `cap` beside this no longer means the editor cannot get past the guard:
+  // a narrowed round still corrects everything else in its reply, so a document can reach `cap`
+  // for unrelated reasons with this true all the way. Only a document whose rounds were refused
+  // WHOLE says that, and only the run log distinguishes them.
   //
   // Overlaps everything and is a subset of nothing. See SIGNAL_EDITOR_HEADINGS_GATED for the
   // false positives it can count and for why the magnitude is not here.
