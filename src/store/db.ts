@@ -384,9 +384,11 @@ export const SIGNAL_EDITOR_TRUNCATED_LOST = "iris:editor-truncated-lost";
 // documents that took a sectioned round, where it was never computed; since #375 both paths
 // compute the same reading and log it as `editor_navigation`, refusing nothing, on every
 // delivered reply so the denominator is there too (`reportNavigation` in pipeline/review.ts).
-// That is the population this number cannot see, and it is now on the record rather than
+// That is the population this number cannot see, and it CAN now be collected rather than
 // inferred — so deciding from a 0 that the two false positives named in `GATED` are not worth a
 // round is still a decision made on the wrong number, but the right one exists to make it on.
+// With the same caveat one step along: a deployment whose rounds are all block patches writes no
+// `editor_navigation` lines at all, and no lines is an empty population, not a reading of 0.
 //
 // Not derivable from anything else here: the blocks that were handed back leave no length, no
 // rule and no `unresolved` row behind them. A round refused whole adds a round to `mean_rounds`,

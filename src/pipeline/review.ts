@@ -1654,7 +1654,7 @@ function reportNavigation(
   ctx: PipelineContext,
   before: string,
   after: string,
-  where: { stage: "whole_body" | "section"; section?: number; of?: number },
+  where: { stage: "whole_body" | "section"; section?: number; of?: number; covers?: "remainder" },
 ): void {
   ctx.log.event("editor_navigation", {
     ...where,
@@ -2087,12 +2087,19 @@ export const MAX_SECTIONS = 12;
 
 // One section, corrected. Returns null when the editor answered with nothing usable, which the
 // caller keeps the original section for.
+//
+// `part` is the caller's `covers` marker and it is on every line this function writes, because
+// `section N of M` means two different things without it: the sections of the document, or the
+// sections of the TAIL a truncated reply never reached (`correctBySection`). A rate grouped per
+// round off a line that dropped it reads `of: 3` as "the document was cut in three" and mixes the
+// two populations.
 async function editorSectionCall(
   ctx: PipelineContext,
   section: string,
   issues: ReviewIssue[],
   index: number,
   of: number,
+  part: { covers?: "remainder" } = {},
 ): Promise<string | null> {
   const user =
     `## Section ${index + 1} of ${of} (body content)\n${section}\n\n` +
@@ -2133,7 +2140,13 @@ async function editorSectionCall(
   });
   const corrected = extractJson<{ html?: string }>(res.text)?.html?.trim();
   if (!corrected) {
-    ctx.log.event("editor_section_failed", { section: index + 1, of, reason: "no_output", chars: res.text.length });
+    ctx.log.event("editor_section_failed", {
+      section: index + 1,
+      of,
+      reason: "no_output",
+      chars: res.text.length,
+      ...part,
+    });
     return null;
   }
   // #174's floor at the other unit. The same reply shapes reach here — this prompt asks for one
@@ -2156,13 +2169,14 @@ async function editorSectionCall(
       text_chars_before: visibleText(section).length,
       text_chars_after: visibleText(corrected).length,
       floor: EDITOR_SHRINK_FLOOR,
+      ...part,
     });
     return null;
   }
   // #375, at this unit. `joinSections` puts an unanswered section back as it stood, so a section
   // that came back with one fewer heading is a document with one fewer heading — nothing downstream
   // compares the join against what went in, and this is the loop's last round.
-  reportNavigation(ctx, section, corrected, { stage: "section", section: index + 1, of });
+  reportNavigation(ctx, section, corrected, { stage: "section", section: index + 1, of, ...part });
   return corrected;
 }
 
@@ -2518,7 +2532,7 @@ async function correctBySection(
   });
   const corrected = await mapWithConcurrency(sections, limit, async (section, i) => {
     try {
-      return await editorSectionCall(ctx, section.html, issues, i, sections.length);
+      return await editorSectionCall(ctx, section.html, issues, i, sections.length, part);
     } catch (err) {
       // Per-section containment, and only for the two failures that are about the size of one
       // request or one response: a section that cannot be returned costs that section, and its
@@ -2531,6 +2545,7 @@ async function correctBySection(
         of: sections.length,
         reason: isTruncatedResponseError(err) ? "truncated" : "too_large",
         ...truncation(err),
+        ...part,
       });
       return null;
     }

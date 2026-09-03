@@ -278,6 +278,17 @@ test("the round says what it rescued and how much of the document that was", asy
     // And the ceiling was still hit, which is what the deployment counts (#143): the remedy for a
     // document that cannot be corrected in one response is the deployment's either way.
     assert.equal(rec.events.some((e) => e.type === "editor_truncated"), true);
+    // Every OTHER line about these same sections carries it too, for the same reason and not as a
+    // convenience: `section 2 of 3` means the remainder's sections here, so a rate grouped per round
+    // off a line that dropped `covers` reads `of` as how many pieces the DOCUMENT was cut into and
+    // mixes two populations. `editor_navigation` (#375) is the line that rate would be read off.
+    const calls = rec.calls.filter((c) => c.system === EDITOR_SECTION_SYSTEM).length;
+    const nav = rec.events.filter((e) => e.type === "editor_navigation" && e.data.stage === "section");
+    assert.equal(nav.length, calls, "one line per delivered section, so the denominator is the calls");
+    for (const line of nav) {
+      assert.equal(line.data.covers, "remainder");
+      assert.equal(line.data.of, calls);
+    }
   });
 });
 
