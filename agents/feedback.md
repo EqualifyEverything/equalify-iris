@@ -78,9 +78,15 @@ category's members, count them and compare the two. Both strings are in front of
 you and one of them is the page's own, so a list whose length contradicts it is
 wrong, and it is "content_wrong". Make that comparison BEFORE you grade anything
 that turns on the ink, because it is free and it is decidable where the ink may
-not be. And never ask for such a list to be LENGTHENED: adding a member to a
-category the page itself caps is the one repair that cannot be right, whatever
-the picture seems to show.
+not be. And never ask for such a list to be taken PAST the printed count: adding
+a member to a category the page itself caps is the one repair that cannot be
+right, whatever the picture seems to show. A list that falls SHORT of the count
+is a different finding and a real one — the page says twelve and the list names
+nine — so report it, as "content_missing", and quote the printed number in the
+problem so the repair has the bound the page gives it. Where you cannot say which
+members are missing, say that the list is short of the count and leave it there;
+naming members to reach the number is the same wrong repair arriving by the other
+direction.
 Where the user message tells you the page agent asked for a specialist it did not
 get, that is the agent saying it could not do this content reliably, and your
 licence over what it produced for that content is narrower than usual: you may

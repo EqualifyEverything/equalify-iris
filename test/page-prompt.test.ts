@@ -775,6 +775,13 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     // 55-unit lighting gradient, so a reader working from the image alone cannot decode the map.
     ["the printed count is transcribed where the page prints it",
       /Transcribe the printed count where the page prints it, in the caption or label that carries it/],
+    // Which puts the count in two places, immediately above a rule that forbids the description
+    // repeating what the words beside the image already say. That rule is scoped to the NAME of the
+    // thing pictured, so there is no contradiction — but it has to be derived from two adjacent
+    // paragraphs, and the audience that derives it wrongly is the same verifier that read a
+    // described swatch as invention and deleted it (#347). Stated instead of derived.
+    ["the count standing in both places is excluded from the redundancy rule that follows",
+      /A count standing in both places is not the repetition the next rule forbids: that rule is about the NAME of the thing pictured/],
     // #122, #124, #125: the position title, the product name and the caption were each
     // repeated into the alt text of the image they sat beside.
     ["a name the page prints beside the image is not repeated in its description",

@@ -1607,14 +1607,24 @@ puts the true partition at 8 and 4 with everything else base map, matching the p
 exactly — and the legend's own swatch cannot settle it, reading 100 against fills of 32–42 and
 163–186 under a 55-unit lighting gradient, so on this page the caption was the only sound decoder.
 Both prompts now compare an enumeration against a count the page states before grading anything that
-turns on the ink, and `agents/feedback.md` will let such a list be **shortened** and never lengthened.
+turns on the ink, and `agents/feedback.md` bounds the repair at that count: a list may be sent back to
+be **shortened**, and never taken past the number the page prints. Not "never lengthened" — a list
+naming nine where the page prints twelve is three members missing, which is a real `content_missing`
+finding, so that direction stays reportable with the printed number quoted as its bound, and a
+verifier that cannot say which members are missing says the list is short rather than naming three.
 The second check is a signal the pipeline already emitted and nothing consumed: the page agent's
 `suggested_agent` request, which in one 100-page round fired 7 times on 5 pages under 6 names, every
 one a map specialist, none resolvable — and those 5 were every page whose verdict turned on reading
 ink. An unmet request is now carried into the verify message (`specialistCaution` in
 `src/pipeline/extraction.ts`, after the cached prefix so one page's note cannot cost the document its
 cache reads), where it narrows what the verifier may assert: it can ask for an unsupported reading to
-be hedged or removed, and may not supply one of its own. It is not treated as a detector — it is
+be hedged or removed, and may not supply one of its own. **Unmet** is not the same question as
+dispatched, and they disagree on three of the six ways a request can end: a specialist that ran and
+found nothing of its type, one that threw, and one whose fragment would not merge all leave the page
+agent's own unaided HTML in front of the verifier, while a *standard* type — a table, a heading — is
+declined by a policy that makes the general pass its intended handler rather than a fallback, and
+carries no caution at all. So the dispatch returns the phrase, and the caution says which of the four
+it was. It is not treated as a detector — it is
 page-level rather than per-arm and it missed two hard pages in that round — so that licence bound
 holds on every page and the flag only says where the model has already admitted the difficulty.
 `prd.md` §7.4 v1.11, with the carrying pinned in `test/verify-specialist-caution.test.ts`.

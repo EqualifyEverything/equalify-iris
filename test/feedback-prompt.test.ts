@@ -128,10 +128,21 @@ test("the verify task compares an enumeration against a count the page prints", 
     ["the free check is ordered ahead of the ones that need the picture",
       /Make that comparison BEFORE you grade anything that turns on the ink, because it is free and it is decidable where the ink may not be/],
     // The asymmetry is the operative half: what shipped on p084 was not a missed check, it was a
-    // problem string that added a member. A verifier allowed only to shorten cannot write this
-    // defect however wrong its reading of the picture is.
-    ["and lengthening such a list is refused outright",
-      /never ask for such a list to be LENGTHENED: adding a member to a category the page itself caps is the one repair that cannot be right/],
+    // problem string that added a member. A verifier that cannot take a list past the page's own
+    // number cannot write this defect however wrong its reading of the picture is.
+    //
+    // Bounded at the count rather than at lengthening, and that bound is the whole of the rule.
+    // "Never ask for it to be lengthened" also bars the one lengthening that is right — a list
+    // that names nine where the page prints twelve is three members missing, which is a real
+    // `content_missing` finding, and an unconditional ban leaves it with no repair path at all.
+    ["the refusal is bounded at the printed count, not at lengthening",
+      /never ask for such a list to be taken PAST the printed count: adding a member to a category the page itself caps is the one repair that cannot be right/],
+    ["so a list short of the count stays reportable, with its kind and its bound",
+      /A list that falls SHORT of the count is a different finding and a real one .* so report it, as "content_missing", and quote the printed number in the problem so the repair has the bound the page gives it/],
+    // Without this the short-list licence reintroduces the defect by the other route: a verifier
+    // that may ask for three more members and cannot read them names three anyway.
+    ["and naming unreadable members to reach the number is refused as the same repair",
+      /Where you cannot say which members are missing, say that the list is short of the count and leave it there; naming members to reach the number is the same wrong repair arriving by the other direction/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
   }
