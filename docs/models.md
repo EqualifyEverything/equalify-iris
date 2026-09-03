@@ -561,7 +561,8 @@ incumbent's 12%, so a single verdict from it is a noisier thing to spend a corre
 columns reconcile with the per-draw rates, counting in draws on both sides — the incumbent's 22×3 plus
 **5** draws from its 3 unstable pages is its 71 of 135, and 32×3 plus **19** from the cheap arm's 12 is
 its 115 — so this is the same measurement recut, not a second. Those two contributed-draw counts are
-the numbers a future recut of this round needs and the only ones not derivable from the table. Neither
+the numbers a future recut of this round needs; they are not derivable from the per-page table alone,
+though 5 and 19 do fall out of it once the per-draw totals above are used. Neither
 row moves the pricing, because production reads each page once and 85.2% is what the bill is computed
 from, and both were sitting in repeats the round had already paid for
 ([#330](https://github.com/EqualifyEverything/equalify-iris/issues/330), 2026-09-02, $0).
@@ -947,10 +948,11 @@ set.
   own repeat against the incumbent's 12%: it is both fussier and less repeatable, and a correction pass
   is spent on one verdict. The pooled rate also cannot see whether a detection *credited* to an arm
   reproduced. One such credit turned out to rest on **one read of three** — a single observation, not
-  coverage — and that is the sharper half of this limit, but it is on a defect family §4 does not
-  otherwise cite, so it is on record at #330 and not restated here rather than being asserted with no
-  base in this document. §4's own repeat data says less: `runs-digits-repro` has 1 of 10 cells
-  unstable, which means only "not 0/3 and not 3/3". **Nothing was re-run**: this was the same round
+  coverage — which is the sharper half of this limit and whose base is
+  [#330](https://github.com/EqualifyEverything/equalify-iris/issues/330), not this document: it is on a
+  defect family §4 does not otherwise cite. What §4 carries in its own right is weaker —
+  `runs-digits-repro` has 1 of 10 cells unstable, which means only "not 0/3 and not 3/3" — so read the
+  one-read figure as cited rather than shown here. **Nothing was re-run**: this was the same round
   recut for $0, so it is
   not another instance of the wider-corpus limit above but a cheaper failure than that one, and the
   cheapest check for it is to print both denominators and the reads-agreeing count beside every rate
