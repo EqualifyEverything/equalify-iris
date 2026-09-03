@@ -158,8 +158,17 @@ export type Navigable = (typeof NAVIGABLE)[number];
 // `PatchReport`), and the gate it feeds is scoped to the block that fell rather than to the reply,
 // precisely because a fall is not a verdict on the round it arrived in.
 function gaveContentUp(before: string, after: string): boolean {
-  if (visibleText(after).length < visibleText(before).length) return true;
+  if (proseShortened(before, after)) return true;
   return mediaGone(before, after) || structureCounts(after).headings < structureCounts(before).headings;
+}
+
+// The prose half of both readings above and below, given a name because it now has a THIRD reader
+// outside this file (#375). The two apply paths that report `navigationLost` without gating on it
+// have to say which kind of nothing an empty reading is — nothing fell, or the reading was silenced
+// because the prose shortened — and a second spelling of this comparison at those call sites would
+// be free to drift from the one that decides the reading it is describing.
+export function proseShortened(before: string, after: string): boolean {
+  return visibleText(after).length < visibleText(before).length;
 }
 
 // Whether the block's own CONTENT is still the content it had — its words the same words, its images
@@ -226,9 +235,16 @@ function mediaGone(before: string, after: string): boolean {
 // rounds behind #271 (`fidelity.headings_lost` in equalify-iris-bench's `editorround.mjs`, run
 // `runs-editor-1` — outside this repo, so nothing here can assert on it), which lets the two be read
 // against each other.
-function navigationLost(before: string, after: string): Partial<Record<Navigable, number>> {
+//
+// Exported since #375, because this file is not the only place a reply is applied. `applyBlockEdits`
+// is one of THREE apply paths — the block patch here, the whole-body reply `editorCall` still reads,
+// and the per-section replies of a sectioned round — and until #375 this reading was computed on the
+// first alone, so `editor_headings_gated_rate` was a rate over a population it did not name. The
+// other two callers report it and gate nothing; see `reportNavigation` in review.ts for why the
+// remedy this file applies is not available to them.
+export function navigationLost(before: string, after: string): Partial<Record<Navigable, number>> {
   const lost: Partial<Record<Navigable, number>> = {};
-  if (visibleText(after).length < visibleText(before).length) return lost;
+  if (proseShortened(before, after)) return lost;
   const [was, now] = [structureCounts(before), structureCounts(after)];
   for (const k of NAVIGABLE) if (now[k] < was[k]) lost[k] = was[k] - now[k];
   return lost;

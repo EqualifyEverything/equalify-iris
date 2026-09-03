@@ -16,7 +16,15 @@ import { stripNestedMain } from "./landmarks.ts";
 import { destroyedBody, EDITOR_SHRINK_FLOOR, structureCounts, visibleText } from "./correction.ts";
 import { runAxe, lintErrorFields, lintDebrisFields, type LintResult } from "./lint.ts";
 import { joinSections, splitSections, type Section } from "./sections.ts";
-import { annotateBlocks, applyBlockEdits, blocksOf, readBlockEdits, stripBlockMarkers } from "./patch.ts";
+import {
+  annotateBlocks,
+  applyBlockEdits,
+  blocksOf,
+  navigationLost,
+  proseShortened,
+  readBlockEdits,
+  stripBlockMarkers,
+} from "./patch.ts";
 import { flatten } from "./flatten.ts";
 import { examplesForPrompt } from "./memory.ts";
 import { knownPages, pageIndex, type IndexedPage } from "./pageindex.ts";
@@ -90,9 +98,13 @@ export interface ReviewResult {
   // deployment reading 0.3 has an editor that would be flattening headings out of a third of its
   // documents without it.
   //
-  // A 0 is NOT evidence that no round demotes a heading. The reading behind it is computed on the
-  // block-patch round only; `editorSectionCall` and the whole-body reply path check the size floor
-  // and nothing else, so a demotion on either is applied and delivered and never reaches this.
+  // A 0 is NOT evidence that no round demotes a heading. The GATE behind it is on the block-patch
+  // round only, which is where a fall can be attributed to the block that dropped it and that block
+  // alone handed back; `editorSectionCall` and the whole-body reply path adopt a reply whole and
+  // check a prose floor a demotion cannot move, so a demotion on either is applied and delivered and
+  // never reaches this. Since #375 both of those paths compute the same reading and log it as
+  // `editor_navigation`, refusing nothing (`reportNavigation`), so the population this number cannot
+  // see can be collected — and no lines at all is an empty population, not a reading of 0.
   //
   // Per DOCUMENT, not per round, and accumulated over the loop rather than read off its last round:
   // the round is retried, so the body that ships is normally one a later round corrected cleanly,
@@ -1598,7 +1610,60 @@ async function editorCall(
     });
     return { body, usable: false };
   }
+  // #375. The structure reading the block-patch path gates on, on the path that cannot: this reply
+  // is adopted for the whole body, so a `<h2>` rewritten as `<p><strong>` moves nothing the floor
+  // above can see. Reported, gated on nothing — see `reportNavigation`.
+  reportNavigation(ctx, body, corrected, { stage: "whole_body" });
   return { body: corrected, usable: true };
+}
+
+// The `navigationLost` reading on the two apply paths that do not gate on it (#375).
+//
+// #331 made a heading fall hand blocks back, and it did so inside `applyBlockEdits` — where a fall
+// can be attributed to the block that dropped it and that block alone handed back. Two other paths
+// adopt an editor's reply: the whole-body branch of `editorCall`, and each section of a sectioned
+// round. Both checked only `destroyedBody`, a prose floor at half the document, which a demotion
+// cannot move by construction: `<h2>Costs</h2>` -> `<p><strong>Costs</strong></p>` keeps every word
+// and grows the bytes. So the outline could fall silently on either, and on the sectioned path that
+// is the loop's LAST round (see `runEditorSections`), which means it ships with no retry behind it.
+//
+// This REPORTS and refuses nothing, which is what #375 asked for first and is also the only thing
+// available here. #331's remedy is a block handed back; neither path has blocks. The whole-body
+// reply is one string, so the only refusal expressible is the whole round — and that is what #331's
+// own first version did on the patch path and what it was changed away from, because on the
+// commonest false positive (a stray `<h4>Name</h4>` corrected into a `<label>`) it threw away every
+// other correction in the reply, every round, until the budget ran out. Repeating that here would
+// be worse, not better: a section reply IS the section, so refusing it costs that whole section's
+// corrections, and the round is the last one.
+//
+// Which leaves the number this cannot yet be decided without: how often a fall happens on these two
+// paths at all. That is the line's job, and it is why it prints on EVERY delivered reply rather than
+// only where something fell — a rate needs its denominator on the record, and a log that speaks only
+// when it has a finding cannot tell a path nothing fell on from a path that was never taken. So a
+// clean whole-body round logs `{ stage: "whole_body" }` and that is the denominator.
+//
+// `shortened` is the third state and is on the line because otherwise it reads as the second: the
+// reading is silenced wherever the prose shortened (a deletion the prompt sanctions takes its own
+// words, and that round is the ordinary shape of every correction, not damage), and an empty reading
+// there means "not asked" rather than "nothing fell". Rolling the two together would put rounds the
+// reading never looked at into the denominator of a rate about rounds it did.
+//
+// The grain is the unit the reply was about, and on the sectioned path that is the SECTION rather
+// than the joined document. Sound, and finer than the patch path can manage: sections are corrected
+// independently and joined, so no heading can move between them, which is the one thing that forces
+// the patch path to read a whole body (a sanctioned reorder is a fall in one block and a gain in
+// another). It also costs less than the patch path's coarseness — one sanctioned deletion in
+// section 1 silences section 1, not the round — so a demotion in section 3 is still on the record.
+function reportNavigation(
+  ctx: PipelineContext,
+  before: string,
+  after: string,
+  where: { stage: "whole_body" | "section"; section?: number; of?: number; covers?: "remainder" },
+): void {
+  ctx.log.event("editor_navigation", {
+    ...where,
+    ...(proseShortened(before, after) ? { shortened: true } : navigationLost(before, after)),
+  });
 }
 
 // The editor's edits, applied to the body they were about (issue #250).
@@ -2026,12 +2091,19 @@ export const MAX_SECTIONS = 12;
 
 // One section, corrected. Returns null when the editor answered with nothing usable, which the
 // caller keeps the original section for.
+//
+// `part` is the caller's `covers` marker and it is on every line this function writes, because
+// `section N of M` means two different things without it: the sections of the document, or the
+// sections of the TAIL a truncated reply never reached (`correctBySection`). A rate grouped per
+// round off a line that dropped it reads `of: 3` as "the document was cut in three" and mixes the
+// two populations.
 async function editorSectionCall(
   ctx: PipelineContext,
   section: string,
   issues: ReviewIssue[],
   index: number,
   of: number,
+  part: { covers?: "remainder" } = {},
 ): Promise<string | null> {
   const user =
     `## Section ${index + 1} of ${of} (body content)\n${section}\n\n` +
@@ -2072,7 +2144,13 @@ async function editorSectionCall(
   });
   const corrected = extractJson<{ html?: string }>(res.text)?.html?.trim();
   if (!corrected) {
-    ctx.log.event("editor_section_failed", { section: index + 1, of, reason: "no_output", chars: res.text.length });
+    ctx.log.event("editor_section_failed", {
+      section: index + 1,
+      of,
+      reason: "no_output",
+      chars: res.text.length,
+      ...part,
+    });
     return null;
   }
   // #174's floor at the other unit. The same reply shapes reach here — this prompt asks for one
@@ -2095,9 +2173,14 @@ async function editorSectionCall(
       text_chars_before: visibleText(section).length,
       text_chars_after: visibleText(corrected).length,
       floor: EDITOR_SHRINK_FLOOR,
+      ...part,
     });
     return null;
   }
+  // #375, at this unit. `joinSections` puts an unanswered section back as it stood, so a section
+  // that came back with one fewer heading is a document with one fewer heading — nothing downstream
+  // compares the join against what went in, and this is the loop's last round.
+  reportNavigation(ctx, section, corrected, { stage: "section", section: index + 1, of, ...part });
   return corrected;
 }
 
@@ -2453,7 +2536,7 @@ async function correctBySection(
   });
   const corrected = await mapWithConcurrency(sections, limit, async (section, i) => {
     try {
-      return await editorSectionCall(ctx, section.html, issues, i, sections.length);
+      return await editorSectionCall(ctx, section.html, issues, i, sections.length, part);
     } catch (err) {
       // Per-section containment, and only for the two failures that are about the size of one
       // request or one response: a section that cannot be returned costs that section, and its
@@ -2466,6 +2549,7 @@ async function correctBySection(
         of: sections.length,
         reason: isTruncatedResponseError(err) ? "truncated" : "too_large",
         ...truncation(err),
+        ...part,
       });
       return null;
     }

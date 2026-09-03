@@ -472,6 +472,75 @@ test("a whole-body reply that hands back what it was SHOWN does not deliver the 
   );
 });
 
+// The outline reading on the whole-body path (#375). A body with two headings, a list and enough
+// prose that dropping a word or two stays well clear of `EDITOR_SHRINK_FLOOR`.
+const WHOLE_OUTLINE = `<h1>Report</h1>\n\n<h2>Costs</h2>\n\n<p>${"word ".repeat(80)}</p>\n\n<ul><li>a</li><li>b</li><li>c</li></ul>\n`;
+
+test("a whole-body reply that demotes a heading is delivered, and the fall is on the record", async () => {
+  // #375: #331's guard lives in `applyBlockEdits`, so until now this path had one check on it —
+  // `destroyedBody`, a prose floor at half the document. A demotion cannot move that floor by
+  // construction: `<h2>Costs</h2>` -> `<p><strong>Costs</strong></p>` keeps every word and grows the
+  // bytes. So the outline fell here with nothing said about it anywhere.
+  //
+  // It is still delivered, deliberately. There are no blocks on this path, so the only refusal
+  // expressible is the whole reply — which is what #331 did on the patch path in its first version
+  // and was changed away from, because the commonest false positive is a correction axe asks for by
+  // name. What this needs first is the rate, and the rate is what this line is.
+  const demoted = `<h1>Report</h1>\n\n<p><strong>Costs</strong></p>\n\n<p>${"word ".repeat(80)}</p>\n\n<ul><li>a</li><li>b</li><li>c</li></ul>\n`;
+  const { result, events } = await round(() => ({ html: demoted }), WHOLE_OUTLINE, 1);
+  assert.match(result.body, /<p><strong>Costs<\/strong><\/p>/, "the reply is applied, not refused");
+  assert.equal(events.filter((e) => e.type === "editor_patch").length, 0, "this is the whole-body path");
+  const nav = events.filter((e) => e.type === "editor_navigation");
+  assert.equal(nav.length, 1);
+  assert.equal(nav[0]!.data.stage, "whole_body");
+  assert.equal(nav[0]!.data.headings, 1);
+  // The two kinds that are reported and never gate are collected on the same line, because deciding
+  // whether they ever COULD gate is what the population is for: a `<ul>` flattened into paragraphs
+  // is a real loss and a `<ul>` rewritten as the `<dl>` agents/page.md asks for is a correction, and
+  // no round on file separates them.
+  const flattened = await round(
+    () => ({ html: `<p><strong>Report</strong></p>\n\n<h2>Costs</h2>\n\n<p>${"word ".repeat(80)}</p>\n\n<p>a</p>\n<p>b</p>\n<p>c</p>\n` }),
+    WHOLE_OUTLINE,
+    1,
+  );
+  const both = flattened.events.find((e) => e.type === "editor_navigation");
+  assert.equal(both?.data.headings, 1);
+  assert.equal(both?.data.items, 3);
+});
+
+test("the whole-body line prints on a round that lost nothing, because a rate needs its denominator", async () => {
+  // A log that speaks only when it has a finding cannot tell a path nothing fell on from a path
+  // nothing took, and #375 is asking how OFTEN this happens. So the line is per delivered reply and
+  // the counts are what is conditional.
+  const { events } = await round(
+    () => ({ html: `<h1>Report</h1>\n\n<h2>Costs</h2>\n\n<p>${"word ".repeat(80)} And a sentence.</p>\n\n<ul><li>a</li><li>b</li><li>c</li></ul>\n` }),
+    WHOLE_OUTLINE,
+    1,
+  );
+  const nav = events.find((e) => e.type === "editor_navigation");
+  assert.deepEqual(nav?.data, { stage: "whole_body" }, "a clean round is a row in the denominator");
+});
+
+test("a whole-body reply that shortened the prose says so, instead of reading as nothing lost", async () => {
+  // The third state, and the reason it is named rather than left as an empty reading: the structure
+  // reading is silenced wherever the prose shortened, because a deletion the prompt sanctions takes
+  // its own words and that is the ordinary shape of a correction rather than damage. An empty
+  // reading there means "not asked", and folding it in with "nothing fell" would put rounds this
+  // never looked at into the denominator of a rate about rounds it did.
+  //
+  // Both at once, so the round that is sanctioned and silent in one reply — the shape patch.ts
+  // names as the one this contract cannot tell apart — is on the line as the silence it is: the
+  // heading is demoted AND a paragraph is shortened, and `headings` is absent.
+  const { result, events } = await round(
+    () => ({ html: `<h1>Report</h1>\n\n<p><strong>Costs</strong></p>\n\n<p>${"word ".repeat(40)}</p>\n\n<ul><li>a</li><li>b</li><li>c</li></ul>\n` }),
+    WHOLE_OUTLINE,
+    1,
+  );
+  assert.match(result.body, /<p><strong>Costs<\/strong><\/p>/, "still not refused: the floor is at half");
+  const nav = events.find((e) => e.type === "editor_navigation");
+  assert.deepEqual(nav?.data, { stage: "whole_body", shortened: true });
+});
+
 test("half a move is not applied: a refusal beside a block that gave content up costs the round", async () => {
   // Per-edit refusal is the right rule for independent edits and the wrong one for a MOVE, which
   // this contract makes a pair — the block the content lands in, and the block it came from. Take

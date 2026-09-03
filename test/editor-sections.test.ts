@@ -433,6 +433,89 @@ test("a section that came back as a sentence about itself keeps the text it went
   });
 });
 
+// The same body with an outline over it, for #375: three `<h2>`s spread far enough apart that the
+// budget puts one in each section.
+const HEADED = PARAS.map((p, i) => (i % 8 === 0 ? `<h2 id="h${i}">Part ${i / 8 + 1}</h2>\n\n${p}` : p)).join("\n\n");
+const demote = (html: string) => html.replace(/<h2 id="h\d+">(.*?)<\/h2>/g, `<p><strong>$1</strong></p>`);
+
+test("a section that came back with fewer headings is delivered, and the fall is on the record", async () => {
+  await withTemp(async (dir) => {
+    // #375. #331's guard is in `applyBlockEdits`, and a sectioned round never goes through it: the
+    // only check on this reply was `destroyedBody`, a prose floor at half the section, which a
+    // demotion cannot move — `<h2>Part 2</h2>` -> `<p><strong>Part 2</strong></p>` keeps every word
+    // and grows the bytes. And this is the loop's LAST round (see below), so what falls here ships
+    // with no retry behind it.
+    //
+    // Reported, refusing nothing. A section reply IS the section, so the only refusal expressible
+    // costs that whole section's corrections on the round that has no successor — worse than the
+    // whole-reply refusal #331 was changed away from on the patch path. What has to come first is
+    // the rate, which is what this line is.
+    let demoted = 0;
+    const { ctx, rec } = ctxWith(dir, {
+      sectionAnswer: (s) => {
+        if (s.index !== 2) return s.html;
+        demoted = (s.html.match(/<h2 /g) ?? []).length;
+        return demote(s.html);
+      },
+    });
+    const result = await review(ctx, HEADED);
+
+    const sections = rec.calls.filter((c) => c.system === EDITOR_SECTION_SYSTEM).length;
+    assert.ok(sections >= 2, "the body was not sectioned, so nothing here is being tested");
+    assert.ok(demoted >= 1, "section 2 carried no heading, so the demotion had nothing to demote");
+    assert.match(result.body, /<p><strong>Part \d<\/strong><\/p>/, "the reply is applied, not refused");
+
+    const nav = rec.events.filter((e) => e.type === "editor_navigation");
+    // One line per delivered section, because a rate needs its denominator on the record: a log that
+    // speaks only when it has a finding cannot tell a section nothing fell in from a section that was
+    // never answered.
+    assert.equal(nav.length, sections);
+    for (const line of nav) {
+      assert.equal(line.data.stage, "section");
+      assert.equal(line.data.of, sections);
+    }
+    const fell = nav.filter((e) => e.data.headings !== undefined);
+    assert.equal(fell.length, 1, "only the section that was rewritten lost anything");
+    assert.equal(fell[0]!.data.section, 2);
+    assert.equal(fell[0]!.data.headings, demoted);
+    // Nothing is gated, so the round is a round like any other: the sections that came back are
+    // counted as corrected and the document is not reported as one that did not come back whole.
+    assert.equal(rec.events.find((e) => e.type === "editor")?.data.corrected, sections);
+    assert.equal(result.editorTruncatedLost, false);
+  });
+});
+
+test("a sanctioned deletion in one section does not silence the reading in the others", async () => {
+  await withTemp(async (dir) => {
+    // The grain, and what it buys. The structure reading is silenced wherever the prose shortened,
+    // because a deletion the prompt sanctions takes its own words with it and that is the ordinary
+    // shape of a correction. On the patch path that condition is read on the whole joined body, so
+    // one sanctioned deletion anywhere in a reply silences the round — patch.ts names that as
+    // accepted coarseness. Here the unit is the SECTION, which is sound because sections are
+    // corrected independently and joined, so no heading can move between them and there is no
+    // reorder to be fooled by. The demotion in section 2 is therefore still on the record even
+    // though section 1 dropped a paragraph in the same round.
+    const { ctx, rec } = ctxWith(dir, {
+      sectionAnswer: (s) => {
+        if (s.index === 1) return s.html.replace(PARAS[0]!, "");
+        if (s.index === 2) return demote(s.html);
+        return s.html;
+      },
+    });
+    await review(ctx, HEADED);
+
+    const nav = rec.events.filter((e) => e.type === "editor_navigation");
+    const first = nav.find((e) => e.data.section === 1);
+    // `shortened` rather than an empty reading, so the line does not read as "nothing fell": an
+    // empty reading here means the question was not asked, and folding the two together would put
+    // rounds this never looked at into the denominator of a rate about rounds it did.
+    assert.deepEqual(first?.data, { stage: "section", section: 1, of: nav.length, shortened: true });
+    const second = nav.find((e) => e.data.section === 2);
+    assert.equal(second?.data.headings, 1);
+    assert.equal(second?.data.shortened, undefined);
+  });
+});
+
 test("a round where no section came back is exactly the round that used to be discarded", async () => {
   await withTemp(async (dir) => {
     const { ctx, rec } = ctxWith(dir, { sectionAnswer: () => truncatedSection(9_000) });
