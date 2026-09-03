@@ -355,8 +355,9 @@ export const SIGNAL_EDITOR_TRUNCATED = "iris:editor-truncated";
 // live with the inherent floor; this answers "did the output ceiling stop the loop from
 // trying", whose remedy is one number in the deployment's config rather than a prompt.
 export const SIGNAL_EDITOR_TRUNCATED_LOST = "iris:editor-truncated-lost";
-// A correction round was refused because it would have taken heading elements out of the
-// document while leaving every word of it in place (`headings_lost`, #331).
+// A correction round had blocks handed back because applying them would have taken heading
+// elements out of the document while leaving every word of it in place (`headings_reverted`, or
+// `headings_lost` where the whole round went; #331).
 //
 // The odd one out in this table, and the reason it is here rather than left to the run log:
 // every other signal counts something a delivered document HAS, and this counts something it
@@ -366,23 +367,31 @@ export const SIGNAL_EDITOR_TRUNCATED_LOST = "iris:editor-truncated-lost";
 // It is recorded because the alternative is not measuring it at all. #331 asked for the rate
 // two ways round: if the demotion stayed ungated, the population to count was heading falls on
 // rounds that shipped; with a gate in place that population is empty by construction, and the
-// question that remains is what the gate costs and whether it earns its retries. A deployment
-// reading 0 here has a guard that has never fired — and can then decide from evidence whether
-// the two false positives named in `GATED` (a heading corrected into a `<label>`, `<caption>`,
-// `<dt>` or `<th>` in the same block; a de-duplication that left the prose no shorter) are
-// worth a round. One reading 0.3 has an editor that would be flattening headings out of a
-// third of its documents unwatched — the shape #329's round did to five headings at once,
-// which until this signal no number on a deployment could confirm or refute.
+// question that remains is what the gate costs and whether it earns its keep. One reading 0.3
+// has an editor that would be flattening headings out of a third of its documents unwatched —
+// the shape #329's round did to five headings at once, which until this signal no number on a
+// deployment could confirm or refute.
 //
-// Not derivable from anything else here: a refused round leaves the body it was given, so it
-// moves no length, no rule and no `unresolved` row. It does add a round to `mean_rounds`, which
-// is the only trace of it in this table without this signal — and indistinguishable there from
-// a round the editor answered.
+// WHAT A 0 IS NOT: evidence that no round demotes a heading, and therefore not on its own a
+// reason to retire the guard. The reading behind this signal is computed on the BLOCK-PATCH
+// round only. The sectioned round and the whole-body reply check the size floor and nothing
+// else (`editorSectionCall` and its neighbour in pipeline/review.ts), so a demotion on either
+// is applied and delivered and never reaches this. The sectioned round is also the loop's LAST
+// round, which is the permanence #331 rests on. So a 0 is equally consistent with a guard that
+// never fires and with one that is watching a path the demotions are not on, and separating
+// those two means reading `navigation_lost` off the run logs of documents that took a sectioned
+// round. Deciding from a 0 that the two false positives named in `GATED` are not worth a round
+// is a decision made on a number that cannot see the population it would be about.
+//
+// Not derivable from anything else here: the blocks that were handed back leave no length, no
+// rule and no `unresolved` row behind them. A round refused whole adds a round to `mean_rounds`,
+// which is the only trace of it in this table without this signal — and indistinguishable there
+// from a round the editor answered; a round that was merely narrowed leaves no trace at all.
 //
 // Per document, like the pair above and for the same reason: a rate over documents cannot
-// divide "2 of 3 rounds". How many headings each refused round would have removed is on that
-// round's `editor_patch` line in the run log, which is where a magnitude belongs — it is one
-// session's, and these sessions are user uploads.
+// divide "2 of 3 rounds". How many headings each round would have removed, and which blocks
+// were handed back, are on that round's `editor_patch` line in the run log, which is where a
+// magnitude belongs — it is one session's, and these sessions are user uploads.
 export const SIGNAL_EDITOR_HEADINGS_GATED = "iris:editor-headings-gated";
 // How many windows of the document the review's last read of it came back with no usable
 // answer for (issue #186). Recorded only when non-zero, like the three above.

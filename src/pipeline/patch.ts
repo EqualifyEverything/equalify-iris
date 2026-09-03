@@ -123,9 +123,15 @@ export type Navigable = (typeof NAVIGABLE)[number];
 // Not compensated for, deliberately: `structureCounts` does not count `<label>` or `<legend>` at all,
 // so a rule that discounted a `headings` fall wherever `captions`/`terms`/`header_cells` rose would
 // cover three of those four cases and miss the one that is likeliest — and it would be machinery for
-// a shape no round on file has produced. So the cost stands where every other `shrunk` false positive
-// stands: one retried round, and only where the same reply ALREADY holds a refusal. What the
-// measurement below will say, if this happens at all, is how often.
+// a shape no round on file has produced. So the cost is accepted rather than compensated for, and
+// since #331 it is paid with no refusal needed beside it — which is why what it costs had to come
+// down. It is now ONE BLOCK, not the round: the caller hands that block back untouched and applies
+// everything else in the reply (`headings_dropped` below, read by `applyEditorPatch`). The first
+// version of #331 discarded the whole reply, which on this exact input — a `<label>` correction axe's
+// `wcag2a` `label` rule asks for by name — threw away every other correction in it, on every round,
+// until `max_review_iterations` ran out. That is the failure mode the header comment on
+// `applyBlockEdits` exists to rule out, and a gate is not exempt from it. What the measurement below
+// says, if this happens at all, is how often.
 //
 // `items` and `rows` do NOT pass it, and they are reported rather than read (#271 asked for all
 // three; this is the half of it the evidence does not support). Both are ambiguous in a way
@@ -142,7 +148,8 @@ export type Navigable = (typeof NAVIGABLE)[number];
 // What is NOT claimed, even for headings: that a fall is damage. It is a fall the other readings
 // cannot see, which is a different thing — removing content the document printed twice is this
 // loop's job and reaches `shrunk` as a fall too. `shrunk` has never meant "wrong" (see
-// `PatchReport`), and the gate it feeds fires only where the same reply ALREADY holds a refusal.
+// `PatchReport`), and the gate it feeds is scoped to the block that fell rather than to the reply,
+// precisely because a fall is not a verdict on the round it arrived in.
 function gaveContentUp(before: string, after: string): boolean {
   if (visibleText(after).length < visibleText(before).length) return true;
   const [was, now] = [structureCounts(before), structureCounts(after)];
@@ -176,8 +183,14 @@ function gaveContentUp(before: string, after: string): boolean {
 // reporting the pair would put a sanctioned deletion into the population as silent damage. This number
 // is a sample used to decide whether `items` and `rows` can gate, and for that a filter that
 // under-collects is right where one that over-collects is not: a missed round costs a row, and a
-// wrong row costs the decision. Nothing ships differently either way, because the gate is `shrunk`
-// and that is still read per block — the demoted heading in the second block is caught there.
+// wrong row costs the decision. What that silence now costs the DELIVERABLE, since #331 made this
+// reading gate and not only report: that round ships with its real heading demoted, because the
+// document-wide gate never sees it. Per-block `shrunk` does see it, but `shrunk` on its own has never
+// refused anything — it turns into a refused round only where the same reply also holds a refusal
+// (`refusal_with_loss` in `applyEditorPatch`). So the round that is sanctioned and silent in one reply
+// is the shape this contract still cannot tell apart, and it is the reason the count under-collects
+// rather than over-collects. `headings_dropped` below is read per block and is not subject to this
+// condition, which is what keeps the two readings from having to be the same one.
 //
 // Reported as HOW MANY of each went, not as which kinds fell: one heading gone is a repeated title
 // resolved a little too thoroughly and 84 is a document flattened, the two want different answers, and
@@ -246,6 +259,37 @@ export interface PatchReport {
   // closed may name its blocks in any order — so a caller wanting the first block takes the
   // minimum rather than the head.
   lost: number[];
+  // Blocks that came back with FEWER HEADING ELEMENTS than they were sent, whatever else they did
+  // (#331, narrowed by the review of #336). A subset of `lost` — a heading falling is one of the
+  // things `gaveContentUp` reads — but not the same question, and the difference is the whole point
+  // of having it: `lost` answers "up to where may a cut reply be applied", and this answers "which
+  // blocks may not be applied at all".
+  //
+  // Why per block, when `navigation_lost` is deliberately read on the joined body: the two are
+  // answering different halves of one question and neither can answer the other's. The joined reading
+  // says whether the DOCUMENT lost a heading, which is the only grain at which a sanctioned reorder is
+  // silent — so it is the right predicate for deciding that something must be refused. This says WHICH
+  // blocks to refuse, which the joined reading cannot say at all, and without it the only available
+  // answer was "the whole reply". That answer cost every other correction in it.
+  //
+  // Empty on the ordinary round, and empty whenever `navigation_lost.headings` is absent — but not the
+  // converse: a reply whose prose shortened silences `navigation_lost` and still fills this in, and a
+  // pure reorder fills this in with the source block while the document lost nothing. Both are why the
+  // caller reads this only after the joined reading has said there is something to refuse.
+  headings_dropped: number[];
+  // Heading elements that ARRIVED in some block, summed across the reply. The number that says whether
+  // `headings_dropped` can be acted on: a heading that left one block and turned up in another is a
+  // reorder EDITOR_SYSTEM sanctions by name, and nothing here binds the two halves together, so a
+  // caller reverting the source block on that reply would restore a heading the landing block already
+  // has — one heading printed twice, invented by the guard.
+  //
+  // 0 is therefore the licence, and it is exactly the condition the guarantee rests on: no block took
+  // a heading, so a document-wide fall means the heading is gone rather than moved, so handing back
+  // every block that dropped one restores the outline exactly. Non-zero and the caller cannot tell
+  // which source belongs to which arrival, and refuses the round whole rather than guess (see
+  // `applyEditorPatch`). Counted rather than flagged because the quantity is the reader's next
+  // question — one arrival beside one fall is a move, and eleven beside one is a restructure.
+  headings_gained: number;
   // Navigable structure the DOCUMENT lost while every word stayed, per kind (#271) — the shape of
   // loss this pipeline had no signal for at all. Empty on the ordinary round.
   //
@@ -256,6 +300,11 @@ export interface PatchReport {
   // given up at all, so a line carrying `navigation_lost` with no `shrunk` beside it is a round that
   // re-expressed a list or a table — the population that would decide whether either can ever gate,
   // on the record before it is believed.
+  //
+  // Since #331 the `headings` member of this is the one that is READ and not only reported: a fall in it
+  // is what tells the caller a heading has left the document rather than moved within it, which is the
+  // question `headings_dropped` cannot answer and this one can. What the caller does about it is scoped
+  // by that field rather than by this one — this says a heading is gone, that says where from.
   navigation_lost: Partial<Record<Navigable, number>>;
 }
 
@@ -288,8 +337,16 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     markers: 0,
     shrunk: 0,
     lost: [],
+    headings_dropped: [],
+    headings_gained: 0,
     navigation_lost: {},
   };
+  // Both directions of every replaced block's heading count, taken here rather than derived later
+  // because the original block text is only in hand while the edit is being applied. Counted with
+  // `structureCounts` for the same reason `gaveContentUp` does — folded across h1-h6, so re-levelling
+  // moves neither side — and on every replacement including a deletion, which takes its whole count
+  // down to nothing.
+  const headings = (html: string) => structureCounts(html).headings;
   for (const edit of edits) {
     const at = edit.block;
     if (!Number.isInteger(at) || at < 0 || at >= blocks.length) {
@@ -315,6 +372,7 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
       replacements[at] = "";
       report.deleted++;
       report.lost.push(at);
+      if (headings(blocks[at]!.html) > 0) report.headings_dropped.push(at);
       continue;
     }
     if (html.trim() === blocks[at]!.html.trim()) {
@@ -331,6 +389,9 @@ export function applyBlockEdits(blocks: Section[], edits: BlockEdit[]): PatchRep
     }
     replacements[at] = html;
     report.applied++;
+    const delta = headings(html) - headings(blocks[at]!.html);
+    if (delta < 0) report.headings_dropped.push(at);
+    if (delta > 0) report.headings_gained += delta;
     if (gaveContentUp(blocks[at]!.html, html)) {
       report.shrunk++;
       report.lost.push(at);
