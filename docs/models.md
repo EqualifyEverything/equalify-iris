@@ -518,11 +518,16 @@ correct one — these are real Iris outputs, not verified-clean fixtures.
 
 Two things still block a swap, and neither is measured:
 
-- **Rejecting 84% of pages is an action, not an opinion.** #288 measured the correction pass clearing
-  the verifier on 26% of the pages it is bought for, so a more accurate verifier at this rejection
-  rate mostly buys corrections that do not clear — and on a deployment running one review round
-  (UIC's `max_review_iterations: 1`) it instead ships those pages carrying unresolved flags. **A
-  verifier being right more often is not the same as being worth acting on more often.**
+- **Rejecting 84% of pages is an action, not an opinion.** Each rejected page buys exactly **one**
+  correction attempt — `correctPage` in `src/pipeline/extraction.ts`, one call per page, not a loop
+  and not governed by `max_review_iterations`, which bounds the document-level review loop in
+  `review.ts` and nothing here. #288 measured that attempt clearing the verifier on **26%** of the
+  pages it is bought for, so a more accurate verifier at this rejection rate mostly buys corrections
+  that do not clear: ~84 extra page calls per 100 pages, of which roughly a quarter change anything,
+  and the rest ship the page with its flag standing — and, per
+  [#328](https://github.com/EqualifyEverything/equalify-iris/issues/328), with nothing in the
+  delivered document saying so. **A verifier being right more often is not the same as being worth
+  acting on more often.**
 - **Luna's errors are the expensive kind.** Two of the 12 pages also carried an invented defect — a
   sentence claimed missing that is in the file, a colon claimed inserted that is not — and a false
   `content_missing` sends a correction pass to add text nobody dropped. Two instances in 45 pages is
@@ -852,12 +857,12 @@ set.
 - **`feedback` is 15.6% and its decision is open, but the round that would settle it is not a
   verifier round.** Neither answer is defensible from what has been measured: the incumbent's lead is
   one class (table figures, 12/14 against 9/14) and the cheap finalist's extra rejections turned out to
-  be mostly real defects (§4). What is missing is the *action* cost — #288's 26% clear rate means a
-  more accurate verifier at an 84% rejection rate mostly buys corrections that do not clear, and on a
-  one-round deployment ships the flags instead. Two free things come first: adjudicate the remaining 33
-  control pages, and fix the incumbent's self-retracting `problems` with a prompt clause. The paid
-  round worth running instead is against the `page` agent — 12 of 12 disputed pages carry extraction
-  defects the verifier is passing, plus #333.
+  be mostly real defects (§4). What is missing is the *action* cost: one correction attempt per
+  rejected page, ~84 per 100 pages at the cheap finalist's rejection rate, clearing on 26% of them
+  (#288) and otherwise shipping the page with its flag standing. Two free things come first —
+  adjudicate the remaining 33 control pages, and fix the incumbent's self-retracting `problems` with a
+  prompt clause. The paid round worth running instead is against the `page` agent: 12 of 12 disputed
+  pages carry extraction defects the verifier is passing, plus #333.
 - **A swap invalidates the quality baseline, not just the cost.** `/v1/quality` reports a clean
   rate and mean rounds per document from the judge's verdicts, and a change to `page` or `reader`
   changes what the judge is reading. Re-measure the week after, not the day after.
