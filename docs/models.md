@@ -44,7 +44,7 @@ the same kind of decision.
   verdict is not a deliverable**, it triggers one correction pass billed to whichever model runs
   `page`, and the cheap verifier rejects far more pages. Priced that way the swap is **−50.9% of the
   total cost per page judged under the corrector actually deployed, and −1.3% under the incumbent
-  one** — the same swap worth 2% or 51% according to a price that is not the verifier's, where on the
+  one** — the same swap worth 1% or 51% according to a price that is not the verifier's, where on the
   verify line *alone* it is −71% under both and decides nothing (§7's eighth limit). Both measured
   corrector prices sit under the **$0.0644/pass** that would reverse it, **so the price favours the
   swap and the price is not what is holding it up.** Two things are: the cheap verifier invents
@@ -641,8 +641,14 @@ both.** Its later reading gives $0.0305/$0.0080 a verify call and an 84.4% trigg
 document derived $0.0296/$0.0086 and 85.2% — a third disagreement about `runs-digits-45`'s controls,
 and #330's to settle. It matters less than it looks: that set moves break-even to $0.0708, which is
 *further* from both corrector prices, and puts the swap at −4.5% under the sonnet corrector and −54.0%
-under the deployed one. Across four corrector prices ($0.0100, $0.0137, $0.0607, $0.0619) and both
-input sets, the challenger is cheaper in **every** combination, by between 1.3% and 54%. The sign has
+under the deployed one. Across four corrector prices and both input sets, the challenger is cheaper in
+**every one of the eight combinations**, by between 1.3% and 54%. The four prices, each with its round:
+**$0.0619** and the superseded **$0.0607** for `claude-sonnet-4-6` (`runs-extract100-frozen` and
+`runs-extract100-1`, §6); **$0.0100** for `moonshotai.kimi-k2.5`, the 3-page probe §6 flags; and
+**$0.0137** for `openai.gpt-5.6-luna` as the page agent, from #330's blob-matched table — a corrector
+nobody is running, included because it is the only *cheap* corrector price that has been blob-matched,
+where the $0.0100 probe has not, and at it the swap is −44.9% on this document's inputs and −48.1% on
+#330's. The sign has
 never been the uncertain part; only the size, and the size is set by an agent that is not under test.
 
 **Why this row is `open` and not `declined`, when #330 now says "do not swap the page verifier".** That
@@ -658,7 +664,7 @@ unmeasured, and `open` is the disposition for unmeasured. If the two rates come 
 
 Three things follow that the verify-price framing hid. **A second opinion is the best detector and the
 worst buy:** running both and rejecting if either rejects closes 4 of the incumbent's 5 blind spots for
-97.8% detection, and costs +35.1% to +49.8%. **The intersection is worse than either alone** — it pays
+97.8% detection, and costs +35.1% to +50.0%. **The intersection is worse than either alone** — it pays
 for two verifiers and then discards the detection they were bought for. And **`$/page actually fixed`
 ranks Luna best under both correctors**, a column whose *ranking* does not depend on #288's clear
 rate at all, since that rate is a common factor across arms; only its level does. That level is **26%
@@ -695,8 +701,10 @@ word, a broken list, alt text duplicating its caption, headings emitted as itali
 agent numbers 5 of 91 markers by file position instead of the printed folio, against a clause in its
 own prompt. The verifier swap priced above is worth, at most, about **$1.61 per 100 document pages** —
 $0.0177 per page *judged* under the deployed corrector, and only ≈91 of every 100 pages are judged
-since #294 stopped sending blank versos; under the incumbent corrector the same swap is worth **$0.08**,
-a ≈22x spread in dollars, which §7's eighth limit states as 1.3% against 50.9% — a ≈39x spread,
+since #294 stopped sending blank versos; under the incumbent corrector the same swap is worth **$0.07**
+— there the per-page gap is $0.0008, so the *fourth* decimal decides it and differencing the table's
+rounded cells gives $0.08 instead — a ≈22x spread in dollars, which §7's eighth limit states as 1.3%
+against 50.9% — a ≈39x spread,
 because the two percentages carry different denominators. Two correct ratios of the same two arms,
 and neither is a substitute for the other. These are
 defects a reader can catch the service out on, and fixing the extraction is worth more than changing
