@@ -43,7 +43,7 @@ interface Recorded {
 // `opts` reaches the four exits of `dispatchSpecialist` that a request-and-name alone cannot: a
 // specialist that runs and finds nothing of its type, one that throws, one whose fragment will not
 // merge, and a reason written with a code fence in it. Those are the branches where `dispatched`
-// disagrees with "the request was met", and three of them shipped the wrong answer until the review
+// disagrees with "the request was met", and all four shipped the wrong answer until the review
 // of this PR pointed at them.
 interface StubOpts {
   specialistNoContent?: true;

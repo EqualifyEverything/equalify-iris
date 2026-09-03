@@ -2454,9 +2454,15 @@ const NO_SUCH_AGENT = "No agent of that name was available";
 // dispatched=true means a library specialist ran (so the suggestion is already
 // covered and should not be re-filed as a new-agent issue).
 //
-// `unmet` is a separate question from `dispatched`, and they disagree on three of the six
+// `unmet` is a separate question from `dispatched`, and they disagree on four of the six
 // exits below, so `dispatched` cannot stand in for it (it was tried, and mislabelled all
-// three). `dispatched` answers "is this suggestion already covered, or should it be filed
+// four). Three of the four were silent — no content, a throw, and a fragment that would not
+// merge all return `dispatched: true` and so said nothing about a request that went unmet.
+// The fourth is the standard-type decline, and it is the one that shipped a wrong ANSWER
+// rather than none: `dispatched: false` there, so the verifier was told "no agent of that
+// name was available" about a type declined by policy, on the commonest suggestion shape
+// there is. Counting only the silent three reads as `dispatched` being incomplete, which
+// undersells it. `dispatched` answers "is this suggestion already covered, or should it be filed
 // as a new-agent issue"; `unmet` answers "did specialist content reach the HTML the
 // verifier is about to judge". A dispatch that ran and returned nothing, threw, or produced
 // a fragment that would not merge is dispatched-and-unmet: the delivered page is the page
@@ -2584,7 +2590,7 @@ async function dispatchSpecialist(
 // costs nothing when the flag is wrong.
 //
 // The test is `unmet` and not `dispatched`: those two answer different questions and disagree on
-// three of `dispatchSpecialist`'s six exits, so keying on `dispatched` claimed "no agent of that
+// four of `dispatchSpecialist`'s six exits, so keying on `dispatched` claimed "no agent of that
 // name was available" about a standard type that was declined by policy, and said nothing at all
 // about a specialist that ran and returned nothing, threw, or produced a fragment that would not
 // merge — the last three being verbatim the case this caution is for. `unmet` carries the phrase
@@ -2612,7 +2618,9 @@ function specialistCaution(
 
 // Backticks and newlines out, then clipped to a sentence's worth. Backticks rather than only
 // the triple: a single one opens inline code, which is enough to swallow the punctuation the
-// sentence around it depends on.
+// sentence around it depends on. Flattening the newlines is the sharper half of the two,
+// though, and not only a tidiness measure: the verify message is structured by `##` headings,
+// and a string that cannot start a line cannot forge one.
 function oneLine(s: string, max: number): string {
   const flat = s.replace(/`/g, "'").replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max).trimEnd()}…` : flat;
