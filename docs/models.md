@@ -652,8 +652,12 @@ where the $0.0100 probe has not, and at it the swap is −44.9% on this document
 never been the uncertain part; only the size, and the size is set by an agent that is not under test.
 
 **Why this row is `open` and not `declined`, when #330 now says "do not swap the page verifier".** That
-recommendation is priced against a page agent running `claude-sonnet-4-6` — 4.4 points from break-even,
-which is a fair reading of that arm and is not the deployed one. `page` has run
+recommendation is priced against a page agent running `claude-sonnet-4-6`, where it puts the challenger
+**4.4 points from break-even** — and those are percentage points of *rejection rate*, not of money:
+#330 expresses break-even as the rejection rate at which the swap stops saving, 88.8% against the 84.4%
+it measures, where this document expresses the same threshold as a correction price ($0.0644 a pass).
+Both are correct and neither converts to the other by inspection. That is a fair reading of the sonnet
+arm, and it is not the deployed one. `page` has run
 `moonshotai.kimi-k2.5` since #312, and on the cheap corrector both readings agree that **no reachable
 rejection rate makes the verify swap unprofitable**: the challenger would have to trigger corrections on
 more than 100% of pages. So the cost case does not decline this swap under the deployment that exists,
