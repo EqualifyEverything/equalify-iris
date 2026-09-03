@@ -653,11 +653,18 @@ never been the uncertain part; only the size, and the size is set by an agent th
 
 **Why this row is `open` and not `declined`, when #330 now says "do not swap the page verifier".** That
 recommendation is priced against a page agent running `claude-sonnet-4-6`, where it puts the challenger
-**4.4 points from break-even** — and those are percentage points of *rejection rate*, not of money:
-#330 expresses break-even as the rejection rate at which the swap stops saving, 88.8% against the 84.4%
-it measures, where this document expresses the same threshold as a correction price ($0.0644 a pass).
-Both are correct and neither converts to the other by inspection. That is a fair reading of the sonnet
-arm, and it is not the deployed one. `page` has run
+**4.4 points from break-even** — and those are percentage points of *rejection rate*, not of money.
+#330 expresses break-even as the rejection rate at which the swap stops saving: its 88.8% against the
+84.4% it measures. Recomputed from the inputs published here it is **88.9%**, so 4.5 points, a tenth of
+a point apart and not worth reconciling. This document expresses the same threshold as a correction
+price instead — $0.0644 a pass on its own inputs, $0.0708 on #330's — and the matching rejection-rate
+form of it is 86.5% against a measured 85.2%, or **1.3 points**. Which brings out why the borrowed 4.4
+was ambiguous rather than merely unlabelled: points-above-break-even is
+`(incumbent − challenger) ÷ $pass` and percent-cheaper is `(incumbent − challenger) ÷ incumbent`, so
+the two coincide whenever a correction pass costs about what a page costs in total — $0.0619 against
+$0.0622 and $0.0631 here — which is exactly the case at the sonnet corrector, and is why 4.5 points and
+−4.5% are the same digits. **The mechanisms do not convert; on this corrector the answers nearly do.**
+That is a fair reading of the sonnet arm, and it is not the deployed one. `page` has run
 `moonshotai.kimi-k2.5` since #312, and on the cheap corrector both readings agree that **no reachable
 rejection rate makes the verify swap unprofitable**: the challenger would have to trigger corrections on
 more than 100% of pages. So the cost case does not decline this swap under the deployment that exists,
