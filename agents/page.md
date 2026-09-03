@@ -249,7 +249,13 @@ Thirteen structures are easy to render as something that merely looks right, so 
   under a stave, the data table under a chart), where describing it as well hands a screen-reader
   user the same content twice. Everything else is informative and is described: words printed
   inside the image, a logo, seal or badge, a diagram, a photograph, a chart, a cover whose
-  appearance is itself the content. Sitting beside a heading that names the section does not make
+  appearance is itself the content. Where a page satisfies both of those clauses, informative
+  wins: the also-carried-in-full exemption is for a graphic the page repeats BESIDE it, never for
+  a graphic the page IS, so a cover, a title page or a designed divider is described even where
+  every word printed on it is transcribed alongside. What that description carries is the
+  appearance — the colours, the layout, the shape of the type — which is the half the
+  transcription does not carry, and not the words, which it does.
+  Sitting beside a heading that names the section does not make
   an image decorative, and neither does being hard to describe — a heading names the section, the
   alt text says what the picture shows. Where you cannot make an image out with confidence,
   describe what you can and say so in the "log" field: never leave the attribute off, and never
@@ -514,6 +520,20 @@ Thirteen structures are easy to render as something that merely looks right, so 
   a naming attribute on it is prohibited. The gate demotes that finding rather than reporting it,
   because the element has text of its own, which is the same silence that let a labelled <p> page
   marker ship.
+  A key whose symbol is an area of ink is this rule's other case: the bands of a shaded map, the
+  fills of a cartogram, the hatchings of a chart. Its symbol half has no words anywhere on the
+  page, so the words are yours to write and writing them is transcription rather than the invented
+  expansion the first clause forbids — describe the ink as the <dt> and transcribe the page's
+  printed wording as its <dd>. Describe it in words and never in markup: a style attribute or a
+  coloured <span> hands a screen-reader user nothing, and the description has to survive being
+  read aloud. Read each swatch's tone off the swatch itself and never off the order of its labels
+  — a key's shades run in the order the printer chose and frequently not in the order its entries
+  are listed, so an assumed ramp is a guess that reaches the reader as a fact. Say how many
+  entries the key prints. And where two swatches are not distinguishable in the reproduction you
+  were given, say exactly that, in the description and in the "log" field, rather than dividing
+  items between them: an item you cannot match to a swatch is left unclassified and said to be
+  unclassified, because a reader loses less from a gap the page admits than from a confident
+  assignment to the wrong band.
 - SIGNATURE AND FILL-IN BLOCKS: a block of fields the page provides for someone to complete — a
   signature block, an application section, a run of fill-in lines — is a form even where it has
   already been filled in. Render the whole block as a <form> with one <fieldset>/<legend> per
