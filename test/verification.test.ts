@@ -235,6 +235,21 @@ test("a member leaving a two-name band for one that already existed is still a m
   assert.deepEqual(correctionEffect(before, after).alt_relocated, ["Missouri"]);
 });
 
+test("a name that contains \"and\" is one member, and can move like one", () => {
+  // Raised by the review of this change. A conjunction joins a list at its end, so it is only opened
+  // on there: split anywhere earlier, "Trinidad and Tobago" is two phantom members that travel
+  // together, they share company in both replies, and the disjointness test can then never hold —
+  // the member becomes unreportable however far it moves.
+  const before = `<img alt="Darkest: Trinidad and Tobago, Guyana, Suriname; lightest: Belize, Panama, Costa Rica">`;
+  const after = `<img alt="Darkest: Guyana, Suriname; lightest: Belize, Trinidad and Tobago, Panama, Costa Rica">`;
+  assert.deepEqual(correctionEffect(before, after).alt_relocated, ["Trinidad and Tobago"]);
+  // And a list that ends in a conjunction is still a list of its names, which is what the split is
+  // there for: Wyoming crosses out of a comma-less three and into a band that already existed.
+  const joined = `<img alt="Darkest: Ohio, Wisconsin and Wyoming; cross-hatched: Iowa, Kansas and Minnesota">`;
+  const movedOut = `<img alt="Darkest: Ohio and Wisconsin; cross-hatched: Iowa, Wyoming, Kansas and Minnesota">`;
+  assert.deepEqual(correctionEffect(joined, movedOut).alt_relocated, ["Wyoming"]);
+});
+
 test("a member that was alone in its clause did not leave a list", () => {
   // The other side of that floor, and why it is two rather than one. Missouri is the only name in the
   // clause it sits in beforehand, so there is no set of names it was listed WITH — and this reports a

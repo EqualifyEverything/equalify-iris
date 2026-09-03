@@ -152,8 +152,9 @@ test("the verify task compares an enumeration against a count the page prints", 
 // LENGTH against a size the page prints; this compares its MEMBERSHIP against a region the page
 // names. On the same map, in the same fragment, the <figcaption> read "The South, in General, Has the
 // Lowest Effective Rates; the New England and Mideastern States, the Highest" while the alt filed
-// 0 of 6 New England and 0 of 6 Mideast jurisdictions in its highest band — all twelve of them in the
-// second-lowest — with the South passing as a control at 6 of 6 in the lightest. The paid verify pass
+// 0 of 6 New England and 0 of 6 Mideast jurisdictions in its highest band — eleven of those twelve in
+// the second-lowest and Massachusetts in the middle one — with the South passing as a control at 6 of
+// 6 in the lightest. The paid verify pass
 // on that page cost $0.04529 (67.4% of the page) and made one edit, which the ink says was wrong;
 // this comparison was available to it for nothing and it never made it.
 test("the verify task compares a region the page names against the bands the HTML sorts into", () => {
@@ -167,8 +168,11 @@ test("the verify task compares a region the page names against the bands the HTM
     // correct maps, and the finding here is not one member: it is nought of six, twice.
     ["what the sentence contradicts is the whole set, and one member is not a problem at all",
       /What such a sentence can contradict is the SET and not one member — it is a generalisation and leaves room for exceptions — so a single place out of step with its region is not a problem at all/],
+    // Both directions, because the page carried both: the "highest" claim was the one contradicted
+    // and the "lowest" claim was the control that passed. Stated for one only, the inverted case is a
+    // generalisation the model has to make on its own.
     ["a region called highest with no member in the highest band is the finding, with its kind",
-      /a region the page calls highest with NOT ONE of its members in the highest band the HTML describes contradicts the page's own words, and that is "content_wrong"/],
+      /a region the page calls highest with NOT ONE of its members in the highest band the HTML describes — or one it calls lowest with not one of them in the lowest band — contradicts the page's own words, and that is "content_wrong"/],
     // Ordered with the count check for the same reason the count check is ordered: this verifier's
     // ink readings are graded 5 wrong of 6 on the pages whose verdict turns on one, and both of
     // these checks are decidable without the picture at all.

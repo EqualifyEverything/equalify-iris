@@ -379,8 +379,17 @@ function enumerationsIn(alt: string): {
   const dropped = new Set<string>();
   for (const bucket of alt.split(ENUMERATION_BREAK)) {
     const members: { key: string; shown: string }[] = [];
-    for (const piece of (bucket ?? "").split(",")) {
-      for (const item of piece.split(/\s+(?:and|or)\s+/i)) {
+    const pieces = (bucket ?? "").split(",");
+    for (const [at, piece] of pieces.entries()) {
+      // A conjunction joins a list only at its END — "Ohio, Wisconsin and Wyoming" — so only the last
+      // comma-separated piece is opened on one. Anywhere earlier, "and" and "or" belong to the name
+      // that carries them, and there are plenty: "Trinidad and Tobago", "Bosnia and Herzegovina",
+      // "Antigua and Barbuda", "Health and Human Services". Split there, such a name becomes two
+      // phantom members that always travel together, and the two halves then share company in both
+      // replies — so the disjointness test below can never hold and the member could never be
+      // reported however far it moved (#358 review, note 4). A single-piece bucket is its own last
+      // piece, which keeps a comma-less "Ohio and Wisconsin" a list of two.
+      for (const item of at === pieces.length - 1 ? piece.split(/\s+(?:and|or)\s+/i) : [piece]) {
         const shown = item.replace(/^(?:&|and|or)\s+/i, "").replace(/\s+/g, " ").trim();
         if (!shown || shown.length > MEMBER_MAX) continue;
         // A trailing period is not part of the name, and whether a member keeps one depends on where

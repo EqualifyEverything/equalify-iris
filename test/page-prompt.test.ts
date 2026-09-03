@@ -786,11 +786,12 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     // against a printed size, this compares its MEMBERSHIP against a printed region. Same map, same
     // fragment. The <figcaption> transcribed "The South, in General, Has the Lowest Effective Rates;
     // the New England and Mideastern States, the Highest" while the alt ten lines above put 0 of 6
-    // New England and 0 of 6 Mideast jurisdictions in its highest band — all twelve in the
-    // second-LOWEST — with the South as a clean control at 6 of 6 in the lightest. Two regional
+    // New England and 0 of 6 Mideast jurisdictions in its highest band — eleven of those twelve in the
+    // second-LOWEST and Massachusetts in the middle one — with the South as a clean control at 6 of 6
+    // in the lightest. Two regional
     // claims, both inverted, and no pixel needed to see it.
     ["a printed claim about a region is evidence the description's bands are checked against",
-      /A claim the page makes in words about a whole REGION is the same kind of evidence, and reading it costs no more ink than the count did/],
+      /A claim the page makes in words about a whole REGION is the same kind of evidence as a printed count, and reading it costs no more ink/],
     ["the check is named with the shape such a claim comes in",
       /where the page says that some named group of places runs highest or lowest — "the New England and Mideastern states, the highest" — and your description sorts individual places into bands, read your own bands back against that sentence before you emit/],
     // The trigger is pinned as a SET predicate, because the caption's own words are hedged: "in
@@ -799,8 +800,10 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     // over is not an exception.
     ["what the sentence contradicts is the whole set, never one member",
       /What such a sentence can contradict is the SET and not one member: it is a generalisation and leaves room for exceptions, so one place out of step with its region is nothing/],
+    // Both directions, because the page carried both: the "highest" claim was the one contradicted and
+    // the "lowest" claim was the control that passed.
     ["a region called highest with no member in the highest band is the contradiction",
-      /a region the page calls highest with NOT ONE of its members in your highest band contradicts the page's own words/],
+      /a region the page calls highest with NOT ONE of its members in your highest band — or one it calls lowest with not one of them in your lowest — contradicts the page's own words/],
     // Which of the two gives way, and how far. The sentence is transcription and the bands are a
     // reading, so the reading is what gets re-examined — but a regional generalisation cannot say
     // which place sits in which band, so it licenses no reassignment. Without this, a model told two

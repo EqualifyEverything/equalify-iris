@@ -95,7 +95,8 @@ you and one of them is the page's own. What such a sentence can contradict is th
 SET and not one member — it is a generalisation and leaves room for exceptions —
 so a single place out of step with its region is not a problem at all, while a
 region the page calls highest with NOT ONE of its members in the highest band the
-HTML describes contradicts the page's own words, and that is "content_wrong". Make
+HTML describes — or one it calls lowest with not one of them in the lowest band —
+contradicts the page's own words, and that is "content_wrong". Make
 this comparison with the count comparison above, before you grade anything that
 turns on the ink, because both are decidable where the ink may not be. Quote both
 strings in the problem and stop there: the sentence says which region runs high and
