@@ -875,6 +875,52 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   the bound above. The lowercase test has no signal in Hangul, Chinese, Japanese, Arabic or Hebrew,
   so those sentences still ship split — a join missed rather than a join got wrong, and left there
   because the 22 were measured on an English corpus. Logged as `prose_joined`.
+- **A verdict that cannot be obtained is not a page that cannot be extracted.** `verifyAgentOutput` is
+  non-blocking for an absent Feedback Agent and for a reply that will not parse, but a provider error
+  is *rethrown*, and the first verify call had nothing to catch it — so a throttled or over-long
+  **check** propagated out of the page's own extraction, logged `page_extraction_failed`, and shipped a
+  `@page-failed` comment for a page that had rendered fine (issue #364). Measured once on a 100-page
+  bench arm: a page extracted as 8,855 characters of HTML — a complete statistical table, 568 words —
+  delivered as a 156-byte comment, and **$0.5051 of that page's $0.6634 was the call that deleted it**,
+  3.2x what the extraction it was checking cost. The fix is the policy this pipeline already applies to
+  every other specialist, arriving one call earlier: a specialist that fails leaves the page as the
+  general pass wrote it, and a fidelity check that cannot run is nothing to correct — so no correction
+  is bought and the page ships as extracted, which on a page whose only repair would have come from the
+  verdict is exactly what an unconfigured deployment delivers. **Exactly, but not on every page**, and
+  the exception is worth stating because it is the one axis a reader can check: with no Feedback Agent
+  loaded, `verifyAgentOutput` returns a passing unjudged verdict at *both* call sites, so a links- or
+  alt-triggered correction reaches the binding recheck, is judged unjudged-ok, and is **kept** — while
+  under a throttle that recheck throws too, and the correction is discarded. So a page with a dropped
+  `href` ships without it here and with it there. That is the discard decision below, taken knowingly;
+  what is not claimed is equivalence on the page it costs something. Three things the misattribution cost
+  besides the page, and they are why this is its own `page_verify_error` event rather than a quiet
+  `catch`: the delivered document asserted the source pages "could not be extracted", which was false;
+  `pages_failed` and every triage of *why* pages fail recorded a vision failure, so anyone tuning the
+  page agent on that signal was tuning the wrong agent; and the marker told the operator to raise
+  `providers.*.max_tokens`, which buys the verifier room to write **more** about a page it has already
+  judged — the wrong lever, pushed the wrong way, on the one line the operator was given. **The second
+  unguarded call site was not in the report and cost more when it fired:** the `recheck_binding` gate,
+  which throws away a page that had rendered, *passed*, and been corrected — two calls' work, not one.
+  There the failure is a decision rather than a default, and it is taken the conservative way: that
+  recheck exists to stop a correction bought for one link or one placeholder alt from damaging a page
+  that had already passed, so no verdict is no licence, the correction is discarded, and the page ships
+  as it was — which is the same answer the branch gives a verdict that *fails*. The correction is
+  billed either way, and `correction_discarded` on the line is what says the money bought nothing. **The
+  two failures are counted in different places, because they are not the same kind of page.** A failed
+  first check makes the page *unjudged*, so it counts as `pages_verify_error`, a subset of
+  `pages_unjudged` and so of `pages_verified`, and no published rate moves. A failed binding recheck does
+  not: that page has a real first verdict and it **passed**, so counting it as unjudged would put a
+  judged page inside the unjudged total. It counts as `rechecks.binding_error` instead — disjoint from
+  `binding`, `binding_ok` and `binding_unjudged`, which are fed from the recheck's own verdict line and
+  so cannot see a recheck that produced none. Giving it a number rather than only a sentence is the
+  point: it is the more expensive shape, and its only other trace is `page_corrected`
+  `result: "rejected"`, pooled there with the shrink floor and with a rewrite a second verdict actually
+  refused — and those were judged, while this one never was. `pages_verify_error` in turn is kept apart
+  from `pages_skipped_blank` because those two point opposite ways
+  in money — a blank skip is a call not made and is a saving, an error is a full ceiling of output
+  billed for no verdict — and adding them would price the most expensive shape of verification failure
+  as a saving. The third verify call, the *sampled* recheck, was guarded already and keeps its own
+  older `page_correction_recheck_failed`: it decides nothing whether it answers or not.
 - **A page the document has no content for is reported once, not once per chunk.** Two kinds of
   source page contribute nothing: one extraction *lost* (`pages_failed`, and a `@page-failed`
   comment where the content would have been) and one that is *blank in the source*, delivered as an

@@ -462,6 +462,13 @@ interface Behaviour {
   recheck?: (order: number) => VerifyProblem[];
   // A provider error on the re-verification, the way ProviderRouter.complete raises one.
   recheckThrows?: boolean;
+  // A provider error on the FIRST verify — the fidelity check itself. Separate from
+  // `recheckThrows` because that one fires on every call after the first, and the whole point of
+  // issue #364 is that this call is reached by every page in every run while a recheck is reached
+  // only by a page that was corrected. A thunk rather than a flag so a test can choose the shape:
+  // a throttle carries no reply, and a `TruncatedResponseError` carries the evidence the log line
+  // exists to preserve.
+  verifyThrows?: () => unknown;
   // The first verify answers prose with no JSON in it. `verifyAgentOutput` cannot read a
   // verdict out of that and returns its non-blocking default, which is a page nothing
   // judged rather than a page that passed.
@@ -524,6 +531,7 @@ function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 2): Pipelin
         if (user.includes("TASK: verify")) {
           const n = (verifies.get(order) ?? 0) + 1;
           verifies.set(order, n);
+          if (n === 1 && b.verifyThrows) throw b.verifyThrows();
           if (n > 1 && b.recheckThrows) throw new Error("ThrottlingException: Too many requests");
           if (n === 1 && b.verifyGarbles) return { text: "I was unable to compare the HTML with the image." };
           if (n > 1 && b.recheckGarbles) return { text: "I was unable to compare the HTML with the image." };
@@ -1424,6 +1432,200 @@ test("a provider error on the sample costs the measurement, not the page", async
     // And the slot stays spent: a throttled provider is not asked again for every
     // corrected page in the batch.
     assert.equal(of(events, "page_corrected").length, 2);
+  });
+});
+
+// --- a check that cannot answer may not delete the page it was checking (issue #364) ---------
+
+test("a verify call that overruns its ceiling keeps the page it was judging", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The worst reach of the same defect, and the one the two tests above do not cover: they
+    // guard the calls a CORRECTED page makes, and this is the call every page in every run
+    // makes. Uncaught, a provider error on the fidelity check left `extractPage` through the
+    // per-page catch and shipped a `@page-failed` comment for a page whose extraction had
+    // succeeded and was sitting in a local variable — measured once as 8,855 characters of a
+    // statistical table delivered as 156 bytes, where $0.5051 of the page's $0.6634 was the
+    // call that deleted it.
+    const page = `<h2>Table 4</h2><table><tr><th>State</th><td>Illinois</td></tr></table>`;
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => page,
+        problems: () => ["never reached"],
+        corrected: () => `<p>never reached</p>`,
+        verifyThrows: () => new TruncatedResponseError("bedrock", "some-model", 32_000, TRUNCATED_REPLY),
+      }),
+    );
+    // The page is delivered, whole and unmarked. This is the assertion the issue is about:
+    // everything below is about being able to say WHY, and this is the content.
+    assert.equal(result.failedPages.length, 0);
+    for (const f of result.fragments) assert.equal(f.innerHtml, page);
+    assert.doesNotMatch(result.fragments.map((f) => f.innerHtml).join(""), /@page-failed/);
+    // And no correction is bought: an unobtainable verdict is a fidelity check that did not
+    // run, and a check that did not run names nothing to correct. So the page ships exactly as
+    // it would have with no Feedback Agent configured at all, which is what the rest of this
+    // file already guarantees for that configuration.
+    assert.equal(of(events, "page_corrected").length, 0);
+    assert.equal(of(events, "page_extraction_failed").length, 0);
+    // The failure is on the record with the evidence, under its own name — `page_verify_failed`
+    // is already taken by a verdict that named problems, which is the opposite of this.
+    const errs = of(events, "page_verify_error");
+    assert.equal(errs.length, 2);
+    for (const e of errs) {
+      assert.equal(e.step, "verify");
+      assert.match(String(e.error), /truncat/i);
+      // The shape with a configuration remedy, named rather than left to be read out of the
+      // message, and both ends of the reply — which is what says whether the ceiling was too
+      // tight or the verifier wrote an essay about a page it had already judged. The round
+      // cannot be asked again: a truncation has already been billed for a full ceiling.
+      assert.equal(e.truncated, true);
+      assert.equal(e.reply_chars, TRUNCATED_REPLY.length);
+    }
+    // The page is countable beside the others without reading two event streams, and it is
+    // counted as the kind of unjudged that COST money rather than the kind that saved it.
+    const oks = of(events, "page_verify_ok");
+    assert.equal(oks.length, 2);
+    for (const o of oks) {
+      assert.equal(o.unjudged, true);
+      assert.equal(o.skipped, "error");
+    }
+    // Which the fold reads back nested, so nothing published moves: both pages are still
+    // `pages_verified`, still `pages_unjudged`, and the judged pass rate is 0 of 0.
+    const d = summarizeRun(
+      events.map((e) => JSON.stringify({ ts: new Date(Date.UTC(2026, 0, 1)).toISOString(), ...e })).join("\n"),
+      { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.UTC(2026, 0, 1) },
+    );
+    assert.equal(d.verification.pages_verified, 2);
+    assert.equal(d.verification.pages_unjudged, 2);
+    assert.equal(d.verification.pages_verify_error, 2);
+    // And it is NOT the blank skip. The two point opposite ways in money — a blank page's call
+    // is not made and is a saving, this one was billed for a full ceiling and answered with
+    // nothing — so a reader adding them together would price a loss as a saving.
+    assert.equal(d.verification.pages_skipped_blank, 0);
+    assert.equal(d.verification.verify_failed, 0);
+    assert.deepEqual(d.pages_failed, []);
+    // And the first check's failure is counted ONCE. `page_verify_error` and `page_verify_ok` both
+    // fire for it, so the fold matches `step` strictly rather than reading "not the recheck" — a
+    // `binding_error` here would be this page counted twice under two names.
+    assert.equal(d.verification.rechecks.binding_error, 0);
+  });
+});
+
+test("a throttled verify is unjudged for its own reason, not the blank one", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The other shape, which is the commoner one: a throttle has no reply to quote, so `error`
+    // is the whole of what is known about it and the truncation fields are absent rather than
+    // false. Asserted because `truncationEvidence` spreads nothing for a plain Error, and a
+    // `truncated: false` here would read as a measurement that the ceiling was fine.
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<p>Kept</p>`,
+        problems: () => ["never reached"],
+        corrected: () => `<p>never reached</p>`,
+        verifyThrows: () => new Error("ThrottlingException: Too many requests"),
+      }),
+    );
+    assert.equal(result.failedPages.length, 0);
+    const errs = of(events, "page_verify_error");
+    assert.equal(errs.length, 2);
+    for (const e of errs) {
+      assert.match(String(e.error), /ThrottlingException/);
+      assert.equal("truncated" in e, false);
+      assert.equal("reply_chars" in e, false);
+    }
+    // A run being throttled reads, on a log written before this event existed, as a run whose
+    // vision was failing — the failure took the page with it and was recorded as an extraction
+    // failure. That is the misattribution the count exists to end.
+    const d = summarizeRun(
+      events.map((e) => JSON.stringify({ ts: new Date(Date.UTC(2026, 0, 1)).toISOString(), ...e })).join("\n"),
+      { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.UTC(2026, 0, 1) },
+    );
+    assert.equal(d.verification.pages_verify_error, 2);
+    assert.deepEqual(d.pages_failed, []);
+  });
+});
+
+test("an unobtainable binding recheck discards the correction and keeps the page that passed", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const link = { text: "the full report", href: "https://example.org/report" };
+    // The second unguarded call site, which is not in the issue's report and costs MORE when it
+    // fires: this page rendered, PASSED its fidelity check, and was corrected, so a throw here
+    // threw away two calls' work instead of one, by the same route into the per-page catch.
+    //
+    // Where its verdict cannot be obtained the correction is DISCARDED, which is a decision and
+    // not a default. This recheck is the gate on changing a page that had already passed — the
+    // page is being re-rendered only to attach one link — so no verdict is no licence, and the
+    // status quo is the fragment that passed. It is also the same answer this branch gives a
+    // verdict that fails.
+    const page = `<h2>Progress</h2><p>Read the full report for the 2026 figures.</p>`;
+    const corrected = `<h2>Progress</h2><p>Read <a href="https://example.org/report">the full report</a> for the 2026 figures.</p>`;
+    const result = await runExtraction(
+      makeCtx(dir, events, {
+        html: () => page,
+        problems: () => [],
+        corrected: () => corrected,
+        recheckThrows: true,
+        links: [link],
+      }),
+    );
+    // The page that passed is what ships, byte for byte, and the link stays missing — which is
+    // the trade this branch was written to make: recovering a target may not cost a page the
+    // accessibility it already had.
+    assert.equal(result.failedPages.length, 0);
+    for (const f of result.fragments) assert.equal(f.innerHtml, page);
+    assert.doesNotMatch(result.fragments.map((f) => f.innerHtml).join(""), /href="https:\/\/example\.org\/report"/);
+    assert.equal(of(events, "page_extraction_failed").length, 0);
+    // The correction was billed, so the discard is on the record rather than inferred from an
+    // absent rejection line, and `trigger` says which repair the money bought nothing for.
+    const errs = of(events, "page_verify_error");
+    assert.equal(errs.length, 2);
+    for (const e of errs) {
+      assert.equal(e.step, "recheck_binding");
+      assert.equal(e.correction_discarded, true);
+      assert.equal(e.trigger, "links");
+      assert.match(String(e.error), /ThrottlingException/);
+    }
+    // And the rejection event does NOT fire: it reports what the second verdict said was wrong,
+    // and there is no second verdict. A line claiming problems it never read would be worse than
+    // no line, which is why the discard has an event of its own.
+    assert.equal(of(events, "page_links_correction_rejected").length, 0);
+    // The FIRST verdict stands and is a real one — this page passed. So the failure here is not
+    // an unjudged page: the fold must not count it as one, or a run whose rechecks were
+    // throttled would read as a run nothing verified.
+    const oks = of(events, "page_verify_ok");
+    assert.equal(oks.length, 2);
+    for (const o of oks) {
+      assert.equal("unjudged" in o, false);
+      assert.equal("skipped" in o, false);
+    }
+    const d = summarizeRun(
+      events.map((e) => JSON.stringify({ ts: new Date(Date.UTC(2026, 0, 1)).toISOString(), ...e })).join("\n"),
+      { sessionId: "s", status: "ready_for_review", phase: "done", now: Date.UTC(2026, 0, 1) },
+    );
+    assert.equal(d.verification.pages_verified, 2);
+    // NOT unjudged, and NOT `pages_verify_error`: that count is nested inside `pages_unjudged`, and
+    // this page has a real first verdict which it passed. Counting it there would put a judged page
+    // inside the unjudged total and move the rate the nesting exists to protect. Review round 1
+    // caught the README claiming otherwise while this assertion said the opposite.
+    assert.equal(d.verification.pages_unjudged, 0);
+    assert.equal(d.verification.pages_verify_error, 0);
+    // Which is why it needs a number of its own, and this is it. Without it the page reached NO
+    // counter anywhere — `binding` and `failures` come off `page_correction_recheck`, which does not
+    // fire when there is no verdict, and `errors` needs an `ok: false` this event does not carry —
+    // so the more expensive of the two failure shapes was the silent one.
+    assert.equal(d.verification.rechecks.binding_error, 2);
+    // Disjoint from the verdict-fed fields rather than a subset of them, so the judged-only rate
+    // `(binding_ok - binding_unjudged) / (binding - binding_unjudged)` is untouched by it.
+    assert.equal(d.verification.rechecks.binding, 0);
+    assert.equal(d.verification.rechecks.binding_ok, 0);
+    assert.equal(d.verification.rechecks.failures.length, 0);
+    // And the only other trace it has, which is why the count is worth having: a `rejected` pooled
+    // with the shrink floor and with a rewrite a second verdict genuinely refused.
+    const corrected2 = of(events, "page_corrected");
+    assert.equal(corrected2.length, 2);
+    for (const c of corrected2) assert.equal(c.result, "rejected");
   });
 });
 
