@@ -40,11 +40,17 @@ interface Recorded {
 // without it `verifyAgentOutput` short-circuits to unjudged and there is no prompt to inspect. The
 // verifier passes the page, so nothing here reaches a correction: this is about the first verify
 // call's message.
-// `opts` reaches the four exits of `dispatchSpecialist` that a request-and-name alone cannot: a
-// specialist that runs and finds nothing of its type, one that throws, one whose fragment will not
-// merge, and a reason written with a code fence in it. Those are the branches where `dispatched`
-// disagrees with "the request was met", and all four shipped the wrong answer until the review
-// of this PR pointed at them.
+// `stub` reaches what a request-and-name alone cannot. Its first three members are exits of
+// `dispatchSpecialist` where `dispatched` disagrees with "the request was met" and said nothing at
+// all: a specialist that runs and finds nothing of its type, one that throws, one whose fragment
+// will not merge. Its fourth is not an exit — it is an input variation, a `reason` the model wrote
+// with a code fence in it, and it belongs here because the same stub is the only way to get one
+// through `renderPage`.
+//
+// Four exits disagree in total, not three. The fourth is the standard-type decline, which is
+// reached through `suggestedName` rather than through this stub and has the `"table"` case below to
+// itself; it is also the only one that emitted a WRONG caution rather than none, which is why the
+// count is worth stating twice.
 interface StubOpts {
   specialistNoContent?: true;
   specialistThrows?: true;
