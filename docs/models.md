@@ -558,8 +558,10 @@ The first row is the same fact as "passing 1 page of 45" above, stated the other
 arm fails essentially every undamaged page it is shown often enough.** The last row is the new one, and
 it is the part that reopened this row: 27% of its rejections do not survive its own repeat against the
 incumbent's 12%, so a single verdict from it is a noisier thing to spend a correction pass on. Both
-columns reconcile with the per-draw rates — 22×3 plus 3 unstable pages is the incumbent's 71 of 135,
-and 32×3 plus 12 is the cheap arm's 115 — so this is the same measurement recut, not a second. Neither
+columns reconcile with the per-draw rates, counting in draws on both sides — the incumbent's 22×3 plus
+**5** draws from its 3 unstable pages is its 71 of 135, and 32×3 plus **19** from the cheap arm's 12 is
+its 115 — so this is the same measurement recut, not a second. Those two contributed-draw counts are
+the numbers a future recut of this round needs and the only ones not derivable from the table. Neither
 row moves the pricing, because production reads each page once and 85.2% is what the bill is computed
 from, and both were sitting in repeats the round had already paid for
 ([#330](https://github.com/EqualifyEverything/equalify-iris/issues/330), 2026-09-02, $0).
@@ -842,7 +844,9 @@ it. The swap itself is the exception — that *is* confirmed inside the round, f
 `by_agent.page.models` (§5).
 
 **Two numbers in [#311](https://github.com/EqualifyEverything/equalify-iris/issues/311) do not match
-the round it cites**, and both are in the recommendations' favour. That report gives `page` 43.2% and
+the round it cites**, and both understate an agent whose swap is on the table — `page`'s, already
+applied, and `copy_editor`'s, recommended — so each understates the prize. That report gives `page`
+43.2% and
 `copy_editor` 20.8%; `runs-bystep-100/summary.json` gives **44.5%** and **25.0%**, and its four
 agents partition the round's spend exactly — $7.9453 + $4.4639 + $3.2086 + $2.2427 = $17.8605, the
 round's whole priced total — where the report's four shares sum to 94.6%. 43.2%
@@ -942,8 +946,12 @@ set.
   reads each page once. Per page it rejects **44 of 45**, and 27% of those rejections do not survive its
   own repeat against the incumbent's 12%: it is both fussier and less repeatable, and a correction pass
   is spent on one verdict. The pooled rate also cannot see whether a detection *credited* to an arm
-  reproduced — one such credit turned out to rest on one read of three, which is a single observation
-  and not coverage (§4, #330). **Nothing was re-run**: this was the same round recut for $0, so it is
+  reproduced. One such credit turned out to rest on **one read of three** — a single observation, not
+  coverage — and that is the sharper half of this limit, but it is on a defect family §4 does not
+  otherwise cite, so it is on record at #330 and not restated here rather than being asserted with no
+  base in this document. §4's own repeat data says less: `runs-digits-repro` has 1 of 10 cells
+  unstable, which means only "not 0/3 and not 3/3". **Nothing was re-run**: this was the same round
+  recut for $0, so it is
   not another instance of the wider-corpus limit above but a cheaper failure than that one, and the
   cheapest check for it is to print both denominators and the reads-agreeing count beside every rate
   taken over repeats. §7's own advice to prefer a wider corpus to more repeats stands, but repeats you
