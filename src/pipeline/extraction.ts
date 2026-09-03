@@ -566,7 +566,8 @@ Thirteen structures are easy to render as something that merely looks right, so 
   Never as a sentence of your own beside the <dl>: that is the prose this rule forbids two
   paragraphs above, and it reads to a verifier as text the page does not print.
   And where two swatches are not distinguishable in the reproduction you
-  were given, say exactly that, in the description and in the "log" field, rather than dividing
+  were given, say exactly that — in the <dt> describing the ink, or in the alt text where you are
+  describing the key there, and in the "log" field either way — rather than dividing
   items between them: an item you cannot match to a swatch is left unclassified and said to be
   unclassified, because a reader loses less from a gap the page admits than from a confident
   assignment to the wrong band.

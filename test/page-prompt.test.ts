@@ -635,8 +635,14 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
       /Say how many entries the key prints — in the alt text where you are describing the key there, since a description is scaffolding this prompt asks for by name, and in the "log" field either way/],
     ["and the one place it must not go is named, with the rule that forbids it",
       /Never as a sentence of your own beside the <dl>: that is the prose this rule forbids two paragraphs above, and it reads to a verifier as text the page does not print/],
-    ["two indistinguishable swatches are declared, in the description and in the log",
-      /where two swatches are not distinguishable in the reproduction you were given, say exactly that, in the description and in the "log" field, rather than dividing items between them/],
+    // Destinations conditioned the same way as the count clause above, which is the standard
+    // prd.md §7.4 v1.10 sets for this whole rule: every clause names where its answer goes. A first
+    // revision said "in the description and in the 'log' field" — safe, because "the description"
+    // resolves to the <dt> in the <dl> case and the sentence above forbids a <p> beside it, but it
+    // was the last clause here leaving a reader to work the home out, in a rule whose defect was
+    // exactly that.
+    ["two indistinguishable swatches are declared, with every home named and none of them prose",
+      /where two swatches are not distinguishable in the reproduction you were given, say exactly that — in the <dt> describing the ink, or in the alt text where you are describing the key there, and in the "log" field either way — rather than dividing items between them/],
     ["an unmatched fill is left unclassified and said to be, with the reason a reader would give",
       /an item you cannot match to a swatch is left unclassified and said to be unclassified, because a reader loses less from a gap the page admits than from a confident assignment to the wrong band/],
   ] as [string, RegExp][]) {
