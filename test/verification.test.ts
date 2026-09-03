@@ -244,7 +244,7 @@ test("a name that contains \"and\" is one member, and can move like one", () => 
   const after = `<img alt="Darkest: Guyana, Suriname; lightest: Belize, Trinidad and Tobago, Panama, Costa Rica">`;
   assert.deepEqual(correctionEffect(before, after).alt_relocated, ["Trinidad and Tobago"]);
   // And a list that ends in a conjunction is still a list of its names, which is what the split is
-  // there for: Wyoming crosses out of a comma-less three and into a band that already existed.
+  // there for: Wyoming crosses out of a three whose last two are joined by "and".
   const joined = `<img alt="Darkest: Ohio, Wisconsin and Wyoming; cross-hatched: Iowa, Kansas and Minnesota">`;
   const movedOut = `<img alt="Darkest: Ohio and Wisconsin; cross-hatched: Iowa, Wyoming, Kansas and Minnesota">`;
   assert.deepEqual(correctionEffect(joined, movedOut).alt_relocated, ["Wyoming"]);
@@ -255,6 +255,22 @@ test("a name that contains \"and\" is one member, and can move like one", () => 
   const last = `<img alt="Darkest: Guyana, Suriname and Trinidad and Tobago; lightest: Belize, Panama, Costa Rica">`;
   const lastMoved = `<img alt="Darkest: Guyana and Suriname; lightest: Belize, Panama, Costa Rica and Trinidad and Tobago">`;
   assert.deepEqual(correctionEffect(last, lastMoved).alt_relocated, ["Trinidad and Tobago"]);
+});
+
+test("a run written with no commas is separated by every conjunction in it", () => {
+  // The other side of that rule, and the second thing the review of this branch caught. A bucket with
+  // commas in it has said what its separator is; a bucket with none has not, and there the conjunction
+  // is doing the work every comma would have done. Read as two, the key for the tail is a name nobody
+  // wrote — "Wisconsin and Wyoming" — so the member that moved is not a key at all and the move is
+  // lost in silence.
+  const runOn = `<img alt="Darkest: Ohio and Wisconsin and Wyoming; light: Iowa, Kansas, Nebraska">`;
+  const runOnMoved = `<img alt="Darkest: Ohio and Wisconsin; light: Iowa, Kansas, Nebraska and Wyoming">`;
+  assert.deepEqual(correctionEffect(runOn, runOnMoved).alt_relocated, ["Wyoming"]);
+  // And a conjunction NAME inside such a run costs only itself: "Health" and "Human Services" are two
+  // phantoms that travel together, so neither is ever reported, while the real member beside them is.
+  const depts = `<img alt="Fully funded: Health and Human Services and Education; partly: Interior, Commerce, Labor">`;
+  const deptsMoved = `<img alt="Fully funded: Health and Human Services; partly: Interior, Commerce, Labor and Education">`;
+  assert.deepEqual(correctionEffect(depts, deptsMoved).alt_relocated, ["Education"]);
 });
 
 test("a member that was alone in its clause did not leave a list", () => {
