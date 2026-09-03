@@ -251,3 +251,20 @@ test("a reply carrying only one decision flag is not a verdict, and does not bec
   assert.equal(good.unjudged, undefined);
   assert.equal(good.ok, true);
 });
+
+test("the flags check is not free in one direction, and this is the direction", async () => {
+  // What the check costs, pinned rather than left as a footnote. A rejection that names its problems
+  // but omits `accessible` used to buy a correction pass; it is now a page nothing judged, so the
+  // defect ships — counted in `pages_unjudged`, and not fixed. No reply in the bench logs does this
+  // (1,342 of 1,342 answer both flags) and the trade is deliberate: the shape it refuses is the
+  // swallowed envelope of #339, where reading one flag turns a rejection into a confident PASS on a
+  // page with a missing table row. A pass that never happens is visible; a pass that did is not.
+  const v = await verdict('{ "faithful": false, "problems": [{ "kind": "content_missing", "problem": "the third data row is absent" }] }');
+  assert.equal(v.unjudged, true);
+  assert.deepEqual(v.problems, [], "the problems this reply named do not reach `correctPage`");
+  assert.equal(v.ok, true, "and the page ships, because verification never costs a page");
+  // The same reply WITH the flag it omitted is the rejection it was meant to be.
+  const both = await verdict('{ "faithful": false, "accessible": true, "problems": [{ "kind": "content_missing", "problem": "the third data row is absent" }] }');
+  assert.equal(both.ok, false);
+  assert.deepEqual(both.problems, ["the third data row is absent"]);
+});

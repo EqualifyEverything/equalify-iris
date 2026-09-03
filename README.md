@@ -1532,13 +1532,18 @@ the reply with a second object that carries the decision flag, and reading it tu
 verifier rejected for a missing table row into a confident pass — no problems, no `unjudged` marker,
 a plain `page_verify_ok` line, the one shape `pages_unjudged` cannot count. Two things close it. A
 reply that is nothing but its object is now read with the repair rule's colon case confined to keys,
-which is where JSON puts a colon after a string; that confinement is measured rather than assumed,
-because applying it to every candidate in the walk changes 14 of 4,100 bench replies and loses on all
-14 — a Reader verdict quoting `{"html":"…` in its prose gets a string that never closes and swallows
-the verdict, returning one issue instead of five. And because a fenced reply is beyond any one-pass
-reader, `verifyAgentOutput` now refuses to read anything carrying fewer than both boolean flags as a
-verdict: 1,342 of 1,342 readable verify replies in those logs carry both, so the check costs nothing
-measurable and converts a silent pass into a counted `unjudged` page.
+which is where JSON puts a colon after a string — and that reading is taken only where it recovers
+fields the ordinary walk lost. Both limits are measured. Applied to every candidate in the walk the
+narrow rule changes 14 of 4,100 bench replies and loses on all 14: a Reader verdict quoting
+`{"html":"…` in its prose gets a string that never closes and swallows the verdict, returning one
+issue instead of five. Its own weak case is a draft abandoned mid-string and restarted inline, where
+it returns the abandoned prose glued to the front of the page — so where the two readings carry the
+same fields, the walk's answer stands. And because a fenced reply is beyond any one-pass reader,
+`verifyAgentOutput` now refuses to read anything carrying fewer than both boolean flags as a verdict:
+1,342 of 1,342 readable verify replies in those logs carry both, so the check costs nothing measurable
+and converts a silent pass into a counted `unjudged` page. What it does cost is the opposite shape — a
+`faithful: false` reply that omits `accessible` no longer buys a correction — and that page is counted
+rather than corrected, which is the trade made knowingly.
 
 ## Automated code review
 

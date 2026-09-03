@@ -150,6 +150,23 @@ test("a reply that is only its object is read as that object, not as something q
     [[22, 23], [24]],
   );
 
+  // The narrow reading is also preferred only where it recovers FIELDS the walk lost — every key
+  // the walk found, plus at least one more. Its own failure case is a string the position tracker
+  // reads as a value where JSON meant a key, and an abandoned unterminated string is exactly what
+  // does that: here a draft the model gave up on mid-string and restarted inline. The walk reads
+  // the restart, which is the answer. The narrow rule reads one object whose `html` is the
+  // abandoned prose with `{"html": "` glued to the front — and that string is delivered to a
+  // reader as the page, which is the whole subject of this file. Same key set as the walk's, so
+  // the walk keeps it.
+  const restarted =
+    `{"html": "<p>Table 3 continues\n` +
+    `{"html": "<table><tr><th>Year</th></tr></table>", "log": "ok", "suggested_agent": null}`;
+  assert.equal(
+    extractJson<{ html?: string }>(restarted)?.html,
+    "<table><tr><th>Year</th></tr></table>",
+    "the abandoned draft's prose was read as the page",
+  );
+
   // And the limit, stated so it is not mistaken for coverage: wrap the same verdict in a fence or a
   // sentence and the decoy is the last readable object again. One pass cannot tell that reply from
   // a page printing `She said "hello", he replied`, so `verifyAgentOutput` refuses a verdict

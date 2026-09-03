@@ -57,26 +57,6 @@ export function extractJson<T = unknown>(text: string): T | null {
   } catch {
     // On to the candidates.
   }
-  // The same reply with the escaping slightly wrong: still nothing but one object, opening at the
-  // first character and closing at the last, and readable under the narrower colon rule described
-  // above `repairedSpan`. Taken here rather than in the walk because the walk's unit is a
-  // CANDIDATE, and at a candidate the narrow rule can succeed where the wide one failed and hand
-  // back a span that runs past the answer — which is how it loses four of five issues on the
-  // Reader replies that quote `{"html":"…` in their prose. Those replies open with that prose, so
-  // requiring the object to be the WHOLE reply excludes every one of them by construction, and
-  // over 4,100 bench replies this reads one shape differently and only one: the verify verdict
-  // whose `notes` quotes the contract back (#339). What it will not rescue is the same verdict
-  // inside a code fence — there the walk is the only reader, and it still returns the decoy.
-  if (whole.startsWith("{")) {
-    const span = repairedSpan(whole, 0, false);
-    if (span !== null && span.end === whole.length) {
-      try {
-        return JSON.parse(span.text) as T;
-      } catch {
-        // On to the candidates.
-      }
-    }
-  }
   let last: T | null = null;
   for (let i = text.indexOf("{"); i !== -1; ) {
     const read = readObjectAt<T>(text, i);
@@ -101,7 +81,56 @@ export function extractJson<T = unknown>(text: string): T | null {
     // missing the field it needs, which is the reported-failure path either way (#168).
     i = text.indexOf("{", i + 1);
   }
+  // Last chance for a reply that is nothing BUT one object — opening at the first character and
+  // closing at the last, which is what every one of these prompts asks for — whose escaping the
+  // walk could not repair. Read under the narrower colon rule described above `repairedSpan`, and
+  // taken only where it recovers FIELDS the walk lost: every key the walk found plus at least one
+  // more.
+  //
+  // Both halves of that condition are load-bearing, and each is a version of this change that
+  // shipped nothing. The narrow rule cannot go in the walk, because a candidate that newly parses
+  // moves the cursor: on 14 of the 4,100 agent replies in the bench logs a Reader verdict quoting
+  // `{"html":"…` in its prose gets a value-string that never closes, swallows the verdict behind
+  // it, and comes back with one issue in place of five — and putting the narrow rule in as a
+  // per-candidate FALLBACK loses the same 14 the same way. And the key test is not decoration: the
+  // narrow rule's own failure case is a string the tracker reads as a value where JSON meant a key,
+  // which is what an ABANDONED unterminated string does to it —
+  //
+  //   {"html": "<p>Table 3 continues\n{"html": "<table>…</table>", "log": "ok", …}
+  //
+  // a draft the model gave up on mid-string and restarted inline. The walk reads the restart, which
+  // is the answer; the narrow rule reads one object whose `html` is the abandoned prose with
+  // `{"html": "` glued to the front of it, and that string is delivered to a reader as the page
+  // (#168). Its key set is the same as the walk's, so the walk keeps it. What the narrow reading is
+  // for carries strictly more: `{ faithful, accessible, problems, notes }` where the decoy quoted
+  // inside `notes` had `{ faithful, problems }` (#339).
+  const recovered = wholeReplyObject<T>(whole);
+  if (recovered !== null && recoversMoreThan(recovered, last)) return recovered;
   return last;
+}
+
+// One object spanning the whole reply, read with the colon rule confined to keys. Null unless the
+// reply is exactly that: a `{` first, its match last, and JSON on the other side of the repair.
+function wholeReplyObject<T>(whole: string): T | null {
+  if (!whole.startsWith("{")) return null;
+  const span = repairedSpan(whole, 0, false);
+  if (span === null || span.end !== whole.length) return null;
+  try {
+    return JSON.parse(span.text) as T;
+  } catch {
+    return null;
+  }
+}
+
+// Does `recovered` carry everything the walk found and at least one field more? That is the only
+// case where the narrower reading is preferred, because it is the only case where the walk can be
+// shown to have lost something rather than read something differently.
+function recoversMoreThan(recovered: unknown, found: unknown): boolean {
+  if (found === null || typeof found !== "object") return true;
+  if (recovered === null || typeof recovered !== "object") return false;
+  const have = Object.keys(recovered);
+  const want = Object.keys(found);
+  return have.length > want.length && want.every((k) => have.includes(k));
 }
 
 // The entries of an array field that DID arrive complete, out of a reply that stopped partway
