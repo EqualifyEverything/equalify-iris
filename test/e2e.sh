@@ -1309,6 +1309,15 @@ echo "$q" | jq -e '.first_read.documents == .documents
 echo "$q" | jq -e '.unfinished_page_rate != null and .unfinished_page_rate > 0 and .unfinished_page_rate <= 1' >/dev/null \
   && pass "unfinished_page_rate is $(echo "$q" | jq -r '.unfinished_page_rate'), measured from the document step 9i delivered" \
   || fail "quality" "unfinished_page_rate=$(echo "$q" | jq -r '.unfinished_page_rate'), expected the marker from step 9i to be counted"
+# The heading gate's rate (#331). Asserted as a recorded 0 rather than a value, because that IS
+# the claim worth pinning here: no document in this run had a round refused for demoting a
+# heading, and a deployment where that is true must say 0 rather than omit the key — the weekly
+# report divides by nothing and a missing field reads to its `>` comparison as a silent pass.
+# Whether the gate fires when the editor does demote is `test/editor-patch.test.ts`, which can
+# make the editor answer that way; the mock here corrects nothing, so this run cannot.
+echo "$q" | jq -e '.editor_headings_gated_rate == 0' >/dev/null \
+  && pass "editor_headings_gated_rate is a recorded 0 — no round was refused for demoting a heading" \
+  || fail "quality" "editor_headings_gated_rate=$(echo "$q" | jq -r '.editor_headings_gated_rate'), expected 0 from a run whose editor made no edits"
 # A round is an EDITOR pass, not a reader pass: the loop returns as soon as the
 # Reader finds nothing, before incrementing, so a document that comes back clean on
 # the first look completes with 0 rounds and that is the good outcome. The mock model
@@ -1347,8 +1356,11 @@ done
 # about someone's document into a public issue. `mean_issues` and `unread_documents` (#313) are
 # the leaves of `first_read`, and are two counts and an average of counts — the obvious next
 # request of a mean is a distribution, and the obvious way to give it one is a sample, which
-# would name documents.
-allowed='["window_days","documents","since","mean_rounds","unresolved_rate","mean_issues","unread_documents","severity","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","where","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","unfinished_page_rate","id","impact","share","nodes"]'
+# would name documents. `editor_headings_gated_rate` (#331) is a share of documents like the
+# rates around it and carries no magnitude: how many headings a refused round would have taken
+# is on that session's run log, deliberately, because a count of a document's own structure is
+# a description of the document.
+allowed='["window_days","documents","since","mean_rounds","unresolved_rate","mean_issues","unread_documents","severity","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","where","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","editor_headings_gated_rate","unfinished_page_rate","id","impact","share","nodes"]'
 extra=$(echo "$q" | jq -c --argjson allowed "$allowed" '([paths(scalars) | last] | unique) - $allowed')
 [ "$extra" = "[]" ] \
   && pass "the payload's key set is exactly the documented one (no session id, login or document content)" \

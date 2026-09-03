@@ -10,6 +10,7 @@ import {
   PUBLIC_QUALITY_MIN_DOCUMENTS,
   SIGNAL_EDITOR_TRUNCATED,
   SIGNAL_EDITOR_TRUNCATED_LOST,
+  SIGNAL_EDITOR_HEADINGS_GATED,
   SIGNAL_LINKS_DROPPED,
   SIGNAL_LINKS_UNRESOLVED,
   SIGNAL_MARKUP_UNBALANCED,
@@ -862,6 +863,7 @@ test("nothing per-session, per-user or per-document is exposed", () => {
       [
         "documents",
         "documents_linted",
+        "editor_headings_gated_rate",
         "editor_truncated_lost_rate",
         "editor_truncated_rate",
         "first_read",
@@ -1032,6 +1034,42 @@ test("a truncation the sectioned retry rescued is counted as a cost, not as a lo
     // subtracted-and-equated, because 3/20 - 1/20 is 0.09999999999999999 in a double and this
     // assertion is about the pipeline, not about IEEE 754; the two counts are pinned above.
     assert.ok(q.editor_truncated_rate > q.editor_truncated_lost_rate, "a rescued truncation is not a lost one");
+  });
+});
+
+// Issue #331. The rate that goes UP when a guard is working, which is why it needs its own test
+// rather than a line in the one above: every other signal in this table counts something a delivered
+// document HAS, and this counts a round the loop threw away to keep a heading in one.
+test("a round refused for demoting a heading is counted on documents that shipped clean", () => {
+  withStore((store) => {
+    // Four documents, and the pairing that matters is on the first three: the editor tried to demote
+    // a heading, the round was refused, the retry corrected the document, and the Reader then found
+    // nothing left. So `iris:editor-headings-gated` sits beside `iris:review-stopped-clean` and no
+    // `iris:unresolved` row at all — which is the correct reading and the one that looks wrong at a
+    // glance. The fourth demoted every round and ran out of budget.
+    atFloor(store, (i) =>
+      i < 3
+        ? [{ code: SIGNAL_EDITOR_HEADINGS_GATED, count: 1 }, { code: reviewStoppedSignal("clean"), count: 1 }]
+        : i === 3
+          ? [
+              { code: SIGNAL_EDITOR_HEADINGS_GATED, count: 1 },
+              { code: reviewStoppedSignal("cap"), count: 1 },
+              { code: SIGNAL_UNRESOLVED, count: 1 },
+            ]
+          : [{ code: reviewStoppedSignal("clean"), count: 1 }],
+    );
+    const q = store.qualityStats();
+    assert.equal(q.editor_headings_gated_rate, 4 / 20, "per document, once however many rounds it took");
+    // A subset of nothing, which is the difference from the truncation pair above: three of these
+    // four documents are in no other numerator here, so a deployment reading this rate against
+    // `unresolved_rate` would see nothing at all.
+    assert.equal(q.unresolved_rate, 1 / 20);
+    // And `review_stopped` is what turns the rate into a decision. Three clean says the guard cost a
+    // round and bought a document; one `cap` says the editor could not get past it on that document,
+    // which is a question about the prompt rather than about the guard.
+    const stopped = new Map(q.review_stopped.map((s) => [s.where, s.documents]));
+    assert.equal(stopped.get("clean"), 19);
+    assert.equal(stopped.get("cap"), 1);
   });
 });
 

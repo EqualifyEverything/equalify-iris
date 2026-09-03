@@ -80,6 +80,21 @@ export interface ReviewResult {
   // threshold: the other rises with document length by itself, since the editor's answer is as
   // long as the document it is rewriting (#159).
   editorTruncatedLost: boolean;
+  // True when at least one correction round was refused because it would have taken heading
+  // elements out of the document with every word left in place (`headings_lost`, #331).
+  //
+  // The document is unharmed when this is true — that is what the refusal is for — so this is not a
+  // defect rate of the deliverable. It is the rate at which the editor tries it, which is the number
+  // #331 asks for and the only one that can say whether the gate is earning its retries or costing
+  // them: a deployment reading 0 here has a guard that never fires, and one reading 0.3 has an
+  // editor that would be flattening headings out of a third of its documents without it.
+  //
+  // Per DOCUMENT, not per round, and accumulated over the loop rather than read off its last round:
+  // the round is retried, so the body that ships is normally one a later round corrected cleanly,
+  // and by the exit nothing else in this result remembers that a heading was ever at risk. Also why
+  // it is here rather than derived from the run log — the log line is one session's, and these
+  // sessions are user uploads (see Store.recordRunSignals).
+  editorHeadingsGated: boolean;
   // How many windows of the document the LAST read of it came back with no usable answer
   // for — an unparseable reply, or one carrying no issue list this code can read (issue
   // #186). 0 on a document that was reviewed in full, which is almost all of them.
@@ -1284,6 +1299,16 @@ interface EditorRound {
   // because the sentence it would otherwise write ("the answer hit the ceiling partway through")
   // is the one thing that did not happen at that boundary.
   salvaged?: { edits: number; blocks: number; of: number; cutBack: boolean };
+  // How many heading elements this round would have taken out of the document, on the one round
+  // shape that is refused for it: every edit applied, nothing refused, the prose no shorter, and the
+  // delivered body left with fewer headings than it had (`headings_lost` in `applyEditorPatch`, #331).
+  //
+  // Present ONLY on that round, so it is not a general "headings moved" reading and must not be
+  // summed with anything: `usable` is false wherever this is set, which is what distinguishes it from
+  // the `navigation_lost` counters on the run log. The loop reads it to record that the editor did
+  // this at all — the retry that follows it usually succeeds, and then nothing else in the result
+  // says a heading was ever at risk.
+  headingsLost?: number;
 }
 
 // Under this contract a reply names one block per edit, so counting the key says how many edits the
@@ -1614,8 +1639,54 @@ function applyEditorPatch(
   // whether or not those edits were actually a pair. Both are ordinary corrections on their own —
   // this fires only where a reply ALREADY has a defect in it — so the cost of being wrong about the
   // pairing is one round, and the cost of being wrong the other way is in the deliverable.
+  //
+  // `headings_lost`: the third case, and the one that needs no refusal beside it (#331). The
+  // document came out of this round with fewer heading elements in it than it went in with, and
+  // every word of it still there. That is not a pairing this has to guess at — it is a measurement
+  // of the whole delivered body, so it says the heading is GONE from the document rather than moved
+  // within it, which is the reading the two conjuncts above cannot make.
+  //
+  // Why it gates where `items` and `rows` on the same field do not: content can land in a different
+  // announced structure with every word intact — `<ul>` -> `<dl>` is the correction agents/page.md
+  // asks for — and reading either as a loss would report a working round as damage. There is no
+  // sanctioned correction that removes a heading and keeps its text (`GATED` in patch.ts sets out
+  // the one exception, below). `<h2>Standby Pay.</h2>` -> `<p><strong>Standby Pay.</strong></p>` is
+  // not a reclassification into something else a reader can navigate by: it is a removal from the
+  // heading outline with a visual imitation left in its place. Nothing about the rendered page
+  // changes, no length pair moves, `destroyedBody` cannot see it — and screen-reader heading
+  // navigation loses the item permanently, because a truncation-free round is not looked at again.
+  //
+  // The measured round behind this: five `<h2>`s rewritten to `<p><strong>` on blocks no issue had
+  // named, `word_delta: 0`, text characters identical either side at 29,709, every guard in
+  // `patch.ts` passed, and the reason the reply gave for doing it was factually false (#331, from
+  // #329's editor round). `navigation_lost: {headings: 5}` went on the line below and gated nothing.
+  //
+  // What this costs when it is wrong, stated rather than compensated for. Two false positives are
+  // reachable and both are in `GATED`'s account: a heading corrected into a `<label>`, `<caption>`,
+  // `<dt>` or `<th>` inside the same wrapper block, which `structureCounts` cannot see as anything
+  // arriving; and a de-duplication thorough enough to leave the prose no shorter. Each costs one
+  // retried round, bounded by `max_review_iterations`, and a document whose editor does this every
+  // round is delivered as it entered with its issues in `@unresolved` — which is the loop's
+  // ordinary way of saying it could not fix something, and is the direction to be wrong in. The
+  // other way round is a heading that has left a document nobody will re-read.
+  //
+  // NOT read as `refusal_with_loss` although #331 proposed that shape: there is no refusal in this
+  // reply, and a log line naming one would send the next reader of it looking for the edit that was
+  // not used. Same treatment, own name.
+  //
+  // The narrower predicate #331 preferred — a heading fall in a block NO ISSUE NAMED — is not
+  // available here and could not be added in this file: `ReviewIssue` attributes an issue to source
+  // PAGES, not to blocks, and nothing in the pipeline binds an edit's block number to the issue that
+  // asked for it. So this is that issue's stated fallback, which is coarser in one direction only.
   const gaveUpContent = patched.deleted > 0 || patched.shrunk > 0;
-  const discarded = used === 0 && refused > 0 ? "all_refused" : refused > 0 && gaveUpContent ? "refusal_with_loss" : null;
+  const headingsLost = patched.navigation_lost.headings ?? 0;
+  const discarded = used === 0 && refused > 0
+    ? "all_refused"
+    : refused > 0 && gaveUpContent
+      ? "refusal_with_loss"
+      : headingsLost > 0
+        ? "headings_lost"
+        : null;
   ctx.log.event("editor_patch", {
     blocks: blocks.length,
     edits: raw.length,
@@ -1641,7 +1712,13 @@ function applyEditorPatch(
     // whether or not it counted as `shrunk`: only the headings part of it does (see `GATED`), and a
     // line carrying `navigation_lost` with no `shrunk` beside it is the population that would decide
     // whether a fall in the other two can ever be read as damage. Nothing on file measures that rate,
-    // so it is collected here before it is acted on.
+    // so the `items` and `rows` halves are still collected here before they are acted on.
+    //
+    // The `headings` half no longer is: since #331 it is the `headings_lost` predicate above, so a
+    // line carrying `navigation_lost: {headings: N}` also carries `discarded` and the round it
+    // describes was not applied. What is still worth reading off it there is N — one heading gone is
+    // a repeated title resolved a little too thoroughly and 84 is a document flattened, and the two
+    // say different things about the editor even though both are now refused.
     ...(Object.keys(patched.navigation_lost).length ? { navigation_lost: patched.navigation_lost } : {}),
     ...(discarded ? { discarded } : {}),
   });
@@ -1649,7 +1726,14 @@ function applyEditorPatch(
   // be used as this document — which lets the loop run another round rather than crediting the
   // unchanged body as a convergence. `edits: []` does not come through here, because nothing was
   // refused: that is an answer, and it converges.
-  if (discarded) return { body, usable: false };
+  //
+  // `headingsLost` travels with it on the one case that carries it, because the loop is the only
+  // place the deployment-wide count can be taken from: this round is retried, and the round that
+  // succeeds after it has nothing to say about the one that was refused (see
+  // `ReviewResult.editorHeadingsGated`).
+  if (discarded) {
+    return { body, usable: false, ...(discarded === "headings_lost" ? { headingsLost } : {}) };
+  }
   // #174's floor, on the JOINED body rather than on any one replacement. The patch contract makes
   // a catastrophic loss harder to reach — an untouched block cannot be lost, so only deletions
   // and shrunken replacements can move this — but "harder to reach" is not a guarantee, and the
@@ -2339,6 +2423,11 @@ export async function runReview(
   let droppedLinks = 0;
   let editorTruncated = false;
   let editorTruncatedLost = false;
+  // Whether any round in this loop was refused for demoting a heading (#331). A latch and not a
+  // count, for the reason `editorTruncatedLost` is a boolean: the rate is over documents, and "3 of
+  // 4 rounds" is not something a document-level rate can divide. How many headings each refused
+  // round would have taken is on that round's `editor_patch` line.
+  let editorHeadingsGated = false;
   // What the truncated round's section calls rescued, when there was one: the difference
   // between "this document was not corrected" and "it was corrected a piece at a time, and the
   // pieces could not see each other". The document says it in those terms and the store says it
@@ -2421,6 +2510,11 @@ export async function runReview(
         droppedLinks,
         editorTruncated,
         editorTruncatedLost,
+        // Reachable on THIS exit and worth saying why, because it reads like a contradiction: a
+        // round refused for demoting a heading is retried, the retry corrects the document, the
+        // Reader then finds nothing left and the document leaves by the clean exit. The document is
+        // clean and the editor still tried it, which is exactly the pair this field exists to keep.
+        editorHeadingsGated,
         // 0 by the guard above. Passed rather than written as a literal for the same reason
         // `editorTruncated` is: the field's value is the loop's, and a return that states it
         // itself is a place where the two can come apart.
@@ -2455,6 +2549,11 @@ export async function runReview(
     iterations++;
     const before = body;
     const round = await runEditor(ctx, body, issues);
+    // The round was refused for taking headings out of the document (#331). Latched here, ahead of
+    // every exit below, because this is the only place it is visible: the round is `usable: false`,
+    // so `body` does not move and the loop goes round again — and if the next round corrects the
+    // document cleanly, which is the expected outcome, nothing on the way out remembers this one.
+    if (round.headingsLost) editorHeadingsGated = true;
     // The round could not be answered as one response, and the next one would make the same
     // request against the same body — the response length follows the length of the document,
     // not the number of issues in it. So this is the loop's last round however it turned out:
@@ -2786,6 +2885,7 @@ export async function runReview(
     droppedLinks,
     editorTruncated,
     editorTruncatedLost,
+    editorHeadingsGated,
     unreviewedWindows: lastUnread,
     firstRead,
     // Whichever `break` above got here. Undefined is not a state this loop can reach today —
