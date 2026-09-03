@@ -391,8 +391,9 @@ function strictSpan(candidate: string, start: number): Span | null {
 // comma or a brace — `<p>She said "hello", he replied</p>` — which reads as a terminator and
 // fails the parse. That is the failure this had before, not a new one. It also bounds what the
 // whole-reply attempt fixes, and the bound is worth stating because a verdict is on the other side
-// of it. Four shapes still leave the decoy as the last readable object, all of them unchanged from
-// before this repair rather than opened by it:
+// of it. Three kinds of residual still leave the decoy as the last readable object — and the last of
+// them is a CLASS rather than a shape, so this list is not countable and said "four shapes" until the
+// bullet below was widened. All of them are unchanged from before this repair rather than opened by it:
 //
 //   * the same `notes` inside a code fence, or after a sentence of preamble — the reply no longer
 //     opens with `{`, so the whole-reply attempt does not apply to it at all;
