@@ -88,21 +88,36 @@ const START_TAG = /<([a-z][a-z0-9-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
 // the deprecated one, and rewriting it would edit a string nobody reads. (anchors.ts's source scan
 // takes the first of a repeated attribute for the same reason.)
 //
-// **A repeated `role` is DECLINED rather than edited, because removing the first PROMOTES the
-// second**, and that turns a removal into a gift. `<div role="doc-footnotes" role="main">` computes
-// to *generic* today — the parser keeps the invalid first value, so the element has no role — and
-// stripping it leaves `<div role="main">`, an element handed a landmark it never had. Through the
-// shipped gate that trades `aria-roles[critical]` for `landmark-main-is-top-level` and
-// `landmark-no-duplicate-main`. Every argument for this file is that removing an invalid role
-// changes nothing a reader is given; that holds of removing a token and not of promoting the next
-// attribute into effect, so the tag is left for the gate to report.
+// **Where the value loses every token and a second `role` follows it, the attribute is EMPTIED
+// rather than removed**, because removing it would PROMOTE the second and turn a removal into a
+// gift. `<div role="doc-footnotes" role="main">` computes to *generic* today — the parser keeps the
+// invalid first value, so the element has no role — and deleting the attribute leaves
+// `<div role="main">`, an element handed a landmark it never had; measured through the shipped gate,
+// that trades `aria-roles[critical]` for `landmark-main-is-top-level` and
+// `landmark-no-duplicate-main`. Leaving `role=""` in its place keeps the attribute the parser reads
+// in the position the parser reads it, so the second copy stays as inert as it already was: ARIA
+// treats a value with no valid token as no role at all, so the element computes to exactly what it
+// computes to today, and the gate reads it clean. Verified rather than reasoned —
+// `<div role="" role="main">` is clean, `<div role="main">` is two landmark violations.
+//
+// Emptying is what makes this file's argument hold on the shape, rather than an exception to it. The
+// argument is that removing an invalid role changes nothing a reader is given; it is about a role
+// TOKEN, and the token really does go. What must not change is which attribute the parser keeps.
+//
+// It is also why no implicit-role table is needed to tell a harmless promotion from a costly one.
+// The alternative was to permit the deletion where the promoted value is the host's own implicit
+// role (`listitem` on an `<li>`, `list` on a `<ul>`), which needs a table whose wrong entries hand
+// elements roles — and it would still have shipped a violation wherever it declined. Emptying is
+// clean on every shape measured: `<ol><li role="doc-endnote" role="listitem">` and
+// `<ul role="directory" role="list">` were delivered clean before this file located attributes by
+// walking, and are delivered clean again.
 type RoleAttr =
   // No `role` attribute, or one with no value — an empty role is ignored by ARIA and by the
   // gate, so there is nothing to remove.
   | { kind: "none" }
-  // The tag is left exactly as it arrived, for one of two reasons: a `role` whose value cannot be
-  // read to its end (the JSON-escaping leak's shape — see the comment at the call sites), or a
-  // repeated `role` whose first copy is the one that would be edited.
+  // The tag is left exactly as it arrived, because a `role` on it has a value that cannot be read to
+  // its end — the JSON-escaping leak's shape, see the comment at the call sites. Asked of every
+  // `role` on the tag and not only the first, so debris in a repeat declines it too.
   | { kind: "declined" }
   | {
       kind: "found";
@@ -115,6 +130,9 @@ type RoleAttr =
       dq?: string;
       sq?: string;
       bare?: string;
+      // Whether another `role` follows this one. It changes what an emptied value leaves behind and
+      // nothing else: the attribute must stay so the parser goes on reading THIS one.
+      repeated: boolean;
     };
 
 const WS = /\s/;
@@ -132,10 +150,10 @@ const SEP = /[\s/]/;
 
 function findRoleAttribute(attrs: string): RoleAttr {
   let first: (RoleAttr & { kind: "found" }) | null = null;
-  // Whatever the first `role` turns out to be, a second one means the first is the one the parser
-  // keeps and the one this would edit — so the edit would promote the second. Declining is the
-  // answer wherever that is discovered, which is why every `isRole` branch below asks.
-  const seen = () => (first === null ? null : ({ kind: "declined" } as const));
+  // The walk does not stop at the first `role`, because whether a second one follows decides what an
+  // emptied value may leave behind — and because a repeat with an unreadable value declines the tag
+  // just as the first one would.
+  let repeated = false;
   let i = 0;
   while (i < attrs.length) {
     const start = i;
@@ -151,7 +169,12 @@ function findRoleAttribute(attrs: string): RoleAttr {
     if (attrs[j] !== "=") {
       // A valueless attribute. `i` already sits after the name, so the next turn reads the
       // separator before whatever follows.
-      if (isRole) return seen() ?? { kind: "none" };
+      if (isRole) {
+        // A valueless FIRST `role` is the empty role the parser builds, which ARIA and the gate both
+        // ignore: there is no token to remove and nothing after it is reachable, so the walk is over.
+        if (first === null) return { kind: "none" };
+        repeated = true;
+      }
       continue;
     }
     j++;
@@ -180,12 +203,11 @@ function findRoleAttribute(attrs: string): RoleAttr {
       i = k;
     }
     if (isRole) {
-      const repeat = seen();
-      if (repeat) return repeat;
-      first = { kind: "found", index: start, whole, gap, ...value };
+      if (first === null) first = { kind: "found", index: start, whole, gap, repeated: false, ...value };
+      else repeated = true;
     }
   }
-  return first ?? { kind: "none" };
+  return first === null ? { kind: "none" } : { ...first, repeated };
 }
 
 // Splice a new `role` attribute — or nothing — into a start tag, by position. `attrs` is the
@@ -194,6 +216,24 @@ function findRoleAttribute(attrs: string): RoleAttr {
 function spliceAttr(tag: string, attrs: string, at: number, len: number, replacement: string): string {
   const attrsAt = tag.length - 1 - attrs.length;
   return tag.slice(0, attrsAt + at) + replacement + tag.slice(attrsAt + at + len);
+}
+
+// What the `role` attribute becomes once the tokens this pass refuses have gone. Shared by both
+// passes, because the three outcomes are a property of the attribute and not of which tokens went.
+//
+// The quoting style the page used is kept for the tokens that survive. A value that loses every
+// token loses the whole attribute, and the whitespace that introduced it with it, so nothing is
+// left behind saying anything about the element — except where another `role` follows, where the
+// attribute stays with an empty value, because deleting it would make the next one the parser's
+// choice. See the promotion paragraph at `RoleAttr`; the emptied form is what the element already
+// computes to and the gate reads it clean.
+function rewrite(kept: string[], found: RoleAttr & { kind: "found" }): string {
+  const { gap, dq, sq, repeated } = found;
+  const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : "";
+  if (kept.length > 0) return `${gap}role=${quote}${kept.join(" ")}${quote}`;
+  // Quoted even where the page wrote a bare value, because `role=` with nothing after it is not an
+  // empty value — the next attribute would be read as one.
+  return repeated ? `${gap}role=${sq !== undefined ? "''" : '""'}` : "";
 }
 
 export interface RoleStrip {
@@ -219,7 +259,7 @@ export function stripDeprecatedRoles(html: string): RoleStrip {
     // only reach it through a stray token that happened to be one of three names, but the
     // outcome would be the same mangling, so it declines for the same reason.
     if (found.kind !== "found") return tag;
-    const { whole, gap, dq, sq, bare, index } = found;
+    const { whole, dq, sq, bare, index } = found;
     const value = dq ?? sq ?? bare ?? "";
     // ARIA takes the first token it recognises, so a deprecated token after a good one is
     // already inert — removed anyway, because an inert token is still text in the file that
@@ -233,11 +273,7 @@ export function stripDeprecatedRoles(html: string): RoleStrip {
     });
     if (kept.length === tokens.length) return tag;
     nodes++;
-    // The quoting style the page used is kept for the tokens that survive; a value that
-    // loses every token loses the attribute and the whitespace that introduced it.
-    const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : "";
-    const replacement = kept.length === 0 ? "" : `${gap}role=${quote}${kept.join(" ")}${quote}`;
-    return spliceAttr(tag, attrs, index, whole.length, replacement);
+    return spliceAttr(tag, attrs, index, whole.length, rewrite(kept, found));
   });
   return { html: out, stripped, nodes };
 }
@@ -355,11 +391,11 @@ export function stripInvalidRoles(html: string): InvalidRoleStrip {
     // character out of the middle of an attribute leaves `<hr"doc-pagebreak\" …>` — markup mangled
     // worse than the violation it was fixing. The strip above can only reach that shape through a
     // stray token that happens to be one of three known names; this pass removes everything it does
-    // not recognise, so it meets the case on every leaked marker. A repeated `role` is declined
-    // here too, for the different reason given at `RoleAttr`: removing the first promotes the
-    // second, which is the one case where a removal GIVES the element a role.
+    // not recognise, so it meets the case on every leaked marker. Debris in a REPEATED `role`
+    // declines the tag too, for the same reason and not for the promotion one: a repeat whose value
+    // can be read is handled by emptying rather than deleting, at `rewrite`.
     if (found.kind !== "found") return tag;
-    const { whole, gap, dq, sq, bare, index } = found;
+    const { whole, dq, sq, bare, index } = found;
     const value = dq ?? sq ?? bare ?? "";
     const tokens = value.split(/\s+/).filter((t) => t.length > 0);
     const kept = tokens.filter((t) => {
@@ -381,9 +417,7 @@ export function stripInvalidRoles(html: string): InvalidRoleStrip {
     // takes the first token it recognises — so this case is not a violation the gate reported and
     // the edit changes nothing a reader is given. It is made anyway, for the reason the strip
     // above makes it: an inert token is still text in the file saying the wrong thing.
-    const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : "";
-    const replacement = kept.length === 0 ? "" : `${gap}role=${quote}${kept.join(" ")}${quote}`;
-    return spliceAttr(tag, attrs, index, whole.length, replacement);
+    return spliceAttr(tag, attrs, index, whole.length, rewrite(kept, found));
   });
   return { html: out, stripped, nodes };
 }

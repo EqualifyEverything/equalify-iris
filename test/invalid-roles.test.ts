@@ -326,13 +326,14 @@ test("a `role=` inside another attribute's value is prose, and is not an attribu
 // changed nothing about the document. The valueless case is the same rule — an empty role is
 // ignored, so the element has nothing invalid on it however the second copy is spelled.
 //
-// **The order that matters is the invalid one FIRST, and there the tag is declined, because
-// removing the first role PROMOTES the second.** That is the one case where this pass would not
-// remove something inert but hand the element a role it never had, which every argument in
-// roles.ts's headers says it does not do. The gate assertion below is the point: it is not that the
-// edit is untidy, it is that it trades one violation for two different ones and gives a `<div>` of
-// notes the document's main landmark.
-test("a repeated role is the first one, and removing it would promote the second", async () => {
+// **The order that matters is the invalid one FIRST, and there the attribute is EMPTIED rather than
+// deleted, because deleting it would PROMOTE the second.** Handing the element a role it never had
+// is the one thing every argument in roles.ts's headers rules out, and an empty value avoids it
+// without giving up the strip: ARIA treats a value with no valid token as no role at all, so the
+// element computes to what it computed to before, and the attribute stays where the parser looks.
+// The three gate readings below are the point — the arriving tag fails, the emptied tag is clean,
+// and the deleted tag trades one violation for two landmark ones.
+test("a repeated role is emptied rather than deleted, because deleting it would promote the second", async () => {
   const inert = '<li role="listitem" role="doc-notes">n</li>';
   assert.equal(stripInvalidRoles(inert).html, inert);
   assert.deepEqual(stripInvalidRoles(inert).stripped, []);
@@ -340,23 +341,42 @@ test("a repeated role is the first one, and removing it would promote the second
   assert.equal(stripInvalidRoles(valueless).html, valueless);
   const promoting = '<div role="doc-footnotes" role="main"><p>notes</p></div>';
   const strip = stripInvalidRoles(promoting);
-  assert.equal(strip.html, promoting, "declined, because the edit would put role=main into effect");
-  assert.deepEqual(strip.stripped, []);
-  assert.equal(strip.nodes, 0);
-  // What declining costs and what it avoids, both read off the shipped gate rather than argued.
-  const before = await rules(`<h1>M</h1>${promoting}`);
-  const after = await rules('<h1>M</h1><div role="main"><p>notes</p></div>');
-  if (before === null || after === null) return;
-  assert.ok(before.includes("aria-roles[critical]"), `the declined tag still fails the gate, got: ${before.join(", ")}`);
-  assert.ok(
-    after.some((v) => v.startsWith("landmark-")),
-    `stripping it would have introduced a landmark violation instead, got: ${after.join(", ") || "none"}`,
+  assert.equal(strip.html, '<div role="" role="main"><p>notes</p></div>');
+  assert.deepEqual(strip.stripped, ["doc-footnotes"]);
+  assert.equal(strip.nodes, 1);
+  // The quoting style follows the page's, and a bare value is quoted rather than left as `role=`,
+  // which would read the next attribute as the value.
+  assert.equal(
+    stripInvalidRoles("<div role='doc-footnotes' role='main'>n</div>").html,
+    "<div role='' role='main'>n</div>",
   );
-  assert.ok(!after.includes("aria-roles[critical]"), "and the promoted role is valid, so nothing reports the swap");
-  // The deprecated strip declines the same shape for the same reason: `doc-endnote` is reported at
-  // minor, and promoting `main` past it is a worse document than the one that arrived.
-  const dep = '<li role="doc-endnote" role="main">n</li>';
-  assert.equal(stripDeprecatedRoles(dep).html, dep);
+  assert.equal(stripInvalidRoles("<div role=doc-footnotes role=main>n</div>").html, '<div role="" role=main>n</div>');
+  // All three readings off the shipped gate rather than argued.
+  const before = await rules(`<h1>M</h1>${promoting}`);
+  const emptied = await rules(`<h1>M</h1>${strip.html}`);
+  const deleted = await rules('<h1>M</h1><div role="main"><p>notes</p></div>');
+  if (before === null || emptied === null || deleted === null) return;
+  assert.ok(before.includes("aria-roles[critical]"), `the arriving tag fails the gate, got: ${before.join(", ")}`);
+  assert.deepEqual(emptied, [], `the emptied tag is clean, got: ${emptied.join(", ")}`);
+  assert.ok(
+    deleted.some((v) => v.startsWith("landmark-")),
+    `deleting it would have introduced a landmark violation instead, got: ${deleted.join(", ") || "none"}`,
+  );
+  assert.ok(!deleted.includes("aria-roles[critical]"), "and the promoted role is valid, so nothing reports the swap");
+  // The deprecated strip empties for the same reason — and there this is also what `main` delivered,
+  // by deleting the first token's attribute and leaving `role="listitem"` behind. Both readings are
+  // clean, so locating the attribute by walking costs that pass nothing on this shape.
+  const dep = stripDeprecatedRoles('<ol><li role="doc-endnote" role="listitem">n</li></ol>');
+  assert.equal(dep.html, '<ol><li role="" role="listitem">n</li></ol>');
+  assert.deepEqual(dep.stripped, ["doc-endnote"]);
+  const depBefore = await rules('<ol><li role="doc-endnote" role="listitem">n</li></ol>');
+  const depAfter = await rules(dep.html);
+  if (depBefore === null || depAfter === null) return;
+  assert.deepEqual(depBefore, ["aria-deprecated-role[minor]"]);
+  assert.deepEqual(depAfter, [], `the emptied tag is clean, got: ${depAfter.join(", ")}`);
+  // A second pass over a delivered body changes nothing: an empty value has no tokens to strip.
+  assert.equal(stripInvalidRoles(dep.html).html, dep.html);
+  assert.equal(stripDeprecatedRoles(dep.html).html, dep.html);
 });
 
 // A solidus between attributes is a separator, not part of a name. The parser treats an unexpected
