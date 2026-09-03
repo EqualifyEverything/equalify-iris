@@ -44,3 +44,81 @@ test("the verify task judges HTML against the agent's contract, not the image al
     assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
   }
 });
+
+// #347: the general clause above was not enough for one case, so that case is named. On the nine
+// legend-bearing figure pages of a 100-page corpus the extraction read the shading key correctly
+// and the verifier talked it out of it — "invented text not present as a legend label" against a
+// `<dd>` describing the ink, twice, and the compliant correction deleted the description. The
+// three serious accessibility violations in that arm's whole output were all created by the repair
+// rather than found by it, and the verify-and-correct pair was 63.7% of what those pages cost.
+//
+// It is the same shape as the page-break marker above — output the contract demands, read as
+// infidelity — but it needed naming rather than deriving, because the contract's own first clause
+// ("never supply an expansion the page does not state") appears to forbid exactly what its `<dl>`
+// clause requires here. A verifier applying the general rule reaches the prohibition first.
+//
+// The hedge half is the more expensive one. On `acir-p077` the extraction wrote "none visibly
+// distinct from medium in this reproduction", which measurement off the source image confirms is
+// the correct answer — the page's two light bands are 33 luminance units apart under a 113-unit
+// lighting vignette — and the verifier called it "factually wrong", named thirteen states as the
+// lightest shade of which seven carry the darkest fill, and bought the correction that installed
+// it. Nothing downstream can see this: the corrected page is well-formed, specific and false, and
+// every automated gate passes it.
+test("the verify task will not score a described swatch as invented, or overturn a stated hedge", () => {
+  for (const [what, re] of [
+    ["the case is named rather than left to the general clause",
+      /A graphical key is where that goes wrong most expensively, so it is named here/],
+    ["a description of the ink is the transcription, because the page prints no words for it",
+      /the page prints no words for that half, so a description of the ink standing as the term of the legend IS the transcription the contract asks for and is not invented text/],
+    // Bounded to the invention framing it is aimed at. Unqualified, "do not send it back for naming
+    // a shade the page does not name" also covers a shade named WRONGLY — which on this corpus is
+    // the commonest defect of all, since the page names none of the tones in words — so the literal
+    // reading told the verifier to leave a mis-read tone standing. The clause below is what it is
+    // for; that one is what it is not for.
+    ["the prohibited report is bounded to the invention framing",
+      /do not send it back AS INVENTED TEXT for naming a shade the page does not name/],
+    ["a count of the key's entries in the same description is covered on the same terms",
+      /A count of the key's entries carried in the same description is the contract too, on the same terms/],
+    // The root cause on p077: both agents assumed the legend's tones ran in the order of its
+    // labels. Measured, they do not — 26, then 176, then 143 — so the assumption was written into
+    // the markup as fact by the extraction and enforced as fact by the verifier. Pinned with its
+    // kind, because this rule's job is to make one report clearly available while another is
+    // withdrawn, and a verifier told only what NOT to file files nothing.
+    ["what the contract does not sanction is named, so a mis-read tone stays reportable",
+      /What the contract does not sanction is the tone being read off the order of the labels beside the swatch rather than off the swatch, which is frequently not the order the shades run in — a wrongly named shade is a real problem, and it is "content_wrong"/],
+    ["a stated uncertainty is the contract being followed, and is checked before it is contradicted",
+      /that hedge is the contract being followed — check it against the image before contradicting it/],
+    ["and is never replaced by a confident assignment the verifier cannot see well enough to make",
+      /never replace a stated uncertainty with a confident assignment you cannot see well enough to make/],
+    // Symmetry, and it is the half a shield alone would cost. Protecting a hedge without also
+    // licensing a verifier that CAN see through it makes an unclassified item nearly unfalsifiable,
+    // so it becomes the cheapest answer the page agent has and the gap ships. `prd.md` §7.4 v1.10
+    // takes the trade knowingly in the other direction — a gap the page admits beats a confident
+    // assignment to the wrong band — which is a reason to bound the shield, not to omit it.
+    ["a hedge is falsifiable, and a verifier that can tell the shades apart says which",
+      /A hedge is not unfalsifiable, though: where you CAN tell the two apart, say so and say which is which, because an item left unclassified is a gap in the delivered page and a hedge nobody checks is the cheapest wrong answer available/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
+  }
+});
+
+// Also #347, and the generalizable half of it. `correctPage` is told to resolve every problem and
+// change nothing else, so each problem string is a licence — and the licence is shaped by the
+// REASON, not only by the target. p093's third problem said a phrase in the markup was "invented
+// text not present as a legend label". The phrase is the legend's own printed heading, set in two
+// lines inside the legend box, and the correction deleted it. "This is a heading glued to the
+// first label" would have licensed moving those words; "this text is not on the page" licenses
+// only removing them. Same page, same words, opposite repairs, and the difference is entirely in
+// the sentence the verifier chose.
+test("the verify task states that a problem's reason is part of the licence it grants", () => {
+  for (const [what, re] of [
+    ["the reason is named as part of the licence rather than as commentary",
+      /The REASON you give is part of that licence and not commentary on it/],
+    ["with the two repairs a right finding can buy, contrasted",
+      /"this heading sits at the wrong level" licenses moving it, while "this text is not on the page" licenses only deleting it/],
+    ["and the consequence, so the rule is not read as a style note",
+      /a right finding with a wrong reason buys the wrong repair. Say what you saw and where, not what you infer it means/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
+  }
+});

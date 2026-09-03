@@ -1576,6 +1576,28 @@ removes the class is the prompt clause asking for no quoted JSON in `notes` at a
 clause is not treated as decoration. Both an empty and a non-empty instance are pinned as
 failing-by-design assertions in `test/envelope-as-content.test.ts`.
 
+**A rejection can be wrong in a way no gate downstream can see, and the reason it gives decides the
+repair.** On the nine legend-bearing figure pages of a 100-page document the extraction read the
+shading key correctly and the verify-and-correct pair — 63.7%–76.0% of what those pages cost —
+removed it: two of three verify calls read a `<dd>` describing a swatch as the invented expansion
+`agents/page.md`'s abbreviation rule forbids, and the compliant correction deleted it, so the only
+three serious accessibility violations in that arm's whole output were created by the repair rather
+than found by it (issue #347). On one page the verifier also overturned the extraction's own hedge —
+*"none visibly distinct from medium in this reproduction"*, which measurement off the source image
+confirms is correct, the two light bands being 33 luminance units apart under a 113-unit vignette —
+and named thirteen states as the lightest shade of which seven carry the darkest fill, at 48.6% of
+that page's cost. `agents/feedback.md` now names the case: a description of ink standing as a
+legend's term is the transcription the contract asks for, a swatch's tone is read off the swatch and
+not off the order of the labels, and a stated uncertainty is checked against the image before it is
+contradicted. It also says that a problem's **reason** is part of the licence `correctPage` acts on
+and not commentary on it — the same page's third problem called the legend's printed two-line
+heading "invented text not present as a legend label" and the correction deleted it, where "a
+heading glued to the first label" would have licensed moving those words. Nothing else could catch
+any of this: the corrected page is well-formed, specific and false, and every automated gate passes
+it. Pinned in `test/feedback-prompt.test.ts`; the page-agent half, and the cover-page clause
+ordering that came with it (issue #351), are in `prd.md` §7.4 v1.10 and
+`test/page-prompt.test.ts`.
+
 ## Automated code review
 
 Every PR is reviewed by Claude in CI before a human reads it

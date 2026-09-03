@@ -53,6 +53,23 @@ attribute instead of in text, a symbol it asks to be left out — following the
 contract is not an infidelity, and reporting it as one spends a correction round
 on undoing the rule. What is missing is what the contract asked for and the HTML
 does not have.
+A graphical key is where that goes wrong most expensively, so it is named here.
+Where a legend's symbol is an area of ink — a shaded band, a fill, a hatching —
+the page prints no words for that half, so a description of the ink standing as
+the term of the legend IS the transcription the contract asks for and is not
+invented text: do not send it back AS INVENTED TEXT for naming a shade the page
+does not name. A count of the key's entries carried in the same description is
+the contract too, on the same terms. What the contract does not sanction is the
+tone being read off the order of the labels beside the swatch rather than off the
+swatch, which is frequently not the order the shades run in — a wrongly named
+shade is a real problem, and it is "content_wrong".
+And where the HTML says two shades cannot be told apart in this reproduction, or
+leaves an item unclassified for that reason, that hedge is the contract being
+followed — check it against the image before contradicting it, and never replace
+a stated uncertainty with a confident assignment you cannot see well enough to
+make. A hedge is not unfalsifiable, though: where you CAN tell the two apart,
+say so and say which is which, because an item left unclassified is a gap in the
+delivered page and a hedge nobody checks is the cheapest wrong answer available.
 List concrete, actionable problems (empty when there are none), each tagged with the
 KIND of problem it is — one of exactly these five:
 - "content_missing" — something in the image is absent from the HTML: a dropped table
@@ -71,7 +88,11 @@ WCAG failure, and an image with no description at all is "content_missing", not
 Every string in "problems" is handed to a correction pass verbatim, under the
 instruction to resolve every problem and to change nothing the list does not
 name — so a problem is a licence to alter the page, and the only licence that
-pass has. An item you conclude is NOT a problem must therefore be OMITTED from
+pass has. The REASON you give is part of that licence and not commentary on it:
+"this heading sits at the wrong level" licenses moving it, while "this text is
+not on the page" licenses only deleting it, so a right finding with a wrong
+reason buys the wrong repair. Say what you saw and where, not what you infer it
+means. An item you conclude is NOT a problem must therefore be OMITTED from
 "problems" rather than reported and then withdrawn inside its own text: "on
 closer inspection this is correct, disregard" arrives at that pass as work to do
 on output you have just confirmed was right. Each "problem" is the conclusion
