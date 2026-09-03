@@ -620,7 +620,9 @@ agent numbers 5 of 91 markers by file position instead of the printed folio, aga
 own prompt. The verifier swap recommended above is worth about **$1.61 per 100 document pages** —
 $0.0177 per page *judged* under the deployed corrector, and only ≈91 of every 100 pages are judged
 since #294 stopped sending blank versos; under the incumbent corrector the same swap is worth **$0.11**,
-which is the ~15x spread §7's eighth limit is about. These are
+a ≈15x spread in dollars, which §7's eighth limit states as 2.0% against 50.9% — a ≈25x spread,
+because the two percentages carry different denominators. Two correct ratios of the same two arms,
+and neither is a substitute for the other. These are
 defects a reader can catch the service out on, and fixing the extraction is worth more than changing
 who grades it — the same conclusion §5 reaches from the other direction, where the swap that saved
 44.8% is also the one that lost the subtotal rows.
