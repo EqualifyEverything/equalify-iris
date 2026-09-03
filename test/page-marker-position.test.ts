@@ -354,6 +354,44 @@ test("a marker whose start tag cannot be read to its end is declined", () => {
   assert.deepEqual(report.stripped, []);
 });
 
+test("a repeated aria-label loses every copy, not the one the parser keeps", () => {
+  // Deleting the first copy promotes the second into its place, which is the promotion `roles.ts`
+  // answers by emptying a value instead. Here the whole attribute goes, however many there are — and
+  // the reason it matters is the report: `stripped` is the only trace this check leaves, so a page
+  // that went on announcing 52 while the line said the label was removed would have a round reading a
+  // claim about a document that does not say that. Also covers the self-closing spelling, whose `/`
+  // the scan reads as part of the attribute text and which has to come back out intact.
+  const twice = `<hr role="doc-pagebreak" aria-label="Page 52" aria-label="Page 52" id="page-2"/><p>x</p>`;
+  const pages: MarkerPage[] = [{ order: 2, name: "acir-p052.png", html: twice }, ...body({}, 51).slice(2)];
+  const { pages: out, report } = stripPositionalMarkers(pages);
+  assert.deepEqual(report.stripped, ['page 2: "Page 52" → 38']);
+  assert.equal(out[0], `<hr role="doc-pagebreak" id="page-2"/><p>x</p>`, "a copy of the label survived");
+  assert.doesNotMatch(out[0]!, /aria-label/, "the report claimed a removal that did not happen");
+});
+
+test("the removals report their own shape, so a restart is separable from a leak", () => {
+  // The blind spot this cannot act on: one PDF concatenating two reports, A printing 1-6 and B
+  // printing 1-20, Iris rasterizing it itself. The majority holds offset 6, A's six true labels
+  // depart from it and repeat their filenames, and the refusal cannot fire because none of the
+  // agreeing markers is positional. Six correct page numbers go. What `departures` adds is that the
+  // shape is on the record: a block of consecutive positions with no surviving label in it, which is
+  // a restart's signature, against the interleaved single removal a leak produces.
+  const concat: MarkerPage[] = Array.from({ length: 26 }, (_, i) =>
+    page(i + 1, `two-reports-p${i + 1}.png`, `Page ${i < 6 ? i + 1 : i - 5}`),
+  );
+  const { report } = stripPositionalMarkers(concat);
+  assert.equal(report.stripped.length, 6, "the accepted trade-off changed shape");
+  assert.deepEqual(report.departures, ["arabic: 6 removed at offset 0, pages 1-6 (every marker in that span)"]);
+
+  // The defect itself, on the same field: one removal, and no span clause, because the labels either
+  // side of it survived and are what convicted it. Its offset is -50 and not 0, because the number it
+  // repeated is its filename's rather than its position — the two are 50 apart in a batched round, and
+  // that difference is the whole reason the filename is what gets tested.
+  const { report: leak } = stripPositionalMarkers(body({ 2: "Page 52" }, 51));
+  assert.deepEqual(leak.stripped, ['page 2: "Page 52" → 38']);
+  assert.deepEqual(leak.departures, ["arabic: 1 removed at offset -50, page 2"]);
+});
+
 test("an aria-label is never located by searching for it", () => {
   // The attributes are walked in parser order, not searched for, because the values on these
   // elements are prose out of a document: an `alt` that mentions `aria-label=` would otherwise have

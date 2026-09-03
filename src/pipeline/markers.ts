@@ -66,8 +66,11 @@
 //   - A document whose ARABIC numbering restarts partway through, where the minority run's folios
 //     coincide with the numbers in their own filenames while the majority's do not. Those labels are true
 //     and are removed, because from here they are indistinguishable from the defect: the label repeats a
-//     number Iris handed the model and the majority of the document contradicts it. The per-system offset
-//     counts are logged so that a corpus which pays for this can say so with data. The commoner shapes of
+//     number Iris handed the model and the majority of the document contradicts it. It is an active
+//     removal of true labels and not a missed leak, so `departures` reports the shape the removals form:
+//     a restart takes out a block of consecutive positions with no surviving label among them, a leak is
+//     interleaved with the labels that contradict it, and a corpus which pays for this can count the two
+//     apart even though the check cannot act on the difference. The commoner shapes of
 //     this are caught: where the honest majority repeats its filenames too, the system is refused
 //     outright, and sectioned numbering — the usual way a document restarts per chapter — is unreadable
 //     above.
@@ -168,12 +171,18 @@ function attr(list: Attr[], name: string): Attr | undefined {
   return list.find((a) => a.name === name);
 }
 
-// Splice over a range of the attribute text, by position. `attrs` is the last thing in the tag before
-// its `>`, so its offset is fixed by the two lengths; nothing is searched for, so a value that happens
-// to contain the attribute text cannot be edited instead.
-function spliceAttrs(tag: string, attrs: string, at: number, len: number, replacement: string): string {
-  const attrsAt = tag.length - 1 - attrs.length;
-  return tag.slice(0, attrsAt + at) + replacement + tag.slice(attrsAt + at + len);
+// Cut ranges out of a start tag's attribute text, by position. `attrs` is the last thing in the tag
+// before its `>`, so the prefix carrying the element's name is fixed by the two lengths and everything
+// else in the tag — including a trailing `/`, which the scan reads as part of the attribute text — is
+// carried through untouched. Nothing is searched for, so a value that happens to contain the attribute
+// text cannot be edited instead. Cut from the back, so the positions read off the original text still
+// hold as the text shrinks under them.
+function cutAttrs(tag: string, attrs: string, cuts: { index: number; length: number }[]): string {
+  let text = attrs;
+  for (const cut of [...cuts].sort((a, b) => b.index - a.index)) {
+    text = text.slice(0, cut.index) + text.slice(cut.index + cut.length);
+  }
+  return tag.slice(0, tag.length - 1 - attrs.length) + text + ">";
 }
 
 const PAGE_BREAK = "doc-pagebreak";
@@ -306,9 +315,14 @@ function stripLabels(html: string, occurrences: Set<number>): string {
     const role = attr(list, "role");
     if (!role || !role.value.split(/\s+/).some((t) => t.toLowerCase() === PAGE_BREAK)) return tag;
     const at = occurrence++;
-    const label = attr(list, "aria-label");
-    if (!label || !occurrences.has(at)) return tag;
-    return spliceAttrs(tag, attrs, label.index, label.length, "");
+    // Every copy of the attribute, not the one the parser keeps. Deleting only the first promotes a
+    // repeated `aria-label` into its place, so a model that wrote the label twice would go on announcing
+    // the number while `stripped` reported it removed — and that line is the only trace this leaves, so a
+    // round would be reading a claim about a page that still says 52. `roles.ts` answers the same
+    // promotion problem by emptying the value; here the whole attribute goes, however many there are.
+    const labels = list.filter((a) => a.name === "aria-label");
+    if (labels.length === 0 || !occurrences.has(at)) return tag;
+    return cutAttrs(tag, attrs, labels);
   });
 }
 
@@ -338,6 +352,15 @@ export interface MarkerReport {
   // One entry per label removed, `page 52: "Page 52" → 38`, with the derived folio omitted where the
   // derivation names a number below 1.
   stripped: string[];
+  // The SHAPE the removals form, one entry per offset they sat at: `arabic: 1 removed at offset 0,
+  // page 2`, against `arabic: 6 removed at offset 0, pages 1-6 (every marker in that span)`. This is
+  // what separates the defect from the blind spot below it, because both log removals beside one derived
+  // offset and nothing else here tells them apart. A leak is interleaved with the labels that contradict
+  // it; a document whose numbering restarts with the leading run in the minority takes out a block of
+  // consecutive positions with no honest label among them, which is a restart's signature and not a
+  // model's. The check acts either way — it cannot read a signature — but a corpus round paying for this
+  // can now count the two apart.
+  departures: string[];
   // Readable labels that disagree with their system's offset and were NOT touched, because they repeat
   // no number in the page's own filename: a page printing `ix` labelled `Page 9` is
   // one. A wrong label all the same, and this count is the only trace of it — nothing here can tell a
@@ -369,6 +392,7 @@ export function emptyMarkerReport(): MarkerReport {
     unreadable: 0,
     systems: [],
     stripped: [],
+    departures: [],
     offMode: 0,
     undecided: 0,
     unchecked: 0,
@@ -428,6 +452,7 @@ export function stripPositionalMarkers(pages: MarkerPage[]): { pages: string[]; 
     report.systems.push(`${system}: offset ${mode.offset} on ${mode.agreed} of ${mine.length}`);
   }
   const strip = new Map<number, Set<number>>();
+  const cuts = new Map<string, { system: Numerals; offset: number; pages: number[] }>();
   for (const m of all) {
     if (!m.folio) {
       report.unreadable++;
@@ -453,6 +478,22 @@ export function stripPositionalMarkers(pages: MarkerPage[]): { pages: string[]; 
     const mine = strip.get(m.page) ?? new Set<number>();
     mine.add(m.occurrence);
     strip.set(m.page, mine);
+    const key = `${m.folio.system} ${offset}`;
+    const cut = cuts.get(key) ?? { system: m.folio.system, offset, pages: [] };
+    cut.pages.push(m.page);
+    cuts.set(key, cut);
+  }
+  for (const cut of cuts.values()) {
+    const first = Math.min(...cut.pages);
+    const last = Math.max(...cut.pages);
+    // Every marker of that system inside the span, so the entry can say whether the removals took all of
+    // it — a block with no surviving label in it — or sit among labels that disagreed with them.
+    const inSpan = all.filter((m) => m.folio?.system === cut.system && m.page >= first && m.page <= last).length;
+    report.departures.push(
+      `${cut.system}: ${cut.pages.length} removed at offset ${cut.offset}, ` +
+        (first === last ? `page ${first}` : `pages ${first}-${last}`) +
+        (first !== last && inSpan === cut.pages.length ? " (every marker in that span)" : ""),
+    );
   }
   return {
     pages: pages.map((p) => {

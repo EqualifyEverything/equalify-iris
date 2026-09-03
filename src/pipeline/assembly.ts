@@ -656,6 +656,7 @@ export async function runAssembly(
       unreadable: markers.unreadable,
       systems: markers.systems,
       stripped: markers.stripped,
+      departures: markers.departures,
       off_mode: markers.offMode,
       undecided: markers.undecided,
       unchecked: markers.unchecked,
