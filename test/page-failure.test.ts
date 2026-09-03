@@ -388,6 +388,7 @@ test("a re-extraction cannot blank a page the document has content for", async (
     assert.equal(refused.length, 1);
     assert.equal(refused[0].data.page, 2);
     assert.equal(refused[0].data.chars_kept, "<p>prior 2</p>".length);
+    assert.equal("blank_stated" in refused[0].data, false, "this declaration was made in prose");
     assert.equal(ev(rec, "page_blank").length, 0, "nothing recorded the page as blank");
     assert.equal(ev(rec, "page_extraction_failed")[0].data.kept, "prior");
     assert.deepEqual(ev(rec, "reextract_complete")[0].data, {
@@ -415,6 +416,26 @@ test("a re-extraction cannot blank that page by writing the declaration as marku
     assert.equal(refused[0].data.chars_kept, "<p>prior 2</p>".length);
     // And what arrived instead, so the line says which spelling walked into the refusal.
     assert.equal(refused[0].data.dropped, "<!-- Page 2: blank page -->");
+    assert.equal(ev(rec, "page_blank").length, 0);
+    assert.equal(ev(rec, "page_extraction_failed")[0].data.kept, "prior");
+  });
+});
+
+test("a re-extraction that STATES the page is blank is refused too, and the line says the field was sent", async () => {
+  await withTemp(async (dir) => {
+    // The field cannot reach content Iris already holds either (#371): the refusal is on the
+    // declaration, not on how it was spelled. What is new is that the line has to say the field was
+    // used — a model stamping `"blank": true` on pages the document has content for is the misuse the
+    // prompt warns about, and a run that recorded the field only where it was believed could not see it.
+    const stated = JSON.stringify({ html: "", log: "Page 2 is blank.", blank: true });
+    const { ctx, rec } = makeCtx(dir, 3, [], truncated, (o) => (o === 2 ? stated : undefined));
+    const { fragments, failedPages } = await reExtractPages(ctx, [prior(1), prior(2), prior(3)], [2, 3]);
+    assert.deepEqual(failedPages, []);
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "<p>prior 2</p>", "the content is still there");
+    const refused = ev(rec, "page_blank_refused");
+    assert.equal(refused.length, 1);
+    assert.equal(refused[0].data.blank_stated, true);
+    assert.equal(refused[0].data.chars_kept, "<p>prior 2</p>".length);
     assert.equal(ev(rec, "page_blank").length, 0);
     assert.equal(ev(rec, "page_extraction_failed")[0].data.kept, "prior");
   });

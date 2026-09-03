@@ -177,6 +177,16 @@ answers: where there are marks on the paper you could not resolve, that is [not 
 element it belongs to, and where you returned only part of a page, that is [page not fully
 transcribed]. An empty "html" says the paper is empty, and it is read that way.
 
+Say it in the reply's shape as well as in words: put "blank": true beside the empty "html". That field
+is the answer, and the sentence in your log is only read to check it. Without the field there is
+nothing to check and the sentence has to decide the page on its own, which is a machine reading your
+English — "No text, images, tables, or other document content is visible" was read as an assertion
+that content IS visible, because a word stood between the "No" and the noun it denies, and the page
+was thrown away. So the field on a page with nothing on it is what keeps that page in the document.
+Put it on no other page. "blank": true is not a way of saying a page was hard to read or that you
+returned little: it says the paper is empty, and on a page that is not, it costs a reader everything
+the page held.
+
 A page whose only printed content is its own number is one of those pages. The folio is not content
 here: the rule above forbids transcribing it as text, and the marker its number may be carried in is
 not delivered, so a sheet printing nothing but a page number has nothing on it a reader receives — and
@@ -187,9 +197,15 @@ nobody transcribed.
 
 Say that and nothing else in the same breath. A log that reports the page blank and then names
 something on it — a heading, a caption, a signature, handwriting, an image — contradicts the answer
-it is attached to, and the contradiction is what gets believed: the reply is refused and the page is
-reported as one nobody transcribed, which is a worse outcome for it than either half of the log
-alone. Anything on the paper worth naming in the log is worth putting in "html", and anything you
+it is attached to. With "blank": true on the reply the field is believed and the page is delivered
+empty, but naming content still costs it: the page is looked at again, and where that second look
+finds the thing you named, it is rendered again. Without the field, the contradiction is what gets
+believed: the reply is refused and the page is reported as one nobody transcribed, which is a worse
+outcome for it than either half of the log alone. The one thing the field does not carry past is
+doubt — a log that hedges the blankness it declares ("appears blank, though the scan is very faint")
+or describes an image too dark or too poor to read is a page you could not read, and it is read that
+way with the field or without it, because a page nobody could see is not a page with nothing on it.
+Anything on the paper worth naming in the log is worth putting in "html", and anything you
 could see but not read is worth [not legible] inside the element it belongs to. Describing the
 specks and dust that establish a page IS empty is not naming content and is welcome; naming
 something you read is the answer to a different question than the one you just gave. The page's own
@@ -693,7 +709,11 @@ is a page that ships as a stub.
 Respond with ONLY this JSON:
 { "html": "<accessible HTML for the whole page — body content only, no duplication>",
   "log": "notes, e.g. content cut off at an edge",
-  "suggested_agent": { "name": "lowerCamelCase", "reason": "why a specialist is warranted" } }`;
+  "blank": true,
+  "suggested_agent": { "name": "lowerCamelCase", "reason": "why a specialist is warranted" } }
+
+"blank" belongs on a page with nothing on it and on no other page: omit it everywhere else rather
+than sending false, and never send it for a page you could not read.`;
 
 export interface ExtractionResult {
   fragments: Fragment[];
@@ -1390,12 +1410,51 @@ function deniesAfterResolveObject(log: string, start: number): boolean {
 const HARD_DOUBT =
   /\b(illegible|unreadable|could ?n[o']?t|can ?not|can'?t|unable|failed|truncat\w*|too \w+ to|too (low|light|dark|faint|poor|noisy|blurry|grainy)|obscur\w*|hidden|corrupt\w*|error|did ?n[o']?t load|not load\w*|though|although|however|uncertain|not (entirely |fully )?(sure|certain))\b/i;
 
+// A phrase naming the thing the model was HANDED, which is not a thing on the page. The reply is
+// written about an image of a page, so "visible in the image" locates the specks on the scan: the noun
+// is the substrate. `TEXT_NOUN` lists `images?` and `figures?` because both name page objects too — "an
+// image is visible" is a page with a picture on it — and that is the right reading everywhere except
+// inside `MARKS_GAP`, where a name for text between a marks noun and its denial is exactly what says
+// the denial is about the text rather than the marks. So `image` standing in the middle of #343's log,
+// "Contains only minimal dust/specks visible in the image; no printed content, no page number, no marks
+// that resolve into characters", broke that anchor, and the denial's own verb was left to veto the page
+// as a doubt about the scan. Measured on that log word for word: `vetoes: ["resolve"]`, page reported
+// lost, and it is a page the model read correctly.
+//
+// Stripped by the RELATION rather than by the phrase. "in the figure" is the same sentence with one
+// noun changed and it lost the page identically, so a fix naming `the image` would have bought one
+// word — which is what every fix in this class has bought so far (#190, #194, #220, and #371 is the
+// issue that says so). What is asked for instead is a locative preposition and a definite determiner in
+// front of a name for the input, which is the relation that makes the noun the substrate. The definite
+// article is the discriminator the affirmation machinery already uses for this same ambiguity
+// (`LOCATIVE_SUBSTRATE` with `definiteBefore`): "in an image" is as likely to be a picture on the paper
+// and is left alone. `scan`, `photo` and `photograph` are in the list because they name the input, not
+// because they were failing — `TEXT_NOUN` does not list them, so they never blocked anything, and a
+// list that omitted them would read as a claim that `image` is special when it is only in both lists.
+//
+// What it moves on the corpus: nothing. All 125 blank declarations in every bench round on disk get the
+// same verdict from this branch as from base — the reported log is from a deployed run and no bench
+// round happens to contain its shape. That is the whole of the evidence for this half: one log reported
+// as a lost page, fixed verbatim, plus the three wordings above that lose it identically, and a
+// zero-difference sweep over every declaration on hand saying it takes nothing else with it. A rule
+// that fires on no corpus row is worth stating as such rather than leaving a reader to assume the
+// sweep found a rescue it did not.
+const INPUT_SUBSTRATE = new RegExp(
+  String.raw`\b(?:${[...LOCATIVE].join("|")})\s+(?:the|this|that)\s+` +
+    String.raw`(?:(?:scanned|provided|supplied|attached|original|source|page)\s+){0,2}` +
+    String.raw`(?:images?|figures?|scans?|photos?|photographs?)\b`,
+  "gi",
+);
+
 // The text the veto lists are run over: the log with the marks phrases in it removed, or the log
 // untouched where anything in it says the reading failed.
-// The two anchored strips run FIRST: `MARKS_PHRASE` removes the very nouns they are anchored to.
+// The substrate strip runs before all of them, because what it removes is what stands between the two
+// anchored strips and the nouns they anchor to.
+// The two anchored strips run before the last: `MARKS_PHRASE` removes the very nouns they are anchored to.
 function vetoScope(log: string): string {
   if (HARD_DOUBT.test(log)) return log;
   return log
+    .replace(INPUT_SUBSTRATE, " ")
     .replace(MARKS_NOT_TEXT, (match, offset: number, whole: string) =>
       deniesAfterResolveObject(whole, offset + match.length) ? " " : match,
     )
@@ -1418,6 +1477,14 @@ function vetoScope(log: string): string {
 // no way to tell from the text, and the two answers cost differently — a page reported lost is a
 // glance at a re-extraction, a page dropped in silence is a page nobody knows to look for. Which is
 // the direction every rule in this section is chosen for.
+//
+// That choice was between those two answers because they were the only two available. Where the reply
+// STATES blankness in the field there is a third, and it is better than either: the page is delivered
+// as the field says AND the image is put in front of the verifier with the empty fragment, so an
+// affirmation that was right about the page buys a correction rather than a hole in the document, and
+// one that was the regex misreading a denial costs a page nothing (#371, `blankSkip` in extractPage).
+// Everything below is unchanged and still decides a declaration made in prose alone, where refusing
+// remains the cheaper of the two errors available to it.
 //
 // Read over the SAME text the veto lists see — the log with the marks phrases removed — because that
 // is what makes the check affordable at all. The logs a genuinely blank page is written in affirm
@@ -1974,28 +2041,70 @@ export interface BlankDeclaration {
   // finding with a different remedy — a doubt word means the page could not be read and wants a
   // better image, an affirmation means the agent answered with no page for a page it says has
   // content on it, and `agents/page.md` already tells it to write `[not legible]` instead.
+  //
+  // Present whether or not it refused: where the reply STATED the page blank it no longer decides
+  // the page (`stated` below), and it is still the finding it was — the caller carries it to the
+  // verifier and onto the `page_blank` line.
   affirmed?: string;
+  // The reply answered the question in the FIELD (`"blank": true`) and not only in prose (#371).
+  // Absent rather than false where it did not, so a prose-only declaration is byte-identical to what
+  // this returned before the field existed.
+  stated?: true;
+}
+
+// Did the reply state blankness in the field? `true` and nothing else.
+//
+// The field can ASSERT blankness and cannot deny it: a `"blank": false` beside an empty `html` and a
+// log saying the page is empty is a reply disagreeing with itself, and honouring the `false` there
+// would report the page as one nobody transcribed — the exact outcome this field exists to stop, and
+// a new way to lose a page for a reply's own inconsistency. So a `false` is read as an absent one and
+// the prose decides, as it did before (#371). Every error this field can make is therefore in one
+// direction: it can rescue a page the prose reading would have thrown away, and it can never throw
+// away a page the prose reading would have delivered.
+//
+// The string form is accepted because this is a token in an envelope a model writes by hand, where
+// the shapes an answer arrives in are not the shapes the prompt asked for: 33 of 78 blank replies in
+// the bench logs spelled the empty `html` this prompt asks for as markup instead (#219). `"true"` is
+// well inside that. A "yes" is not, because it is not a boolean any JSON writer would produce.
+function statedBlank(field: unknown): boolean {
+  return field === true || (typeof field === "string" && field.trim().toLowerCase() === "true");
 }
 
 // Exported for the unit test: this predicate is the whole distinction between a page delivered
 // empty and a page reported lost, and it is worth pinning on the reply shapes directly.
-export function blankDeclaration(parsed: { html?: string; log?: string } | null): BlankDeclaration {
+export function blankDeclaration(parsed: { html?: string; log?: string; blank?: unknown } | null): BlankDeclaration {
   const none = { asserted: false, blank: false, vetoes: [] };
   if (typeof parsed?.html !== "string" || carriesContent(parsed.html)) return none;
+  const stated = statedBlank(parsed.blank);
   const log = parsed.log?.trim();
-  if (!log || !BLANK_LOG.test(log)) return none;
-  const scope = vetoScope(log);
+  // The field is an answer on its own. Until it existed, the log was the only place blankness could be
+  // asserted, so a reply whose log said it in words `BLANK_LOG` does not list ("Nothing on the sheet.")
+  // was a page nobody transcribed — and which words those are is a fact about a regex, not about the
+  // page. A stated declaration with no log at all is still a declaration, for the same reason.
+  if (!stated && (!log || !BLANK_LOG.test(log))) return none;
+  const scope = log ? vetoScope(log) : "";
   const vetoes = [...new Set([...matches(UNREADABLE_LOG, scope), ...matches(DEGRADED_IMAGE_LOG, scope)])];
   const affirmed = contentAffirmed(scope);
   return {
     asserted: true,
-    blank: vetoes.length === 0 && affirmed === null,
+    // The doubt words refuse a STATED declaration exactly as they refuse a prose one, and #371 asks
+    // for that on purpose: a page too dark to read is not a blank page, and a model stating
+    // `"blank": true` on one is the failure the veto was written for. What a stated declaration
+    // survives is the SELF-CONTRADICTION — the log naming something on the page — because there the
+    // reply has answered the question twice and the field is the answer to the question that was
+    // asked, while the prose is a sentence a regex has to interpret. It interprets badly enough to
+    // matter: #371 measured four of ten ordinary ways of writing "nothing is here" losing the page,
+    // one of them to the word `document` standing between a `No` and the noun it denies. The
+    // contradiction is not discarded — it is carried out of here and costs the page a paid second
+    // look instead of costing it the page (see `blankSkip` in extractPage).
+    blank: vetoes.length === 0 && (affirmed === null || stated),
     vetoes,
     ...(affirmed === null ? {} : { affirmed }),
+    ...(stated ? { stated: true as const } : {}),
   };
 }
 
-export function declaredBlank(parsed: { html?: string; log?: string } | null): boolean {
+export function declaredBlank(parsed: { html?: string; log?: string; blank?: unknown } | null): boolean {
   return blankDeclaration(parsed).blank;
 }
 
@@ -2034,6 +2143,11 @@ interface PageRender {
   // to coincide, and a future path that returns an empty page without declaring one would
   // silently inherit the caller's decision not to verify it (#294).
   blank?: true;
+  // The declaration was believed AND its log named something on the page (#371). Only reachable on a
+  // declaration stated in the field, because a prose one is still refused by the contradiction. Set
+  // rather than re-derived at the caller: the caller has the fragment and not the log the affirmation
+  // was found in, and re-running the read on the delivered `""` would find nothing to disagree with.
+  blankContradicted?: string;
 }
 
 // The output ceiling for a correction call, or undefined for "whatever the deployment allows".
@@ -2168,7 +2282,15 @@ async function renderPage(
     { step: "extract", images: [loadImage(img)] },
   );
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
-  const parsed = extractJson<{ html?: string; log?: string; suggested_agent?: { name?: string; reason?: string } }>(res.text);
+  // `blank` is `unknown` rather than `boolean` because nothing validates this envelope: it is a model's
+  // JSON, and a field typed here is a claim about a reply Iris did not write. `statedBlank` decides
+  // what counts as an answer.
+  const parsed = extractJson<{
+    html?: string;
+    log?: string;
+    blank?: unknown;
+    suggested_agent?: { name?: string; reason?: string };
+  }>(res.text);
   const html = parsed?.html ?? bareHtml(res.text);
   // Nothing for a reader in this reply. Throwing hands the page to `failedPage`, which is what
   // every other unusable answer in this file already does: the page is lost, and the run
@@ -2216,12 +2338,23 @@ async function renderPage(
     // folio the paper never printed — which is the difference #219 had to reconstruct by replaying
     // 818 replies, and the field that would have shown it in one grep.
     const dropped = html?.trim() ? { dropped: html.trim().slice(0, 200) } : {};
+    // On all three lines a declaration can land on, because the field's own failure mode is invisible
+    // from the one that honoured it. `blank_stated` here says the field was SENT, not that it was
+    // believed: a run reading only `page_blank` can count how often the answer arrived in the shape
+    // the prompt asks for and cannot count how often it arrived for a page the model had just said it
+    // could not read, or for a page Iris already holds content for. Those two are the misuse the
+    // prompt paragraph warns about in as many words ("never send it for a page you could not read"),
+    // and they are the one signal that would say this change had gone wrong — a model stamping
+    // `"blank": true` on unreadable pages costs nothing today (the doubt veto still refuses it) and
+    // would be the reason to take the field back out. Neither line can show it unless it is on them.
+    const stated = declaration.stated ? { blank_stated: true as const } : {};
     if (declaration.blank && previous?.trim()) {
       ctx.log.event("page_blank_refused", {
         image: img.name,
         page: img.order,
         chars_kept: previous.trim().length,
         log: parsed?.log ?? "",
+        ...stated,
         ...dropped,
       });
       throw new Error(
@@ -2229,7 +2362,21 @@ async function renderPage(
       );
     }
     if (declaration.blank) {
-      ctx.log.event("page_blank", { image: img.name, page: img.order, log: parsed?.log ?? "", ...dropped });
+      // `blank_stated` says which of the two asked-for answers this was, because they no longer behave
+      // alike: a stated one survives a self-contradiction and a prose one does not, so a run that
+      // wants to know how often the field is actually sent — the thing the whole of #371 turns on —
+      // has to be able to count it. On this line it means the field was believed; the same field on
+      // the two refusals above and below means it was sent and refused, which is the paragraph at
+      // `stated`. `blank_contradicted` is the same field name `page_no_output`
+      // carries for the refusal, so one grep finds both the pages this cost and the pages it did not.
+      ctx.log.event("page_blank", {
+        image: img.name,
+        page: img.order,
+        log: parsed?.log ?? "",
+        ...stated,
+        ...(declaration.affirmed ? { blank_contradicted: declaration.affirmed } : {}),
+        ...dropped,
+      });
       // `""` whatever the reply held, so one shape of fragment stands for a blank page however the
       // model wrote it. What that discards is a page-break marker on 18 of the 33 markup-spelled
       // declarations — and every one of those logs says the paper prints no number, which makes the
@@ -2237,7 +2384,13 @@ async function renderPage(
       // page 14 begins here. The prompt forbids exactly that and the paragraph at `blankDeclaration`
       // has the reasoning; a blank page that DID print its folio loses an anchor to nothing, which is
       // the cheaper mistake. The markup is on the log line above either way.
-      return { html: "", log: parsed?.log ?? "", outputTokens: res.usage?.output_tokens, blank: true };
+      return {
+        html: "",
+        log: parsed?.log ?? "",
+        outputTokens: res.usage?.output_tokens,
+        blank: true,
+        ...(declaration.affirmed ? { blankContradicted: declaration.affirmed } : {}),
+      };
     }
     const shape = replyShape(res.text, parsed);
     // A declaration the veto refused is recorded as the refusal it is, with the words that did it:
@@ -2256,6 +2409,12 @@ async function renderPage(
       shape,
       ...dropped,
       ...(declaration.asserted ? { blank_vetoed: declaration.vetoes, log: parsed?.log ?? "" } : {}),
+      // The misuse case, and the reason `blank_stated` is not confined to the line that honoured the
+      // field: a stated blank refused HERE is a model that said the page was unreadable and stamped
+      // the field on it anyway. `blank_vetoed` names the words and this names where the answer came
+      // from, so the two together separate a prompt that is being followed badly from one that is not
+      // being followed at all.
+      ...stated,
       ...(declaration.affirmed ? { blank_contradicted: declaration.affirmed } : {}),
     });
     // The message says what arrived, which for a fragment carrying nothing is not "no HTML": a reply
@@ -2677,6 +2836,27 @@ function specialistCaution(
   );
 }
 
+// What a contradicted blank declaration says about its own output, in the same channel and the same
+// register: something the agent under test said, not a question Iris is asking. It is the reason that
+// page is judged at all (#371) — without it the verifier is asked whether an empty fragment is faithful
+// to the image, which is the question it answered "no problems" to on all 36 blank pages it was ever
+// sent (the count at `blankSkip`), and with it the two halves of the reply are in front of it together.
+//
+// The affirmation is quoted in the log's own words rather than paraphrased: a sentence of Iris's own
+// saying the page has a heading on it would be Iris asserting the thing the reply merely claimed, and
+// this channel is documented as narrowing what the verifier may assert rather than deciding anything.
+// Flattened and clipped by `oneLine` for the reason the specialist caution is: it is free text a model
+// wrote, landing in a message structured by fences and `##` headings.
+function blankContradictionCaution(affirmed: string | undefined): string | undefined {
+  const quoted = affirmed ? oneLine(affirmed, 200) : "";
+  if (!quoted) return undefined;
+  return (
+    `The page agent returned NO page for this image and said the page is blank, and the same note also ` +
+    `said "${quoted}". The empty fragment above is the answer it gave, so the two halves of its reply ` +
+    `disagree about whether this page has anything on it.`
+  );
+}
+
 // Backticks and newlines out, then clipped to a sentence's worth. Backticks rather than only
 // the triple: a single one opens inline code, which is enough to swallow the punctuation the
 // sentence around it depends on. Flattening the newlines is the sharper half of the two,
@@ -2850,7 +3030,13 @@ async function extractPage(
   sampler: RecheckSampler,
   previous?: string,
 ): Promise<PageOutcome> {
-  const { html, log, suggestion, outputTokens, blank } = await renderPage(ctx, pageAgent, img, lessons, previous);
+  const { html, log, suggestion, outputTokens, blank, blankContradicted } = await renderPage(
+    ctx,
+    pageAgent,
+    img,
+    lessons,
+    previous,
+  );
   let innerHtml = html;
   let logNote = log;
   let dispatched = false;
@@ -2897,13 +3083,46 @@ async function extractPage(
   // hedged declaration before it can reach this line at all (`blank_vetoed` on `page_no_output`).
   // A confident-but-wrong declaration would leave a `page_blank` line and a blank count in
   // diagnostics as its evidence, and no verdict.
+  //
+  // The one declaration that IS sent, and the only spend #371 adds: one whose log names something on
+  // the page. Until the reply could state blankness in a field, that page was refused outright, and
+  // refusing was chosen as the cheaper error when the only alternative was dropping it in silence
+  // (`AFFIRMED_NOUN`). A stated declaration makes a third answer available, and the price of it is
+  // this call: the page is delivered as the field says, and the verifier is shown the image with the
+  // empty fragment, so a log that was RIGHT about the heading it named buys a correction and the
+  // reader gets the page — which is more than the refusal ever gave them, since a refused page is a
+  // hole in the document until someone re-extracts it. What it costs is bounded by how rarely the two
+  // halves disagree: 1 of the 125 blank declarations in every bench round on disk, off 2,189 page
+  // renders. The number above prices that one — $0.0859 bought 9 judged blank pages on one arm, so
+  // under a cent each, against a page render of several cents.
+  //
+  // And that one declaration is the argument. Its log is "Source image is entirely blank/white with no
+  // visible content, text, graphics, or printed page number. No page-break marker can be emitted
+  // because no folio number is visible on the page. No content to transcribe." — a page that is blank,
+  // said three times, and `contentAffirmed` reads `image is entirely` out of the first clause and
+  // refuses it. So the page this spends a verify call on is a page today's code reports LOST, and the
+  // call is what turns it back into a delivered page. A log that is right about the heading it names is
+  // the case the branch was written for; the case it is actually taken on, so far, is a page the regex
+  // misread.
   // Computed once, above the check and both rechecks: it is a fact about this page's render, so a
   // recheck of a correction to that render carries the same one. It is read from `suggestion` and
   // the dispatch's own return rather than from the log, so the caution and the routing line cannot
   // disagree about whether the request was met. `unmet` stays undefined when no suggestion was made
   // at all, which is the same no-caution answer by a different route.
-  const caution = specialistCaution(suggestion, unmet);
-  const blankSkip = blank === true && innerHtml === "";
+  //
+  // Two cautions, joined rather than one winning. Only one of them can be present today — a blank
+  // declaration returns before `suggested_agent` is read, so `suggestion` is undefined on exactly the
+  // pages a contradiction caution exists for — and the join is written for the same reason the
+  // conjunction below is: that is a fact about today's control flow, not a property of either caution,
+  // and if a later path does hand the verifier a page that says both things, both should reach it
+  // rather than one being dropped by a precedence nobody chose. Empty stays `undefined` and not `""`
+  // to keep the value the shape its type declares; `verifyAgentOutput` drops a blank caution either
+  // way, so this is about what the call SAYS and not about the bytes.
+  const cautions = [specialistCaution(suggestion, unmet), blankContradictionCaution(blankContradicted)].filter(
+    (c): c is string => c !== undefined,
+  );
+  const caution = cautions.length > 0 ? cautions.join(" ") : undefined;
+  const blankSkip = blank === true && innerHtml === "" && !blankContradicted;
   // Which KIND of unjudged this page is, for `page_verify_ok`'s `skipped` below. It cannot be read off
   // the verdict: `unjudgedVerdict()` is deliberately one shape for every page nothing looked at, and a
   // call that threw is the one kind of unjudged that COST money, so a reader pricing the skips must be
@@ -3134,6 +3353,15 @@ async function extractPage(
     // repair is the safety net the skip above rests on, so capping it at a bound taken from the
     // reply that got the page wrong is the wrong side of #285's own argument (the cap exists to
     // bound a runaway, and this call has nothing to run away from being asked to produce).
+    //
+    // Since #371 the links check is not the only caller that gets here with an empty page. A blank
+    // declaration STATED in the field whose own log names something on the page is delivered and
+    // judged, so a failed verdict reaches this call with `trigger: "verify"` (or `both`, where a link
+    // is missing too) and the same empty first pass. The exemption is unchanged and so is the reason
+    // for it — the reply that measured nothing is still the reply that got the page wrong, and this
+    // is still a re-render from the image rather than an edit — but the argument no longer rests on
+    // the link repair alone: this is now the repair that decides whether that verify call bought
+    // anything, and a cap taken from the empty render would spend it and lose the page anyway.
     const ceiling = html === "" ? undefined : correctionCeiling({ outputTokens, chars: html.length }, before.length);
     const attempt = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons, ceiling).then(
       (html) => ({ html, error: null as unknown }),
@@ -3167,8 +3395,10 @@ async function extractPage(
         // remedy is a config edit or `correctionCeiling`'s multiple. Absent where the call ran
         // uncapped, which is two causes and not one: the first pass reported no usage, so there was
         // no measurement to cap from, or the page rendered nothing and was delivered blank, whose
-        // correction is a re-render rather than an edit (#294, and the only trigger that reaches it
-        // there is `links`). Both leave the deployment's ceiling as the one that bound the call, so
+        // correction is a re-render rather than an edit (#294; `links` on a page nothing judged, and
+        // since #371 `verify` or `both` on a stated blank whose own log contradicted it, which is the
+        // one blank page a verdict is bought for). Both leave the deployment's ceiling as the one that
+        // bound the call, so
         // the remedy on the line is the same; what differs is whether anything here could have
         // capped it, which is what an operator reading this field is asking.
         ...(ceiling !== undefined ? { ceiling } : {}),
