@@ -1657,9 +1657,32 @@ function negatedBefore(tokens: Word[], i: number): boolean {
 // VISUAL content is present." is one denial of two coordinated nouns, and the one word between the
 // second noun and the qualifier in front of it was enough to end the walk — so `content` found the
 // list's shared `is present` and a blank page was reported lost (#220).
+//
+// Two axes, then, and the grouping below is which one each word is here for, because reading the whole
+// thing as one vocabulary is what makes it look like a list to extend by hand (#371's objection).
+// The COORDINATION axis is how many members a denial has — the joiners and the `of any kind` that
+// trails one — and it is the axis #190 and #194 measured. The MODIFIER axis is how the member itself is
+// spelled: a noun used to modify the name for text, which sits between the negator and the noun without
+// joining anything. `page` and `number` were already that axis under another name (`no printed page
+// number or heading`), which is why `no page content` shipped and `no other DOCUMENT content` did not —
+// which noun the model put in front of `content` decided whether the page survived. `document` and
+// `body` are here for that axis and only that one (#379, from #367's log, which is both axes at once:
+// "No text, images, tables, or other document content is visible." stopped at `document`, one word
+// short of the `No`, and the page was delivered as `@page-failed`).
+//
+// What that axis cannot do is reach an affirmation no negator was ever near. Neither word is in
+// `TEXT_NOUN`, so neither is a subject this walk starts from, and a determiner, a verb, a count or a
+// `but` still ends the walk — so `Page is blank. There is handwriting on the page.` and the three
+// self-contradictions beside it in the tests have no negator to be handed one, whatever is added here.
 const CHAIN_LINK = new Set(
-  ("or and either handwritten hand-written typewritten of any all at whatsoever else kind sort type " +
-    "page pages number numbers visual").split(" "),
+  (
+    // The coordination axis: what joins members, and what trails the last one.
+    "or and either of any all at whatsoever else kind sort type " +
+    // Qualifiers this walk needs that `QUALIFIER` cannot carry, for the reasons above.
+    "handwritten hand-written typewritten visual " +
+    // The modifier axis: a noun dressing the name for text rather than joining a list.
+    "page pages number numbers document body"
+  ).split(" "),
 );
 // A coordination has no length limit, so this walk needs one: a log with two hundred conjoined nouns
 // in it should not be re-read from every one of them. Sixteen tokens is longer than any denial the
@@ -1683,6 +1706,23 @@ const NEGATOR_CHAIN_MAX = 16;
 // affirmations #194 measured. `and printing, no page number, is visible` — the shape this must not
 // swallow — reaches the document with its `not legible text` already stripped from the veto scope, so
 // there is no negator left in front of `printing` to find.
+//
+// "It cannot reach past a verb" is the whole of that guarantee, and it says nothing about a denial with
+// no verb of its own: `No printed text, and handwriting is present` is one clause of pure denial and one
+// affirmation, and nothing between them ends the walk, so the affirmed noun reads as the last member of
+// the list. That reading is the one #200's review weighed and chose — refusing it loses a blank page
+// whose log denied twice — and the discriminator is thin on purpose: a determiner, an `only` or a verb in
+// the second clause stops the walk and the same sentence affirms. #379's two words do not change that
+// branch, they make it reachable by more wordings, and both sides of it are pinned in
+// test/envelope-as-content.test.ts so which one a log falls on is a recorded answer rather than a
+// discovered one (#391's review).
+//
+// The comma cannot be the discriminator, which is worth recording because it is the obvious narrowing:
+// ending the walk at a comma no conjunction follows refuses four of the blank pages pinned in that file —
+// `No printed words, lines, or characters are visible.` and #367's own log among them — because the
+// members of a denial are separated by bare commas exactly as the two clauses are. Whatever separates a
+// verbless denial from an affirmation behind it, it is not punctuation.
+//
 // A negator distributes over a coordination only if it has a member of its own to distribute FROM,
 // and one case in this file can take that member away: the marks phrase is stripped before any of
 // this runs, so "No stray marks, and handwriting is visible" arrives as `no … and handwriting` with

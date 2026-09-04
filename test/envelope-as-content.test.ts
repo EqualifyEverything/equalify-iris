@@ -1540,17 +1540,19 @@ test("a contradicted blank declaration says what the log claimed was there", () 
 // instead, which is the one change that is not about a word — the tests here are what that field is and
 // is not allowed to do.
 test("a reply that states blankness in a field does not have to say it in a sentence", () => {
-  // The three logs measured on this branch, verbatim: two from the issues that reported them and one
-  // from the bench corpus, where it is the single declaration of 125 that base refuses. All three are
-  // logs about a page that is empty, and every one of them is read as saying something is on it.
+  // Two of the three logs measured on this branch, verbatim: one from the issue that reported it and one
+  // from the bench corpus, where it is the single declaration of 125 that base refuses. Both are logs
+  // about a page that is empty, and both are read as saying something is on it.
+  //
+  // The third was #367's, and it is not here any more: `document` is read as a modifier now, so that log
+  // is delivered by the prose read with no field at all (#379, and the test below it). That is the
+  // relationship between the two fixes rather than a redundancy — the field carries the replies that
+  // send it and the walk carries the ones that do not, which is every reply sent before the field
+  // existed and every model that ignores it.
   const lost: [string, string][] = [
     [
       "#343, and the `affirmed` is its filename sentence",
       "Page 14 is blank. Contains only minimal dust/specks visible in the image; no printed content, no page number, no marks that resolve into characters. Image filename indicates this is page 14 of 25 in document acir.",
-    ],
-    [
-      "#367, where `document` stands between the negator and the noun",
-      "The page is blank apart from a few scattered specks/dots that appear to be artifacts rather than content. No text, images, tables, or other document content is visible.",
     ],
     [
       "the bench corpus's one refused declaration, which says the page is blank three times",
@@ -1563,6 +1565,111 @@ test("a reply that states blankness in a field does not have to say it in a sent
     // And what the prose read decided is still on the record, because it is the thing that costs a
     // verify call now instead of a page: `affirmed` survives the field.
     assert.ok(blankDeclaration({ html: "", log, blank: true }).affirmed, `${name}: the misreading is kept`);
+  }
+});
+
+// The floor under every reply that does not send that field — which is every reply sent before it
+// existed, and any model that ignores it (#379, from #367 and #371's appendix). A denial distributes over
+// a coordination, and #190 and #194 got that axis right; what it could not reach was a member spelled
+// with a noun in front of it. `no page content` shipped and `no other DOCUMENT content` did not, so
+// which noun the model happened to write decided whether the page survived — the same shape as `image`
+// (#343) and a negator four tokens back (#220), one word further along.
+//
+// The two axes are measured separately here because a widened rule has more than one, and the cuts say
+// which one binds. Cutting the sentence's coordination away leaves the page lost; cutting the modifier
+// away delivers it on `main` too. So the coordination axis was never what refused this log, and pinning
+// only the full sentence would pass for the reason #371 warned about.
+test("a denial reaches its noun through a noun-modifier, alone or inside a coordination", () => {
+  const specks =
+    "The page is blank apart from a few scattered specks/dots that appear to be artifacts rather than content. ";
+  for (const [axis, log] of [
+    // #367's log, verbatim from the run that lost the page. Both axes at once: four coordinated nouns and
+    // a modifier on the last of them. `affirmed` was `content is visible` and the reader got
+    // `<!-- @page-failed 86: page agent returned no HTML -->` for a white sheet with a few specks.
+    ["both axes, #367 verbatim", specks + "No text, images, tables, or other document content is visible."],
+    // The modifier axis alone, which is the one that binds: lost on `main` with the list taken out.
+    ["modifier alone", specks + "No other document content is visible."],
+    ["modifier alone, two words", "The page is blank. No document content is visible."],
+    // The coordination axis alone — delivered on `main` and before #379, pinned so that what this change
+    // did and did not buy stays legible. It is the same sentence with `document` deleted, and it is
+    // already in the #220 list above in the corpus wording it arrived in.
+    ["coordination alone", specks + "No text, images, tables, or other content is visible."],
+    // `body` is the other spelling of the same axis, and it was lost the same way: `affirmed` was
+    // `text is visible`, the list's own verb handed to a noun the `No` had already denied.
+    ["modifier alone, `body`", "Page is blank. No body text is visible."],
+    ["both axes, `body`", "Page is blank. No headings, captions, or other body text is visible."],
+    // And a modifier in a denial written in the other order the corpus uses, where the coordination is of
+    // two nouns and the modifier dresses the first.
+    ["modifier on the first member", "Page is blank. No document text or figures are present."],
+  ] as [string, string][]) {
+    assert.equal(declaredBlank({ html: "", log }), true, axis);
+  }
+
+  // The whole record for #367's log, because "delivered" is the one thing `declaredBlank` can say and
+  // this line is what a run would have shown: an ordinary blank page, declared in prose, with no doubt
+  // word picked out of `scattered`/`artifacts`, nothing quoted against it, and no `stated` — the field
+  // was not sent, and the page no longer needs it.
+  assert.deepEqual(
+    blankDeclaration({ html: "", log: specks + "No text, images, tables, or other document content is visible." }),
+    { asserted: true, blank: true, vetoes: [] },
+  );
+
+  // What the widening must not reach, and the reason it cannot: these words make the walk transparent,
+  // they do not start it. Neither is in `TEXT_NOUN`, so a positive sentence built from the same two words
+  // still affirms and still refuses the page — which is what makes the modifier axis safe to widen at all.
+  for (const [log, affirmed] of [
+    ["Page is blank. Body text is visible.", "text is visible"],
+    ["Page is blank. Document content is visible at the top.", "content is visible"],
+    ["Page is blank. The document contains handwriting.", "contains handwriting"],
+    // And a longer walk still ends where it always did — at a `but`, at a determiner, at a verb. Each of
+    // these has a negator somewhere behind the affirmed noun and none of them governs it.
+    ["Page is blank. No caption, but body text is visible.", "text is visible"],
+    ["Page is blank. No page number is visible, and the document heading is visible.", "heading is visible"],
+    ["Page is blank. No page number is visible and document headings are visible.", "headings are visible"],
+  ] as [string, string][]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+    assert.equal(blankDeclaration({ html: "", log }).affirmed, affirmed, log);
+  }
+
+  // Where the widened walk lands when the FIRST clause has no verb of its own, which #391's review asked
+  // to have written down rather than discovered. `negatedInList` steps over these words without requiring
+  // a verb, so a denial with no verb in it reaches across the comma and takes the next clause's noun into
+  // its list — and the next clause's own `is visible` then belongs to a noun read as denied. The page
+  // ships as an accepted declaration, which for a log that named a heading is the fatal direction.
+  //
+  // It is the branch `No printed text, and handwriting is present.` is already pinned on, twenty lines up,
+  // as the reading chosen when #200's review raised exactly this cost. What `document` and `body` change
+  // is how often it is reached, not what it does: the identical sentences built from the modifiers that
+  // were already in the set are delivered on `main` too, and the third of these is one of them — pinned
+  // here so the shape cannot be read as something this change introduced.
+  for (const log of [
+    "Page is blank. No printed text or images, and body text is visible.",
+    "Page is blank. No text or images, document headings are visible.",
+    "Page is blank. No text or images, page numbers are visible.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+  // And how narrow that line is, which is the other half of the same decision: one determiner, one `only`
+  // or one verb in the second clause and the walk stops before the negator, as it does for every negative
+  // above. The pair is what makes the branch legible — the words are the same, the reading is opposite.
+  for (const log of [
+    "Page is blank. No text or images, the document heading is visible.",
+    "Page is blank. No text or images, only document headings are visible.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
+
+  // The four self-contradictions this check exists for, pinned to THIS widening as well as to #194's own
+  // test above. They are the property that makes widening the walk the safe fix: the defect is a denial
+  // the walk could not reach, and these have no denial in them at all, so nothing added to the list can
+  // hand one of them a negator. A later widening that breaks any of these has stopped being this axis.
+  for (const log of [
+    "Page is blank. There is handwriting on the page.",
+    "Page is blank. A heading is visible at the top.",
+    "Page is blank. The page contains handwriting.",
+    "Page is blank. The scan is blurry. There is handwriting on the page.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
   }
 });
 
