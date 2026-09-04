@@ -2295,6 +2295,14 @@ function pageSystem(agent: AgentSpec, lessons: string): string {
 // and edit it as text. Their only route to one is invention, which nothing has measured. The
 // fixture path is out for a different reason: its HTML is scored against a stored fixture and
 // never delivered, so a strip there would move a comparison rather than repair a document.
+//
+// Of those four, the TABLE JOIN is the one to cover first should `page_soft_hyphens` ever fire after
+// a model swap. It is the closest thing outside this phase to a transcription step — its job is
+// re-typing the cells of a table the printing broke across a boundary — so while its input is clean
+// and invention is still the only route, it is the shortest route of the four.
+//
+// `correct` is the last of the four to run, not `specialist_merge`: dispatch happens inside the
+// render, and the correction pass runs after the fidelity verdict.
 type SoftHyphenSeam = "extract" | "correct" | "specialist" | "specialist_merge";
 
 function stripped(ctx: PipelineContext, where: SoftHyphenSeam, img: InputImage, html: string): string {
@@ -2353,9 +2361,10 @@ async function renderPage(
     suggested_agent?: { name?: string; reason?: string };
   }>(res.text);
   const raw = parsed?.html ?? bareHtml(res.text);
-  // Ahead of every check below, so `carriesContent` and the emptiness test read the markup a
-  // reader actually gets: a fragment whose only text is soft hyphens carries nothing, and should be
-  // treated as the page with nothing on it that it is rather than as characters.
+  // Ahead of every check below, so the emptiness test reads the markup a reader actually gets: a
+  // fragment whose only text is soft hyphens carries nothing, and should be treated as the page with
+  // nothing on it that it is rather than as characters. `blankDeclaration` re-derives that same
+  // reading from the reply, so it is handed this fragment too — see the call.
   const html = raw == null ? raw : stripped(ctx, "extract", img, raw);
   // Nothing for a reader in this reply. Throwing hands the page to `failedPage`, which is what
   // every other unusable answer in this file already does: the page is lost, and the run
@@ -2396,13 +2405,22 @@ async function renderPage(
     // deleting it (`page_extraction_failed` with `kept: "prior"`). Nothing else on the
     // re-extraction path would catch it: `destroyedPage` guards the correction pass, where
     // `before` is this round's own render, so prior → empty never reaches a size comparison.
-    const declaration = blankDeclaration(parsed);
+    // The STRIPPED markup, so this predicate and the gate above read the same fragment. It
+    // re-derives "does this carry content" from the reply itself, and handed the raw one it would
+    // answer yes for a fragment whose only text is soft hyphens while the gate answered no — which is
+    // this branch entered and then refusing the declaration inside it, so a page the reply said was
+    // empty is reported as a page that FAILED. That is the one distinction this whole passage exists
+    // to keep: a failed page is work to redo, a blank page is nothing to do. Nothing else about the
+    // reply is substituted, and stripping cannot turn a page with content into one without.
+    const declaration = blankDeclaration(parsed && { ...parsed, html: html ?? undefined });
     // What the model sent instead of the page, where it sent anything: the markup a declaration was
-    // spelled in, bounded, on both lines that discard it. Without it a run says a page was declared
-    // blank and not whether the reply was the empty `html` the prompt asks for or a marker naming a
-    // folio the paper never printed — which is the difference #219 had to reconstruct by replaying
-    // 818 replies, and the field that would have shown it in one grep.
-    const dropped = html?.trim() ? { dropped: html.trim().slice(0, 200) } : {};
+    // spelled in, bounded, on both lines that discard it. The RAW markup, deliberately, and the one
+    // place in this function that is: the field exists to show which shape the declaration arrived
+    // in, and a repair Iris made on the way past is not part of that shape. Without it a run says a
+    // page was declared blank and not whether the reply was the empty `html` the prompt asks for or a
+    // marker naming a folio the paper never printed — which is the difference #219 had to reconstruct
+    // by replaying 818 replies, and the field that would have shown it in one grep.
+    const dropped = raw?.trim() ? { dropped: raw.trim().slice(0, 200) } : {};
     // On all three lines a declaration can land on, because the field's own failure mode is invisible
     // from the one that honoured it. `blank_stated` here says the field was SENT, not that it was
     // believed: a run reading only `page_blank` can count how often the answer arrived in the shape
@@ -2675,11 +2693,10 @@ async function mergeSpecialist(
   });
   const parsed = extractJson<{ html?: string }>(res.text);
   const merged = parsed?.html?.trim();
-  // Redundant against a merge that only copies — its two inputs are stripped already — and kept
-  // for the one that does not. This is the last seam a page's markup passes through before it is
-  // the page, so it is where "nothing leaves extraction carrying one" is actually true rather than
-  // merely likely, and a merge agent re-typing a word it is joining is exactly the transcription
-  // step that produces these.
+  // Redundant against a merge that only copies — its two inputs are stripped already — and kept for
+  // the one that does not: a merge agent re-typing a word it is joining is the same transcription step
+  // that produces these in the first place. NOT the phase's last seam, which is `correct`: dispatch
+  // runs inside the render, and the correction pass runs after the fidelity verdict.
   return merged ? stripped(ctx, "specialist_merge", img, merged) : null;
 }
 

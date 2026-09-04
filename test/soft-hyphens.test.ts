@@ -49,6 +49,24 @@ test("what a soft-hyphen strip must not touch", () => {
   // reaching for an invisible break might use instead. Out of scope on purpose — this issue is about
   // one character, and each of those has its own argument.
   assert.deepEqual(stripSoftHyphens("a-b\u2011c\u200bd"), { html: "a-b\u2011c\u200bd", removed: 0 });
+  // An href, which is the attribute where a false positive would cost something rather than just be
+  // wrong: `normalizeHref` compares a page's links against the ones poppler reported, so a character
+  // taken out of a URL reads as a link the page dropped and buys a correction pass for a page that had
+  // nothing wrong with it. A query string's escaped ampersand is the shape that comes closest, and it
+  // is safe for the same reason `&amp;shy;` is.
+  const href = `<a href="?y=2026&amp;q=1">report</a>`;
+  assert.deepEqual(stripSoftHyphens(href), { html: href, removed: 0 });
+});
+
+test("a soft hyphen inside an attribute goes, href included", () => {
+  // Deliberate, and it costs nothing: these are the entity spellings, so a browser resolving that
+  // href would put U+00AD into the URL it requests. No URL carries one, which makes it a
+  // transcription error either way, and leaving one in an `alt` would defeat the same search the
+  // visible text is being repaired for.
+  assert.deepEqual(stripSoftHyphens(`<img alt="Insur&#173;ance" src="a&shy;.png">`), {
+    html: `<img alt="Insurance" src="a.png">`,
+    removed: 2,
+  });
 });
 
 test("the count is every occurrence, not every page that had one", () => {
@@ -73,6 +91,9 @@ interface Recorded {
 interface Spec {
   // The first render's fragment.
   render: string;
+  // The reply's `log` and `blank` field, for the one test about a page the model says is empty.
+  log?: string;
+  blank?: boolean;
   // Present means the fidelity check rejects the page, which buys the one correction pass.
   problems?: string[];
   // What that pass answers with.
@@ -142,7 +163,8 @@ function makeCtx(dir: string, spec: Spec, companion = false): { ctx: PipelineCon
         return {
           text: JSON.stringify({
             html: spec.render,
-            log: "",
+            log: spec.log ?? "",
+            ...(spec.blank === undefined ? {} : { blank: spec.blank }),
             ...(spec.specialist ? { suggested_agent: { name: "chartDataAgent", reason: "a chart" } } : {}),
           }),
         };
@@ -227,8 +249,8 @@ test("the correction pass is stripped too, and the strip runs before its reply i
 test("both specialist seams are stripped", async () => {
   await withTemp(async (dir) => {
     // The specialist fragment is stripped where it is read, before it goes into the merge prompt, so
-    // the merge agent is never shown one to copy — and the merge reply is stripped as well, because
-    // that call is the last seam a page's markup passes through before it IS the page.
+    // the merge agent is never shown one to copy — and the merge reply is stripped as well, because a
+    // merge agent re-typing a word it is joining is the same transcription step that produces these.
     const { ctx, rec } = makeCtx(dir, {
       render: ORDINARY,
       specialist: {
@@ -263,5 +285,29 @@ test("a fragment whose only text is soft hyphens is a page with nothing on it", 
     assert.equal(ev(rec, "page_no_output").length, 1);
     // Counted before it was discarded, so a page lost this way is still attributable.
     assert.deepEqual(ev(rec, "page_soft_hyphens").map((e) => e.data.removed), [2]);
+  });
+});
+
+test("...unless the reply SAID the page is empty, in which case it is a blank page and not a lost one", async () => {
+  await withTemp(async (dir) => {
+    // The same reply as the test above plus a declaration, and the distinction the whole no-content
+    // branch exists to keep: a failed page is work to redo, a blank page is nothing to do. The
+    // emptiness gate reads the stripped markup and `blankDeclaration` re-derives the same reading
+    // from the reply, so the two have to be handed the same fragment — given the raw one it answers
+    // "this carries content", refuses the declaration, and a page the model correctly reported empty
+    // comes out as a page that FAILED.
+    const { ctx, rec } = makeCtx(
+      dir,
+      { render: `<p>${SHY}${SHY}</p>`, log: "This page is blank.", blank: true },
+      true,
+    );
+    const { failedPages } = await runExtraction(ctx);
+
+    assert.deepEqual(failedPages, [], "declared blank, so nothing was lost");
+    assert.equal(ev(rec, "page_no_output").length, 0);
+    assert.equal(ev(rec, "page_blank").length, 1);
+    // And the markup on that line is the RAW reply: the field says which shape the declaration
+    // arrived in, which is a fact about what the model sent and not about what Iris did next.
+    assert.equal(ev(rec, "page_blank")[0].data.dropped, `<p>${SHY}${SHY}</p>`);
   });
 });
