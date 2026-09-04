@@ -162,6 +162,14 @@ export async function runPipeline(args: {
     // instead, because a document containing none of the source's words is not a partial
     // success.
     let failedPages: number[] = [];
+    // Pages whose content is here and failed Iris's own fidelity check, with the one correction
+    // pass they get having produced no replacement (extraction.ts, #328). A property of the
+    // DOCUMENT for exactly the reason the set above is, and persisted to final.json for the same
+    // one: the verdict was taken by a call that had the source image, this session may be refined
+    // again by rounds that have no image at all, and none of them can re-judge the page — so a
+    // second round would otherwise deliver the same rejected markup with the notice dropped.
+    // Only re-extracting the page can take it out of the set.
+    let uncorrectedPages: number[] = [];
     // Pages this run filled in that the document had no content for. Logged only once the
     // new state is on disk (below), because that is when it becomes true: diagnostics
     // folds `page_recovered` straight into `pages_failed`, so a line written when the
@@ -175,11 +183,17 @@ export async function runPipeline(args: {
         fragments?: Fragment[];
         body?: string;
         failedPages?: number[];
+        uncorrectedPages?: number[];
       };
       const priorFragments = saved.fragments ?? [];
       // Absent in state written before this was recorded, which reads as "no page is
       // missing" — the same answer that state implied when it was written.
       failedPages = saved.failedPages ?? [];
+      // And the same reading for state written before #328: no page is recorded as having
+      // shipped rejected, which is the answer that state gave when it was written. The
+      // alternative — re-deriving it from the stored fragments — cannot be done at all, because
+      // the verdict is not in the markup.
+      uncorrectedPages = saved.uncorrectedPages ?? [];
       beforeBody = (saved.body ?? assembleBody(priorFragments)).trim();
       // A deprecated role in a body this run did not produce (roles.ts, #187). Neither branch of
       // that `??` covers the other: the join strips, a body stored before this existed does not,
@@ -244,10 +258,11 @@ export async function runPipeline(args: {
         // A page that failed earlier is exactly the kind of page feedback names, and
         // re-extracting it successfully is the one thing that fills the hole — so the
         // prior set goes in and the updated one comes out.
-        const extraction = await reExtractPages(ctx, priorFragments, scope.pages, failedPages);
+        const extraction = await reExtractPages(ctx, priorFragments, scope.pages, failedPages, uncorrectedPages);
         fragments = extraction.fragments;
         suggestions = extraction.suggestions;
         failedPages = extraction.failedPages;
+        uncorrectedPages = extraction.uncorrectedPages;
         recovered = extraction.recovered ?? [];
 
         setPhase("assembly");
@@ -259,6 +274,7 @@ export async function runPipeline(args: {
           lint: assembled.lint,
           pages: fragments,
           failedPages,
+          uncorrectedPages,
         });
       } else {
         mode = "feedback_iterative";
@@ -280,7 +296,9 @@ export async function runPipeline(args: {
         // this path lints a body it did not extract, and debris that read differently here would be
         // debris nobody greps for (#257).
         if (lint.malformedAttributes) log.event("lint_debris", { stage: "feedback_relint", ...lintDebrisFields(lint) });
-        review = await runReview(ctx, { body: beforeBody, lint, pages: fragments, failedPages });
+        // `uncorrectedPages` straight from the stored state: this path re-extracts nothing, so no
+        // page in it got a second verdict and every one of them still ships as it was rejected.
+        review = await runReview(ctx, { body: beforeBody, lint, pages: fragments, failedPages, uncorrectedPages });
       }
     } else {
       mode = "full";
@@ -291,6 +309,7 @@ export async function runPipeline(args: {
       fragments = extraction.fragments;
       suggestions = extraction.suggestions;
       failedPages = extraction.failedPages;
+      uncorrectedPages = extraction.uncorrectedPages;
 
       setPhase("assembly");
       const assembled = await runAssembly(ctx, fragments);
@@ -301,6 +320,7 @@ export async function runPipeline(args: {
         lint: assembled.lint,
         pages: fragments,
         failedPages,
+        uncorrectedPages,
       });
     }
 
@@ -598,7 +618,7 @@ export async function runPipeline(args: {
     // output keyed to its source image) can be captured on accept (close handler).
     writeFileSync(
       finalFragmentsPath,
-      JSON.stringify({ fragments, body: review.body, failedPages }, null, 2),
+      JSON.stringify({ fragments, body: review.body, failedPages, uncorrectedPages }, null, 2),
     );
     // Now that the document that HAS these pages is the persisted one (see `recovered`).
     if (recovered.length) log.event("page_recovered", { pages: recovered });
@@ -679,6 +699,11 @@ export async function runPipeline(args: {
       // Only when there were any: a `failed_pages` of [] on every successful run would
       // read as a field about failure on lines that have none.
       ...(failedPages.length ? { failed_pages: failedPages } : {}),
+      // Same rule, and the reason it is on the run's own terminal line rather than left to
+      // `extraction_complete`: a feedback round that re-extracts nothing runs no extraction, so
+      // that line does not exist on it, and this is the only place the state the run DELIVERED
+      // can be read from on every mode (#328).
+      ...(uncorrectedPages.length ? { uncorrected_pages: uncorrectedPages } : {}),
     });
 
     // After the user has their output, auto-file agent-suggestion issues

@@ -2677,7 +2677,13 @@ async function sectionRound(
 // deliver the body with what is left written to @unresolved.
 export async function runReview(
   ctx: PipelineContext,
-  initial: { body: string; lint: LintResult; pages?: IndexedPage[]; failedPages?: number[] },
+  initial: {
+    body: string;
+    lint: LintResult;
+    pages?: IndexedPage[];
+    failedPages?: number[];
+    uncorrectedPages?: number[];
+  },
 ): Promise<ReviewResult> {
   let body = initial.body;
   let lint = initial.lint;
@@ -2730,6 +2736,14 @@ export async function runReview(
   // where that is now said (noContentPages), which is also the only place that can say it: the
   // index it builds is the route the reports came in by.
   const failedPages = initial.failedPages ?? [];
+  // Re-stated in the wrapper at the end and given to nobody else, which is the difference from
+  // `failedPages` above (#328). The Reader is not told, and must not be: it reads the assembled
+  // HTML, so what it would see is a page whose content is present and plausible, and telling it
+  // "page 5 failed its fidelity check" invites an issue against markup it cannot compare with
+  // the source — the editor is a text call with no image, so no round can repair it and the
+  // iteration budget would go on trying. The correction pass with the page in front of it is the
+  // only thing that could, and it has already had its one attempt.
+  const uncorrectedPages = initial.uncorrectedPages ?? [];
   // Set by the `return` or `break` that ends the loop, and by nothing else (#264). Deliberately
   // not initialised: the value has to come from the exit taken, so an exit added without one
   // leaves it undefined and the deployment's tally shows an unattributed document rather than a
@@ -2771,6 +2785,12 @@ export async function runReview(
         // between a clean document and an unchecked one (#164).
         html: wrapDocument(body, {
           failedPages,
+          // On THIS return above all, for the same reason `lintUnavailable` is here: this is the
+          // exit that means the Reader looked again and found nothing left, and a page the
+          // fidelity check rejected is invisible to it — the Reader never sees the source. A
+          // clean review of a document containing a page known to be wrong is exactly the
+          // document that must still say so (#328).
+          uncorrectedPages,
           editorTruncated,
           editorSections,
           editorSalvaged,
@@ -3160,6 +3180,7 @@ export async function runReview(
     html: wrapDocument(body, {
       unresolved: unresolvedLines,
       failedPages,
+      uncorrectedPages,
       editorTruncated,
       editorSections,
       editorSalvaged,

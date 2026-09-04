@@ -731,6 +731,20 @@ export interface ExtractionResult {
   // `reextract_complete.failed` instead — folding them in would tell a client its
   // document is missing a page that is in it.
   failedPages: number[];
+  // Source pages the verifier REJECTED and the correction pass did not repair, so what the
+  // document carries for them is the fragment that failed the check, byte for byte (#328).
+  //
+  // Disjoint from `failedPages` and not a rate of anything: those pages have no content at
+  // all, these have content that is known to be wrong in a way Iris named. Kept apart for
+  // the reason the two markers are kept apart in the document — a page with nothing in it
+  // is obviously incomplete, and a page whose table lost its rows looks finished.
+  //
+  // From `reExtractPages` this is the prior set with the re-extracted pages' own answers
+  // substituted in: a page re-rendered and now accepted leaves the set, a page re-rendered
+  // and rejected again stays, and a page the round never touched keeps whatever it had. A
+  // re-extraction that THREW keeps its prior status too — it is the prior fragment that
+  // ships, so the prior verdict is the one that describes it.
+  uncorrectedPages: number[];
   // Pages that WERE in `failedPages` and are not any more, because this re-extraction
   // produced content for them. Returned rather than logged here: "the document has this
   // page now" only becomes true once the round's document is persisted, and a round that
@@ -2877,6 +2891,18 @@ interface PageOutcome {
   // from the fragment, because a caller must not have to pattern-match HTML to find
   // out whether the document it was handed is whole.
   failed?: true;
+  // Set when the fidelity check REJECTED this page and the correction pass did not replace
+  // it, so `fragment` above is the markup that failed the check. Carried explicitly for the
+  // same reason `failed` is: a caller must not have to pattern-match HTML, or join two
+  // event streams, to find out whether what it was handed is known to be wrong. Reported in
+  // the delivered document as `@page-uncorrected` (assembly.ts `wrapDocument`, issue #328).
+  //
+  // NOT set for a correction the pass DID replace the page with. That page may still be
+  // wrong — replaying the check over 57 corrected pages put the pass rate at 26% (#288) —
+  // but it is a repaired page rather than the rejected one, and a marker that covered both
+  // would fire on most of the pages of an ordinary round and stop meaning anything. Whether
+  // a correction worked is `page_correction_recheck`'s question and it is a sample.
+  uncorrected?: true;
   // The error that page threw, kept so it can be re-raised if it turns out EVERY page
   // failed (see runExtraction). Containment replaces one message with a document; when
   // there is no document, the message is all there is, and a fresh one written here
@@ -3271,6 +3297,22 @@ async function extractPage(
     }
   }
 
+  // Whether the correction below actually replaced this page, which is a different question
+  // from whether one was bought or how it ended. Declared out here because what it decides is
+  // a property of the fragment this function RETURNS: `verifyFailed && !repaired` is a page
+  // the verifier rejected and nothing fixed, and until #328 that was the one thing the
+  // delivered document had no way to admit to.
+  //
+  // A failed verdict always buys a correction — `failedCheck` requires a named problem, so
+  // `verifyFailed` implies `problems.length > 0` and the branch below always runs — which is
+  // why "rejected and never corrected" is not a state this can report: it does not exist. The
+  // four states it does cover are the four ways the pass ends without replacing the page, and
+  // they are one fact about the delivered bytes: the call threw (`page_correction_failed`),
+  // it answered with nothing (`page_corrected` `empty`), it answered with the page it was
+  // given (`identical`), or its answer came back at a fraction of that page's size and was
+  // refused (`page_correction_rejected`). Whichever it was, the fragment below is the one the
+  // verifier named problems in.
+  let repaired = false;
   const problems = [
     ...(verifyFailed ? verdict.problems : []),
     ...missing.map(missingLinkProblem),
@@ -3697,6 +3739,7 @@ async function extractPage(
       });
       if (keep) {
         innerHtml = corrected;
+        repaired = true;
         logNote = logNote
           ? `${logNote}; self-corrected after fidelity check`
           : "self-corrected after fidelity check";
@@ -3751,6 +3794,12 @@ async function extractPage(
       suggestion?.name && !dispatched
         ? { name: suggestion.name, reason: suggestion.reason, image: img.name }
         : undefined,
+    // Gated on `verifyFailed` and not on `problems.length`: a correction bought by the links
+    // or the alt rule ran on a page that PASSED its check, so a failure there leaves a page
+    // with a dropped href or a placeholder description and no verdict against it. Both of
+    // those are already reported by name (`page_links_unrecovered`, `page_generic_alt`), and
+    // a marker saying this page did not pass verification would be false about it.
+    ...(verifyFailed && !repaired ? ({ uncorrected: true } as const) : {}),
   };
 }
 
@@ -3808,11 +3857,19 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
     .map((o) => o.suggestion)
     .filter((s): s is NonNullable<typeof s> => s !== undefined);
   const failedPages = outcomes.filter((o) => o.failed).map((o) => o.fragment.order);
+  const uncorrectedPages = outcomes.filter((o) => o.uncorrected).map((o) => o.fragment.order);
   // Always logged, including the zero case, so "no page failed" and "this run predates
   // per-page containment" are not the same observation in a log.
   ctx.log.event("extraction_complete", {
     pages: fragments.length,
     failed: failedPages,
+    // The document-level roll-up of what `page_correction_failed` and `page_corrected` already
+    // say a line at a time, and it is the roll-up that makes the set countable without joining
+    // two events per page and knowing which `result` values mean the page was not replaced.
+    // Always present, including empty, for the same reason `failed` is: a field that only ever
+    // appears when it fires cannot tell "every rejected page was repaired" from "this run
+    // predates the count" (#328).
+    uncorrected: uncorrectedPages,
     // The generic-alt rule over the fragments the document is assembled FROM, which is a different
     // question from the per-page `page_generic_alt` above: this one is asked after any correction,
     // so a non-zero `alts_generic` here is a placeholder this step could not repair.
@@ -3878,7 +3935,7 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
     join(ctx.paths.sessionFragments(ctx.sessionId), "fragments.json"),
     JSON.stringify(fragments, null, 2),
   );
-  return { fragments, suggestions, failedPages };
+  return { fragments, suggestions, failedPages, uncorrectedPages };
 }
 
 // Re-extract only the pages a piece of feedback actually concerns (PRD §7.12),
@@ -3904,6 +3961,12 @@ export async function reExtractPages(
   // a round that succeeds on it fills the hole. Anything else about the set is unchanged
   // by this path.
   priorFailedPages: number[] = [],
+  // And the pages the verifier rejected in the round that produced the document being
+  // refined, for the same reason: this path is the only thing that can shrink THAT set too,
+  // since re-rendering a page from its image is the only way a page whose correction failed
+  // gets a second answer. Every page it does not re-run keeps the status it arrived with —
+  // nothing else here looks at those pages, so nothing else can have changed them.
+  priorUncorrectedPages: number[] = [],
 ): Promise<ExtractionResult> {
   const targets = new Set(pages);
   const pageAgent = loadPageAgent(ctx);
@@ -3986,6 +4049,20 @@ export async function reExtractPages(
   const filled = new Set(outcomes.filter((o) => !o.failed).map((o) => o.fragment.order));
   const failedPages = priorFailedPages.filter((p) => !filled.has(p));
   const recovered = priorFailedPages.filter((p) => filled.has(p));
+  // The rejected-and-unrepaired set, carried forward the same way but keyed on the pages that
+  // got a fresh ANSWER rather than on the ones that got content. `filled` is the right set for
+  // `failedPages` because the question there is whether the page has content; here the question
+  // is whether a verdict was taken again, and it was taken again for exactly the pages that ran
+  // without throwing — including pages that already had content. A page that threw keeps its
+  // prior fragment, so it keeps the prior verdict with it.
+  //
+  // A page re-run and rejected again appears only once: the first list drops every page the
+  // round answered for, so the second list is where all of them come from.
+  const answeredAgain = new Set(outcomes.filter((o) => !o.failed).map((o) => o.fragment.order));
+  const uncorrectedPages = [
+    ...priorUncorrectedPages.filter((p) => !answeredAgain.has(p)),
+    ...outcomes.filter((o) => !o.failed && o.uncorrected).map((o) => o.fragment.order),
+  ].sort((a, b) => a - b);
 
   writeFileSync(
     join(ctx.paths.sessionFragments(ctx.sessionId), "fragments.json"),
@@ -4005,6 +4082,11 @@ export async function reExtractPages(
     // sends feedback (#290).
     alts_checked: fragments.reduce((n, f) => n + altTexts(f.innerHtml).length, 0),
     alts_generic: fragments.reduce((n, f) => n + genericAlts(f.innerHtml).length, 0),
+    // Over the whole document this round delivers, like the two alt fields above and unlike
+    // `pages`: a feedback round that repairs one rejected page out of three should read as two
+    // left, not as one page re-run. Always present, including empty, for the same reason it is
+    // on `extraction_complete` (#328).
+    uncorrected: uncorrectedPages,
   });
-  return { fragments, suggestions, failedPages, recovered };
+  return { fragments, suggestions, failedPages, uncorrectedPages, recovered };
 }
