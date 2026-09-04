@@ -361,11 +361,15 @@ narration arm for #365; the #319 arbiter on a table-dense corpus; a ~$1.45 three
 - **"Catches 57 of 57, misses nothing" was published from 11 hand-picked pages** and a decision
   recommended on it. At 45 pages it missed 5. **Widen the corpus before publishing the headline, not
   after.**
-- **The detectors were biased against the shipped model, twice, the same way.** Two anchored patterns
-  keyed on the tag immediately after `<p>`/`<li>`; kimi wraps inline content in `<em>`/`<strong>`; so
-  a **0** was published for the shipped model on two axes that were not zero. A detector calibrated
-  on one model's output silently under-reports another's, and in a cross-model comparison that bias
-  runs in the worst possible direction.
+- **The detectors were mis-keyed on the shipped model's markup, twice, the same way — and the error
+  flattered it.** Two anchored patterns keyed on the tag immediately after `<p>`/`<li>`; kimi wraps
+  inline content in `<em>`/`<strong>`; so a **0** was published for the shipped model on two axes that
+  were not zero. A false zero *under-reports* that model's defects, so the incumbent read cleaner than
+  it was and the challenger lost ground to a detector artifact — which is why §2's census counts are
+  the post-correction ones. #370 states this as "biased **against** the shipped model"; the sign is the
+  other way, and it is the direction that matters, because a detector calibrated on one model's output
+  silently under-reports another's and in a cross-model comparison that is the worst place for the
+  error to sit.
 - **A share table that did not sum to 100% and nobody checked it** — four agent shares summing to
   94.6%, because each numerator excluded the agent's own failed spend while each denominator kept it.
   `test/config-agents.test.ts` now checks both of this repo's share tables, and the arithmetic of the
