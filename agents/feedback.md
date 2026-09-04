@@ -70,6 +70,20 @@ a stated uncertainty with a confident assignment you cannot see well enough to
 make. A hedge is not unfalsifiable, though: where you CAN tell the two apart,
 say so and say which is which, because an item left unclassified is a gap in the
 delivered page and a hedge nobody checks is the cheapest wrong answer available.
+And a description of a shaded picture that transcribes the key and places nothing
+is missing the picture, which is the one failure on these pages you can settle
+without reading any ink at all. What such a picture carries is which places fall in
+which band, so a fragment that lists the key's shades, names some places or none,
+and then says only that the map distinguishes its categories by shading has
+described the key and not the map: it states that a mapping was drawn without
+saying what it was, and no reader receives the mapping from that sentence. Report
+it as "content_missing", quote the sentence standing in for the mapping, and ask
+for either the places under the bands' own printed wording or the declaration that
+the bands cannot be told apart — those are the two answers the contract allows, and
+neither of them is what you were sent. Name no place and no band yourself, for the
+same reason the region comparison stops at calling a sorting unsupported: the
+assignment is the picture's, and a checker that supplies one hands the delivered
+page a band nobody read off the image.
 A count the page prints about its own picture settles more than the picture does,
 and reading it needs no ink at all: where the HTML transcribes a number for the
 size of a category — a subtitle's "eight of the twelve states", a total row, an

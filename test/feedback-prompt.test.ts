@@ -97,6 +97,29 @@ test("the verify task will not score a described swatch as invented, or overturn
     // assignment to the wrong band — which is a reason to bound the shield, not to omit it.
     ["a hedge is falsifiable, and a verifier that can tell the shades apart says which",
       /A hedge is not unfalsifiable, though: where you CAN tell the two apart, say so and say which is which, because an item left unclassified is a gap in the delivered page and a hedge nobody checks is the cheapest wrong answer available/],
+    // #372's trap, and the reason the page.md half of this fix could not ship alone. This prompt is
+    // the only thing that refuses a map page: the page agent's rules are not shown to the verifier,
+    // so an obligation written only there is an obligation nothing enforces. Measured: acceptance of
+    // map pages that classify nothing was 46.2% before the graphical-key rule existed and 0.0% after,
+    // and none of that movement came from anyone asking for the mapping — on 6 of 8 plates the
+    // refusal cites the key rule and on two it is the ONLY thing refusing them. So a key rule that
+    // models finally satisfy would hand those pages a pass with the shading still missing, a
+    // regression wearing a compliance fix's clothes. Verified off a delivered page rather than the
+    // refusal strings: `runs-maps-95ca64c-r1`'s luna `acir-p077` ships an alt that names 49 places,
+    // no key element at all, and ends "The map uses dark, medium, and light shading to distinguish
+    // the three ratio categories."
+    ["a key transcribed with nothing placed is missing content, decidable without reading the ink",
+      /a description of a shaded picture that transcribes the key and places nothing is missing the picture, which is the one failure on these pages you can settle without reading any ink at all/],
+    ["and the non-answer is described by what it does, not by its wording",
+      /says only that the map distinguishes its categories by shading has described the key and not the map: it states that a mapping was drawn without saying what it was/],
+    ["with the kind, the quote and the two answers the contract allows",
+      /Report it as "content_missing", quote the sentence standing in for the mapping, and ask for either the places under the bands' own printed wording or the declaration that the bands cannot be told apart/],
+    // #373 is the other half of this page and is deliberately not answered here: the checker
+    // supplying the state-to-category assignment was wrong a third of the time it did it, and one
+    // false assignment was obeyed into the delivered document. Asking for the mapping and supplying
+    // the mapping are one sentence apart, so the prohibition travels with the ask.
+    ["and the verifier names no place and no band of its own",
+      /Name no place and no band yourself, for the same reason the region comparison stops at calling a sorting unsupported: the assignment is the picture's, and a checker that supplies one hands the delivered page a band nobody read off the image/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
   }

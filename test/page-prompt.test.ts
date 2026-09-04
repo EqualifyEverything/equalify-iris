@@ -691,6 +691,31 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
       /the words are yours to write and writing them is transcription rather than the invented expansion the first clause forbids/],
     ["with the halves assigned, so the described ink is the term and the printed wording its definition",
       /describe the ink as the <dt> and transcribe the page's printed wording as its <dd>/],
+    // #372 measured which way each model breaks this rule, and the shapes do not share a fix.
+    // Assigning the halves was not enough for the arm that reads the rule and builds the thing: 5 of
+    // sonnet's 13 refused map cells swap them, and 4 more draw the ink as a coloured box the clause
+    // below already forbids. So the halves now carry the reason they go that way round, and the rule
+    // carries one worked example — which is the single edit that speaks to both dominant shapes,
+    // where an emphasis edit speaks only to the arm that emits nothing.
+    ["which half is which is argued rather than asserted",
+      /Which half goes where is not a preference: the <dt> is the term being defined, and here the ink is what needs defining while the page's printed wording is what defines it/],
+    ["and the swapped key is named by what it says when it is read aloud",
+      /a key with the wording in the <dt> and the ink in the <dd> reads aloud as the page's own words needing a picture to explain them/],
+    ["the rule works one key all the way out, in the structure it asks for",
+      /<dl><dt>mid grey<\/dt><dd>Less than 2\.5<\/dd><dt>solid black<\/dt><dd>2\.5 thru 3\.4<\/dd><dt>light grey<\/dt><dd>3\.5 and over<\/dd><\/dl>/],
+    ["and says what the example is made of, so a reader cannot take the shape and miss the rule",
+      /one <dt>\/<dd> pair per swatch the page prints, the ink in words, the page's wording transcribed as printed, and no entry that is not a swatch/],
+    // An invented wrapper is 3 of #372's 41 problem strings, and it is what a model adds when it
+    // reads the <dl> as a list needing a title. The caption is already the title.
+    ["a wrapper entry of the model's own is refused, with the reason the caption gives",
+      /no "Legend" or "Key" entry of your own, because the <dl> stands where the page puts the key and the caption beside it already says what the picture is/],
+    // The example had to be built against the ramp clause four lines below it or it would teach the
+    // guess that clause forbids: a light-to-dark worked example IS an assumed ramp, printed by the
+    // prompt itself. Measured on the source image of the plate this rule came from, the legend's
+    // three tones run 26, 176, 143. So the example pairs mid, solid, light against low, middle, high
+    // and says why.
+    ["the worked example does not run light to dark, and says that is deliberate",
+      /That example deliberately does not run light to dark, because a printed key frequently does not: its pairing is what those three swatches showed, and yours is what yours show/],
     // The verifier is right about this part and it is granted rather than argued with: a colour
     // carried in a style attribute is not read out, so it answers nobody the <dl> was built for.
     ["the description is words and never markup",
@@ -722,8 +747,47 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     // resolves to the <dt> in the <dl> case and the sentence above forbids a <p> beside it, but it
     // was the last clause here leaving a reader to work the home out, in a rule whose defect was
     // exactly that.
+    // #372's free check that costs nothing and decides something: the entry count was already
+    // required to be STATED, and stating a number is not comparing it. It fires on only 3 of 8
+    // plates where the comparison is against a count the subtitle prints, because only 3 print one —
+    // but every key prints its own swatches, so this comparison is available on every plate, and
+    // one arm never performed the printed-count check in any round.
+    ["the entries emitted are counted back against the swatches printed, as a free decidable check",
+      /Count the entries you emitted back against the swatches the key prints before you emit, the way a printed count is read back against a list/],
+    ["and the check is named as decidable where the ink is not",
+      /both numbers are things you can see, so the comparison costs no ink and is decidable where the ink is not, and a key that prints three swatches and leaves with two or four is wrong whatever the tones turned out to be/],
+    // THE GATE NOBODY WROTE, which this rule was accidentally standing in for. #372: acceptance of
+    // map pages that classify nothing was 46.2% before the legend rule existed and is 0.0% now, and
+    // none of that movement came from anyone asking for the mapping — on 6 of 8 plates the refusal
+    // cites the legend rule and on two it is the only thing refusing them. So a legend fix landing
+    // alone would let those pages pass with the shading still missing. Verified here off the
+    // DELIVERED page rather than the refusal strings: on runs-maps-95ca64c-r1 the luna plate p077
+    // ships an alt naming 49 places, no key element at all, and the sentence quoted in the clause
+    // below word for word.
+    ["transcribing the key is distinguished from describing the map",
+      /The key is not the picture, and transcribing the key is not describing the map/],
+    ["and one of the two answers is owed on every such page",
+      /the description says which places you read into each band, under that band's own printed wording — or says, of the picture, that you could not tell its bands apart\. One of those two is owed on every such page/],
+    ["with the shipped non-answer quoted, so a model cannot read it as compliance",
+      /states that the distinction exists without making it: a reader who cannot see the picture is told a mapping was drawn and never told what it was/],
+    // #372: declared it, 0 of 5, against ten wordings taken from the rule's own text, on a plate whose
+    // two darkest bands measure 13 units apart against a 112-unit vignette — and 0 of 5 false alarms
+    // on a control plate whose textures separate by 2.4x, so the zero is hedging nowhere rather than
+    // hedging everywhere. The trigger was the defect: the old clause owed a declaration for "an item
+    // you cannot match to a swatch", which presupposes the reply has put items forward, and 3 of the
+    // 5 never do — so the rule asked them nothing and their silence read as compliance.
+    ["the declaration is owed whether or not a single item was placed",
+      /say exactly that — whether or not you place a single item, because a page whose bands you cannot separate owes that sentence most and has no list of members to hang it off/],
+    // #349: the "log" field is withheld from the checker on every page, so a declaration made only
+    // there is invisible to the one component that would act on it — and it reaches no reader either.
+    // The old clause listed the field alongside the two homes that do reach someone, which is what a
+    // search for the declaration had to treat as three permitted places.
+    ["and the log field is where it is kept, never where it is said",
+      /the "log" field is never where it is said, only where it is also kept, because nothing downstream reads that field and a declaration made only there reaches neither a reader nor the pass that would act on it/],
     ["two indistinguishable swatches are declared, with every home named and none of them prose",
-      /where two swatches are not distinguishable in the reproduction you were given, say exactly that — in the <dt> describing the ink, or in the alt text where you are describing the key there, and in the "log" field either way — rather than dividing items between them/],
+      /where two swatches are not distinguishable in the reproduction you were given, say exactly that — whether or not you place a single item.*Say it in the <dt> describing the ink, or in the alt text where you are describing the key there, and record it in the "log" field as well/],
+    ["and the items are not divided between bands that could not be separated",
+      /Do not divide the items between two bands you cannot separate/],
     ["an unmatched fill is left unclassified and said to be, with the reason a reader would give",
       /an item you cannot match to a swatch is left unclassified and said to be unclassified, because a reader loses less from a gap the page admits than from a confident assignment to the wrong band/],
   ] as [string, RegExp][]) {

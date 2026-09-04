@@ -616,19 +616,46 @@ Thirteen structures are easy to render as something that merely looks right, so 
   fills of a cartogram, the hatchings of a chart. Its symbol half has no words anywhere on the
   page, so the words are yours to write and writing them is transcription rather than the invented
   expansion the first clause forbids — describe the ink as the <dt> and transcribe the page's
-  printed wording as its <dd>. Describe it in words and never in markup: a style attribute or a
-  coloured <span> hands a screen-reader user nothing, and the description has to survive being
-  read aloud. Read each swatch's tone off the swatch itself and never off the order of its labels
-  — a key's shades run in the order the printer chose and frequently not in the order its entries
-  are listed, so an assumed ramp is a guess that reaches the reader as a fact. Say how many
-  entries the key prints — in the alt text where you are describing the key there, since a
-  description is scaffolding this prompt asks for by name, and in the "log" field either way.
-  Never as a sentence of your own beside the <dl>: that is the prose this rule forbids two
-  paragraphs above, and it reads to a verifier as text the page does not print.
-  And where two swatches are not distinguishable in the reproduction you
-  were given, say exactly that — in the <dt> describing the ink, or in the alt text where you are
-  describing the key there, and in the "log" field either way — rather than dividing
-  items between them: an item you cannot match to a swatch is left unclassified and said to be
+  printed wording as its <dd>. Which half goes where is not a preference: the <dt> is the term
+  being defined, and here the ink is what needs defining while the page's printed wording is what
+  defines it, so a key with the wording in the <dt> and the ink in the <dd> reads aloud as the
+  page's own words needing a picture to explain them. Written out, a map whose key prints
+  "Less than 2.5", "2.5 thru 3.4" and "3.5 and over" is this and nothing more:
+  <dl><dt>mid grey</dt><dd>Less than 2.5</dd><dt>solid black</dt><dd>2.5 thru 3.4</dd><dt>light
+  grey</dt><dd>3.5 and over</dd></dl> — one <dt>/<dd> pair per swatch the page prints, the ink in
+  words, the page's wording transcribed as printed, and no entry that is not a swatch: no
+  "Legend" or "Key" entry of your own, because the <dl> stands where the page puts the key and the
+  caption beside it already says what the picture is. That example deliberately does not run light
+  to dark, because a printed key frequently does not: its pairing is what those three swatches
+  showed, and yours is what yours show. Describe it in words and never in markup: a style
+  attribute or a coloured <span> hands a screen-reader user nothing, and the description has to
+  survive being read aloud. Read each swatch's tone off the swatch itself and never off the order
+  of its labels — a key's shades run in the order the printer chose and frequently not in the
+  order its entries are listed, so an assumed ramp is a guess that reaches the reader as a fact.
+  Say how many entries the key prints — in the alt text where you are describing the key there,
+  since a description is scaffolding this prompt asks for by name, and in the "log" field either
+  way. Never as a sentence of your own beside the <dl>: that is the prose this rule forbids two
+  paragraphs above, and it reads to a verifier as text the page does not print. Count the entries
+  you emitted back against the swatches the key prints before you emit, the way a printed count is
+  read back against a list: both numbers are things you can see, so the comparison costs no ink and
+  is decidable where the ink is not, and a key that prints three swatches and leaves with two or
+  four is wrong whatever the tones turned out to be.
+  The key is not the picture, and transcribing the key is not describing the map. What a shaded
+  map's ink carries is which places fall in which band, so the description says which places you
+  read into each band, under that band's own printed wording — or says, of the picture, that you
+  could not tell its bands apart. One of those two is owed on every such page. Naming the places
+  and then saying that the map "uses dark, medium and light shading to distinguish the three
+  categories" states that the distinction exists without making it: a reader who cannot see the
+  picture is told a mapping was drawn and never told what it was, which is the one thing they came
+  to the figure for.
+  And where two swatches are not distinguishable in the reproduction you were given, say exactly
+  that — whether or not you place a single item, because a page whose bands you cannot separate
+  owes that sentence most and has no list of members to hang it off. Say it in the <dt> describing
+  the ink, or in the alt text where you are describing the key there, and record it in the "log"
+  field as well; the "log" field is never where it is said, only where it is also kept, because
+  nothing downstream reads that field and a declaration made only there reaches neither a reader
+  nor the pass that would act on it. Do not divide the items between two bands you cannot
+  separate: an item you cannot match to a swatch is left unclassified and said to be
   unclassified, because a reader loses less from a gap the page admits than from a confident
   assignment to the wrong band.
 - SIGNATURE AND FILL-IN BLOCKS: a block of fields the page provides for someone to complete — a
