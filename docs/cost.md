@@ -1,10 +1,10 @@
 # What Iris costs, and the recommended approach for every step
 
 Iris cost about **19.4 cents a document page** in model bills when the model-selection sprint
-([#246](https://github.com/EqualifyEverything/equalify-iris/issues/246)) started. One config change
-has shipped and measured **10.7 cents** — a 45% cut with no code change, from **two lines of
-config** (#312 set the page agent's model *and* a block-wide API setting; §8). Two more
-recommendations are measured and waiting on a person to take them.
+([#246](https://github.com/EqualifyEverything/equalify-iris/issues/246)) started. One change has
+shipped and measured **10.7 cents** — a 45% cut with no code touched at all, out of **two lines of
+config** (#312 set the page agent's model *and* a block-wide API setting, which is why undoing it is
+also two lines; §8). Two more recommendations are measured and waiting on a person to take them.
 
 **The most useful thing the sprint found is that three of the four biggest savings were not model
 choices at all** — they were a code path, a contract, and not paying twice for the same reply — and
@@ -72,6 +72,14 @@ win, and the dot-leader axis is the other. They are broken out because they are 
 something, not because they sit outside the count. The ten are the seven clause-anchored axes of #334
 and #333, the `<abbr>` fabrication axis of #335, the dot-leader axis of #374, and the subtotal-row
 axis of #324.
+
+**"Worst on 4 of the first 7" is the post-correction count, which matters because two of those seven
+are the axes §9 records as having been mis-scored for this same model.** Two of the seat's detectors
+keyed on the tag immediately after `<p>`/`<li>` and so read `0` for a model that wraps inline content
+in `<em>`/`<strong>` — the shipped one. #344 publishes the census with "the corrected figures are the
+ones above", and both corrections went **against** the shipped model, so the 4 is the number after
+its two false zeros were removed, not before. A reader checking §2 against §9 should find those two
+axes already rescored.
 
 **† The lost-page column was corrected on 2026-09-03 and the correction goes against the
 recommendation.** Sonnet had been published at 1 lost page. Re-reading the round's logs after
