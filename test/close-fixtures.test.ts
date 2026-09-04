@@ -61,6 +61,7 @@ async function closeWith(
   fragments: Fragment[],
   failedPages: number[] | undefined,
   pageCount: number,
+  uncorrectedPages?: number[],
 ): Promise<FixtureCase[]> {
   const dir = mkdtempSync(join(tmpdir(), "iris-close-fixtures-"));
   const config = cfg(dir);
@@ -78,7 +79,16 @@ async function closeWith(
   }
   writeFileSync(
     paths.sessionFinalFragments(id),
-    JSON.stringify({ fragments, body: "<p>b</p>", ...(failedPages ? { failedPages } : {}) }, null, 2),
+    JSON.stringify(
+      {
+        fragments,
+        body: "<p>b</p>",
+        ...(failedPages ? { failedPages } : {}),
+        ...(uncorrectedPages ? { uncorrectedPages } : {}),
+      },
+      null,
+      2,
+    ),
   );
 
   const app = express();
@@ -133,6 +143,21 @@ test("a document where the only extracted page failed files nothing", async () =
   // a real image would gate future updates on producing nothing for it.
   const cases = await closeWith([frag(1, "<!-- @page-failed 1: boom -->")], [1], 1);
   assert.deepEqual(cases, []);
+});
+
+test("a page the fidelity check rejected is not filed as the agent's accepted output", async () => {
+  // One step further than the failed page above, and the harder half: this page HAS content, and
+  // the content is what Iris's own verifier named problems in and the correction pass did not
+  // replace. Filing it keys the fixture to markup this run had already declared wrong, and every
+  // future page-agent update is then gated on reproducing it (#328).
+  //
+  // Accepting the session is a human saying the DOCUMENT is good enough to close, which is not the
+  // same claim as this page being the correct output for its image — and the verdict is nowhere in
+  // the markup, so before the set was recorded there was no way to tell the two apart here.
+  const cases = await closeWith([frag(1, "<table><tr><td>1</td></tr></table>"), frag(2, "<p>two</p>")], [], 2, [1]);
+  assert.equal(cases.length, 1);
+  assert.equal(cases[0].source_image, "page-002.png", "the fixture moved to the page that was accepted as it stands");
+  assert.equal(cases[0].accepted_html, "<p>two</p>");
 });
 
 test("state written before failed pages were recorded captures as it always did", async () => {

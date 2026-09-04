@@ -379,7 +379,34 @@ function salvagedNote(
 // the loop, it is out of the editor's reach for the same reason @unresolved is. The
 // in-body marker stays because it says WHERE the hole is; this one guarantees the
 // document admits there is one.
-// `editorTruncated` is the third statement of the same kind, and it is about the loop
+// `uncorrectedPages` is the same statement about the opposite failure, and it is the one where
+// Iris knows the most and said the least (issue #328). These pages ARE here: they were rendered,
+// the fidelity check rejected them naming what was wrong, one correction pass was bought, and it
+// repaired nothing — so what those pages carry is content Iris named a defect in and never fixed.
+// Not necessarily the rejected bytes: this marker is written after the review loop, and the Copy
+// Editor may have rewritten a block on one of these pages since. What no later round can have done
+// is ANSWER the check. Not for want of the image — `imagesForIssues` hands the editor the source
+// pages the Reader's issues name, so an uncorrected page the Reader happened to raise something
+// about is one of the few places an image and the HTML sit side by side after extraction. It is
+// that the editor is never asked the fidelity question and is deliberately forbidden to act on it:
+// its instruction on a discrepancy it notices in an image is to REPORT it, because an edit made
+// from one reading of a page reaches a reader as what the page says (#183). So the rejection stands
+// whatever the markup became, and the only thing that could lift it is a re-extraction.
+// Before this the document said nothing at all about them, which made the case Iris
+// understands best the case it declared least: `@page-failed` above announces a page with no
+// content, obviously incomplete to anyone who opens the file, while a page whose statistical
+// table lost its six aggregate rows looks finished and no longer adds up (#324, `p26-50-p5`).
+// Every marker here rests on a silent gap being worse than a declared one; this is that
+// principle applied where the declaration is most useful.
+//
+// It is deliberately NOT the same claim as "this page might be wrong". A correction the pass DID
+// adopt is not listed, even though replaying the check over 57 corrected pages put its pass rate
+// at 26% (#288): that page is a repaired page, listing it would put most of an ordinary round's
+// pages under this marker, and a marker that fires on most pages tells a reader nothing. What
+// the absence of this marker means is exactly that no page shipped as the fragment its own
+// verifier rejected — not that every page was checked after correction, which is a sample
+// (`page_correction_recheck`) and not a gate.
+// `editorTruncated` is the fourth statement of the same kind, and it is about the loop
 // rather than about the content: a correction round's response hit the model's output
 // ceiling (issue #143). Without it, a document delivered this way is indistinguishable from
 // one whose issues the editor tried and failed to fix — and the difference is what a reader
@@ -400,14 +427,14 @@ function salvagedNote(
 // problem across it needs to know. `cutBack` says that boundary was Iris's and not the ceiling's
 // (#317) — the reply answered further and was believed only this far — which the marker has to say
 // out loud, since a reader told the ceiling stopped it there would go looking for a longer reply.
-// `lintUnavailable` is the fourth statement of the same kind, and the one that is about
+// `lintUnavailable` is the fifth statement of the same kind, and the one that is about
 // the CHECKING rather than about the content: axe-core could not run on this document, so
 // nothing here has been through the accessibility gate at all. It belongs in the document
 // for the same reason the others do — a document delivered this way is otherwise
 // indistinguishable from one the linter cleared, and the person who receives it is the one
 // who most needs to know which they have. It is the delivered half of #164: the log line
 // says it to an operator, this says it to whoever opens the file.
-// `reviewUnread` is the fifth, and it is about the other half of the checking: the REVIEWER
+// `reviewUnread` is the sixth, and it is about the other half of the checking: the REVIEWER
 // did not answer about all of this document (issue #186). The document is read in windows and
 // one of them came back with nothing usable, so there is no verdict on that part — which
 // matters most where it is least visible, in a document whose `@unresolved` list is empty. An
@@ -418,6 +445,7 @@ export function wrapDocument(
   opts: {
     unresolved?: string[];
     failedPages?: number[];
+    uncorrectedPages?: number[];
     editorTruncated?: boolean;
     editorSections?: { of: number; corrected: number };
     editorSalvaged?: { edits: number; blocks: number; of: number; cutBack?: boolean };
@@ -433,6 +461,25 @@ export function wrapDocument(
       `  This document is incomplete: the source pages above could not be extracted and\n` +
       `  none of their content is here. See the run log (page_extraction_failed) or the\n` +
       `  session's diagnostics (pages_failed) for why.\n-->`
+    : "";
+  // Not pointed at `pages_failed` in diagnostics, which is where the issue that asked for this
+  // marker guessed the pages would be: that field is the no-content set and these pages are
+  // deliberately not in it. The counts are in `verification.results` and `verification.triggers`
+  // there, which say how many corrections ended each way without saying which pages — so the
+  // run log is where a reader goes for the page, and this marker is where they learn to.
+  const uncorrected = opts.uncorrectedPages?.length
+    ? `\n<!-- @page-uncorrected ${opts.uncorrectedPages.join(", ")}\n` +
+      `  The content of the source pages above IS in this document, and it never passed Iris's\n` +
+      `  own fidelity check: the check named what was wrong with each of them, one correction\n` +
+      `  pass was made against the source image, and it repaired nothing. No later step checks a\n` +
+      `  page against its source again, so nothing after that point can have put right what the\n` +
+      `  check named. Expect content to be missing or mis-structured on these pages; a table that\n` +
+      `  lost rows is the shape this has been seen in. Every other page was either accepted as\n` +
+      `  it was or repaired by a correction. See the run log (page_verify_failed for what was\n` +
+      `  wrong, then page_correction_failed or page_corrected for how the correction ended) —\n` +
+      `  the pass either threw, answered with nothing, answered with the page it was given,\n` +
+      `  answered at a fraction of its size and was refused, or answered with the same page\n` +
+      `  written differently.\n-->`
     : "";
   const truncated = !opts.editorTruncated
     ? ""
@@ -496,7 +543,7 @@ export function wrapDocument(
 <body>
 <main>
 ${body}
-</main>${failed}${truncated}${unlinted}${unread}${unresolved}
+</main>${failed}${uncorrected}${truncated}${unlinted}${unread}${unresolved}
 </body>
 </html>
 `;

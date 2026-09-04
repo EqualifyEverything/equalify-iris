@@ -539,6 +539,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
         const saved = JSON.parse(readFileSync(finalPath, "utf8")) as {
           fragments?: Fragment[];
           failedPages?: number[];
+          uncorrectedPages?: number[];
         };
         // A page whose extraction failed is excluded. Its fragment is a `@page-failed`
         // comment, and a fixture is an assertion that this HTML is the RIGHT output for
@@ -547,8 +548,19 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
         // representative image the fixture is keyed to. Read from the recorded set
         // rather than sniffed out of the HTML: the run already knows which pages those
         // are (pipeline/orchestrator.ts).
-        const failed = new Set(saved.failedPages ?? []);
-        captureFixtures(paths, s.session_id, (saved.fragments ?? []).filter((f) => !failed.has(f.order)));
+        //
+        // And a page the fidelity check REJECTED, on the same argument carried one step
+        // further (#328). That page's markup is not a marker, it is content — content Iris's
+        // own verifier named problems in and the correction pass did not replace — so it
+        // would be captured as though it were right, and `captureFixtures` keys the fixture
+        // to the first fragment it is given. Every future page-agent update would then be
+        // gated on reproducing markup this run had already declared wrong. Accepting the
+        // session is a human saying the DOCUMENT is good enough to close, which is not the
+        // same claim as this page being the correct output for its image; before the set was
+        // recorded there was no way to tell them apart here, since the verdict is nowhere in
+        // the markup.
+        const excluded = new Set([...(saved.failedPages ?? []), ...(saved.uncorrectedPages ?? [])]);
+        captureFixtures(paths, s.session_id, (saved.fragments ?? []).filter((f) => !excluded.has(f.order)));
       }
     } catch {
       // ignore — fixture capture must not prevent accepting a session
