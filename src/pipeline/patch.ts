@@ -226,8 +226,14 @@ function contentLanded(block: Traffic, others: Traffic[]): boolean {
 // Compared at word grain, lowercased and cut at every non-letter, which is looser than the text on
 // purpose: the words are RE-EXPRESSED where they land rather than copied. `Standby Pay.` inside
 // `<strong>` is the same string, but the `<label>` that takes `<h4>Name</h4>` may write it `Name:`, and
-// a grain that missed that would miss the commonest form of the hazard. What the looseness costs is a
-// block left reverted where it could have been handed back, which is one block for one round.
+// a grain that missed that would miss the commonest form of the hazard.
+//
+// WHAT THE LOOSENESS COSTS IS THE ROUND, not the block, and that is the direction to keep in mind when
+// widening the grain further. An over-matched block — one that shed a redundant sentence while some
+// unrelated edit in the same reply happened to add one of its words (`page`, `see`, `the`) — is HELD,
+// so it keeps its edit; the fall it made is still in the re-applied body, and `applyEditorPatch`
+// refuses a round whose fall survives the revert. Whether it was the only block that dropped a heading
+// makes no difference to that, only to which reason the log gives.
 function wordsGivenUp(before: string, after: string): Map<string, number> {
   const gone = wordCounts(before);
   for (const [word, n] of wordCounts(after)) {
@@ -427,6 +433,11 @@ export interface PatchReport {
   // An emptied block is in this only if it HELD something that landed: `<h2></h2>` -> `""` has no words
   // to move, so the empty-heading false positive stays the cheap one — that block is re-seated and
   // costs one block for one round rather than the whole reply.
+  //
+  // The two errors are NOT symmetrical, which is the thing to weigh before touching the grain. Missing
+  // an arrival re-seats one block; inventing one holds a block whose fall then survives the revert, and
+  // `applyEditorPatch` refuses that round whole. See `wordsGivenUp` for why the word grain is loose
+  // anyway.
   content_landed: number[];
   // Heading elements that ARRIVED in some block, summed across the reply. The number that says whether
   // `headings_dropped` can be acted on: a heading that left one block and turned up in another is a

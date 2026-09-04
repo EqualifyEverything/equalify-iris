@@ -996,6 +996,39 @@ test("a block that demoted a heading and corrected its own words is handed back,
   assert.equal(result.editorHeadingsGated, true, "the guard fired, and says so, on a round it did not refuse");
 });
 
+test("a reply that demotes in two places, one of them a migration, is the migrated case and not a re-check", async () => {
+  // Found by the review of #383, reproduced before it was believed. Only the SEATABLE blocks are handed
+  // back, so a block that dropped a heading and gave its content away keeps its edit — and keeps its
+  // fall. The re-applied body therefore still has a fall in it, and the fail-closed re-check catches a
+  // round that is nothing more unusual than two demotions in one reply, one of them the `<label>`
+  // migration this file calls the commonest form of the hazard.
+  //
+  // The outcome was right (the round is refused, the body handed back untouched) and the LABEL was
+  // wrong: `headings_recheck` told whoever greps it that the reading is broken. So the branch splits on
+  // whether any block still dropping a heading accounts for the fall. Here block 1 does.
+  const MIXED =
+    `<h1>Form</h1>\n` +
+    `<h4>Name</h4>\n` +
+    `<form><input id="name"></form>\n` +
+    `<div><h2>Standby Pay.</h2><p>Paid at the rate.</p></div>\n`;
+  const { result, events } = await round(() => ({
+    edits: [
+      { block: 1, html: `` },
+      { block: 2, html: `<form><label for="name">Name</label><input id="name"></form>` },
+      { block: 3, html: `<div><p><strong>Standby Pay.</strong></p><p>Paid at the rate.</p></div>` },
+    ],
+  }), MIXED, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 2 }, "two demotions, both read");
+  assert.equal(patch?.data.discarded, "headings_lost", "and the round is refused, which is unchanged");
+  assert.equal(result.body, MIXED, "the document that entered");
+  assert.deepEqual(patch?.data.headings_dropped, [1, 3], "both blocks that fell are named");
+  assert.ok(
+    !("headings_recheck" in (patch?.data ?? {})),
+    "NOT the re-check marker: block 1's fall is accounted for, so nothing here says the reading is wrong");
+  assert.ok(!("headings_reverted" in (patch?.data ?? {})), "and nothing was delivered, so nothing was handed back");
+});
+
 test("the words are matched as words, so a label that repunctuates them is still not re-seated", async () => {
   // Why the containment reading is not a string comparison. The words are RE-EXPRESSED where they land
   // rather than copied: `<h4>Name</h4>` emptied while the `<label>` that takes its place writes `Name:`.

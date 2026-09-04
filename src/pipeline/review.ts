@@ -1833,14 +1833,24 @@ function applyEditorPatch(
       // block was seated.
       const kept = applyBlockEdits(blocks, edits.filter((x) => !reverted.includes(x.block)));
       if ((kept.navigation_lost.headings ?? 0) > 0) {
-        // The arithmetic above says this cannot happen with `headings_gained === 0`. If it does, the
-        // reading is wrong about something and the round is refused whole — a fall that survived the
-        // revert is the one outcome this must never ship.
+        // A fall that survived the revert is the one outcome this must never ship, so the round is
+        // refused whole either way. But it is two different findings, and only one of them says the
+        // reading is wrong.
         //
-        // Named apart from the other two on the log line (`headings_recheck`), because a branch that is
-        // unreachable by argument is exactly the one whose firing has to be legible: it fired here, not
-        // in the case that looks identical from the counts (#376).
-        unattributable = "recheck";
+        // ONLY THE SEATABLE EDITS WERE DROPPED, so a block that dropped a heading AND gave its content
+        // away still has its edit, and its fall is still in the re-applied body. That is a reply that
+        // demoted in two places, one of them the `<label>` migration this file calls the commonest form
+        // of the hazard — ordinary output, and the migrated case at a mixed grain: same cause, same
+        // answer, so it is logged as `migrated` and not as a re-check. `kept.headings_dropped` is
+        // exactly that set — every block still dropping one is a block deliberately not handed back,
+        // because a reverted block has no edit left to drop anything with.
+        //
+        // With no per-block fall behind it, the fall is one the arithmetic above says cannot happen with
+        // `headings_gained === 0`, and then the reading is wrong about something. Named apart on the log
+        // line (`headings_recheck`) for that case alone, because a branch unreachable by argument is
+        // exactly the one whose firing has to be legible — and a marker an ordinary mixed reply can
+        // trip is not that marker, which is what it was until this became two branches (#376).
+        unattributable = kept.headings_dropped.length > 0 ? "migrated" : "recheck";
         reverted = [];
       } else {
         shipped = kept;
@@ -1910,14 +1920,15 @@ function applyEditorPatch(
     //   - `headings_gained` — a heading arrived somewhere in the same reply, so a departure cannot be
     //     matched to an arrival. Counted, because one arrival beside one fall is a move and eleven is a
     //     restructure.
-    //   - `headings_dropped` — no heading arrived, but every block that dropped one gave content to
-    //     another edit in the same reply, so re-seating any of them would print those words twice. These
-    //     are the blocks that fell and could not be handed back, which is the one thing a reader of this
-    //     line needs and cannot get from anywhere else.
-    //   - `headings_recheck` beside `headings_dropped` — the fail-closed re-check found a fall that
-    //     survived the revert. Its own marker because the counts on the line are otherwise identical to
-    //     the case above (#376), and this branch is unreachable by argument: if it ever fires, which one
-    //     fired is the whole finding.
+    //   - `headings_dropped` — no heading arrived, but a block that dropped one gave content to another
+    //     edit in the same reply, so re-seating it would print those words twice: either every dropping
+    //     block did, leaving nothing seatable, or the seatable ones were handed back and the fall the
+    //     others explain survived it. These are the blocks that fell and could not be handed back, which
+    //     is the one thing a reader of this line needs and cannot get from anywhere else.
+    //   - `headings_recheck` beside `headings_dropped` — a fall survived the revert that NO block still
+    //     dropping a heading explains. Its own marker because the counts on the line are otherwise
+    //     identical to the case above (#376), and this one is unreachable by argument: if it ever fires,
+    //     which one fired is the whole finding.
     //   - `headings_reverted` present WITH `discarded` — blocks were handed back and nothing was left to
     //     apply, so the round changed nothing. That shape is already distinguishable, which is why it
     //     needs no field of its own.
