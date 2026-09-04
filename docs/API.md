@@ -515,7 +515,7 @@ Two more values live in the repo that reads it — the `QUALITY_URL` **variable*
 **origin**, no `/v1`: the job appends the path, and a value carrying one produces a 404 that looks
 exactly like a deployment which never opted in) and the `QUALITY_TOKEN` **secret**, byte-for-byte the
 token above. Verify the pair with `gh workflow run quality-report.yml -f dry_run=true` rather than
-waiting for the weekly schedule; README's "Weekly quality report" section has the full procedure,
+waiting for the weekly schedule; [ci.md](ci.md)'s "Weekly quality report" section has the full procedure,
 including why a green run that declines to file is the expected result on a young deployment.
 
 ## 1. Authenticate (get a token)
@@ -538,7 +538,7 @@ it cannot touch any repository other than the upstream one the app is installed 
 Your token is never written to disk. It is read from the `Authorization` header, held in memory
 for the duration of the run it authorizes, and discarded — revoke it any time at
 [github.com/settings/applications](https://github.com/settings/applications) and the service loses
-that access within five minutes (see the README's "What happens to your token").
+that access within five minutes (see [github-auth.md](github-auth.md#what-happens-to-a-token)).
 
 *Operators:* an earlier build did store tokens, in a `github_token` column. There is no migration —
 delete any `data/iris.sqlite` from before that change and let users re-authorize. The service
@@ -1890,7 +1890,7 @@ document says so in an `@editor-truncated` comment (§5, and
 
 This is the same script CI runs on every PR, and its output is handed to the automated reviewer as
 evidence rather than re-run by it (see
-[Automated code review](../README.md#automated-code-review)). So a change that breaks a request or
+[Automated code review](ci.md#automated-code-review)). So a change that breaks a request or
 response documented above surfaces as a blocking review finding quoting the failure — which is why
 this file is in the reviewer's scope: the API docs are part of the contract, and docs that now
 contradict the code are treated as a real defect.

@@ -98,7 +98,7 @@ test("the Reader is told what a no-content entry is, and that neither kind is it
     // the document's own close") and then asked for window 2 to be verified; Kimi wrote "window
     // boundaries are not document defects" into the `suggested_action` of an issue whose whole
     // content was the label. Strengthening these sentences is spending prompt tokens on a model
-    // that already quotes them back. Recorded in README's window bullet, which is where a
+    // that already quotes them back. Recorded in docs/design-notes.md's window bullet, which is where a
     // Reader swap is told to re-measure the count.
     ["the label itself is named as never a defect",
       /That label is never itself a defect, and neither is the window it describes/],

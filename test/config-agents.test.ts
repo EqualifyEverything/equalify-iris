@@ -1,8 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { readFileSync, readdirSync, writeFileSync, mkdtempSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import {
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+  mkdtempSync,
+  mkdirSync,
+  existsSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { perAgentKeyWarning } from "../src/config.ts";
 
@@ -632,8 +639,24 @@ function unclosedBoldRuns(doc: string): string[] {
   // top of the block — round 3 asked for that and it is the line an editor has to go and look at.
   let block: [number, string][] = [];
 
+  // A `**` inside an inline code span is not emphasis: `src/**` and `.github/workflows/**` are glob
+  // patterns, and GFM renders what is between backticks literally by definition. Stripped before
+  // counting, or every path pattern written in prose reads as a run that never closes. Four lines of
+  // docs/ci.md are what found this, on the commit that first brought that text under this check —
+  // it had lived in README.md, which this loop did not cover.
+  //
+  // Stripping is per line, like everything else here, and a code span WRAPPED across a line break
+  // therefore strips the wrong range: the half-span on each line pairs with the next backtick it
+  // finds, which can swallow a real `**` in between. docs/sprint-246.md had one (`git worktree
+  // list`, split across two lines), and the run it swallowed was the one this check exists to catch,
+  // so adding the strip turned a masked defect into a false positive on the same line. It is
+  // reflowed rather than parsed for, which is what the note above says to do with a false positive
+  // of this shape — but unlike that one, this failure mode also HIDES defects, so if a wrapped span
+  // is ever legitimately needed the strip has to become a real scan, not an exemption.
+  const stripCode = (text: string): string => text.replace(/`+[^`]*`+/g, "");
+
   const finish = () => {
-    const runs = block.flatMap(([n, text]) => (text.match(/\*\*/g) ?? []).map(() => n));
+    const runs = block.flatMap(([n, text]) => (stripCode(text).match(/\*\*/g) ?? []).map(() => n));
     if (runs.length % 2 !== 0) {
       const [openerLine, opener] = block[0]!;
       unclosed.push(
@@ -668,8 +691,26 @@ function unclosedBoldRuns(doc: string): string[] {
 // after this check existed. sprint-246.md is most of the prose docs/cost.md used to carry, so leaving
 // it out of the loop would have quietly dropped ~250 already-covered lines out of coverage on the
 // commit that moved them.
+//
+// `docs/design-notes.md`, `docs/ci.md`, `docs/verifier-calibration.md` and `docs/github-auth.md` are
+// in the loop for the same reason sprint-246.md is: they are ~1,950 lines lifted out of README.md,
+// written in exactly this style, and a move is the commit where a `**` run gets cut in half.
+//
+// One list for both checks below, deliberately. They had a copy each, and a document added to one
+// copy and not the other is covered by half the guard while reading as covered by all of it.
+const PROSE_DOCS = [
+  "docs/models.md",
+  "docs/cost.md",
+  "docs/sprint-246.md",
+  "docs/design-notes.md",
+  "docs/ci.md",
+  "docs/verifier-calibration.md",
+  "docs/github-auth.md",
+  "README.md",
+];
+
 test("the measurement docs' bold runs close in the block that opens them", () => {
-  for (const file of ["docs/models.md", "docs/cost.md", "docs/sprint-246.md"]) {
+  for (const file of PROSE_DOCS) {
     const unclosed = unclosedBoldRuns(readFileSync(join(ROOT, file), "utf8"));
     assert.deepEqual(
       unclosed,
@@ -699,7 +740,7 @@ test("the measurement docs' bold runs close in the block that opens them", () =>
 // legitimately, so only a plain paragraph line is a defect. The unit is the source line because that is
 // what the renderer consumes; nothing here parses the table.
 test("no prose paragraph is swallowed into the table above it", () => {
-  for (const file of ["docs/models.md", "docs/cost.md", "docs/sprint-246.md", "README.md"]) {
+  for (const file of PROSE_DOCS) {
     const lines = readFileSync(join(ROOT, file), "utf8").split("\n");
     let fenced = false;
     const swallowed: string[] = [];
@@ -1012,5 +1053,81 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
     `docs/cost.md says checking a page is ${claimed}% of the bill; its own \`verify\`, \`correct\` ` +
       `and \`recheck_sampled\` rows come to ${checkingShare.toFixed(2)}%. That figure is the ` +
       `document's headline finding about where the money goes.`,
+  );
+});
+
+// GitHub's own heading slug, near enough for the links this repo writes: lowercase, drop anything
+// that is not a word character, hyphen or space, then spaces to hyphens. Inline code and a link
+// inside a heading contribute their text, not their markup.
+function headingAnchors(markdown: string): Set<string> {
+  const anchors = new Set<string>();
+  let fenced = false;
+  for (const line of markdown.split("\n")) {
+    if (line.startsWith("```")) fenced = !fenced;
+    if (fenced) continue;
+    const heading = /^#{1,6}\s+(.*?)\s*$/.exec(line);
+    if (!heading) continue;
+    const text = heading[1].replace(/`/g, "").replace(/\[(.*?)\]\(.*?\)/g, "$1");
+    anchors.add(
+      text
+        .toLowerCase()
+        .replace(/[^\w\- ]+/g, "")
+        .trim()
+        .replace(/ +/g, "-"),
+    );
+  }
+  return anchors;
+}
+
+// A cross-reference that does not resolve is the failure mode of moving prose between files, and it
+// is silent: GitHub renders a dead relative link as a link, and a dead `#anchor` scrolls nowhere.
+// The commit that split ~1,950 lines out of README.md into docs/design-notes.md, docs/ci.md,
+// docs/verifier-calibration.md and docs/github-auth.md rewrote 11 pointers and created 18 anchors,
+// none of which any other gate reads.
+//
+// Anchors are checked as well as paths because the paths were the easy half. Two of the pointers
+// this replaced were *positional* — "see the end of design notes", "the section above" — which
+// cannot break and cannot be checked either; they were turned into anchors precisely so that a
+// later move fails here instead of quietly pointing at the wrong paragraph.
+test("every relative link in the docs resolves, file and anchor", () => {
+  const files = [
+    "README.md",
+    "CONTRIBUTING.md",
+    ...readdirSync(join(ROOT, "docs"))
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => `docs/${f}`),
+  ];
+  const anchorCache = new Map<string, Set<string>>();
+  const anchorsFor = (path: string) => {
+    if (!anchorCache.has(path)) anchorCache.set(path, headingAnchors(readFileSync(path, "utf8")));
+    return anchorCache.get(path)!;
+  };
+
+  const broken: string[] = [];
+  let checked = 0;
+  for (const file of files) {
+    const text = readFileSync(join(ROOT, file), "utf8");
+    for (const [, target] of text.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
+      if (/^(?:https?:|mailto:|#!)/.test(target)) continue;
+      const [path, anchor] = target.split("#");
+      const abs = path === "" ? join(ROOT, file) : join(ROOT, dirname(file), path);
+      checked++;
+      if (!existsSync(abs)) {
+        broken.push(`${file} -> ${target} (no such file)`);
+        continue;
+      }
+      if (anchor && abs.endsWith(".md") && !anchorsFor(abs).has(anchor)) {
+        broken.push(`${file} -> ${target} (file exists, no heading makes that anchor)`);
+      }
+    }
+  }
+
+  // Without this the check passes on a repo whose links it failed to match at all.
+  assert.ok(checked > 40, `only ${checked} relative links found across ${files.length} files`);
+  assert.deepEqual(
+    broken,
+    [],
+    `${broken.length} relative link(s) in the docs do not resolve. A moved section takes its ` +
+      `anchor with it, so repoint the link rather than deleting it:\n  ${broken.join("\n  ")}`,
   );
 });

@@ -16,13 +16,14 @@ By participating you agree to our [Code of Conduct](CODE_OF_CONDUCT.md).
   prompts are code, in `src/pipeline/review.ts`.) Iris also opens `New agent suggestion: <type>`
   issues when it meets content a specialist would handle better, and you're welcome to open one
   yourself — but note that `agents/` is not a directory of content types: a file added for a type
-  the whole-page pass already covers is never loaded (README's "One agent per page, not one per
-  content type" says why). `chartDataAgent.md` is the shape that earns its place.
+  the whole-page pass already covers is never loaded — the
+  [design notes](docs/design-notes.md#the-pipelines-shape) say why, under "One agent per page, not
+  one per content type". `chartDataAgent.md` is the shape that earns its place.
 - **Code** — bug fixes and improvements via pull request.
 
 A well-written issue may get a pull request without you doing anything else. A scheduled workflow
 ranks the open issues Sun–Wed and opens one PR for the most pressing one it can finish well
-([details](README.md#scheduled-issue-triage)) — accessibility barriers rank first, and small
+([details](docs/ci.md#scheduled-issue-triage)) — accessibility barriers rank first, and small
 user-visible fixes reported against the demo rank well because they review cleanly. It never
 touches an issue labelled `no-auto-pr`, never files a second PR for an issue it has already tried,
 and stops entirely when nothing is eligible. If you'd rather own the fix yourself, say so on the
@@ -81,7 +82,7 @@ should report **0 violations**.
 ### What the automated review will say
 
 Your PR gets a review from Claude in CI before a maintainer reads it
-([details](README.md#automated-code-review)). Useful things to know:
+([details](docs/ci.md#automated-code-review)). Useful things to know:
 
 - **It runs the checks itself** and quotes their real output, so a failing `typecheck` or `e2e`
   comes back as a blocking finding with the relevant lines.

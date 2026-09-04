@@ -88,7 +88,7 @@ storage:
 # service without contributing.
 #
 # Nothing here opens pull requests: contributions are filed as issues (an earlier
-# design opened them — see README "Implementation notes").
+# design opened them — see docs/design-notes.md).
 #
 # The user's token is never persisted. It arrives in the `Authorization` header,
 # stays in memory for the run it authorizes, and is gone when the run ends — so a

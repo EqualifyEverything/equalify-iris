@@ -1081,7 +1081,7 @@ export class Store {
   // from "a peer instance is running it right now". A second instance booting
   // against the same data_dir marks the first instance's live runs `failed` —
   // the pipeline keeps going and still writes output.html, but the client is
-  // told the conversion failed. Declared in README's implementation notes;
+  // told the conversion failed. Declared in docs/design-notes.md;
   // making it safe needs an owning-instance id, not a change here.
   failStaleSessions(): number {
     const now = new Date().toISOString();

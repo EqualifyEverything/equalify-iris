@@ -404,8 +404,9 @@ narration arm for #365; the #319 arbiter on a table-dense corpus; a ~$1.45 three
   failure; the one table that had never adopted it is the one the figure came from.
 - **One method fix worth naming because it nearly cost a round.** Every analysis script was pinned to
   one Iris checkout while the script that *spends the money* still defaulted to a shared checkout
-  parked 35 commits behind on an unrelated branch with a different `agents/page.md`. `git worktree
-  list` showed nine checkouts carrying **seven distinct `page.md` blobs.** A $0 dry run caught it.
+  parked 35 commits behind on an unrelated branch with a different `agents/page.md`.
+  `git worktree list` showed nine checkouts carrying **seven distinct `page.md` blobs.** A $0 dry
+  run caught it.
   Provenance is now a `git hash-object` of the bytes the loader reads, rather than a `rev-parse` of
   the committed blob — `e0eb74a` (#360) does the same inside Iris for `agent_sha`.
 

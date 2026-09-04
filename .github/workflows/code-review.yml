@@ -1104,7 +1104,7 @@ jobs:
                  fallback never runs.
                - **Comments that no longer match the YAML.** These files are load-bearing
                  documentation for a security control, and a stale rationale comment here is a
-                 defect, not a nit. Same for `README.md`'s "Automated code review" /
+                 defect, not a nit. Same for `docs/ci.md`'s "Automated code review" /
                  "Scheduled issue triage" sections, which state the behaviour these files
                  implement.
 
@@ -1115,8 +1115,9 @@ jobs:
 
             - Agent markdown edits that loosen the output contract, drop the accessibility
               requirements, or change a pinned git SHA without explanation.
-            - Docs (`README.md`, `docs/API.md`, `docs/models.md`) that now contradict the code, and
-              `config.example.yaml` missing a newly-required config key.
+            - Docs (`README.md`, `docs/API.md`, `docs/models.md`, `docs/design-notes.md`,
+              `docs/ci.md`) that now contradict the code, and `config.example.yaml` missing a
+              newly-required config key.
             - Changes to the review context builder's thresholds (`MIN_CHANGED_PCT`,
               `ALWAYS_INCLUDE_UNDER_BYTES`, `ALWAYS_INCLUDE_PATHS`, `MAX_BYTES_PER_FILE`) that
               could drop a high-risk file from a future review's context. Name the files that
