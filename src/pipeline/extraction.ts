@@ -3683,14 +3683,18 @@ async function extractPage(
         // reaches `GET /v1/quality`. Its `truncated: true` restates what the predicate above already
         // said on every line where both fire, and the two paths above spell the field the same way.
         ...evidence,
-        // Which of the four replies a correction can send this was, on the same terms the first pass
+        // Which of the five replies a correction can send this was, on the same terms the first pass
         // reports it (`replyShape`, `page_no_output`): the envelope it was asked for, an envelope cut
-        // by the ceiling, the page's bare markup, or prose. It is the head-and-tail reading above
-        // turned into something countable, which is what #365 asks for — a hand-count of tails is
-        // how the shapes were told apart until now, and `reply_chars` cannot do it, since the same
-        // 15,000 characters are a large page and a short essay. Absent on a reply of zero characters,
-        // where `reply_chars: 0` is already the whole of what is known and a fifth value would say it
-        // twice, and absent on every failure that has no reply at all, exactly as the excerpts are.
+        // by the ceiling, the page's bare markup, prose, or `empty` for a reply of whitespace. It is
+        // the head-and-tail reading above turned into something countable, which is what #365 asks
+        // for — a hand-count of tails is how the shapes were told apart until now, and `reply_chars`
+        // cannot do it, since the same 15,000 characters are a large page and a short essay.
+        //
+        // Absent on a reply of ZERO characters, and that is a narrower rule than "absent on a reply
+        // that carried nothing": whitespace lands here as `empty` with a `reply_chars` above 0, so the
+        // two are distinguishable, where on a zero-character reply `reply_chars: 0` is already the
+        // whole of what is known and a shape would say it twice. Also absent on every failure that has
+        // no reply at all, exactly as the excerpts are.
         //
         // It says where the reply BEGAN and not where the output went. `bare_html` on a correction
         // that started the page and then narrated at it reads the same as one that transcribed until
