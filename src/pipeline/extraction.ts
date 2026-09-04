@@ -1657,9 +1657,32 @@ function negatedBefore(tokens: Word[], i: number): boolean {
 // VISUAL content is present." is one denial of two coordinated nouns, and the one word between the
 // second noun and the qualifier in front of it was enough to end the walk — so `content` found the
 // list's shared `is present` and a blank page was reported lost (#220).
+//
+// Two axes, then, and the grouping below is which one each word is here for, because reading the whole
+// thing as one vocabulary is what makes it look like a list to extend by hand (#371's objection).
+// The COORDINATION axis is how many members a denial has — the joiners and the `of any kind` that
+// trails one — and it is the axis #190 and #194 measured. The MODIFIER axis is how the member itself is
+// spelled: a noun used to modify the name for text, which sits between the negator and the noun without
+// joining anything. `page` and `number` were already that axis under another name (`no printed page
+// number or heading`), which is why `no page content` shipped and `no other DOCUMENT content` did not —
+// which noun the model put in front of `content` decided whether the page survived. `document` and
+// `body` are here for that axis and only that one (#379, from #367's log, which is both axes at once:
+// "No text, images, tables, or other document content is visible." stopped at `document`, one word
+// short of the `No`, and the page was delivered as `@page-failed`).
+//
+// What that axis cannot do is reach an affirmation no negator was ever near. Neither word is in
+// `TEXT_NOUN`, so neither is a subject this walk starts from, and a determiner, a verb, a count or a
+// `but` still ends the walk — so `Page is blank. There is handwriting on the page.` and the three
+// self-contradictions beside it in the tests have no negator to be handed one, whatever is added here.
 const CHAIN_LINK = new Set(
-  ("or and either handwritten hand-written typewritten of any all at whatsoever else kind sort type " +
-    "page pages number numbers visual").split(" "),
+  (
+    // The coordination axis: what joins members, and what trails the last one.
+    "or and either of any all at whatsoever else kind sort type " +
+    // Qualifiers this walk needs that `QUALIFIER` cannot carry, for the reasons above.
+    "handwritten hand-written typewritten visual " +
+    // The modifier axis: a noun dressing the name for text rather than joining a list.
+    "page pages number numbers document body"
+  ).split(" "),
 );
 // A coordination has no length limit, so this walk needs one: a log with two hundred conjoined nouns
 // in it should not be re-read from every one of them. Sixteen tokens is longer than any denial the
