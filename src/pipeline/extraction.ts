@@ -824,10 +824,43 @@ export function bareHtml(text: string): string | null {
 // is now narrower than it was: a blank page DECLARED as one is `declaredBlank` below and not a
 // failure at all, so what reaches this shape is an envelope that carried no page and did not
 // say why — the model that gave up, which is the prompt problem this field names.
+//
+// `bare_html` is the fifth value and it is the one the four could not say (#365). A model that
+// answers with the page's MARKUP instead of the envelope is a reply `bareHtml` accepts and
+// delivers, so it is not a parser problem and not the agent answering conversationally — and
+// without this value it was labelled `prose`, whose stated remedy above is the prompt. Measured
+// on the 180 corrections of `runs-extract100-95ca64c` that logged a reply: 24 of them answer in
+// bare markup (19 of kimi-k2.5's 64, 5 of sonnet-4-6's 52, 0 of luna's 64), so it is a model
+// trait rather than an oddity, and both of that round's page-shaped correction truncations are
+// in the group. Order is load-bearing only in that the envelope tests stay first, so every label
+// this function gave before is the label it gives now: over those 180 replies the only change is
+// the 24, and cutting each of them at 60% of its own length — a truncation, which is the case the
+// correction path calls this for — gives 152 `truncated_envelope`, 27 `bare_html` and 1 `prose`,
+// where before it gave 152 and 28 `prose` for everything else.
+//
+// The rule is `bareHtml`'s in substance — a reply is markup when nothing about it suggests an
+// envelope — plus one thing `bareHtml` has no need of: an opening fence with no closing one.
+// `stripFences` returns the last COMPLETE fenced block and otherwise the whole text, so a reply cut
+// by an output ceiling comes back with its own opener still on the front. That is precisely the
+// reply this value is for. Both page-shaped truncations in that round begin
+// "```html\n<hr role=\"doc-pagebreak\"…", and asking `bareHtml` about them returns null and labels
+// them `prose` — the label the value was added to stop. Widening `bareHtml` instead is the wrong
+// place: it is only ever asked about a reply that arrived whole, and loosening what the pipeline
+// DELIVERS as a page to fix a log line is a trade this does not need to make. A reply that is
+// nothing but an opener reads as `empty` rather than `prose`, which is what it is.
+//
+// What the value CANNOT say is where the output went, because this reads the reply's beginning.
+// A correction that starts with the page and then talks about it — `acir-p083` in that round,
+// whose tail is the model re-opening a fence and second-guessing its own table — is `bare_html`
+// here exactly like one that transcribed to the last character it had room for. That is what
+// `reply_tail` is on the log line for, and it is why nothing counts narration off this field.
+const UNCLOSED_FENCE = /^```[a-z]*[ \t]*\r?\n?/;
+
 function replyShape(text: string, parsed: unknown): string {
   if (parsed) return "empty_html";
-  const t = stripFences(text);
+  const t = stripFences(text).replace(UNCLOSED_FENCE, "").trim();
   if (t.startsWith("{") || /"html"\s*:/.test(t)) return /}\s*$/.test(t) ? "envelope" : "truncated_envelope";
+  if (t.startsWith("<")) return "bare_html";
   return t ? "prose" : "empty";
 }
 
@@ -2271,10 +2304,26 @@ export const CORRECTION_CEILING_FLOOR = 4000;
 // `handedBackChars` are three counts of the same page whose transposition would type-check and
 // would be silent — swapping the two lengths turns `growth` upside down, and a cap that shrinks
 // when the document grows is the failure this exists to prevent.
+//
+// WHICH of the two terms produced the number is returned with it, because it is the question a
+// truncated correction's log line is read to answer and the line could not answer it (#365). The
+// two have different remedies and only one of them is `CORRECTION_CEILING_MULTIPLE`: of the three
+// corrections that truncated in `runs-extract100-95ca64c`, two were capped at twice their own
+// first pass (7,904 on 3,952 tokens; 13,278 on 6,639) and the third at the FLOOR — `acir-p083`,
+// a 1,618-token first pass whose doubling is 3,236 — so a reading of those three lines as
+// evidence about the multiple is a reading of two lines and one that says nothing about it.
+// Recovering that from the logs today means pairing the line with the page's own `model_call`,
+// which carries no image and is joined by position (#365's own instrument had that join wrong
+// once, on every extract cell of two arms).
+//
+// Returned rather than re-derived at the caller from `ceiling === CORRECTION_CEILING_FLOOR`,
+// which is the approximation available there and is wrong in the one case that matters: a first
+// pass of exactly 2,000 tokens with `growth` 1 computes 4,000 from the MULTIPLE, and raising the
+// multiple would raise its cap. `>=` is the boundary and it belongs where the two terms are.
 export function correctionCeiling(
   firstPass: { outputTokens?: number; chars: number },
   handedBackChars: number,
-): number | undefined {
+): { tokens: number; bound: "multiple" | "floor" } | undefined {
   // No number, no cap. The alternative — a ceiling derived from the character count alone — is a
   // guess about a provider's tokenizer standing in for a measurement, on the path where getting it
   // wrong throws away a correction that was about to work.
@@ -2283,10 +2332,10 @@ export function correctionCeiling(
   // fragment is unwrapped and trimmed), and reading that as "this page needs fewer tokens than it
   // took" would tighten every cap on the corpus the multiple was measured against.
   const growth = firstPass.chars > 0 ? Math.max(1, handedBackChars / firstPass.chars) : 1;
-  return Math.max(
-    Math.ceil(CORRECTION_CEILING_MULTIPLE * growth * firstPass.outputTokens),
-    CORRECTION_CEILING_FLOOR,
-  );
+  const scaled = Math.ceil(CORRECTION_CEILING_MULTIPLE * growth * firstPass.outputTokens);
+  return scaled >= CORRECTION_CEILING_FLOOR
+    ? { tokens: scaled, bound: "multiple" }
+    : { tokens: CORRECTION_CEILING_FLOOR, bound: "floor" };
 }
 
 // Everything the page agent is told that is NOT about the page in front of it: its own
@@ -3537,7 +3586,8 @@ async function extractPage(
     // is still a re-render from the image rather than an edit — but the argument no longer rests on
     // the link repair alone: this is now the repair that decides whether that verify call bought
     // anything, and a cap taken from the empty render would spend it and lose the page anyway.
-    const ceiling = html === "" ? undefined : correctionCeiling({ outputTokens, chars: html.length }, before.length);
+    const cap = html === "" ? undefined : correctionCeiling({ outputTokens, chars: html.length }, before.length);
+    const ceiling = cap?.tokens;
     const attempt = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons, ceiling).then(
       (html) => ({ html, error: null as unknown }),
       (error: unknown) => ({ html: null, error }),
@@ -3558,6 +3608,20 @@ async function extractPage(
         page: img.order,
         trigger,
         problems: problems.length,
+        // What the verdict said was wrong going in, spelled exactly as `page_corrected` spells it
+        // and for the same reason (#182): the count above says how much work the call was given and
+        // not what kind. Without it the correction path's FAILURES were the one part of it that
+        // could not be grouped by what was asked — #365 grouped 205 successful corrections by
+        // whether their kinds include `content_missing` (39 of 64 grew the page's text with it, 19
+        // of 141 without) and could not put a single failed one in either group, because the kinds
+        // are on the other event. Empty on the `links` and `alt` triggers, where the defect was
+        // found by code against the file's own annotations rather than named by the verifier, which
+        // is that field's rule here too — a kind on such a line would be a count the verdict never
+        // made. Empty is therefore two cases, exactly as it is on `page_corrected`: no verdict at
+        // all, or a verdict whose problems named no kind. `page_verify_failed` separates them on the
+        // same `image` — it carries `untagged` beside its own `kinds`, and a `verify` trigger here
+        // means that line exists.
+        kinds: verifyFailed ? verdict.kinds : [],
         error: message,
         // Named rather than left to be read out of the message, because it is the one shape
         // with a configuration remedy (`providers.*.max_tokens`) and the one that says the
@@ -3576,7 +3640,17 @@ async function extractPage(
         // bound the call, so
         // the remedy on the line is the same; what differs is whether anything here could have
         // capped it, which is what an operator reading this field is asking.
-        ...(ceiling !== undefined ? { ceiling } : {}),
+        //
+        // And WHICH of `correctionCeiling`'s two terms produced the number, because the field above
+        // cannot say and the answer decides which constant a reader is looking at. `multiple` is
+        // twice this page's own first pass (scaled by a specialist's growth, where there was one) and
+        // `floor` is `CORRECTION_CEILING_FLOOR`, which binds on a small page whose doubling is under
+        // it: one of the three corrections that truncated in `runs-extract100-95ca64c` is a `floor`
+        // line — a 1,618-token first pass capped at 4,000 rather than 3,236 — and a triage of those
+        // three lines as evidence about the multiple would be counting it for a term that did not
+        // bind on it. The alternative was a reader comparing `ceiling` against 4,000 by eye, which is
+        // wrong on the page whose multiple lands exactly there (`correctionCeiling`).
+        ...(cap !== undefined ? { ceiling: cap.tokens, ceiling_bound: cap.bound } : {}),
         // What the reply reached, and both of its ends — the evidence that decides the question the
         // `ceiling` above only poses (issue #293). A cap this page hit is either a page that
         // genuinely needs more room than its first pass took, in which case the multiple in
@@ -3599,6 +3673,24 @@ async function extractPage(
         // reaches `GET /v1/quality`. Its `truncated: true` restates what the predicate above already
         // said on every line where both fire, and the two paths above spell the field the same way.
         ...evidence,
+        // Which of the four replies a correction can send this was, on the same terms the first pass
+        // reports it (`replyShape`, `page_no_output`): the envelope it was asked for, an envelope cut
+        // by the ceiling, the page's bare markup, or prose. It is the head-and-tail reading above
+        // turned into something countable, which is what #365 asks for — a hand-count of tails is
+        // how the shapes were told apart until now, and `reply_chars` cannot do it, since the same
+        // 15,000 characters are a large page and a short essay. Absent on a reply of zero characters,
+        // where `reply_chars: 0` is already the whole of what is known and a fifth value would say it
+        // twice, and absent on every failure that has no reply at all, exactly as the excerpts are.
+        //
+        // It says where the reply BEGAN and not where the output went. `bare_html` on a correction
+        // that started the page and then narrated at it reads the same as one that transcribed until
+        // the ceiling — both are real, in the same round, on the same model — so the tail above stays
+        // the evidence and this is the index into it. `prose` is the one value that settles anything
+        // by itself: a reply that never began the page spent the whole cap on something else, and
+        // raising the cap buys more of it (#293, §9.3).
+        ...(attempt.error instanceof TruncatedResponseError && attempt.error.text !== ""
+          ? { shape: replyShape(attempt.error.text, null) }
+          : {}),
         // What the page kept, so the log shows this was a page retained and not a page lost.
         chars_kept: before.length,
       });
