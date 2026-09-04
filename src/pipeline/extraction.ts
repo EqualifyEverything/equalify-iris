@@ -8,6 +8,7 @@ import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } fr
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { unjudgedVerdict, verifyAgentOutput, type VerifyVerdict } from "./feedback.ts";
 import {
+  captionClaims,
   carriesContent,
   changedAnything,
   claimRecheck,
@@ -3153,6 +3154,19 @@ async function extractPage(
       innerHtml = result.html;
       logNote = logNote ? `${logNote}; merged ${suggestion.name}` : `merged ${suggestion.name}`;
     }
+  }
+
+  // What the two free caption checks had to work with on this page, before anything is judged or
+  // repaired (#356). Here rather than beside the correction for the reason `correctionEffect` cannot
+  // carry it: this is a fact about the fragment the verifier is about to be shown, and most pages
+  // that have one are never corrected at all, so a field on `page_corrected` would be silent on
+  // exactly the pages where a check declining is indistinguishable from a check finding nothing.
+  //
+  // After the merge, so it reads the same fragment the verify call does — a specialist that rewrote
+  // the figure changed both strings this compares. Nothing consumes these lines: they are the record
+  // that the subject existed, and the reasons the comparison was not available.
+  for (const claim of captionClaims(innerHtml)) {
+    ctx.log.event("page_caption_claim", { image: img.name, page: img.order, ...claim });
   }
 
   // A page the agent declared blank is not sent to the verifier. The fidelity question this call
