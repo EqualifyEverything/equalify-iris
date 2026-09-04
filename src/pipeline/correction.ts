@@ -527,6 +527,195 @@ export function altRelocations(before: string, after: string): string[] {
   return moved;
 }
 
+// A figure's caption read as a claim about the same picture its description describes.
+//
+// The `<figcaption>` is the typesetter's own sentence and the `alt` is the model's, and they arrive
+// in one fragment with no image between them, which makes the comparison the one check on a
+// description that costs no call, no pixel and no word list (#356). Two of its three axes are
+// already rules in both prompts: a count the page PRINTS against the length of the list (v1.11), and
+// a region the page names as highest or lowest against the bands the description sorts places into
+// (v1.12). What is here is not a third rule. It is the RECORD that those two leave nothing of when
+// they decline, plus the subject list for the axis that cannot be built yet.
+//
+// The decline is the whole reason this is code rather than more prose. v1.12's clause ends by
+// refusing the comparison where the caption's named group is not one the page itself sorts —
+// supplying "which states are New England" from a model's own knowledge is how that check invents
+// the problem it then reports — so a round that reports no region contradiction is either a round
+// with none or a round where every subject was refused, and from outside those are the same silence.
+// Over 1,302 delivered pages of the rounds on disk this fires on 66 figures across four plates, and
+// 47 of the 50 region claims among them are subjects the clause must decline: 44 where the caption's
+// group is nowhere in the description's own bands, and 3 more where the description sorts nothing at
+// all. The 3 that are decidable are all one arm describing the map BY region, which is the shape
+// that puts the membership on the page.
+//
+// Nothing here refuses, corrects or reaches a verdict, and no field is a proportion. That is the
+// finding rather than a limitation: see `FRACTION_WORDS`.
+export type CaptionClaim = {
+  figure: number;
+  caption: string;
+  quantifier?: string;
+  share?: number;
+  band?: string;
+  enumerations: number;
+  named?: string[];
+  declined?: string[];
+};
+
+// A figure and its caption. Both close at the first end tag or at the end of the fragment, because
+// this reads model output mid-pipeline for the reason the whole module does: a page cut off inside
+// its last figure still has a caption to compare, and a scan that required the close tag would drop
+// exactly the page most likely to have lost something.
+const FIGURE = /<figure\b[^>]*>([\s\S]*?)(?:<\/figure>|$)/gi;
+const FIGCAPTION = /<figcaption\b[^>]*>([\s\S]*?)(?:<\/figcaption>|$)/i;
+
+// The words a caption quantifies a category with that name a definite fraction, and only those. A
+// hedge in front of one does not change the fraction the sentence names, so it is kept in what gets
+// recorded — "About Half" is the string the page printed — and the value is read off the noun.
+//
+// "Most", "a majority", "many", "few", "nearly all" are deliberately absent: each names an
+// inequality rather than a value, and a report that turned one into a number would be inventing the
+// number it then compared. A printed integer is absent for the opposite reason — that is v1.11's
+// axis and it is a rule in both prompts already.
+//
+// **No proportion is computed from these, and that is a measured decision rather than a gap.** The
+// caption states a fraction of a population; the description's categories are the only denominator
+// available; and both terms of that ratio are readings of the ink rather than transcriptions of the
+// page, so the comparison inherits every bit of the reading's noise. `p092` is the corpus's only
+// subject and its five reads put the quantified category at 34.7%, 35.6%, 41.7%, 41.9% and 50.0% of
+// the states enumerated, so no tolerance separates a miss from an exact hit on the one plate any
+// tolerance could be fitted to (#356 §2). The member parse settles it independently: run over the
+// same alt on 16 reads it answers 1, 2 or 3 categories for one unchanged legend, and on the read
+// that yields "30 and 16" two of those 46 members are fragments of prose and one state's name was
+// lost to a length bound. A share off that is right by cancellation and not by measurement. So the
+// subject is recorded — the words, the fraction they name, how many lists the description holds —
+// and the arithmetic is left to whoever regrades the log, at whatever tolerance a later corpus can
+// justify.
+const FRACTION_WORDS: [RegExp, number][] = [
+  [/(?:\b(?:about|approximately|around|nearly|roughly|some)\s+)?\bone[-\s]?half\b(?!-)/i, 1 / 2],
+  [/(?:\b(?:about|approximately|around|nearly|roughly|some)\s+)?\bhalf\b(?!-)/i, 1 / 2],
+  [/(?:\b(?:about|approximately|around|nearly|roughly|some)\s+)?\b(?:a|one)[-\s]third\b/i, 1 / 3],
+  [/(?:\b(?:about|approximately|around|nearly|roughly|some)\s+)?\btwo[-\s]thirds\b/i, 2 / 3],
+  [/(?:\b(?:about|approximately|around|nearly|roughly|some)\s+)?\b(?:a|one)[-\s]quarter\b/i, 1 / 4],
+  [/(?:\b(?:about|approximately|around|nearly|roughly|some)\s+)?\bthree[-\s]quarters\b/i, 3 / 4],
+  [/(?:\b(?:about|approximately|around|nearly|roughly|some)\s+)?\b(?:a|one)[-\s]fifth\b/i, 1 / 5],
+];
+
+// A caption saying that a group of places runs high or low: the band word has to be what a verb
+// asserts of something, not merely present.
+//
+// The verb is what keeps this off a figure's own title, and the two are not distinguishable any
+// other way. `p071` prints "Figure 3. States With Lowest Capacity" above "the Southeastern States
+// Rank Lowest", and `p073` prints "Figure 5. States With Highest Capacity" above "Farming and
+// Mineral States in the West Rank High": the titles name the band the whole plate is about, which is
+// no claim about any group, while the sentences under them are exactly v1.12's subject. Keyed on the
+// band word alone, both plates fired on their titles — and on `p073` that read the right page for
+// the wrong reason, which is a decline counted where no check was ever available.
+//
+// Bare "high" and "low" are admitted after a ranking verb and nowhere else, because "Rank High" is
+// how this document's captions write a superlative and a comparative there would be unbounded prose.
+const BAND_CLAIM =
+  /\b(?:rank|ranks|ranked|is|are|was|were|has|have|had|shows?|stands?)\s+(?:the\s+|among\s+the\s+)?(highest|lowest|greatest|smallest|largest|high|low)\b/i;
+
+// A member of the description's own lists that could be the group a caption names: it begins with a
+// capital. The false positives to keep out are band labels, which these plates print inside the
+// caption as a legend and their descriptions repeat inline — running this over the corpus produced
+// "1 thru 1.4", "2.0" and "over", and one test drops all three, because a label is either numeric or
+// a lowercase preposition where a place or a region is a proper noun. "New England" and "States in
+// the West" survive as the only three decidable subjects the corpus has.
+//
+// A second test, for a digit anywhere in the member, was here and is gone: over the same 1,302 pages
+// it changed no figure's record, and the shape it would have guarded — a capitalised label carrying a
+// number, matched against a caption that prints it in the same case — has no instance in them. If one
+// ever occurs it reads as one decidable line where a decline belonged, on a record nothing consumes.
+const GROUP_NAME = /^[A-Z]/;
+
+// How much of the caption is recorded, and how many named groups. The caption is quoted rather than
+// counted because it is the page's own words and the whole point is that a reader can check the
+// claim afterwards; a `<figcaption>` on these plates runs to a legend and three sentences, and the
+// claim is always in the first of them.
+const CAPTION_MAX = 200;
+const NAMED_MAX = 6;
+
+const escapeLiteral = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// One record per figure whose caption makes a claim of the kind those two rules are about. A figure
+// with no caption, or a caption with no such claim, produces nothing — which keeps this at 3 or 4
+// lines per 91-page arm rather than one per figure, and means a line's presence is itself the fact
+// that a free check had a subject here.
+//
+// Scoped to a `<figure>` that holds both strings, so a caption is compared with the description of
+// the picture it captions and not with a neighbouring one. What that leaves out is stated: a claim
+// in a `<p>` beside the figure, or in a `<table><caption>`, is v1.12's subject too — the prompts say
+// "a `<figcaption>` or a sentence in the fragment" — and this reads only the caption, so a decline
+// it does not count is a decline that happened somewhere this cannot see.
+export function captionClaims(html: string): CaptionClaim[] {
+  const claims: CaptionClaim[] = [];
+  for (const [at, figure] of [...html.matchAll(FIGURE)].entries()) {
+    const captionMarkup = FIGCAPTION.exec(figure[1]);
+    if (!captionMarkup) continue;
+    const alts = altValues(figure[1]).filter((a) => a !== "");
+    if (alts.length === 0) continue;
+    const caption = visibleText(captionMarkup[1]);
+    let quantifier: string | undefined;
+    let share: number | undefined;
+    for (const [pattern, value] of FRACTION_WORDS) {
+      const found = pattern.exec(caption);
+      if (found) {
+        quantifier = found[0].trim();
+        share = value;
+        break;
+      }
+    }
+    const band = BAND_CLAIM.exec(caption)?.[1].toLowerCase();
+    if (!quantifier && !band) continue;
+    // Joined on a semicolon, which is one of `ENUMERATION_BREAK`'s own separators: two images in one
+    // figure are two descriptions, and a join that let the first one's last list run into the
+    // second's first would read a member as sharing a category with places it was never listed with.
+    const { buckets, memberOf } = enumerationsIn(alts.join("; "));
+    // Bounded on both sides by something that is not part of a word, so a caption's "New Englanders"
+    // is not the region "New England"; and case-sensitive, which over the same 1,302 pages changes
+    // exactly one figure's answer and changes it from wrong to right. `p071`'s description labels the
+    // map with postal abbreviations, which makes "OR" a member, and its caption says "Per Capita
+    // Income or Per Capita Yield": ignoring case reports a named group, and so a decidable check, on
+    // the one plate whose claim is about "the Southeastern States" — a region the page never sorts.
+    // What case-sensitivity costs is a group the caption re-typed in another case, which goes
+    // uncounted and so reads as declined: the conservative direction for a field whose whole job is
+    // to say the check had nothing to work with.
+    const named: string[] = [];
+    for (const member of memberOf.values()) {
+      if (!GROUP_NAME.test(member.shown)) continue;
+      if (new RegExp(`(?<![\\w.])${escapeLiteral(member.shown)}(?![\\w])`).test(caption)) {
+        named.push(member.shown);
+        if (named.length === NAMED_MAX) break;
+      }
+    }
+    // Why nothing was compared, and each reason belongs to one of the three axes. `proportion` is
+    // unconditional wherever a caption quantifies in words, because that axis declines by design
+    // (see `FRACTION_WORDS`) — a constant on a line that only exists because the subject is there,
+    // and the alternative is a log that says nothing at all about the axis #356 asked for.
+    // `no_enumeration` is a description that sorts nothing into anything: both remaining checks need
+    // a list, and the arm this fires on is the cheapest one in every round measured, which is worth
+    // knowing before either rule is priced — an arm that makes no checkable claim escapes a check
+    // rather than passing it. It also settles the membership question by pre-empting it, which is
+    // why the two are exclusive rather than joined: where there are no bands, there is no band for a
+    // region's members to be missing from.
+    const declined: string[] = [];
+    if (quantifier) declined.push("proportion");
+    if (buckets.length === 0) declined.push("no_enumeration");
+    else if (band && named.length === 0) declined.push("membership");
+    claims.push({
+      figure: at + 1,
+      caption: caption.slice(0, CAPTION_MAX),
+      ...(quantifier === undefined ? {} : { quantifier, share }),
+      ...(band === undefined ? {} : { band }),
+      enumerations: buckets.length,
+      ...(named.length === 0 ? {} : { named }),
+      ...(declined.length === 0 ? {} : { declined }),
+    });
+  }
+  return claims;
+}
+
 // Every attribute EXCEPT alt, tag by tag, in document order.
 //
 // The other three signals are blind to attributes — `tagShape` reads names only, and
