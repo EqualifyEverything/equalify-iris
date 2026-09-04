@@ -9,17 +9,19 @@ import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Fragment } from "../src/pipeline/fragment.ts";
 import type { Paths } from "../src/store/paths.ts";
 
-// A page the fidelity check REJECTED, naming what was wrong, whose one correction pass did not
-// replace it. What the document carries for that page is the markup that failed the check, byte
-// for byte — and until #328 the document said nothing about it at all. `@page-failed` announces a
-// page with no content, which anyone who opens the file can see for themselves; a page whose
-// statistical table lost its six aggregate rows looks finished and no longer adds up.
+// A page the fidelity check REJECTED, naming what was wrong, whose one correction pass repaired
+// nothing. What the document carries for that page is content Iris named a defect in and never
+// fixed — and until #328 the document said nothing about it at all. `@page-failed` announces a page
+// with no content, which anyone who opens the file can see for themselves; a page whose statistical
+// table lost its six aggregate rows looks finished and no longer adds up.
 //
 // "Rejected and never corrected" is deliberately not among the cases below, because it is not a
 // state that exists: `failedCheck` requires a named problem, so a failed verdict always buys a
-// correction. What these pin down is the four ways that one pass ends without replacing the page —
-// it threw, it answered with nothing, it answered with the page it was given, or it answered at a
-// fraction of the size and was refused — and that all four are one fact about the delivered bytes.
+// correction. What these pin down is the five ways that one pass ends without repairing the page —
+// it threw, it answered with nothing, it answered with the page it was given, it answered at a
+// fraction of the size and was refused, or it answered with a different STRING carrying the same
+// page — and that all five are one fact about the delivered document. The last of them is the one
+// that looks like a repair, so it has a test of its own below rather than a row in the table.
 
 async function withTemp<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), "iris-uncorrected-"));
@@ -36,7 +38,7 @@ interface Recorded {
 
 // How this page's one correction pass ends. `kept` is the adopted correction, which is the case
 // that must NOT be marked.
-type Correction = "throw" | "empty" | "identical" | "shrink" | "kept";
+type Correction = "throw" | "empty" | "identical" | "restyle" | "shrink" | "kept";
 
 interface PageSpec {
   // What the fidelity check says about the first pass. Absent, or empty, is a page that passes.
@@ -56,6 +58,11 @@ interface PageSpec {
 const body = (order: number, tag = "page"): string =>
   `<h2>Page ${order}</h2><p>${tag} ${order} ${"content ".repeat(20)}</p>`;
 const withAlt = (order: number): string => `${body(order)}<p><img src="f.png" alt="image"></p>`;
+// The same page as a DIFFERENT string: a model that re-indents its own output. `corrected !== before`
+// so this is adopted and delivered, but every axis `correctionEffect` observes is unchanged — text
+// with whitespace collapsed, the descriptions, the attributes, the tag sequence — so `changedAnything`
+// is false and the page the verifier named problems in is still the page that ships.
+const restyled = (order: number): string => body(order).replace("</h2>", "</h2>\n  ");
 const frag = (order: number, innerHtml: string): Fragment => ({
   image: `page-00${order}.png`,
   order,
@@ -127,6 +134,7 @@ function makeCtx(
           if (outcome === "throw") throw new Error("ThrottlingException");
           if (outcome === "empty") return { text: JSON.stringify({ html: "" }) };
           if (outcome === "identical") return { text: JSON.stringify({ html: body(img.order) }) };
+          if (outcome === "restyle") return { text: JSON.stringify({ html: restyled(img.order) }) };
           // A reply at well under a quarter of what it was given, which `destroyedPage` refuses
           // before either recheck can be bought for it.
           if (outcome === "shrink") return { text: JSON.stringify({ html: `<p>${img.order}</p>` }) };
@@ -149,10 +157,11 @@ function makeCtx(
 const ev = (rec: Recorded, type: string) => rec.events.filter((e) => e.type === type);
 const rejected = ["The table on this page lost its six aggregate rows."];
 
-// The four ways one correction pass ends without replacing the page, and what each of them is
-// called in the log. `page_corrected`'s `result` is the field that separates them, so a reader who
-// has the marker can find out which of the four it was; the marker itself does not distinguish
-// them, because for the delivered bytes they are the same fact.
+// Four of the five ways one correction pass ends without repairing the page — the fifth is tested on
+// its own, because it is the one where the reply IS adopted — and what each of them is called in
+// the log. `page_corrected`'s `result` is the field a reader who has the marker goes to for which it
+// was; the marker itself does not distinguish them, because for the delivered document they are the
+// same fact.
 const ENDINGS: { correction: Correction; result: string; also?: string }[] = [
   { correction: "throw", result: "failed", also: "page_correction_failed" },
   { correction: "empty", result: "empty" },
@@ -187,10 +196,37 @@ for (const ending of ENDINGS) {
 
       const doc = wrapDocument("<p>x</p>", { uncorrectedPages });
       assert.match(doc, /@page-uncorrected 2\b/, "the delivered document admits to it");
-      assert.match(doc, /did not pass Iris's\n  own fidelity check/);
+      assert.match(doc, /never passed Iris's\n  own fidelity check/);
     });
   });
 }
+
+test("a correction ADOPTED that changed the string and not the page is still marked", async () => {
+  await withTemp(async (dir) => {
+    // The fifth ending, and the only one that looks like a repair from the outside: the reply
+    // differs from the fragment it was given, so `corrected !== before` and it is kept and
+    // delivered — and it is the same page, re-indented. Nothing the verifier objected to has been
+    // touched. The marker is therefore driven off `moved` (did the page change) rather than off
+    // `keep` (was the reply adopted), and `page_corrected` labels this `identical` for exactly the
+    // same reason, which is what makes the rule readable off the log as one line: a page whose
+    // verdict failed is in the set unless its `result` is `kept`.
+    const { ctx, rec } = makeCtx(dir, 3, { 2: { problems: rejected, correction: "restyle" } });
+    const { fragments, uncorrectedPages } = await runExtraction(ctx);
+
+    assert.deepEqual(uncorrectedPages, [2]);
+    // The reply WAS adopted — this is not the `corrected === before` branch wearing a different
+    // name, and a test that let these two collapse would leave the case with no assertion at all.
+    const shipped = fragments.find((f) => f.order === 2)!.innerHtml;
+    assert.equal(shipped, restyled(2));
+    assert.notEqual(shipped, body(2), "the string changed, which is the whole point of this case");
+
+    const corrected = ev(rec, "page_corrected");
+    assert.equal(corrected.length, 1);
+    assert.equal(corrected[0].data.result, "identical", "adopted, and not a repair");
+    assert.deepEqual(ev(rec, "extraction_complete")[0].data.uncorrected, [2]);
+    assert.match(wrapDocument("<p>x</p>", { uncorrectedPages }), /@page-uncorrected 2\b/);
+  });
+});
 
 test("a correction the pass adopted is not marked, however wrong the page may still be", async () => {
   await withTemp(async (dir) => {

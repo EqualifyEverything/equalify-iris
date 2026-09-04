@@ -732,7 +732,10 @@ export interface ExtractionResult {
   // document is missing a page that is in it.
   failedPages: number[];
   // Source pages the verifier REJECTED and the correction pass did not repair, so what the
-  // document carries for them is the fragment that failed the check, byte for byte (#328).
+  // document carries for them is content Iris named a defect in and never fixed (#328). Not
+  // necessarily the rejected bytes — the review loop runs afterwards and may rewrite a block on
+  // such a page — but nothing after this point re-asks whether a page matches its source, so the
+  // rejection stands whatever the markup becomes.
   //
   // Disjoint from `failedPages` and not a rate of anything: those pages have no content at
   // all, these have content that is known to be wrong in a way Iris named. Kept apart for
@@ -3306,12 +3309,17 @@ async function extractPage(
   // A failed verdict always buys a correction — `failedCheck` requires a named problem, so
   // `verifyFailed` implies `problems.length > 0` and the branch below always runs — which is
   // why "rejected and never corrected" is not a state this can report: it does not exist. The
-  // four states it does cover are the four ways the pass ends without replacing the page, and
-  // they are one fact about the delivered bytes: the call threw (`page_correction_failed`),
-  // it answered with nothing (`page_corrected` `empty`), it answered with the page it was
-  // given (`identical`), or its answer came back at a fraction of that page's size and was
-  // refused (`page_correction_rejected`). Whichever it was, the fragment below is the one the
-  // verifier named problems in.
+  // states it does cover are the ways the pass ends without repairing the page, and they are
+  // one fact about it: the call threw (`page_correction_failed`), it answered with nothing
+  // (`page_corrected` `empty`), it answered with the page it was given (`identical`), its
+  // answer came back at a fraction of that page's size and was refused
+  // (`page_correction_rejected`), or it answered with a different STRING carrying the same page
+  // — re-indented, or `&` for `&amp;` — which is adopted and is also `identical`. Whichever it
+  // was, what this function returns is the page the verifier named problems in.
+  //
+  // So the rule is one line rather than five, and it is the same line `page_corrected` already
+  // writes: `repaired` is set exactly where that event's `result` is `kept`. A reader can check
+  // the set against the log without a rule about which values count.
   let repaired = false;
   const problems = [
     ...(verifyFailed ? verdict.problems : []),
@@ -3739,7 +3747,25 @@ async function extractPage(
       });
       if (keep) {
         innerHtml = corrected;
-        repaired = true;
+        // `moved`, not `keep`: a reply adopted because it differs as a STRING while being the same
+        // page is the fifth way a correction buys nothing, and it is the one that looks like a
+        // repair. The line above labels it `identical` for exactly that reason — a page re-indented,
+        // or `&` written where `&amp;` was, is a different string and the same page, and the problems
+        // the verifier named are all still in it. Clearing the marker on it would deliver a page that
+        // never passed a check, and never got a change, saying nothing (#328, review of #387).
+        //
+        // Which makes the rule one a reader can check against the log rather than two: a
+        // verify-triggered page is in `uncorrectedPages` exactly when its `page_corrected` `result`
+        // is not `kept`. The four other values are the four this function can produce for it.
+        //
+        // Reading `correctionEffect` here is not the thing the comment above it forbids. What must
+        // not turn on that signal being complete is which fragment SHIPS — an effect it cannot see
+        // would silently revert a real repair — and that decision is `keep`, untouched. This is a
+        // declaration about the page, where an incomplete signal errs the safe way: a correction
+        // whose only change is one `correctionEffect` cannot see is marked as having repaired
+        // nothing, which over-declares, and a silent gap is what every marker in this pipeline
+        // exists to prevent.
+        repaired = moved;
         logNote = logNote
           ? `${logNote}; self-corrected after fidelity check`
           : "self-corrected after fidelity check";
@@ -4044,21 +4070,22 @@ export async function reExtractPages(
   // Conflating the two tells a client following docs/API.md §7c that it received a
   // partial document when it did not.
   const keptPrior = outcomes.filter((o) => o.failed).map((o) => o.fragment.order);
+  // The pages this round got a fresh answer for: every page whose re-extraction ran without
+  // throwing. Both sets below are keyed on it, for two different questions that have the same
+  // answer here — whether the page has content now, and whether a verdict was taken on it again —
+  // and it is computed once rather than twice so the two cannot drift apart while a comment goes
+  // on claiming they agree (review of #387).
+  const answeredAgain = new Set(outcomes.filter((o) => !o.failed).map((o) => o.fragment.order));
   // A page that WAS missing and re-extracted cleanly is no longer missing. One that was
   // missing and threw again keeps its marker, so it stays in the set.
-  const filled = new Set(outcomes.filter((o) => !o.failed).map((o) => o.fragment.order));
-  const failedPages = priorFailedPages.filter((p) => !filled.has(p));
-  const recovered = priorFailedPages.filter((p) => filled.has(p));
-  // The rejected-and-unrepaired set, carried forward the same way but keyed on the pages that
-  // got a fresh ANSWER rather than on the ones that got content. `filled` is the right set for
-  // `failedPages` because the question there is whether the page has content; here the question
-  // is whether a verdict was taken again, and it was taken again for exactly the pages that ran
-  // without throwing — including pages that already had content. A page that threw keeps its
-  // prior fragment, so it keeps the prior verdict with it.
+  const failedPages = priorFailedPages.filter((p) => !answeredAgain.has(p));
+  const recovered = priorFailedPages.filter((p) => answeredAgain.has(p));
+  // The rejected-and-unrepaired set, carried forward the same way: a page that ran again was
+  // judged again, so its new outcome is the whole of what is known about it, and a page that
+  // threw keeps its prior fragment and so keeps the prior verdict with it.
   //
   // A page re-run and rejected again appears only once: the first list drops every page the
   // round answered for, so the second list is where all of them come from.
-  const answeredAgain = new Set(outcomes.filter((o) => !o.failed).map((o) => o.fragment.order));
   const uncorrectedPages = [
     ...priorUncorrectedPages.filter((p) => !answeredAgain.has(p)),
     ...outcomes.filter((o) => !o.failed && o.uncorrected).map((o) => o.fragment.order),

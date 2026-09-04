@@ -382,8 +382,17 @@ function salvagedNote(
 // `uncorrectedPages` is the same statement about the opposite failure, and it is the one where
 // Iris knows the most and said the least (issue #328). These pages ARE here: they were rendered,
 // the fidelity check rejected them naming what was wrong, one correction pass was bought, and it
-// did not replace the page — so the markup below for those pages is the markup that failed the
-// check. Before this the document said nothing at all about them, which made the case Iris
+// repaired nothing — so what those pages carry is content Iris named a defect in and never fixed.
+// Not necessarily the rejected bytes: this marker is written after the review loop, and the Copy
+// Editor may have rewritten a block on one of these pages since. What no later round can have done
+// is ANSWER the check. Not for want of the image — `imagesForIssues` hands the editor the source
+// pages the Reader's issues name, so an uncorrected page the Reader happened to raise something
+// about is one of the few places an image and the HTML sit side by side after extraction. It is
+// that the editor is never asked the fidelity question and is deliberately forbidden to act on it:
+// its instruction on a discrepancy it notices in an image is to REPORT it, because an edit made
+// from one reading of a page reaches a reader as what the page says (#183). So the rejection stands
+// whatever the markup became, and the only thing that could lift it is a re-extraction.
+// Before this the document said nothing at all about them, which made the case Iris
 // understands best the case it declared least: `@page-failed` above announces a page with no
 // content, obviously incomplete to anyone who opens the file, while a page whose statistical
 // table lost its six aggregate rows looks finished and no longer adds up (#324, `p26-50-p5`).
@@ -460,15 +469,17 @@ export function wrapDocument(
   // run log is where a reader goes for the page, and this marker is where they learn to.
   const uncorrected = opts.uncorrectedPages?.length
     ? `\n<!-- @page-uncorrected ${opts.uncorrectedPages.join(", ")}\n` +
-      `  The content of the source pages above IS in this document, and it did not pass Iris's\n` +
+      `  The content of the source pages above IS in this document, and it never passed Iris's\n` +
       `  own fidelity check: the check named what was wrong with each of them, one correction\n` +
-      `  pass was made, and it did not produce a replacement — so what is here for those pages\n` +
-      `  is the markup that was rejected. Expect content to be missing or mis-structured on\n` +
-      `  them; a table that lost rows is the shape this has been seen in. Every other page was\n` +
-      `  either accepted as it was or replaced by a correction. See the run log\n` +
-      `  (page_verify_failed for what was wrong, then page_correction_failed or page_corrected\n` +
-      `  for how the correction ended) — the pass either threw, answered with nothing, answered\n` +
-      `  with the page it was given, or answered at a fraction of its size and was refused.\n-->`
+      `  pass was made against the source image, and it repaired nothing. No later step checks a\n` +
+      `  page against its source again, so nothing after that point can have put right what the\n` +
+      `  check named. Expect content to be missing or mis-structured on these pages; a table that\n` +
+      `  lost rows is the shape this has been seen in. Every other page was either accepted as\n` +
+      `  it was or repaired by a correction. See the run log (page_verify_failed for what was\n` +
+      `  wrong, then page_correction_failed or page_corrected for how the correction ended) —\n` +
+      `  the pass either threw, answered with nothing, answered with the page it was given,\n` +
+      `  answered at a fraction of its size and was refused, or answered with the same page\n` +
+      `  written differently.\n-->`
     : "";
   const truncated = !opts.editorTruncated
     ? ""

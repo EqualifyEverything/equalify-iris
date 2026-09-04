@@ -2738,11 +2738,15 @@ export async function runReview(
   const failedPages = initial.failedPages ?? [];
   // Re-stated in the wrapper at the end and given to nobody else, which is the difference from
   // `failedPages` above (#328). The Reader is not told, and must not be: it reads the assembled
-  // HTML, so what it would see is a page whose content is present and plausible, and telling it
-  // "page 5 failed its fidelity check" invites an issue against markup it cannot compare with
-  // the source — the editor is a text call with no image, so no round can repair it and the
-  // iteration budget would go on trying. The correction pass with the page in front of it is the
-  // only thing that could, and it has already had its one attempt.
+  // HTML and cannot see the source images at all, so what it would see is a page whose content is
+  // present and plausible, and telling it "page 5 failed its fidelity check" invites an issue it
+  // has no way to state a remedy for. The editor is not the way out of that either, and NOT for
+  // want of the image: `imagesForIssues` would hand it that page, but the standing instruction on
+  // a fidelity discrepancy is to REPORT it and carry the block over, precisely because an edit made
+  // from one reading of an image reaches a reader as what the page says (#183). So the issue could
+  // not be resolved by the only round able to act on it, and the iteration budget would go on
+  // trying before it landed in `@unresolved` anyway. The correction pass with the page in front of
+  // it is the one thing that could have repaired it, and it has already had its one attempt.
   const uncorrectedPages = initial.uncorrectedPages ?? [];
   // Set by the `return` or `break` that ends the loop, and by nothing else (#264). Deliberately
   // not initialised: the value has to come from the exit taken, so an exit added without one
