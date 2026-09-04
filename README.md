@@ -126,9 +126,9 @@ from the environment at startup; changes require a restart.
   bill against region subtotal rows dropped from statistical tables) and the one where the cheaper
   model is a priced trade that was declined (`reader`, 78% of the incumbent's own agreement floor
   for −77%), and what every figure was measured at — **[docs/models.md](docs/models.md)**. **What
-  the pipeline costs per page and the recommended approach for every step** — including the three
-  largest remaining levers, none of which is a model choice —
-  **[docs/cost.md](docs/cost.md)**.
+  the pipeline costs per page**, step by step — **[docs/cost.md](docs/cost.md)**. **The recommended
+  approach for every step**, including the three largest remaining levers, none of which is a model
+  choice — **[docs/sprint-246.md](docs/sprint-246.md)**.
   Each provider also takes `max_tokens` (default 32000), the per-call **output** ceiling. A
   response that stops at the ceiling is a **failed** call, not a short one: it arrives as a 200
   with HTML cut mid-tag, which would otherwise be assembled into the deliverable as if it were
@@ -388,9 +388,11 @@ To prove the endpoints work end-to-end (mock GitHub + mock model, no credentials
 `./test/e2e.sh`.
 
 Which model to run each agent on and what each one costs: **[docs/models.md](docs/models.md)**. What
-the whole pipeline costs a page — **19.4 cents when the model-selection sprint started, 10.7
-measured after two lines of config and no code change** — with the recommended approach for every
-step and the evidence under each one: **[docs/cost.md](docs/cost.md)**.
+the whole pipeline costs a page — **10.7 cents, broken down by step**:
+**[docs/cost.md](docs/cost.md)**. How it got there — **19.4 cents when the model-selection sprint
+started, 10.7 measured after two lines of config and no code change** — with the recommended approach
+for every step and the evidence under each one:
+**[docs/sprint-246.md](docs/sprint-246.md)**.
 
 Example — create a session (order of `images` parts is the processing order, §9.2):
 
