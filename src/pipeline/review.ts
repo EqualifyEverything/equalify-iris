@@ -1770,8 +1770,8 @@ function applyEditorPatch(
   // The second is that case with the migrant not a heading, which is why `headings_gained` cannot see
   // it: a block emptied of the words another edit re-seated as a `<label>`, a `<caption>`, a `<th>` or a
   // `<dt>`. The words never leave the document, so the joined prose is unmoved and the fall is read as
-  // ordinary. `lost` is what catches it — the per-block record of content given up — and a block in it
-  // is never re-seated. See the exclusion below.
+  // ordinary. `content_landed` is what catches it — the per-block record of content that turned up in
+  // another block of the same reply — and a block in it is never re-seated. See the exclusion below.
   //
   // `headings_gained === 0` and at least one block still seatable is the licence, and it is the same
   // condition the guarantee rests on. The re-applied report is then checked for a remaining fall before
@@ -1792,28 +1792,43 @@ function applyEditorPatch(
   // every round that did not reach the salvage, so nothing below this needs to know whether it ran.
   let shipped = patched;
   let reverted: number[] = [];
-  let unattributable = false;
+  // The blocks whose re-seat was computed and then given up with the round. Empty on every route but
+  // the one where part of the reply was salvageable and the rest was not, which is the only place the
+  // difference between "this block could not be handed back" and "this block dropped a heading" exists.
+  let abandoned: number[] = [];
+  let unattributable: "reorder" | "migrated" | "recheck" | null = null;
   if (headingsLost > 0 && !roundRefused) {
-    // Only a block that KEPT ITS WORDS can be re-seated. `content_moved` is the per-block record of
-    // words or media given up — and a block in it may have given them to another block in the same
-    // reply, which the joined prose cannot see because they never left the document. Handing such a
-    // block back restores text that is now in two places and a heading over content that has moved out
-    // from under it. Read `content_moved` and not `lost`, which every block here is in already: a
-    // heading falling is one of the things `gaveContentUp` reads, so `lost` cannot sort these at all.
+    // Only a block that DID NOT GIVE ITS CONTENT TO ANOTHER EDIT can be re-seated. `content_landed` is
+    // the per-block record of words or media that turned up in another block of the same reply, which
+    // the joined prose cannot see because they never left the document. Handing such a block back
+    // restores text that is now in two places and a heading over content that has moved out from under
+    // it. Read `content_landed` and not `lost`, which every block here is in already: a heading falling
+    // is one of the things `gaveContentUp` reads, so `lost` cannot sort these at all.
     // `headings_gained` does not cover it either:
     // that reads a heading arriving, and the commonest migrant here is a heading's words arriving as
     // something `structureCounts` does not count at all — a `<label>` seated inside the `<form>` while
     // the stray `<h4>` sibling that held it is emptied, which is the two-edit form of the same `label`
     // correction the same-block case above is the one-edit form of.
     //
-    // Excluding them can empty the list, and then there is nothing to salvage: the round is refused
-    // whole, which is the right answer for a reply that both dropped a heading and moved words out of
-    // the block it was in. Deliberately not the mirror remedy — seating the block back and dropping the
-    // edit that took the words — because nothing binds a departure to an arrival (see `headings_gained`
-    // below), so which other edit received them is not a question this can ask.
-    const seatable = patched.headings_dropped.filter((at) => !patched.content_moved.includes(at));
-    if (patched.headings_gained > 0 || seatable.length === 0) {
-      unattributable = true;
+    // Read as WHERE THE WORDS WENT and not as "are these the words it had", which is the narrowing #376
+    // asked for. The block reading is an inequality on its own text, so a block that demotes a heading
+    // and corrects its own words in the same edit — a typo fixed in the same `<div>`, one of the
+    // ordinary things this loop asks for — was unseatable, and a reply whose only demotion was that
+    // block was refused whole with nothing having moved anywhere. The length licence that suggests
+    // itself instead is refuted by measurement in #376 and `content_landed`'s own comment: `kept <=
+    // patched` is 24 against 59 on the duplication hazard and passes it by a mile, because the edit that
+    // grew is the one being reverted.
+    //
+    // Excluding them can still empty the list, and then there is nothing to salvage: the round is
+    // refused whole, which is the right answer for a reply that both dropped a heading and moved words
+    // out of the block it was in. Deliberately not the mirror remedy — seating the block back and
+    // dropping the edit that took the words — because nothing binds a departure to an arrival (see
+    // `headings_gained` below), so which other edit received them is not a question this can ask.
+    const seatable = patched.headings_dropped.filter((at) => !patched.content_landed.includes(at));
+    if (patched.headings_gained > 0) {
+      unattributable = "reorder";
+    } else if (seatable.length === 0) {
+      unattributable = "migrated";
     } else {
       reverted = [...seatable].sort((a, b) => a - b);
       // Re-applied over the shorter edit list rather than patched back out of the joined body, for the
@@ -1821,11 +1836,39 @@ function applyEditorPatch(
       // the time there is a body to undo it in, and `joinSections` is the only thing that knows how a
       // block was seated.
       const kept = applyBlockEdits(blocks, edits.filter((x) => !reverted.includes(x.block)));
-      if ((kept.navigation_lost.headings ?? 0) > 0) {
-        // The arithmetic above says this cannot happen with `headings_gained === 0`. If it does, the
-        // reading is wrong about something and the round is refused whole — a fall that survived the
-        // revert is the one outcome this must never ship.
-        unattributable = true;
+      // A fall that survived the revert is the one outcome this must never ship, and the two ways of
+      // asking are not equivalent — so the PER-BLOCK question is asked first, and it is the one the
+      // guarantee rests on.
+      //
+      // ONLY THE SEATABLE EDITS WERE DROPPED, so a block that dropped a heading AND gave its content away
+      // still has its edit, and its fall is still in the re-applied body. `kept.headings_dropped` is
+      // exactly that set — a reverted block has no edit left to drop anything with — and it does not
+      // depend on what the reply did to the prose. The joined reading does: `navigationLost` is silent
+      // wherever the body it reads is shorter, and REVERTING IS A WAY TO GET UNDER THAT FLOOR. One block
+      // holds a demotion and sheds a redundant sentence, another demotes and adds more prose than the
+      // first shed; the second is seatable, and handing it back takes the re-applied body below the body
+      // that came in, so the joined reading reports nothing and the first block's demotion would ship.
+      // The revert is the pipeline's own edit, so this is the guard's own remedy defeating its own check
+      // — asking `kept.navigation_lost` alone shipped a document one heading short of the one it was
+      // given (found in review of #376, and it is a round `content_moved` refused).
+      //
+      // Logged as `migrated`, because it IS that case reached from the other side: a block whose content
+      // landed elsewhere cannot be handed back and its fall cannot be delivered, so the round goes back
+      // whole. That covers the reply that demoted in two places, one of them the `<label>` migration this
+      // file calls the commonest form of the hazard — ordinary output, and not evidence of anything.
+      if (kept.headings_dropped.length > 0) {
+        unattributable = "migrated";
+        abandoned = reverted;
+        reverted = [];
+      } else if ((kept.navigation_lost.headings ?? 0) > 0) {
+        // A joined fall with NO per-block fall behind it. Unreachable by construction, not merely by
+        // argument: the joined count is the sum of the blocks' own counts, so a document that lost a
+        // heading has a block that lost one, and the branch above has it. Kept, and named apart on the
+        // log line (`headings_recheck`), because a check whose firing would mean the reading is wrong has
+        // to be legible when it fires — and a marker an ordinary mixed reply can trip is not that
+        // marker, which is what this was until it became two branches (#376).
+        unattributable = "recheck";
+        abandoned = reverted;
         reverted = [];
       } else {
         shipped = kept;
@@ -1841,7 +1884,7 @@ function applyEditorPatch(
     ? "all_refused"
     : refused > 0 && gaveUpContent
       ? "refusal_with_loss"
-      : unattributable || (headingsLost > 0 && !changed)
+      : unattributable !== null || (headingsLost > 0 && !changed)
         ? "headings_lost"
         : null;
   // The counts below are `shipped`, not the reply as sent: `applied` has always meant "applied to the
@@ -1895,19 +1938,36 @@ function applyEditorPatch(
     //   - `headings_gained` — a heading arrived somewhere in the same reply, so a departure cannot be
     //     matched to an arrival. Counted, because one arrival beside one fall is a move and eleven is a
     //     restructure.
-    //   - `headings_dropped` — no heading arrived, but every block that dropped one also changed its own
-    //     words, so re-seating any of them would print those words twice. These are the blocks that
-    //     fell and could not be handed back, which is the one thing a reader of this line needs and
-    //     cannot get from anywhere else.
+    //   - `headings_dropped` — no heading arrived, but a block that dropped one gave content to another
+    //     edit in the same reply, so re-seating it would print those words twice: either every dropping
+    //     block did, leaving nothing seatable, or the seatable ones were handed back and the fall the
+    //     others explain survived it. EVERY block whose own count fell, which is the reading of the
+    //     model's behaviour — not the subset that could not be handed back, which is the next field. On
+    //     the first route they are the same list and on the second they are not (found in review of
+    //     #376, where this comment claimed the narrower thing and logged the wider one).
+    //   - `headings_abandoned` beside it — the blocks that COULD have been handed back and were refused
+    //     with the round anyway, because the fall of the ones that could not would have outlived their
+    //     revert. Absent where nothing was salvageable, so it is present exactly on the mixed reply, and
+    //     that is the rate the deferred question needs: how often refusing the round throws away a safe
+    //     salvage. Subtracting it from `headings_dropped` leaves the blocks that could not be handed
+    //     back, which is what makes both readings available from one line.
+    //   - `headings_recheck` beside `headings_dropped` — a fall survived the revert that NO block still
+    //     dropping a heading explains. Its own marker because the counts on the line are otherwise
+    //     identical to the case above (#376), and this one is unreachable by argument: if it ever fires,
+    //     which one fired is the whole finding.
     //   - `headings_reverted` present WITH `discarded` — blocks were handed back and nothing was left to
     //     apply, so the round changed nothing. That shape is already distinguishable, which is why it
     //     needs no field of its own.
     //
-    // So `headings_reverted` without `discarded` means part of the reply was kept, and the other two are
+    // So `headings_reverted` without `discarded` means part of the reply was kept, and the first two are
     // mutually exclusive with each other.
     ...(reverted.length ? { headings_reverted: reverted } : {}),
-    ...(unattributable && patched.headings_gained ? { headings_gained: patched.headings_gained } : {}),
-    ...(unattributable && !patched.headings_gained ? { headings_dropped: patched.headings_dropped } : {}),
+    ...(unattributable === "reorder" ? { headings_gained: patched.headings_gained } : {}),
+    ...(unattributable === "migrated" || unattributable === "recheck"
+      ? { headings_dropped: patched.headings_dropped }
+      : {}),
+    ...(abandoned.length ? { headings_abandoned: abandoned } : {}),
+    ...(unattributable === "recheck" ? { headings_recheck: true } : {}),
     ...(discarded ? { discarded } : {}),
   });
   // `usable: false` for the same reason an unparseable reply is one — nothing came back that can
@@ -1920,7 +1980,7 @@ function applyEditorPatch(
   // be taken from: whatever this round did, the round after it has nothing to say about the blocks that
   // were handed back (see `ReviewResult.editorHeadingsGated`). Gating the field on `discarded` instead
   // would count only the two failures and report a working guard as one that never fired.
-  const gated = headingsLost > 0 && (reverted.length > 0 || unattributable) ? { headingsLost } : {};
+  const gated = headingsLost > 0 && (reverted.length > 0 || unattributable !== null) ? { headingsLost } : {};
   if (discarded) {
     return { body, usable: false, ...gated };
   }
