@@ -565,7 +565,15 @@ export type CaptionClaim = {
 // this reads model output mid-pipeline for the reason the whole module does: a page cut off inside
 // its last figure still has a caption to compare, and a scan that required the close tag would drop
 // exactly the page most likely to have lost something.
-const FIGURE = /<figure\b[^>]*>([\s\S]*?)(?:<\/figure>|$)/gi;
+//
+// A figure ALSO closes at the next one's open tag, and that is not tidiness. With only the two ends
+// above, a reply that dropped one `</figure>` mid-fragment let the first figure swallow the second:
+// `altValues` then harvested both descriptions, and the caption was matched against the members of a
+// picture it does not caption — which is what the scoping below exists to prevent. It fails in the
+// one direction this record cannot afford, turning a declined check into an apparent decidable one
+// by supplying the membership out of a neighbouring figure, so the page's own markup does what the
+// v1.12 clause refuses to do from a model's knowledge.
+const FIGURE = /<figure\b[^>]*>([\s\S]*?)(?:<\/figure>|(?=<figure\b)|$)/gi;
 const FIGCAPTION = /<figcaption\b[^>]*>([\s\S]*?)(?:<\/figcaption>|$)/i;
 
 // The words a caption quantifies a category with that name a definite fraction, and only those. A
@@ -611,10 +619,25 @@ const FRACTION_WORDS: [RegExp, number][] = [
 // band word alone, both plates fired on their titles — and on `p073` that read the right page for
 // the wrong reason, which is a decline counted where no check was ever available.
 //
-// Bare "high" and "low" are admitted after a ranking verb and nowhere else, because "Rank High" is
-// how this document's captions write a superlative and a comparative there would be unbounded prose.
-const BAND_CLAIM =
-  /\b(?:rank|ranks|ranked|is|are|was|were|has|have|had|shows?|stands?)\s+(?:the\s+|among\s+the\s+)?(highest|lowest|greatest|smallest|largest|high|low)\b/i;
+// Two patterns rather than one verb list, because bare "high" and "low" are only a band where a
+// RANKING verb puts them on a scale. "Rank High" is how this document's captions write a superlative,
+// so those two words have to be admitted somewhere; admitted after a copula as well they take
+// ordinary prose with them — "Unemployment Is High Throughout", "Tax Yields Have Low Variance" —
+// neither of which claims anything about a group, and each of which would then write the very line
+// this exists to avoid: a decline counted where no check was ever available.
+//
+// What still fires that is not a claim about a group, stated because these comments are read as the
+// account of what the census counted: a title that asserts its band with a verb rather than a
+// preposition. "Figure 7. Where Tax Effort Is Highest" is one, and it is a `membership` decline in
+// the record. The `States With Lowest Capacity` form above is out, the copula form is in, and no
+// wording separates the second from `p095`'s own "The South … Has the Lowest Effective Rates" —
+// which is the claim this check is for. So the trade is deliberate and in this direction: a title
+// counted as a declined subject over-reports how often the clause had a page to refuse on, while
+// dropping the copula would lose the plate the amendment was written about.
+const BAND_RANKED =
+  /\b(?:rank|ranks|ranked)\s+(?:the\s+|among\s+the\s+)?(highest|lowest|greatest|smallest|largest|high|low)\b/i;
+const BAND_ASSERTED =
+  /\b(?:is|are|was|were|has|have|had|shows?|stands?)\s+(?:the\s+|among\s+the\s+)?(highest|lowest|greatest|smallest|largest)\b/i;
 
 // A member of the description's own lists that could be the group a caption names: it begins with a
 // capital. The false positives to keep out are band labels, which these plates print inside the
@@ -666,7 +689,7 @@ export function captionClaims(html: string): CaptionClaim[] {
         break;
       }
     }
-    const band = BAND_CLAIM.exec(caption)?.[1].toLowerCase();
+    const band = (BAND_RANKED.exec(caption) ?? BAND_ASSERTED.exec(caption))?.[1].toLowerCase();
     if (!quantifier && !band) continue;
     // Joined on a semicolon, which is one of `ENUMERATION_BREAK`'s own separators: two images in one
     // figure are two descriptions, and a join that let the first one's last list run into the

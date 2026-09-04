@@ -126,6 +126,43 @@ test("a band word in the figure's own TITLE is not a claim about a group", () =>
     captionClaims(figure(P095_ALT, "<p>Farming and Mineral States in the West Rank High.</p>"))[0]?.band,
     "high",
   );
+  // Bare "high" and "low" are a band on a RANKING verb only. After a copula they are ordinary prose
+  // about a quantity rather than a claim sorting places, and admitting them writes the same
+  // unavailable-check line the titles above did.
+  for (const prose of ["Unemployment Is High Throughout.", "Tax Yields Have Low Variance."]) {
+    assert.deepEqual(captionClaims(figure(P095_ALT, `<p>${prose}</p>`)), [], prose);
+  }
+  // A superlative after a copula stays in, and this is the case that says why: no wording separates
+  // a title that asserts its band with a verb from `p095`'s own claim, so the title is counted as a
+  // declined subject rather than the plate being lost.
+  assert.equal(
+    captionClaims(figure(P095_ALT, "<p>Figure 7. Where Tax Effort Is Highest</p>"))[0]?.band,
+    "highest",
+  );
+});
+
+test("a figure that lost its close tag is not compared with the next figure's description", () => {
+  // Model output mid-pipeline drops a close tag, and with only `</figure>` and end-of-fragment to
+  // stop at, the first figure swallowed the second: both descriptions were harvested and the caption
+  // was matched against the members of a picture it does not caption. It fails in the one direction
+  // this record cannot afford — a declined check reads as a decidable one, with the membership
+  // supplied out of a neighbouring figure rather than by the model, which is #356's problem arriving
+  // from the markup.
+  const byState = `<figure><img src="a.png" alt="${P095_ALT}"><figcaption><p>New England Has the ` +
+    `Lowest Effective Rates.</p></figcaption>`;
+  const byRegion =
+    '<figure><img src="b.png" alt="Map of the United States by rate. Lowest rates: New England, ' +
+    'the Mideast. Highest rates: the Southeast, the Southwest."><figcaption><p>Figure 11. Rates by ' +
+    "Region</p></figcaption></figure>";
+  const claims = captionClaims(byState + byRegion);
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].enumerations, 4);
+  assert.equal(claims[0].named, undefined);
+  assert.deepEqual(claims[0].declined, ["membership"]);
+  // Closing the first figure properly changes nothing, which is what says the fix is the boundary
+  // and not the shape of these two fixtures.
+  const closed = captionClaims(`${byState}</figure>${byRegion}`);
+  assert.deepEqual(closed[0], claims[0]);
 });
 
 test("a description that sorts nothing has no term for either check, and that is not a pass", () => {
