@@ -108,10 +108,25 @@ test("the verify task will not score a described swatch as invented, or overturn
     // refusal strings: `runs-maps-95ca64c-r1`'s luna `acir-p077` ships an alt that names 49 places,
     // no key element at all, and ends "The map uses dark, medium, and light shading to distinguish
     // the three ratio categories."
-    ["a key transcribed with nothing placed is missing content, decidable without reading the ink",
-      /a description of a shaded picture that transcribes the key and places nothing is missing the picture, which is the one failure on these pages you can settle without reading any ink at all/],
+    // Both qualifiers were absent from the first revision and both were wrong to omit, which review
+    // round 1 of #393 filed as two separate notes. WIDER THAN ITS OBLIGATION: the page contract owes
+    // a place-to-band mapping for a shaded MAP, while the rule this paragraph joins covers "the
+    // fills of a cartogram, the hatchings of a chart" too — so a hatched chart described faithfully
+    // and enumerating nothing matched the trigger with no page-side obligation behind it, and the
+    // repair the clause asks for does not exist on that figure. AND IT REFUSED ITS OWN ANSWER: the
+    // page contract now requires the indistinguishable-bands declaration "whether or not you place a
+    // single item", so the correct answer on the hardest plates IS a key transcribed with nothing
+    // placed. The escape was carried only by the hedge paragraph above and by "neither of them is
+    // what you were sent" ten lines later, not by the sentence that names the kind — and this change
+    // is what makes that answer common, so a false `content_missing` was the expensive direction.
+    ["a key transcribed with nothing placed and no declaration is missing content",
+      /a description of a shaded MAP that transcribes the key, places nothing, and does not say the bands cannot be told apart is missing the picture — the one failure on these pages you can settle without reading any ink at all/],
+    ["with both qualifiers named as load-bearing, so neither reads as decoration",
+      /Both halves of that sentence are load-bearing: it is a map, because a map has places for its bands to sort and a hatched bar chart or a fills key on a diagram has no such list to give, and it is silence, because a page that DECLARES its bands indistinguishable has answered this rule and placing nothing is exactly what answering it looks like/],
     ["and the non-answer is described by what it does, not by its wording",
       /says only that the map distinguishes its categories by shading has described the key and not the map: it states that a mapping was drawn without saying what it was/],
+    ["and what a map's ink carries is stated, so the kind is not left to the trigger alone",
+      /What a map's ink carries is which places fall in which band/],
     ["with the kind, the quote and the two answers the contract allows",
       /Report it as "content_missing", quote the sentence standing in for the mapping, and ask for either the places under the bands' own printed wording or the declaration that the bands cannot be told apart/],
     // #373 is the other half of this page and is deliberately not answered here: the checker

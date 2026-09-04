@@ -621,13 +621,14 @@ Thirteen structures are easy to render as something that merely looks right, so 
   defines it, so a key with the wording in the <dt> and the ink in the <dd> reads aloud as the
   page's own words needing a picture to explain them. Written out, a map whose key prints
   "Less than 2.5", "2.5 thru 3.4" and "3.5 and over" is this and nothing more:
-  <dl><dt>mid grey</dt><dd>Less than 2.5</dd><dt>solid black</dt><dd>2.5 thru 3.4</dd><dt>light
+  <dl><dt>solid black</dt><dd>Less than 2.5</dd><dt>light grey</dt><dd>2.5 thru 3.4</dd><dt>mid
   grey</dt><dd>3.5 and over</dd></dl> — one <dt>/<dd> pair per swatch the page prints, the ink in
   words, the page's wording transcribed as printed, and no entry that is not a swatch: no
   "Legend" or "Key" entry of your own, because the <dl> stands where the page puts the key and the
-  caption beside it already says what the picture is. That example deliberately does not run light
-  to dark, because a printed key frequently does not: its pairing is what those three swatches
-  showed, and yours is what yours show. Describe it in words and never in markup: a style
+  caption beside it already says what the picture is. That example is a key really printed, and it
+  runs dark, light, mid against entries listed low to high, because a printed key frequently does
+  run in no order at all: its pairing is what those three swatches showed, and yours is what yours
+  show. Describe it in words and never in markup: a style
   attribute or a coloured <span> hands a screen-reader user nothing, and the description has to
   survive being read aloud. Read each swatch's tone off the swatch itself and never off the order
   of its labels — a key's shades run in the order the printer chose and frequently not in the
@@ -643,7 +644,11 @@ Thirteen structures are easy to render as something that merely looks right, so 
   The key is not the picture, and transcribing the key is not describing the map. What a shaded
   map's ink carries is which places fall in which band, so the description says which places you
   read into each band, under that band's own printed wording — or says, of the picture, that you
-  could not tell its bands apart. One of those two is owed on every such page. Naming the places
+  could not tell its bands apart. One of those two is owed on every such page, and it goes where
+  the reader receives it: in the alt text where you are describing the picture, or as a list or a
+  table in the fragment that carries the figure, which is the better home wherever you can place
+  every item. Never as a sentence of your own beside the <dl> or beside the figure, for the reason
+  the count clause above gives. Naming the places
   and then saying that the map "uses dark, medium and light shading to distinguish the three
   categories" states that the distinction exists without making it: a reader who cannot see the
   picture is told a mapping was drawn and never told what it was, which is the one thing they came

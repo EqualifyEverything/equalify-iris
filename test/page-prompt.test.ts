@@ -702,7 +702,7 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     ["and the swapped key is named by what it says when it is read aloud",
       /a key with the wording in the <dt> and the ink in the <dd> reads aloud as the page's own words needing a picture to explain them/],
     ["the rule works one key all the way out, in the structure it asks for",
-      /<dl><dt>mid grey<\/dt><dd>Less than 2\.5<\/dd><dt>solid black<\/dt><dd>2\.5 thru 3\.4<\/dd><dt>light grey<\/dt><dd>3\.5 and over<\/dd><\/dl>/],
+      /<dl><dt>solid black<\/dt><dd>Less than 2\.5<\/dd><dt>light grey<\/dt><dd>2\.5 thru 3\.4<\/dd><dt>mid grey<\/dt><dd>3\.5 and over<\/dd><\/dl>/],
     ["and says what the example is made of, so a reader cannot take the shape and miss the rule",
       /one <dt>\/<dd> pair per swatch the page prints, the ink in words, the page's wording transcribed as printed, and no entry that is not a swatch/],
     // An invented wrapper is 3 of #372's 41 problem strings, and it is what a model adds when it
@@ -711,11 +711,15 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
       /no "Legend" or "Key" entry of your own, because the <dl> stands where the page puts the key and the caption beside it already says what the picture is/],
     // The example had to be built against the ramp clause four lines below it or it would teach the
     // guess that clause forbids: a light-to-dark worked example IS an assumed ramp, printed by the
-    // prompt itself. Measured on the source image of the plate this rule came from, the legend's
-    // three tones run 26, 176, 143. So the example pairs mid, solid, light against low, middle, high
-    // and says why.
-    ["the worked example does not run light to dark, and says that is deliberate",
-      /That example deliberately does not run light to dark, because a printed key frequently does not: its pairing is what those three swatches showed, and yours is what yours show/],
+    // prompt itself. So the pairing is a real one — measured off the source image of the plate this
+    // rule came from, that legend's tones run 26, then 176, then 143 in the order its entries are
+    // listed, which is dark, light, mid against categories running low to high. A first revision
+    // paired mid, dark, light, which is non-monotonic and would have done the same job in the
+    // prompt while leaving the amendment's own numbers unable to support the sentence beside it —
+    // review round 1 of #393 caught that, and an invented pairing is a worse teacher than a
+    // printed one on the one rule whose defect is a reading taken from the wrong place.
+    ["the worked example is a real pairing and says which way it runs",
+      /That example is a key really printed, and it runs dark, light, mid against entries listed low to high, because a printed key frequently does run in no order at all: its pairing is what those three swatches showed, and yours is what yours show/],
     // The verifier is right about this part and it is granted rather than argued with: a colour
     // carried in a style attribute is not read out, so it answers nobody the <dl> was built for.
     ["the description is words and never markup",
@@ -768,6 +772,15 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
       /The key is not the picture, and transcribing the key is not describing the map/],
     ["and one of the two answers is owed on every such page",
       /the description says which places you read into each band, under that band's own printed wording — or says, of the picture, that you could not tell its bands apart\. One of those two is owed on every such page/],
+    // Every other clause in this rule names where its answer goes, and prd.md §7.4 v1.10 makes that
+    // the standard for this rule specifically, because the defect it was written for was a model
+    // finding the nearest home itself and landing on prose beside the <dl>. The first revision of
+    // this clause said "the description" and left the home to be worked out — the same gap, in the
+    // one paragraph added to close a different one. Caught by review round 1 of #393. A list or
+    // table is named as the better home because it is the structure a full mapping actually wants,
+    // and naming only the alt would have forbidden it.
+    ["with the homes the mapping may be delivered in, and the one it may not",
+      /it goes where the reader receives it: in the alt text where you are describing the picture, or as a list or a table in the fragment that carries the figure, which is the better home wherever you can place every item\. Never as a sentence of your own beside the <dl> or beside the figure/],
     ["with the shipped non-answer quoted, so a model cannot read it as compliance",
       /states that the distinction exists without making it: a reader who cannot see the picture is told a mapping was drawn and never told what it was/],
     // #372: declared it, 0 of 5, against ten wordings taken from the rule's own text, on a plate whose

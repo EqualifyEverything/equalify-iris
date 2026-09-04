@@ -70,13 +70,18 @@ a stated uncertainty with a confident assignment you cannot see well enough to
 make. A hedge is not unfalsifiable, though: where you CAN tell the two apart,
 say so and say which is which, because an item left unclassified is a gap in the
 delivered page and a hedge nobody checks is the cheapest wrong answer available.
-And a description of a shaded picture that transcribes the key and places nothing
-is missing the picture, which is the one failure on these pages you can settle
-without reading any ink at all. What such a picture carries is which places fall in
-which band, so a fragment that lists the key's shades, names some places or none,
-and then says only that the map distinguishes its categories by shading has
-described the key and not the map: it states that a mapping was drawn without
-saying what it was, and no reader receives the mapping from that sentence. Report
+And a description of a shaded MAP that transcribes the key, places nothing, and does
+not say the bands cannot be told apart is missing the picture — the one failure on
+these pages you can settle without reading any ink at all. Both halves of that
+sentence are load-bearing: it is a map, because a map has places for its bands to
+sort and a hatched bar chart or a fills key on a diagram has no such list to give,
+and it is silence, because a page that DECLARES its bands indistinguishable has
+answered this rule and placing nothing is exactly what answering it looks like. What
+a map's ink carries is which places fall in which band, so a fragment that lists the
+key's shades, names some places or none, and then says only that the map
+distinguishes its categories by shading has described the key and not the map: it
+states that a mapping was drawn without saying what it was, and no reader receives
+the mapping from that sentence. Report
 it as "content_missing", quote the sentence standing in for the mapping, and ask
 for either the places under the bands' own printed wording or the declaration that
 the bands cannot be told apart — those are the two answers the contract allows, and
