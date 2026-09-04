@@ -257,6 +257,10 @@ Named rather than quietly changed, because #370 is the source and a reader may h
 beside this. None of the seven moves a recommendation, and each is checkable against the round it
 names without spending anything (§10).
 
+**There is one more divergence and it is not a figure, so it lives in §9 instead: the direction of the
+detector bias.** #370 has it as "biased against the shipped model"; the error was a false zero, which
+flatters that model. Read this section as the figures and §9's detector bullet as the one sign.
+
 - **The revert price multiple.** #370 reads "34.9% → 9.6% at 2.4x the price". 34.9% is the *shipped*
   kimi arm's subtotal-row rate and 2.4x is the *recommended* luna arm's price ratio against sonnet.
   §2 gives both pairings: 2.06x from kimi, 2.45x from luna.
