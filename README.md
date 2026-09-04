@@ -122,9 +122,13 @@ from the environment at startup; changes require a restart.
   example configs had carried an unroutable key, `config.example.yaml` a `table` no call site
   has ever dispatched and prd.md §10.3 an `image_analysis` that went with the triage step it
   named. **Which model to put on which agent, measured**: each agent's share of the bill, the
-  one agent whose cheaper model measured no net loss (`page`) and the one where the cheaper model
-  is a priced trade (`reader`, 78% of the incumbent's own agreement floor for −77%), and what
-  every figure was measured at — **[docs/models.md](docs/models.md)**.
+  agent whose swap has shipped and what it cost as well as what it saved (`page`, −44.8% of the
+  bill against region subtotal rows dropped from statistical tables) and the one where the cheaper
+  model is a priced trade that was declined (`reader`, 78% of the incumbent's own agreement floor
+  for −77%), and what every figure was measured at — **[docs/models.md](docs/models.md)**. **What
+  the pipeline costs per page and the recommended approach for every step** — including the three
+  largest remaining levers, none of which is a model choice —
+  **[docs/cost.md](docs/cost.md)**.
   Each provider also takes `max_tokens` (default 32000), the per-call **output** ceiling. A
   response that stops at the ceiling is a **failed** call, not a short one: it arrives as a 200
   with HTML cut mid-tag, which would otherwise be assembled into the deliverable as if it were
@@ -383,8 +387,10 @@ Full copy-pasteable bash/curl walkthrough of every endpoint: **[docs/API.md](doc
 To prove the endpoints work end-to-end (mock GitHub + mock model, no credentials needed):
 `./test/e2e.sh`.
 
-Which model to run each agent on, what each one costs, and the two cheaper swaps — one measured no
-net loss, one a priced trade: **[docs/models.md](docs/models.md)**.
+Which model to run each agent on and what each one costs: **[docs/models.md](docs/models.md)**. What
+the whole pipeline costs a page — **19.4 cents when the model-selection sprint started, 10.7
+measured after one config line** — with the recommended approach for every step and the evidence
+under each one: **[docs/cost.md](docs/cost.md)**.
 
 Example — create a session (order of `images` parts is the processing order, §9.2):
 
