@@ -268,6 +268,7 @@ async function failingRound(throwValue: unknown): Promise<{ sent: number[]; reje
   const dir = mkdtempSync(join(tmpdir(), "iris-review-fail-"));
   try {
     const sent: number[] = [];
+    let windows = -1;
     // Resolved after the round has rejected, so a chunk released by it is a chunk the guard has
     // already had its chance to stop. Held rather than slow: a chunk that merely takes longer than
     // chunk 0 is a bet on two timers, which is the defect being fixed.
@@ -298,7 +299,12 @@ async function failingRound(throwValue: unknown): Promise<{ sent: number[]; reje
           return { text: JSON.stringify({ issues: [] }) };
         },
       },
-      log: { event: () => {}, agentCall: () => {} },
+      log: {
+        event: (type: string, data: Record<string, unknown>) => {
+          if (type === "reader_start") windows = data.chunks as number;
+        },
+        agentCall: () => {},
+      },
     } as unknown as PipelineContext;
 
     let rejected: unknown = "did not reject";
@@ -307,6 +313,12 @@ async function failingRound(throwValue: unknown): Promise<{ sent: number[]; reje
     } catch (e) {
       rejected = e;
     }
+    // The premise both tests below rest on, asserted rather than assumed: `sent` of `[0, 1]` only
+    // says the guard fired if there were chunks BEHIND those two for it to stop. Should
+    // CHUNK_BUDGET or STRIDE ever move so that this body is two windows, `[0, 1]` is what a deleted
+    // guard produces as well and the pair would pass saying nothing. Read off `reader_start` rather
+    // than recounted here, so it is the number the round actually used.
+    assert.equal(windows, 5, "the body must span 5 windows for a guard that stops 3 of them to be visible");
     // The guard is armed by now, so let the held chunks go and let their workers pull whatever they
     // are going to pull. One turn of the event loop drains all of it: nothing left in that chain
     // waits on a timer or on I/O, and the microtask queue runs to empty before a timer callback
