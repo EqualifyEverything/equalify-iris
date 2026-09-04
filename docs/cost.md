@@ -13,12 +13,11 @@
 | `read` | $2.4034 | 22.4% | 40 | `claude-sonnet-4-6` | Reviews the assembled document and writes findings. Loops. |
 | `edit` | $1.8487 | 17.3% | 4 | `claude-sonnet-4-6` | Applies those findings to the document. |
 | **failed** | $0.0513 | 0.5% | 2 | `kimi-k2.5` | Two `correct` calls that errored. Billed, bought nothing. |
-
 **Where the money goes: 59.8% ($6.4071) producing and checking pages, 39.7% ($4.2521) reviewing and
-editing the finished document, 0.5% wasted.** Those three cover every row, and they sum to $10.7105
-against the round's ledger total of $10.7106 — the tenth of a cent is the per-step cells being
-published to four decimals. For the same reason the share column sums to 99.9% rather than 100%, so
-read it as a decomposition rounded, not as a partition.
+editing the finished document, 0.5% ($0.0513) wasted.** Those three blocks cover every step above and
+nothing else. The eight steps sum to $10.7105 against the round's ledger total of $10.7106 — the tenth
+of a cent is the per-step cells being published to four decimals. For the same reason the share column
+sums to 99.9% rather than 100%, so read it as a decomposition rounded, not as a partition.
 
 Two things the table says that are worth saying out loud:
 

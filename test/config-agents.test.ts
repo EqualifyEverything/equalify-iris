@@ -618,11 +618,13 @@ test("docs/models.md's sections agree with §0 about each agent's share and disp
 // three** documents this runs over, and the audit is per-document because the answer could differ: in
 // docs/models.md the minus signs are U+2212, which the ASCII `[-*+]` class does not match, and no line
 // wraps onto an ordered marker — §4's numbered list is where a future edit would hit it first. In
-// docs/cost.md the same holds (no ASCII minus as a numeric sign) and the five sampling bounds are
-// genuine ordered markers. docs/sprint-246.md was audited the same way when the report was split out
-// of docs/cost.md (12 × U+2212, no ASCII minus as a sign, and §5's `1./2./3.` genuine): both lines
-// were checked on it rather than assumed from its parent, which is what a fourth document added to
-// the loop below owes as well.
+// docs/cost.md the same holds (1 × U+2212, no ASCII minus as a numeric sign) and the five sampling
+// bounds are genuine ordered markers. docs/sprint-246.md was audited the same way when the report was
+// split out of docs/cost.md (15 × U+2212, no ASCII minus as a sign, and §5's `1./2./3.` genuine): both
+// lines were checked on it rather than assumed from its parent, which is what a fourth document added
+// to the loop below owes as well. Count occurrences with `grep -o … | wc -l`, not `grep -c`, which
+// counts matching LINES — this comment first recorded 15 as "12" for exactly that reason, and 12 is
+// the number of lines those 15 signs sit on.
 function unclosedBoldRuns(doc: string): string[] {
   const unclosed: string[] = [];
   let fenced = false;
@@ -773,10 +775,20 @@ test("docs/sprint-246.md's cost table decomposes to its own totals, and its pros
 // the realistic edit is the one this sprint has already made twice: a newer round moves a row and the
 // headline, the block subtotals or a share is left standing.
 //
-// What makes it worth a check rather than a proofread is that the document deliberately states three
-// numbers that are NOT independent of the table: the cents-a-page headline is the total over 100, each
-// share is a row over the total, and the "checking costs two and a half times producing" claim is
-// three of those shares added. Nothing in a markdown file tells a reader which of those went stale.
+// What makes it worth a check rather than a proofread is that the document deliberately states four
+// sets of numbers that are NOT independent of the table: the cents-a-page headline is the total over
+// 100, each share is a row over the total, the three block subtotals are groups of rows added, and the
+// "checking costs two and a half times producing" claim is three of those shares added. Nothing in a
+// markdown file tells a reader which of those went stale.
+//
+// All four are derived off the rows here, the blocks included. Review round 1 of PR #396 caught that
+// this comment claimed the block subtotals were covered when nothing read them — the row filter is
+// `/^\| /`, so the prose sentence carrying them was excluded and `$6.4071` → `$6.5071` passed. A
+// comment naming what a check catches is itself a claim, and the same round found the sentence the
+// row-sum assertion anchors on was about the BLOCKS rather than the rows, so the strictest assertion in
+// the test was right by coincidence: the two decompositions are numerically equal today and regrouping
+// the blocks would have moved the expected value of a row-sum check. The document now states each
+// decomposition in its own sentence and this reads the one it means.
 //
 // Rounding is asserted rather than tolerated away. The per-step cells are published to four decimals,
 // so they sum to $0.0001 less than the round's ledger total and the shares sum to 99.9%; the document
@@ -813,11 +825,14 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
   );
 
   const summed = rows.reduce((a, cells) => a + money(cells[1])!, 0);
-  const stated = money(doc.match(/they sum to (\$[\d,]+\.\d+)/)?.[1]);
+  // The sentence about the STEPS, not the one about the three blocks. Those two sums are equal today,
+  // so anchoring on the wrong one passes and stops meaning anything the moment the blocks are regrouped.
+  const stated = money(doc.match(/steps sum to (\$[\d,]+\.\d+)/)?.[1]);
   assert.ok(
     stated !== undefined,
-    "docs/cost.md no longer states what its step rows sum to (`they sum to $N`). That sentence is " +
-      "the one place the table's own arithmetic is written down for a reader.",
+    "docs/cost.md no longer states what its step rows sum to (`… steps sum to $N`). That sentence is " +
+      "the one place the table's own arithmetic is written down for a reader, and it has to be the " +
+      "sentence about the steps — the block subtotals are a different decomposition of the same rows.",
   );
   assert.equal(
     Number(summed.toFixed(4)),
@@ -842,6 +857,61 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
       `docs/cost.md says ${name} is ${share} of the bill; ${cost} over the headline ` +
         `$${total!.toFixed(4)} is ${actual.toFixed(2)}%. The share column is read off the total the ` +
         `document opens with, so one of the two is from a different round.`,
+    );
+  }
+
+  // The three block subtotals, which are the sentence a reader quotes when they want one number for
+  // "where does the money go" and are the only figures in the document that are a GROUP of rows added.
+  // The grouping is the document's own, restated here: a step that appears in no block, or in two,
+  // fails rather than being silently dropped from a subtotal — which is exactly how #311 published four
+  // shares summing to 94.6%, by leaving each agent's failed spend out of a numerator that kept it in
+  // the denominator.
+  const BLOCKS: [string, string[]][] = [
+    ["producing and checking pages", ["extract", "verify", "correct", "recheck_sampled", "table_join"]],
+    ["reviewing and editing the finished document", ["read", "edit"]],
+    ["wasted", ["failed"]],
+  ];
+  const stepName = (cell: string) => cell.replace(/[`*]/g, "").trim();
+  const assigned = BLOCKS.flatMap(([, steps]) => steps);
+  const tableSteps = rows.map((cells) => stepName(cells[0]!));
+  assert.deepEqual(
+    [...tableSteps].sort(),
+    [...assigned].sort(),
+    `docs/cost.md's table and the three block subtotals under it name different steps. The table has ` +
+      `${tableSteps.join(", ")}; the blocks account for ${assigned.join(", ")}. A step in no block is ` +
+      `spend the "where the money goes" sentence silently omits, and a step in two is spend it ` +
+      `double-counts.`,
+  );
+
+  const blockFigures = [
+    ...(doc.match(/Where the money goes:[\s\S]*?\*\*/)?.[0] ?? "").matchAll(
+      /([\d.]+)%\s*\((\$[\d,]+\.\d+)\)/g,
+    ),
+  ];
+  assert.equal(
+    blockFigures.length,
+    BLOCKS.length,
+    `docs/cost.md's "where the money goes" sentence states ${blockFigures.length} percent-and-dollar ` +
+      `pairs; the ${BLOCKS.length} blocks below it each need one, or a subtotal is going unchecked.`,
+  );
+
+  for (const [i, [label, steps]] of BLOCKS.entries()) {
+    const [, statedPct, statedDollars] = blockFigures[i]!;
+    const actual = steps.reduce((a, step) => {
+      const row = rows.find((cells) => stepName(cells[0]!) === step);
+      assert.ok(row, `docs/cost.md's table has no \`${step}\` row, so the "${label}" block is unpriced`);
+      return a + money(row![1])!;
+    }, 0);
+    assert.ok(
+      Math.abs(actual - money(statedDollars)!) <= 0.0001,
+      `docs/cost.md says "${label}" is ${statedDollars}; its own rows (${steps.join(" + ")}) come to ` +
+        `$${actual.toFixed(4)}. This is the sentence a reader quotes for where the money goes, and it ` +
+        `is prose rather than a table cell, so nothing else in the repo would notice it going stale.`,
+    );
+    assert.ok(
+      Math.abs((actual / total!) * 100 - Number(statedPct)) <= 0.05,
+      `docs/cost.md says "${label}" is ${statedPct}% of the bill; $${actual.toFixed(4)} over the ` +
+        `headline $${total!.toFixed(4)} is ${((actual / total!) * 100).toFixed(2)}%.`,
     );
   }
 
