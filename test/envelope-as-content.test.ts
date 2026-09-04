@@ -1631,6 +1631,34 @@ test("a denial reaches its noun through a noun-modifier, alone or inside a coord
     assert.equal(blankDeclaration({ html: "", log }).affirmed, affirmed, log);
   }
 
+  // Where the widened walk lands when the FIRST clause has no verb of its own, which #391's review asked
+  // to have written down rather than discovered. `negatedInList` steps over these words without requiring
+  // a verb, so a denial with no verb in it reaches across the comma and takes the next clause's noun into
+  // its list — and the next clause's own `is visible` then belongs to a noun read as denied. The page
+  // ships as an accepted declaration, which for a log that named a heading is the fatal direction.
+  //
+  // It is the branch `No printed text, and handwriting is present.` is already pinned on, twenty lines up,
+  // as the reading chosen when #200's review raised exactly this cost. What `document` and `body` change
+  // is how often it is reached, not what it does: the identical sentences built from the modifiers that
+  // were already in the set are delivered on `main` too, and the third of these is one of them — pinned
+  // here so the shape cannot be read as something this change introduced.
+  for (const log of [
+    "Page is blank. No printed text or images, and body text is visible.",
+    "Page is blank. No text or images, document headings are visible.",
+    "Page is blank. No text or images, page numbers are visible.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+  // And how narrow that line is, which is the other half of the same decision: one determiner, one `only`
+  // or one verb in the second clause and the walk stops before the negator, as it does for every negative
+  // above. The pair is what makes the branch legible — the words are the same, the reading is opposite.
+  for (const log of [
+    "Page is blank. No text or images, the document heading is visible.",
+    "Page is blank. No text or images, only document headings are visible.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
+
   // The four self-contradictions this check exists for, pinned to THIS widening as well as to #194's own
   // test above. They are the property that makes widening the walk the safe fix: the defect is a denial
   // the walk could not reach, and these have no denial in them at all, so nothing added to the list can

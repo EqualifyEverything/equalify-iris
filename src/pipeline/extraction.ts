@@ -1706,6 +1706,23 @@ const NEGATOR_CHAIN_MAX = 16;
 // affirmations #194 measured. `and printing, no page number, is visible` — the shape this must not
 // swallow — reaches the document with its `not legible text` already stripped from the veto scope, so
 // there is no negator left in front of `printing` to find.
+//
+// "It cannot reach past a verb" is the whole of that guarantee, and it says nothing about a denial with
+// no verb of its own: `No printed text, and handwriting is present` is one clause of pure denial and one
+// affirmation, and nothing between them ends the walk, so the affirmed noun reads as the last member of
+// the list. That reading is the one #200's review weighed and chose — refusing it loses a blank page
+// whose log denied twice — and the discriminator is thin on purpose: a determiner, an `only` or a verb in
+// the second clause stops the walk and the same sentence affirms. #379's two words do not change that
+// branch, they make it reachable by more wordings, and both sides of it are pinned in
+// test/envelope-as-content.test.ts so which one a log falls on is a recorded answer rather than a
+// discovered one (#391's review).
+//
+// The comma cannot be the discriminator, which is worth recording because it is the obvious narrowing:
+// ending the walk at a comma no conjunction follows refuses four of the blank pages pinned in that file —
+// `No printed words, lines, or characters are visible.` and #367's own log among them — because the
+// members of a denial are separated by bare commas exactly as the two clauses are. Whatever separates a
+// verbless denial from an affirmation behind it, it is not punctuation.
+//
 // A negator distributes over a coordination only if it has a member of its own to distribute FROM,
 // and one case in this file can take that member away: the marks phrase is stripped before any of
 // this runs, so "No stray marks, and handwriting is visible" arrives as `no … and handwriting` with
