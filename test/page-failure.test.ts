@@ -230,6 +230,11 @@ test("every page failing is a failed run, not an empty document", async () => {
       // whose alts were clean. The distinction is why the denominator is on the line (#290).
       alts_checked: 0,
       alts_generic: 0,
+      // And 0 of 0 ids, which on this run is the strongest form of that argument: every page
+      // threw, so there is no markup for the rule to have looked at. A reader seeing
+      // `ids_duplicated: 0` alone would take it for a clean bill on three pages (#373).
+      ids_checked: 0,
+      ids_duplicated: 0,
     });
     assert.equal(ev(rec, "extraction_failed").length, 1, "the log says why the run ended, not just that a page did");
   });
@@ -284,6 +289,8 @@ test("a whole run logs an empty failed list rather than no list", async () => {
       uncorrected: [],
       alts_checked: 0,
       alts_generic: 0,
+      ids_checked: 0,
+      ids_duplicated: 0,
     });
   });
 });
@@ -410,6 +417,11 @@ test("a re-extraction cannot blank a page the document has content for", async (
       uncorrected: [],
       alts_checked: 0,
       alts_generic: 0,
+      // Counted over the pages this re-extraction returned, not over the document: page 2 kept
+      // its prior content and is not on this line at all, so a 0 here is a statement about
+      // page 3 (#373).
+      ids_checked: 0,
+      ids_duplicated: 0,
     });
   });
 });
@@ -486,6 +498,8 @@ test("a source whose every page is blank is a failed run, not an empty document"
       uncorrected: [],
       alts_checked: 0,
       alts_generic: 0,
+      ids_checked: 0,
+      ids_duplicated: 0,
     });
     assert.deepEqual(ev(rec, "extraction_failed")[0].data, {
       pages: 0,
@@ -519,6 +533,8 @@ test("a page that threw is not counted among the pages re-extracted", async () =
       uncorrected: [],
       alts_checked: 0,
       alts_generic: 0,
+      ids_checked: 0,
+      ids_duplicated: 0,
     });
   });
 });

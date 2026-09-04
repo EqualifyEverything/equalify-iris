@@ -542,6 +542,118 @@ function referencesIn(document: Document): string[] {
   return refs;
 }
 
+// How many elements ONE page fragment gives an id, and which of those ids it used more than once —
+// the collision `namespaceAnchors` cannot fix, answered at the page step instead of at assembly
+// (#373 directive 3).
+//
+// Why it is here and not left to lint: prefixing cannot separate two copies on one page — either
+// the id is renamed on both or on neither, and the second is the ordinary outcome, since
+// `namespaceAnchors` renames only ids more than one PAGE claims. `namespaceAnchors` says so where
+// it declines the case, and until now the sentence ended "it needs a human or the review loop".
+// Which branch a document took also decides what lint's finding is CALLED — `p3-fn-1` where the
+// rename ran, `fn-1` where nothing collided across pages — so the name the page agent would have
+// to act on is not even predictable from here. The page step
+// is the one place that can still ask the model that wrote the ids to renumber them, and
+// `agents/page.md` is where the rule lives (*"never hand one an id that a numbered footnote on
+// this page already uses… is a duplicate id that ships"*), so this is the prompt's own rule
+// checked rather than only asked for — the argument #290's placeholder-alt rule makes.
+//
+// Read off the PARSED tree only, and `[]` where the parse threw. That is the opposite of
+// `sourceIds`' rule and for the same underlying reason: there, a missed id costs a duplicate lint
+// reports, so over-collecting is the danger; here, an over-collected id is a phantom DUPLICATE,
+// which buys a correction round against a defect the document does not have. That is precisely
+// the failure #373 is about, so the direction of the trade flips with the consequence — a
+// duplicate this cannot see ships exactly as it shipped before, and lint still names it on the
+// assembled document.
+//
+// The regex screen is the same one `namespaceAnchors` uses, and it is what keeps this off the
+// ordinary page's bill: a fragment with no id in attribute position is not parsed at all. It runs
+// on every page rather than a sample, like the link and alt checks beside it in extraction.ts,
+// because it is exact and free.
+//
+// Measured before it was written, over every page reply on disk in the benchmark's round logs
+// (1,501 fragments, 1,421 of them carrying an id, no model call): **2** fragments duplicate an id
+// within themselves, both of them a footnote — `fnref-1` twice on `gpt-5.6-luna`, and
+// `numbering-note-1`/`-2` on `nova-2-lite`. On the deployed page model (`kimi-k2.5`) it is 0 of
+// 328, and on `sonnet` 0 of 469. So this buys a correction on roughly one page in 750 and none at
+// all on the model Iris ships today — the reason to have it is #344, which proposes swapping the
+// page agent to the one arm that produced a hit.
+// `ids` comes back with the duplicates because a count of duplicates is not readable without its
+// denominator: 0 duplicates on a page that carries no ids at all says nothing about this rule, and
+// 0 on a page carrying 40 says something (`alts_checked` in extraction.ts is the same pair for the
+// same reason). Both off ONE parse — asking two functions would parse the fragment twice.
+//
+// A page whose parse threw reports 0 and 0. That is one page's worth of denominator lost rather
+// than a wrong answer, it is the page no reader in this file can see at all, and per
+// `parseFragment` it is close to unreachable: malformed markup does not get there, since the HTML
+// parser has a recovery rule for everything.
+export function idAudit(innerHtml: string): { ids: number; duplicated: string[] } {
+  if (!new RegExp(`${ATTR_SEP}id\\s*=`, "i").test(innerHtml)) return { ids: 0, duplicated: [] };
+  const { dom } = parseFragment(innerHtml);
+  if (!dom) return { ids: 0, duplicated: [] };
+  try {
+    const counts = new Map<string, number>();
+    for (const el of dom.window.document.querySelectorAll("[id]")) {
+      const id = el.getAttribute("id");
+      // A blank id is skipped rather than counted, and it is not being called harmless: `id=""` and
+      // `id="   "` are invalid markup, and two of them ARE two elements a reference cannot reach.
+      // What does not fit is this rule's remedy — "renumber every copy after the first" is not the
+      // repair for an id with no name, and `duplicateIdProblem` would quote an empty string back at
+      // the model as the thing to renumber. Never observed in 1,501 page replies, and the trade this
+      // whole function makes is that a duplicate it cannot name costs nothing new while a
+      // correction bought on a sentence the model cannot act on costs a page call.
+      if (id?.trim()) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return {
+      // Elements carrying a usable id, not distinct ids: it is the number of things that could
+      // have collided, which is what makes a zero a measurement.
+      ids: [...counts.values()].reduce((n, c) => n + c, 0),
+      duplicated: [...counts]
+        .filter(([, n]) => n > 1)
+        .map(([id]) => id)
+        .sort(),
+    };
+  } finally {
+    // Cleanup is allowed to fail, for the reason `namespaceAnchors` gives at its own `close()`
+    // below: `close()` walks the tree recursively and overflows from about 4,000 levels, and this
+    // function reaches pages that deep on purpose — it ignores `rewritable`, because reading ids
+    // off a too-deep tree is exact where scanning its source is a guess. A throw from a `finally`
+    // would replace the counts with a `RangeError`, and the two call sites turn that into
+    // different damage: `duplicateIds` at the page step lands in the per-page catch and marks
+    // @page-failed a page Iris already holds (the shape #171 fixed), while `idCounts` is
+    // evaluated inline in the roll-up event, outside any catch, and would fail the whole run
+    // after every page had been billed. Neither is worth a count of ids.
+    try {
+      dom.window.close();
+    } catch {
+      // Deliberately empty: see above.
+    }
+  }
+}
+
+// The duplicates alone, for the three page-step callers that have no use for the denominator.
+export function duplicateIds(innerHtml: string): string[] {
+  return idAudit(innerHtml).duplicated;
+}
+
+// What the correction pass is asked to do about one, in the shape `missingLinkProblem` and
+// `genericAltProblem` use: the exact defect, the exact repair, and nothing else changed.
+//
+// The repair names the references as well as the ids, because renaming an id on its own is how
+// this defect gets worse: `href="#fn-1"` currently reaches the first copy, and a rename that
+// leaves the link behind turns a wrong target into a dangling one. Both of the duplicates
+// measured on disk are footnote ids, which is the shape where that matters most — the marker and
+// its back-reference point at each other.
+export function duplicateIdProblem(id: string): string {
+  return (
+    `More than one element on this page has id="${id}". Ids must be unique within a page, so a ` +
+    `reference to it — href="#${id}", aria-labelledby, or a <label for> — reaches only the first ` +
+    `one, and the others cannot be linked to at all. Renumber every copy after the first to an id ` +
+    `nothing else on this page uses, and repoint the reference that meant each one, so each link ` +
+    `still lands on the element it names. Change nothing else about the page.`
+  );
+}
+
 // Namespace colliding ids across a document's pages. Input is one entry per page in
 // document order; output is the rewritten inner HTML in the same order, plus what
 // was done. Pages are processed as a set because a collision is not visible from
@@ -622,9 +734,11 @@ export function namespaceAnchors(pages: { order: number; innerHtml: string }[]):
       //
       // A page that used one id twice BY ITSELF is deliberately not a collision here:
       // ids are collected per page as a set, and no prefix could fix it anyway since
-      // both copies would get the same one. It needs a human or the review loop, so it
-      // is left to lint's `duplicate-id` / `duplicate-id-active`, which see the
-      // assembled document and report it.
+      // both copies would get the same one. It is answered one step earlier instead —
+      // `duplicateIds` above runs at the page step, where the model that wrote the ids
+      // can still renumber them — and lint's `duplicate-id` / `duplicate-id-active`
+      // remain the backstop on the assembled document for the page that arrives here
+      // with one anyway.
       return { pages: pages.map((p) => p.innerHtml), report: EMPTY_REPORT };
     }
 

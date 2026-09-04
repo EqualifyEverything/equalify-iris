@@ -20,6 +20,7 @@ import {
 import { examplesForPrompt } from "./memory.ts";
 import { altTexts, genericAltProblem, genericAlts } from "./alt.ts";
 import { missingLinkProblem, missingLinks, pageLinkContext, unexpectedHrefs } from "./links.ts";
+import { duplicateIdProblem, duplicateIds, idAudit } from "./anchors.ts";
 import { STANDARD as STANDARD_AGENTS, isStandardType, logicalType } from "./contribute.ts";
 import { isTruncatedResponseError, replyExcerpt, TruncatedResponseError } from "../providers/types.ts";
 import type { Fragment } from "./fragment.ts";
@@ -3425,6 +3426,32 @@ async function extractPage(
     ctx.log.event("page_generic_alt", { image: img.name, page: img.order, alts: generic });
   }
 
+  // And whether the page used one id twice, on the same terms again — exact, free, every page —
+  // with one difference from the two above that is the reason it is here at all: this defect has a
+  // second reader downstream, and that reader cannot repair it. `namespaceAnchors` prefixes each
+  // page's ids at assembly, so a cross-page collision is fixed in code; a page that collided with
+  // ITSELF gets the same prefix on both copies and stays collided, which is the one case that
+  // function declines by name. Its remaining reporter is lint on the assembled document, for a page
+  // nobody is going to look at again with the image in front of them — and often under a name that
+  // page never wrote, since a finding on a prefixed id reads `p3-fn-1`.
+  //
+  // Often and not always, which is worth stating exactly because the unqualified version is
+  // tempting: `namespaceAnchors` renames only ids more than one PAGE claims, and returns every page
+  // byte-for-byte when there are none, so a document whose sole defect is page 3 using `fn-1` twice
+  // with no other page claiming `fn-1` reaches lint with `fn-1` intact. Per-page footnote numbering
+  // usually does produce the cross-page collision that makes the rename happen — it is the shape
+  // both duplicates measured on disk have — but the case for asking here does not rest on it. The
+  // page step is where the model still holds the image, and lint runs after delivery either way.
+  //
+  // This is also the half of #373 directive 3 that a code check can honestly buy. The directive's
+  // claim is that the checker's guess becomes an instruction because "nothing in the run knows the
+  // answer" when it is asked, and the run now knows it: what that stops is the REAL defect
+  // reaching the document, not a false problem being written, which is directive 4's business.
+  const duplicated = duplicateIds(innerHtml);
+  if (duplicated.length) {
+    ctx.log.event("page_duplicate_ids", { image: img.name, page: img.order, ids: duplicated });
+  }
+
   // page_verify_ok / page_verify_failed report the Feedback Agent's verdict and
   // nothing else, exactly as they did before links existed — a missing link is not
   // part of that verdict, and folding it in would make the two events mean different
@@ -3547,21 +3574,26 @@ async function extractPage(
     ...(verifyFailed ? verdict.problems : []),
     ...missing.map(missingLinkProblem),
     ...generic.map(genericAltProblem),
+    ...duplicated.map(duplicateIdProblem),
   ];
   if (problems.length) {
-    // What the correction was asked to fix, for the event below. Any of the three can fire on one
-    // page, and they cost the same call but mean different things: a link the model dropped and a
-    // placeholder alt are exact, code-checked misses, while a fidelity problem is the Feedback
-    // Agent's judgement.
+    // What the correction was asked to fix, for the event below. Any of the four can fire on one
+    // page, and they cost the same call but mean different things: a link the model dropped, a
+    // placeholder alt and a duplicate id are exact, code-checked misses, while a fidelity problem
+    // is the Feedback Agent's judgement.
     //
     // `both` is more than one source, which is what it has always counted — until #290 there
-    // were two sources, so every line an old log calls `both` is still one, and no reading of an
-    // old log changes. What it no longer does is name WHICH pair, and that is on purpose rather
-    // than traded away: the alternative is seven buckets for three sources, and the per-source
-    // detail is already exact on `page_links_missing` and `page_generic_alt`, both keyed by the
-    // same `image` as this line.
-    const sources = [verifyFailed ? "verify" : null, missing.length ? "links" : null, generic.length ? "alt" : null]
-      .filter((s): s is string => s !== null);
+    // were two sources, and until #373's directive 3 three, so every line an old log calls `both`
+    // is still one and no reading of an old log changes. What it no longer does is name WHICH
+    // pair, and that is on purpose rather than traded away: the alternative is fifteen buckets for
+    // four sources, and the per-source detail is already exact on `page_links_missing`,
+    // `page_generic_alt` and `page_duplicate_ids`, all keyed by the same `image` as this line.
+    const sources = [
+      verifyFailed ? "verify" : null,
+      missing.length ? "links" : null,
+      generic.length ? "alt" : null,
+      duplicated.length ? "ids" : null,
+    ].filter((s): s is string => s !== null);
     const trigger = sources.length > 1 ? "both" : sources[0];
     const before = innerHtml.trim();
     // A correction that cannot complete costs the CORRECTION, not the page.
@@ -3856,6 +3888,12 @@ async function extractPage(
             // hrefs: without them a rejected alt correction is a line saying a good page was
             // re-rendered for nothing and not saying what for.
             ...(generic.length ? { alts: generic } : {}),
+            // And the duplicated ids, on the same terms. Omitted rather than empty, so no line an
+            // older log holds gains a field, and named rather than left to `trigger`: `both` says
+            // more than one source fired and not which, so on a page where a link and an id both
+            // fired this is the only field that says the id was part of what the refused call was
+            // asked to fix.
+            ...(duplicated.length ? { ids: duplicated } : {}),
             problems: recheck.problems,
           });
         }
@@ -3977,6 +4015,13 @@ async function extractPage(
           // Whether the alts came back is answered exactly and for free by
           // `page_generic_alt_unrecovered`, not by this verdict.
           alt_before: generic.length,
+          // The fourth share, for the reason the third exists (#373 directive 3). A duplicate id is
+          // found by code and cannot be counted coming out of `problems_after` either — the Feedback
+          // Agent judges the fragment against the IMAGE, and an id appears on the page no more than a
+          // link target does — so folding it into `problems_before` would make a page with one
+          // fidelity problem and two duplicated ids read as three-in-one-out. Whether the ids came
+          // back is answered exactly and for free by `page_duplicate_ids_unrecovered`.
+          ids_before: duplicated.length,
           problems_after: recheck.problems.length,
           // The same two sides as kinds (issue #182), which is what turns "the recheck did
           // not pass" into an answer about the CORRECTION: `content_missing` going in and
@@ -4062,6 +4107,27 @@ async function extractPage(
             });
           }
         }
+        // And the same question about the ids, which this rule owes more than the other two do: it
+        // is the one whose defect has a downstream reporter that CANNOT fix it — lint sees the
+        // assembled document, after this page's last chance to be read against its image, and where
+        // a prefixed id no longer carries the name the page gave it (only where the rename ran; see
+        // the qualification at `page_duplicate_ids` above). Free and exact, on the fragment that is
+        // actually delivered.
+        //
+        // `ids` and not a count, because unlike an unrecovered link this is not identity-matched
+        // against anything the page arrived with: the correction renumbers, so it can clear `fn-1`
+        // and collide on `fn-2`, and that page is a repair that moved the defect rather than one
+        // that failed to touch it. Only the names on the line can tell those apart.
+        if (duplicated.length) {
+          const stillDuplicated = duplicateIds(innerHtml);
+          if (stillDuplicated.length) {
+            ctx.log.event("page_duplicate_ids_unrecovered", {
+              image: img.name,
+              page: img.order,
+              ids: stillDuplicated,
+            });
+          }
+        }
       }
     }
   }
@@ -4096,6 +4162,24 @@ async function extractPage(
     // a marker saying this page did not pass verification would be false about it.
     ...(verifyFailed && !repaired ? ({ uncorrected: true } as const) : {}),
   };
+}
+
+// The id rule's two document-level counts, for `extraction_complete` and `reextract_complete`.
+// One function rather than the expression twice, so the two events cannot drift into measuring
+// different things while a comment goes on claiming they are comparable (review of #387).
+//
+// Per fragment and summed, which is the only count this rule can make: two pages sharing an id is
+// not a defect at this point — `namespaceAnchors` fixes it at assembly — so pooling a document's
+// ids into one set would report that fix as fifty failures.
+function idCounts(fragments: { innerHtml: string }[]): { ids_checked: number; ids_duplicated: number } {
+  let ids_checked = 0;
+  let ids_duplicated = 0;
+  for (const f of fragments) {
+    const audit = idAudit(f.innerHtml);
+    ids_checked += audit.ids;
+    ids_duplicated += audit.duplicated.length;
+  }
+  return { ids_checked, ids_duplicated };
 }
 
 // One fragment per page, in submitted order. Each page is verified for source
@@ -4187,6 +4271,23 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
     // memory.
     alts_checked: fragments.reduce((n, f) => n + altTexts(f.innerHtml).length, 0),
     alts_generic: fragments.reduce((n, f) => n + genericAlts(f.innerHtml).length, 0),
+    // The same pair for the id rule (#373 directive 3), on the same terms and for the same reason:
+    // asked after any correction, so a non-zero `ids_duplicated` is a duplicate this step could not
+    // repair, and present at zero on every run because a rule that fires on almost nothing is only
+    // visible as a zero that prints. It fires on less than the alt rule does — 2 of 1,501 page
+    // replies across every round on disk, and 0 of 328 on the model deployed today — so a field
+    // appearing only when it fires would leave a reader unable to tell "no page duplicated an id"
+    // from "this run predates the check".
+    //
+    // Counted per FRAGMENT and summed, which is the only count this rule can make: a collision
+    // between two pages is not a defect here, `namespaceAnchors` fixes it at assembly, and pooling
+    // the ids of a 50-page document into one set would report that fix as a failure 50 times over.
+    //
+    // Not what shipped, exactly as `alts_generic` is not: the review loop rewrites blocks after this
+    // line, so it can introduce a duplicate these counts never saw. Lint on the assembled document
+    // is what sees that one (`duplicate-id`, enabled by name in lint.ts because the WCAG 2.2 tag
+    // filter drops it).
+    ...idCounts(fragments),
   });
 
   // Nothing was extracted. Containment trades a thrown run for the pages that DID
@@ -4378,6 +4479,10 @@ export async function reExtractPages(
     // sends feedback (#290).
     alts_checked: fragments.reduce((n, f) => n + altTexts(f.innerHtml).length, 0),
     alts_generic: fragments.reduce((n, f) => n + genericAlts(f.innerHtml).length, 0),
+    // And the id pair, over the whole document for the same reason the alt pair is: a feedback
+    // round reporting only the pages it re-ran would read as the id corpus shrinking every time a
+    // client sends feedback (#373 directive 3).
+    ...idCounts(fragments),
     // Over the whole document this round delivers, like the two alt fields above and unlike
     // `pages`: a feedback round that repairs one rejected page out of three should read as two
     // left, not as one page re-run. Always present, including empty, for the same reason it is

@@ -505,7 +505,7 @@ test("the verification tally counts what was checked, corrected and re-checked",
   assert.deepEqual(d.verification.effects, {
     alt_only: 1, text: 1, attrs: 1, structure: 1, text_grew: 1, text_shrank: 0,
   });
-  assert.deepEqual(d.verification.triggers, { verify: 2, links: 1, alt: 0, both: 0 });
+  assert.deepEqual(d.verification.triggers, { verify: 2, links: 1, alt: 0, ids: 0, both: 0 });
   assert.deepEqual(d.verification.rechecks, {
     sampled: 1, sampled_ok: 1, sampled_unjudged: 0,
     sampled_problems_before: 1, sampled_problems_after: 0,
@@ -515,6 +515,34 @@ test("the verification tally counts what was checked, corrected and re-checked",
     verdicts_omitted: 0,
   });
   assert.equal(d.verification.pages_unjudged, 0, "every page here carried a real verdict");
+});
+
+test("every source a correction can be bought by has a bucket, so the split still sums", () => {
+  // The reason each new free rule has to be added to `CORRECTION_TRIGGERS` rather than left to
+  // fall through: an unknown `result` costs one bucket, while an unknown TRIGGER breaks the
+  // invariant the split rests on — that the buckets add up to `corrections` — and a run whose
+  // corrections were all bought by the newest rule would report the bill with five zeros beside
+  // it. `ids` is the one #373 added; `both` is still more than one source, whichever they were.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "page_verify_failed", image: "page-001.png", problems: ["a table row is missing"] },
+    { ts: T(2), type: "page_corrected", image: "page-001.png", page: 1, trigger: "verify", problems: 1, result: "kept" },
+    { ts: T(2), type: "page_corrected", image: "page-002.png", page: 2, trigger: "links", problems: 1, result: "kept" },
+    { ts: T(2), type: "page_corrected", image: "page-003.png", page: 3, trigger: "alt", problems: 1, result: "kept" },
+    // A page that PASSED and used one id on two elements. Invisible to the verifier, which
+    // judges the fragment against the image, and renamed out of lint's reach by assembly.
+    { ts: T(2), type: "page_corrected", image: "page-004.png", page: 4, trigger: "ids", problems: 1, result: "kept" },
+    { ts: T(2), type: "page_corrected", image: "page-005.png", page: 5, trigger: "both", problems: 2, result: "kept" },
+    { ts: T(3), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(3))));
+  assert.deepEqual(d.verification.triggers, { verify: 1, links: 1, alt: 1, ids: 1, both: 1 });
+  const { triggers, corrections } = d.verification;
+  assert.equal(
+    Object.values(triggers).reduce((n, v) => n + v, 0),
+    corrections,
+    "the split has to account for every correction, or it cannot be read as a bill",
+  );
 });
 
 test("a page nothing judged is counted apart from a page that passed", () => {
@@ -711,7 +739,7 @@ test("a correction that bought nothing is counted apart from one that was kept",
   assert.deepEqual(d.verification.effects, {
     alt_only: 0, text: 1, attrs: 1, structure: 1, text_grew: 0, text_shrank: 1,
   });
-  assert.deepEqual(d.verification.triggers, { verify: 3, links: 1, alt: 0, both: 1 });
+  assert.deepEqual(d.verification.triggers, { verify: 3, links: 1, alt: 0, ids: 0, both: 1 });
   // The links path's re-verification is `binding`, and stays out of the sample it would
   // otherwise outnumber: this page had PASSED its check and was rewritten for a link, so
   // its failure says nothing about whether correcting a FAILED page converges. Its problem
@@ -755,7 +783,7 @@ test("a log from before these events reports zeros, not absences", () => {
     assert.equal(typeof v, "number", `${k} is not a number`);
   }
   assert.deepEqual(d.verification.results, { kept: 0, rejected: 0, identical: 0, empty: 0, failed: 0 });
-  assert.deepEqual(d.verification.triggers, { verify: 0, links: 0, alt: 0, both: 0 });
+  assert.deepEqual(d.verification.triggers, { verify: 0, links: 0, alt: 0, ids: 0, both: 0 });
   assert.deepEqual(d.verification.effects, {
     alt_only: 0, text: 0, attrs: 0, structure: 0, text_grew: 0, text_shrank: 0,
   });

@@ -338,16 +338,18 @@ export interface Diagnostics {
     // Why each correction ran: `verify` is a page the Feedback Agent rejected, `links` is a
     // page that passed and lost a link the code found in the PDF, `alt` is a page that passed
     // and described an image with a placeholder instead of a description (pipeline/alt.ts,
-    // #290), and `both` is one with more than one of those. These are the split that makes
-    // `corrections` readable as a bill — a `links` or `alt` correction is a page call with no
-    // verify failure behind it, so a consumer reading `verify_failed` as the number of extra
-    // page calls undercounts by both of them.
+    // #290), `ids` is a page that passed and used one id on two elements (pipeline/anchors.ts,
+    // #373), and `both` is one with more than one of those. These are the split that makes
+    // `corrections` readable as a bill — a `links`, `alt` or `ids` correction is a page call with
+    // no verify failure behind it, so a consumer reading `verify_failed` as the number of extra
+    // page calls undercounts by all three.
     //
-    // `alt` is expected to be 0 on a healthy run, and that is the point of counting it: the
-    // rule flags nothing in Iris's own output (0 of 1,064 alts across the bench corpus), so a
-    // non-zero here is either a page agent that has started writing placeholders or a
-    // regression in the rule, and both are worth a look. It is not a cost line at that rate.
-    triggers: { verify: number; links: number; alt: number; both: number };
+    // `alt` and `ids` are both expected to be 0 on a healthy run, and that is the point of
+    // counting them: the alt rule flags nothing in Iris's own output (0 of 1,064 alts across the
+    // bench corpus) and the id rule flags 2 of 1,501 page replies, none of them from the model
+    // deployed today, so a non-zero is either a page agent that has started writing placeholders
+    // or reusing ids, or a regression in one of the rules. Neither is a cost line at that rate.
+    triggers: { verify: number; links: number; alt: number; ids: number; both: number };
     // What the corrections that DID change something changed, as observed on the two
     // fragments rather than claimed by the verdict (pipeline/correction.ts). Not a
     // partition: a re-render that rebuilds a table counts under both `text` and
@@ -629,9 +631,15 @@ function parse(logText: string): LogEvent[] {
 const CORRECTION_RESULTS = ["kept", "rejected", "identical", "empty", "failed"] as const;
 
 // And why it ran. A closed list for the same reason, and read off the same event. `alt` since
-// #290; `both` has always meant more than one source, so adding a third source does not change
-// what an old log's `both` counted.
-const CORRECTION_TRIGGERS = ["verify", "links", "alt", "both"] as const;
+// #290 and `ids` since #373; `both` has always meant more than one source, so neither addition
+// changes what an old log's `both` counted.
+//
+// A value missing from this list is worse here than a missing `result` is, and that is why each new
+// source has to be added: an unknown `result` leaves one bucket short of `corrections`, while an
+// unknown TRIGGER leaves the four buckets no longer summing to `corrections` at all — a run whose
+// every correction was bought by the id rule would report `corrections: 12` and four zeros, which
+// reads as a reader that cannot count rather than as a source it has not heard of.
+const CORRECTION_TRIGGERS = ["verify", "links", "alt", "ids", "both"] as const;
 
 // What the Feedback Agent said was wrong with a page (`page_verify_failed`'s `kinds`).
 // Declared here rather than imported from pipeline/feedback.ts, like the two lists above
@@ -1028,7 +1036,7 @@ export function summarizeRun(
     },
     corrections: 0,
     results: { kept: 0, rejected: 0, identical: 0, empty: 0, failed: 0 },
-    triggers: { verify: 0, links: 0, alt: 0, both: 0 },
+    triggers: { verify: 0, links: 0, alt: 0, ids: 0, both: 0 },
     effects: { alt_only: 0, text: 0, attrs: 0, structure: 0, text_grew: 0, text_shrank: 0 },
     rechecks: {
       sampled: 0,
