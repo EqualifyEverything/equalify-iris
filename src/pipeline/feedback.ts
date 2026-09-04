@@ -205,8 +205,10 @@ function diffPreview(before: string, after: string, maxLines = 80): string {
 // long — over 2,001 enveloped page replies in 67 bench round logs on file the median is 671
 // characters, p90 1,147, p99 1,741 and the longest 2,566 — and it is long because `agents/page.md`
 // asks for it by name in 26 places. Two of those records exist in the log and nowhere else, and for
-// the rest the log is the verifier's evidence that the DOCUMENT owes its half — a page that says
-// where it stopped owes the `[page not fully transcribed]` marker. Either way the record sits at the
+// the rest the log is the verifier's evidence that the DOCUMENT owes its half — a page the MODEL
+// could not return in full owes the `[page not fully transcribed]` marker, while a page that merely
+// ran out where the SHEET did owes the log entry and nothing more, and the log is what tells the
+// verifier which of the two it is looking at. Either way the record sits at the
 // end of the entry. Cutting one short cuts those off its END, which is precisely the half
 // `agents/feedback.md` now relies on to avoid a false "unrecorded" finding, so a clip that bites a
 // real log would make this change worse than not making it. 3,000 is reached by 0 of those 2,001:

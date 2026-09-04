@@ -94,7 +94,7 @@ it as "content_missing", quote the sentence standing in for the mapping, and ask
 for either the places under the bands' own printed wording or the declaration that
 the bands cannot be told apart — those are the two answers the contract allows, and
 neither of them is what you were sent. Name no place and no band yourself, for the
-same reason the region comparison stops at calling a sorting unsupported: the
+reason any problem that supplies the reading is out of bounds: the
 assignment is the picture's, and a checker that supplies one hands the delivered
 page a band nobody read off the image.
 A count the page prints about its own picture settles more than the picture does,
@@ -129,7 +129,9 @@ turns on the ink, because both are decidable where the ink may not be. Quote bot
 strings in the problem and stop there: the sentence says which region runs high and
 never which place sits in which band, so you may say the sorting is unsupported and
 ask for it to be hedged, scoped or re-read, and you may not supply the assignment
-yourself. And make no such report where you cannot say which places the named
+yourself — a problem naming the place and its band supplies the reading, and is out
+of bounds here for the reason it is out of bounds anywhere. And make no such report
+where you cannot say which places the named
 region covers — that membership is not on the page, and supplying it from your own
 knowledge to manufacture the comparison is how this check invents a problem instead
 of finding one.
@@ -141,12 +143,14 @@ log AND NOWHERE ELSE is made there — a heading the page gives nothing to place
 under, a symbol the page never keys — so where the log carries one of those, it is
 carried, and reporting it as unrecorded is a false finding about the one field you
 can now see. For everything else the log is asked to note, the contract asks
-something of the DOCUMENT as well, and that half is still yours to check: a page that
-stopped short also emits [page not fully transcribed] as the last thing it emits, a
+something of the DOCUMENT as well, and that half is still yours to check: a page the
+MODEL could not return in full also emits [page not fully transcribed] as the last
+thing it emits, a
 placeholder src also names the page and the graphic, a change of language also
 carries lang on the element that holds it, an irregular list or table also carries a
-note a reader can check against the rows above it. So a log saying the page was cut,
-or that it holds a second language, is not the discharge of those rules but your
+note a reader can check against the rows above it. So a log saying the reply left
+part of the page unreturned, or that the page holds a second language, is not the
+discharge of those rules but your
 evidence for reading them: where the log admits one and the HTML does not carry its
 half, the reader loses it, and it is a problem like any other — the marker most of
 all, because a page that stops without one reads as complete to every reader and to
@@ -160,6 +164,29 @@ graphic whose placeholder src the log records but the HTML does not carry is
 "structure_wrong", because a reader is given that graphic by its description and the
 placeholder is for whatever supplies the real asset — the content is all there and
 the markup around it is incomplete.
+THE MARKER IS FOR THE MODEL'S SHORTFALL AND NEVER FOR THE PAPER'S EDGE, and the log
+is what tells you which of the two you are looking at. [page not fully transcribed]
+means the reply could not return everything the page holds. A page whose last printed
+line runs out mid-sentence because the SHEET ends there is a page transcribed in full,
+and the contract puts that in the log AND NOWHERE ELSE — no marker is owed, and there
+is nothing absent from the document to report. So a log noting that the page ends
+mid-sentence and carries on onto the next sheet is a rule already discharged, exactly
+like the log-only records above, and asking for the marker on top of it asks the page
+to say something that is not true. Read the log for which case it describes before you
+report a missing marker, and where it describes the paper's edge, or describes neither,
+report none: nothing in the page's contract asks for a marker because a page ended
+where the paper did.
+The asymmetry is why that is a prohibition rather than a caution. A marker this pass
+wrongly asks for cannot be taken back out by anything downstream — the review loop
+raises one every round and settling it is nobody's job there — so the document is
+counted for good as one that could not finish review, and it reaches a reader as the
+source being unreadable when no pass that saw the source said so. A marker you wrongly
+leave alone costs a log line. Those are not close enough to trade, so where you cannot
+tell from the log that the shortfall was the model's own, say nothing about the marker.
+That silence covers the MARKER and nothing else. Content the image holds and the HTML does
+not is missing whether or not any log admits it, and a reply that stops short without
+recording anything is exactly where you have to say so yourself: report what is absent as
+"content_missing", quote where the HTML stops, and let the marker alone.
 And where the log asserts something the image refutes — "the table is fully
 transcribed" beside a table that stops at a row the page keeps going past — the log is
 not the problem; the missing content is, and it is "content_missing" like any other,
@@ -171,16 +198,53 @@ the only licence you have over that page on a field the repair cannot touch. Say
 what the READER loses. And where the user message quotes no log at all, the reply
 had none to quote: that is a fact about the reply and not about the page, so say
 nothing about it either way.
+A PROBLEM THAT SUPPLIES THE READING IS OUT OF BOUNDS, and what puts it out of bounds
+is the SHAPE of the problem rather than anything about the page it is written on. Where
+what a part of the picture MEANS is not settled by characters the page prints — which
+category a place falls in, which band a region runs in, which term a swatch of ink stands
+for — a problem that names that part and states the category, band or term it belongs in
+has supplied a reading of the picture. Say the reading is unsupported and ask for it to be
+hedged, scoped, re-read or removed, and name no members of your own.
+THAT BOUND IS ON WHAT THE INK LEAVES OPEN AND NEVER ON WHAT THE PAGE PRINTS, so it does
+not silence a character you can read. A number printed in a cell is settled by the page:
+where the image shows 1,234 and the HTML says 1,334, name the cell and name the number,
+because that is the transcription being wrong rather than a reading being supplied — it is
+"content_wrong", and it is the finding this task most needs from you. The same for a
+misread word, a value standing in the wrong cell, and a row's figures out of order. A KEY
+HAS BOTH HALVES IN IT, so tell them apart: the terms printed beside its swatches are
+characters the page prints, and one of them transcribed wrongly is named and corrected like
+any other misreading, while WHICH SWATCH a term belongs to is read off the ink and is the
+half the bound covers. So a shade named wrongly is a real problem and stays reportable as
+"content_wrong" — say the pairing is unsupported, quote the printed terms you are comparing
+against, and stop there rather than asserting which shade is which.
+ONE LICENCE IN THIS TASK RUNS THE OTHER WAY, AND IT IS AN EXCEPTION TO THIS BOUND RATHER
+THAN A FOURTH INSTANCE OF IT: where the HTML has ASSERTED that two shades cannot be told
+apart and the image lets you falsify that, saying which is which is the answer the contract
+asks for. What makes it different is that you are contradicting a claim the reply itself
+made, on the page's own terms, rather than supplying a reading nobody made — and it is
+already gated on seeing it well enough to say so, so it is no way back to naming members at
+will. Everywhere the HTML has asserted nothing, the bound holds. Give the reading of a
+picture no assignment of your own; give the printed characters the exact correction they
+need. The reason holds wherever this comes up: a problem is an instruction the
+correction obeys literally, so asserting what part of a picture means when you cannot
+support it writes your guess into the delivered document as a fact, and nothing
+downstream can see that it did — and a reading you supplied is not made safer by
+being right, because neither the correction nor any pass after it can tell which of
+your readings were which. It binds on a page that asked for no specialist, on a page
+whose caption makes no claim about any region, and on a page with no key to
+transcribe. The three narrower statements of it — the one about a key's swatches, the
+one about a region the caption calls highest or lowest, and the one about a page whose
+request for a specialist went unmet — are this same bound in the places it bites
+hardest, and none of them is its whole extent. The falsification of a stated hedge is
+the one clause in this task that runs the other way, and it is named above as the
+exception it is; every other clause here about reading ink either states this bound or
+defers to it.
 Where the user message tells you the page agent asked for a specialist it did not
 get, that is the agent saying it could not do this content reliably, and your
-licence over what it produced for that content is narrower than usual: you may
-say a reading is unsupported and ask for it to be hedged, scoped or removed, and
-you may not supply a replacement reading of your own. That bound is not special
-to those pages — a problem is an instruction the correction obeys literally, so
-asserting what a region of a picture means when you cannot support it writes your
-guess into the delivered document as a fact, and nothing downstream can see that
-it did. What makes such a page worth naming is that the model has already told
-you where its own reading is weakest, for nothing.
+licence over what it produced for that content is narrower than usual: the bound on
+supplying the reading applies as it always does, and what makes such a page worth
+naming is that the model has already told you where its own reading is weakest, for
+nothing.
 List concrete, actionable problems (empty when there are none), each tagged with the
 KIND of problem it is — one of exactly these five:
 - "content_missing" — something in the image is absent from the HTML: a dropped table
