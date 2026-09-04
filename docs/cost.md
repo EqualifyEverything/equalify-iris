@@ -33,18 +33,12 @@ while its actual spend **fell 26%** ($1.6701 → $1.2362).
 
 ## About the sample
 
-**What it is.** 100 pages of a 1962 report of the US Advisory Commission on Intergovernmental
-Relations — dense hierarchical statistical tables, no charts, little running prose. Rendered at 150
+**What it is.** 100 pages of a 1962 [report of the US Advisory Commission on Intergovernmental
+Relations](https://library.unt.edu/gpo/acir/Reports/information/M-16.pdf) — dense hierarchical statistical tables, no charts, little running prose. Rendered at 150
 dpi. In the benchmark repo as **`pages100/`**, page ids `acir-p001`–`acir-p100`. Name the corpus when
 you quote a figure from it: a second corpus there, `pages-hard57/`, uses the same `acir-pNNN` ids, and
 one published figure of "54% more per call" was **18%** on the 57 pages the choice actually applied
 to.
-
-**Source PDF: not recorded.** The corpus stores provenance as a bare content hash and the PDF is not
-in the benchmark repo, so nothing anywhere names a URL. The hash is sha256
-`679f0a956868fa935b3bec38ebd83b3fb486e74dd87762e17248bc523c797188`. Finding the original needs a
-person — ACIR published it, and a HathiTrust or archive.org copy would do — and this section should
-then carry the URL beside the hash, so a reader can confirm the copy they fetched is the one measured.
 
 **Five things that bound every number above:**
 
@@ -69,14 +63,6 @@ then carry the URL beside the hash, so a reader can confirm the copy they fetche
 unapplied. The three largest levers left are not model choices at all: **#369**, **#324**'s free
 artifact check, and **#365**. Each carries its own price and its own evidence; this document does not
 restate them.
-
-## Where the rest of it went
-
-This document used to be the sprint's report as well as its price sheet. The report is now
-**[docs/sprint-246.md](sprint-246.md)** — every per-model comparison, the errata against
-[#370](https://github.com/EqualifyEverything/equalify-iris/issues/370), what the sprint got wrong, and
-the open handoffs with their prices. Per-agent detail, call sites and the older rounds are
-**[docs/models.md](models.md)**.
 
 ## Reproducing the table
 
