@@ -922,6 +922,10 @@ test("a correction that hit the output ceiling costs the correction, not the pag
         page: 1,
         trigger: "verify",
         problems: 2,
+        // Both problems in this fixture are bare strings, so the verdict named no kind and the field
+        // is empty — which on this line is a different fact from the `links` trigger's empty, and
+        // `page_verify_failed`'s `untagged` on the same image is what tells them apart (#182, #365).
+        kinds: [],
         error: "…",
         truncated: true,
         // The whole reply and its two ends, which on this line are the evidence and not colour: 93,039
@@ -931,6 +935,10 @@ test("a correction that hit the output ceiling costs the correction, not the pag
         reply_chars: TRUNCATED_REPLY.length,
         reply_head: TRUNCATED_REPLY.slice(0, 240),
         reply_tail: TRUNCATED_REPLY.slice(-240),
+        // And the same reading as a value, so it can be counted rather than eyeballed: this reply is
+        // the page's own markup, which is the shape 24 of 180 corrections in a bench round answered
+        // in and the one the four-value vocabulary used to call `prose` (#365).
+        shape: "bare_html",
         chars_kept: page.length,
       },
     );

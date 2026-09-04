@@ -48,17 +48,49 @@ test("the cap is twice what the first pass spent", () => {
   // median 1.01x, p90 1.33x, max 5.01x. Two is the multiple, and the page from the issue is the
   // case it was chosen for — 6,233 tokens rendered, 32,000 spent correcting. No specialist ran on
   // that page, so what it was handed is what it rendered and `growth` is 1.
-  assert.equal(correctionCeiling({ outputTokens: 6233, chars: 14_287 }, 14_287), 12_466);
+  assert.deepEqual(correctionCeiling({ outputTokens: 6233, chars: 14_287 }, 14_287), {
+    tokens: 12_466,
+    bound: "multiple",
+  });
   // Which is a bound on the loss, not a fix: 12,466 tokens of output instead of 32,000 is
   // $0.187 instead of $0.480 at sonnet-4-6's rate, for the identical outcome.
   assert.ok(12_466 < 32_000);
+});
+
+test("which of the two terms bound the cap is returned, not left to be guessed from the number", () => {
+  // The reading this exists for: three corrections truncated in `runs-extract100-95ca64c` and only
+  // two of them are evidence about the multiple. `acir-p051` (kimi) and `acir-p050` (sonnet) were
+  // capped at twice their own first pass; `acir-p083` (kimi) was capped at the FLOOR, because
+  // doubling its 1,618-token first pass gives 3,236. Raising the multiple to 3x moves the first two
+  // and moves that one only as far as the floor lets it — so a triage that counts all three for the
+  // multiple is counting a line the multiple did not bind (#365, and #293's standing question).
+  assert.deepEqual(correctionCeiling({ outputTokens: 3952, chars: 6735 }, 6735), {
+    tokens: 7904,
+    bound: "multiple",
+  });
+  assert.deepEqual(correctionCeiling({ outputTokens: 1618, chars: 4382 }, 4382), {
+    tokens: CORRECTION_CEILING_FLOOR,
+    bound: "floor",
+  });
+  assert.ok(CORRECTION_CEILING_MULTIPLE * 1618 < CORRECTION_CEILING_FLOOR, "the floor is what bound it");
+  // And the boundary the caller could NOT have worked out from `ceiling` alone: a first pass of
+  // exactly 2,000 tokens with `growth` 1 computes 4,000 from the multiple, which is the floor's own
+  // number. `ceiling === CORRECTION_CEILING_FLOOR` reads that as a floor line and would send a
+  // reader to the wrong constant — raising the multiple raises this page's cap.
+  assert.deepEqual(correctionCeiling({ outputTokens: 2000, chars: 100 }, 100), {
+    tokens: CORRECTION_CEILING_FLOOR,
+    bound: "multiple",
+  });
 });
 
 test("the floor is what keeps a small page's correction from being cut", () => {
   // `acir-p001` on the luna arm: a 365-character page rendered in 314 output tokens, then
   // corrected in 1,573 — 5.01x, and the reason a bare multiple is the wrong rule. Every success
   // above 3x had a first pass under 1,000 output tokens; at 1,000 or more the worst was 1.65x.
-  assert.equal(correctionCeiling({ outputTokens: 314, chars: 365 }, 365), CORRECTION_CEILING_FLOOR);
+  assert.deepEqual(correctionCeiling({ outputTokens: 314, chars: 365 }, 365), {
+    tokens: CORRECTION_CEILING_FLOOR,
+    bound: "floor",
+  });
   assert.ok(CORRECTION_CEILING_FLOOR > 1573 * 1.2, "the floor has to clear the tail with room");
   // 2 x 314 would have cut it, which is what the issue's own proposal was.
   assert.ok(CORRECTION_CEILING_MULTIPLE * 314 < 1573);
@@ -68,9 +100,9 @@ test("the tightest success in the corpus still fits under its cap", () => {
   // `acir-p075`: 3,929 output tokens emitted against a cap of 5,094. Nothing in the 110
   // successes came closer, and this is the number that would move first if the multiple were
   // lowered — 1.5x puts it at 1.02x of the cap, which is not a margin.
-  const cap = correctionCeiling({ outputTokens: 2547, chars: 6000 }, 6000);
+  const cap = correctionCeiling({ outputTokens: 2547, chars: 6000 }, 6000)?.tokens;
   assert.equal(cap, 5094);
-  assert.ok(cap > 3929, "0 of 110 successful corrections exceed their cap");
+  assert.ok((cap ?? 0) > 3929, "0 of 110 successful corrections exceed their cap");
 });
 
 test("a longer document than the first pass produced raises the cap in proportion", () => {
@@ -81,11 +113,11 @@ test("a longer document than the first pass produced raises the cap in proportio
   //
   // `acir-p030` on the sonnet arm is the only attempt in either run set where a merge grew the
   // page: 8,287 characters rendered in 4,461 output tokens, 8,960 handed back.
-  assert.equal(correctionCeiling({ outputTokens: 4461, chars: 8287 }, 8960), 9647);
+  assert.equal(correctionCeiling({ outputTokens: 4461, chars: 8287 }, 8960)?.tokens, 9647);
   // Which is above what the unscaled multiple would have allowed, and that is the whole point.
   assert.ok(9647 > CORRECTION_CEILING_MULTIPLE * 4461);
   // A merge that doubles the document doubles the cap: 2 x 2 x 3,000.
-  assert.equal(correctionCeiling({ outputTokens: 3000, chars: 5000 }, 10_000), 12_000);
+  assert.equal(correctionCeiling({ outputTokens: 3000, chars: 5000 }, 10_000)?.tokens, 12_000);
 });
 
 test("a cap never shrinks because the fragment handed back is smaller than the render", () => {
@@ -94,11 +126,11 @@ test("a cap never shrinks because the fragment handed back is smaller than the r
   // attempts in the two run sets are here. Reading that as "this page needs fewer tokens than it
   // took" would tighten every cap the multiple was measured against — including the corpus's
   // tightest success, which has a 1.30x margin and no room to give any of it up.
-  assert.equal(correctionCeiling({ outputTokens: 6233, chars: 14_287 }, 14_200), 12_466);
-  assert.equal(correctionCeiling({ outputTokens: 6233, chars: 14_287 }, 1), 12_466);
+  assert.equal(correctionCeiling({ outputTokens: 6233, chars: 14_287 }, 14_200)?.tokens, 12_466);
+  assert.equal(correctionCeiling({ outputTokens: 6233, chars: 14_287 }, 1)?.tokens, 12_466);
   // A first pass whose length is unknown is the same case: scale by 1 rather than by a division
   // that has no denominator.
-  assert.equal(correctionCeiling({ outputTokens: 6233, chars: 0 }, 99_999), 12_466);
+  assert.equal(correctionCeiling({ outputTokens: 6233, chars: 0 }, 99_999)?.tokens, 12_466);
 });
 
 test("the cap is never expressed in characters, at any size", () => {
@@ -108,7 +140,7 @@ test("the cap is never expressed in characters, at any size", () => {
   // a term would bind. `/ 4` therefore provides a quarter to a half of the tokens the same HTML
   // costs, and it binds only when it is the largest term — so it decided the cap exactly where it
   // was too low. A 120,000-character page rendered in 500 tokens is not a 30,000-token correction.
-  const cap = correctionCeiling({ outputTokens: 500, chars: 120_000 }, 120_000);
+  const cap = correctionCeiling({ outputTokens: 500, chars: 120_000 }, 120_000)?.tokens;
   assert.equal(cap, CORRECTION_CEILING_FLOOR);
   assert.notEqual(cap, 30_000, "no character-count term survives here");
 });
@@ -119,6 +151,9 @@ test("no usage from the provider means no cap, not a guessed one", () => {
   // about to work. Undefined is "whatever the deployment allows", which is what ran before #285.
   assert.equal(correctionCeiling({ outputTokens: undefined, chars: 20_000 }, 20_000), undefined);
   assert.equal(correctionCeiling({ outputTokens: 0, chars: 20_000 }, 20_000), undefined);
+  // Undefined and not a `bound` of its own: there is no cap, so there is no term that produced one,
+  // and a third value here would put a name on the deployment's ceiling as if this file had chosen
+  // it. Both fields come off the log line together for the same reason.
 });
 
 // --- the pipeline: which call is capped, and what the log says about it ------------------
@@ -139,7 +174,15 @@ function ctxWith(
   dir: string,
   asked: Asked[],
   events: { type: string; fields: Record<string, unknown> }[],
-  opts: { outputTokens?: number; correctionThrows?: () => unknown; mergeTo?: string },
+  opts: {
+    outputTokens?: number;
+    correctionThrows?: () => unknown;
+    mergeTo?: string;
+    // A page whose fidelity check PASSES and whose correction is bought by the link comparison
+    // instead. The only way to reach the failure line with no verdict behind it, which is the case
+    // `kinds: []` is on that line for.
+    linkTrigger?: true;
+  },
 ): PipelineContext {
   const agentsDir = join(dir, "agents");
   const inputDir = join(dir, "input");
@@ -154,7 +197,14 @@ function ctxWith(
   const page = PAGE_HTML;
   return {
     sessionId: "ses_test",
-    images: [{ name: "page-001.png", order: 1, path: join(inputDir, "page-001.png"), links: [] }],
+    images: [
+      {
+        name: "page-001.png",
+        order: 1,
+        path: join(inputDir, "page-001.png"),
+        links: opts.linkTrigger ? [{ href: "https://example.gov/report", text: "the report" }] : [],
+      },
+    ],
     extractionConcurrency: 1,
     recheckSampleSize: 1,
     maxReviewIterations: 1,
@@ -174,7 +224,7 @@ function ctxWith(
         asked.push({ step: o.step, maxOutputTokens: o.maxOutputTokens });
         const user = messages.find((m) => m.role === "user")?.content ?? "";
         if (user.includes("TASK: verify")) {
-          const first = asked.filter((a) => a.step === "verify").length === 1;
+          const first = asked.filter((a) => a.step === "verify").length === 1 && !opts.linkTrigger;
           return {
             text: JSON.stringify({
               faithful: !first,
@@ -297,6 +347,72 @@ test("a correction that truncates at its own cap says so on the log line", async
     assert.equal(failed[0].fields.truncated, true);
     assert.equal(failed[0].fields.ceiling, 12_466);
     assert.equal(failed[0].fields.ceiling, asked.find((a) => a.step === "correct")?.maxOutputTokens);
+    // And which of the two terms produced that number, so the line says which constant it is
+    // evidence about. 12,466 is twice a 6,233-token first pass, so this one is the multiple.
+    assert.equal(failed[0].fields.ceiling_bound, "multiple");
+  });
+});
+
+test("a cap that came from the floor says so, rather than reading as evidence about the multiple", async () => {
+  // `acir-p083` of `runs-extract100-95ca64c`: a 1,618-token first pass, so twice it is 3,236 and
+  // the 4,000-token floor is what the call was capped at. It is one of the three corrections that
+  // truncated in that round, and the only reading available from its log line today is `ceiling:
+  // 4000` — which #365's table left out of a comparison of the other two against the multiple.
+  // Recovering the term meant joining the line to the page's own `model_call`, which carries no
+  // image and pairs by position.
+  await withTemp(async (dir) => {
+    const asked: Asked[] = [];
+    const events: { type: string; fields: Record<string, unknown> }[] = [];
+    await runExtraction(
+      ctxWith(dir, asked, events, {
+        outputTokens: 1618,
+        correctionThrows: () => new TruncatedResponseError("bedrock", "some-model", 4000, "<p>cut"),
+      }),
+    );
+    const failed = events.filter((e) => e.type === "page_correction_failed")[0].fields;
+    assert.equal(failed.ceiling, CORRECTION_CEILING_FLOOR);
+    assert.equal(failed.ceiling_bound, "floor");
+    // The number asked for is still the number reported, floor or not.
+    assert.equal(failed.ceiling, asked.find((a) => a.step === "correct")?.maxOutputTokens);
+    // And the multiple really would not have bound this call, which is what the field claims.
+    assert.ok(CORRECTION_CEILING_MULTIPLE * 1618 < CORRECTION_CEILING_FLOOR);
+  });
+});
+
+test("the failure line says what the correction was asked to fix, not only how many things", async () => {
+  // `problems` is a count, and a count cannot be grouped: #365 grouped 205 successful corrections by
+  // whether the verdict's kinds include `content_missing` — the kind that asks the model for output
+  // its first pass never produced, where the 2x has least headroom — and could put no failed
+  // correction in either group, because `kinds` was on `page_corrected` and not here. Same
+  // expression as that event's, so the two lines group the same way (#182).
+  await withTemp(async (dir) => {
+    const events: { type: string; fields: Record<string, unknown> }[] = [];
+    await runExtraction(
+      ctxWith(dir, [], events, { outputTokens: 6233, correctionThrows: () => new Error("ThrottlingException") }),
+    );
+    const failed = events.filter((e) => e.type === "page_correction_failed")[0].fields;
+    assert.equal(failed.trigger, "verify");
+    assert.deepEqual(failed.kinds, ["structure_wrong"]);
+    // The verdict's own line says the same thing, which is the pairing that makes the two readable
+    // together — a failed correction and a kept one are now grouped by the same field.
+    assert.deepEqual(events.filter((e) => e.type === "page_verify_failed")[0].fields.kinds, ["structure_wrong"]);
+  });
+  // The other axis, and the one where a kind would be an invention: a correction bought by the link
+  // comparison. The page PASSED its fidelity check, so no verdict named anything, and the defect was
+  // found by code against the source file's own annotations.
+  await withTemp(async (dir) => {
+    const events: { type: string; fields: Record<string, unknown> }[] = [];
+    await runExtraction(
+      ctxWith(dir, [], events, {
+        outputTokens: 6233,
+        linkTrigger: true,
+        correctionThrows: () => new Error("ThrottlingException"),
+      }),
+    );
+    const failed = events.filter((e) => e.type === "page_correction_failed")[0].fields;
+    assert.equal(failed.trigger, "links", JSON.stringify(failed));
+    assert.deepEqual(failed.kinds, [], "the verifier named nothing on this page");
+    assert.equal(failed.problems, 1);
   });
 });
 
@@ -387,6 +503,81 @@ test("a failure that is not a truncation has no reply to quote", async () => {
   });
 });
 
+// The shapes a cut correction can have, as `replyShape` labels them. Written the way the models
+// write them — a leading fence, a newline, whitespace — because that is what the classifier has to
+// survive.
+const CUT_ENVELOPE = ' ```json\n{\n  "html": "<hr role=\\"doc-pagebreak\\" aria-label=\\"Page 37\\"><table><tr><td>Ala';
+const CUT_BARE = ' ```html\n<hr role="doc-pagebreak" aria-label="Page 37" id="page-37">\n<table><tr><td>Alab';
+const CUT_PROSE =
+  "I'll carefully analyze the image to fix all the named problems. Let me work through each issue: " +
+  "1. **Missing Amusements and Miscellaneous columns** - need to a";
+
+test("the failure line names which shape the cut reply was, across every value it can carry", async () => {
+  // What a hand-count of tails was doing until now. `reply_chars` cannot do it — the same 15,000
+  // characters are a large page and a short essay — and the three truncations in
+  // `runs-extract100-95ca64c` are two shapes, not one: `acir-p050` spent its cap narrating and
+  // `acir-p051`/`acir-p083` spent it emitting the page. Those have opposite remedies, which is the
+  // whole of #293's open question.
+  const shapeOf = async (reply: string) =>
+    await withTemp(async (dir) => {
+      const events: { type: string; fields: Record<string, unknown> }[] = [];
+      await runExtraction(ctxWith(dir, [], events, { outputTokens: 6233, correctionThrows: truncatedCorrection(reply) }));
+      return events.filter((e) => e.type === "page_correction_failed")[0].fields;
+    });
+  assert.equal((await shapeOf(CUT_ENVELOPE)).shape, "truncated_envelope");
+  assert.equal((await shapeOf(CUT_PROSE)).shape, "prose");
+  // The value the field was added for, and the one the four-shape vocabulary did not have: a reply
+  // that IS the page's markup. `bareHtml` accepts and delivers this shape when it arrives whole, so
+  // labelling it `prose` — as this did before #365 — pointed at the prompt for a reply that had
+  // answered correctly and simply run out of room. 19 of kimi-k2.5's 64 corrections in that round
+  // are this shape, and 5 of sonnet-4-6's 52.
+  assert.equal((await shapeOf(CUT_BARE)).shape, "bare_html");
+  // And it has to hold with the opening fence still attached, which is the state a truncation leaves
+  // it in: nothing closed the fence, so `stripFences` finds no block and hands back the opener with
+  // the markup behind it. Read through `bareHtml` this is `prose`, which is the label both of the
+  // round's page-shaped truncations would have carried.
+  assert.ok(CUT_BARE.trim().startsWith("```html"));
+  assert.equal((await shapeOf(CUT_BARE.replace(" ```html\n", ""))).shape, "bare_html");
+  // A complete envelope is reachable here too: a ceiling can land after the closing brace, on a
+  // reply the model was still adding to.
+  assert.equal((await shapeOf(`{"html": "<p>page</p>"}`)).shape, "envelope");
+  // And an UPPER-CASE info string is the same reply, because `stripFences` treats it as one: the
+  // opener is matched case-insensitively, so a model that writes ```HTML does not have its page
+  // filed as prose. This is a label, not a page — but it is the label the value exists to give.
+  assert.equal((await shapeOf(CUT_BARE.replace("```html", "```HTML"))).shape, "bare_html");
+  assert.equal((await shapeOf(CUT_BARE.replace("```html", "```Html"))).shape, "bare_html");
+  // A reply of whitespace is `empty`, which is a fifth value this line can carry and not the same
+  // thing as the zero-character reply below: this one has a `reply_chars` above 0, so the two are
+  // distinguishable, and a reader counting shapes should expect it.
+  const blank = await shapeOf("   \n\t");
+  assert.equal(blank.shape, "empty");
+  assert.equal(blank.reply_chars, 5);
+});
+
+test("a truncation with no reply, and one that is not a truncation, carry no shape", async () => {
+  // `reply_chars: 0` already says the whole of what is known about a reply of nothing, and a fifth
+  // value for it would say it twice — the shape vocabulary has an `empty`, and putting it here would
+  // read as a model that answered with an empty string rather than one whose ceiling went on
+  // reasoning the adapters never see as reply.
+  await withTemp(async (dir) => {
+    const events: { type: string; fields: Record<string, unknown> }[] = [];
+    await runExtraction(ctxWith(dir, [], events, { outputTokens: 6233, correctionThrows: truncatedCorrection("") }));
+    const failed = events.filter((e) => e.type === "page_correction_failed")[0].fields;
+    assert.equal(failed.reply_chars, 0);
+    assert.equal("shape" in failed, false);
+  });
+  // And a throttle has no reply at all, exactly as it has no excerpts.
+  await withTemp(async (dir) => {
+    const events: { type: string; fields: Record<string, unknown> }[] = [];
+    await runExtraction(
+      ctxWith(dir, [], events, { outputTokens: 6233, correctionThrows: () => new Error("ThrottlingException") }),
+    );
+    const failed = events.filter((e) => e.type === "page_correction_failed")[0].fields;
+    assert.equal("shape" in failed, false);
+    assert.equal("reply_chars" in failed, false);
+  });
+});
+
 test("a provider that reports no usage leaves the correction uncapped", async () => {
   await withTemp(async (dir) => {
     const asked: Asked[] = [];
@@ -406,6 +597,10 @@ test("a provider that reports no usage leaves the correction uncapped", async ()
     const failed = events.filter((e) => e.type === "page_correction_failed");
     assert.equal(failed.length, 1);
     assert.equal("ceiling" in failed[0].fields, false);
+    // And no `ceiling_bound` either: there is no cap, so there is no term that produced one, and a
+    // value here would name a bound this file did not choose. The two fields come off the line
+    // together because they are one fact.
+    assert.equal("ceiling_bound" in failed[0].fields, false);
   });
 });
 
