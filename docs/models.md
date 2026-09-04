@@ -7,6 +7,14 @@ it cost" — the outcome of the model-selection sprint tracked in
 [#246](https://github.com/EqualifyEverything/equalify-iris/issues/246) and reported in
 [#311](https://github.com/EqualifyEverything/equalify-iris/issues/311).
 
+**The sprint's final answer is [docs/cost.md](cost.md), and it is newer than this document.** That one
+is organised by pipeline *step* rather than by agent, prices the whole pipeline a page, and carries
+the last round of the sprint (`runs-extract100-95ca64c`, three page models at 100 pages each) which
+nothing here is measured on. Read it first for what to do; read this for how the knob works, what
+each agent's calls are, and the rounds before that one. Where the two differ, **cost.md §7 names the
+three claims here it narrows and the one open question it answers** — the largest being that `page`, swapped and live on `moonshotai.kimi-k2.5`
+below, now has a further swap recommended on top of it.
+
 Four of the five agents have a cheaper model in play, and no two of the four are at the same stage.
 **One was applied, one was declined, one is recommended and waiting on a decision, and one went back
 to open after the seat that ran its round withdrew the recommendation** — and none of the four was
@@ -73,7 +81,7 @@ resolve.
 
 | agent | share of the bill, unswapped | status |
 |---|---|---|
-| `page` | **42.0%** | **swapped and live since 2026-09-02** (#312) — −44.8% of the priced bill measured on 100 pages, at a named content cost: `content_missing` on 42 pages against 15 (§5) |
+| `page` | **42.0%** | **swapped and live since 2026-09-02** (#312) — −44.8% of the priced bill measured on 100 pages, at a named content cost: `content_missing` on 42 pages against 15 (§5). A **further** swap, to `openai.gpt-5.6-luna`, is recommended on a later round and waiting on a person: −15.9% again and 0 lost pages against 2 (#344, cost.md §2) |
 | `copy_editor` | **33.1%** | **swap recommended, not yet applied** (#329) — `openai.gpt-5.6-luna` at 9.5% of the cost and *ahead* on both quality halves, once the page images the agent actually receives are attached (§4) |
 | `feedback` | 15.6% | **open** (#330) — five dispositions in one sprint, and the last two were a swap to `openai.gpt-5.6-luna` and its withdrawal by the seat that ran the round. On 45 pages the two arms tie on detection (40/45 against 39/45) and the cheap arm's extra rejections are mostly real. Total cost per page, including the correction pass a rejection triggers, favours the swap at **−50.9%** under the deployed corrector and −1.3% under the incumbent one, so the price is not what leaves this open: an unbounded rate of invented defects and a verdict that rejects 44 of 45 clean pages, reproducibly on 32 of them, are (§4) |
 | `reader` | 9.3% | **declined** (#313) — 78% of the incumbent's own agreement floor at −77%, and §3 says what the 22% is |
@@ -168,6 +176,16 @@ carries no per-step breakdown, so `by_step` has to be read per session (docs/API
 ([#324](https://github.com/EqualifyEverything/equalify-iris/issues/324)).** The 11-page round below
 is what the decision was taken on; §5 is the 100-page round that priced it afterwards and found the
 content cost the small round could not see. Read both before revisiting it.
+
+**A third round has since put a third model on this agent, and it is the one to act on.**
+`runs-extract100-95ca64c` ran `claude-sonnet-4-6`, `moonshotai.kimi-k2.5` and `openai.gpt-5.6-luna`
+over 100 pages each with the checker pinned to the incumbent on every arm, and it recommends moving
+again — to `gpt-5.6-luna`, at **$5.1496 per 100 pages against the shipped model's $6.1201** and **0
+pages lost against 2**. It also withdraws the quality half of that case: the first-pass acceptance
+comparison the recommendation was filed on re-ran at **McNemar p=0.6636**, a coin flip. The whole
+round, its six disagreeing quality axes and what the recommendation costs are in
+**[docs/cost.md](cost.md) §2 and §3**. Everything below this paragraph is the 11-page round, and it
+neither knew about that third model nor could have separated it.
 
 `runs-extract-ad3e7a6`: 7 models × 11 deliberately hard pages, Iris at `ad3e7a6` with a clean
 tree, `agents/page.md` at `635267ac32bb`, `agents/feedback.md` at `b4b2d3cac40f`, judge pinned to
@@ -835,7 +853,8 @@ share column above), so the next win has to come from asking an agent to do less
 
 | figure | round | Iris at | still good? |
 |---|---|---|---|
-| page $/pg, recall, flags | `runs-extract-ad3e7a6` | `ad3e7a6`, recorded in the round | **yes** — everything merged since is docs or the config warning |
+| page $/pg, recall, flags | `runs-extract-ad3e7a6` | `ad3e7a6`, recorded in the round | **partly.** Its arms are 11 hand-picked pages and its finalists have since been separated at 100 — see the row below and [docs/cost.md](cost.md) §2. Nothing merged since touches it beyond docs and the config warning |
+| the three-arm 100-page page-model round: $5.1496 / $6.1201 / $12.5991, 0 / 2 / 0 pages lost, p=0.6636 | `runs-extract100-95ca64c` | `95ca64c`, recorded, with `page.md` at `c666a6975261` and `feedback.md` at `883480a36cd0` | **yes**, and it is the newest page-model evidence there is. Reported in full in [docs/cost.md](cost.md) §2–§3 rather than here, because it is a per-step round with the checker pinned on every arm |
 | reader % of floor, $/doc | `runs-reader-newsha`, `-newsha2` | `e842faa`, recorded, code-identical to `ad3e7a6` | **yes** |
 | cost shares (42.0 / 33.1 / 15.6 / 9.3) | `runs-bystep-now` | `3749f54`, recorded | **yes**, for the unswapped pipeline |
 | $0.1940/page, $19.3951/100 pages | `runs-bystep-now` | `3749f54` | yes, unswapped — and superseded in practice by the row below |
@@ -1033,10 +1052,15 @@ set.
   never doubted.** Two pages shipped after `page_correction_failed` in the post-swap round, one of
   them the page whose six missing subtotal rows the verifier had described in words. That is a
   reporting gap independent of any model choice.
-- **`gpt-5.6-luna` on `page` is a live question, not a closed one.** It is 30% cheaper than Kimi,
-  ties it on both content kinds, and is declined on an accessibility count of 10-vs-7 across 11
-  pages. Settling it needs a corpus with charts and images — which is also the corpus that would
-  make the specialist and `builder` rows mean anything.
+- **`gpt-5.6-luna` on `page` has since been measured at 100 pages, and it is now the
+  recommendation.** On the 11 pages below it was 30% cheaper than Kimi, tied it on both content
+  kinds, and was declined on an accessibility count of 10-vs-7. `runs-extract100-95ca64c` put both
+  on 100 pages with the checker pinned: **−15.9% and 0 lost pages against 2**, first-pass acceptance
+  a coin flip (p=0.6636), and worse than Kimi on dot-leader encodings while better on the region
+  subtotal rows §5 is about. That is #344, and applying it is a person's decision
+  ([docs/cost.md](cost.md) §2). What a chart-and-image corpus would still settle is the
+  accessibility axis — and it is the same corpus that would make the specialist and `builder` rows
+  mean anything.
 - **Re-derive the failed-spend figure after #300.** It is the one number here that is known wrong
   rather than merely old.
 - **`copy_editor` is 33.1% unswapped, 28.8% after the `page` swap, and its own swap is now

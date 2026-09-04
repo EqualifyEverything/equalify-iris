@@ -614,11 +614,14 @@ test("docs/models.md's sections agree with §0 about each agent's share and disp
 // markup rather than use it. (2) The split below tests what a line *looks* like, so a prose line that
 // happens to wrap onto `- and that is the point` or `3. Undecided, because…` starts a fresh count
 // mid-sentence, and a `**` run spanning that wrap then reports as two odd blocks. That is a false
-// positive and the fix is to reflow the paragraph, not to widen the guard. It is latent here — this
-// document's minus signs are U+2212, which the ASCII `[-*+]` class does not match, and no line wraps
-// onto an ordered marker — but §4's numbered list is where a future edit would hit it first.
-test("docs/models.md's bold runs close in the block that opens them", () => {
-  const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
+// positive and the fix is to reflow the paragraph, not to widen the guard. It is latent in **both**
+// documents this runs over, and the audit is per-document because the answer could differ: in
+// docs/models.md the minus signs are U+2212, which the ASCII `[-*+]` class does not match, and no line
+// wraps onto an ordered marker — §4's numbered list is where a future edit would hit it first. In
+// docs/cost.md the same holds (15 × U+2212, no ASCII minus outside a real bullet) and §5's `1./2./3.`
+// are genuine ordered markers. A third document added to the loop below needs the same two lines
+// checked, not assumed.
+function unclosedBoldRuns(doc: string): string[] {
   const unclosed: string[] = [];
   let fenced = false;
   // [line number, text] per line, so the message can name the run that is left open rather than the
@@ -652,13 +655,103 @@ test("docs/models.md's bold runs close in the block that opens them", () => {
     block.push([i + 1, line]);
   }
   finish();
+  return unclosed;
+}
 
-  assert.deepEqual(
-    unclosed,
-    [],
-    `docs/models.md has ${unclosed.length} block(s) with an odd number of \`**\` runs, so a bold ` +
-      `run opens and never closes and the asterisks render literally. Each entry names the line ` +
-      `carrying the run that is left open — a paragraph, one list item or one table row:\n  ` +
-      `${unclosed.join("\n  ")}`,
-  );
+// Both of the measurement documents, not just the one the defect happened in. docs/cost.md is the
+// same kind of writing — bold lead-ins on nearly every paragraph, tables whose emphasis lands on
+// whichever figure moved — so it fails the same way, and it was written after this check existed.
+test("the measurement docs' bold runs close in the block that opens them", () => {
+  for (const file of ["docs/models.md", "docs/cost.md"]) {
+    const unclosed = unclosedBoldRuns(readFileSync(join(ROOT, file), "utf8"));
+    assert.deepEqual(
+      unclosed,
+      [],
+      `${file} has ${unclosed.length} block(s) with an odd number of \`**\` runs, so a bold ` +
+        `run opens and never closes and the asterisks render literally. Each entry names the line ` +
+        `carrying the run that is left open — a paragraph, one list item or one table row:\n  ` +
+        `${unclosed.join("\n  ")}`,
+    );
+  }
+});
+
+// docs/cost.md's §3 is the sprint's final cost table and the only one in this repo whose rows are
+// an ARITHMETIC decomposition rather than a partition: each arm's total is its `verify + correct`
+// column plus its `page only` column, and the percentage beside them is the first over the total.
+// So the realistic edit — a newer round moves one arm's total and its components are left standing,
+// or the reverse — is catchable for free, and it is the edit that has already gone wrong twice in
+// this sprint's reporting (#311's four shares summing to 94.6%, and §0 of docs/models.md carrying
+// one round's shares while §6 predicted another's).
+//
+// Deliberately NOT a check that the figures are current or that the round named beside them is the
+// one they came from: it passes on any self-consistent set. What it does say is that the table and
+// the prose under it cannot drift apart, since the per-page figures the prose quotes are re-derived
+// here from the table's own cells rather than pinned as literals.
+test("docs/cost.md's cost table decomposes to its own totals, and its prose quotes those totals", () => {
+  const doc = readFileSync(join(ROOT, "docs/cost.md"), "utf8");
+  const section = doc.split(/^## /m).find((s) => s.startsWith("3."));
+  assert.ok(section, "docs/cost.md has no `## 3.` cost section any more");
+
+  const money = (cell: string | undefined) => {
+    const m = cell?.replace(/\*\*/g, "").match(/\$([\d,]+\.\d+)/);
+    return m ? Number(m[1]!.replace(/,/g, "")) : undefined;
+  };
+  // Rows naming a backticked model, which is what an arm is. The header and the separator carry no
+  // backtick, and no other table in the section does either.
+  const arms = section
+    .split("\n")
+    .filter((l) => /^\| `/.test(l))
+    .map((l) =>
+      l
+        .split("|")
+        .slice(1, -1)
+        .map((c) => c.trim()),
+    );
+  assert.ok(arms.length >= 3, `§3's table has ${arms.length} arm rows; expected one per model`);
+
+  for (const row of arms) {
+    const [name, total, checked, share, , , pageOnly] = row;
+    const [t, c, p] = [money(total), money(checked), money(pageOnly)];
+    assert.ok(
+      t !== undefined && c !== undefined && p !== undefined,
+      `§3's ${name} row is missing one of its three dollar figures: ${row.join(" | ")}`,
+    );
+    // A cent, since the three are published to four decimals and the round's own totals carry the
+    // same rounding.
+    assert.ok(
+      Math.abs(c! + p! - t!) <= 0.01,
+      `docs/cost.md §3 says ${name} cost ${total}, but its own components are ${checked} of ` +
+        `checking and correcting plus ${pageOnly} of page calls — $${(c! + p!).toFixed(4)}. One ` +
+        `column was updated from a newer round and the others were left standing, and the ` +
+        `verify+correct SHARE beside them is read off exactly this decomposition.`,
+    );
+    const stated = Number(share!.replace(/\*\*/g, "").match(/([\d.]+)%/)?.[1]);
+    assert.ok(Number.isFinite(stated), `§3's ${name} row has no verify+correct share: ${share}`);
+    assert.ok(
+      Math.abs((c! / t!) * 100 - stated) <= 0.5,
+      `docs/cost.md §3 says checking and correcting is ${share} of ${name}'s bill; its own cells ` +
+        `give ${((c! / t!) * 100).toFixed(1)}% (${checked} of ${total}). That share is the number ` +
+        `§5 opens on — "85% of the extraction step is checking and correcting" — so it decides ` +
+        `which lever the document sends a reader to.`,
+    );
+    // And the per-page figure the prose quotes, over the denominator the prose names. The table is
+    // per 100 pages SUBMITTED and every cross-arm figure in the document is on that denominator, so
+    // a total that moves has to move the prose with it or the two disagree by a factor of a hundred.
+    // Scoped to §3, not the whole document: a match anywhere else would let a figure quoted in some
+    // other section stand in for the sentence this is here to hold, and the failure message would
+    // then be false about where it looked. Prose only — the table row it came from is excluded, or
+    // every row would satisfy this against itself.
+    const perPage = `$${(t! / 100).toFixed(4)}`;
+    const prose = section
+      .split("\n")
+      .filter((l) => !/^\| /.test(l))
+      .join("\n");
+    assert.ok(
+      prose.includes(perPage),
+      `docs/cost.md §3's ${name} row is ${total} per 100 pages submitted, so ${perPage} a page, ` +
+        `and no prose in §3 quotes ${perPage}. Either the table moved and the ` +
+        `per-page sentence under it did not, or a figure is being quoted on the other ` +
+        `denominator — pages that produced a file, which §3 says is not comparable across arms.`,
+    );
+  }
 });
