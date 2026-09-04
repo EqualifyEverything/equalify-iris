@@ -1,6 +1,7 @@
 import { readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { extractJson } from "../util/json.ts";
+import { stripSoftHyphens } from "../util/html.ts";
 import { mapWithConcurrency } from "../util/concurrency.ts";
 import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
@@ -2266,6 +2267,49 @@ function pageSystem(agent: AgentSpec, lessons: string): string {
   return `${agent.content}\n\n${ACCESSIBILITY_REQUIREMENTS}${lessons}`;
 }
 
+// Soft hyphens out of a page reply, on the line where that reply becomes markup Iris keeps
+// (issue #334). `stripSoftHyphens` has the reasoning for why there is no output where one is the
+// right answer; this is about WHERE the strip goes, which is the part with alternatives.
+//
+// At every seam in this phase rather than once at its exit, because a page's own output is an
+// INPUT further along: `renderPage`'s fragment is what `correctPage` is shown as "your previous
+// output", what a re-extraction is shown as "your previous output for this page", and what
+// `mergeSpecialist` is shown as the current page. Strip only on the way out of extraction and the
+// model is handed its own soft hyphen back and told to carry over everything the problem list does
+// not name exactly as it stands — which is the instruction working correctly, on markup that
+// should not have reached it. Stripping where the reply is read means the character never enters
+// the pipeline's state at all, so it cannot be re-derived, quoted, or copied forward.
+//
+// AFTER `ctx.log.agentCall` at every site, and that order is load-bearing rather than incidental.
+// `agent_call.output` is the raw reply and the only record of what the model actually wrote:
+// #334's census — 9 pages, 63 occurrences, one arm of three, $0 — was a regrade of round logs
+// already on disk, and a strip that ran before the log would have left no way to take that
+// measurement or any future one. The repair is Iris's; the reply on record stays the model's.
+//
+// This phase and not the review phase, which is the scope worth stating because there are four
+// more seams where a model's HTML becomes markup: the Copy Editor's two contracts and
+// `edit_section` (review.ts), the table-join agent (tables.ts), and the regression fixture re-run
+// (feedback.ts). A soft hyphen is a TRANSCRIPTION artefact — it comes from an agent reading an
+// image of a printing that broke a word across a column and re-typing it — and every seam here is
+// such an agent, while the review-phase agents are handed markup this phase has already cleaned
+// and edit it as text. Their only route to one is invention, which nothing has measured. The
+// fixture path is out for a different reason: its HTML is scored against a stored fixture and
+// never delivered, so a strip there would move a comparison rather than repair a document.
+type SoftHyphenSeam = "extract" | "correct" | "specialist" | "specialist_merge";
+
+function stripped(ctx: PipelineContext, where: SoftHyphenSeam, img: InputImage, html: string): string {
+  const { html: clean, removed } = stripSoftHyphens(html);
+  // Only when it fired, so the line means "this page had them" and a run with none of these lines
+  // is a run where no reply carried one. `where` is the step name the call was billed under, which
+  // is what makes the count attributable: the same character from a first render, from the
+  // correction pass and from a specialist are three facts about three different calls, and #334's
+  // census is per-agent.
+  if (removed) {
+    ctx.log.event("page_soft_hyphens", { image: img.name, page: img.order, where, removed });
+  }
+  return clean;
+}
+
 async function renderPage(
   ctx: PipelineContext,
   agent: AgentSpec,
@@ -2308,7 +2352,11 @@ async function renderPage(
     blank?: unknown;
     suggested_agent?: { name?: string; reason?: string };
   }>(res.text);
-  const html = parsed?.html ?? bareHtml(res.text);
+  const raw = parsed?.html ?? bareHtml(res.text);
+  // Ahead of every check below, so `carriesContent` and the emptiness test read the markup a
+  // reader actually gets: a fragment whose only text is soft hyphens carries nothing, and should be
+  // treated as the page with nothing on it that it is rather than as characters.
+  const html = raw == null ? raw : stripped(ctx, "extract", img, raw);
   // Nothing for a reader in this reply. Throwing hands the page to `failedPage`, which is what
   // every other unusable answer in this file already does: the page is lost, and the run
   // SAYS the page is lost (`page_extraction_failed`, `pages_failed`, a @page-failed
@@ -2543,7 +2591,7 @@ async function correctPage(
   );
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
   const parsed = extractJson<{ html?: string }>(res.text);
-  const corrected = (parsed?.html ?? bareHtml(res.text) ?? "").trim();
+  const corrected = stripped(ctx, "correct", img, (parsed?.html ?? bareHtml(res.text) ?? "").trim());
   // A correction that cannot be read is not a correction. Null keeps the version this
   // page already had, which passed everything except the fidelity check — strictly better
   // than replacing it with the reply's own envelope, and the caller has always treated a
@@ -2590,7 +2638,7 @@ async function runSpecialist(ctx: PipelineContext, agent: AgentSpec, img: InputI
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
   const parsed = extractJson<{ no_content?: boolean; html?: string }>(res.text);
   if (!parsed || parsed.no_content || !parsed.html?.trim()) return null;
-  return parsed.html.trim();
+  return stripped(ctx, "specialist", img, parsed.html.trim());
 }
 
 // Splice a specialist fragment into the page body, replacing the page's own
@@ -2626,7 +2674,13 @@ async function mergeSpecialist(
     output: res.text,
   });
   const parsed = extractJson<{ html?: string }>(res.text);
-  return parsed?.html?.trim() || null;
+  const merged = parsed?.html?.trim();
+  // Redundant against a merge that only copies — its two inputs are stripped already — and kept
+  // for the one that does not. This is the last seam a page's markup passes through before it is
+  // the page, so it is where "nothing leaves extraction carrying one" is actually true rather than
+  // merely likely, and a merge agent re-typing a word it is joining is exactly the transcription
+  // step that produces these.
+  return merged ? stripped(ctx, "specialist_merge", img, merged) : null;
 }
 
 // The agent names a suggestion could have resolved to, for the
