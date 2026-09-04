@@ -781,6 +781,16 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     // and naming only the alt would have forbidden it.
     ["with the homes the mapping may be delivered in, and the one it may not",
       /it goes where the reader receives it: in the alt text where you are describing the picture, or as a list or a table in the fragment that carries the figure, which is the better home wherever you can place every item\. Never as a sentence of your own beside the <dl> or beside the figure/],
+    // Round 2 of #393: the permission granted above sits four lines from "Never as a sentence of your
+    // own beside the <dl>" (the count clause) and immediately before "or beside the figure", and three
+    // clauses in this same rule call model-authored text near the figure "text the page does not
+    // print". The distinction the rule is actually drawing is prose-versus-structure, not
+    // printed-versus-read, and it was nowhere stated — so a model reading in order gets "never text of
+    // your own beside the figure" and "a list beside the figure is the better home" four lines apart.
+    ["with the prose/structure distinction the two clauses straddle named, not left to be inferred",
+      /What that refusal turns on is the SHAPE and not the reading: a mapping is what a list or a table is for.*while the same reading poured into a sentence beside the figure is loose prose a verifier reads as text of your own/],
+    ["and neither the count nor the mapping falls back to prose for want of a home",
+      /neither the count nor the mapping ever becomes free prose because it found no other home/],
     ["with the shipped non-answer quoted, so a model cannot read it as compliance",
       /states that the distinction exists without making it: a reader who cannot see the picture is told a mapping was drawn and never told what it was/],
     // #372: declared it, 0 of 5, against ten wordings taken from the rule's own text, on a plate whose

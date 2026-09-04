@@ -79,6 +79,22 @@ test("the verify task will not score a described swatch as invented, or overturn
       /do not send it back AS INVENTED TEXT for naming a shade the page does not name/],
     ["a count of the key's entries in the same description is covered on the same terms",
       /A count of the key's entries carried in the same description is the contract too, on the same terms/],
+    // Round 2 of #393: this shield was scoped to the legend, and #393 asks the page for a THIRD thing
+    // the page prints nowhere — a list or table of places under the bands' printed wording, named as
+    // the better home for the mapping. That list is neither "the term of the legend" nor "a count of
+    // the key's entries", so nothing sanctioned it, and the paragraph below only ASKS for it, which is
+    // precisely what failed before: prd.md §7.4 v1.10 records the verifier refusing a described <dd>
+    // as invented text and the compliant correction DELETING it, making the only three serious
+    // accessibility violations in that arm's output. That is why the shield was written as an explicit
+    // "do not send it back AS INVENTED TEXT" rather than left to be inferred, and the new home needs
+    // the same words. The wording matches the ask below verbatim so the two are found together.
+    ["a list of places under the bands' printed wording is sanctioned by name, not by implication",
+      /so is a LIST OR TABLE of the places under the bands' own printed wording, wherever the fragment carries one: no place-to-band mapping is printed anywhere on such a page — reading it off the ink is the whole job — so that list is the contract's answer and not text of the model's own/],
+    // And the shield stays a shield rather than becoming a pass: transcription is what is protected,
+    // correctness is not. Unbounded, "that list is the contract's answer" reads as licence to leave a
+    // place in the wrong band, which is the defect the whole rule exists to catch.
+    ["with all three sanctioned as transcription and none of them as correct",
+      /Each of these three is sanctioned as the TRANSCRIPTION it is, and none of them is sanctioned as CORRECT: a shade named wrongly, a count that does not match the swatches, a place put in a band it is not in are all real problems below/],
     // The root cause on p077: both agents assumed the legend's tones ran in the order of its
     // labels. Measured, they do not — 26, then 176, then 143 — so the assumption was written into
     // the markup as fact by the extraction and enforced as fact by the verifier. Pinned with its

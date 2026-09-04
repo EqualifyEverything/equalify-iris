@@ -59,7 +59,15 @@ the page prints no words for that half, so a description of the ink standing as
 the term of the legend IS the transcription the contract asks for and is not
 invented text: do not send it back AS INVENTED TEXT for naming a shade the page
 does not name. A count of the key's entries carried in the same description is
-the contract too, on the same terms. What the contract does not sanction is the
+the contract too, on the same terms, and so is a LIST OR TABLE of the places
+under the bands' own printed wording, wherever the fragment carries one: no
+place-to-band mapping is printed anywhere on such a page — reading it off the ink
+is the whole job — so that list is the contract's answer and not text of the
+model's own, and it is not sent back AS INVENTED TEXT for naming a band the page
+does not name beside that place. Each of these three is sanctioned as the
+TRANSCRIPTION it is, and none of them is sanctioned as CORRECT: a shade named
+wrongly, a count that does not match the swatches, a place put in a band it is
+not in are all real problems below. What the contract does not sanction is the
 tone being read off the order of the labels beside the swatch rather than off the
 swatch, which is frequently not the order the shades run in — a wrongly named
 shade is a real problem, and it is "content_wrong".

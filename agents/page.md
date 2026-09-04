@@ -614,7 +614,13 @@ Thirteen structures are easy to render as something that merely looks right, so 
   the reader receives it: in the alt text where you are describing the picture, or as a list or a
   table in the fragment that carries the figure, which is the better home wherever you can place
   every item. Never as a sentence of your own beside the <dl> or beside the figure, for the reason
-  the count clause above gives. Naming the places
+  the count clause above gives. What that refusal turns on is the SHAPE and not the reading: a
+  mapping is what a list or a table is for, and one item per row under the band's printed wording
+  is the structure a reader can move through, while the same reading poured into a sentence beside
+  the figure is loose prose a verifier reads as text of your own. So a list or a table of places
+  under the printed wording is asked for here and a sentence saying the same thing is not, and
+  neither the count nor the mapping ever becomes free prose because it found no other home.
+  Naming the places
   and then saying that the map "uses dark, medium and light shading to distinguish the three
   categories" states that the distinction exists without making it: a reader who cannot see the
   picture is told a mapping was drawn and never told what it was, which is the one thing they came
