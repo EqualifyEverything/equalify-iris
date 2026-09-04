@@ -15,7 +15,7 @@ import type { FixtureCase } from "../src/pipeline/regression.ts";
 
 // `POST /:id/close` is where accepting a document turns into a regression fixture: the
 // page agent's accepted HTML for a real source image, re-checked before any future
-// update to that agent (PRD §7.12). So what it captures is an assertion that this HTML
+// update to that agent. So what it captures is an assertion that this HTML
 // is the RIGHT output for this image — which a page whose extraction failed is not. Its
 // fragment is a `@page-failed` comment, and the fixture is keyed to the FIRST fragment
 // the agent produced, i.e. page 1: a document that lost page 1 would gate every future

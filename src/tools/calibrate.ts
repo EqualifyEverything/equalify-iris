@@ -201,7 +201,7 @@ export function passedImages(logPath: string): Set<string> {
 }
 
 // The agent versions a session actually ran, from its own log. `agent_call` records the
-// blob SHA of every library agent it invoked (loader.ts, PRD §7.3 version pinning), which
+// blob SHA of every library agent it invoked (`blobSha` in loader.ts), which
 // is what makes the drift below detectable at all.
 function agentShas(logPath: string): Map<string, string> {
   const shas = new Map<string, string>();

@@ -34,8 +34,7 @@ function bearer(header: string | undefined): string | null {
 }
 
 /**
- * `GET /v1/quality` — the deployment-wide tally of how good the output has been
- * (PRD §7.16).
+ * `GET /v1/quality` — the deployment-wide tally of how good the output has been.
  *
  * Read by `.github/workflows/quality-report.yml`, which compares the numbers against
  * thresholds and files an issue when one is crossed. The thresholds live in the

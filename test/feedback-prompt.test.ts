@@ -83,7 +83,7 @@ test("the verify task will not score a described swatch as invented, or overturn
     // the page prints nowhere — a list or table of places under the bands' printed wording, named as
     // the better home for the mapping. That list is neither "the term of the legend" nor "a count of
     // the key's entries", so nothing sanctioned it, and the paragraph below only ASKS for it, which is
-    // precisely what failed before: prd.md §7.4 v1.10 records the verifier refusing a described <dd>
+    // precisely what failed before: issue #347 records the verifier refusing a described <dd>
     // as invented text and the compliant correction DELETING it, making the only three serious
     // accessibility violations in that arm's output. That is why the shield was written as an explicit
     // "do not send it back AS INVENTED TEXT" rather than left to be inferred, and the new home needs
@@ -108,7 +108,7 @@ test("the verify task will not score a described swatch as invented, or overturn
       /never replace a stated uncertainty with a confident assignment you cannot see well enough to make/],
     // Symmetry, and it is the half a shield alone would cost. Protecting a hedge without also
     // licensing a verifier that CAN see through it makes an unclassified item nearly unfalsifiable,
-    // so it becomes the cheapest answer the page agent has and the gap ships. `prd.md` §7.4 v1.10
+    // so it becomes the cheapest answer the page agent has and the gap ships. Issue #347
     // takes the trade knowingly in the other direction — a gap the page admits beats a confident
     // assignment to the wrong band — which is a reason to bound the shield, not to omit it.
     ["a hedge is falsifiable, and a verifier that can tell the shades apart says which",
@@ -303,7 +303,7 @@ test("the verify task reads a quoted log as evidence and never makes it the subj
     // :157 puts a WCAG requirement unmet over faithful content in `a11y_only`, and :160's
     // earliest-in-list tiebreak cannot rescue a missing `lang` into `content_missing`, because nothing
     // is absent. `kind` gates nothing today (extraction.ts records the kind-gated fail as deliberately
-    // unimplemented) — but it is the count #349's own §7.4 argument is measured in, and it becomes a
+    // unimplemented) — but it is the count #349's own argument is measured in, and it becomes a
     // behaviour difference the day that gate is priced off these counts.
     ["the four are tagged by what the reader loses and not all as content_missing",
       /Tag it by what\s+the reader loses, the way you tag everything else/],

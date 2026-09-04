@@ -8,7 +8,7 @@ import { READER_SYSTEM } from "../src/pipeline/review.ts";
 // `flatten` has one invariant: it may reorganize text, but it may not LOSE any.
 // Both of its consumers fail silently when it does.
 //
-//   * The Reader reviews this view instead of the source images (§7.8), so
+//   * The Reader reviews this view instead of the source images, so
 //     anything missing here cannot be reported as an issue — the review loop has
 //     nothing to act on.
 //   * `contentCoverage` compares an agent's candidate output against an accepted

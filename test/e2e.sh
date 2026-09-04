@@ -280,7 +280,7 @@ me=$(curl -s "${AUTH[@]}" "$BASE/me")
 echo "$me" | jq -e '.github_login=="iris-tester" and .defaults.max_review_iterations==1' >/dev/null \
   && pass "identity resolved ($(echo "$me" | jq -r .github_login))" || fail "me" "$me"
 # The response shape over the wire, not just in a unit test: `fork_repo` is gone
-# rather than permanently null, since nothing forks (PRD §7.13 v1.2).
+# rather than permanently null, since nothing forks.
 echo "$me" | jq -e 'has("fork_repo")|not' >/dev/null \
   && pass "no fork_repo in /me" || fail "me shape" "$me"
 
@@ -901,7 +901,7 @@ echo "==> 9e. a second upload WAITS in the run queue instead of starting a secon
 # max_concurrent_runs=1 in the config above. Uploads used to `void runPipeline(...)`
 # straight out of the handler, so two simultaneous uploads meant two unthrottled
 # pipelines — two jsdom+axe instances and 2 x extraction_concurrency model calls in
-# flight, on a machine PRD §10.1 says may be a laptop.
+# flight, on a machine that may well be a laptop.
 #
 # No race here: the create handler enqueues synchronously and runPipeline sets
 # status=running before returning to the queue, so by the time the FIRST 201 lands

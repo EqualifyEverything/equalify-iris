@@ -13,10 +13,10 @@ import type { Paths } from "../src/store/paths.ts";
 // `"table.md"`, which `STANDARD` does not contain, but the `loadAgent` check right
 // after it resolved `agents/table.md` and skipped the suggestion anyway.
 //
-// The nine standard agent files are gone (§7.4 v1.2, they were unreachable), so
+// The nine standard agent files are gone (they were unreachable), so
 // that second net is gone with them. The same hole now drafts an agent with a model
 // call and FILES an issue on the upstream repo proposing a `table` agent — under the
-// user's own GitHub identity, since that is whose token files contributions (§12).
+// user's own GitHub identity, since that is whose token files contributions.
 // A maintainer sees a proposal for a type the page pass has always handled, and the
 // user gets the credit for it.
 //
@@ -112,7 +112,7 @@ test("a case variant of a standard type is filtered too", async () => {
   // user's own GitHub identity, proposing a specialist for a type the page pass has
   // always handled.
   //
-  // Until §7.4 v1.2 this was invisible: `loadAgent` looked up `agents/Table.md`, which
+  // Until those nine files were deleted this was invisible: `loadAgent` looked up `agents/Table.md`, which
   // resolves on a case-insensitive volume (macOS, the usual dev machine), so the
   // suggestion was skipped for the wrong reason and only a Linux deployment filed the
   // issue. The nine files are gone now and nothing resolves anywhere.
@@ -148,8 +148,8 @@ test("no suggestion means no builder call, which is why its cost and the special
 
 test("a genuinely new type is still drafted, so the filter is not just refusing everything", async () => {
   // The control. Without it, a filter that dropped every suggestion would pass both
-  // tests above while silently ending contributions altogether — the failure §12
-  // cares about most.
+  // tests above while silently ending contributions altogether — the failure the
+  // sustainability model cares about most.
   const rec = await contribute(["chartDataAgent"]);
   assert.equal(rec.drafted, 1, "a new content type was not drafted");
   // Under the `builder` name, and asserted at the call site rather than grepped for: this string

@@ -14,7 +14,7 @@ import type {
 export type { Image, Message, CompletionResult, PipelineStep, ProviderNote, Usage } from "./types.ts";
 
 // The router maps (agent, capability) -> concrete provider + model using the
-// deployment config (PRD §10.3). Providers are constructed lazily so a
+// deployment config. Providers are constructed lazily so a
 // deployment only needs credentials for the providers it actually references.
 export type TelemetryFn = (type: string, data: Record<string, unknown>) => void;
 

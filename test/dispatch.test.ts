@@ -213,7 +213,7 @@ test("a miss reports what was dispatchable and what would have been declined, se
 test("the near-miss explanation survives with no standard agent files on disk", async () => {
   await withTemp(async (dir) => {
     // The real library ships no standard agent files — the nine were deleted as
-    // unreachable (§7.4 v1.2). So `declined_types` must come from STANDARD rather
+    // unreachable. So `declined_types` must come from STANDARD rather
     // than from a directory listing: reading the directory, `table` appears nowhere
     // and the commonest miss ("tables") becomes unexplainable in exactly the
     // deployment everyone runs.

@@ -746,7 +746,7 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     ["and the one place it must not go is named, with the rule that forbids it",
       /Never as a sentence of your own beside the <dl>: that is the prose this rule forbids two paragraphs above, and it reads to a verifier as text the page does not print/],
     // Destinations conditioned the same way as the count clause above, which is the standard
-    // prd.md §7.4 v1.10 sets for this whole rule: every clause names where its answer goes. A first
+    // issue #347 sets for this whole rule: every clause names where its answer goes. A first
     // revision said "in the description and in the 'log' field" — safe, because "the description"
     // resolves to the <dt> in the <dl> case and the sentence above forbids a <p> beside it, but it
     // was the last clause here leaving a reader to work the home out, in a rule whose defect was
@@ -772,7 +772,7 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
       /The key is not the picture, and transcribing the key is not describing the map/],
     ["and one of the two answers is owed on every such page",
       /the description says which places you read into each band, under that band's own printed wording — or says, of the picture, that you could not tell its bands apart\. One of those two is owed on every such page/],
-    // Every other clause in this rule names where its answer goes, and prd.md §7.4 v1.10 makes that
+    // Every other clause in this rule names where its answer goes, and issue #347 makes that
     // the standard for this rule specifically, because the defect it was written for was a model
     // finding the nearest home itself and landing on prose beside the <dl>. The first revision of
     // this clause said "the description" and left the home to be worked out — the same gap, in the

@@ -749,7 +749,7 @@ jobs:
                  finding — say so in the run summary, comment it on the issue if you can,
                  and pick a different issue. Do not attempt the edit.
                - **The fix is usually a prompt, not code.** `agents/*.md` files *are* the
-                 prompts (§7.4 of prd.md). A rule Iris keeps breaking most often means
+                 prompts. A rule Iris keeps breaking most often means
                  `page.md` never told it not to, or `reader.md` does not report it, or
                  `copy_editor.md` reports it and fails to fix it. Work out which of those
                  three it is before editing anything — they need different changes.

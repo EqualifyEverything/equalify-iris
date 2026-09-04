@@ -10,17 +10,17 @@
 //     no connection pool to absorb a burst: each query occupies the event loop, so a
 //     tight polling loop degrades every other request in the process — including the
 //     ones driving a pipeline that is already running.
-//   * `/v1/auth` is unauthenticated by design (§9.1) and its device-flow poll makes an
+//   * `/v1/auth` is unauthenticated by design and its device-flow poll makes an
 //     OUTBOUND call to GitHub per request. Unbounded, that makes Iris an amplifier: the
 //     caller spends one cheap request, the deployment spends one of its GitHub rate
 //     limit tokens, and the cost of exhausting that lands on every user's login rather
 //     than on the caller.
 //   * multer buffers the ENTIRE multipart body into memory before any handler — and
-//     therefore before the run queue — runs. PRD §9.4 records that as a limit the queue
+//     therefore before the run queue — runs. That is a limit the run queue
 //     could not address; a gate that sits in front of multer is what addresses it, which
 //     is what `uploadGate` and `requestSizeGate` below are.
 //
-// Infra-level limiting is not a substitute. Per §10.2 v1 is a single instance with
+// Infra-level limiting is not a substitute. v1 is a single instance with
 // SQLite and no load balancer in front of it, and even behind Caddy or nginx every
 // request that gets through shares this one event loop.
 //
@@ -179,7 +179,7 @@ function retryAfterSeconds(res: Response): number {
 
 // One rate limiter, built the same way three times over. The pieces that must not
 // differ between them live here: the error shape (sendError, so a 429 looks like every
-// other error — PRD §9.3), the `RateLimit`/`RateLimit-Policy` headers a client can read
+// other error — see docs/API.md "Errors"), the `RateLimit`/`RateLimit-Policy` headers a client can read
 // its remaining budget from, and the absence of the long-deprecated `X-RateLimit-*`
 // pair.
 function limiter(opts: {
@@ -278,7 +278,7 @@ export function uploadRateLimit(cfg: IrisConfig): RequestHandler {
  *
  * A rate limit counts requests over a window; memory is spent by requests that OVERLAP.
  * Twelve uploads a minute is a fine budget and twelve simultaneous 128 MB uploads is
- * 1.5 GB of buffered body on a machine PRD §10.1 says may be a laptop.
+ * 1.5 GB of buffered body on a machine that may be a laptop.
  *
  * So this gate meters BYTES, not requests. Each request is charged what its
  * `Content-Length` says it is about to send, and admitted while the total in flight fits

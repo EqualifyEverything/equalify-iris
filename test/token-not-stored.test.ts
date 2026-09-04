@@ -11,8 +11,8 @@ import { makeAuthMiddleware, __clearTokenCache } from "../src/auth/middleware.ts
 import { meRouter } from "../src/routes/me.ts";
 import type { IrisConfig } from "../src/config.ts";
 
-// The user's GitHub token is a live credential and it is never persisted (PRD §9.1
-// v1.2). It arrives in the `Authorization` header, is held in memory for the run it
+// The user's GitHub token is a live credential and it is never persisted.
+// It arrives in the `Authorization` header, is held in memory for the run it
 // authorizes, and is gone when that run ends.
 //
 // This is asserted against the DATABASE FILE, not against the schema or the record
@@ -137,7 +137,7 @@ test("the users table has no token column at all", async () => {
 test("GET /v1/me returns no fork_repo", async () => {
   const { body } = await authenticatedRequest();
   // Dropped rather than returned as a permanent `null`: nothing forks and nothing
-  // pushes (PRD §7.13 v1.2), so the field only ever documented an unbuilt feature.
+  // pushes, so the field only ever documented an unbuilt feature.
   assert.equal("fork_repo" in body, false, "reintroduced fork_repo, which can only ever be null");
   assert.deepEqual(Object.keys(body).sort(), [
     "defaults",

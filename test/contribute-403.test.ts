@@ -10,7 +10,7 @@ import type { Paths } from "../src/store/paths.ts";
 
 // Issue filing fails softly on purpose — a contribution is a side effect, and a
 // GitHub outage must not fail a document the user already paid for. But filing is
-// also the point of the design (PRD §12: every session gives back under the user's
+// also the point of the design (every session gives back under the user's
 // own identity), so a permissions failure means the deployment is silently not
 // contributing while looking healthy — and it lands as a single log line, several
 // steps from its cause: the permission was granted on github.com, when the GitHub

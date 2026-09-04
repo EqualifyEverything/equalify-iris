@@ -7,7 +7,7 @@ import { Store } from "../src/store/db.ts";
 import { normalizeReviewIterations, DEFAULT_MAX_REVIEW_ITERATIONS } from "../src/config.ts";
 
 // `defaults.max_review_iterations` is the ONLY input to the review cap: the
-// per-request `config` override was removed (§9.2 "Amended"), so this one config
+// per-request `config` override was removed, so this one config
 // value seeds every account default, which every session then inherits. That makes
 // the values it must not silently become the whole point of normalizing it — and
 // two of them fail in ways nothing else in the system would report:

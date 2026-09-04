@@ -27,7 +27,7 @@ const TTL_MS = 5 * 60 * 1000;
 // each is only a string in a header, so an unauthenticated caller sending random
 // bearers could not fill it (those never reach `set`), but a rotating fleet of real
 // clients would. 10k entries is far above any single-machine deployment's real
-// concurrent user count (§10.1) and small enough to be bounded memory.
+// concurrent user count and small enough to be bounded memory.
 const MAX_ENTRIES = 10_000;
 
 // Evict expired entries, then — if still over the ceiling — the oldest insertions.
@@ -119,7 +119,7 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
         // every cached request purely to refresh `users.github_token`.)
         userId = cached.id;
       } else {
-        // GitHub identifies the caller; login provisions an account (§9.1).
+        // GitHub identifies the caller; login provisions an account.
         const ghUser = await fetchUser(token, apiBase);
         store.upsertUser({ github_user_id: ghUser.id, github_login: ghUser.login }, defaultMaxIter);
         userId = ghUser.id;

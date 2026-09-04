@@ -1,7 +1,7 @@
 import { JSDOM } from "jsdom";
 
 // Produce a flattened, text-only view of an HTML chunk that approximates what a
-// screen reader announces, in order (PRD §7.8). The Reader cross-checks this
+// screen reader announces, in order. The Reader cross-checks this
 // against the HTML structure to surface reading-order problems.
 //
 // The one invariant: **no text may be dropped.** This function has two consumers

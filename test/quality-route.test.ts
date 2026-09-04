@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import type { QualityStats, Store } from "../src/store/db.ts";
 import { qualityRouter } from "../src/routes/quality.ts";
 
-// The route half of `GET /v1/quality` (PRD §7.16). test/quality.test.ts covers what
+// The route half of `GET /v1/quality`. test/quality.test.ts covers what
 // the numbers mean; this covers the two things only the route decides — who is let in,
 // and whether a window's answer can be served for a different window.
 //

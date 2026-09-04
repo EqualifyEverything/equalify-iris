@@ -41,7 +41,7 @@ function pruneFixtures(dir: string): void {
   }
 }
 
-// PRD §7.12 (auto-capture on accept): when a session is accepted (closed), save a
+// Auto-capture on accept: when a session is accepted (closed), save a
 // regression fixture for each agent that produced accepted output — the
 // triggering source image plus the agent's accepted HTML for it. File-only; no
 // model calls.

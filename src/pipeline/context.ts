@@ -27,7 +27,7 @@ export interface PipelineContext {
   router: ProviderRouter;
   log: RunLog;
   images: InputImage[];
-  feedback?: string; // present on feedback re-runs (PRD §7.12)
+  feedback?: string; // present on feedback re-runs
   maxReviewIterations: number;
   // Pages extracted in parallel in this run. Always a valid integer >= 1
   // (normalized by loadConfig), so consumers need no fallback.
@@ -55,7 +55,7 @@ export function loadImage(img: InputImage): Image {
   return { data: readFileSync(img.path), media_type: mediaTypeFor(img.name) };
 }
 
-// PRD §7.12: feedback is injected as a top-level instruction available to every
+// Feedback is injected as a top-level instruction available to every
 // downstream agent in the run. It is phrased as a required change so that, on an
 // iterative feedback re-run, the Reader surfaces it as an issue (sourced to the
 // affected block) and the Copy Editor applies it — rather than the round no-opping

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
 
-// The jq half of `.github/workflows/quality-report.yml` (PRD §7.16), which turns the
+// The jq half of `.github/workflows/quality-report.yml`, which turns the
 // `/v1/quality` tally into the body of a public issue. It lives in
 // `.github/scripts/quality-body.jq`.
 //

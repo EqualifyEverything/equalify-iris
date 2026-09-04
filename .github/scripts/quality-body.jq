@@ -1,5 +1,5 @@
-# The Markdown body of every issue `.github/workflows/quality-report.yml` files
-# (PRD §7.16). One finding from that workflow's threshold step arrives on stdin, the whole
+# The Markdown body of every issue `.github/workflows/quality-report.yml` files.
+# One finding from that workflow's threshold step arrives on stdin, the whole
 # `GET /v1/quality` tally arrives as `--slurpfile tallyfile`, and this prints the body of
 # the issue to open for it. Called once per finding, with `--arg url` and
 # `--argjson cooldown` as well.
@@ -110,7 +110,7 @@
 | "**Measured:** `\(.metric)` = \(.value) (threshold \(.threshold))\n\n"
   + $detail
   + "\n\n---\n\n### How this was filed\n\n"
-  + "Opened automatically by `.github/workflows/quality-report.yml` (PRD §7.16), which reads `GET /v1/quality` on \($url) once a week and compares a few rates against thresholds held in that workflow file. No model was involved in writing this issue — it is arithmetic on the numbers below.\n\n"
+  + "Opened automatically by `.github/workflows/quality-report.yml`, which reads `GET /v1/quality` on \($url) once a week and compares a few rates against thresholds held in that workflow file. No model was involved in writing this issue — it is arithmetic on the numbers below.\n\n"
   + "**The threshold may be the thing that is wrong.** It is a guess, it lives in the workflow, and moving it is a one-line PR with a reviewer. If this rate is the honest cost of doing the job well, say so here and change the number — that is a better outcome than muting the workflow.\n\n"
   + "Everything above is aggregate by construction. The endpoint cannot return document text: the documents behind these numbers are user uploads, and this issue is public.\n\n"
   + "Closing this issue starts a \($cooldown)-day cooldown before the same threshold can be filed again, because the rate is measured over a \($tally.window_days)-day window and will barely have moved on the day a fix lands.\n\n"

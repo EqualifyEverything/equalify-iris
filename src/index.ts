@@ -59,7 +59,7 @@ if (agentKeyWarning) console.warn(`WARNING: ${agentKeyWarning}`);
 const visionWarning = visionModelWarning(cfg);
 if (visionWarning) console.warn(`WARNING: ${visionWarning}`);
 
-// Ensure the on-disk layout exists (PRD §8.1).
+// Ensure the on-disk layout exists.
 mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
 mkdirSync(join(cfg.storage.data_dir, "tmp"), { recursive: true });
 
@@ -109,7 +109,7 @@ app.use("/v1/stats", statsRouter(store));
 // to authenticate to find out.
 app.use("/v1/limits", limitsRouter(cfg));
 
-// The deployment-wide quality tally (PRD §7.16), read by the weekly
+// The deployment-wide quality tally, read by the weekly
 // quality-report workflow. Mounted above the GitHub auth middleware because it
 // carries its own guard — a shared secret, since the data belongs to no user and the
 // caller is a CI job with no GitHub identity. Answers 404 until
@@ -126,7 +126,7 @@ app.get("/", (_req, res) => {
 // Keep the old /demo path working for any shared links.
 app.get("/demo", (_req, res) => res.redirect(302, "/"));
 
-// Auth endpoints are unauthenticated by definition (§9.1), which is also why they get a
+// Auth endpoints are unauthenticated by definition, which is also why they get a
 // tighter budget than the rest: there is no credential to count against yet, and every
 // device-flow poll spends an outbound call to GitHub. Counted in ADDITION to the general
 // limiter above — the stricter of the two is simply the one that bites first.

@@ -33,7 +33,7 @@ const PAGE_AGENT = "page";
 // nested structures like forms).
 //
 // The nine standard content agents that fan-out used to call are no longer in the
-// repo (§7.4 v1.2). They were not merely unused: `dispatchSpecialist` declines every
+// repo. They were not merely unused: `dispatchSpecialist` declines every
 // name in STANDARD_AGENTS below before `loadAgent` is reached, only `page.md` is
 // ever trained, and `runContribution` filters the same names — so no run could
 // reach them by any path. What survives is the part that pays for itself:
@@ -3029,7 +3029,8 @@ async function mergeSpecialist(
 // `unresolvedCandidates`), because the two answer different questions and merging
 // them makes the answer to the first one false: `candidates` reads as "what I could
 // have asked for", and a standard type is not that — it is declined by policy
-// before the file is ever looked up, and since §7.4 v1.2 there is no file either.
+// before the file is ever looked up, and since those nine files were deleted there is
+// no file either.
 function libraryAgentNames(ctx: PipelineContext): string[] {
   const names = new Set<string>();
   for (const dir of [ctx.paths.agentsDir, ctx.paths.tmpAgentsDir(ctx.sessionId)]) {
@@ -3990,7 +3991,7 @@ async function extractPage(
         // the ceiling — both are real, in the same round, on the same model — so the tail above stays
         // the evidence and this is the index into it. `prose` is the one value that settles anything
         // by itself: a reply that never began the page spent the whole cap on something else, and
-        // raising the cap buys more of it (#293, §9.3).
+        // raising the cap buys more of it (#293).
         ...(attempt.error instanceof TruncatedResponseError && attempt.error.text !== ""
           ? { shape: replyShape(attempt.error.text, null) }
           : {}),
@@ -4402,7 +4403,7 @@ function idCounts(fragments: { innerHtml: string }[]): { ids_checked: number; id
 }
 
 // One fragment per page, in submitted order. Each page is verified for source
-// fidelity at build time (PRD §7.5/§7.12); a page that fails gets one self-
+// fidelity at build time; a page that fails gets one self-
 // correction pass. Verification is non-blocking — a run never fails because the
 // Feedback Agent is unavailable or unsure. When a page flags a content type that an
 // existing library agent handles, that specialist is dispatched and merged in;
@@ -4553,11 +4554,11 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
   return { fragments, suggestions, failedPages, uncorrectedPages };
 }
 
-// Re-extract only the pages a piece of feedback actually concerns (PRD §7.12),
+// Re-extract only the pages a piece of feedback actually concerns,
 // leaving every other page's prior fragment untouched.
 //
 // This is the path for feedback the review loop structurally cannot serve: the
-// Reader only ever sees the assembled HTML (by design, §7.8), so a misreading of
+// Reader only ever sees the assembled HTML (by design), so a misreading of
 // the source raises no issue and the loop has nothing to act on. "You misread the
 // table on page 3" can only be fixed by putting page 3's IMAGE back in front of
 // the page agent. Each targeted page goes through the same

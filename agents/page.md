@@ -1,7 +1,7 @@
 # Page Agent
 
 ## Purpose
-The Page Agent is the primary extraction agent (PRD §7.4). It converts an ENTIRE
+The Page Agent is the primary extraction agent. It converts an ENTIRE
 document page (provided as an image) into a single, coherent, accessible HTML
 fragment that meets WCAG 2.2 AA — one vision call per page. It sees the whole page
 and produces ONE faithful representation of it, never duplicating content or

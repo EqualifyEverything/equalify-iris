@@ -12,13 +12,14 @@ export interface AgentSpec {
   content: string;
   // Capabilities declared in the "## Required capability" section.
   capabilities: Capability[];
-  // git blob SHA of the prompt text this spec carries (PRD §7.3 version pinning), or
+  // git blob SHA of the prompt text this spec carries — how a run says which prompt
+  // version it used — or
   // null for a spec whose content is a literal in this codebase rather than a file —
   // those are versioned by the application's own commit and have no blob of their own.
   // Computed from `content`, so it is the SHA of what was SENT and not of what a
   // checkout has committed; see `blobSha`.
   sha: string | null;
-  // True when this agent lives in tmp/<session>/agents (session-built, §7.5).
+  // True when this agent lives in tmp/<session>/agents (session-built).
   sessionBuilt: boolean;
 }
 
@@ -62,8 +63,8 @@ function blobSha(content: string): string {
 }
 
 // Loads an agent by name, preferring a session-built agent in tmp/ over the
-// upstream library (PRD §7.3: built agents are used for the rest of the
-// session). Returns null when no agent exists for the type.
+// upstream library: a session-built agent is used for the rest of that
+// session. Returns null when no agent exists for the type.
 export function loadAgent(
   name: string,
   opts: { agentsDir: string; tmpAgentsDir: string },

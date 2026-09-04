@@ -665,7 +665,7 @@ test("every reason for not sectioning at all is logged with its number", async (
 
     // No measurement: a truncation that lost its prototype at some boundary is recognised by
     // its message, but its `chars` are not on it, and inventing a budget would be the
-    // pre-flight guess this deliberately is not (PRD §7.11 v1.3).
+    // pre-flight guess this deliberately is not.
     assert.equal(
       (
         await declined({
