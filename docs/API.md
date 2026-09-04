@@ -1645,8 +1645,8 @@ marker is written after the review loop, and the Copy Editor may have rewritten 
 these pages since. What no later round can have done is **answer the check** — nothing after
 extraction asks whether a page is faithful to its source, and the editor, which is the one step that
 does see a source image after that point (for the pages the Reader's issues name), is told to *report*
-a discrepancy it notices rather than edit from one reading of an image (`editor_fidelity_observed`).
-The rejection therefore stands whatever the markup became, and only a re-extraction can lift it.
+a discrepancy it notices rather than edit from one reading of an image (`editor_fidelity_observed`,
+§7a). The rejection therefore stands whatever the markup became, and only a re-extraction can lift it.
 
 ```html
 <!-- @page-uncorrected 5, 31

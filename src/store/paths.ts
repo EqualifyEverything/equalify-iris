@@ -7,9 +7,10 @@ import type { IrisConfig } from "../config.ts";
 // `storage.data_dir`:
 //
 //   sessions/<id>/  input/ (the uploaded pages), fragments/ (per-page extraction, plus
-//                   final.json), history/ (each review round's document), output.html,
-//                   log.jsonl (the run log), lint.json, unresolved.md, agent-updates.md,
-//                   links.json, source-name.txt
+//                   final.json), history/ (the PRIOR output.html, snapshotted only when a
+//                   feedback re-run is about to overwrite it — not the review loop's rounds),
+//                   output.html, log.jsonl (the run log), lint.json, unresolved.md,
+//                   agent-updates.md, links.json, source-name.txt
 //   fixtures/<agent>/  and  memory/<agent>.json  — keyed by agent, shared by every session
 //   tmp/<id>/       one run's scratch. `tmp/<id>/agents/` holds agents that session BUILT,
 //                   which `loadAgent` prefers over the library for the rest of it.
