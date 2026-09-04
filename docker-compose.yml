@@ -1,4 +1,4 @@
-# Reference single-machine deployment (PRD §10.4): SQLite + local filesystem +
+# Reference single-machine deployment: SQLite + local filesystem +
 # one configured model provider is enough for a single-user deployment.
 #
 #   docker compose up

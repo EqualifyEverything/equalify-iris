@@ -60,7 +60,7 @@ function readLinks(paths: Paths, sessionId: string): Record<string, PdfLink[]> {
 }
 
 // Input files are stored as "<0001>__<original-name>" so submitted order
-// (significant per PRD §9.2) survives, independent of filename.
+// (which is significant — see docs/API.md) survives, independent of filename.
 export function enumerateInputs(paths: Paths, sessionId: string): InputImage[] {
   const dir = paths.sessionInput(sessionId);
   const links = readLinks(paths, sessionId);
@@ -74,7 +74,7 @@ export function enumerateInputs(paths: Paths, sessionId: string): InputImage[] {
     .sort((a, b) => a.order - b.order);
 }
 
-// Runs phases 1–5 (PRD §6) for a session and persists status transitions.
+// Runs phases 1–5 for a session and persists status transitions.
 // Designed to be invoked in the background; failures move the session to
 // "failed" with the error recorded.
 export async function runPipeline(args: {
@@ -117,7 +117,7 @@ export async function runPipeline(args: {
     log.event("phase", { phase: "extraction" });
 
     // Feedback re-runs are logged separately and preserve the prior output so it
-    // can be reverted to (PRD §7.12). The previous output.html is snapshotted to
+    // can be reverted to. The previous output.html is snapshotted to
     // history/ before this run overwrites it.
     if (args.feedback) {
       const prevOutput = paths.sessionOutput(sessionId);
@@ -132,7 +132,7 @@ export async function runPipeline(args: {
       }
     }
 
-    // Iterative feedback (PRD §7.12): when feedback arrives and a prior run's
+    // Iterative feedback: when feedback arrives and a prior run's
     // final state exists, build on that state instead of regenerating the document
     // from scratch, so rounds converge. First runs (no saved state) run the full
     // pipeline.
@@ -429,7 +429,7 @@ export async function runPipeline(args: {
         examples: deliveredGeneric.slice(0, 5),
       });
     }
-    // Final accessibility lint result, summarized into the PR description on close (§7.13).
+    // Final accessibility lint result, summarized into the PR description on close.
     writeFileSync(paths.sessionLint(sessionId), JSON.stringify(review.lint, null, 2));
     if (review.unresolved.length) {
       writeFileSync(
@@ -438,8 +438,8 @@ export async function runPipeline(args: {
         // nothing, which is precisely how a document whose remaining issues cannot be
         // fixed here ends up with a list (pipeline/review.ts `review_converged`), and on
         // a round whose response hit the output ceiling, where no editor pass worked on
-        // this list at all (`editor_truncated`). This file is what a human reads on close
-        // (§7.13), so it says what is true of all three; which one it was is in the
+        // this list at all (`editor_truncated`). This file is what a human reads on close,
+        // so it says what is true of all three; which one it was is in the
         // delivered document and in the run log.
         `# Unresolved issues when the review loop stopped\n\n` +
           review.unresolved
@@ -459,7 +459,7 @@ export async function runPipeline(args: {
     const pageMarkers = markerCounts(review.body)[MARKER_PAGE_INCOMPLETE] ?? 0;
 
     // Record what this document cost us, for the deployment-wide quality tally
-    // behind GET /v1/quality (PRD §7.16). Counts and axe rule ids only — never the
+    // behind GET /v1/quality. Counts and axe rule ids only — never the
     // unresolved issues' text or the dropped URLs, both of which are content from
     // the user's own document and would end up in a public GitHub issue.
     //
@@ -629,7 +629,7 @@ export async function runPipeline(args: {
       iterations_completed: review.iterationsCompleted,
     });
 
-    // Feedback -> agent training (PRD §7.12/§7.13): turn the document-level
+    // Feedback -> agent training: turn the document-level
     // correction this feedback run produced into a proposed improvement to the
     // page agent, recorded (gated by its regression fixtures) for review; or
     // in-place training if a session-built page agent is in use.

@@ -1,4 +1,4 @@
-# Equalify Iris deployment configuration (PRD §10.3).
+# Equalify Iris deployment configuration.
 #
 # ${ENV_VAR} references are expanded from the process environment at startup.
 # Changes require a restart in v1 (hot-reload is out of scope).
@@ -9,7 +9,7 @@ server:
   # callback URL and surfaced in device-flow instructions.
   base_url: http://localhost:8080
   # Shared secret gating GET /v1/quality, the deployment-wide tally of how good
-  # the output has been (PRD §7.16). Read by the weekly quality-report workflow,
+  # the output has been. Read by the weekly quality-report workflow,
   # which files an issue when a rate crosses a threshold.
   #
   # Blank (default) means the endpoint answers 404 — opting in is deliberate.
@@ -32,7 +32,7 @@ server:
   # would let any caller mint a fresh address per request.
   trust_proxy: ${IRIS_TRUST_PROXY}
   #
-  # What one caller may ask of this deployment per minute (PRD §9.4). v1 is a
+  # What one caller may ask of this deployment per minute. v1 is a
   # single process with a synchronous SQLite store, so a request flood is felt by
   # everyone using it — including the runs already in flight — and the run cap
   # below cannot help, since the cheap endpoints never reach the queue.
@@ -74,21 +74,21 @@ storage:
   # Root directory for sessions/, tmp/, and the agents/ git checkout.
   data_dir: ./data
   # Path to the agent library git checkout. Modified ONLY by `git pull`
-  # from upstream (PRD §8.1).
+  # from upstream.
   agents_dir: ./agents
   # Session metadata store. SQLite by default; a postgres URL is a supported
   # alternative for multi-instance deployments (not implemented in v1).
   database: ./data/iris.sqlite
 
-# GitHub OAuth is the only auth mechanism (PRD §9.1), and a user's token is
+# GitHub OAuth is the only auth mechanism, and a user's token is
 # REQUIRED on every API call. That is the sustainability model, not a limitation:
 # the token identifies the user AND files their session's feedback back to the
 # shared agent library under their own identity, so using Iris and improving it are
-# the same act (PRD §12). There is no anonymous mode and no way to consume the
+# the same act. There is no anonymous mode and no way to consume the
 # service without contributing.
 #
-# Nothing here opens pull requests: contributions are filed as issues (deviation
-# from PRD §7.13 — see README "Implementation notes").
+# Nothing here opens pull requests: contributions are filed as issues (an earlier
+# design opened them — see README "Implementation notes").
 #
 # The user's token is never persisted. It arrives in the `Authorization` header,
 # stays in memory for the run it authorizes, and is gone when the run ends — so a
@@ -144,7 +144,7 @@ github:
   # `upstream_repo`. If filing logs a 403/404, the app is probably not installed — the
   # log line's `hint` says so.
 
-# LLM provider abstraction (PRD §10.3). Each agent declares a capability;
+# LLM provider abstraction (see docs/models.md). Each agent declares a capability;
 # the deployment decides which provider serves it.
 providers:
   # The provider serving anything with no override below. `openrouter` rather than
@@ -208,8 +208,7 @@ providers:
   # nothing, and the two limits an upload is actually refused by do not follow the
   # model at all.
   #
-  # Checked against the deployment 2026-08-26. The block in prd.md §10.3 illustrates
-  # the SHAPE of this config and is not a second recommendation.
+  # Checked against the deployment 2026-08-26.
 
   # OpenRouter model IDs are `vendor/model` slugs (dot-versioned). Full list:
   # https://openrouter.ai/models

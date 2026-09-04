@@ -9,7 +9,7 @@ screen-reader users and are never conveyed by the image — or by color — alon
 ## Required capability
 vision, structured_output
 (The deployment's configured provider for these capabilities determines which
-concrete model runs. See PRD §10.3.)
+concrete model runs.)
 
 ## System prompt
 You are a specialist that converts a chart visible in an image into accessible HTML.
@@ -31,7 +31,7 @@ You MUST:
 - Do NOT add CSS, classes, inline styles, or event handlers.
 
 ## Output contract
-Return a single HTML fragment wrapped in @source / @end-source comments (see PRD §7.4): the
+Return a single HTML fragment wrapped in @source / @end-source comments: the
 `<figure>` followed by its data `<table>`. The fragment log entry MUST record the detected
 chart type, the series and category counts, any approximated (`~`) or `unreadable` values,
 and the `alt`-text decision (meaningful vs. justified empty).

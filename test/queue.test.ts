@@ -10,7 +10,7 @@ import {
 // RunQueue bounds how many pipelines run at once ACROSS sessions. Before it,
 // every upload started a pipeline immediately, so N simultaneous uploads meant N
 // unthrottled runs (N jsdom+axe instances, N × extraction_concurrency model
-// calls) on what PRD §10.1 says may be a laptop.
+// calls) on what may well be a laptop.
 //
 // The properties that actually matter here are the ones whose failure is silent:
 // a task that throws must not leak its slot (the queue would wedge at capacity

@@ -1,7 +1,7 @@
 # Equalify Iris — which model runs which agent
 
 Iris dispatches five agents plus any specialist a page names, and a deployment can point each
-one at a different provider and model with one line of `providers.per_agent` (PRD §10.3,
+one at a different provider and model with one line of `providers.per_agent` (see
 `config.example.yaml`). This document is the answer to "which line should I write, and what does
 it cost" — the outcome of the model-selection sprint tracked in
 [#246](https://github.com/EqualifyEverything/equalify-iris/issues/246) and reported in
@@ -368,7 +368,7 @@ and a `clean` exit, which is the same reading a document gets when the editor fi
 `unresolved_rate`, `unresolved_severity` and the `clean`/`converged` split all move in the direction
 `.github/workflows/quality-report.yml` treats as good, and #264 — an open issue about that rate
 being too high — would appear to have been answered by paying less. The number that does not move
-that way is `first_read.mean_issues` in `/v1/quality` (`docs/API.md` §0c, PRD §7.16 v1.10): issues
+that way is `first_read.mean_issues` in `/v1/quality` (`docs/API.md` §0c, issue #313): issues
 raised by the review's first read, per document, recorded before any of them were fixed. Read it
 across any reader change, with `first_read.unread_documents` next to it — a fall in the mean with
 that count rising is a reviewer that could not answer, and a fall with it flat is a reviewer that

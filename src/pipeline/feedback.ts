@@ -188,7 +188,7 @@ function diffPreview(before: string, after: string, maxLines = 80): string {
 }
 
 // ---------------------------------------------------------------------------
-// Build-time verification (source-fidelity, PRD §7.5/§7.12)
+// Build-time verification (source-fidelity)
 // ---------------------------------------------------------------------------
 
 // A model-written log, made safe to interpolate into the verify message.
@@ -332,8 +332,8 @@ export async function verifyAgentOutput(
   // whole-reply repair in `src/util/json.ts` reads the envelope correctly when the reply is nothing
   // but its JSON, which is what the prompt asks for; this is the half that also holds when the
   // model fences it or writes a sentence first, and it degrades to a page nobody judged rather than
-  // to a page that passed. `pages_unjudged` counts those, which is why the after-check in prd.md
-  // §7.4 names it.
+  // to a page that passed. `pages_unjudged` counts those, and `docs/API.md` says what it is a
+  // subset of.
   if (!parsed || typeof parsed.faithful !== "boolean" || typeof parsed.accessible !== "boolean") {
     return unjudgedVerdict();
   }
@@ -342,7 +342,7 @@ export async function verifyAgentOutput(
 }
 
 // ---------------------------------------------------------------------------
-// Feedback routing (PRD §7.12): does this feedback need the source images?
+// Feedback routing: does this feedback need the source images?
 // ---------------------------------------------------------------------------
 
 export interface FeedbackScope {
@@ -360,7 +360,7 @@ const MAX_REEXTRACT_FRACTION = 0.5;
 
 // Ask the Feedback Agent (SCOPE task) whether feedback is about what was read off
 // the source pages — which the review loop CANNOT fix, because the Reader only ever
-// sees the assembled HTML (by design, §7.8) and so raises no issue for a misreading
+// sees the assembled HTML (by design) and so raises no issue for a misreading
 // it cannot detect — or about the assembled document.
 //
 // Non-blocking and biased toward the cheap path: any doubt (agent unavailable,
@@ -425,7 +425,7 @@ export async function scopeFeedback(
 }
 
 // ---------------------------------------------------------------------------
-// Regression gate (PRD §7.12): protect existing uses when an agent is updated
+// Regression gate: protect existing uses when an agent is updated
 // ---------------------------------------------------------------------------
 
 const MAX_GATE_FIXTURES = 3;
@@ -708,7 +708,7 @@ export async function regressionGate(
       return { image: c.image_file, score: zero, failure: `${c.image_file}: updated agent produced no output` };
     }
     // Content-preservation check: the updated agent must still reproduce the
-    // content it produced when this fixture was accepted (PRD §7.12). Compare the
+    // content it produced when this fixture was accepted. Compare the
     // screen-reader-flattened text of the new output against the accepted output;
     // a large drop means the change regressed a use we already shipped.
     const candidateHtml = blocks.map((b) => b.html).join("\n\n");
@@ -820,7 +820,7 @@ export async function evalAgent(ctx: PipelineContext, agentFile: string, content
 }
 
 // ---------------------------------------------------------------------------
-// Feedback-driven agent training (PRD §7.12/§7.13)
+// Feedback-driven agent training
 // ---------------------------------------------------------------------------
 
 // On a feedback re-run, turn the document-level correction (the prior reviewed
@@ -965,7 +965,7 @@ export async function proposeAgentUpdatesFromFeedback(
   // Surface the proposal where maintainers act on it: file a GitHub issue (the
   // contribution model uses issues, not close-time PRs). This is the path that makes
   // a user's feedback give back to the shared library — filed under their own GitHub
-  // identity, which is why authenticating with GitHub is required (PRD §12).
+  // identity, which is why authenticating with GitHub is required.
   // `github.issue_token` overrides the attribution to a bot account. No-op without
   // any token, so local runs still keep the proposal in agent-updates.md.
   const usingServiceToken = Boolean(ctx.cfg.github.issue_token);

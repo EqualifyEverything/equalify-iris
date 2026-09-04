@@ -287,7 +287,7 @@ export function bodyLang(body: string): string | null {
 // happen at that point, which is the same distinction the zero-edit paragraph above exists to make.
 // It also earns a fourth paragraph: the trade the retreat accepts is a possible DUPLICATE, and this
 // marker is the only place a person reading the document is told where to look for one, since no
-// later pass in the run can see it (`salvageRound`, PRD §7.11 v1.11).
+// later pass in the run can see it (`salvageRound`).
 function salvagedNote(
   salvaged: { edits: number; blocks: number; of: number; cutBack?: boolean },
   sections?: { of: number; corrected: number },

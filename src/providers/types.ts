@@ -175,7 +175,7 @@ export interface CompletionResult {
   usage?: Usage;
 }
 
-// PRD §10.3 provider interface. An agent declares a capability; the
+// The provider interface (see docs/models.md). An agent declares a capability; the
 // deployment decides which provider serves it.
 export interface ModelProvider {
   name: string;

@@ -14,7 +14,7 @@ export type SessionStatus = "queued" | "running" | "ready_for_review" | "closed"
 export type Phase = "extraction" | "assembly" | "review" | "done";
 
 // No `github_token` field, deliberately. The user's GitHub token is a live
-// credential — it files issues on their behalf during a run (§7.13) — but it never
+// credential — it files issues on their behalf during a run — but it never
 // needs to OUTLIVE the request that carried it: it arrives in the `Authorization`
 // header, is passed in memory to the queued run, and is gone when the run ends.
 // Storing it made a copy of `data/iris.sqlite` equivalent to GitHub API access as
@@ -154,7 +154,7 @@ export function pageSessions(
 }
 
 // The signals Iris records about its own output, as opposed to the axe-core rule
-// ids that share the `run_signals.code` column (PRD §7.16). Prefixed so the two
+// ids that share the `run_signals.code` column. Prefixed so the two
 // namespaces cannot collide — axe adds rules between versions, and a new rule
 // named `rounds` would otherwise be counted as a measurement of ours.
 //
@@ -204,7 +204,7 @@ export const SIGNAL_UNRESOLVED = "iris:unresolved";
 // `feedback_iterative` round re-reviews the body that was already delivered, so its own first
 // read is on rewritten bytes and would land here as a smaller number for a reason that has
 // nothing to do with the Reader. `Store.priorFirstRead` and its caller in the orchestrator are
-// that exception; PRD §7.16's re-run bullet names it.
+// that exception, and `docs/API.md` names it beside the re-run.
 export const SIGNAL_FIRST_READ_ISSUES = "iris:first-read-issues";
 // How many windows of that first read came back with no usable answer (`ReaderWindow.usable`),
 // recorded only when there is any.
@@ -487,8 +487,7 @@ export interface RunSignal {
   count: number;
 }
 
-// What `GET /v1/quality` serves and what the weekly workflow files issues from
-// (PRD §7.16).
+// What `GET /v1/quality` serves and what the weekly workflow files issues from.
 //
 // Every field is a count, a rate or an axe rule id. There is deliberately no field
 // that can carry text from a converted document: this feeds an endpoint whose
@@ -812,9 +811,9 @@ export class Store {
       PRAGMA journal_mode = WAL;
       PRAGMA busy_timeout = 5000;
       -- No github_token column, and no fork_repo column. The token is never
-      -- persisted (see UserRecord above); fork_repo belonged to the fork-and-PR
-      -- flow of PRD §7.13, which was never built and is not going to be —
-      -- contributions are filed as issues under the user's own identity (§12).
+      -- persisted (see UserRecord above); fork_repo belonged to an earlier
+      -- fork-and-PR design, which was never built and is not going to be —
+      -- contributions are filed as issues under the user's own identity.
       CREATE TABLE IF NOT EXISTS users (
         github_user_id INTEGER PRIMARY KEY,
         github_login TEXT NOT NULL,
@@ -848,8 +847,8 @@ export class Store {
       -- write on every session insert. Unconditional and idempotent: this is the
       -- migration step for databases created before the compound cursor.
       DROP INDEX IF EXISTS idx_sessions_user;
-      -- What each delivered document cost us in quality terms, one row per signal
-      -- (PRD §7.16). See recordRunSignals for what a row means and qualityStats for
+      -- What each delivered document cost us in quality terms, one row per signal.
+      -- See recordRunSignals for what a row means and qualityStats for
       -- what is counted over them.
       --
       -- Needs no ALTER migration, unlike sessions.first_completed_at: this is a new
@@ -1025,7 +1024,7 @@ export class Store {
   // --- users ---
 
   // On first auth a user account is provisioned with the deployment's default
-  // max_review_iterations (PRD §9.1). Existing users keep their stored default; the
+  // max_review_iterations. Existing users keep their stored default; the
   // login is the only field an existing row refreshes, since it is the only one that
   // can change upstream and the token is not stored at all (see UserRecord).
   upsertUser(
@@ -1315,7 +1314,7 @@ export class Store {
     };
   }
 
-  // --- run quality signals (PRD §7.16) ---
+  // --- run quality signals ---
 
   /**
    * Record what one delivered document cost us, replacing anything previously
@@ -1384,7 +1383,7 @@ export class Store {
    * `recordRunSignals` replaces the session's rows, which is the only moment it exists.
    *
    * Every other signal in that table is a fact about the document a user was last handed, so
-   * replacing them on a feedback re-run is exactly right (see PRD §7.16 on the re-run). These
+   * replacing them on a feedback re-run is exactly right. These
    * two are the exception, because they are facts about the REVIEW rather than the document:
    * `feedback_iterative` re-reviews the previously delivered body, so its first read is taken
    * on bytes the copy editor has already rewritten — normally finding less, and pulling the
@@ -1417,7 +1416,7 @@ export class Store {
   }
 
   /**
-   * The deployment-wide quality tally behind `GET /v1/quality` (PRD §7.16).
+   * The deployment-wide quality tally behind `GET /v1/quality`.
    *
    * Windowed on purpose — see DEFAULT_QUALITY_WINDOW_DAYS. An all-time rate is the
    * shape to avoid: it converges, stops responding to a fix, and so cannot answer

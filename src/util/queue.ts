@@ -4,7 +4,8 @@
 // request handler, so N simultaneous uploads meant N unthrottled pipelines: N
 // jsdom+axe instances, and N × extraction_concurrency model calls in flight.
 // Nothing in the process bounded that. On a single-machine deployment — a
-// laptop, a Mac Mini, a self-hosted box, all first-class targets per PRD §10.1 —
+// laptop, a Mac Mini, a self-hosted box, all first-class targets (README, "One
+// machine, no vendor lock-in") —
 // the failure mode is the whole service degrading for everyone at once instead
 // of one run taking longer.
 //

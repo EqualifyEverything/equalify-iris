@@ -2,8 +2,22 @@
 
 **Image-to-Accessible-HTML parsing service.** Iris converts a sequential set of image files
 (e.g. the rendered pages of a PDF) into a single content-only, WCAG 2.2 AA accessible HTML
-document, using specialized per-content-type agents, a self-extending builder, and an
-iterative reader/copy-editor review loop.
+document: one vision call per page against a prompt anyone can improve, then an iterative
+reader/copy-editor review loop over the assembled document.
+
+Three constraints shape the whole design, and the code is written to hold them:
+
+- **Content only.** No CSS, no visual fidelity, no pixel-perfect layout. A two-column source
+  becomes linear semantic HTML. WCAG 2.2 AA is the fixed target and is not a per-run option.
+- **One machine, no vendor lock-in.** A laptop, a Mac Mini or a self-hosted box are all
+  first-class targets, with no AWS/GCP/Azure account required. Every external dependency —
+  model provider, database, object store — is replaceable by configuration, and the defaults
+  (SQLite + local filesystem) need nothing hosted. That is also why in-process work is
+  budgeted rather than assumed: see the concurrency and request-limit knobs below.
+- **GitHub, deliberately not replaceable.** GitHub is the only sign-in, and a token is
+  required on every call, because that token is what files each session's contributions under
+  the user's own name. There is no anonymous mode and no opt-out —
+  [why](#github-is-the-only-sso-layer-and-tokens-are-required).
 
 ---
 
@@ -34,8 +48,8 @@ The pipeline as **implemented today** runs in three phases:
 When Iris meets content a specialist agent would handle better than the general pass, it drafts
 that agent and **automatically files a GitHub issue titled `New agent suggestion: <type>`** (with
 the agent code + context) on the upstream repo. Maintainers triage those issues; merged agents
-become part of the shared `agents/` library. (This replaces the PRD's fork+PR-on-close flow —
-see Implementation notes.)
+become part of the shared `agents/` library. (An earlier design forked the repo and opened a PR
+when the session closed; nothing forks now — see Implementation notes.)
 
 Those issues are identified by their **title prefix**, not by a label, and deliberately so: GitHub
 silently drops labels set by anyone without push access to the repo, which is most of the people
@@ -97,12 +111,14 @@ http://localhost:8080/
 
 ## Configuration
 
-Deployment is configured in `config.yaml` (PRD §10.3). `${ENV_VAR}` references are expanded
+Deployment is configured in `config.yaml`. `${ENV_VAR}` references are expanded
 from the environment at startup; changes require a restart.
 
-- **Storage** (§10.2): local filesystem + a single SQLite file by default. `agents/` is a git
-  checkout modified only by `git pull` from upstream.
-- **Model providers** (§10.3): each agent declares a *capability* (`vision`,
+- **Storage**: local filesystem + a single SQLite file by default. `agents/` is a git
+  checkout modified only by `git pull` from upstream. These are the only backends v1 ships —
+  a Postgres or S3 backend was designed for and is deliberately not built (see the end of
+  Implementation notes).
+- **Model providers** ([docs/models.md](docs/models.md)): each agent declares a *capability* (`vision`,
   `structured_output`, `text`); the deployment maps capabilities to a provider + concrete
   model. v1 ships **OpenRouter** and **Amazon Bedrock** adapters. Adding a provider is a small
   adapter implementing the `ModelProvider` interface in `src/providers/types.ts`. Models are
@@ -120,7 +136,7 @@ from the environment at startup; changes require a restart.
   (`perAgentKeyWarning`), which is the only place the *key* can be named — the diagnostics field
   above names what ran, never what was ignored — and both of this repo's own
   example configs had carried an unroutable key, `config.example.yaml` a `table` no call site
-  has ever dispatched and prd.md §10.3 an `image_analysis` that went with the triage step it
+  has ever dispatched and the retired PRD an `image_analysis` that went with the triage step it
   named. **Which model to put on which agent, measured**: each agent's share of the bill, the
   agent whose swap has shipped and what it cost as well as what it saved (`page`, −44.8% of the
   bill against region subtotal rows dropped from statistical tables) and the one where the cheaper
@@ -211,7 +227,7 @@ from the environment at startup; changes require a restart.
   had. Every `model_call` line carries the dialect it went out on (`api`), since the point of the
   switch is comparing the two and a comparison whose run log does not say which side produced a
   number is not one.
-- **Concurrency** (§9.4): two independent knobs under `defaults`.
+- **Concurrency**: two independent knobs under `defaults`.
   `extraction_concurrency` is *within* a run — pages in parallel during extraction, and during
   review both the Reader's chunk reads and the section calls a too-long correction round is
   re-made with, all under that one cap, so a run's in-flight calls never exceed it in either
@@ -222,7 +238,7 @@ from the environment at startup; changes require a restart.
   is rejected — the upload is already received and on disk, so a 429 would discard work the user
   has already paid for. The cap is global rather than per user because the resources it protects
   (memory, jsdom, the provider's rate limit) are global.
-- **Request limits** (§9.4): the run cap bounds work the deployment has *accepted*;
+- **Request limits**: the run cap bounds work the deployment has *accepted*;
   `server.rate_limits` bounds what can be **asked** of it, which is a different problem — the cheap
   endpoints never reach the queue, and every one of them queries SQLite *synchronously* on the one
   event loop. Per minute: `general_per_minute` across `/v1` (240, liveness probe exempt),
@@ -242,7 +258,7 @@ from the environment at startup; changes require a restart.
   header a client wrote, which would make the per-address limits bound nothing. Express's own
   vocabulary (`loopback`, or a list of proxy addresses and subnets) works too; anything it cannot
   interpret warns and trusts nothing, rather than taking the process down at startup.
-- **GitHub** (§9.1): GitHub is the auth mechanism — a user *is* their GitHub account, and a token
+- **GitHub**: GitHub is the auth mechanism — a user *is* their GitHub account, and a token
   is **required** on every call. By default the
   service uses a **bundled GitHub App via the device flow** — no per-operator app setup, no
   secret (the same approach the `gh` CLI uses). Set `github.client_id` only to point at your
@@ -256,7 +272,7 @@ There is no anonymous mode, no API key, and no second identity provider. Every r
 user's GitHub token, and that token is what files the session's feedback back to the shared agent
 library — as an issue, under that user's own GitHub identity.
 
-**That is the sustainability model, not an implementation detail** (PRD §12). The agents in
+**That is the sustainability model, not an implementation detail.** The agents in
 `agents/` get better because sessions run against real documents and real corrections; a user who
 could consume the service without contributing would be taking from a library nobody was refilling.
 Requiring GitHub auth is how using Iris and improving it become the same act, and how each
@@ -394,7 +410,7 @@ started, 10.7 measured after two lines of config and no code change** — with t
 for every step and the evidence under each one:
 **[docs/sprint-246.md](docs/sprint-246.md)**.
 
-Example — create a session (order of `images` parts is the processing order, §9.2):
+Example — create a session (order of `images` parts is the processing order):
 
 ```bash
 curl -X POST http://localhost:8080/v1/sessions \
@@ -410,18 +426,18 @@ Then poll `GET /v1/sessions/{id}` until `status` is `ready_for_review`, fetch
 
 ```
 agents/                  # the agent library: page.md (the general pass), feedback.md,
-                         #   and specialists dispatched by name (§7.4 v1.2)
+                         #   and specialists dispatched by name
 src/
   config.ts              # config loader (${ENV} expansion)
   providers/             # ModelProvider interface + openrouter & bedrock adapters
-  agents/loader.ts       # loads agent .md files, pins git SHA (§7.3)
+  agents/loader.ts       # loads agent .md files, pins git SHA
   pipeline/
     orchestrator.ts      # runs the phases, persists results, drives learning
     extraction.ts        # per-page vision pass (+ verify, correct, specialist merge)
     assembly.ts          # joins fragments into the document shell
     review.ts            # reader -> copy editor -> re-lint loop (scoped image payload)
     pageindex.ts         # page-number index shared by the reader + feedback scoping
-    lint.ts              # axe-core in jsdom (color-contrast disabled, see §4)
+    lint.ts              # axe-core in jsdom (color-contrast disabled)
     flatten.ts           # screen-reader text view, used by reader + coverage
     feedback.ts          # verify / scope / classify / train + regression gate
     memory.ts            # per-agent example bank of learned corrections
@@ -432,22 +448,28 @@ src/
   util/queue.ts          # bounded FIFO run queue (cross-session concurrency cap)
   auth/                  # GitHub OAuth + device flow + bearer middleware
   github/                # auto-files labeled agent-suggestion issues
-  store/                 # node:sqlite metadata store + on-disk session layout (§8.1)
+  store/                 # node:sqlite metadata store + on-disk session layout
   routes/                # /v1 endpoints
   index.ts               # server entry point
 data/                    # sessions/, tmp/, and the SQLite DB (created at runtime)
 ```
 
-## Implementation notes & PRD coverage
+## Implementation notes
 
-Where v1 **diverges from the PRD** (read these before assuming a PRD section describes the
-code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/issues/30)):
+Decisions the code makes that are worth knowing before reading it. Several of them reverse an
+earlier design, so they are stated as decisions rather than as a diff against one: Iris was
+specified up front in a product requirements document, that document was amended twenty-odd
+times as the build disagreed with it, and it has now been retired — the design record is the
+git history and the issues each decision cites, and what is true today is here, in
+[docs/API.md](docs/API.md), in [docs/models.md](docs/models.md) and in the code.
 
-- **Three phases, not five (§6).** Triage and Reconciliation are not implemented, and the
-  Builder Agent does not draft session-scoped agents into `tmp/<id>/agents/`. Extraction is a
+- **Three phases, not five.** The original design had a Triage pass writing per-image notes and
+  a Reconciliation pass stitching fragments across images; neither is built. Extraction is a
   single general page agent rather than triage → per-region fan-out; the fan-out was removed
   because it duplicated output for nested structures like forms. Reconciliation additionally
-  cannot run until extraction emits fragment edge data (it currently emits none).
+  cannot run until extraction emits fragment edge data (it currently emits none). A Builder
+  Agent that drafts session-scoped agents into `tmp/<id>/agents/` is likewise designed for and
+  not built — what ships instead files the drafted agent as an issue (below).
 
   Reconciliation's *within-page* job also no longer exists: it was there to clean up after the
   fan-out, and one page now yields one fragment from one agent, so there are never two fragments
@@ -459,11 +481,11 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
   different replies, and the agent that wrote `public serv-` was never shown the page that says
   `ices`. Neither can emit that sentence whole without inventing the half it cannot see. So the page
   agent's job there is to transcribe its own edge exactly, hyphen included, and declare in its `log`
-  that the page opens or ends mid-sentence, and the join is done by the pass that holds both halves
-  (§7.6 v1.2). Measured on the last bench round before it: 22 of 90 page-break markers stood where a
+  that the page opens or ends mid-sentence, and the join is done by the pass that holds both halves.
+  Measured on the last bench round before it: 22 of 90 page-break markers stood where a
   sentence carried on, and 2 of those split a hyphenated word.
-- **One agent per page, not one per content type (§7.4 v1.2).** The PRD's nine per-content-type
-  agents (`paragraph.md`, `table.md`, `formField.md`, …) have been **deleted**, and this is the
+- **One agent per page, not one per content type.** Nine per-content-type
+  agents (`paragraph.md`, `table.md`, `formField.md`, …) once shipped and have been **deleted**, and this is the
   decision on whether the agent library is the product: it is, but the library is not a taxonomy
   of content types. Those nine were not merely unused, they were unreachable through every path
   that can reach an agent file — dispatch declines each of their names *before* the file is
@@ -500,27 +522,28 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
   While the nine files existed, `agents/Table.md` resolved on a case-insensitive volume and
   absorbed it; with them gone, an exact-match filter would draft an agent and file a public issue
   on the upstream repo — under the user's own GitHub identity — for a type the page pass covers.
-- **No provenance comments in the output (§7.4/§7.7).** The PRD specifies `@source` / `@agent` /
-  `@fragment` wrappers preserved into the final HTML. Iris delivers clean content-only HTML
+- **No provenance comments in the output.** `@source` / `@agent` / `@fragment` wrappers travel
+  with a fragment through the pipeline, and an early design kept them in the final HTML. Iris
+  delivers clean content-only HTML
   instead: the comments leak pipeline internals into a document meant to be handed to end users,
   and every consumer would have to strip them. Provenance is recorded in the run log
   (`GET /v1/sessions/{id}/logs`) rather than in the deliverable. `@unresolved` **is** emitted
   when the review loop stops with issues outstanding — at its iteration cap, on a round that
-  changed nothing, or on a round whose response hit the model's output ceiling (§7.11). That
+  changed nothing, or on a round whose response hit the model's output ceiling. That
   last exit adds a second comment, `@editor-truncated`, saying what that round managed: a round
   too long to answer is re-made a section at a time, and the comment reports how many sections
   came back — or, where nothing could be, that
   no editor pass ever worked on the issues `@unresolved` lists. A third comment,
   `@lint-unavailable`, is emitted when axe-core could not run on the document at all: nothing in
   it was checked, so an `@unresolved` list that is short — or absent — is not evidence that there
-  is nothing left to fix (§7.7).
-- **Contributions are issues, not PRs (§7.13/§9.2).** Instead of fork+PR-on-close, when the
+  is nothing left to fix.
+- **Contributions are issues, not PRs.** Instead of fork+PR-on-close, when the
   extractor flags content a specialist would handle better, Iris drafts that agent and files a
   `New agent suggestion: <type>` GitHub issue with the agent code + context; feedback that
   generalizes files an `Agent update proposal: <agent> — <lesson>` issue the same way. Simpler to
-  triage, and it needs no write access to a fork — so nothing forks and nothing pushes. Consequently
-  the PRD's `pending_prs` and `prs_opened` response fields, the `skip_prs` parameter and the
-  `fork_repo` field on `/v1/me` are **not** part of the API.
+  triage, and it needs no write access to a fork — so nothing forks and nothing pushes. The
+  `pending_prs` and `prs_opened` response fields, the `skip_prs` parameter and the
+  `fork_repo` field on `/v1/me` belonged to that flow and are **not** part of the API.
   Issues are filed with the logged-in user's token, which is
   [required, and the point](#github-is-the-only-sso-layer-and-tokens-are-required);
   `github.issue_token` overrides that with a service account, at the cost of the attribution.
@@ -530,25 +553,25 @@ code — tracked in [#30](https://github.com/EqualifyEverything/equalify-iris/is
   that first issue stayed open (observed on the UIC deployment, where one issue blocked the path for
   a day). A repeat report of the same lesson now comments on its issue with the new session and
   corroboration count instead of being dropped, so no lesson leaves without a trace.
-- **Review issues are attributed by page, not by `@source` region (§7.8/§7.9).** The PRD's issue
-  format references `@source` region ids from the per-region fan-out, which extraction no longer
-  produces and which are stripped from the deliverable anyway (§7.4 v1.1). Issues instead carry
+- **Review issues are attributed by page, not by `@source` region.** The Reader's issue format
+  was designed around the `@source` region ids of the per-region fan-out, which extraction no longer
+  produces and which are stripped from the deliverable anyway (above). Issues instead carry
   `pages: number[]` — the source pages the Reader matched the offending content to, from an index
   of page-number + extracted-HTML excerpt. Attribution is what scopes the Copy Editor's image
   payload (below); the two-view (HTML + flattened) cross-check is implemented as specified.
 
-Places where the PRD left a decision open, and where v1 intentionally stops:
+Places where a decision was left open, and where v1 intentionally stops:
 
-- **`runs/<run-id>` vs `sessions/<session-id>`.** The PRD references both (§7.3/§7.5 vs §8.1).
+- **`runs/<run-id>` vs `sessions/<session-id>`.** The design named both.
   This implementation treats the run id as the session id and writes the log, `agent-updates.md`,
-  etc. under `sessions/<session-id>/`, matching the authoritative layout in §8.1. (Two files in
-  that tree, `new-agents.md` and `prs.md`, are not written at all — they belong to the withdrawn
-  fork-and-PR flow; see §8.1 v1.2.)
-- **Reader chunking (§7.8).** Chunks use a fixed character budget with overlap rather than a
+  etc. under `sessions/<session-id>/`, which is the layout above. (Two files that tree once
+  named, `new-agents.md` and `prs.md`, are not written at all — they belong to the withdrawn
+  fork-and-PR flow.)
+- **Reader chunking.** Chunks use a fixed character budget with overlap rather than a
   literal 30%-of-context computation, since the per-model context window is not exposed through
   the provider abstraction. The two-view (HTML + flattened) cross-check is implemented as
-  specified.
-- **Color-contrast lint.** Output is content-only with no styling (§4), so axe-core's
+  designed.
+- **Color-contrast lint.** Output is content-only with no styling, so axe-core's
   `color-contrast` rule is disabled — it cannot be assessed without rendering and is out of
   scope.
 - **Skipped heading levels are linted for, though they are not a conformance failure.**
@@ -577,7 +600,7 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   and it is quiet on a nested `<main>` that carries a label, so it would cost false positives
   without covering the case. The rules are a backstop, not the fix: `landmarks.ts` takes the tags
   out of the body first (below).
-- **Duplicate ids are linted for three separate ways (§7.7 v1.2).** Obsolete as a *conformance
+- **Duplicate ids are linted for three separate ways.** Obsolete as a *conformance
   criterion* is not the same as harmless here: this document is assembled from independently
   extracted pages, so a duplicate id is the specific defect concatenation produces, and it breaks
   navigation rather than conformance. Two `id="fn-1"` means every `href="#fn-1"` reaches the first
@@ -666,7 +689,7 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   beginning with a digit, and an id or class beginning with one, are escaped correctly by the same
   engine and are never removed; and `<template>` content is reached by neither the strip nor axe, so
   debris there is uncounted and also harmless.
-- **Colliding ids are namespaced during assembly (§7.7 v1.2).** A page is extracted alone and
+- **Colliding ids are namespaced during assembly.** A page is extracted alone and
   concurrently, so it cannot know that another page also numbered its first footnote 1 — and the
   page prompt asks it to preserve the source numbering. `assembleBody` prefixes the ids that more
   than one page claimed with their page number (`fn-1` → `p3-fn-1`) and rewrites everything that
@@ -1155,7 +1178,7 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   measured that as +86 prompt tokens **per document**, 29,747 → 29,833, which is the sentence sent
   once per window rather than once per document.) The effect of any change here is visible without new
   instrumentation: `by_step.review.output_tokens` in the run's diagnostics is the number that moved.
-- **Copy Editor image payload (§7.9).** When every issue in a round is attributed to a page, the
+- **Copy Editor image payload.** When every issue in a round is attributed to a page, the
   editor gets only those pages' images (logged per round as `editor_images`). Attaching every
   page's image on every round is the dominant per-round cost of the review loop — on a 25-page
   document that is 25 base64 PNGs × up to `max_review_iterations`. Narrowing requires *full*
@@ -1242,11 +1265,11 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   they are stripped and counted, because delivering them would put Iris's request scaffolding in the
   HTML and would compound, a comment being a top-level node that becomes a block of its own next
   round. The section fallback
-  (§7.11) stays for the case the contract does not fix — one top-level node bigger than the
+  stays for the case the contract does not fix — one top-level node bigger than the
   ceiling — and its prompt now says outright that a section request carries no numbered blocks,
   because it is built on the same system prompt and a prompt that is true about one request and
   silent about the other reads as true about both.
-- **The flattened screen-reader view must never lose text (§7.8).** `flatten.ts` has two
+- **The flattened screen-reader view must never lose text.** `flatten.ts` has two
   consumers, and both fail *silently* when text goes missing: the Reader reviews this view
   instead of the source images, so anything absent from it cannot be reported as an issue; and
   `contentCoverage` measures a candidate agent against an accepted fixture using these words, so
@@ -1292,7 +1315,7 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   an unexplained mismatch is a defect, and the Copy Editor is licensed to restructure tables.
   Adding a check to that prompt without the annotation that reconciles it turns the review loop
   into a false-positive generator aimed at accessible output.
-- **Both sides of the eval gate must score fixtures by the same rule (§7.12).** Before proposing
+- **Both sides of the eval gate must score fixtures by the same rule.** Before proposing
   an agent update, Iris compares the candidate prompt's mean fixture coverage (from
   `regressionGate`) against the current prompt's (from `evalAgent`) and blocks a drop of more than
   `EVAL_REGRESSION_EPS` (0.02). That comparison is a subtraction between two means, so it is only
@@ -1317,7 +1340,7 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   score as well as one that handles it. That is also the one input where abstention is **not**
   purely a property of the fixture: whether a prompt produced output is a property of *that
   prompt*, so one fixture can be scored 0 for one side and excluded from the other.
-- **The eval gate is a *paired* comparison, per fixture (§7.12).** The rule above is right about
+- **The eval gate is a *paired* comparison, per fixture.** The rule above is right about
   what a score means, but averaging each side over whatever it happened to measure compared two
   different fixture sets — and in one direction that waved a real regression through. If the
   **current** prompt flaked to no output on a fixture the candidate abstained on, the current mean
@@ -1333,8 +1356,8 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   that hides both it and any regression behind it. It stays visible in the `eval_gate` log line's
   `unpaired` list. If no fixture is measurable on both sides, both means are `null` — "nothing to
   compare", deferring to the regression gate, rather than a pass.
-- **`GET /v1/sessions` pages on a compound cursor (§9.2 v1.1).** The PRD names a `cursor`
-  parameter without saying what is in it, and the obvious reading — the last row's
+- **`GET /v1/sessions` pages on a compound cursor.** The endpoint was specified with a `cursor`
+  parameter and no statement of what is in it, and the obvious reading — the last row's
   `created_at` — is unsound: `created_at` is a millisecond timestamp assigned by a request
   handler, so a burst of uploads ties on it, and paging on a non-unique key skips rows
   (`created_at < ?` drops the rest of a tied group) and can repeat them (nothing pins the
@@ -1342,7 +1365,7 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   key; clients pass it back verbatim. A cursor that doesn't parse is a `400`, not a silent
   restart at page one, and `next_cursor` is `null` on a full final page — so clients stop on
   a null cursor rather than on a short page.
-- **Runs are queued, and the queue is in-process (§9.4).** A bounded FIFO queue
+- **Runs are queued, and the queue is in-process.** A bounded FIFO queue
   (`src/util/queue.ts`) caps concurrent pipelines at `defaults.max_concurrent_runs`; sessions over
   the cap wait in `queued`. Two things this deliberately does *not* do. It does not persist: the
   queue lives in the process, so a restart loses waiting runs — they are marked `failed`
@@ -1364,7 +1387,7 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   the API docs. A PDF is measured *after* rasterizing rather than as uploaded — its pages are
   what reach the model, and at a fixed DPI a page image's size follows the physical page size, so
   a large-format page can break a limit its 20 MB parent file does not. This is not tidiness — the numbers had
-  been stated in five places and enforced in none, so the demo, the docs and the PRD all
+  been stated in five places and enforced in none, so the demo, the docs and the specification all
   advertised **TIFF**, which Claude has never read (accepted, then failed inside the first model
   call) while rejecting **GIF**, which it does; and an oversized photo was accepted by multer's
   50 MB ceiling and died two to four minutes later as "no output arrived within 120s". Switching
@@ -1418,12 +1441,12 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   exponential backoff — to throttling, 5xx, and node network errors, while failing fast on 4xx.
   Verified empirically against a stubbed request handler (3 wire attempts for 503/429/ECONNRESET,
   1 for a 400). Adding a loop around it would give Bedrock 9 attempts to OpenRouter's 3.
-- **Feedback re-runs (§7.12).** Re-runs are logged separately (a `feedback_rerun` event) and the
+- **Feedback re-runs.** Re-runs are logged separately (a `feedback_rerun` event) and the
   prior `output.html` is snapshotted to `sessions/<id>/history/` so it can be reverted to. A
-  revert *endpoint* is out of v1 API scope (not in §9); the data is preserved to enable it.
+  revert *endpoint* is out of v1 API scope; the data is preserved to enable it.
 
   A re-run is **routed** first (`feedback_scoped` event). The Reader only ever sees the assembled
-  HTML (by design, §7.8), so feedback about what was *read off a page* ("the revenue figure on
+  HTML, by design — image access is the Copy Editor's — so feedback about what was *read off a page* ("the revenue figure on
   page 2 is wrong") raises no issue for the loop to act on and cannot be fixed there. The Feedback
   Agent's SCOPE task decides which case applies:
   - **`document`** — tone, wording, ordering, or an accessibility rule: re-lint the saved body
@@ -1455,16 +1478,16 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   moving the queue and locks out of process, is what a genuinely multi-instance version needs.
 
 - **`phase` reports only phases that exist.** `extraction`, `assembly`, `review`, `done`. The
-  PRD's `triage` (§7.2) and `reconciliation` (§7.6) are not implemented — reconciliation is
+  designed `triage` and `reconciliation` phases are not implemented — reconciliation is
   unreachable while extraction hardcodes `edges: []` — so they are not in the enum and not
-  emitted (§9.2 v1.1). New sessions start at `extraction`; they used to be created at `triage`
+  emitted. New sessions start at `extraction`; they used to be created at `triage`
   and overwritten before a client could observe it.
 
-Intentionally **not** built in v1 (the PRD frames each as optional / alternative / out of scope):
-PostgreSQL and S3 backends (§10.2 — "supported alternative," SQLite + local FS is the v1
-reference), the per-user config endpoint (§9.1 — "not specified in v1"), and webhooks (§9.4 —
-out of scope). The endpoints beyond the PRD are `GET /v1/health`, a standard liveness probe, and
-`GET /v1/stats`, the public page tally described above.
+Designed for and intentionally **not** built in v1, each having been framed as optional, as an
+alternative, or as out of scope: PostgreSQL and S3 backends (SQLite + local filesystem is the v1
+reference), a per-user configuration endpoint, and webhooks. Two endpoints go the other way and
+were never specified: `GET /v1/health`, a standard liveness probe, and `GET /v1/stats`, the
+public page tally described above.
 
 ## Calibrating the fidelity verifier
 
@@ -1650,7 +1673,7 @@ heading "invented text not present as a legend label" and the correction deleted
 heading glued to the first label" would have licensed moving those words. Nothing else could catch
 any of this: the corrected page is well-formed, specific and false, and every automated gate passes
 it. Pinned in `test/feedback-prompt.test.ts`; the page-agent half, and the cover-page clause
-ordering that came with it (issue #351), are in `prd.md` §7.4 v1.10 and
+ordering that came with it, are in issues #347 and #351 and in
 `test/page-prompt.test.ts`.
 
 Two of that verifier's cheapest checks need no image at all, and issue #353 is where both were
@@ -1684,7 +1707,7 @@ fallback; it now carries no caution. So the dispatch returns the phrase, and the
 the four it was. It is not treated as a detector — it is
 page-level rather than per-arm and it missed two hard pages in that round — so that licence bound
 holds on every page and the flag only says where the model has already admitted the difficulty.
-`prd.md` §7.4 v1.11, with the carrying pinned in `test/verify-specialist-caution.test.ts`.
+Issue #353, with the carrying pinned in `test/verify-specialist-caution.test.ts`.
 
 The third check is the same comparison on the other axis, and it is the one that fires on the page
 above (issue #355). Its `<figcaption>` also read *"The South, in General, Has the Lowest Effective
@@ -1718,7 +1741,7 @@ already existed in the description being corrected, by two or more names already
 member whose new neighbours are all new text is a sentence someone rewrote around it. A list starts at
 two names, a floor pinned in both directions: three at each end failed no test, since the destination
 condition already refuses the two-phrase false positive it was aimed at, and it declined the real shape
-at its smallest. `prd.md` §7.4 v1.12, with both
+at its smallest. Issue #355, with both
 halves pinned in `test/page-prompt.test.ts`, `test/feedback-prompt.test.ts` and
 `test/verification.test.ts`.
 
@@ -1761,14 +1784,14 @@ accounts for every page with no log. In the same change `agent_sha` stops being 
 round: it was `git rev-parse HEAD:./<file>`, which needs a `.git` the deployment container does not
 ship, and it is now computed from the prompt text, which is the same number `git hash-object` gives.
 Four deployed rounds of one PDF moved a defect from 0 pages to 28 of 100 with no log among them able to
-say which prompt each ran. `prd.md` §7.4 v1.13, pinned in `test/page-log-to-verifier.test.ts`,
+say which prompt each ran. Issue #349, pinned in `test/page-log-to-verifier.test.ts`,
 `test/feedback-prompt.test.ts`, `test/agent-sha.test.ts` and `test/page-failure.test.ts`.
 
 ## Automated code review
 
 Every PR is reviewed by Claude in CI before a human reads it
-([`.github/workflows/code-review.yml`](.github/workflows/code-review.yml), PRD §7.14). This is
-not convenience tooling. Iris's agent library only improves through upstream merge (§7.13), so
+([`.github/workflows/code-review.yml`](.github/workflows/code-review.yml)). This is
+not convenience tooling. Iris's agent library only improves through upstream merge, so
 review capacity is the bottleneck on the whole contribution model — and a three-institution
 maintainership with no full-time reviewer cannot be the only thing between a contributed prompt
 and every future session.
@@ -1807,7 +1830,7 @@ them, so if it's cut off, a fallback step posts the partial findings plus the ch
 no review was posted at all, since the action can exit 0 without posting one.
 
 **The workflows are reviewed like the rest of the app**, because they are part of it. This
-reviewer and the issue-triage one are what §7.14's review promise actually rests on, and they hold
+reviewer and the issue-triage one are what the review promise above actually rests on, and they hold
 `id-token: write` and the Bedrock role; every workflow here holds a secret, a token or write
 access, and a defect in one is reachable by definition, since CI runs it. So a diff touching
 `.github/workflows/**` or `.github/scripts/**` gets a CI-security checklist
@@ -1852,8 +1875,8 @@ It exists because the dedupe already in the app cannot do this, and was never tr
 `src/github/issue.ts` refuses to file an `Agent update proposal:` whose title exactly matches an
 open one, which is the right check to have there: cheap, deterministic, no model. What it cannot see
 is that "procedure steps must be marked up at heading" and "when steps are nested inside a named
-section" are one rule described twice. Iris files these speculatively from content it met once
-(§7.13), so semantic overlap between them is the normal case rather than the exception, and it
+section" are one rule described twice. Iris files these speculatively from content it met once,
+so semantic overlap between them is the normal case rather than the exception, and it
 accumulates faster than anyone reads it.
 
 **Two sessions, and the second one is not shown the first one's argument.** The whole risk of
@@ -1992,7 +2015,7 @@ touching the issue. Add `-f force=true` to re-triage an issue that has already b
 ## Scheduled issue triage
 
 [`.github/workflows/issue-to-pr.yml`](.github/workflows/issue-to-pr.yml) runs **Sun–Wed at 22:00
-UTC** (PRD §7.15). It reads the open issues, ranks them by what most improves Iris, and opens
+UTC**. It reads the open issues, ranks them by what most improves Iris, and opens
 **one** pull request for the top issue it can finish well, with a review requested from
 **@bbertucc**.
 
@@ -2111,7 +2134,7 @@ A deployment nobody else runs must never be able to turn this project's `main` r
 ## Weekly quality report
 
 [`.github/workflows/quality-report.yml`](.github/workflows/quality-report.yml) runs **Saturdays at
-20:00 UTC** (PRD §7.16). It reads `GET /v1/quality` on a live deployment, compares a handful of
+20:00 UTC**. It reads `GET /v1/quality` on a live deployment, compares a handful of
 rates against thresholds held in that workflow file, and opens one issue per crossed threshold.
 [Scheduled issue triage](#scheduled-issue-triage) then ranks those issues with everything else and
 may open a PR against one.

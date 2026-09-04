@@ -39,7 +39,7 @@ import { join } from "node:path";
 // counter counts — express-rate-limit does that — but the decisions made around it, each of
 // which is invisible in normal operation and expensive when wrong:
 //
-//   * A 429 is an Iris error (PRD §9.3 shape) carrying `Retry-After`, not the library's
+//   * A 429 is an Iris error (the shape docs/API.md "Errors" describes) carrying `Retry-After`, not the library's
 //     default plain-text body. A client that cannot parse the refusal cannot pace itself.
 //   * An address is only an address if the deployment can trust the header it came from:
 //     unset, `X-Forwarded-For` is a claim, and a limiter that believed it would bound

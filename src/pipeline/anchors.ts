@@ -1,7 +1,7 @@
 import { JSDOM, VirtualConsole } from "jsdom";
 
 // Make the ids of independently extracted pages unique across the assembled
-// document (PRD §7.7 v1.2), while leaving every reference that already worked
+// document, while leaving every reference that already worked
 // alone.
 //
 // Why this is needed at all: extraction is per page and concurrent. `extractPage`

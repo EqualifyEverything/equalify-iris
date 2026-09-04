@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadAgent } from "../src/agents/loader.ts";
 
-// `AgentSpec.sha` is how a run says WHICH prompt produced it (PRD §7.3), and it is written to every
+// `AgentSpec.sha` is how a run says WHICH prompt produced it, and it is written to every
 // `agent_call` line as `agent_sha`. It used to be `git -C <agentsDir> rev-parse HEAD:./<file>`, which
 // answers null wherever there is no `.git` — and the container Iris is deployed in ships none. So
 // every deployed round on file records `agent_sha: null`: four deployed rounds of the same PDF moved

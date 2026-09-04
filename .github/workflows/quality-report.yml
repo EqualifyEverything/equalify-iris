@@ -6,7 +6,7 @@ name: Quality Report
 # document needed, which axe-core rules its HTML still violates, whether a link from
 # the source PDF went missing — and until now it wrote all of it to a per-session log
 # and nothing ever looked across sessions. This job looks. It reads `GET /v1/quality`
-# (PRD §7.16), compares a handful of rates against thresholds held *in this file*, and
+# and compares a handful of rates against thresholds held *in this file*, and
 # opens one issue per crossed threshold. `issue-to-pr.yml` then ranks those issues
 # alongside every other open issue and may open a PR against one. That is the whole
 # loop: the app's measurements become work, without a person typing feedback first.
@@ -415,7 +415,7 @@ jobs:
           # correcting the wording changes the dedupe key and refiles a problem that is
           # already being tracked. Hence "too many", "nearly its whole budget", "a large
           # share": vague in the title, exact in the body, where it costs nothing. This
-          # repo has already been bitten by the mirror image of that (PRD §7.13: a
+          # repo has already been bitten by the mirror image of that (a
           # dedupe that could not match, so every session refiled the same
           # suggestion), and one issue per week is how a maintainer learns to mute a
           # workflow.
@@ -566,7 +566,7 @@ jobs:
           # `in:title` search is a full-text phrase match rather than an equality
           # test, so it returns a superset and the comparison below decides.
           #
-          # A prefix rather than a label, for the reason PRD §7.13 gives: labels are
+          # A prefix rather than a label, and deliberately so: labels are
           # silently dropped for a filer without push access, so a label-based dedupe
           # is one that works in testing and fails for everyone else. The title is set
           # by the same request that creates the issue and cannot be stripped.
@@ -640,7 +640,7 @@ jobs:
             fi
 
             # No labels, and no `--assignee`. Labels are silently dropped for a filer
-            # without push access (PRD §7.13) so nothing downstream may depend on
+            # without push access, so nothing downstream may depend on
             # them; issue-to-pr.yml ranks these by the title prefix instead.
             URL=$(gh issue create --title "$TITLE" --body-file /tmp/issue-body.md)
             FILED=$((FILED + 1))

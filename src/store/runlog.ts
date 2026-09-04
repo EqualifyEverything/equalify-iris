@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs";
 import type { AgentSpec } from "../agents/loader.ts";
 
-// Appends structured entries to sessions/<id>/log.jsonl (PRD §7.3). Every agent
+// Appends structured entries to sessions/<id>/log.jsonl. Every agent
 // invocation records the agent file's git SHA, or the full file content inline
 // when the agent was session-built (no upstream object to pin against).
 export class RunLog {

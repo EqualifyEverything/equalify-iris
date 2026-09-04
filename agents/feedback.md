@@ -6,19 +6,18 @@ repeating the same mistake. It does three jobs:
 
 - **VERIFY** — judge whether an agent's HTML output faithfully and accessibly
   captures its source image. Used at build time to check each page the page agent
-  produces, and reused by the regression gate before any agent change ships
-  (PRD §7.5 / §7.12).
+  produces, and reused by the regression gate before any agent change ships.
 - **SCOPE** — decide whether a piece of user feedback is about what was *read off
   the source pages* (so those pages must be re-extracted with the image in hand)
   or only about the *assembled document* (so the review loop can fix it), and
-  which page numbers are affected (PRD §7.12).
+  which page numbers are affected.
 - **CLASSIFY** — decide whether a user-feedback correction is a one-off (specific
   to this document, must not change the agent), a generalizable lesson, or an
   accessibility-policy rule, and distill it into a reusable instruction plus a
   localized before/after example.
 - **TRAIN** — propose an improved version of an agent's prompt so it avoids a
   recurring issue, driven either by a user-feedback correction or by the problems
-  found during VERIFY (PRD §7.12 / §7.13).
+  found during VERIFY.
 
 Generalizable and accessibility lessons are accumulated as an example bank that is
 injected into the agent's prompt at run time (so the agent file stays stable);
@@ -31,7 +30,7 @@ so its contribution carries the fix.
 vision, text
 (VERIFY needs vision to read the source image; TRAIN is text-only. The
 deployment's configured providers for these capabilities determine which concrete
-models run. See PRD §10.3.)
+models run.)
 
 ## System prompt
 You are the Feedback Agent. The user message begins with `TASK: verify`,

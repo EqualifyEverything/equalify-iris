@@ -1,4 +1,4 @@
-// The accessibility requirements every content agent must satisfy (PRD §7.4).
+// The accessibility requirements every content agent must satisfy.
 // Appended to each content-agent system prompt so the contract is enforced
 // regardless of how terse an individual agent file is.
 export const ACCESSIBILITY_REQUIREMENTS = `

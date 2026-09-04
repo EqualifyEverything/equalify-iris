@@ -32,7 +32,7 @@ import {
   type RunSignal,
 } from "../src/store/db.ts";
 
-// The store half of `GET /v1/quality` (PRD §7.16): the tally the weekly workflow
+// The store half of `GET /v1/quality`: the tally the weekly workflow
 // files issues from.
 //
 // What makes this worth testing rather than trusting is that every number here is
@@ -673,7 +673,7 @@ test("a first read that could not answer is the mean's error bar, per document",
 
 test("the first read survives a feedback re-run, because the re-read is of an edited body", () => {
   withStore((store) => {
-    // The one exemption from the replace-on-re-run rule (PRD §7.16), and the reason for it is
+    // The one exemption from the replace-on-re-run rule, and the reason for it is
     // the same reason the field exists. A document-level feedback re-run re-reviews the body
     // that was already delivered, so its first read sees the copy editor's work and normally
     // finds LESS — recording it would move the mean in the exact direction a Reader going

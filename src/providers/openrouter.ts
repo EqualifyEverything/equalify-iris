@@ -108,7 +108,7 @@ function addUsage(a?: Usage, b?: Usage): Usage | undefined {
   return sum;
 }
 
-// OpenRouter adapter (PRD §10.3). Speaks the OpenAI-compatible chat
+// OpenRouter adapter. Speaks the OpenAI-compatible chat
 // completions API that OpenRouter exposes, including image content parts.
 export class OpenRouterProvider implements ModelProvider {
   name = "openrouter";

@@ -1037,8 +1037,8 @@ jobs:
                block past 21000 characters, so `issue-triage.yml` holds its enforcement
                step in `.github/scripts/triage-decide.sh`, and that file decides whether an
                issue closes. When it does, do it before item 1: the workflows in this
-               repo are as much a part of Iris as `src/` is. `code-review.yml` is the review
-               capacity §7.14 of `prd.md` promises and `issue-to-pr.yml` opens pull requests
+               repo are as much a part of Iris as `src/` is. `code-review.yml` is this
+               repo's whole review capacity and `issue-to-pr.yml` opens pull requests
                against this repo on a schedule; both hold `id-token: write` and the Bedrock
                role, and every workflow here holds a secret, a token, or write access to
                something. A defect in one is reachable by definition — CI runs it — so the
@@ -1105,8 +1105,8 @@ jobs:
                - **Comments that no longer match the YAML.** These files are load-bearing
                  documentation for a security control, and a stale rationale comment here is a
                  defect, not a nit. Same for `README.md`'s "Automated code review" /
-                 "Scheduled issue triage" sections and `prd.md` §7.14–§7.15, which state the
-                 behaviour these files implement.
+                 "Scheduled issue triage" sections, which state the behaviour these files
+                 implement.
 
                Do not flag YAML style, key order, or line length — `actionlint` ran in the
                check summary and covers schema and expression errors; style is not reviewed.
@@ -1115,7 +1115,7 @@ jobs:
 
             - Agent markdown edits that loosen the output contract, drop the accessibility
               requirements, or change a pinned git SHA without explanation.
-            - Docs (`README.md`, `docs/API.md`, `prd.md`) that now contradict the code, and
+            - Docs (`README.md`, `docs/API.md`, `docs/models.md`) that now contradict the code, and
               `config.example.yaml` missing a newly-required config key.
             - Changes to the review context builder's thresholds (`MIN_CHANGED_PCT`,
               `ALWAYS_INCLUDE_UNDER_BYTES`, `ALWAYS_INCLUDE_PATHS`, `MAX_BYTES_PER_FILE`) that

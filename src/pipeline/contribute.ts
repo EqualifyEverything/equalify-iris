@@ -3,7 +3,7 @@ import { loadImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { createAgentIssue, installHintFor } from "../github/issue.ts";
 
-// The content types the general page pass covers itself (PRD §7.4 v1.2). A
+// The content types the general page pass covers itself. A
 // suggestion naming one of these is declined rather than dispatched, and never
 // filed as a new agent to build (see extraction.ts).
 //
@@ -41,13 +41,13 @@ export function logicalType(name: string): string {
 // `"Table"` — spellings a model will produce, since these are prose descriptions of
 // content types and not filenames — used to fall through to `draftAgent` and
 // `createAgentIssue`: a public issue on the upstream repo, filed under the USER's own
-// GitHub identity (§12), proposing a specialist for a type the page pass has always
+// GitHub identity, proposing a specialist for a type the page pass has always
 // handled. A false decline costs one specialist that the page pass covers anyway; a
 // false accept costs a real person's name on a spurious proposal.
 //
 // This used to be backstopped by `loadAgent` finding `agents/table.md` — on a
-// case-insensitive volume, `agents/Table.md` too. Those nine files are gone (§7.4 v1.2,
-// they were unreachable), so this predicate is the whole filter.
+// case-insensitive volume, `agents/Table.md` too. Those nine files are gone (they
+// were unreachable), so this predicate is the whole filter.
 // Takes a name ALREADY through `logicalType`, and does not re-normalize. An earlier
 // version called `logicalType` here as well, which was worse than redundant: both call
 // sites pass a normalized name, so `"table.md "` got its extension stripped twice and
@@ -98,7 +98,7 @@ async function draftAgent(ctx: PipelineContext, s: Suggestion): Promise<string> 
 //
 // Filed under the LOGGED-IN USER's identity, which is the whole reason GitHub is
 // the auth layer: using Iris and giving back to the shared agent library are the
-// same act, credited to the person who did it (PRD §12). `github.issue_token` is an
+// same act, credited to the person who did it. `github.issue_token` is an
 // optional override for deployments that must file under one bot account instead,
 // and it trades that attribution away.
 export async function runContribution(ctx: PipelineContext, suggestions: Suggestion[]): Promise<void> {

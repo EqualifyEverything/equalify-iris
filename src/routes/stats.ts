@@ -25,7 +25,7 @@ export const DEFAULT_TTL_MS = 60_000;
  * has), so a client can say "since May 2026" without inventing a launch date.
  *
  * `quality` is how *well* it has been going rather than how much of it there was —
- * two numbers from the same signals `GET /v1/quality` aggregates (PRD §7.16), which
+ * two numbers from the same signals `GET /v1/quality` aggregates, which
  * is otherwise readable only with that endpoint's shared secret. It is **null** until
  * the window holds `PUBLIC_QUALITY_MIN_DOCUMENTS` documents, and the floor lives in
  * `Store.publicQuality` rather than here on purpose: on a quiet deployment a rate over

@@ -1,4 +1,4 @@
-// GitHub App auth helpers (PRD §9.1). GitHub is the only auth mechanism.
+// GitHub App auth helpers. GitHub is the only auth mechanism.
 //
 // Base URLs are passed in (not hardcoded) so a deployment can target GitHub
 // Enterprise, and so the suite can drive the flow against a mock host.
@@ -16,8 +16,8 @@
 // An OAuth App can only express #2 as `public_repo`, an ACCOUNT-WIDE grant of read
 // and write to every public repository the user can reach — code, commit statuses,
 // collaborators, webhooks. Nothing here uses any of that: nothing pushes and nothing
-// opens pull requests (PRD §7.13 described a fork-and-PR flow that was never built
-// and has been dropped). The consent screen was therefore asking for orders of
+// opens pull requests (an earlier design described a fork-and-PR flow that was
+// never built and has been dropped). The consent screen was therefore asking for orders of
 // magnitude more than the service does, and there is no narrower OAuth scope — no
 // scope means "issues on one repository".
 //
@@ -35,11 +35,11 @@
 // a PUBLIC `upstream_repo` (the design's assumption — the agent library is public) files
 // for everyone, while a PRIVATE one files only for users who can already see it and
 // 404s for everyone else. A private upstream that anyone can contribute to therefore
-// needs `github.issue_token`, which trades away §12 attribution.
+// needs `github.issue_token`, which trades away per-user attribution.
 //
 // What the user's token still carries is their IDENTITY: a user-to-server token acts
 // as the user, so issues are filed under their own account and each contribution is
-// credited to the person whose session produced it (PRD §12). That is why the app is
+// credited to the person whose session produced it. That is why the app is
 // authorized by users at all rather than filing everything as itself.
 //
 // Two registration settings this code depends on, both invisible from here:
@@ -203,7 +203,8 @@ export async function pollDeviceFlow(
   return { status: "pending", error: json.error ?? "authorization_pending" };
 }
 
-// Identify the GitHub user behind a token (PRD §9.1: login is signup).
+// Identify the GitHub user behind a token. Login is signup: there is no separate
+// registration step.
 export async function fetchUser(token: string, apiBase: string): Promise<GitHubUser> {
   const res = await fetch(`${apiBase}/user`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "equalify-iris" },

@@ -44,9 +44,9 @@ export interface ReviewIssue {
   issue: string;
   severity: "low" | "medium" | "high";
   suggested_action: string;
-  // Source attribution (PRD §7.8, amended v1.1): the 1-based source pages this
+  // Source attribution: the 1-based source pages this
   // issue is on. Empty when the Reader could not attribute it — the document is
-  // delivered without provenance comments (§7.4 v1.1), so page numbers are the
+  // delivered without provenance comments, so page numbers are the
   // only reference available, and the Reader is told not to guess.
   pages?: number[];
 }
@@ -58,7 +58,7 @@ export interface ReviewResult {
   unresolved: ReviewIssue[];
   lint: LintResult;
   // How many absolute hrefs the Copy Editor destroyed, totalled over the rounds it
-  // ran (PRD §7.16). Summing across rounds does not double-count: each round
+  // ran. Summing across rounds does not double-count: each round
   // compares only its own before/after, so a link dropped in round 1 is already
   // absent from round 2's `before`.
   //
@@ -238,7 +238,7 @@ export interface ReviewResult {
 // sentence is neither the cost the old numbers made it nor the bargain their reversal makes it.
 // The Reader model is
 // a config line (`providers.per_agent.reader`), so this is re-measured on a swap — the Reader
-// bullet under "Implementation notes & PRD coverage" in README says what to measure, quote fidelity
+// bullet under "Implementation notes" in README says what to measure, quote fidelity
 // included, since that is the one metric this arm moved the wrong way. Record the SHARE OF REPLIES
 // THAT CONTAIN ANY PROSE rather than the share of characters: the reply share separates these two
 // models in every round measured — the incumbent 67-75% over the four large rounds and 91% in the
@@ -2123,7 +2123,7 @@ function logFidelityObserved(ctx: PipelineContext, raw: unknown, selected: Input
 // Measured, not estimated, and that distinction is what makes this safe to do at all.
 // `TruncatedResponseError.chars` is how many characters THIS model produced for THIS document
 // before it ran out of ceiling, so it prices this document's HTML in characters per token
-// without anyone having to guess at a ratio — and the guess is the thing PRD §7.11 v1.3 rules out,
+// without anyone having to guess at a ratio — and the guess is the thing this design rules out,
 // because measured characters per token vary enough between documents that a wrong one skips
 // corrections the editor would have made. Nothing here is computed until the ceiling has
 // actually been reached, which is why this is a measurement and not a pre-flight estimate.
@@ -2283,7 +2283,7 @@ async function editorSectionCall(
 // (`lastRound` in `runReview`), so there is no further read and no further document-level call, and
 // the section calls over the remainder are handed the remainder alone, so the section holding the
 // source block cannot know the content is now also in the prefix. What can see it is a feedback
-// re-run (PRD §7.12), which is the user's action and not this loop's.
+// re-run, which is the user's action and not this loop's.
 //
 // The trade is still the right way round, and this is the whole of the argument for it: a deletion is
 // invisible in the delivered document and permanent, while a duplicate is in the delivered document
@@ -3169,8 +3169,8 @@ export async function runReview(
   }
 
   // Issues remain and the loop has stopped — at the cap, on a round that changed nothing,
-  // or on a round whose response hit the output ceiling (§7.11). All three record them as
-  // a comment, with the source page reference the Reader attributed (§7.8) so a human can
+  // or on a round whose response hit the output ceiling. All three record them as
+  // a comment, with the source page reference the Reader attributed so a human can
   // find them; the third also states itself in the document, because "the editor tried and
   // could not fix these" and "no editor pass ever worked on these" are different facts.
   //

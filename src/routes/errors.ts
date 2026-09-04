@@ -1,6 +1,6 @@
 import type { Response } from "express";
 
-// Standard error structure (PRD §9.3).
+// Standard error structure.
 export function sendError(
   res: Response,
   httpStatus: number,

@@ -1,8 +1,8 @@
 # Multi-arch image (linux/amd64, linux/arm64). Mac Mini and Linux ARM
-# workstations are first-class targets (PRD §10.4).
+# workstations are first-class targets (README, "One machine, no vendor lock-in").
 FROM node:24-slim
 
-# git: agents/ is a git checkout (SHA pinning, PRD §7.3) and the contribution
+# git: agents/ is a git checkout (SHA pinning) and the contribution
 # workflow inspects it. poppler-utils: pdftoppm/pdfinfo for rasterizing uploaded
 # PDFs into per-page images, and pdftohtml for reading their link annotations,
 # which rasterizing destroys (src/pipeline/links.ts).

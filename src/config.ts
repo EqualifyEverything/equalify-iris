@@ -83,7 +83,7 @@ export interface IrisConfig {
     port: number;
     base_url: string;
     // Shared secret that gates `GET /v1/quality`, the deployment-wide quality tally
-    // the weekly workflow files issues from (PRD §7.16). Unset by default, and the
+    // the weekly workflow files issues from. Unset by default, and the
     // endpoint answers 404 until it is set — an operator opts in rather than
     // discovering they exposed it.
     //
@@ -127,8 +127,8 @@ export interface IrisConfig {
     // instead of under the user who ran the session.
     //
     // Off by default, and deliberately not recommended: filing under each user's
-    // own identity is the point of authenticating with GitHub at all (PRD §12 —
-    // every user gives back to the shared agent library, credited to them). A bot
+    // own identity is the point of authenticating with GitHub at all: every user
+    // gives back to the shared agent library, credited to them. A bot
     // account erases that attribution. Set it only when a deployment cannot file as
     // its users — e.g. an org policy that forbids it.
     issue_token?: string;
@@ -146,8 +146,8 @@ export interface IrisConfig {
   defaults: {
     // Reader/editor rounds a document gets before the review loop stops and lists
     // what is left in `unresolved.md`. Read once, at first auth, to seed the
-    // account default every session inherits — a session cannot override it
-    // (§9.2 "Amended"). Normalized by loadConfig, so it is always >= 1.
+    // account default every session inherits — a session cannot override it.
+    // Normalized by loadConfig, so it is always >= 1.
     max_review_iterations: number;
     // How many pages to extract in parallel within one run. Pages are
     // independent (one vision call each), so this is a pure speed knob; it is
@@ -184,7 +184,8 @@ export const MAX_EXTRACTION_CONCURRENCY = 16;
 // Pipeline runs allowed to execute simultaneously when the deployment doesn't
 // say. Deliberately small: 2 concurrent runs on a default config already means
 // up to 10 in-flight vision calls (2 × DEFAULT_EXTRACTION_CONCURRENCY) plus two
-// live jsdom+axe instances, on a machine that per PRD §10.1 may be a laptop.
+// live jsdom+axe instances, on a machine that may be a laptop (README, "One machine,
+// no vendor lock-in").
 // The knob to reach for first on a bigger box is this one, not the extraction
 // concurrency — waiting is cheap and visible (`status: "queued"`), whereas
 // over-subscribing degrades every run at once.
@@ -212,7 +213,7 @@ export const DEFAULT_RECHECK_SAMPLE_SIZE = 1;
 // Upper bound. This is a cap on how much of the machine one deployment will
 // commit, not a statement about what a provider will serve; an operator who
 // genuinely needs more concurrency than this wants multiple instances and a
-// shared Postgres store (§10.2), which v1 does not implement.
+// shared Postgres store, which v1 does not implement.
 export const MAX_CONCURRENT_RUNS_CEILING = 32;
 
 // The request-volume budget when the deployment doesn't say. Each is per minute; see
@@ -337,7 +338,7 @@ export function applyTrustProxy(app: Pick<Express, "set">, value: unknown): stri
 }
 
 // Reader/editor rounds a document gets when the deployment doesn't say. Since the
-// per-request override was removed (§9.2 "Amended"), this config value is the ONLY
+// per-request override was removed, this config value is the ONLY
 // input to the cap — it seeds every account default on first auth — so the values
 // it must not silently become are the ones that would quietly stop the review loop
 // from reviewing: `0` buys one reader pass with no fix ever applied, and a negative
@@ -390,7 +391,7 @@ function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void
 
   // The scope validation this function used to do is gone: it rejected a scopeless
   // `github.oauth_scope` at startup, because a token that could identify a user but
-  // not file on their behalf broke the contribution model (PRD §12) and failed
+  // not file on their behalf broke the contribution model and failed
   // silently — one swallowed `agent_issue_failed` line per run while the service kept
   // answering 200. Iris now authenticates as a GitHub App, so a user's authorization
   // carries no repository permission to get wrong: `issues: write` comes from
@@ -571,9 +572,9 @@ const DISPATCHED_AGENTS = ["page", "reader", "copy_editor", "feedback", "builder
 // and the row for that agent names the model it actually ran on. Warning at boot is still
 // worth more than that: it says which key is wrong, before the run is paid for.
 //
-// It is how `config.example.yaml` came to invite `table:` and prd.md §10.3 to show
-// `image_analysis:` — both relics of the per-content-type fan-out prd.md §7.4 v1.2
-// withdrew, and stale in different ways: `image_analysis` was the triage agent and went
+// It is how `config.example.yaml` came to invite `table:` and the retired specification to
+// show `image_analysis:` — both relics of the per-content-type fan-out that was withdrawn,
+// and stale in different ways: `image_analysis` was the triage agent and went
 // with `pipeline/triage.ts`, while `table` was never dispatched by anything. The table
 // join in particular reads as though it has its own line, and it does not: it is a
 // `copy_editor` call (pipeline/tables.ts), so the join and the review round cannot be put
@@ -768,7 +769,7 @@ export function normalizeRecheckSampleSize(value: unknown): number {
   return Math.max(0, Math.floor(n));
 }
 
-// Bundled GitHub App client_id for the device flow (PRD §9.1). This is the single
+// Bundled GitHub App client_id for the device flow. This is the single
 // place to embed Equalify's registered "Equalify Iris" GitHub App so the default
 // deployment needs no per-operator app setup — the same pattern the GitHub CLI uses.
 // The client_id is NOT a secret (it is sent openly in every authorization flow); the
@@ -851,7 +852,7 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
     b.max_tokens = normalizeMaxTokens(b.max_tokens);
   }
   // Fall back to the bundled GitHub App so the default device-flow deployment
-  // works with no per-operator app setup (PRD §9.1). Applied BEFORE validateConfig,
+  // works with no per-operator app setup. Applied BEFORE validateConfig,
   // so its client_id check sees the effective value rather than an empty string.
   parsed.github.client_id = parsed.github.client_id || DEFAULT_CLIENT_ID;
   validateConfig(parsed, unset, path);

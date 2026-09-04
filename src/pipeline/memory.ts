@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname } from "node:path";
 import type { Paths } from "../store/paths.ts";
 
-// Agent memory (PRD §7.12, extended): instead of rewriting an agent's prompt when
+// Agent memory: instead of rewriting an agent's prompt when
 // it makes a mistake, we accumulate generalized "lessons" learned from real user
 // feedback and inject the corroborated ones into the agent's prompt at run time.
 // Examples are easy to add, audit, and remove — and they don't rot the prompt.
@@ -122,8 +122,8 @@ export function loadExamples(paths: Paths, agentFile: string): CorrectionExample
 // so a second process that writes between another's read and write replaces its lesson
 // rather than merging with it. That is a smaller and louder failure than a torn read —
 // one lesson missing from a bank that parses, against a page extracted with none — and
-// fixing it needs a lock this deployment model does not have (§10.2 is one SQLite file
-// and a filesystem, single-instance by design).
+// fixing it needs a lock this deployment model does not have (one SQLite file and a
+// filesystem, single-instance by design).
 //
 // Rename is atomic on POSIX. On Windows it is `MoveFileEx`, which can fail with EPERM
 // against a destination another process holds open — a throw rather than a torn file,

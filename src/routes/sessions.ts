@@ -113,7 +113,7 @@ function sessionSummary(s: SessionRecord) {
 }
 
 // Owned-by-caller lookup. Returns undefined (caller sends 404) when missing or
-// owned by another user, so a token cannot probe others' sessions (§9.1).
+// owned by another user, so a token cannot probe others' sessions.
 function ownedSession(store: Store, id: string, userId: number): SessionRecord | undefined {
   const s = store.getSession(id);
   if (!s || s.github_user_id !== userId) return undefined;
@@ -238,7 +238,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   });
 
   // POST /v1/sessions — create a session. Accepts images and/or PDFs; PDFs are
-  // rasterized to one image per page, expanded in submitted order (§9.2).
+  // rasterized to one image per page, expanded in submitted order.
   //
   // Three gates run BEFORE `uploadImages`, and the order is the point: multer buffers the
   // whole body into memory as it parses, so anything that runs after it has already paid
@@ -348,7 +348,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     // Remember the source basename so the output title + download filename
     // mirror the upload (e.g. report.pdf -> report_converted.html).
     writeFileSync(paths.sessionSourceName(sessionId), outputBasenameFromUploads(files));
-    // Persist page images with an order prefix so submitted order survives (§9.2).
+    // Persist page images with an order prefix so submitted order survives.
     pages.forEach((p, i) => {
       const order = String(i + 1).padStart(4, "0");
       writeFileSync(join(paths.sessionInput(sessionId), `${order}__${p.name}`), p.buffer);
@@ -454,7 +454,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     res.json(summarizeRun(text, { sessionId: s.session_id, status: s.status, phase: s.phase, now: Date.now() }));
   });
 
-  // POST /v1/sessions/{id}/feedback — re-run within the same session (§7.12).
+  // POST /v1/sessions/{id}/feedback — re-run within the same session.
   r.post("/:id/feedback", (req: AuthedRequest, res) => {
     const s = ownedSession(store, req.params.id, req.user!.github_user_id);
     if (!s) {
@@ -505,7 +505,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     );
   });
 
-  // POST /v1/sessions/{id}/close — finalize the session and clean tmp (§9.2).
+  // POST /v1/sessions/{id}/close — finalize the session and clean tmp.
   // Agent contributions are auto-filed as GitHub issues during the run (see
   // pipeline/contribute.ts), so close no longer opens PRs.
   r.post("/:id/close", (req: AuthedRequest, res) => {
@@ -529,7 +529,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 409, "invalid_state", "Session is not ready_for_review");
       return;
     }
-    // Auto-capture regression fixtures from the accepted output (PRD §7.12): the
+    // Auto-capture regression fixtures from the accepted output: the
     // page agent's per-page output + its source image, used to gate future agent
     // updates so a change can't break a use it already handled. Best-effort —
     // never block closing a session on fixture capture.

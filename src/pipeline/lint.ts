@@ -485,7 +485,7 @@ export function isKnownLanguage(subtag: string): boolean {
   return cldrKnowsLanguage(subtag);
 }
 
-// PRD §7.7: validate the document parses and basic accessibility lint passes
+// Validate that the document parses and that basic accessibility lint passes
 // (axe-core in headless mode). We run axe inside a jsdom realm. If axe cannot run in this
 // environment the session continues rather than failing — but with no verdict rather than
 // with a passing one (`ok: false`, no `violations`; see LintResult), because a document
@@ -573,7 +573,7 @@ export async function runAxe(html: string): Promise<LintResult> {
     const results = await w.axe.run(window.document, {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] },
       rules: {
-        // Output is content-only with no styling (PRD §4), so color contrast is
+        // Output is content-only with no styling, so color contrast is
         // out of scope and cannot be assessed without rendering anyway.
         "color-contrast": { enabled: false },
         // Enabled BY NAME because the tag filter above excludes it: WCAG 2.2

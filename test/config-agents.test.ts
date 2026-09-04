@@ -17,10 +17,11 @@ import { perAgentKeyWarning } from "../src/config.ts";
 // that arrives before the run is paid for.
 //
 // It had already happened twice, in the two files an operator reads first, and both were
-// relics of the per-content-type fan-out prd.md §7.4 v1.2 withdrew: `config.example.yaml`
+// relics of the per-content-type fan-out that was withdrawn: `config.example.yaml`
 // offered a commented `table:` line described as the way to put a stronger model on the table
-// join, and prd.md §10.3's block showed `image_analysis: bedrock`. They are stale in different
-// ways, which is why this file pins the set rather than those two names — `image_analysis` was
+// join, and the now-retired specification's own block showed `image_analysis: bedrock`. They
+// are stale in different ways, which is why this file pins the set rather than those two
+// names — `image_analysis` was
 // the triage agent and went with `src/pipeline/triage.ts`; `table` was never dispatched by
 // anything, so no removal could have caught it.
 //
@@ -199,7 +200,7 @@ test("every per_agent key any example names is an agent Iris dispatches", () => 
   // file offers a per_agent key called `max_tokens`. Both files carry more than one block, so
   // each is scanned in turn rather than picking one.
   const blocks = /^(\s*)(#\s?)?per_agent:/;
-  for (const file of ["config.example.yaml", "prd.md", "docs/models.md"]) {
+  for (const file of ["config.example.yaml", "docs/models.md"]) {
     const lines = readFileSync(join(ROOT, file), "utf8").split("\n");
     let found = 0;
     let seenBlock = false;
@@ -220,9 +221,8 @@ test("every per_agent key any example names is an agent Iris dispatches", () => 
         // A LIVE block runs to the first line at or above the key's own indent, since that is
         // the line that has left the mapping. YAML allows both blank lines and comments
         // between two entries, so neither ends it — and neither can BE an entry, so both are
-        // skipped rather than read (prd.md's `# everything else uses default` is a comment
-        // about the block, and a `#` line in a live block cannot be an override however it is
-        // indented).
+        // skipped rather than read: a `#` line in a live block is a comment about the block
+        // and cannot be an override however it is indented.
         const isComment = /^\s*#/.test(raw);
         const blank = raw.trim() === "";
         if (commented) {

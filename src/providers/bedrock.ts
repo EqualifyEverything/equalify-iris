@@ -488,7 +488,7 @@ function outputCeilingRefused(model: string, asked: number, cause: unknown, capp
   return error;
 }
 
-// Amazon Bedrock adapter (PRD §10.3). Uses the Anthropic Messages format
+// Amazon Bedrock adapter. Uses the Anthropic Messages format
 // that Bedrock's Claude models accept. Credentials come from the standard
 // AWS credential chain (env vars, shared profile, or IAM role).
 //

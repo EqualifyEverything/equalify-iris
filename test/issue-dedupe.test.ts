@@ -8,7 +8,7 @@ import { lessonSlug } from "../src/pipeline/memory.ts";
 // duplicate issue is cheaper than a lost contribution — but it means the dedupe has
 // exactly one failure mode that is invisible: if the search never MATCHES (a changed
 // title format, a query GitHub rejects), every path still works and every run files a
-// duplicate under a real user's name (PRD §12). Nothing fails, so nothing says so.
+// duplicate under a real user's name. Nothing fails, so nothing says so.
 //
 // The e2e cannot catch it: its mock answers the search with a 404, which lands in the
 // swallow branch, so every e2e run exercises "search unavailable" and never "search
@@ -151,7 +151,7 @@ test("a new-agent suggestion that already has an open issue is not filed again",
 test("neither path sends a label, or touches the labels API", async () => {
   // The actual fix, and the regression that matters. A label set by a filer without
   // push access is DROPPED by GitHub at 201 with nothing in the response to say so —
-  // and that is the typical filer here (PRD §12: any authenticated user contributes).
+  // and that is the typical filer here (any authenticated user contributes).
   // So a reintroduced label would be absent in the repository while looking present in
   // the code, and it would take the dedupe down with it: the search filtered on the
   // label, so unlabeled issues were invisible to it and every later session refiled

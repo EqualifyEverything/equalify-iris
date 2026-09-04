@@ -5,8 +5,8 @@
 // came from without being resent the whole document: the Feedback Agent (which
 // pages does this feedback concern?) and the Reader (which page is this issue on?).
 // Page attribution is what lets the Copy Editor be handed only the images it
-// actually needs, and provenance comments are stripped from the document (§7.4
-// v1.1), so this index is the only page map either one gets.
+// actually needs, and provenance comments are stripped from the document, so this
+// index is the only page map either one gets.
 
 // Enough to recognize a page, far short of resending it. Callers that index on
 // every model call (the Reader, once per chunk per round) pass a smaller value.
