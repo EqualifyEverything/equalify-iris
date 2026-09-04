@@ -1116,8 +1116,11 @@ jobs:
             - Agent markdown edits that loosen the output contract, drop the accessibility
               requirements, or change a pinned git SHA without explanation.
             - Docs (`README.md`, `docs/API.md`, `docs/models.md`, `docs/design-notes.md`,
-              `docs/ci.md`) that now contradict the code, and `config.example.yaml` missing a
-              newly-required config key.
+              `docs/ci.md`, `docs/github-auth.md`, `docs/verifier-calibration.md`) that now
+              contradict the code, and `config.example.yaml` missing a newly-required config key.
+              `docs/github-auth.md` states what `src/auth/` does with a token and
+              `docs/verifier-calibration.md` what `src/pipeline/calibration.ts` measures, so an
+              edit to either is checked against that code and not only against itself.
             - Changes to the review context builder's thresholds (`MIN_CHANGED_PCT`,
               `ALWAYS_INCLUDE_UNDER_BYTES`, `ALWAYS_INCLUDE_PATHS`, `MAX_BYTES_PER_FILE`) that
               could drop a high-risk file from a future review's context. Name the files that

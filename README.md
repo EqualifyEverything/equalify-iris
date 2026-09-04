@@ -270,7 +270,7 @@ src/
     memory.ts            # per-agent example bank of learned corrections
     regression.ts        # fixture capture + pruning on close
     contribute.ts        # drafts suggested agents, files issues
-    calibration.ts       # does the fidelity verifier discriminate? (see "Calibrating…" below)
+    calibration.ts       # does the fidelity verifier discriminate? (docs/verifier-calibration.md)
   tools/calibrate.ts     # CLI for that measurement; nothing in a run imports it
   util/queue.ts          # bounded FIFO run queue (cross-session concurrency cap)
   auth/                  # GitHub OAuth + device flow + bearer middleware
@@ -289,7 +289,7 @@ readable in one sitting. The only prose dropped instead of moved was a paragraph
 that [docs/models.md](docs/models.md) already carries, with more of the context they need. The rest
 of these were always their own documents.
 
-| | |
+| Document | What is in it |
 |---|---|
 | [docs/API.md](docs/API.md) | Every endpoint, with copy-pasteable `curl`. The run log's fields. |
 | [docs/design-notes.md](docs/design-notes.md) | Why the code is the way it is. Read this before changing it. |

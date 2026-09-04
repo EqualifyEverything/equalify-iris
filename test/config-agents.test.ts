@@ -696,17 +696,22 @@ function unclosedBoldRuns(doc: string): string[] {
 // in the loop for the same reason sprint-246.md is: they are ~1,950 lines lifted out of README.md,
 // written in exactly this style, and a move is the commit where a `**` run gets cut in half.
 //
-// One list for both checks below, deliberately. They had a copy each, and a document added to one
-// copy and not the other is covered by half the guard while reading as covered by all of it.
+// One list, read off the directory, for every markdown check in this file. Three things went wrong
+// with the hand-written version and each is fixed by the same line:
+//   - The bold-run and table-swallow checks kept a COPY of it each, so a document added to one and
+//     not the other was covered by half the guard while reading as covered by both.
+//   - The link check three functions down enumerated `docs/` with readdirSync while these two named
+//     files, so the two halves of this file disagreed about what "the docs" meant — and a new
+//     `docs/*.md` was auto-covered by one and silently uncovered by the others.
+//   - `docs/API.md` (1,897 lines, bold lead-ins and tables throughout) and CONTRIBUTING.md were
+//     outside BOTH checks for no stated reason. They pass, so nothing was holding them out.
+// A document is now covered by being a document, which is the only rule that cannot go stale.
 const PROSE_DOCS = [
-  "docs/models.md",
-  "docs/cost.md",
-  "docs/sprint-246.md",
-  "docs/design-notes.md",
-  "docs/ci.md",
-  "docs/verifier-calibration.md",
-  "docs/github-auth.md",
   "README.md",
+  "CONTRIBUTING.md",
+  ...readdirSync(join(ROOT, "docs"))
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => `docs/${f}`),
 ];
 
 test("the measurement docs' bold runs close in the block that opens them", () => {
@@ -1090,13 +1095,7 @@ function headingAnchors(markdown: string): Set<string> {
 // cannot break and cannot be checked either; they were turned into anchors precisely so that a
 // later move fails here instead of quietly pointing at the wrong paragraph.
 test("every relative link in the docs resolves, file and anchor", () => {
-  const files = [
-    "README.md",
-    "CONTRIBUTING.md",
-    ...readdirSync(join(ROOT, "docs"))
-      .filter((f) => f.endsWith(".md"))
-      .map((f) => `docs/${f}`),
-  ];
+  const files = PROSE_DOCS;
   const anchorCache = new Map<string, Set<string>>();
   const anchorsFor = (path: string) => {
     if (!anchorCache.has(path)) anchorCache.set(path, headingAnchors(readFileSync(path, "utf8")));
