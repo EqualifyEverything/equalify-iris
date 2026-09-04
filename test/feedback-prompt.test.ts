@@ -79,6 +79,22 @@ test("the verify task will not score a described swatch as invented, or overturn
       /do not send it back AS INVENTED TEXT for naming a shade the page does not name/],
     ["a count of the key's entries in the same description is covered on the same terms",
       /A count of the key's entries carried in the same description is the contract too, on the same terms/],
+    // Round 2 of #393: this shield was scoped to the legend, and #393 asks the page for a THIRD thing
+    // the page prints nowhere — a list or table of places under the bands' printed wording, named as
+    // the better home for the mapping. That list is neither "the term of the legend" nor "a count of
+    // the key's entries", so nothing sanctioned it, and the paragraph below only ASKS for it, which is
+    // precisely what failed before: prd.md §7.4 v1.10 records the verifier refusing a described <dd>
+    // as invented text and the compliant correction DELETING it, making the only three serious
+    // accessibility violations in that arm's output. That is why the shield was written as an explicit
+    // "do not send it back AS INVENTED TEXT" rather than left to be inferred, and the new home needs
+    // the same words. The wording matches the ask below verbatim so the two are found together.
+    ["a list of places under the bands' printed wording is sanctioned by name, not by implication",
+      /so is a LIST OR TABLE of the places under the bands' own printed wording, wherever the fragment carries one: no place-to-band mapping is printed anywhere on such a page — reading it off the ink is the whole job — so that list is the contract's answer and not text of the model's own/],
+    // And the shield stays a shield rather than becoming a pass: transcription is what is protected,
+    // correctness is not. Unbounded, "that list is the contract's answer" reads as licence to leave a
+    // place in the wrong band, which is the defect the whole rule exists to catch.
+    ["with all three sanctioned as transcription and none of them as correct",
+      /Each of these three is sanctioned as the TRANSCRIPTION it is, and none of them is sanctioned as CORRECT: a shade named wrongly, a count that does not match the swatches, a place put in a band it is not in are all real problems below/],
     // The root cause on p077: both agents assumed the legend's tones ran in the order of its
     // labels. Measured, they do not — 26, then 176, then 143 — so the assumption was written into
     // the markup as fact by the extraction and enforced as fact by the verifier. Pinned with its
@@ -97,6 +113,44 @@ test("the verify task will not score a described swatch as invented, or overturn
     // assignment to the wrong band — which is a reason to bound the shield, not to omit it.
     ["a hedge is falsifiable, and a verifier that can tell the shades apart says which",
       /A hedge is not unfalsifiable, though: where you CAN tell the two apart, say so and say which is which, because an item left unclassified is a gap in the delivered page and a hedge nobody checks is the cheapest wrong answer available/],
+    // #372's trap, and the reason the page.md half of this fix could not ship alone. This prompt is
+    // the only thing that refuses a map page: the page agent's rules are not shown to the verifier,
+    // so an obligation written only there is an obligation nothing enforces. Measured: acceptance of
+    // map pages that classify nothing was 46.2% before the graphical-key rule existed and 0.0% after,
+    // and none of that movement came from anyone asking for the mapping — on 6 of 8 plates the
+    // refusal cites the key rule and on two it is the ONLY thing refusing them. So a key rule that
+    // models finally satisfy would hand those pages a pass with the shading still missing, a
+    // regression wearing a compliance fix's clothes. Verified off a delivered page rather than the
+    // refusal strings: `runs-maps-95ca64c-r1`'s luna `acir-p077` ships an alt that names 49 places,
+    // no key element at all, and ends "The map uses dark, medium, and light shading to distinguish
+    // the three ratio categories."
+    // Both qualifiers were absent from the first revision and both were wrong to omit, which review
+    // round 1 of #393 filed as two separate notes. WIDER THAN ITS OBLIGATION: the page contract owes
+    // a place-to-band mapping for a shaded MAP, while the rule this paragraph joins covers "the
+    // fills of a cartogram, the hatchings of a chart" too — so a hatched chart described faithfully
+    // and enumerating nothing matched the trigger with no page-side obligation behind it, and the
+    // repair the clause asks for does not exist on that figure. AND IT REFUSED ITS OWN ANSWER: the
+    // page contract now requires the indistinguishable-bands declaration "whether or not you place a
+    // single item", so the correct answer on the hardest plates IS a key transcribed with nothing
+    // placed. The escape was carried only by the hedge paragraph above and by "neither of them is
+    // what you were sent" ten lines later, not by the sentence that names the kind — and this change
+    // is what makes that answer common, so a false `content_missing` was the expensive direction.
+    ["a key transcribed with nothing placed and no declaration is missing content",
+      /a description of a shaded MAP that transcribes the key, places nothing, and does not say the bands cannot be told apart is missing the picture — the one failure on these pages you can settle without reading any ink at all/],
+    ["with both qualifiers named as load-bearing, so neither reads as decoration",
+      /Both halves of that sentence are load-bearing: it is a map, because a map has places for its bands to sort and a hatched bar chart or a fills key on a diagram has no such list to give, and it is silence, because a page that DECLARES its bands indistinguishable has answered this rule and placing nothing is exactly what answering it looks like/],
+    ["and the non-answer is described by what it does, not by its wording",
+      /says only that the map distinguishes its categories by shading has described the key and not the map: it states that a mapping was drawn without saying what it was/],
+    ["and what a map's ink carries is stated, so the kind is not left to the trigger alone",
+      /What a map's ink carries is which places fall in which band/],
+    ["with the kind, the quote and the two answers the contract allows",
+      /Report it as "content_missing", quote the sentence standing in for the mapping, and ask for either the places under the bands' own printed wording or the declaration that the bands cannot be told apart/],
+    // #373 is the other half of this page and is deliberately not answered here: the checker
+    // supplying the state-to-category assignment was wrong a third of the time it did it, and one
+    // false assignment was obeyed into the delivered document. Asking for the mapping and supplying
+    // the mapping are one sentence apart, so the prohibition travels with the ask.
+    ["and the verifier names no place and no band of its own",
+      /Name no place and no band yourself, for the same reason the region comparison stops at calling a sorting unsupported: the assignment is the picture's, and a checker that supplies one hands the delivered page a band nobody read off the image/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
   }

@@ -59,7 +59,15 @@ the page prints no words for that half, so a description of the ink standing as
 the term of the legend IS the transcription the contract asks for and is not
 invented text: do not send it back AS INVENTED TEXT for naming a shade the page
 does not name. A count of the key's entries carried in the same description is
-the contract too, on the same terms. What the contract does not sanction is the
+the contract too, on the same terms, and so is a LIST OR TABLE of the places
+under the bands' own printed wording, wherever the fragment carries one: no
+place-to-band mapping is printed anywhere on such a page — reading it off the ink
+is the whole job — so that list is the contract's answer and not text of the
+model's own, and it is not sent back AS INVENTED TEXT for naming a band the page
+does not name beside that place. Each of these three is sanctioned as the
+TRANSCRIPTION it is, and none of them is sanctioned as CORRECT: a shade named
+wrongly, a count that does not match the swatches, a place put in a band it is
+not in are all real problems below. What the contract does not sanction is the
 tone being read off the order of the labels beside the swatch rather than off the
 swatch, which is frequently not the order the shades run in — a wrongly named
 shade is a real problem, and it is "content_wrong".
@@ -70,6 +78,25 @@ a stated uncertainty with a confident assignment you cannot see well enough to
 make. A hedge is not unfalsifiable, though: where you CAN tell the two apart,
 say so and say which is which, because an item left unclassified is a gap in the
 delivered page and a hedge nobody checks is the cheapest wrong answer available.
+And a description of a shaded MAP that transcribes the key, places nothing, and does
+not say the bands cannot be told apart is missing the picture — the one failure on
+these pages you can settle without reading any ink at all. Both halves of that
+sentence are load-bearing: it is a map, because a map has places for its bands to
+sort and a hatched bar chart or a fills key on a diagram has no such list to give,
+and it is silence, because a page that DECLARES its bands indistinguishable has
+answered this rule and placing nothing is exactly what answering it looks like. What
+a map's ink carries is which places fall in which band, so a fragment that lists the
+key's shades, names some places or none, and then says only that the map
+distinguishes its categories by shading has described the key and not the map: it
+states that a mapping was drawn without saying what it was, and no reader receives
+the mapping from that sentence. Report
+it as "content_missing", quote the sentence standing in for the mapping, and ask
+for either the places under the bands' own printed wording or the declaration that
+the bands cannot be told apart — those are the two answers the contract allows, and
+neither of them is what you were sent. Name no place and no band yourself, for the
+same reason the region comparison stops at calling a sorting unsupported: the
+assignment is the picture's, and a checker that supplies one hands the delivered
+page a band nobody read off the image.
 A count the page prints about its own picture settles more than the picture does,
 and reading it needs no ink at all: where the HTML transcribes a number for the
 size of a category — a subtitle's "eight of the twelve states", a total row, an
