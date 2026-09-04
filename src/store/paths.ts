@@ -2,7 +2,20 @@ import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { IrisConfig } from "../config.ts";
 
-// Resolves the on-disk layout (see README, "Layout").
+// Every path Iris writes, resolved in one place so nothing else joins one by hand. All but
+// `agentsDir` (which is `storage.agents_dir`, the upstream agent library) live under
+// `storage.data_dir`:
+//
+//   sessions/<id>/  input/ (the uploaded pages), fragments/ (per-page extraction, plus
+//                   final.json), history/ (each review round's document), output.html,
+//                   log.jsonl (the run log), lint.json, unresolved.md, agent-updates.md,
+//                   links.json, source-name.txt
+//   fixtures/<agent>/  and  memory/<agent>.json  — keyed by agent, shared by every session
+//   tmp/<id>/       one run's scratch. `tmp/<id>/agents/` holds agents that session BUILT,
+//                   which `loadAgent` prefers over the library for the rest of it.
+//
+// Stated here rather than pointed at README's "Layout": that section is the SOURCE tree, and
+// its one line about this one is `data/  # sessions/, tmp/, and the SQLite DB`.
 export class Paths {
   private cfg: IrisConfig;
   constructor(cfg: IrisConfig) {

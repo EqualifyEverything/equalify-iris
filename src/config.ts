@@ -146,8 +146,8 @@ export interface IrisConfig {
   defaults: {
     // Reader/editor rounds a document gets before the review loop stops and lists
     // what is left in `unresolved.md`. Read once, at first auth, to seed the
-    // account default every session inherits — a session cannot override it
-    //. Normalized by loadConfig, so it is always >= 1.
+    // account default every session inherits — a session cannot override it.
+    // Normalized by loadConfig, so it is always >= 1.
     max_review_iterations: number;
     // How many pages to extract in parallel within one run. Pages are
     // independent (one vision call each), so this is a pure speed knob; it is

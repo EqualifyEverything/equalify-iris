@@ -523,7 +523,7 @@ including why a green run that declines to file is the expected result on a youn
 GitHub is the only auth mechanism, and a GitHub token is **required** on every API call —
 there is no anonymous mode, no API key and no second SSO provider. That is a design decision, not
 a gap: your token is what files your session's feedback back to the shared agent library, under
-your own GitHub identity. Using Iris and improving it for the next person are the same act
+your own GitHub identity. Using Iris and improving it for the next person are the same act.
 If you would rather not contribute, this is not the service to run.
 
 By default the service uses a **bundled GitHub App** — you don't create or configure anything;
@@ -1645,9 +1645,8 @@ marker is written after the review loop, and the Copy Editor may have rewritten 
 these pages since. What no later round can have done is **answer the check** — nothing after
 extraction asks whether a page is faithful to its source, and the editor, which is the one step that
 does see a source image after that point (for the pages the Reader's issues name), is told to *report*
-a discrepancy it notices rather than edit from one reading of an image (`editor_fidelity_observed`,
-§7a). The rejection therefore stands
-whatever the markup became, and only a re-extraction can lift it.
+a discrepancy it notices rather than edit from one reading of an image (`editor_fidelity_observed`).
+The rejection therefore stands whatever the markup became, and only a re-extraction can lift it.
 
 ```html
 <!-- @page-uncorrected 5, 31
