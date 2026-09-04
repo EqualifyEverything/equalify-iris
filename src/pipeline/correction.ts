@@ -464,6 +464,11 @@ const shared = (a: Set<string>, b: Set<string>): number => [...a].filter((k) => 
 // The most one correction reports, so that a wholesale rewrite of a description cannot put a hundred
 // names on a log line. A relocation is a shape to go and look at, and the first few names are enough
 // to find the page.
+//
+// It bounds `alt_relocated` and `alt_added` SEPARATELY, so one line can carry twelve names (#401
+// review). Separately rather than between them because the two answer different questions about the
+// same correction, and a shared budget would let a description that moved six members hide every one
+// it added — the shape #373 was raised about — behind a cap spent on the other field.
 const RELOCATED_MAX = 6;
 
 // Members a correction moved from one enumeration into a DISJOINT one: listed with one set of names
@@ -525,6 +530,216 @@ export function altRelocations(before: string, after: string): string[] {
     }
   }
   return moved;
+}
+
+// Does this description name this member in its own words at all, list or not? The buckets cannot
+// answer it: `enumerationsIn` discards a run of fewer than `LIST_MIN` names, so a band of one and a
+// mention in running prose leave nothing behind, and "named nowhere in the description it corrected"
+// has to be a claim about the TEXT to be the claim it says it is (#401 review).
+//
+// The characters either side are checked rather than a `\b`, because a member can end in an
+// abbreviating dot — "N.D." — and a word boundary placed after one matches the wrong side of it. A
+// name that is a whole word inside a longer one ("Iowa" in "Iowa City") reads as named, which is the
+// quiet direction and the one every bound here takes.
+//
+// `fold` is which of the two questions is being asked, and the two need opposite readings because
+// being wrong costs opposite things (#401 review, third round).
+//
+//   - The ARRIVAL test asks whether the earlier description named this member, and reads case-folded
+//     keys: being too generous makes the field quieter, which is the safe side.
+//   - The DEPARTURE test asks whether the corrected description still names a member the earlier one
+//     listed, and being too generous there puts a WRONG NAME on the line — the one thing this module
+//     says it never does. So it is matched exactly, as the earlier reply wrote it, dot and capital
+//     included. A key is `shown` lowercased with its trailing dots stripped, so an abbreviation
+//     reduces to a bare token that can occur as an ordinary word: "Or." becomes "or", and a corrected
+//     description reading "the legend is unclear or faded" was answering "is Or. still named" with
+//     yes, taking the re-spelling to "Oregon" for an arrival. `Miss.` and "miss" are the same trap.
+//     Asking for "Or." refuses both, and it still finds the case round 2 was about, because a member
+//     re-banded rather than re-spelled is re-typed as it was. The capital is the half of that match
+//     which carries an abbreviation written without a dot — "Or" against the same prose — and a test
+//     pins each half on its own, since the dot alone would close the two traps above.
+function mentions(description: string, needle: string, fold: boolean): boolean {
+  const hay = fold ? description.toLowerCase() : description;
+  const find = fold ? needle.toLowerCase() : needle;
+  if (!find) return false;
+  const edge = (c: string | undefined): boolean => c === undefined || !/[a-z0-9]/i.test(c);
+  for (let at = hay.indexOf(find); at !== -1; at = hay.indexOf(find, at + 1)) {
+    if (edge(hay[at - 1]) && edge(hay[at + find.length])) return true;
+  }
+  return false;
+}
+
+// Members a correction ADDED to a category that already existed: named by the corrected
+// description, named nowhere in the description it corrected, and listed among neighbours the
+// earlier reply had already listed together (#373 directive 5).
+//
+// The same instrument as `altRelocations` pointed at the shape it deliberately skipped. #373 could
+// only see the case by recomputing it off disk by hand, and what its script printed for p084 is the
+// whole specification: `below: 4 -> 6 member(s) / + Colorado WRONG / + Illinois WRONG`. A band that
+// existed in both replies gained two states, and the correction asserted of each of them something
+// the reply it corrected did not — which on a shaded map is a classification, sourced from the model
+// rather than from the ink, delivered as the page's own description.
+//
+// Disjoint from `altRelocations` by construction rather than by a rule: a member this reports the
+// earlier description did not name, and a member that one reports it listed. So the two fields never
+// name the same member on one description, and a reader can add them. "Did not name" is a claim about
+// the earlier description's TEXT and not about its buckets, which is what makes the partition hold:
+// the buckets do not contain a band of one, and reading them alone put the one move `altRelocations`
+// declines on purpose — out of a category of one — into this field instead (#401 review).
+//
+// The destination clause carries the same weight it does for a relocation, and here it is the whole
+// of the discipline. Every correction re-emits the description entire, so new NAMES are ordinary —
+// a rewritten clause is full of them. What is not ordinary is a new name inside a list the earlier
+// reply already wrote: `DESTINATION_OVERLAP` names of that list's company were already listed
+// together, so the list is one the earlier description had, and the member is an arrival in it
+// rather than a word in a sentence that was rewritten. A wholly new list of wholly new names is a
+// category the correction invented, which is a different claim and is not this one — the sizes and
+// `structure_changed` are what report a description rebuilt.
+//
+// Three limits, all the same direction as everything else here. A name listed twice in the corrected
+// description is dropped by `enumerationsIn` and so is never reported. A description that lost ANY
+// member it no longer names reports no arrivals at all, which is the substitution guard below read at
+// its widest and the price of refusing a re-spelling. And a
+// member DROPPED from a category is not reported at all. The dropped case is the one worth stating
+// plainly, because a reader will look for it: it is a member the correction stopped asserting, and
+// the honest reason it is absent from this line is that #373's evidence is about assertions the
+// corrector makes rather than ones it withdraws, and `text_chars_before`/`text_chars_after` already
+// say a description lost prose. A category emptied entirely also stops being a list, and this
+// module has nothing to compare a missing bucket against.
+export function altAdditions(before: string, after: string): string[] {
+  const from = altValues(before);
+  const to = altValues(after);
+  // Paired by position, exactly as relocations are, and for the same reason: an image added or
+  // dropped shifts every pairing after it, and every member of every list on the far side of the
+  // shift would read as new.
+  if (from.length !== to.length) return [];
+  const added: string[] = [];
+  for (const [i, alt] of from.entries()) {
+    const wasIn = enumerationsIn(alt);
+    const nowIn = enumerationsIn(to[i]);
+    // Every key the earlier description listed ANYWHERE, taken off the buckets rather than off
+    // `memberOf`: a name listed twice is dropped from that map, and reading it as absent would
+    // report the removal of one of its two entries as an addition of the other.
+    const knew = new Set(wasIn.buckets.flatMap((b) => [...b]));
+    const knows = new Set(nowIn.buckets.flatMap((b) => [...b]));
+    // A member the correction stopped naming ANYWHERE, read across the WHOLE description rather than
+    // per band, and one is enough to report no arrivals in this description at all. It is the
+    // condition that separates an arrival from a RE-SPELLING: "N.D." and "North Dakota" are different
+    // keys, so a correction that writes a state's name out in full drops one and adds the other, and
+    // nothing in the two strings says the two are one place — the descriptions this reads abbreviate
+    // constantly ("Wis.", "Mo.", "Wyo."). Whole-description because a re-spelling can re-band in the
+    // same stroke, and a guard scoped to the band the new name landed in reads that as an arrival
+    // asserted into a band by a reply whose predecessor had already classified the place (#401
+    // review). A member that merely moved between two of this description's bands is not a loss, since
+    // the corrected description still names it — and "still names it" is read off the WORDS as well as
+    // the buckets, because `knows` is a union of buckets and `LIST_MIN` applies to it: a member re-banded
+    // into a band of ONE, or left in running prose, sits in no bucket and would read as lost, silencing
+    // every arrival in a description that never dropped anything (#401 review, second round — the first
+    // round fixed this reading on the arrival test and left it on this one).
+    //
+    // The words are matched EXACTLY here — as the earlier reply wrote the member, capital and dot
+    // included — where the arrival test folds case and reads the key. See `mentions`: the generous
+    // reading is the safe one on arrival and the dangerous one here, because a member whose
+    // abbreviation is also an ordinary English word ("Or.", "Miss.") was found in the corrected
+    // description's prose and its expansion reported as an arrival. A member listed TWICE by the
+    // earlier description has no `shown` form to match, since `enumerationsIn` drops it from
+    // `memberOf`, and reads as lost — quiet, and the same direction as everything else here.
+    //
+    // The price is stated wherever this field's limits are: a description that dropped any member
+    // reports no arrivals, so a pass that both re-spelled one state and genuinely added another is
+    // silent. That is the direction every bound in this module errs in — a name on this line sends a
+    // reader to look for a member that arrived, and a wrong one sends them looking for a member that
+    // never did. It also removes a subtler wrong name: judging the loss against the FIRST prior bucket
+    // clearing the overlap suppressed a real arrival into a second one whenever the first had lost a
+    // member, and read a loss from a band the new name never joined.
+    // The exact branch is reached only for a member in NO bucket of the corrected description —
+    // `knows` is checked first and its keys are folded — so what it costs is narrower and wider at
+    // once than "a re-spelling" (#401 review, fourth round): it bites only where a member was
+    // re-banded out of every list AND re-typed, and then for ANY re-typing, not only an expansion.
+    // "Wis." moved into a band of one and written "Wis", or "MISSOURI" written "Missouri", both read
+    // as lost and silence every arrival in that description. Either condition alone still reports —
+    // for a re-typing that leaves the KEY intact, which case and trailing dots are normalised out of.
+    // A re-typing that changes the key needs no re-banding at all: "N.D." written "North Dakota"
+    // inside the list it was already in is a loss to the guard above, which is that guard working.
+    // Silence, not a wrong name, so it is the side to err on — but a corpus counted off this field
+    // should be read knowing it, which is why both documents state it in these terms.
+    const stillNamed = (k: string): boolean => {
+      if (knows.has(k)) return true;
+      const shown = wasIn.memberOf.get(k)?.shown;
+      return shown !== undefined && mentions(to[i], shown, false);
+    };
+    if ([...knew].some((k) => !stillNamed(k))) continue;
+    for (const [key, now] of nowIn.memberOf) {
+      // Named anywhere in the earlier description, not merely absent from its buckets: `enumerationsIn`
+      // discards a run of fewer than `LIST_MIN` names, so a band of ONE and a mention in prose leave no
+      // bucket behind, and a member read off the buckets alone reads as new when the earlier reply had
+      // named it (#401 review). That shape is a move out of a category of one, which `altRelocations`
+      // declines by the same floor and for the reason `LIST_MIN` gives, and it must not arrive here
+      // instead — the two fields are a partition of the members they name, and this is what keeps them
+      // one.
+      if (knew.has(key) || mentions(alt, key, true)) continue;
+      const joined = without(nowIn.buckets[now.bucket], key);
+      // Existence only: some list the earlier description wrote is the one this member joined. Which
+      // of them it was decides nothing, because the loss test above is about the description entire.
+      if (!wasIn.buckets.some((b) => shared(b, joined) >= DESTINATION_OVERLAP)) continue;
+      added.push(now.shown);
+      if (added.length === RELOCATED_MAX) return added;
+    }
+  }
+  return added;
+}
+
+// The two markers the page agent writes INTO the body: what it could not read, and what it
+// could not finish. Both sit inside a fragment, which is the position assembly.ts deliberately
+// keeps its own @page-failed marker out of — a round that rewrites the block a marker sits in can
+// drop it, and nothing else in the pipeline would notice. `droppedHrefs` exists for the same reason
+// one file over; `contentCoverage` strips [...] before comparing words, so a marker a later pass
+// deleted costs the document nothing any gate can see, and what ships is the one outcome that rule
+// argues a reader cannot detect: a document that reads as transcribed in full.
+//
+// Named separately because one of them is asked for by name elsewhere. A surviving
+// `[page not fully transcribed]` is what the quality tally counts as a document that could not
+// have finished the review loop clean (SIGNAL_UNFINISHED_PAGE): READER_SYSTEM reports every one
+// of them every round and says settling it is nobody's job in that loop. `[not legible]` carries
+// no such guarantee — the editor is given that page's image and asked to resolve it — so the two
+// are not interchangeable and a positional `BODY_MARKERS[1]` would be the wrong way to say which is
+// meant. They live here, and not in review.ts where they were written, because both passes that
+// compare two versions of one body need them: see `markersAdded` and the re-export in review.ts.
+export const MARKER_NOT_LEGIBLE = "[not legible]";
+export const MARKER_PAGE_INCOMPLETE = "[page not fully transcribed]";
+export const BODY_MARKERS = [MARKER_NOT_LEGIBLE, MARKER_PAGE_INCOMPLETE] as const;
+
+export function markerCounts(body: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const m of BODY_MARKERS) out[m] = body.split(m).length - 1;
+  return out;
+}
+
+// Which markers the correction has more of than the page it was given (#373 directive 5, the second
+// shape it names: "appends a completeness marker").
+//
+// A correction is asked for because a page failed its fidelity check, and the cheapest way to answer
+// "content is missing" is to declare the page incomplete rather than to transcribe what is missing.
+// That answer is legitimate where it is true — the page prompt asks for the marker by name, "a
+// [page not fully transcribed] marker where you could not return all of it" — and it is
+// indistinguishable in the log from a repair: 28 characters of prose, `text_changed: true`, both
+// sizes up. Every counter downstream then reads the delivered document correctly and reports a page
+// that says it is unfinished; what nothing recorded is that the page did NOT say so until a
+// correction was bought, which is the round a reader triaging it needs.
+//
+// Names, in the order `BODY_MARKERS` gives them, matching `editor_markers_changed`'s `more` — the
+// same instrument on the other pass, and the field this generalises to the one it was missing from.
+//
+// Additions only, and the asymmetry is the pass's own. The editor is never given writing a marker as
+// an option, so both directions are anomalies there; here the corrector is handed the source image
+// and re-reading it is the job, so a marker that LEAVES is as often the repair as the harm — and
+// whether prose arrived with it is a question `text_chars_before`/`text_chars_after` on the same
+// line already answers. For an appearance there is no such number, because the marker is itself
+// prose and raises them.
+export function markersAdded(before: string, after: string): string[] {
+  const was = markerCounts(before);
+  const now = markerCounts(after);
+  return BODY_MARKERS.filter((m) => now[m] > was[m]);
 }
 
 // A figure's caption read as a claim about the same picture its description describes.
@@ -817,6 +1032,24 @@ export interface CorrectionEffect {
   // names are the whole use of it. Not one of the four ways above and not a fifth: a relocation
   // always shows up as `alt_changed` too, and what it adds is what KIND of alt change it was.
   alt_relocated?: string[];
+  // Which members a description now lists in a category it already had and did not list them in —
+  // see `altAdditions`. Absent where none were added, and disjoint from `alt_relocated`: a member
+  // named here was in no list of the description being corrected, and a member named there was.
+  alt_added?: string[];
+  // Which of the body markers the correction has more of than the page it was given — see
+  // `markersAdded`. Absent where none arrived, which is the ordinary case. Like the two above it is
+  // not a fifth flag: what it adds is that the prose was a declaration of incompleteness rather than
+  // the content itself. It is always a `text_changed` as well, or — where the marker landed in an
+  // ATTRIBUTE rather than in prose — an `alt_changed`, or an `attrs_changed` alone for any attribute
+  // that is not an `alt` (#401 review, sixth and seventh rounds; the class, not the `alt` instance,
+  // because one case short of exhaustive reads as exhaustive). `markerCounts` splits the raw
+  // fragment, so it counts a marker wherever it sits, and the page agent writing "[not legible]"
+  // into an image description is the input that reaches it; a `title` or an `aria-label` is the same
+  // shape and rarer. Pre-existing in `markerCounts`, which
+  // `editor_markers_changed` counts the same way, but worth saying here because a corpus expecting
+  // `text_changed: true` beside every line — or reaching for `text_chars_before`/`text_chars_after`
+  // to size the marker, which stay EQUAL in that case — would read the alt case wrong.
+  markers_added?: string[];
 }
 
 export function correctionEffect(before: string, after: string): CorrectionEffect {
@@ -826,6 +1059,8 @@ export function correctionEffect(before: string, after: string): CorrectionEffec
   const textBefore = visibleText(before);
   const textAfter = visibleText(after);
   const relocated = altRelocations(before, after);
+  const added = altAdditions(before, after);
+  const markers = markersAdded(before, after);
   return {
     chars_before: before.length,
     chars_after: after.length,
@@ -836,6 +1071,8 @@ export function correctionEffect(before: string, after: string): CorrectionEffec
     attrs_changed: attrText(before) !== attrText(after),
     structure_changed: tagShape(before) !== tagShape(after),
     ...(relocated.length ? { alt_relocated: relocated } : {}),
+    ...(added.length ? { alt_added: added } : {}),
+    ...(markers.length ? { markers_added: markers } : {}),
   };
 }
 

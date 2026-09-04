@@ -13,7 +13,16 @@ import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } fr
 import { wrapDocument } from "./assembly.ts";
 import { stripDeprecatedRoles, stripInvalidRoles } from "./roles.ts";
 import { stripNestedMain } from "./landmarks.ts";
-import { destroyedBody, EDITOR_SHRINK_FLOOR, structureCounts, visibleText } from "./correction.ts";
+import {
+  BODY_MARKERS,
+  destroyedBody,
+  EDITOR_SHRINK_FLOOR,
+  MARKER_NOT_LEGIBLE,
+  MARKER_PAGE_INCOMPLETE,
+  markerCounts,
+  structureCounts,
+  visibleText,
+} from "./correction.ts";
 import { runAxe, lintErrorFields, lintDebrisFields, type LintResult } from "./lint.ts";
 import { joinSections, splitSections, type Section } from "./sections.ts";
 import {
@@ -631,14 +640,13 @@ it is, because dropping the one you can see is how a section loses its title.
 
 Respond with ONLY JSON: { "html": "<corrected section>" }`;
 
-// The two markers the page agent writes INTO the body: what it could not read, and what it
-// could not finish. Both sit inside a fragment, which is the position assembly.ts deliberately
-// keeps its own @page-failed marker out of — a round that rewrites the block a marker sits in can
-// drop it, and nothing else in the pipeline would notice. `droppedHrefs`
-// exists for the same reason one file over; `contentCoverage` strips [...] before comparing
-// words, so a marker the editor deleted costs the document nothing any gate can see, and what
-// ships is the one outcome this rule argues a reader cannot detect: a document that reads as
-// transcribed in full.
+// The markers themselves live in correction.ts, beside the other comparisons between two versions
+// of one body, because #373 directive 5 needs them at the PAGE correction too — a correction that
+// answers "content is missing" by appending `[page not fully transcribed]` is a marker arriving in
+// exactly the way the paragraphs below describe, and one string constant cannot be the authority for
+// two passes from inside the module of one of them. Re-exported here rather than moved out of reach:
+// `orchestrator.ts` reads `markerCounts` off this file, and the reasoning below is about the review
+// loop and belongs where the loop is.
 //
 // Counted, not restored, and the asymmetry between the two is the reason. A [not legible] marker
 // SHOULD disappear when the editor reads that region off the attached page image — that is the
@@ -661,15 +669,7 @@ Respond with ONLY JSON: { "html": "<corrected section>" }`;
 // no such guarantee — EDITOR_SYSTEM is given that page's image and asked to resolve it — which
 // is the same asymmetry the paragraph above turns on, so the two are not interchangeable and a
 // positional `BODY_MARKERS[1]` would be the wrong way to say which is meant.
-export const MARKER_NOT_LEGIBLE = "[not legible]";
-export const MARKER_PAGE_INCOMPLETE = "[page not fully transcribed]";
-export const BODY_MARKERS = [MARKER_NOT_LEGIBLE, MARKER_PAGE_INCOMPLETE] as const;
-
-export function markerCounts(body: string): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const m of BODY_MARKERS) out[m] = body.split(m).length - 1;
-  return out;
-}
+export { BODY_MARKERS, MARKER_NOT_LEGIBLE, MARKER_PAGE_INCOMPLETE, markerCounts };
 
 const CHUNK_BUDGET = 24000;
 const CHUNK_OVERLAP = 2000;
@@ -3138,7 +3138,11 @@ export async function runReview(
       droppedLinks += dropped.length;
       ctx.log.event("editor_links_dropped", { iteration: iterations, hrefs: dropped });
     }
-    // See BODY_MARKERS: the only place a marker's arrival or disappearance is recorded.
+    // See BODY_MARKERS: the only place a marker's DISAPPEARANCE is recorded. An arrival is also
+    // recorded on the page path, by `markers_added` on `page_corrected` (#373) — additions only,
+    // because that corrector is handed the image and resolving an illegible passage is its job. The
+    // editor is handed no image, so a marker leaving its body is a claim being dropped rather than
+    // answered, and both directions belong on this line.
     const was = markerCounts(before);
     const now = markerCounts(body);
     const fewer = BODY_MARKERS.filter((m) => now[m] < was[m]);
