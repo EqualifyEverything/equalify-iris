@@ -2100,6 +2100,32 @@ test("a markup-spelled declaration the veto refuses is the failed page an empty 
   });
 });
 
+test("the same declaration sent as bare markup is `bare_html`, and only `dropped` says it was not a page", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // The other half of the shape above, and the reason `bare_html` cannot be read as "a page the
+    // parser refused" on this line (#365). This reply is not an envelope at all: `bareHtml` accepts
+    // it, so nothing about the parse went wrong, and it reaches the failure line only because what
+    // it accepted carries nothing a reader receives. Its remedy is the prompt — exactly the remedy
+    // `prose` used to point at for this input — where the OTHER `bare_html` on this line is a whole
+    // page behind a fence that never closed. The shape is identical for both, which is why the
+    // markup is on the line: `dropped` is what a triage reads, and `chars` is the whole reply.
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, { render: (o) => (o === 2 ? "<!-- blank page -->" : good(o)) }),
+    );
+    assert.deepEqual(failedPages, [2]);
+    assert.equal(of(events, "page_blank").length, 0, "nothing declared this page blank");
+    const lost = of(events, "page_no_output");
+    assert.equal(lost.length, 1);
+    assert.equal(lost[0].shape, "bare_html");
+    assert.equal(lost[0].dropped, "<!-- blank page -->");
+    assert.equal(lost[0].chars, "<!-- blank page -->".length);
+    // And the page is lost the way any unreadable reply is lost, which is what it was before this
+    // label existed: the value renames the finding, it does not route it anywhere new.
+    assert.match(fragments.find((f) => f.order === 2)!.innerHtml, /@page-failed 2:/);
+  });
+});
+
 test("a stated blank the veto refuses says on the failure line that the field was sent", async () => {
   await withTemp(async (dir) => {
     const events: Event[] = [];

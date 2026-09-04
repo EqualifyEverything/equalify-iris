@@ -503,16 +503,16 @@ test("a failure that is not a truncation has no reply to quote", async () => {
   });
 });
 
-// The four shapes a cut correction can have, as `replyShape` labels them. Written the way the
-// models write them — a leading fence, a newline, whitespace — because that is what the classifier
-// has to survive.
+// The shapes a cut correction can have, as `replyShape` labels them. Written the way the models
+// write them — a leading fence, a newline, whitespace — because that is what the classifier has to
+// survive.
 const CUT_ENVELOPE = ' ```json\n{\n  "html": "<hr role=\\"doc-pagebreak\\" aria-label=\\"Page 37\\"><table><tr><td>Ala';
 const CUT_BARE = ' ```html\n<hr role="doc-pagebreak" aria-label="Page 37" id="page-37">\n<table><tr><td>Alab';
 const CUT_PROSE =
   "I'll carefully analyze the image to fix all the named problems. Let me work through each issue: " +
   "1. **Missing Amusements and Miscellaneous columns** - need to a";
 
-test("the failure line names which of the four shapes the cut reply was", async () => {
+test("the failure line names which shape the cut reply was, across every value it can carry", async () => {
   // What a hand-count of tails was doing until now. `reply_chars` cannot do it — the same 15,000
   // characters are a large page and a short essay — and the three truncations in
   // `runs-extract100-95ca64c` are two shapes, not one: `acir-p050` spent its cap narrating and
@@ -538,9 +538,20 @@ test("the failure line names which of the four shapes the cut reply was", async 
   // round's page-shaped truncations would have carried.
   assert.ok(CUT_BARE.trim().startsWith("```html"));
   assert.equal((await shapeOf(CUT_BARE.replace(" ```html\n", ""))).shape, "bare_html");
-  // A complete envelope is the fourth, and it is reachable here: a ceiling can land after the
-  // closing brace, on a reply the model was still adding to.
+  // A complete envelope is reachable here too: a ceiling can land after the closing brace, on a
+  // reply the model was still adding to.
   assert.equal((await shapeOf(`{"html": "<p>page</p>"}`)).shape, "envelope");
+  // And an UPPER-CASE info string is the same reply, because `stripFences` treats it as one: the
+  // opener is matched case-insensitively, so a model that writes ```HTML does not have its page
+  // filed as prose. This is a label, not a page — but it is the label the value exists to give.
+  assert.equal((await shapeOf(CUT_BARE.replace("```html", "```HTML"))).shape, "bare_html");
+  assert.equal((await shapeOf(CUT_BARE.replace("```html", "```Html"))).shape, "bare_html");
+  // A reply of whitespace is `empty`, which is a fifth value this line can carry and not the same
+  // thing as the zero-character reply below: this one has a `reply_chars` above 0, so the two are
+  // distinguishable, and a reader counting shapes should expect it.
+  const blank = await shapeOf("   \n\t");
+  assert.equal(blank.shape, "empty");
+  assert.equal(blank.reply_chars, 5);
 });
 
 test("a truncation with no reply, and one that is not a truncation, carry no shape", async () => {

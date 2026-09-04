@@ -825,8 +825,8 @@ export function bareHtml(text: string): string | null {
 // failure at all, so what reaches this shape is an envelope that carried no page and did not
 // say why — the model that gave up, which is the prompt problem this field names.
 //
-// `bare_html` is the fifth value and it is the one the four could not say (#365). A model that
-// answers with the page's MARKUP instead of the envelope is a reply `bareHtml` accepts and
+// `bare_html` is the sixth value and it is the one the other five could not say (#365). A model
+// that answers with the page's MARKUP instead of the envelope is a reply `bareHtml` accepts and
 // delivers, so it is not a parser problem and not the agent answering conversationally — and
 // without this value it was labelled `prose`, whose stated remedy above is the prompt. Measured
 // on the 180 corrections of `runs-extract100-95ca64c` that logged a reply: 24 of them answer in
@@ -854,7 +854,17 @@ export function bareHtml(text: string): string | null {
 // whose tail is the model re-opening a fence and second-guessing its own table — is `bare_html`
 // here exactly like one that transcribed to the last character it had room for. That is what
 // `reply_tail` is on the log line for, and it is why nothing counts narration off this field.
-const UNCLOSED_FENCE = /^```[a-z]*[ \t]*\r?\n?/;
+//
+// On `page_no_output` it collects one more thing, and the remedy there is the opposite one: markup
+// that arrived fine and carried nothing a reader receives. A bare `<!-- blank page -->` or a lone
+// page-break marker is #219's own spelling of a blank declaration, `bareHtml` accepts it, and it
+// reaches that line through `carriesContent` rather than through the parser — so it is a prompt
+// problem wearing the label of a parser-refused page. `dropped` is on that same line and carries the
+// markup, which is what tells the two apart; nothing here can, because the shapes are identical.
+// Case-insensitive because `stripFences` above is (`/gi`), and for its reason: the info string
+// arrives both ways. A ` ```HTML ` opener left on the front fails the `<` test below and lands the
+// reply in `prose`, which is the one label this is here to stop.
+const UNCLOSED_FENCE = /^```[a-z]*[ \t]*\r?\n?/i;
 
 function replyShape(text: string, parsed: unknown): string {
   if (parsed) return "empty_html";
