@@ -2770,9 +2770,15 @@ export function parseDeclined(value: unknown): Declination[] {
     const raw = rec.problem ?? rec.number;
     const problem = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.trim()) : NaN;
     const cited = Number.isInteger(problem);
-    // Nothing said, in object form: no reason and no number either. Dropped for the same reason as
-    // `"none"` above — there is no disagreement here to record, only a key the model would not omit.
-    if (!cited && !(typeof why === "string" && why.trim())) continue;
+    // Nothing said, in object form: no number, and a reason that is either absent or one of the
+    // non-answers above. Dropped for the same reason — there is no disagreement here to record, only
+    // a key the model would not omit — and the object shape is the one the request's own example
+    // teaches, so `[{ "why": "none" }]` is likelier than the bare string it started as. A CITED
+    // problem is kept whatever its reason says, on the same terms as `{ problem: 2 }` with no reason
+    // at all: the number names something the log can attribute, and an empty `why` on the line is how
+    // a reader sees that the argument never arrived.
+    const said = typeof why === "string" && why.trim() && !NOTHING_DECLINED.test(why.trim());
+    if (!cited && !said) continue;
     out.push({
       ...(cited ? { problem } : {}),
       why: typeof why === "string" ? why.trim() : "",

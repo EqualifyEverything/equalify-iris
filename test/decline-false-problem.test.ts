@@ -149,6 +149,15 @@ test("a model that would not omit the key does not thereby decline something", (
   ]);
   // An object carrying only a key that is not a reason is the same nothing.
   assert.deepEqual(parseDeclined([{ note: "looks fine" }]), []);
+  // And the same non-answers inside the object shape, which is the likelier half: the request's own
+  // example is a list of objects, so a model that will not omit the key sends the object with the
+  // word in it rather than the bare word.
+  assert.deepEqual(parseDeclined([{ why: "none" }]), []);
+  assert.deepEqual(parseDeclined({ reason: "N/A" }), []);
+  assert.deepEqual(parseDeclined([{ why: "-" }, { because: "nothing" }]), []);
+  // A CITED problem survives whatever its reason says, on the same terms as a number with no reason
+  // at all: the number is attributable, and that is what the counts are made of.
+  assert.deepEqual(parseDeclined([{ problem: 2, why: "none" }]), [{ problem: 2, why: "none" }]);
 });
 
 test("one decline sent bare, outside a list, is read as one decline", () => {
