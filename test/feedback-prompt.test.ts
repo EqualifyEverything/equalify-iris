@@ -150,7 +150,7 @@ test("the verify task will not score a described swatch as invented, or overturn
     // false assignment was obeyed into the delivered document. Asking for the mapping and supplying
     // the mapping are one sentence apart, so the prohibition travels with the ask.
     ["and the verifier names no place and no band of its own",
-      /Name no place and no band yourself, for the same reason the region comparison stops at calling a sorting unsupported: the assignment is the picture's, and a checker that supplies one hands the delivered page a band nobody read off the image/],
+      /Name no place and no band yourself, for the reason any problem that supplies the reading is out of bounds: the assignment is the picture's, and a checker that supplies one hands the delivered page a band nobody read off the image/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
   }
@@ -351,18 +351,125 @@ test("the verify task reads a quoted log as evidence and never makes it the subj
 // with it — and deliberately pins the UNCONDITIONAL half too, because the flag is not a detector: it
 // is page-level rather than per-arm, it missed two of that round's hard pages, and a rule that only
 // bites on a flagged page would leave the same defect free to ship on the pages it missed.
+//
+// #373 directive 2: that unconditional half used to live INSIDE this paragraph, and being general in
+// wording was not enough. It sat between two sentences conditioned on "where the user message tells
+// you the page agent asked for a specialist it did not get", and on acir-p084 — where the checker
+// supplied Colorado and Illinois into a below-average list, both measurably wrong, both shipped — NO
+// arm requested a specialist. A reader taking the paragraph's opening condition as its scope reads
+// the bound as scoped too. So the general rule is now its own paragraph keyed on the SHAPE of the
+// problem, and this paragraph points at it rather than restating it: three restatements of one bound,
+// each conditioned on something, is how a rule ends up binding on none of the pages that need it.
 test("the verify task may hedge a reading it cannot support and may not replace it", () => {
   for (const [what, re] of [
     ["an unmet specialist request is read as the agent doubting its own work",
       /Where the user message tells you the page agent asked for a specialist it did not get, that is the agent saying it could not do this content reliably/],
-    ["with both halves of the narrowed licence, the permitted one and the refused one",
-      /you may say a reading is unsupported and ask for it to be hedged, scoped or removed, and you may not supply a replacement reading of your own/],
-    // The generalisation, pinned separately: without it the clause reads as being about flagged
-    // pages, and p092 and p095 turned on ink and drew no request at all.
-    ["the bound holds on every page, not only the flagged ones",
-      /That bound is not special to those pages/],
-    ["and the mechanism, so it is not read as caution for its own sake",
-      /a problem is an instruction the correction obeys literally, so asserting what a region of a picture means when you cannot support it writes your guess into the delivered document as a fact/],
+    // The narrowed licence now POINTS at the general rule instead of carrying its own copy. Pinning
+    // the pointer is the point: a restatement here is what the fix removed.
+    ["with the narrowed licence pointing at the general bound rather than restating it",
+      /your licence over what it produced for that content is narrower than usual: the bound on supplying the reading applies as it always does/],
+    ["and the reason such a page is worth naming at all",
+      /the model has already told you where its own reading is weakest, for nothing/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
+  }
+});
+
+// #373 directive 2, the hoisted rule itself. Measured: 9 supplied category assignments in 40 map
+// cells, 3 measurably wrong, 2 measurably RIGHT, 4 unmeasurable — and the 2 right ones are why the
+// bound is keyed on the shape of the problem rather than on whether the checker turned out to be
+// correct. On acir-p084 a first read named 4 below-average states and was right on all 4; the checker
+// demanded Illinois and Colorado (median 178/sd 10.5 and 169/sd 7.9, both flat base map, both ~10x
+// below the texture cut), the correction obeyed, and that six-state sentence is the delivered
+// document. The clause it violated existed and was correct — it was reachable only through a
+// condition that page did not meet.
+test("the verify task bounds a supplied reading by the shape of the problem, not the page's history", () => {
+  for (const [what, re] of [
+    ["the bound is keyed on the shape of the problem",
+      /A PROBLEM THAT SUPPLIES THE READING IS OUT OF BOUNDS, and what puts it out of bounds is the SHAPE of the problem rather than anything about the page it is written on/],
+    // The shapes enumerated, because "supplies a reading" is the abstraction the p084 problem would
+    // not have recognised itself in: it named states and a fill pattern, nothing about "readings".
+    ["with the shapes that count as supplying one enumerated",
+      /A problem that names a place, a region, a cell or a swatch and states which category, band or value it belongs in has supplied a reading of the picture/],
+    ["and what may be said instead",
+      /Say the reading is unsupported and ask for it to be hedged, scoped or re-read, and name no members of your own/],
+    ["with the mechanism, so it is not read as caution for its own sake",
+      /a problem is an instruction the correction obeys literally, so asserting what part of a picture means when you cannot support it writes your guess into the delivered document as a fact/],
+    // The 2-of-9 correct assignments are the case this sentence is for. Without it the rule reads as
+    // "do not guess", which a checker confident of its reading does not think it is doing.
+    ["and being right is not a defence, because nothing downstream can tell which was which",
+      /a reading you supplied is not made safer by being right, because neither the correction nor any pass after it can tell which of your readings were which/],
+    // The three pages the census actually turned on: p084 requested no specialist, its problems made
+    // no regional claim, and it is a choropleth whose key the read did transcribe. Every existing
+    // statement of the bound was reachable only by a door that page did not open.
+    ["it binds on the pages none of the narrower statements reach",
+      /It binds on a page that asked for no specialist, on a page whose caption makes no claim about any region, and on a page with no key to transcribe/],
+    // Named by mechanism rather than by position: a prompt cross-reference that says "above" or
+    // "below" is wrong as soon as anything moves, and this rule now has three dependents.
+    ["with the three narrower statements named as instances of it, by what they are about",
+      /the one about a key's swatches, the one about a region the caption calls highest or lowest, and the one about a page whose request for a specialist went unmet — are this same bound in the places it bites hardest, and none of them is its whole extent/],
+    // And each of the two that remain in place carries the phrase, so a grep for the rule finds every
+    // site that depends on it.
+    ["and the key clause defers to it by name",
+      /Name no place and no band yourself, for the reason any problem that supplies the reading is out of bounds/],
+    ["and the region clause does too",
+      /a problem naming the place and its band supplies the reading, and is out of bounds here for the reason it is out of bounds anywhere/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
+  }
+});
+
+// #373 directive 1, and it changed shape between the issue being filed and this fix. The issue found
+// feedback.md SILENT on the page-edge case (`git cat-file -p 883480a | grep -c 'not fully
+// transcribed|cut off|page edge'` returned 0) while the checker invented a rule requiring the marker
+// "when a page is cut off" — 3 of 3 markers added in that round went onto pages transcribed IN FULL,
+// each of whose first reply had already written the log entry page.md asks for. Since then #349's fix
+// landed: the log IS now quoted to the checker (`log: logNote` at the first verify call in
+// src/pipeline/extraction.ts), and the clause written to use it says a log saying "the page was cut"
+// is evidence the marker is owed. So the invented rule became an INSTRUCTED one, and this directive
+// stopped being an omission and became a contradiction with page.md, which is unambiguous: the marker
+// is "where you could not return all of it", while "If content is cut off at a page edge, note it in
+// the log field" — log and nothing else. The word "edge" appears nowhere in feedback.md except inside
+// "hedge", so there was no carve-out to lean on.
+test("the verify task tells the model's own shortfall from the paper's edge before demanding a marker", () => {
+  for (const [what, re] of [
+    ["the marker's trigger is the model's shortfall and never the paper's edge",
+      /THE MARKER IS FOR THE MODEL'S SHORTFALL AND NEVER FOR THE PAPER'S EDGE, and the log is what tells you which of the two you are looking at/],
+    ["with page.md's own definition of what the marker means",
+      /\[page not fully transcribed\] means the reply could not return everything the page holds/],
+    // The 3-of-3 shape, stated as the case it is: a page that ends mid-sentence because the sheet
+    // ends is COMPLETE, so there is no `content_missing` to file at all.
+    ["and the page that ends where the paper does is a page transcribed in full",
+      /A page whose last printed line runs out mid-sentence because the SHEET ends there is a page transcribed in full, and the contract puts that in the log AND NOWHERE ELSE — no marker is owed, and there is nothing absent from the document to report/],
+    // The exact artefact all three exhibits produced: the first reply HAD written the prescribed log
+    // entry, and the checker read that entry as the evidence a marker was missing.
+    ["with the discharged-log case named, because that log entry is what the checker read as evidence",
+      /a log noting that the page ends mid-sentence and carries on onto the next sheet is a rule already discharged, exactly like the log-only records above, and asking for the marker on top of it asks the page to say something that is not true/],
+    ["and silence is the answer where the log does not say the shortfall was the model's",
+      /where it describes the paper's edge, or describes neither, report none: nothing in the page's contract asks for a marker because a page ended where the paper did/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
+  }
+});
+
+// #373 directive 6 asked whether to forbid the marker request OUTRIGHT, on the grounds that the
+// checker "cannot tell the two cases apart without the log field, and #349 found the log is withheld
+// from it on every page". That premise no longer holds — the log reaches the first verify call — so
+// the narrower prohibition above is what shipped instead of a blanket ban, and this pins the
+// asymmetry that makes it a prohibition rather than a caution. Verified in code, not taken from the
+// issue: src/pipeline/review.ts says a surviving marker "is what the quality tally counts as a
+// document that could not have finished the review loop clean (SIGNAL_UNFINISHED_PAGE): READER_SYSTEM
+// reports every one of them every round and says settling it is nobody's job in this loop."
+test("the verify task is given the asymmetry that makes a false marker unrecoverable", () => {
+  for (const [what, re] of [
+    ["the asymmetry is why the bound is a prohibition rather than a caution",
+      /The asymmetry is why that is a prohibition rather than a caution/],
+    ["with what a wrongly requested marker costs, in the loop's own terms",
+      /A marker this pass wrongly asks for cannot be taken back out by anything downstream — the review loop raises one every round and settling it is nobody's job there/],
+    ["and what it reaches a reader as",
+      /it reaches a reader as the source being unreadable when no pass that saw the source said so/],
+    ["against what the other direction costs",
+      /A marker you wrongly leave alone costs a log line/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
   }
