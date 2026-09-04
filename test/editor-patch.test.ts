@@ -917,7 +917,11 @@ test("a block that gave its words to another block is not re-seated, because tha
   assert.ok(!("headings_gained" in (patch?.data ?? {})), "nothing arrived as a heading, which is why the other guard is blind to this");
   assert.ok(!("headings_reverted" in (patch?.data ?? {})), "and the block that dropped it is the block that emptied, so it is not handed back");
   assert.equal(patch?.data.discarded, "headings_lost", "leaving nothing to seat, which is refused whole");
-  assert.deepEqual(patch?.data.headings_dropped, [1], "and the line says WHICH block fell and could not be handed back");
+  assert.deepEqual(patch?.data.headings_dropped, [1], "and the line says WHICH block fell");
+  assert.ok(
+    !("headings_abandoned" in (patch?.data ?? {})),
+    "with nothing salvageable, so the two readings are the same list and the field is absent",
+  );
   assert.equal(result.body, SIBLING, "the document that entered — not one carrying `Name` twice");
   assert.equal((result.body.match(/Name/g) ?? []).length, 1, "once, in one place");
   assert.equal(result.editorHeadingsGated, true);
@@ -1026,7 +1030,11 @@ test("the revert cannot take the re-applied body under the prose floor and ship 
   const patch = events.find((e) => e.type === "editor_patch");
   assert.deepEqual(patch?.data.navigation_lost, { headings: 2 }, "the reply as sent lost two");
   assert.equal(patch?.data.discarded, "headings_lost", "and the round is refused rather than part-delivered");
-  assert.deepEqual(patch?.data.headings_dropped, [1, 2]);
+  assert.deepEqual(patch?.data.headings_dropped, [1, 2], "both blocks whose own count fell, which is what the model did");
+  // And which of them the refusal actually cost, because they are not the same list here: block 2's
+  // revert was computed and then given up with the round. Reading `headings_dropped` as "could not be
+  // handed back" would name block 2 as a migration it is not (review round 3 of #383).
+  assert.deepEqual(patch?.data.headings_abandoned, [2], "block 2 could have gone back and was refused anyway");
   assert.ok(!("headings_recheck" in (patch?.data ?? {})), "block 1 accounts for the surviving fall");
   assert.equal(result.body, FLOOR, "the document that entered, with every heading it entered with");
   assert.equal((result.body.match(/<h[1-6][ >]/g) ?? []).length, 3, "h1, h2 and h3 all still there");
@@ -1059,6 +1067,11 @@ test("a reply that demotes in two places, one of them a migration, is the migrat
   assert.equal(patch?.data.discarded, "headings_lost", "and the round is refused, which is unchanged");
   assert.equal(result.body, MIXED, "the document that entered");
   assert.deepEqual(patch?.data.headings_dropped, [1, 3], "both blocks that fell are named");
+  assert.deepEqual(
+    patch?.data.headings_abandoned,
+    [3],
+    "and block 3, the salvage this round threw away, is named apart from block 1, which could not go back",
+  );
   assert.ok(
     !("headings_recheck" in (patch?.data ?? {})),
     "NOT the re-check marker: block 1's fall is accounted for, so nothing here says the reading is wrong");

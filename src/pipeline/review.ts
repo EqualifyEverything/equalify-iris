@@ -1792,6 +1792,10 @@ function applyEditorPatch(
   // every round that did not reach the salvage, so nothing below this needs to know whether it ran.
   let shipped = patched;
   let reverted: number[] = [];
+  // The blocks whose re-seat was computed and then given up with the round. Empty on every route but
+  // the one where part of the reply was salvageable and the rest was not, which is the only place the
+  // difference between "this block could not be handed back" and "this block dropped a heading" exists.
+  let abandoned: number[] = [];
   let unattributable: "reorder" | "migrated" | "recheck" | null = null;
   if (headingsLost > 0 && !roundRefused) {
     // Only a block that DID NOT GIVE ITS CONTENT TO ANOTHER EDIT can be re-seated. `content_landed` is
@@ -1854,6 +1858,7 @@ function applyEditorPatch(
       // file calls the commonest form of the hazard — ordinary output, and not evidence of anything.
       if (kept.headings_dropped.length > 0) {
         unattributable = "migrated";
+        abandoned = reverted;
         reverted = [];
       } else if ((kept.navigation_lost.headings ?? 0) > 0) {
         // A joined fall with NO per-block fall behind it. Unreachable by construction, not merely by
@@ -1863,6 +1868,7 @@ function applyEditorPatch(
         // to be legible when it fires — and a marker an ordinary mixed reply can trip is not that
         // marker, which is what this was until it became two branches (#376).
         unattributable = "recheck";
+        abandoned = reverted;
         reverted = [];
       } else {
         shipped = kept;
@@ -1935,8 +1941,16 @@ function applyEditorPatch(
     //   - `headings_dropped` — no heading arrived, but a block that dropped one gave content to another
     //     edit in the same reply, so re-seating it would print those words twice: either every dropping
     //     block did, leaving nothing seatable, or the seatable ones were handed back and the fall the
-    //     others explain survived it. These are the blocks that fell and could not be handed back, which
-    //     is the one thing a reader of this line needs and cannot get from anywhere else.
+    //     others explain survived it. EVERY block whose own count fell, which is the reading of the
+    //     model's behaviour — not the subset that could not be handed back, which is the next field. On
+    //     the first route they are the same list and on the second they are not (found in review of
+    //     #376, where this comment claimed the narrower thing and logged the wider one).
+    //   - `headings_abandoned` beside it — the blocks that COULD have been handed back and were refused
+    //     with the round anyway, because the fall of the ones that could not would have outlived their
+    //     revert. Absent where nothing was salvageable, so it is present exactly on the mixed reply, and
+    //     that is the rate the deferred question needs: how often refusing the round throws away a safe
+    //     salvage. Subtracting it from `headings_dropped` leaves the blocks that could not be handed
+    //     back, which is what makes both readings available from one line.
     //   - `headings_recheck` beside `headings_dropped` — a fall survived the revert that NO block still
     //     dropping a heading explains. Its own marker because the counts on the line are otherwise
     //     identical to the case above (#376), and this one is unreachable by argument: if it ever fires,
@@ -1952,6 +1966,7 @@ function applyEditorPatch(
     ...(unattributable === "migrated" || unattributable === "recheck"
       ? { headings_dropped: patched.headings_dropped }
       : {}),
+    ...(abandoned.length ? { headings_abandoned: abandoned } : {}),
     ...(unattributable === "recheck" ? { headings_recheck: true } : {}),
     ...(discarded ? { discarded } : {}),
   });
