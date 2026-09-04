@@ -1832,25 +1832,37 @@ function applyEditorPatch(
       // the time there is a body to undo it in, and `joinSections` is the only thing that knows how a
       // block was seated.
       const kept = applyBlockEdits(blocks, edits.filter((x) => !reverted.includes(x.block)));
-      if ((kept.navigation_lost.headings ?? 0) > 0) {
-        // A fall that survived the revert is the one outcome this must never ship, so the round is
-        // refused whole either way. But it is two different findings, and only one of them says the
-        // reading is wrong.
-        //
-        // ONLY THE SEATABLE EDITS WERE DROPPED, so a block that dropped a heading AND gave its content
-        // away still has its edit, and its fall is still in the re-applied body. That is a reply that
-        // demoted in two places, one of them the `<label>` migration this file calls the commonest form
-        // of the hazard — ordinary output, and the migrated case at a mixed grain: same cause, same
-        // answer, so it is logged as `migrated` and not as a re-check. `kept.headings_dropped` is
-        // exactly that set — every block still dropping one is a block deliberately not handed back,
-        // because a reverted block has no edit left to drop anything with.
-        //
-        // With no per-block fall behind it, the fall is one the arithmetic above says cannot happen with
-        // `headings_gained === 0`, and then the reading is wrong about something. Named apart on the log
-        // line (`headings_recheck`) for that case alone, because a branch unreachable by argument is
-        // exactly the one whose firing has to be legible — and a marker an ordinary mixed reply can
-        // trip is not that marker, which is what it was until this became two branches (#376).
-        unattributable = kept.headings_dropped.length > 0 ? "migrated" : "recheck";
+      // A fall that survived the revert is the one outcome this must never ship, and the two ways of
+      // asking are not equivalent — so the PER-BLOCK question is asked first, and it is the one the
+      // guarantee rests on.
+      //
+      // ONLY THE SEATABLE EDITS WERE DROPPED, so a block that dropped a heading AND gave its content away
+      // still has its edit, and its fall is still in the re-applied body. `kept.headings_dropped` is
+      // exactly that set — a reverted block has no edit left to drop anything with — and it does not
+      // depend on what the reply did to the prose. The joined reading does: `navigationLost` is silent
+      // wherever the body it reads is shorter, and REVERTING IS A WAY TO GET UNDER THAT FLOOR. One block
+      // holds a demotion and sheds a redundant sentence, another demotes and adds more prose than the
+      // first shed; the second is seatable, and handing it back takes the re-applied body below the body
+      // that came in, so the joined reading reports nothing and the first block's demotion would ship.
+      // The revert is the pipeline's own edit, so this is the guard's own remedy defeating its own check
+      // — asking `kept.navigation_lost` alone shipped a document one heading short of the one it was
+      // given (found in review of #376, and it is a round `content_moved` refused).
+      //
+      // Logged as `migrated`, because it IS that case reached from the other side: a block whose content
+      // landed elsewhere cannot be handed back and its fall cannot be delivered, so the round goes back
+      // whole. That covers the reply that demoted in two places, one of them the `<label>` migration this
+      // file calls the commonest form of the hazard — ordinary output, and not evidence of anything.
+      if (kept.headings_dropped.length > 0) {
+        unattributable = "migrated";
+        reverted = [];
+      } else if ((kept.navigation_lost.headings ?? 0) > 0) {
+        // A joined fall with NO per-block fall behind it. Unreachable by construction, not merely by
+        // argument: the joined count is the sum of the blocks' own counts, so a document that lost a
+        // heading has a block that lost one, and the branch above has it. Kept, and named apart on the
+        // log line (`headings_recheck`), because a check whose firing would mean the reading is wrong has
+        // to be legible when it fires — and a marker an ordinary mixed reply can trip is not that
+        // marker, which is what this was until it became two branches (#376).
+        unattributable = "recheck";
         reverted = [];
       } else {
         shipped = kept;

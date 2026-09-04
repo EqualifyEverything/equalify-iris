@@ -231,9 +231,13 @@ function contentLanded(block: Traffic, others: Traffic[]): boolean {
 // WHAT THE LOOSENESS COSTS IS THE ROUND, not the block, and that is the direction to keep in mind when
 // widening the grain further. An over-matched block — one that shed a redundant sentence while some
 // unrelated edit in the same reply happened to add one of its words (`page`, `see`, `the`) — is HELD,
-// so it keeps its edit; the fall it made is still in the re-applied body, and `applyEditorPatch`
-// refuses a round whose fall survives the revert. Whether it was the only block that dropped a heading
-// makes no difference to that, only to which reason the log gives.
+// so it keeps its edit, so `headings_dropped` still NAMES it in the re-applied report, and
+// `applyEditorPatch` refuses on that rather than on the joined reading. Whether it was the only block
+// that dropped a heading makes no difference to that, only to which reason the log gives.
+//
+// Which of the two readings refuses it is not a detail: the joined one is silenced wherever the body it
+// reads is shorter in prose, and the revert itself can get under that floor, so a round whose fall was
+// visible before the revert can be invisible after it. See `applyEditorPatch`.
 function wordsGivenUp(before: string, after: string): Map<string, number> {
   const gone = wordCounts(before);
   for (const [word, n] of wordCounts(after)) {

@@ -996,6 +996,42 @@ test("a block that demoted a heading and corrected its own words is handed back,
   assert.equal(result.editorHeadingsGated, true, "the guard fired, and says so, on a round it did not refuse");
 });
 
+test("the revert cannot take the re-applied body under the prose floor and ship a held block's demotion", async () => {
+  // Found in review round 2 of #383 and it was a REGRESSION, not the latent case it was filed as: this
+  // reply is refused on `main` and was delivered here, one heading short of the document that entered.
+  //
+  // The route is the guard's own remedy defeating its own check. `navigationLost` is silent wherever the
+  // body it reads is shorter in prose than the body that went in, and REVERTING AN EDIT THAT ADDED PROSE
+  // is a way under that floor:
+  //
+  //   - block 1 demotes a heading and sheds a duplicated sentence, and block 2's edit happens to take the
+  //     words it shed, so block 1 is `content_landed` and is held — it keeps its edit;
+  //   - block 2 demotes a heading and adds MORE prose than block 1 shed, so the fully patched body is not
+  //     shorter and the fall is read (48 -> 95 characters of prose);
+  //   - block 2 is the only seatable block, so it is handed back, and the re-applied body is the input
+  //     minus block 1's sentence: 36 against 48, under the floor, `navigation_lost` empty.
+  //
+  // So the joined reading cannot be the whole test. `kept.headings_dropped` is asked first and does not
+  // depend on the prose: block 1 still has its edit, so its fall is still named.
+  const FLOOR =
+    `<h1>Doc</h1>\n` +
+    `<div><h2>Fees</h2><p>Fees apply. Fees apply.</p></div>\n` +
+    `<div><h3>Notes</h3><p>See page.</p></div>\n`;
+  const { result, events } = await round(() => ({
+    edits: [
+      { block: 1, html: `<div><p><strong>Fees</strong></p><p>Fees apply.</p></div>` },
+      { block: 2, html: `<div><p><strong>Notes</strong></p><p>See page. Fees apply here as well, and then some more prose besides.</p></div>` },
+    ],
+  }), FLOOR, 1);
+  const patch = events.find((e) => e.type === "editor_patch");
+  assert.deepEqual(patch?.data.navigation_lost, { headings: 2 }, "the reply as sent lost two");
+  assert.equal(patch?.data.discarded, "headings_lost", "and the round is refused rather than part-delivered");
+  assert.deepEqual(patch?.data.headings_dropped, [1, 2]);
+  assert.ok(!("headings_recheck" in (patch?.data ?? {})), "block 1 accounts for the surviving fall");
+  assert.equal(result.body, FLOOR, "the document that entered, with every heading it entered with");
+  assert.equal((result.body.match(/<h[1-6][ >]/g) ?? []).length, 3, "h1, h2 and h3 all still there");
+});
+
 test("a reply that demotes in two places, one of them a migration, is the migrated case and not a re-check", async () => {
   // Found by the review of #383, reproduced before it was believed. Only the SEATABLE blocks are handed
   // back, so a block that dropped a heading and gave its content away keeps its edit — and keeps its
