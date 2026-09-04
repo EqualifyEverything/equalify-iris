@@ -248,12 +248,34 @@ test("the round says how it was read, so a slow one can be diagnosed", async () 
   assert.deepEqual(starts[0].data, { iteration: 0, chunks: 3, concurrency: 2 });
 });
 
-// The same body, against a router whose chunk 0 fails however it likes. Returns how many
-// reader calls were paid for and what the round rejected with.
-async function failingRound(throwValue: unknown): Promise<{ calls: number; rejected: unknown }> {
+// The same body, against a router whose chunk 0 fails however it likes. Returns which chunks were
+// sent — the ones the round paid for — and what it rejected with.
+//
+// NOTHING HERE IS TIMED, and that is the point of how it is written (issue #386). The property under
+// test is an ORDERING — no chunk sends after a failure has been recorded — and the first version
+// staged that ordering with `sleep(1)` for chunk 0 against `sleep(30)` for the rest. Under a loaded
+// full-suite run a 1ms timer arrives late often enough that a worker pulled chunk 2 before the
+// failure landed, and the test failed 2 runs in 6 on unmodified `main` while passing 3 for 3 on its
+// own. Widening the count to 3 would have deleted what it checks, since 3 is the first thing the
+// guard prevents.
+//
+// So the ordering is made explicit instead. Chunk 0 fails with no await at all, every other chunk
+// is held on a promise this function resolves, and it resolves it only once the round has already
+// rejected — which cannot happen before the guard is armed, because the worker that catches the
+// failure sets the flag on the line before it rethrows, and `Promise.all` rejects on that rethrow.
+// A machine under load cannot reorder any of that: there is no timer in it.
+async function failingRound(throwValue: unknown): Promise<{ sent: number[]; rejected: unknown }> {
   const dir = mkdtempSync(join(tmpdir(), "iris-review-fail-"));
   try {
-    let calls = 0;
+    const sent: number[] = [];
+    let windows = -1;
+    // Resolved after the round has rejected, so a chunk released by it is a chunk the guard has
+    // already had its chance to stop. Held rather than slow: a chunk that merely takes longer than
+    // chunk 0 is a bet on two timers, which is the defect being fixed.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const ctx = {
       sessionId: "ses_test",
       images: [],
@@ -268,14 +290,21 @@ async function failingRound(throwValue: unknown): Promise<{ calls: number; rejec
       router: {
         complete: async (agent: string, _cap: string, messages: { content: string }[]) => {
           if (agent !== "reader") return { text: JSON.stringify({ html: "" }) };
-          calls++;
           const which = chunkOf(messages.map((m) => m.content).join("\n"));
-          await sleep(which === 0 ? 1 : 30);
+          sent.push(which);
+          // Synchronously, before any await, so `complete` hands back a promise that is already
+          // rejected. Every worker but this one is then suspended on `held` and cannot advance.
           if (which === 0) throw throwValue;
+          await held;
           return { text: JSON.stringify({ issues: [] }) };
         },
       },
-      log: { event: () => {}, agentCall: () => {} },
+      log: {
+        event: (type: string, data: Record<string, unknown>) => {
+          if (type === "reader_start") windows = data.chunks as number;
+        },
+        agentCall: () => {},
+      },
     } as unknown as PipelineContext;
 
     let rejected: unknown = "did not reject";
@@ -284,7 +313,20 @@ async function failingRound(throwValue: unknown): Promise<{ calls: number; rejec
     } catch (e) {
       rejected = e;
     }
-    return { calls, rejected };
+    // The premise both tests below rest on, asserted rather than assumed: `sent` of `[0, 1]` only
+    // says the guard fired if there were chunks BEHIND those two for it to stop. Should
+    // CHUNK_BUDGET or STRIDE ever move so that this body is two windows, `[0, 1]` is what a deleted
+    // guard produces as well and the pair would pass saying nothing. Read off `reader_start` rather
+    // than recounted here, so it is the number the round actually used.
+    assert.equal(windows, 5, "the body must span 5 windows for a guard that stops 3 of them to be visible");
+    // The guard is armed by now, so let the held chunks go and let their workers pull whatever they
+    // are going to pull. One turn of the event loop drains all of it: nothing left in that chain
+    // waits on a timer or on I/O, and the microtask queue runs to empty before a timer callback
+    // does, whatever else the machine is doing. Without this the workers would still be suspended
+    // when `sent` was read, and the test would pass with the guard deleted.
+    release();
+    await sleep(0);
+    return { sent, rejected };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -296,7 +338,7 @@ test("a chunk that fails without an error to show for it still stops the round",
   // chunk that failed, and a guard read off the error would be disarmed on exactly that
   // call — every queued chunk then paying in full.
   const run = await failingRound(undefined);
-  assert.ok(run.calls <= 2, `a nullish failure must arm the guard too, got ${run.calls} calls`);
+  assert.deepEqual(run.sent, [0, 1], "a nullish failure must arm the guard too");
   assert.equal(run.rejected, undefined, "and the round still rejects with what was thrown");
 });
 
@@ -307,7 +349,10 @@ test("a chunk that fails stops the round paying for the chunks behind it", async
   // result is already discarded.
   const boom = new Error("provider said no");
   const run = await failingRound(boom);
-  assert.ok(run.calls <= 2, `only the calls already in flight should have been paid for, got ${run.calls}`);
+  // The chunks rather than a count of them, which pins the property in both directions: only the
+  // two already in flight were paid for, AND both of them were, so a guard that stopped sending
+  // altogether — or one that never let the round overlap in the first place — fails here too.
+  assert.deepEqual(run.sent, [0, 1], "only the calls already in flight should have been paid for");
   // The error the round rejects with is the one that actually happened, not a stand-in
   // raised by a chunk that read the flag.
   assert.equal(run.rejected, boom);
