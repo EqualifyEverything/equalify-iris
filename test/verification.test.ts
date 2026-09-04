@@ -7,9 +7,10 @@
 // change no verdict and no delivered document, which is itself asserted below.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { changedAnything, correctionEffect, destroyedPage } from "../src/pipeline/correction.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
 import { summarizeRun } from "../src/diagnostics.ts";
@@ -491,6 +492,15 @@ interface Behaviour {
   // The correction call's own user message, for a test whose subject is what that prompt says
   // rather than what the page came back as.
   onCorrection?: (user: string) => void;
+  // What the correction puts in `declined` beside its `html`, per page order: the problems it says
+  // the HTML itself refutes (#373 directive 4). `unknown[]` rather than `Declination[]` because the
+  // shapes worth testing include the ones the contract does not ask for — a bare string, a missing
+  // number — and those have to reach the parser as the model would send them.
+  declines?: (order: number) => unknown[];
+  // The SYSTEM message of each PAGE-agent call — the render and the correction both send one, and
+  // whether they are the same string is what decides the correction's input price (#373 directive
+  // 4). Verify runs on a different agent with a different prefix and is not recorded here.
+  onPageSystem?: (system: string) => void;
 }
 
 function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 2): PipelineContext {
@@ -544,11 +554,15 @@ function makeCtx(dir: string, events: Event[], b: Behaviour, pages = 2): Pipelin
             }),
           };
         }
+        const system = messages.find((m) => m.role === "system")?.content ?? "";
         if (user.includes("had fidelity/accessibility problems")) {
           b.onCorrection?.(user);
+          b.onPageSystem?.(system);
           if (b.correctionThrows) throw b.correctionThrows();
-          return { text: JSON.stringify({ html: b.corrected(order) }) };
+          const declined = b.declines?.(order);
+          return { text: JSON.stringify({ html: b.corrected(order), ...(declined ? { declined } : {}) }) };
         }
+        b.onPageSystem?.(system);
         return { text: JSON.stringify({ html: b.html(order), log: "" }) };
       },
     },
@@ -697,9 +711,11 @@ test("the correction prompt names the problems and bounds what else may change",
 
     assert.equal(prompts.length, 1, "one page failed its check, so one correction prompt");
     const user = prompts[0].replace(/\s+/g, " ");
-    // What it is asked to fix, and the page it is fixing — unchanged, and pinned here because
-    // the scope clause below is meaningless without them.
-    assert.match(user, /- the heading level is wrong/);
+    // What it is asked to fix, and the page it is fixing — pinned here because the scope clause
+    // below is meaningless without them. NUMBERED since #373 directive 4, and the number is not
+    // cosmetic: it is what a decline cites, so a bullet here would leave the reply nothing to name
+    // and the log matching a paraphrase back against the list.
+    assert.match(user, /1\. the heading level is wrong/);
     assert.match(user, /## Your previous output/);
     assert.match(user, /return a corrected version that resolves every problem/);
     // And the bound. Enumerated rather than left as "nothing else": #132's regression was four
@@ -709,6 +725,56 @@ test("the correction prompt names the problems and bounds what else may change",
       user,
       /Change nothing the list above does not name: every heading, table, list, label and attribute that is not part of a problem is carried over exactly as it stands\./,
     );
+    // And the licence to decline a false problem, with its limit and its destination (#373
+    // directive 4). Three claims asserted separately, because the whole risk of this feature is in
+    // which of them a re-worded prompt would drop first.
+    //
+    // The licence itself.
+    assert.match(user, /You are not required to act on a claim you can show is false/);
+    // Its limit, which is what keeps it from being a general refusal: the test is inside the HTML,
+    // and a judgement about the picture is explicitly not covered. A prompt that lost these
+    // sentences would be the failure #373 states against its own directive 4.
+    assert.match(user, /the test is entirely inside the text above/);
+    assert.match(user, /A problem about what the IMAGE shows is not this case/);
+    assert.match(user, /A problem you cannot settle inside the HTML is a problem to fix/);
+    assert.match(user, /declining is not the shorter answer/);
+    // And the destination. An instruction to say which problem and why, with nowhere to say it,
+    // puts a sentence about the checker into the document.
+    assert.match(user, /add "declined" to the JSON/);
+    assert.match(user, /"problem": <the number from the list above>/);
+    assert.match(user, /Return the page in "html" either way/);
+  });
+});
+
+test("the licence to decline rides in the request, not in the prefix both calls share", async () => {
+  // Where `declined` is introduced is a cost decision, and this pins both halves of it (#373
+  // directive 4). The page contract is the system message, and the correction sends it back
+  // byte-for-byte so its input is the cache the first pass already paid for. A `declined` key added
+  // THERE would reprice every page render in the run to give one call a channel — and it would
+  // offer the licence to a first pass that has no problem list to decline anything from.
+  //
+  // Half one, against the shipped file rather than the stub the harness writes: the contract says
+  // nothing about declining.
+  const contract = readFileSync(join(fileURLToPath(new URL("..", import.meta.url)), "agents/page.md"), "utf8");
+  assert.doesNotMatch(contract, /declined/i, "the page contract says nothing about declining");
+  assert.doesNotMatch(contract, /not required to act on a claim/);
+  // Half two, through the pipeline: the render and the correction send the same prefix. That is
+  // what a `declined` line appended to the correction's system message alone would break, and it
+  // would break it silently — the run would still work, at a cache miss per corrected page.
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const systems: string[] = [];
+    await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<p>Page</p>`,
+        problems: (o) => (o === 1 ? ["a column of the table was dropped"] : []),
+        corrected: () => `<p>Page, corrected</p>`,
+        onPageSystem: (system) => systems.push(system),
+      }),
+    );
+    assert.ok(systems.length >= 3, `two renders and a correction, saw ${systems.length}`);
+    assert.equal(new Set(systems).size, 1, "one prefix across the first pass and the correction");
+    assert.doesNotMatch(systems[0], /declined/);
   });
 });
 

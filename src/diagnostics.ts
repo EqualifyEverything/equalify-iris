@@ -350,6 +350,31 @@ export interface Diagnostics {
     // deployed today, so a non-zero is either a page agent that has started writing placeholders
     // or reusing ids, or a regression in one of the rules. Neither is a cost line at that rate.
     triggers: { verify: number; links: number; alt: number; ids: number; both: number };
+    // What the corrector said it would NOT do, and why that is a number worth publishing rather
+    // than a log line worth grepping (#373 directive 4). Before it, the corrector's only legal move
+    // was compliance: a checker's claim that a page's ids are duplicated when they are not is
+    // answered by editing a page that was right, and the whole event is invisible from inside the
+    // run — #373 could only find it by re-reading raw replies off disk. The licence is narrow (a
+    // claim about the HTML the corrector was shown, refuted by that HTML) and it gates nothing, so
+    // these counts are the only trace it leaves.
+    //
+    // Two rates, and both denominators are on this object because neither count can be read alone:
+    // `pages` against `corrections`, and `problems` against `problems_offered` — the whole bill
+    // every correction was given, summed from the same `page_corrected` lines. 2 declined of 2 is a
+    // correction refused outright; 2 of 40 is the pass doing what it was built for.
+    //
+    // `code_checked` is the misuse, and it is the field to watch rather than the total: a declined
+    // `links`, `alt` or `ids` problem is a refusal of something Iris checked against the source file
+    // or the parsed fragment, so it is wrong by construction, where a declined `verify` problem is a
+    // disagreement with a reading and may well be right. A run with a non-zero here has a corrector
+    // reading the licence wider than it is written, which is the failure #373 warns about in
+    // advance — and it is countable now rather than arguable later.
+    //
+    // `unattributed` is a decline that cited no problem number, or cited one the request never
+    // listed. Kept apart from both: it is not evidence about a code-checked fact, and it is not
+    // nothing either — it is a disagreement whose subject cannot be recovered, which is a fact about
+    // the reply's shape and the first thing to look at if `problems` is large and unreadable.
+    declined: { pages: number; problems: number; problems_offered: number; code_checked: number; unattributed: number };
     // What the corrections that DID change something changed, as observed on the two
     // fragments rather than claimed by the verdict (pipeline/correction.ts). Not a
     // partition: a re-render that rebuilds a table counts under both `text` and
@@ -1037,6 +1062,7 @@ export function summarizeRun(
     corrections: 0,
     results: { kept: 0, rejected: 0, identical: 0, empty: 0, failed: 0 },
     triggers: { verify: 0, links: 0, alt: 0, ids: 0, both: 0 },
+    declined: { pages: 0, problems: 0, problems_offered: 0, code_checked: 0, unattributed: 0 },
     effects: { alt_only: 0, text: 0, attrs: 0, structure: 0, text_grew: 0, text_shrank: 0 },
     rechecks: {
       sampled: 0,
@@ -1145,6 +1171,12 @@ export function summarizeRun(
       }
     } else if (e.type === "page_corrected") {
       verification.corrections += 1;
+      // The denominator for `declined.problems`, taken from this line rather than from the decline
+      // event: every correction writes a `page_corrected`, including the ones that answered with
+      // nothing, so summing here counts the problems the pass was given and not only the problems on
+      // the pages that disagreed. Reading the rate off the declining pages' own bills would divide by
+      // a subset chosen by the numerator.
+      if (typeof e.problems === "number" && e.problems > 0) verification.declined.problems_offered += e.problems;
       // Matched against a fixed list rather than tested with `in`, which answers true
       // for anything on Object.prototype: a log line reading `result: "constructor"`
       // would otherwise be added to a function and turn a count into NaN. The same trap
@@ -1177,6 +1209,30 @@ export function summarizeRun(
         e.structure_changed !== true
       ) {
         verification.effects.alt_only += 1;
+      }
+    } else if (e.type === "page_correction_declined") {
+      // One line per page whose correction refused something, so `pages` counts the line and the
+      // three others count its entries (#373 directive 4).
+      //
+      // `pages` is incremented on the line's EXISTENCE and not on a readable `declined` array: the
+      // event is written only where the reply declined something, so a line whose array cannot be
+      // read is still a page that disagreed, and skipping it would report the run as compliant
+      // because the disagreement arrived malformed. The entries are then counted only where they are
+      // objects, which is the same split `page_verify_failed`'s kinds make.
+      verification.declined.pages += 1;
+      const entries = Array.isArray(e.declined) ? e.declined : [];
+      for (const entry of entries) {
+        if (typeof entry !== "object" || entry === null) continue;
+        const source = (entry as { source?: unknown }).source;
+        verification.declined.problems += 1;
+        // `verify` is the one source the licence covers. The other three were checked in code, so a
+        // decline naming one of them is wrong by construction — matched against the same closed list
+        // the triggers use, minus `both`, which is a property of a correction and never of a single
+        // problem. A `source` this code does not know lands in neither bucket rather than in
+        // `code_checked`: manufacturing the evidence that the licence is being misused is worse than
+        // a total that is visibly short.
+        if (source === "links" || source === "alt" || source === "ids") verification.declined.code_checked += 1;
+        else if (source === null || source === undefined) verification.declined.unattributed += 1;
       }
     } else if (e.type === "page_correction_recheck") {
       // Split on the flag the event already carries. A line whose `binding` is neither
