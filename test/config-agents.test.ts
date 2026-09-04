@@ -682,6 +682,50 @@ test("the measurement docs' bold runs close in the block that opens them", () =>
   }
 });
 
+// A GFM table ends at a blank line or at the start of another block-level structure. A plain paragraph
+// line is NEITHER, so a paragraph placed directly under a table is swallowed as table rows — one row
+// per wrapped line, each cell announced under the table's own column headers, with any `**` run split
+// across two rows and rendering as literal asterisks.
+//
+// This is here because it happened, and because every other gate was green while it was broken. Round 1
+// of PR #396 had me mutate docs/cost.md to prove a new assertion could fail; reverting the mutation ate
+// the blank line between the price-sheet table and the sentence under it, and tsc, 1511 tests and e2e all
+// passed with that document's summary paragraph rendering as five prose rows in a six-column table. The
+// `git diff --stat` said so — four insertions against five deletions for a five-line-to-five-line
+// paragraph rewrite — and reading the stat rather than the diff is what missed it. A reverted mutation
+// needs diffing against the pre-mutation blob, not eyeballing.
+//
+// Headings, fences, lists, blockquotes and HTML blocks are all block-level starts and end a table
+// legitimately, so only a plain paragraph line is a defect. The unit is the source line because that is
+// what the renderer consumes; nothing here parses the table.
+test("no prose paragraph is swallowed into the table above it", () => {
+  for (const file of ["docs/models.md", "docs/cost.md", "docs/sprint-246.md", "README.md"]) {
+    const lines = readFileSync(join(ROOT, file), "utf8").split("\n");
+    let fenced = false;
+    const swallowed: string[] = [];
+    for (const [i, line] of lines.entries()) {
+      if (line.startsWith("```")) {
+        fenced = !fenced;
+        continue;
+      }
+      if (fenced) continue;
+      const previous = lines[i - 1];
+      if (!previous?.trimStart().startsWith("|")) continue;
+      // A block-level start ends the table; anything else is consumed as another row.
+      if (line.trim() === "" || /^\s*(?:\||#{1,6}\s|>|```|<|[-*+]\s|\d+\.\s)/.test(line)) continue;
+      swallowed.push(`line ${i + 1}: ${line.trim().slice(0, 70)}`);
+    }
+    assert.deepEqual(
+      swallowed,
+      [],
+      `${file} has ${swallowed.length} line(s) of prose directly under a table row with no blank line ` +
+        `between, so GitHub renders them as table rows rather than as a paragraph — each one a cell ` +
+        `under the table's column headers, with any bold run split across rows and showing literal ` +
+        `asterisks. Insert a blank line before each:\n  ${swallowed.join("\n  ")}`,
+    );
+  }
+});
+
 // docs/sprint-246.md's §3 is the sprint's three-arm page-model comparison, whose rows are an
 // ARITHMETIC decomposition rather than a partition: each arm's total is its `verify + correct`
 // column plus its `page only` column, and the percentage beside them is the first over the total.
@@ -847,10 +891,12 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
       `missing or double-counted step.`,
   );
 
+  const statedShares: number[] = [];
   for (const cells of rows) {
     const [name, cost, share] = cells;
     const stated = Number(share!.replace(/\*\*/g, "").match(/([\d.]+)%/)?.[1]);
     assert.ok(Number.isFinite(stated), `docs/cost.md's ${name} row has no share: ${share}`);
+    statedShares.push(stated);
     const actual = (money(cost)! / total!) * 100;
     assert.ok(
       Math.abs(actual - stated) <= 0.05,
@@ -859,6 +905,26 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
         `document opens with, so one of the two is from a different round.`,
     );
   }
+
+  // The share column's own total, which the document states because it is 99.9% rather than 100% and
+  // says so instead of rounding one cell up to hide it. Every share above is pinned to its own row, so
+  // reaching this needs a restated round — and then the column can land on 99.8% with the prose still
+  // claiming 99.9%, which is the sentence telling a reader the column is a rounded decomposition and
+  // not a partition. Round 2 of PR #396 asked for it.
+  const columnSum = statedShares.reduce((a, b) => a + b, 0);
+  const statedColumnSum = Number(doc.match(/share column\s+sums to ([\d.]+)%/)?.[1]);
+  assert.ok(
+    Number.isFinite(statedColumnSum),
+    "docs/cost.md no longer states what its share column sums to (`the share column sums to N%`), " +
+      "which is the sentence that tells a reader the column is a decomposition rounded rather than a " +
+      "partition.",
+  );
+  assert.ok(
+    Math.abs(columnSum - statedColumnSum) <= 0.05,
+    `docs/cost.md says the share column sums to ${statedColumnSum}%; its own ${statedShares.length} ` +
+      `share cells come to ${columnSum.toFixed(1)}%. Either a share moved or a step was added, and ` +
+      `the sentence that explains why the column is not 100% now explains the wrong gap.`,
+  );
 
   // The three block subtotals, which are the sentence a reader quotes when they want one number for
   // "where does the money go" and are the only figures in the document that are a GROUP of rows added.
