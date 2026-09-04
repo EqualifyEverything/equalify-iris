@@ -11,7 +11,14 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { changedAnything, correctionEffect, destroyedPage } from "../src/pipeline/correction.ts";
+import {
+  changedAnything,
+  correctionEffect,
+  destroyedPage,
+  MARKER_NOT_LEGIBLE,
+  MARKER_PAGE_INCOMPLETE,
+  markersAdded,
+} from "../src/pipeline/correction.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
 import { summarizeRun } from "../src/diagnostics.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
@@ -185,13 +192,16 @@ test("a list reordered, or reworded around, is not a member changing lists", () 
   // The list intact and the prose around it rewritten.
   const reworded = BANDS_BEFORE.replace("A map of the United States shaded in four bands.", "A U.S. map, four bands.");
   assert.equal(correctionEffect(BANDS_BEFORE, reworded).alt_relocated, undefined);
-  // A member added to one list and a member dropped from another. Both change what the page says
-  // and neither is a member asserted into a category the same reply had denied it — there is no pair
-  // of lists to compare — and the sizes on the effect are what report them.
+  // A member added to one list and a member dropped from another. Neither is a member asserted into
+  // a category the same reply had denied it — there is no pair of lists to compare — so neither is a
+  // relocation. The added one is reported on its own field since #373 directive 5, and the two are
+  // disjoint by construction: this member was in no list beforehand, and a relocated one was.
   const added = BANDS_BEFORE.replace("Michigan, Iowa", "Michigan, Indiana, Iowa");
   assert.equal(correctionEffect(BANDS_BEFORE, added).alt_relocated, undefined);
+  assert.deepEqual(correctionEffect(BANDS_BEFORE, added).alt_added, ["Indiana"]);
   const dropped = BANDS_BEFORE.replace("Ohio, Wisconsin, Wyoming, Missouri", "Ohio, Wisconsin, Wyoming");
   assert.equal(correctionEffect(BANDS_BEFORE, dropped).alt_relocated, undefined);
+  assert.equal(correctionEffect(BANDS_BEFORE, dropped).alt_added, undefined);
 });
 
 test("a two-part description whose halves are reworded is not a relocation", () => {
@@ -333,6 +343,300 @@ test("a correction that changed how many images there are reports no relocation"
   );
   assert.equal(e.structure_changed, true);
   assert.equal(e.alt_relocated, undefined);
+  // And the addition field is paired the same way, for the same reason: every member of every list
+  // after the shift would read as new.
+  assert.equal(e.alt_added, undefined);
+});
+
+// --- a member a correction ADDED to a category that already existed (#373 directive 5) ---------
+
+// The issue's own shape, and its own numbers. #373 could only see this case by recomputing it off
+// disk by hand, and what its script printed for p084 is the specification: `below: 4 -> 6 member(s)
+// / + Colorado WRONG / + Illinois WRONG`. A band both replies carry gained two states, so the
+// correction asserted of each of them something the reply it corrected did not — on a shaded map,
+// a classification sourced from the model rather than from the ink and delivered as the page's own
+// description.
+const P084_BEFORE =
+  `<img src="p084-map.png" alt="A map shaded in two bands. Above the national average: Ohio, ` +
+  `Wisconsin, Wyoming, Missouri; below: Iowa, Kansas, Minnesota, Nebraska">`;
+
+test("members a correction added to a band that already existed are named", () => {
+  const after = P084_BEFORE.replace("Nebraska", "Nebraska, Colorado, Illinois");
+  const e = correctionEffect(P084_BEFORE, after);
+  assert.deepEqual(e.alt_added, ["Colorado", "Illinois"]);
+  // Both new names are in one list, so each is read against a destination whose other new member is
+  // also new: the overlap counts the names that were listed together BEFORE, and four of them were.
+  assert.equal(e.alt_relocated, undefined);
+  // What the line said about this correction before the field existed, and why it could not say it:
+  // one description was refined, no word of the page moved.
+  assert.equal(e.alt_changed, true);
+  assert.equal(e.text_changed, false);
+});
+
+test("a relocation and an addition are separate fields on one description", () => {
+  // Disjoint by construction rather than by a rule — a member reported here was in no list of the
+  // description being corrected, and a relocated one was — so a reader can add the two fields. This
+  // correction does both at once: Missouri crosses into the cross-hatched band and Nevada arrives in
+  // the band it left.
+  const before = `<img alt="Darkest: Ohio, Wisconsin, Wyoming, Missouri; cross-hatched: Michigan, Iowa, Kansas">`;
+  const after = `<img alt="Darkest: Ohio, Wisconsin, Wyoming, Nevada; cross-hatched: Michigan, Missouri, Iowa, Kansas">`;
+  const e = correctionEffect(before, after);
+  assert.deepEqual(e.alt_relocated, ["Missouri"]);
+  assert.deepEqual(e.alt_added, ["Nevada"]);
+});
+
+test("a name written out in full is not a member arriving", () => {
+  // The false positive that made a second condition necessary, and it is ordinary on these plates:
+  // the descriptions abbreviate ("N.D.", "Wis.", "Mo."), and a correction that spells one out drops
+  // one key and adds another to the same band, with nothing in either string saying the two are one
+  // place. What refuses it is that the DESCRIPTION also lost a member it no longer names anywhere —
+  // a substitution, which this cannot tell from a re-spelling.
+  const abbrev = `<img alt="Shaded 1.5 thru 1.9: N.D., S.D., Kan., Mo.; shaded 2.0 and over: Ohio, Wis., Wyo.">`;
+  const spelled = abbrev.replace("N.D.,", "North Dakota,");
+  assert.equal(correctionEffect(abbrev, spelled).alt_added, undefined);
+  // A member that left for another band is not such a loss, because the corrected description still
+  // lists it — otherwise the test above, where Missouri crosses out of the band Nevada joins, would
+  // report nothing.
+  //
+  // The recall this costs is stated rather than hidden: a description that genuinely gained one state
+  // and dropped another in the same pass is not reported, which is the direction every bound in this
+  // module errs in. A name on this line sends a reader to look for a member that arrived; a wrong
+  // one sends them looking for one that never did.
+  const swapped = abbrev.replace("N.D., S.D., Kan., Mo.", "S.D., Kan., Mo., Nevada");
+  assert.equal(correctionEffect(abbrev, swapped).alt_added, undefined);
+});
+
+test("a name spelled out AND re-banded in one stroke is not a member arriving", () => {
+  // Why the loss is read across the whole description rather than per band (#401 review). A correction
+  // that spells a state out while moving it reads, band by band, as an arrival into the destination
+  // and a loss in the source — and a guard that only inspected the destination would report that the
+  // reply newly asserted a place into a band whose predecessor had already classified it. The
+  // description-wide reading refuses it for the reason the same-band case is refused: "N.D." is a name
+  // the correction stopped using, and nothing in the two strings says it is "North Dakota".
+  const abbrev = `<img alt="Shaded 1.5 thru 1.9: N.D., S.D., Kan.; shaded 2.0 and over: Ohio, Wis., Wyo.">`;
+  const spelled = `<img alt="Shaded 1.5 thru 1.9: S.D., Kan.; shaded 2.0 and over: Ohio, Wis., Wyo., North Dakota">`;
+  const e = correctionEffect(abbrev, spelled);
+  assert.equal(e.alt_added, undefined);
+  assert.equal(e.alt_relocated, undefined);
+  // And the same reading is what keeps a wrong SOURCE band off the line. Judging the loss against the
+  // first earlier list that cleared the overlap read a member's departure from a band the new name
+  // never joined, which suppressed a real arrival for a reason that was not about it. Here the whole
+  // description is intact, so Colorado is reported although the band beside it was reordered.
+  const kept = `<img alt="A: Ohio, Wisconsin, Wyoming, Missouri; B: Ohio, Wisconsin, Wyoming, Iowa">`;
+  const gained = `<img alt="A: Missouri, Ohio, Wisconsin, Wyoming; B: Ohio, Wisconsin, Wyoming, Iowa, Colorado">`;
+  assert.deepEqual(correctionEffect(kept, gained).alt_added, ["Colorado"]);
+});
+
+test("a member the earlier description named at all is not arriving, list or not", () => {
+  // `enumerationsIn` keeps no bucket for a run of fewer than two names, so the buckets cannot answer
+  // "did the earlier reply name this member" — and reading arrival off them alone made a move out of a
+  // band of ONE into an addition, which is the very move `altRelocations` declines by that floor
+  // (#401 review). Both fields silent is the right answer: the description named Missouri, so nothing
+  // was newly asserted about it, and it was listed with nobody, so there is no first company to
+  // compare a second against.
+  const oneMember = `<img alt="Darkest: Ohio, Wisconsin, Wyoming; cross-hatched: Missouri">`;
+  const moved = `<img alt="Darkest: Ohio, Wisconsin, Wyoming, Missouri; cross-hatched: none">`;
+  const e = correctionEffect(oneMember, moved);
+  assert.equal(e.alt_added, undefined);
+  assert.equal(e.alt_relocated, undefined);
+  // The same for a name the earlier description put in running prose, where there is no list at all.
+  const prose = `<img alt="Darkest: Ohio, Wisconsin, Wyoming. Missouri is cross-hatched.">`;
+  const listed = `<img alt="Darkest: Ohio, Wisconsin, Wyoming, Missouri. Nothing is cross-hatched.">`;
+  assert.equal(correctionEffect(prose, listed).alt_added, undefined);
+  // The check is on the text, so it holds for a name the earlier description merely mentioned without
+  // classifying — and a member genuinely absent from those same words is still reported, which is what
+  // keeps the widening from swallowing the field.
+  const unmentioned = `<img alt="Darkest: Ohio, Wisconsin, Wyoming. Missouri is cross-hatched.">`;
+  const arrived = `<img alt="Darkest: Ohio, Wisconsin, Wyoming, Nevada. Missouri is cross-hatched.">`;
+  assert.deepEqual(correctionEffect(unmentioned, arrived).alt_added, ["Nevada"]);
+});
+
+test("a member re-banded into a category of one has not been lost, so arrivals still report", () => {
+  // Both halves of this field read the WORDS, and this is the half that was left on the buckets for a
+  // round (#401 review, second round). `knows` is a union of buckets, so `LIST_MIN` applies to it: a
+  // state the correction still names, but names in a band of one or in running prose, sits in no bucket
+  // and read as a member the correction stopped naming — which silenced every arrival in a description
+  // that had dropped nothing. A correction that re-bands one state down into a band of its own while
+  // adding two to another is an ordinary shape on these plates, so this is recall the field promised.
+  const before = `<img alt="Darkest: Ohio, Wisconsin, Wyoming; cross-hatched: Missouri, Kansas">`;
+  const intoOne = `<img alt="Darkest: Ohio, Wisconsin, Wyoming, Colorado, Illinois; cross-hatched: Kansas; below: Missouri">`;
+  assert.deepEqual(correctionEffect(before, intoOne).alt_added, ["Colorado", "Illinois"]);
+  const intoProse = `<img alt="Darkest: Ohio, Wisconsin, Wyoming, Colorado, Illinois; cross-hatched: Kansas. Missouri is unshaded.">`;
+  assert.deepEqual(correctionEffect(before, intoProse).alt_added, ["Colorado", "Illinois"]);
+  // And the guard it stands beside is untouched by the widening: a name the correction stopped using
+  // altogether is still a loss, in the band it left and across bands.
+  const abbrev = `<img alt="Shaded 1.5 thru 1.9: N.D., S.D., Kan., Mo.; over 2.0: Ohio, Wis., Wyo.">`;
+  assert.equal(correctionEffect(abbrev, abbrev.replace("N.D.,", "North Dakota,")).alt_added, undefined);
+});
+
+test("an abbreviation that is also an English word does not make a re-spelling look like an arrival", () => {
+  // The cost of reading the departure test off the words, found in review round 3 and the one failure
+  // in this field that goes the WRONG way — a name on the line that no correction asserted. A key is
+  // the member lowercased with its trailing dots stripped, so "Or." reduces to "or" and a corrected
+  // description reading "the legend is unclear or faded" answered "is Or. still named" with yes. The
+  // re-spelling to "Oregon" then read as an arrival. So the departure test matches the member as the
+  // earlier reply WROTE it — capital and dot included — while the arrival test still folds case,
+  // because on that side a generous reading only makes the field quieter.
+  const or = `<img alt="Darkest: Or., Wash., Idaho; lightest: Ohio, Iowa">`;
+  const orAfter =
+    `<img alt="Darkest: Wash., Idaho, Oregon; lightest: Ohio, Iowa. The legend is unclear or faded.">`;
+  assert.equal(correctionEffect(or, orAfter).alt_added, undefined);
+  // The same trap with a different word, since "or" alone could be closed by a length floor and the
+  // shape is not about length.
+  const miss = `<img alt="Darkest: Miss., Wash., Idaho; lightest: Ohio, Iowa">`;
+  const missAfter =
+    `<img alt="Darkest: Wash., Idaho, Mississippi; lightest: Ohio, Iowa. Do not miss the key.">`;
+  assert.equal(correctionEffect(miss, missAfter).alt_added, undefined);
+  // Both arms above are closed by the trailing dot alone, so on their own they leave the OTHER half of
+  // the departure match — its case-sensitivity — unexercised. This arm separates them: the member is
+  // written without a dot, so only the capital distinguishes "Or" from the "or" in the prose. Folding
+  // case here answers "is Or still named" with yes and puts Oregon on the line.
+  const bare = `<img alt="Darkest: Or, Wash, Idaho; lightest: Ohio, Iowa">`;
+  const bareAfter =
+    `<img alt="Darkest: Wash, Idaho, Oregon; lightest: Ohio, Iowa. The legend is unclear or faded.">`;
+  assert.equal(correctionEffect(bare, bareAfter).alt_added, undefined);
+});
+
+test("re-banding a member out of every list AND re-typing it silences that description's arrivals", () => {
+  // What the exact departure match costs, pinned so the disclosed limit is not narrower than the code
+  // (#401 review, fourth round). The exact branch is reached only for a member in no bucket of the
+  // corrected description, and then ANY re-typing reads as a loss — not only an expansion. Both
+  // conditions are needed, which is what the two controls below hold.
+  const band = "Darkest: Ohio, Wisconsin, Wyoming";
+  const gained = "Darkest: Ohio, Wisconsin, Wyoming, Colorado, Illinois";
+  const dot = `<img alt="${band}; cross-hatched: Wis., Kansas">`;
+  const dotAfter = `<img alt="${gained}; cross-hatched: Kansas; below: Wis">`;
+  assert.equal(correctionEffect(dot, dotAfter).alt_added, undefined);
+  const caps = `<img alt="${band}; cross-hatched: MISSOURI, Kansas">`;
+  const capsAfter = `<img alt="${gained}; cross-hatched: Kansas; below: Missouri">`;
+  assert.equal(correctionEffect(caps, capsAfter).alt_added, undefined);
+  // Re-typed, but the member stays in a band of two, so it is found by folded key and the arrivals
+  // report. Without this the test above would pass on a rule that silenced every re-typing.
+  const kept = `<img alt="${band}; cross-hatched: MISSOURI, Kansas, Utah">`;
+  const keptAfter = `<img alt="${gained}; cross-hatched: Missouri, Kansas, Utah">`;
+  assert.deepEqual(correctionEffect(kept, keptAfter).alt_added, ["Colorado", "Illinois"]);
+  // Re-banded into a band of one, but typed as it was, so the words find it — round 2's shape, still
+  // reporting. Without this the test above would pass on a rule that silenced every re-banding.
+  const same = `<img alt="${band}; cross-hatched: Missouri, Kansas">`;
+  const sameAfter = `<img alt="${gained}; cross-hatched: Kansas; below: Missouri">`;
+  assert.deepEqual(correctionEffect(same, sameAfter).alt_added, ["Colorado", "Illinois"]);
+  // The first control holds only for a re-typing that leaves the KEY intact, and that qualifier is
+  // load-bearing (#401 review, fifth round): a re-typing that CHANGES the key needs no re-banding at
+  // all, because the substitution guard sees a member gone from a description that still lists three.
+  // Silent for the reason "N.D." → "North Dakota" is always silent, not for this cost.
+  const inPlace = `<img alt="${band}; cross-hatched: N.D., Kansas, Utah">`;
+  const inPlaceAfter = `<img alt="${gained}; cross-hatched: North Dakota, Kansas, Utah">`;
+  assert.equal(correctionEffect(inPlace, inPlaceAfter).alt_added, undefined);
+});
+
+test("each of the two fields is bounded on its own, so a rewrite cannot fill a line", () => {
+  // `RELOCATED_MAX` caps them separately, which is twelve names in the worst case (#401 review).
+  // Separately because a description that moved six members would otherwise hide every one it added —
+  // #373's own shape — behind a budget spent on the other field.
+  const before = `<img alt="Q: Ohio, Wisconsin, Wyoming">`;
+  const after =
+    `<img alt="Q: Ohio, Wisconsin, Wyoming, Alabama, Alaska, Arizona, Arkansas, Georgia, Hawaii, ` +
+    `Idaho, Utah">`;
+  const added = correctionEffect(before, after).alt_added;
+  assert.equal(added?.length, 6);
+  assert.deepEqual(added, ["Alabama", "Alaska", "Arizona", "Arkansas", "Georgia", "Hawaii"]);
+});
+
+test("a category the correction invented is not a member added to one", () => {
+  // The destination clause doing the same work it does for relocations. A new list of new names is a
+  // category this correction made up, which is a different claim from a member arriving in a category
+  // the earlier reply already wrote — and the sizes and `structure_changed` are what report a
+  // description rebuilt. Two shapes: a whole new band, and a two-part description whose halves were
+  // reworded (a false positive corrections produce constantly).
+  const newBand = P084_BEFORE.replace(`Nebraska">`, `Nebraska; unshaded: Alaska, Hawaii, Puerto Rico">`);
+  assert.equal(correctionEffect(P084_BEFORE, newBand).alt_added, undefined);
+  const reworded = correctionEffect(
+    `<img src="a.png" alt="a bar chart, revenue by quarter"><img src="b.png" alt="a map, three shades">`,
+    `<img src="a.png" alt="a bar chart, quarterly revenue"><img src="b.png" alt="a map, four bands">`,
+  );
+  assert.equal(reworded.alt_changed, true);
+  assert.equal(reworded.alt_added, undefined);
+});
+
+test("a name the corrected description lists twice is not reported as arriving", () => {
+  // Inherited from `enumerationsIn`, and the right way round: which of two "Colorado"s is the arrival
+  // is exactly what this cannot know, and settling it by position would be a guess reported as a
+  // measurement.
+  const after = P084_BEFORE
+    .replace("Ohio, Wisconsin, Wyoming, Missouri", "Ohio, Wisconsin, Wyoming, Missouri, Colorado")
+    .replace("Nebraska", "Nebraska, Colorado");
+  assert.equal(correctionEffect(P084_BEFORE, after).alt_added, undefined);
+});
+
+// --- a completeness marker the correction appended (#373 directive 5) -------------------------
+
+test("a marker the correction appended is named, and one it resolved is not", () => {
+  // The second shape directive 5 names. A correction is bought because a page failed its fidelity
+  // check, and the cheapest answer to "content is missing" is to declare the page incomplete rather
+  // than to transcribe what is missing. In the log that answer is indistinguishable from a repair:
+  // 28 characters of prose, `text_changed: true`, both sizes up.
+  assert.deepEqual(markersAdded(`<p>Torque to 40 Nm.</p>`, `<p>Torque to 40 Nm.</p><p>${MARKER_PAGE_INCOMPLETE}</p>`), [
+    MARKER_PAGE_INCOMPLETE,
+  ]);
+  // Additions only, and the asymmetry is this pass's own: the corrector is handed the source image
+  // and re-reading it is the job, so a marker that leaves is as often the repair as the harm — and
+  // whether prose arrived with it is what `text_chars_*` on the same line answers. The editor, which
+  // is never given writing a marker as an option, counts both directions (`editor_markers_changed`).
+  assert.deepEqual(markersAdded(`<p>a</p><p>${MARKER_NOT_LEGIBLE}</p>`, `<p>a</p><p>0.45 Nm</p>`), []);
+  // Both, in the order `BODY_MARKERS` gives them, so a line is read the same way every time.
+  assert.deepEqual(markersAdded(`<p>a</p>`, `<p>${MARKER_NOT_LEGIBLE}</p><p>${MARKER_PAGE_INCOMPLETE}</p>`), [
+    MARKER_NOT_LEGIBLE,
+    MARKER_PAGE_INCOMPLETE,
+  ]);
+  // A second copy of a marker the page already had is an addition too: it stands for a second
+  // region, and counting rather than testing presence is what sees it.
+  assert.deepEqual(
+    markersAdded(`<p>${MARKER_NOT_LEGIBLE}</p>`, `<p>${MARKER_NOT_LEGIBLE}</p><td>${MARKER_NOT_LEGIBLE}</td>`),
+    [MARKER_NOT_LEGIBLE],
+  );
+});
+
+test("an appended marker reaches the effect beside the change it is part of", () => {
+  // Not a fifth flag, for the same reason a relocation is not: a marker in the body is prose, so it
+  // is a text change as well. What the field adds is that the prose was a declaration of
+  // incompleteness and not the content that was asked for.
+  const e = correctionEffect(
+    `<h2>Schedule</h2><table><tr><td>1</td></tr></table>`,
+    `<h2>Schedule</h2><table><tr><td>1</td></tr></table><p>${MARKER_PAGE_INCOMPLETE}</p>`,
+  );
+  assert.deepEqual(e.markers_added, [MARKER_PAGE_INCOMPLETE]);
+  assert.equal(e.text_changed, true);
+  assert.ok(e.text_chars_after > e.text_chars_before);
+  // "always a text change" is not true of the marker that lands in a DESCRIPTION (#401 review, sixth
+  // round): `markerCounts` splits the raw fragment, so an `alt` counts, and the page agent writing
+  // "[not legible]" into one is the input that reaches it. Then it is an `alt_changed`, the text is
+  // untouched and the two text sizes are EQUAL — pinned because a corpus reading these lines beside
+  // `text_changed`, or sizing the marker off those two numbers, would read this case wrong.
+  const inAlt = correctionEffect(
+    `<p>Chart 4.</p><img src="a.png" alt="A bar chart of receipts">`,
+    `<p>Chart 4.</p><img src="a.png" alt="A bar chart of receipts. Y axis ${MARKER_NOT_LEGIBLE}">`,
+  );
+  assert.deepEqual(inAlt.markers_added, [MARKER_NOT_LEGIBLE]);
+  assert.equal(inAlt.text_changed, false);
+  assert.equal(inAlt.alt_changed, true);
+  assert.equal(inAlt.text_chars_before, inAlt.text_chars_after);
+  // And the class the alt case belongs to, pinned because naming one member of it reads as naming all
+  // of them (#401 review, seventh round): a marker in any OTHER attribute leaves `text_changed` and
+  // `alt_changed` both false, with `attrs_changed` alone carrying it. Rarer than the alt case and
+  // quieter, so it is recorded rather than guarded.
+  const inTitle = correctionEffect(
+    `<p>x</p><img src="a.png" alt="A bar chart" title="Fig 4">`,
+    `<p>x</p><img src="a.png" alt="A bar chart" title="Fig 4 ${MARKER_NOT_LEGIBLE}">`,
+  );
+  assert.deepEqual(inTitle.markers_added, [MARKER_NOT_LEGIBLE]);
+  assert.equal(inTitle.text_changed, false);
+  assert.equal(inTitle.alt_changed, false);
+  assert.equal(inTitle.attrs_changed, true);
+  // And an ordinary correction leaves both new fields off the object entirely, so they cost nothing
+  // on the corrections that are not these and a consumer counting them counts lines that have them.
+  const ordinary = correctionEffect(`<p>Torque to 40 Nm.</p>`, `<p>Torque to 40 N·m.</p>`);
+  assert.ok(!("markers_added" in ordinary));
+  assert.ok(!("alt_added" in ordinary));
 });
 
 test("a re-typed href is a change, though no word on the page moves", () => {
@@ -657,6 +961,38 @@ test("a member that crossed between two lists reaches the correction's log line"
     // The verdict that bought the correction is on the same line, so the pair reads as one fact: a
     // `content_wrong` finding was acted on, and what it moved was a state between two bands.
     assert.deepEqual(corrected[0].kinds, ["content_wrong"]);
+  });
+});
+
+// #373 directive 5, on the line an operator reads rather than on the function. Both shapes at once,
+// because they arrive together on the correction the issue is about: a page whose check said content
+// was missing comes back with two states added to a band that already existed and a marker saying
+// the page is unfinished. Neither was on this line before, and the four booleans read it as an alt
+// refinement with some text added.
+test("a member added to a band and an appended marker both reach the correction's log line", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    await runExtraction(
+      makeCtx(dir, events, {
+        html: () => `<h2>Tax Effort</h2>${P084_BEFORE}`,
+        problems: (o) =>
+          o === 1 ? [{ kind: "content_missing", problem: "the map's second band is missing states" }] : [],
+        corrected: () =>
+          `<h2>Tax Effort</h2>${P084_BEFORE.replace("Nebraska", "Nebraska, Colorado, Illinois")}` +
+          `<p>${MARKER_PAGE_INCOMPLETE}</p>`,
+      }),
+    );
+    const corrected = of(events, "page_corrected");
+    assert.equal(corrected.length, 1);
+    assert.deepEqual(corrected[0].alt_added, ["Colorado", "Illinois"]);
+    assert.deepEqual(corrected[0].markers_added, [MARKER_PAGE_INCOMPLETE]);
+    // The verdict that bought the correction is on the same line, which is the pair that makes it
+    // readable: a `content_missing` finding was answered with two classifications and a declaration
+    // that the page is incomplete, and the fields it was answered with are the ones to go and check.
+    assert.deepEqual(corrected[0].kinds, ["content_missing"]);
+    assert.equal(corrected[0].result, "kept");
+    // Nothing about what ships is decided here — this is a record, exactly as the relocation is.
+    assert.match(String(corrected[0].image), /\.png$/);
   });
 });
 
