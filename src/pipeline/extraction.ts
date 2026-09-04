@@ -2693,6 +2693,126 @@ async function renderPage(
   };
 }
 
+// One problem the corrector says it is not acting on, and what the HTML shows instead (#373
+// directive 4). `problem` is the number it was listed under in the request, so the decline can be
+// joined back to the problem itself and to which of the four sources raised it — the join is by
+// index rather than by matching the sentence back, because a model quoting a problem back
+// paraphrases it and a paraphrase cannot be matched to the entry it came from.
+//
+// It is absent where the reply declined something and named no number. That decline is still
+// recorded rather than dropped: it is the model saying a problem is false, which is the event this
+// field exists to count, and losing it would report a run as compliant because the disagreement was
+// badly addressed. What it cannot do is say WHICH problem, so it is not counted against any.
+export interface Declination {
+  problem?: number;
+  why: string;
+}
+
+// What separates the three problems Iris CHECKED from the one it was told, where the corrector reads
+// them (#373 directive 4). The list it is shown is four sources concatenated with nothing to say
+// which is which, and the licence to decline is written around claims about the markup — whose
+// wordings are exactly the code-checked ones ("More than one element on this page has id=…"). Without
+// this mark a corrector following the licence as written declines into `links`, `alt` and `ids`, and
+// `verification.declined.code_checked`, the field that exists to count the misuse, counts compliance
+// instead. With it the number means one thing.
+//
+// A suffix on the entry rather than a section heading over each group, because the groups are
+// numbered as one sequence for the decline to cite and a heading between them invites the model to
+// renumber from 1 inside each. 33 characters, on the problems this run raised in code — 2 of 1,501
+// page replies for the id rule, none from the deployed model.
+export const CHECKED_IN_CODE = " (Iris checked this one in code.)";
+
+// What a corrector's reply says it declined, out of whatever shape the reply used.
+//
+// Deliberately loose about the container and strict about nothing else: the field is introduced in
+// the request rather than in the page agent's own contract (see `correctPage`), so this is the one
+// key of that envelope no prompt file has ever described, and the shapes a model reaches for are an
+// array of objects, an array of bare strings, or one object on its own. All three are read. What is
+// NOT inferred is a number that is not there — a string entry contributes its text and no `problem`,
+// rather than being matched back against the problem list by wording, which is the guess that would
+// attribute a decline to the wrong problem and then report it as a code-checked fact being refused.
+//
+// A leading number IS read out of a string ("2. the id appears once"), because that is the shape a
+// model gives when it is answering a numbered list in prose and the number is its own citation, not
+// an inference of ours.
+//
+// The one thing this must not do is mint a decline out of a reply that declined nothing. The request
+// says to omit the key, and a model that will not omit a key sends `{}`, `"none"` or `"N/A"` instead
+// — so those are the shapes that would otherwise put a `page_correction_declined` line, and a count
+// in `declined.unattributed`, against every corrected page in a run. Both counts are read as rates
+// against corrections, so a per-page phantom would not skew them, it would replace them.
+const NOTHING_DECLINED = /^(none|no|n\/?a|nil|nothing|null|undefined|-|—)[.!]?$/i;
+
+export function parseDeclined(value: unknown): Declination[] {
+  const entries = Array.isArray(value) ? value : value == null ? [] : [value];
+  const out: Declination[] = [];
+  for (const entry of entries) {
+    if (typeof entry === "string") {
+      const why = entry.trim();
+      if (!why || NOTHING_DECLINED.test(why)) continue;
+      const cited = /^\s*#?(\d{1,3})\s*[.):\-–]/.exec(entry);
+      out.push({ ...(cited ? { problem: Number(cited[1]) } : {}), why });
+      continue;
+    }
+    if (typeof entry !== "object" || entry === null) continue;
+    const rec = entry as Record<string, unknown>;
+    // `why` is the field the request names; `reason` and `because` are the near-synonyms a model
+    // substitutes for it, and a decline whose reason cannot be read is still a decline — it is
+    // logged with an empty `why` rather than discarded, since the count is the load-bearing part
+    // and a silent drop would report the reply as fully compliant.
+    const why = [rec.why, rec.reason, rec.because].find((v) => typeof v === "string" && v.trim());
+    // `problem` and `number` only. `index` is not read, though a model does send it: it conventionally
+    // means the 0-based position, so `{ index: 1 }` may be the FIRST problem or the second, and there
+    // is nothing on the reply to say which. A citation read off by one is worse than no citation,
+    // because `source` is computed from it and then read as evidence about which check was refused —
+    // a `verify` decline filed under `ids` is the misuse this feature is measured by, manufactured
+    // here. Such a reply is logged as a decline with no number, which is what it actually is.
+    const raw = rec.problem ?? rec.number;
+    const problem = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.trim()) : NaN;
+    const cited = Number.isInteger(problem);
+    // Nothing said, in object form: no number, and a reason that is either absent or one of the
+    // non-answers above. Dropped for the same reason — there is no disagreement here to record, only
+    // a key the model would not omit — and the object shape is the one the request's own example
+    // teaches, so `[{ "why": "none" }]` is likelier than the bare string it started as. A CITED
+    // problem is kept whatever its reason says, on the same terms as `{ problem: 2 }` with no reason
+    // at all: the number names something the log can attribute, and an empty `why` on the line is how
+    // a reader sees that the argument never arrived.
+    const said = typeof why === "string" && why.trim() && !NOTHING_DECLINED.test(why.trim());
+    if (!cited && !said) continue;
+    out.push({
+      ...(cited ? { problem } : {}),
+      why: typeof why === "string" ? why.trim() : "",
+    });
+  }
+  return out;
+}
+
+// Which of the four sources raised the problem a decline names, by its position in the list the
+// request numbered. The order here is the order `problems` is built in at the call site and the two
+// cannot be allowed to drift, so this takes the counts rather than re-deriving them.
+//
+// `null` for a number naming no entry in that list. That is not a decline of anything — a reply
+// citing problem 7 of 3 has declined something the request did not ask — and folding it into the
+// last bucket would report it as a refusal of a fact Iris checked in code.
+export function declinedSource(
+  problem: number | undefined,
+  counts: { verify: number; links: number; alt: number; ids: number },
+): "verify" | "links" | "alt" | "ids" | null {
+  if (problem === undefined) return null;
+  const bands: ["verify" | "links" | "alt" | "ids", number][] = [
+    ["verify", counts.verify],
+    ["links", counts.links],
+    ["alt", counts.alt],
+    ["ids", counts.ids],
+  ];
+  let seen = 0;
+  for (const [source, n] of bands) {
+    if (problem > seen && problem <= seen + n) return source;
+    seen += n;
+  }
+  return null;
+}
+
 // Re-run the page agent with the fidelity problems it was told about, so it can
 // fix them against the source image. Used only when verification fails.
 async function correctPage(
@@ -2708,13 +2828,16 @@ async function correctPage(
   // always sent: an adapter lowers it to the deployment's ceiling if it is higher, and never the
   // other way round — see the call site for what a larger number on that log line means.
   maxOutputTokens?: number,
-): Promise<string | null> {
+): Promise<{ html: string | null; declined: Declination[] }> {
   // The link list is repeated here, not just in the first pass: a dropped link is one
   // of the problems this pass exists to fix, and it cannot re-attach a URL it can no
   // longer see. The image still does not show them.
   const user =
     `Your previous accessible-HTML output for this page had fidelity/accessibility problems:\n` +
-    `${problems.map((p) => `- ${p}`).join("\n")}\n\n` +
+    // Numbered rather than bulleted since #373 directive 4, and the numbers are load-bearing: they
+    // are what a decline cites, and the alternative — matching a paraphrase of the problem back
+    // against the list — attributes a disagreement to whichever entry it reads closest to.
+    `${problems.map((p, i) => `${i + 1}. ${p}`).join("\n")}\n\n` +
     `## Your previous output\n\`\`\`html\n${previous}\n\`\`\`\n\n` +
     `Look at the source image again and return a corrected version that resolves every problem. ` +
     // The scope clause, which this path did not have and the feedback path always did
@@ -2726,7 +2849,50 @@ async function correctPage(
     // The page prompt now carries the same rule for both paths; this says it where the problems
     // are listed, so "resolve every problem" reads as a scope rather than as a licence.
     `Change nothing the list above does not name: every heading, table, list, label and attribute ` +
-    `that is not part of a problem is carried over exactly as it stands.` +
+    `that is not part of a problem is carried over exactly as it stands.\n\n` +
+    // #373 directive 4, and the issue asks for this one to be read hardest, so the bound is written
+    // as narrowly as it can be stated: the licence is to decline a claim ABOUT THE HTML ABOVE that
+    // the HTML above refutes, and nothing else. A problem about the picture is not covered, because
+    // that is the judgement the checker was asked to make and this call is looking at the picture
+    // precisely in order to act on it — so the failure mode the issue warns about ("this is also a
+    // way to ignore a true problem") has no wording here to reach through. The three examples are
+    // the shapes measured on disk (an id said to be duplicated that appears once, an attribute said
+    // to be missing that is present, a word said to be absent that is quoted in the markup), and the
+    // two sentences after them exist because a licence stated without its limit reads as a general
+    // one: "a problem you cannot settle in the HTML is a problem to fix" is the whole of the
+    // narrowing, and "not the shorter answer" is there because the cheapest reading of any licence
+    // is that it applies to whatever is hard.
+    `One of these problems may be wrong. You are not required to act on a claim you can show is ` +
+    `false, and the test is entirely inside the text above: where a problem asserts something ` +
+    `about that HTML — an id used twice, an attribute missing, a word absent — and you can check it ` +
+    `there and it is not so, make no change for it. A problem about what the IMAGE shows is not ` +
+    `this case: whether content is missing, whether an alt describes the picture, whether a heading ` +
+    `sits at the right level are judgements about the page, and you are looking at the page again ` +
+    `in order to settle them. A problem you cannot settle inside the HTML is a problem to fix, and ` +
+    `declining is not the shorter answer to a problem you are unsure of. ` +
+    // The other half of the bound, and it is why the entries carry `CHECKED_IN_CODE` at all. Three
+    // of the four problem sources are Iris's own comparisons — the source file's link annotations,
+    // a closed word list of placeholder alts, this page's own parsed tree — and their wordings are
+    // exactly the examples above ("More than one element on this page has id=…"). So a corrector
+    // following the licence as written would decline into them, and the field that counts the misuse
+    // (`verification.declined.code_checked`) would be counting compliance. Marking those entries and
+    // excluding them here is what makes that number mean one thing: an unmarked claim about the
+    // markup is the verifier's reading and is declinable, which is #373's instance C exactly — the
+    // CHECKER asserting a duplicate id on a page that has none — while the marked one is the id
+    // really being duplicated, since it was read off the tree this call was handed.
+    `A problem marked "${CHECKED_IN_CODE.trim()}" is not one of these: it was settled against the ` +
+    `source file or this page's own markup before you were asked, so fix it.\n` +
+    // The destination, because an instruction to "say which problem and why" with nowhere to say it
+    // lands in the document — the page gains a sentence about the checker, which is the defect
+    // #373's own instance A describes in the other direction. `declined` is introduced here rather
+    // than in agents/page.md because the first pass has no problem list and no use for the key, and
+    // because that file is the cached system prefix this call reuses byte-for-byte: adding a field
+    // there would reprice every page render in the run to give this one call a channel.
+    `Say it in the reply and not in the page: add "declined" to the JSON, alongside "html", as ` +
+    `[{ "problem": <the number from the list above>, "why": "<what the HTML shows instead>" }]. ` +
+    `Omit it where you are acting on every problem. Return the page in "html" either way — ` +
+    `unchanged where you declined everything — because a reply with no "html" is a reply this run ` +
+    `cannot use, and every problem you did not decline is still to be fixed in the same reply.` +
     `${pageLinkContext(img.links).section}`;
   const res = await ctx.router.complete(
     PAGE_AGENT,
@@ -2747,8 +2913,12 @@ async function correctPage(
     },
   );
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
-  const parsed = extractJson<{ html?: string }>(res.text);
+  const parsed = extractJson<{ html?: string; declined?: unknown }>(res.text);
   const corrected = stripped(ctx, "correct", img, (parsed?.html ?? bareHtml(res.text) ?? "").trim());
+  // Read from the envelope only, never from `bareHtml`: a reply that came back as raw markup with no
+  // JSON around it has no `declined` key to read, and inferring one from prose in the page would be
+  // this file reading a disagreement into a document rather than out of a reply.
+  const declined = parseDeclined(parsed?.declined);
   // A correction that cannot be read is not a correction. Null keeps the version this
   // page already had, which passed everything except the fidelity check — strictly better
   // than replacing it with the reply's own envelope, and the caller has always treated a
@@ -2759,10 +2929,16 @@ async function correctPage(
       page: img.order,
       chars: res.text.length,
       shape: replyShape(res.text, parsed),
+      // Whether that empty reply was a refusal (#373 directive 4). The request says to return the
+      // page either way, so this is a reply that broke the contract — but a reply which declined
+      // every problem and then omitted the page it was told to send back is a different failure from
+      // one that produced nothing at all, and `shape` cannot separate them: both are an envelope. It
+      // is the reading that decides whether the licence is being used as an exit.
+      ...(declined.length ? { declined: declined.length } : {}),
     });
-    return null;
+    return { html: null, declined };
   }
-  return corrected;
+  return { html: corrected, declined };
 }
 
 // Merge instruction for splicing a specialist fragment into the page output.
@@ -3570,11 +3746,15 @@ async function extractPage(
   // writes: `repaired` is set exactly where that event's `result` is `kept`. A reader can check
   // the set against the log without a rule about which values count.
   let repaired = false;
+  // The verifier's problems as it wrote them, then the three Iris raised itself, each marked as
+  // checked in code (#373 directive 4 — `CHECKED_IN_CODE` has why). The mark is on the string the
+  // corrector reads and on nothing that is counted: `problems.length` is the same number either way,
+  // and `declinedSource` reads positions in this order rather than the text.
   const problems = [
     ...(verifyFailed ? verdict.problems : []),
-    ...missing.map(missingLinkProblem),
-    ...generic.map(genericAltProblem),
-    ...duplicated.map(duplicateIdProblem),
+    ...missing.map((l) => missingLinkProblem(l) + CHECKED_IN_CODE),
+    ...generic.map((a) => genericAltProblem(a) + CHECKED_IN_CODE),
+    ...duplicated.map((id) => duplicateIdProblem(id) + CHECKED_IN_CODE),
   ];
   if (problems.length) {
     // What the correction was asked to fix, for the event below. Any of the four can fire on one
@@ -3669,10 +3849,49 @@ async function extractPage(
     const cap = html === "" ? undefined : correctionCeiling({ outputTokens, chars: html.length }, before.length);
     const ceiling = cap?.tokens;
     const attempt = await correctPage(ctx, pageAgent, img, innerHtml, problems, lessons, ceiling).then(
-      (html) => ({ html, error: null as unknown }),
-      (error: unknown) => ({ html: null, error }),
+      (reply) => ({ ...reply, error: null as unknown }),
+      (error: unknown) => ({ html: null, declined: [] as Declination[], error }),
     );
     const corrected = attempt.html;
+    // What the corrector said it was not doing, before anything is decided about the page (#373
+    // directive 4). Logged on its own event rather than as a field on `page_corrected` because a
+    // decline is per PROBLEM and that line is per page: a reply that declined one of five problems
+    // and fixed the other four is the shape this pass is supposed to produce, and folding it into a
+    // count on the page's line would make it indistinguishable from a reply that declined all five.
+    //
+    // It decides nothing. `keep`, `repaired`, the recheck and the `uncorrected` set below are all
+    // untouched by this, which is the answer to the risk #373 states against its own directive
+    // ("this is also a way to ignore a true problem"): a problem declined wrongly leaves the page in
+    // exactly the state a correction that failed to fix it leaves it — named in `uncorrected`, with a
+    // `@page-uncorrected` marker on the document — so the licence can buy a different EXPLANATION and
+    // never silence. What it removes is the edit: today the corrector's only legal move is
+    // compliance, so a false claim about the HTML is answered by changing a page that was right.
+    if (attempt.declined.length) {
+      const counts = { verify: verifyFailed ? verdict.problems.length : 0, links: missing.length, alt: generic.length, ids: duplicated.length };
+      ctx.log.event("page_correction_declined", {
+        image: img.name,
+        page: img.order,
+        trigger,
+        // Of how many. A count of declines with no denominator cannot be read: 2 declined out of 2
+        // problems is a reply that refused the whole correction, and 2 out of 9 is the pass working.
+        problems: problems.length,
+        declined: attempt.declined.map((d) => ({
+          ...(d.problem !== undefined ? { problem: d.problem } : {}),
+          // Which of the four raised it, because the licence is only defensible over one of them.
+          // `verify` is the Feedback Agent's reading, which is what can be false. `links`, `alt` and
+          // `ids` were checked in code against the source file or the parsed fragment, so a decline
+          // there is a refusal of a fact — the misuse of this licence, and the reason the field is on
+          // the line rather than left to be joined by hand from three other events.
+          //
+          // `null` where the reply cited no number, or cited one the list has no entry for. Not
+          // folded into any bucket: a decline that names nothing has not refused a code-checked
+          // fact, and counting it as one would manufacture the very evidence this field exists to
+          // collect.
+          source: declinedSource(d.problem, counts),
+          why: d.why,
+        })),
+      });
+    }
     if (attempt.error !== null) {
       const message = (attempt.error instanceof Error ? attempt.error.message : String(attempt.error))
         .replace(/\s+/g, " ")
