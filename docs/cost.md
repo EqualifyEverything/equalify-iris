@@ -2,8 +2,9 @@
 
 Iris cost about **19.4 cents a document page** in model bills when the model-selection sprint
 ([#246](https://github.com/EqualifyEverything/equalify-iris/issues/246)) started. One config change
-has shipped and measured **10.7 cents** — a 45% cut from a single line. Two more recommendations are
-measured and waiting on a person to take them.
+has shipped and measured **10.7 cents** — a 45% cut with no code change, from **two lines of
+config** (#312 set the page agent's model *and* a block-wide API setting; §8). Two more
+recommendations are measured and waiting on a person to take them.
 
 **The most useful thing the sprint found is that three of the four biggest savings were not model
 choices at all** — they were a code path, a contract, and not paying twice for the same reply — and
@@ -23,8 +24,8 @@ Every figure below names the round it came from, and no figure is carried from a
 the one beside it.
 
 Rewritten from the sprint's final report,
-[#370](https://github.com/EqualifyEverything/equalify-iris/issues/370). **§6 records the six figures
-this document states differently from that report, and why** — none of the six moves a
+[#370](https://github.com/EqualifyEverything/equalify-iris/issues/370). **§6 records the seven
+figures this document states differently from that report, and why** — none of the seven moves a
 recommendation, and naming them is cheaper than a reader finding them.
 
 ## 1. The recommendation, per step
@@ -62,8 +63,15 @@ checker:
 | pages lost outright | **luna 0 and sonnet 0** † | — | kimi 2 |
 | first-pass acceptance | sonnet 41.1% | luna 29.7% | kimi 26.7% (luna against kimi, p=0.6636) |
 | region subtotal rows dropped | **sonnet 9.6%** | luna 23.3% | **kimi 34.9%** |
-| 8-axis mechanical defect census | **luna best-or-tied on all 8** | sonnet | kimi worst on 4 |
+| mechanical defect census, **10 axes** | **luna best-or-tied on 8 of 10** | sonnet | kimi worst on 4 of the first 7 |
 | "no data" dot-leader encodings | sonnet | kimi | **luna worst** |
+
+The census row is the count of every axis the sprint scored by script from the delivered HTML, and
+**the two rows around it are two of the ten** — the subtotal-row axis is one of the two luna does not
+win, and the dot-leader axis is the other. They are broken out because they are the two that cost
+something, not because they sit outside the count. The ten are the seven clause-anchored axes of #334
+and #333, the `<abbr>` fabrication axis of #335, the dot-leader axis of #374, and the subtotal-row
+axis of #324.
 
 **† The lost-page column was corrected on 2026-09-03 and the correction goes against the
 recommendation.** Sonnet had been published at 1 lost page. Re-reading the round's logs after
@@ -78,8 +86,9 @@ kimi's survive the re-read as genuine page-agent failures (`acir-p050`, `acir-p0
 correction reclassifies sonnet's $0.5091 of failed spend from page-agent waste to **pinned-checker**
 waste, which is #365's finding arriving from the other direction.
 
-**The recommendation is `gpt-5.6-luna`.** It is the cheapest, it is the only arm that loses no pages,
-and it is best-or-tied on all eight mechanically counted defect axes.
+**The recommendation is `gpt-5.6-luna`.** It is the cheapest, it is one of the two arms that lose no
+pages, and it is best-or-tied on eight of the ten mechanically counted defect axes — **not on all of
+them**, which is how #370 puts it and is the seventh figure §6 restates.
 
 **What that recommendation costs, stated plainly.** On the subtotal-row axis — the one that drives
 the most correction spend — luna is **2.43x worse** than the model Iris ran before this sprint
@@ -234,10 +243,10 @@ Three places, out of a sprint asked to loop until another round would not.
    several effects that had already been published. Every quality claim resting on a single round is
    flagged in its own issue.
 
-## 6. Six figures this document states differently from #370
+## 6. Seven figures this document states differently from #370
 
 Named rather than quietly changed, because #370 is the source and a reader may have the report open
-beside this. None of the six moves a recommendation, and each is checkable against the round it
+beside this. None of the seven moves a recommendation, and each is checkable against the round it
 names without spending anything (§10).
 
 - **The revert price multiple.** #370 reads "34.9% → 9.6% at 2.4x the price". 34.9% is the *shipped*
@@ -264,6 +273,13 @@ names without spending anything (§10).
   of 33 is `runs-verifier-1` over pages, and 26/33 is 78.8%. §5 states both with their rounds. Neither
   is wrong and the conclusion is unchanged; a reader who tried to reconcile them would find they do
   not.
+- **"Best-or-tied on all eight mechanical defect axes" is best-or-tied on eight of ten.** #370's §2
+  drops the denominator from the sentence its own source wrote: "across the nine mechanical axes I
+  have now counted, luna is best-or-tied on eight" (#344), where the ninth is the dot-leader axis on
+  which luna is the **worst** of the three. A tenth axis — dropped region subtotal rows — was counted
+  after that sentence, and luna is not best on it either. "All eight" deletes the counter-case, and
+  the counter-case is the reason this recommendation is stated as cost-and-robustness only rather
+  than as a clean win. §2 gives it as 8 of 10 and names all ten.
 
 Two citations are tightened rather than corrected. The checker tie of **40/45 against 39/45** is
 `runs-digits-45` (360 calls), while the 645-call figure belongs to `runs-verifier-1`, which is where

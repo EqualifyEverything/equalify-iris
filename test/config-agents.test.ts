@@ -614,9 +614,13 @@ test("docs/models.md's sections agree with §0 about each agent's share and disp
 // markup rather than use it. (2) The split below tests what a line *looks* like, so a prose line that
 // happens to wrap onto `- and that is the point` or `3. Undecided, because…` starts a fresh count
 // mid-sentence, and a `**` run spanning that wrap then reports as two odd blocks. That is a false
-// positive and the fix is to reflow the paragraph, not to widen the guard. It is latent here — this
-// document's minus signs are U+2212, which the ASCII `[-*+]` class does not match, and no line wraps
-// onto an ordered marker — but §4's numbered list is where a future edit would hit it first.
+// positive and the fix is to reflow the paragraph, not to widen the guard. It is latent in **both**
+// documents this runs over, and the audit is per-document because the answer could differ: in
+// docs/models.md the minus signs are U+2212, which the ASCII `[-*+]` class does not match, and no line
+// wraps onto an ordered marker — §4's numbered list is where a future edit would hit it first. In
+// docs/cost.md the same holds (15 × U+2212, no ASCII minus outside a real bullet) and §5's `1./2./3.`
+// are genuine ordered markers. A third document added to the loop below needs the same two lines
+// checked, not assumed.
 function unclosedBoldRuns(doc: string): string[] {
   const unclosed: string[] = [];
   let fenced = false;
@@ -733,11 +737,19 @@ test("docs/cost.md's cost table decomposes to its own totals, and its prose quot
     // And the per-page figure the prose quotes, over the denominator the prose names. The table is
     // per 100 pages SUBMITTED and every cross-arm figure in the document is on that denominator, so
     // a total that moves has to move the prose with it or the two disagree by a factor of a hundred.
+    // Scoped to §3, not the whole document: a match anywhere else would let a figure quoted in some
+    // other section stand in for the sentence this is here to hold, and the failure message would
+    // then be false about where it looked. Prose only — the table row it came from is excluded, or
+    // every row would satisfy this against itself.
     const perPage = `$${(t! / 100).toFixed(4)}`;
+    const prose = section
+      .split("\n")
+      .filter((l) => !/^\| /.test(l))
+      .join("\n");
     assert.ok(
-      doc.includes(perPage),
+      prose.includes(perPage),
       `docs/cost.md §3's ${name} row is ${total} per 100 pages submitted, so ${perPage} a page, ` +
-        `and no prose in the document quotes ${perPage}. Either the table moved and the ` +
+        `and no prose in §3 quotes ${perPage}. Either the table moved and the ` +
         `per-page sentence under it did not, or a figure is being quoted on the other ` +
         `denominator — pages that produced a file, which §3 says is not comparable across arms.`,
     );

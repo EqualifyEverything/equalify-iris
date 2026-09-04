@@ -389,8 +389,8 @@ To prove the endpoints work end-to-end (mock GitHub + mock model, no credentials
 
 Which model to run each agent on and what each one costs: **[docs/models.md](docs/models.md)**. What
 the whole pipeline costs a page — **19.4 cents when the model-selection sprint started, 10.7
-measured after one config line** — with the recommended approach for every step and the evidence
-under each one: **[docs/cost.md](docs/cost.md)**.
+measured after two lines of config and no code change** — with the recommended approach for every
+step and the evidence under each one: **[docs/cost.md](docs/cost.md)**.
 
 Example — create a session (order of `images` parts is the processing order, §9.2):
 
@@ -1115,8 +1115,9 @@ Places where the PRD left a decision open, and where v1 intentionally stops:
   aggregate is decided by whether the draw caught one: five Kimi documents read exactly 0% in up to 46% of
   resamples and anywhere from 0% to 87% overall. Its median reply being prose-free is what makes the
   sentence buy it little, and that part holds in all three rounds.
-  Since the Reader is one config line (`providers.per_agent.reader`), **swapping it means
-  re-measuring this**, and prose share is not a model trait to look up in either form.
+  Since the Reader's model is a config key and not a code change (`providers.per_agent.reader`, plus
+  block-wide `providers.bedrock.api: converse` for a non-Claude id — docs/models.md §3), **swapping it
+  means re-measuring this**, and prose share is not a model trait to look up in either form.
   **What to re-measure**, then: the **share of replies containing any prose** — not the share of
   characters, because the reply share separates these two models in every round measured — the
   incumbent 67%–75% over the four large rounds and 91% in the ablation's control, Kimi 7%–16% over

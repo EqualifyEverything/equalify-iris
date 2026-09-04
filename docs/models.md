@@ -11,8 +11,8 @@ it cost" — the outcome of the model-selection sprint tracked in
 is organised by pipeline *step* rather than by agent, prices the whole pipeline a page, and carries
 the last round of the sprint (`runs-extract100-95ca64c`, three page models at 100 pages each) which
 nothing here is measured on. Read it first for what to do; read this for how the knob works, what
-each agent's calls are, and the rounds before that one. Where the two differ, **cost.md §7 lists the
-four claims here it narrows** — the largest being that `page`, swapped and live on `moonshotai.kimi-k2.5`
+each agent's calls are, and the rounds before that one. Where the two differ, **cost.md §7 names the
+three claims here it narrows and the one open question it answers** — the largest being that `page`, swapped and live on `moonshotai.kimi-k2.5`
 below, now has a further swap recommended on top of it.
 
 Four of the five agents have a cheaper model in play, and no two of the four are at the same stage.
