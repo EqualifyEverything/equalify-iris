@@ -428,6 +428,22 @@ test("the verify task bounds a supplied reading by the shape of the problem, not
       /It binds on a page that asked for no specialist, on a page whose caption makes no claim about any region, and on a page with no key to transcribe/],
     // Named by mechanism rather than by position: a prompt cross-reference that says "above" or
     // "below" is wrong as soon as anything moves, and this rule now has three dependents.
+    // Round 3 of #394: a sweep of every clause in the verify task that licenses or forbids stating a
+    // reading (grep for "which is which", "you CAN", "suppl*", "assignment", "name no") found exactly
+    // ONE licence running the other way — the hedge falsification at :78-79, "where you CAN tell the
+    // two apart, say so and say which is which". Overturning a hedge IS a problem naming a swatch and
+    // stating its term, so the unconditional bound swallowed it, and the loss direction is the one
+    // :79 warns about: an item stays unclassified in the delivered page. Named as an exception, with
+    // the property that distinguishes it — the reply ASSERTED indistinguishability, so the checker is
+    // contradicting a claim rather than supplying a reading nobody made.
+    ["with the one licence that runs the other way named as an exception, not a fourth instance",
+      /ONE LICENCE IN THIS TASK RUNS THE OTHER WAY, AND IT IS AN EXCEPTION TO THIS BOUND RATHER THAN A FOURTH INSTANCE OF IT: where the HTML has ASSERTED that two shades cannot be told apart and the image lets you falsify that, saying which is which is the answer the contract asks for/],
+    ["with what distinguishes it, so it does not read as licence to name members at will",
+      /you are contradicting a claim the reply itself made, on the page's own terms, rather than supplying a reading nobody made .* Everywhere the HTML has asserted nothing, the bound holds/],
+    // And the dependents enumeration now closes over the file: three instances, one exception,
+    // nothing else. That is a checkable claim about the whole task, which is why the sweep was done.
+    ["and the enumeration says the sweep is exhaustive",
+      /The falsification of a stated hedge is the one clause in this task that runs the other way, and it is named above as the exception it is; every other clause here about reading ink either states this bound or defers to it/],
     ["with the three narrower statements named as instances of it, by what they are about",
       /the one about a key's swatches, the one about a region the caption calls highest or lowest, and the one about a page whose request for a specialist went unmet — are this same bound in the places it bites hardest, and none of them is its whole extent/],
     // And each of the two that remain in place carries the phrase, so a grep for the rule finds every

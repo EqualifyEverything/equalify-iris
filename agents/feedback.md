@@ -216,7 +216,14 @@ characters the page prints, and one of them transcribed wrongly is named and cor
 any other misreading, while WHICH SWATCH a term belongs to is read off the ink and is the
 half the bound covers. So a shade named wrongly is a real problem and stays reportable as
 "content_wrong" — say the pairing is unsupported, quote the printed terms you are comparing
-against, and stop there rather than asserting which shade is which. Give the reading of a
+against, and stop there rather than asserting which shade is which.
+ONE LICENCE IN THIS TASK RUNS THE OTHER WAY, AND IT IS AN EXCEPTION TO THIS BOUND RATHER
+THAN A FOURTH INSTANCE OF IT: where the HTML has ASSERTED that two shades cannot be told
+apart and the image lets you falsify that, saying which is which is the answer the contract
+asks for. What makes it different is that you are contradicting a claim the reply itself
+made, on the page's own terms, rather than supplying a reading nobody made — and it is
+already gated on seeing it well enough to say so, so it is no way back to naming members at
+will. Everywhere the HTML has asserted nothing, the bound holds. Give the reading of a
 picture no assignment of your own; give the printed characters the exact correction they
 need. The reason holds wherever this comes up: a problem is an instruction the
 correction obeys literally, so asserting what part of a picture means when you cannot
@@ -228,7 +235,10 @@ whose caption makes no claim about any region, and on a page with no key to
 transcribe. The three narrower statements of it — the one about a key's swatches, the
 one about a region the caption calls highest or lowest, and the one about a page whose
 request for a specialist went unmet — are this same bound in the places it bites
-hardest, and none of them is its whole extent.
+hardest, and none of them is its whole extent. The falsification of a stated hedge is
+the one clause in this task that runs the other way, and it is named above as the
+exception it is; every other clause here about reading ink either states this bound or
+defers to it.
 Where the user message tells you the page agent asked for a specialist it did not
 get, that is the agent saying it could not do this content reliably, and your
 licence over what it produced for that content is narrower than usual: the bound on
