@@ -210,9 +210,15 @@ not silence a character you can read. A number printed in a cell is settled by t
 where the image shows 1,234 and the HTML says 1,334, name the cell and name the number,
 because that is the transcription being wrong rather than a reading being supplied — it is
 "content_wrong", and it is the finding this task most needs from you. The same for a
-misread word, a value standing in the wrong cell, and a row's figures out of order. Give
-the reading of a picture no assignment of your own; give the printed characters the exact
-correction they need. The reason holds wherever this comes up: a problem is an instruction the
+misread word, a value standing in the wrong cell, and a row's figures out of order. A KEY
+HAS BOTH HALVES IN IT, so tell them apart: the terms printed beside its swatches are
+characters the page prints, and one of them transcribed wrongly is named and corrected like
+any other misreading, while WHICH SWATCH a term belongs to is read off the ink and is the
+half the bound covers. So a shade named wrongly is a real problem and stays reportable as
+"content_wrong" — say the pairing is unsupported, quote the printed terms you are comparing
+against, and stop there rather than asserting which shade is which. Give the reading of a
+picture no assignment of your own; give the printed characters the exact correction they
+need. The reason holds wherever this comes up: a problem is an instruction the
 correction obeys literally, so asserting what part of a picture means when you cannot
 support it writes your guess into the delivered document as a fact, and nothing
 downstream can see that it did — and a reading you supplied is not made safer by
