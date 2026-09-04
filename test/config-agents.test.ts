@@ -614,13 +614,15 @@ test("docs/models.md's sections agree with §0 about each agent's share and disp
 // markup rather than use it. (2) The split below tests what a line *looks* like, so a prose line that
 // happens to wrap onto `- and that is the point` or `3. Undecided, because…` starts a fresh count
 // mid-sentence, and a `**` run spanning that wrap then reports as two odd blocks. That is a false
-// positive and the fix is to reflow the paragraph, not to widen the guard. It is latent in **both**
-// documents this runs over, and the audit is per-document because the answer could differ: in
+// positive and the fix is to reflow the paragraph, not to widen the guard. It is latent in **all
+// three** documents this runs over, and the audit is per-document because the answer could differ: in
 // docs/models.md the minus signs are U+2212, which the ASCII `[-*+]` class does not match, and no line
 // wraps onto an ordered marker — §4's numbered list is where a future edit would hit it first. In
-// docs/cost.md the same holds (15 × U+2212, no ASCII minus outside a real bullet) and §5's `1./2./3.`
-// are genuine ordered markers. A third document added to the loop below needs the same two lines
-// checked, not assumed.
+// docs/cost.md the same holds (no ASCII minus as a numeric sign) and the five sampling bounds are
+// genuine ordered markers. docs/sprint-246.md was audited the same way when the report was split out
+// of docs/cost.md (12 × U+2212, no ASCII minus as a sign, and §5's `1./2./3.` genuine): both lines
+// were checked on it rather than assumed from its parent, which is what a fourth document added to
+// the loop below owes as well.
 function unclosedBoldRuns(doc: string): string[] {
   const unclosed: string[] = [];
   let fenced = false;
@@ -658,11 +660,14 @@ function unclosedBoldRuns(doc: string): string[] {
   return unclosed;
 }
 
-// Both of the measurement documents, not just the one the defect happened in. docs/cost.md is the
-// same kind of writing — bold lead-ins on nearly every paragraph, tables whose emphasis lands on
-// whichever figure moved — so it fails the same way, and it was written after this check existed.
+// Every measurement document, not just the one the defect happened in. docs/cost.md and
+// docs/sprint-246.md are the same kind of writing — bold lead-ins on nearly every paragraph, tables
+// whose emphasis lands on whichever figure moved — so they fail the same way, and both were written
+// after this check existed. sprint-246.md is most of the prose docs/cost.md used to carry, so leaving
+// it out of the loop would have quietly dropped ~250 already-covered lines out of coverage on the
+// commit that moved them.
 test("the measurement docs' bold runs close in the block that opens them", () => {
-  for (const file of ["docs/models.md", "docs/cost.md"]) {
+  for (const file of ["docs/models.md", "docs/cost.md", "docs/sprint-246.md"]) {
     const unclosed = unclosedBoldRuns(readFileSync(join(ROOT, file), "utf8"));
     assert.deepEqual(
       unclosed,
@@ -675,22 +680,27 @@ test("the measurement docs' bold runs close in the block that opens them", () =>
   }
 });
 
-// docs/cost.md's §3 is the sprint's final cost table and the only one in this repo whose rows are
-// an ARITHMETIC decomposition rather than a partition: each arm's total is its `verify + correct`
+// docs/sprint-246.md's §3 is the sprint's three-arm page-model comparison, whose rows are an
+// ARITHMETIC decomposition rather than a partition: each arm's total is its `verify + correct`
 // column plus its `page only` column, and the percentage beside them is the first over the total.
 // So the realistic edit — a newer round moves one arm's total and its components are left standing,
 // or the reverse — is catchable for free, and it is the edit that has already gone wrong twice in
 // this sprint's reporting (#311's four shares summing to 94.6%, and §0 of docs/models.md carrying
 // one round's shares while §6 predicted another's).
 //
+// It lived on docs/cost.md until #395 split that document into a price sheet and this report, which
+// is why the section number is unchanged: the table moved file, not position. The per-STEP table that
+// replaced it in docs/cost.md is a different shape and has its own check below — the two are not
+// interchangeable and neither test covers the other's document.
+//
 // Deliberately NOT a check that the figures are current or that the round named beside them is the
 // one they came from: it passes on any self-consistent set. What it does say is that the table and
 // the prose under it cannot drift apart, since the per-page figures the prose quotes are re-derived
 // here from the table's own cells rather than pinned as literals.
-test("docs/cost.md's cost table decomposes to its own totals, and its prose quotes those totals", () => {
-  const doc = readFileSync(join(ROOT, "docs/cost.md"), "utf8");
+test("docs/sprint-246.md's cost table decomposes to its own totals, and its prose quotes those totals", () => {
+  const doc = readFileSync(join(ROOT, "docs/sprint-246.md"), "utf8");
   const section = doc.split(/^## /m).find((s) => s.startsWith("3."));
-  assert.ok(section, "docs/cost.md has no `## 3.` cost section any more");
+  assert.ok(section, "docs/sprint-246.md has no `## 3.` cost section any more");
 
   const money = (cell: string | undefined) => {
     const m = cell?.replace(/\*\*/g, "").match(/\$([\d,]+\.\d+)/);
@@ -720,7 +730,7 @@ test("docs/cost.md's cost table decomposes to its own totals, and its prose quot
     // same rounding.
     assert.ok(
       Math.abs(c! + p! - t!) <= 0.01,
-      `docs/cost.md §3 says ${name} cost ${total}, but its own components are ${checked} of ` +
+      `docs/sprint-246.md §3 says ${name} cost ${total}, but its own components are ${checked} of ` +
         `checking and correcting plus ${pageOnly} of page calls — $${(c! + p!).toFixed(4)}. One ` +
         `column was updated from a newer round and the others were left standing, and the ` +
         `verify+correct SHARE beside them is read off exactly this decomposition.`,
@@ -729,7 +739,7 @@ test("docs/cost.md's cost table decomposes to its own totals, and its prose quot
     assert.ok(Number.isFinite(stated), `§3's ${name} row has no verify+correct share: ${share}`);
     assert.ok(
       Math.abs((c! / t!) * 100 - stated) <= 0.5,
-      `docs/cost.md §3 says checking and correcting is ${share} of ${name}'s bill; its own cells ` +
+      `docs/sprint-246.md §3 says checking and correcting is ${share} of ${name}'s bill; its own cells ` +
         `give ${((c! / t!) * 100).toFixed(1)}% (${checked} of ${total}). That share is the number ` +
         `§5 opens on — "85% of the extraction step is checking and correcting" — so it decides ` +
         `which lever the document sends a reader to.`,
@@ -748,10 +758,123 @@ test("docs/cost.md's cost table decomposes to its own totals, and its prose quot
       .join("\n");
     assert.ok(
       prose.includes(perPage),
-      `docs/cost.md §3's ${name} row is ${total} per 100 pages submitted, so ${perPage} a page, ` +
+      `docs/sprint-246.md §3's ${name} row is ${total} per 100 pages submitted, so ${perPage} a page, ` +
         `and no prose in §3 quotes ${perPage}. Either the table moved and the ` +
         `per-page sentence under it did not, or a figure is being quoted on the other ` +
         `denominator — pages that produced a file, which §3 says is not comparable across arms.`,
     );
   }
+});
+
+// docs/cost.md is now a price sheet whose entire value is that a reader can take a figure off it
+// without excavating: one headline, one per-STEP table, and three prose figures read off that table.
+// That is a different shape from the three-arm comparison above — the rows are steps of one round
+// rather than arms of three, so they decompose to the headline total instead of to each other — and
+// the realistic edit is the one this sprint has already made twice: a newer round moves a row and the
+// headline, the block subtotals or a share is left standing.
+//
+// What makes it worth a check rather than a proofread is that the document deliberately states three
+// numbers that are NOT independent of the table: the cents-a-page headline is the total over 100, each
+// share is a row over the total, and the "checking costs two and a half times producing" claim is
+// three of those shares added. Nothing in a markdown file tells a reader which of those went stale.
+//
+// Rounding is asserted rather than tolerated away. The per-step cells are published to four decimals,
+// so they sum to $0.0001 less than the round's ledger total and the shares sum to 99.9%; the document
+// says both of those out loud, and this reads the sum it states rather than accepting any total within
+// a cent — a drifted row would otherwise hide inside the allowance.
+test("docs/cost.md's price sheet decomposes to the headline it opens with", () => {
+  const doc = readFileSync(join(ROOT, "docs/cost.md"), "utf8");
+  const money = (cell: string | undefined) => {
+    const m = cell?.replace(/\*\*/g, "").match(/\$([\d,]+\.\d+)/);
+    return m ? Number(m[1]!.replace(/,/g, "")) : undefined;
+  };
+
+  // Step rows are the table lines whose second cell is a dollar figure; the header and separator
+  // carry none. The `failed` row is one of them on purpose — it is billed spend and belongs in the
+  // decomposition, which is the error #311 made by excluding it from four numerators.
+  const rows = doc
+    .split("\n")
+    .filter((l) => /^\| /.test(l))
+    .map((l) =>
+      l
+        .split("|")
+        .slice(1, -1)
+        .map((c) => c.trim()),
+    )
+    .filter((cells) => money(cells[1]) !== undefined);
+  assert.ok(rows.length >= 8, `docs/cost.md's table has ${rows.length} step rows; expected one per step`);
+
+  const total = money(doc.match(/total\s+\*\*(\$[\d,]+\.\d+)\*\*/)?.[1]);
+  assert.ok(
+    total !== undefined,
+    "docs/cost.md's opening paragraph no longer states the round's total as `total **$N**`, so " +
+      "nothing below can be checked against it — every share and the cents-a-page headline are that " +
+      "total's denominator.",
+  );
+
+  const summed = rows.reduce((a, cells) => a + money(cells[1])!, 0);
+  const stated = money(doc.match(/they sum to (\$[\d,]+\.\d+)/)?.[1]);
+  assert.ok(
+    stated !== undefined,
+    "docs/cost.md no longer states what its step rows sum to (`they sum to $N`). That sentence is " +
+      "the one place the table's own arithmetic is written down for a reader.",
+  );
+  assert.equal(
+    Number(summed.toFixed(4)),
+    stated,
+    `docs/cost.md's step rows sum to $${summed.toFixed(4)}, and the prose says they sum to ` +
+      `$${stated!.toFixed(4)}. A row moved and the sentence under the table did not.`,
+  );
+  assert.ok(
+    Math.abs(summed - total!) <= 0.01,
+    `docs/cost.md's step rows sum to $${summed.toFixed(4)} but the headline total is ` +
+      `$${total!.toFixed(4)} — a cent apart at most is per-cell rounding, more than that is a ` +
+      `missing or double-counted step.`,
+  );
+
+  for (const cells of rows) {
+    const [name, cost, share] = cells;
+    const stated = Number(share!.replace(/\*\*/g, "").match(/([\d.]+)%/)?.[1]);
+    assert.ok(Number.isFinite(stated), `docs/cost.md's ${name} row has no share: ${share}`);
+    const actual = (money(cost)! / total!) * 100;
+    assert.ok(
+      Math.abs(actual - stated) <= 0.05,
+      `docs/cost.md says ${name} is ${share} of the bill; ${cost} over the headline ` +
+        `$${total!.toFixed(4)} is ${actual.toFixed(2)}%. The share column is read off the total the ` +
+        `document opens with, so one of the two is from a different round.`,
+    );
+  }
+
+  // The headline a reader quotes, in the unit it is written in.
+  const cents = Number(doc.match(/\*\*([\d.]+)¢ a page\.\*\*/)?.[1]);
+  assert.ok(Number.isFinite(cents), "docs/cost.md no longer opens with `**N¢ a page.**`");
+  assert.equal(
+    cents,
+    Number(((total! / 100) * 100).toFixed(1)),
+    `docs/cost.md opens on ${cents}¢ a page, but its own total $${total!.toFixed(4)} over the 100 ` +
+      `pages it names is ${((total! / 100) * 100).toFixed(1)}¢. The headline is the figure everything ` +
+      `else in the repo quotes.`,
+  );
+
+  // And the one comparison the document draws between its own rows, which is three shares added.
+  const claimed = Number(
+    doc.match(/`verify`\s*\+\s*`correct`\s*\+\s*`recheck_sampled`\s*is\s*\*\*([\d.]+)%\*\*/)?.[1],
+  );
+  assert.ok(
+    Number.isFinite(claimed),
+    "docs/cost.md no longer states the `verify` + `correct` + `recheck_sampled` share, which is the " +
+      "claim its 'checking costs more than producing' line rests on.",
+  );
+  const checking = ["verify", "correct", "recheck_sampled"].map((step) => {
+    const row = rows.find((c) => c[0] === `\`${step}\``);
+    assert.ok(row, `docs/cost.md's table has no \`${step}\` row, so its ${claimed}% cannot be checked`);
+    return money(row![1])!;
+  });
+  const checkingShare = (checking.reduce((a, b) => a + b, 0) / total!) * 100;
+  assert.ok(
+    Math.abs(checkingShare - claimed) <= 0.1,
+    `docs/cost.md says checking a page is ${claimed}% of the bill; its own \`verify\`, \`correct\` ` +
+      `and \`recheck_sampled\` rows come to ${checkingShare.toFixed(2)}%. That figure is the ` +
+      `document's headline finding about where the money goes.`,
+  );
 });
