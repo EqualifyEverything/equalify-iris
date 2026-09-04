@@ -3431,9 +3431,17 @@ async function extractPage(
   // second reader downstream, and that reader cannot repair it. `namespaceAnchors` prefixes each
   // page's ids at assembly, so a cross-page collision is fixed in code; a page that collided with
   // ITSELF gets the same prefix on both copies and stays collided, which is the one case that
-  // function declines by name. Its remaining reporter is lint on the assembled document, and by
-  // then the ids have been renamed — a finding on `p3-fn-1` names an id no page agent ever wrote,
-  // for a page nobody is going to look at again with the image in front of them.
+  // function declines by name. Its remaining reporter is lint on the assembled document, for a page
+  // nobody is going to look at again with the image in front of them — and often under a name that
+  // page never wrote, since a finding on a prefixed id reads `p3-fn-1`.
+  //
+  // Often and not always, which is worth stating exactly because the unqualified version is
+  // tempting: `namespaceAnchors` renames only ids more than one PAGE claims, and returns every page
+  // byte-for-byte when there are none, so a document whose sole defect is page 3 using `fn-1` twice
+  // with no other page claiming `fn-1` reaches lint with `fn-1` intact. Per-page footnote numbering
+  // usually does produce the cross-page collision that makes the rename happen — it is the shape
+  // both duplicates measured on disk have — but the case for asking here does not rest on it. The
+  // page step is where the model still holds the image, and lint runs after delivery either way.
   //
   // This is also the half of #373 directive 3 that a code check can honestly buy. The directive's
   // claim is that the checker's guess becomes an instruction because "nothing in the run knows the
@@ -4101,9 +4109,10 @@ async function extractPage(
         }
         // And the same question about the ids, which this rule owes more than the other two do: it
         // is the one whose defect has a downstream reporter that CANNOT fix it — lint sees the
-        // assembled document, where `namespaceAnchors` has already renamed every id — so a duplicate
-        // still here is one that ships under a name no page agent wrote. Free and exact, on the
-        // fragment that is actually delivered.
+        // assembled document, after this page's last chance to be read against its image, and where
+        // a prefixed id no longer carries the name the page gave it (only where the rename ran; see
+        // the qualification at `page_duplicate_ids` above). Free and exact, on the fragment that is
+        // actually delivered.
         //
         // `ids` and not a count, because unlike an unrecovered link this is not identity-matched
         // against anything the page arrived with: the correction renumbers, so it can clear `fn-1`

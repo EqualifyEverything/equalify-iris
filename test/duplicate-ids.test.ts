@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { duplicateIdProblem, duplicateIds, idAudit } from "../src/pipeline/anchors.ts";
+import { duplicateIdProblem, duplicateIds, idAudit, namespaceAnchors } from "../src/pipeline/anchors.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
@@ -92,6 +92,35 @@ test("the correction names the id, the references, and the repair on both ends",
   assert.match(sentence, /href="#fn-1"/);
   assert.match(sentence, /repoint the reference/);
   assert.match(sentence, /Change nothing else/);
+});
+
+test("what lint would call this collision depends on the rest of the document", () => {
+  // The reason the comments here say lint reports `p3-fn-1` "usually" rather than flatly, pinned
+  // because the flat version was written in four places first (review of #397). `namespaceAnchors`
+  // renames only ids more than one PAGE claims, so a same-page duplicate reaches the assembled
+  // document under whichever name the rest of the document happens to decide.
+  //
+  // Nothing else claims `fn-1`, so there is no collision to namespace and the page ships as
+  // written: lint's finding would name `fn-1`, the id the page agent chose.
+  const alone = namespaceAnchors([
+    { order: 1, innerHtml: `<p id="a">one</p>` },
+    { order: 2, innerHtml: `<sup id="fn-1">1</sup><sup id="fn-1">2</sup>` },
+  ]);
+  assert.deepEqual(alone.report.collisions, []);
+  assert.match(alone.pages[1], /id="fn-1"/);
+  assert.doesNotMatch(alone.pages[1], /p2-/, "no prefix, because no page collided with another");
+
+  // Add a second page claiming `fn-1` — the shape per-page footnote numbering produces, and the
+  // shape both measured duplicates have — and now the rename runs, so the SAME defect is reported
+  // under a name that page never wrote. Either way it is still two elements with one id: prefixing
+  // renames both copies or neither, which is why this is not the pass that can fix it.
+  const together = namespaceAnchors([
+    { order: 1, innerHtml: `<sup id="fn-1">1</sup>` },
+    { order: 2, innerHtml: `<sup id="fn-1">1</sup><sup id="fn-1">2</sup>` },
+  ]);
+  assert.deepEqual(together.report.collisions, ["fn-1"]);
+  assert.equal(idAudit(together.pages[1]).duplicated.length, 1, "still duplicated after namespacing");
+  assert.deepEqual(idAudit(together.pages[1]).duplicated, ["p2-fn-1"], "under the assembler's name");
 });
 
 // --- through the pipeline ------------------------------------------------------------

@@ -546,9 +546,13 @@ function referencesIn(document: Document): string[] {
 // the collision `namespaceAnchors` cannot fix, answered at the page step instead of at assembly
 // (#373 directive 3).
 //
-// Why it is here and not left to lint: prefixing is per page, so both copies of a same-page
-// duplicate get the same prefix and stay collided. `namespaceAnchors` says so where it declines
-// the case, and until now the sentence ended "it needs a human or the review loop". The page step
+// Why it is here and not left to lint: prefixing cannot separate two copies on one page — either
+// the id is renamed on both or on neither, and the second is the ordinary outcome, since
+// `namespaceAnchors` renames only ids more than one PAGE claims. `namespaceAnchors` says so where
+// it declines the case, and until now the sentence ended "it needs a human or the review loop".
+// Which branch a document took also decides what lint's finding is CALLED — `p3-fn-1` where the
+// rename ran, `fn-1` where nothing collided across pages — so the name the page agent would have
+// to act on is not even predictable from here. The page step
 // is the one place that can still ask the model that wrote the ids to renumber them, and
 // `agents/page.md` is where the rule lives (*"never hand one an id that a numbered footnote on
 // this page already uses… is a duplicate id that ships"*), so this is the prompt's own rule
@@ -610,7 +614,20 @@ export function idAudit(innerHtml: string): { ids: number; duplicated: string[] 
         .sort(),
     };
   } finally {
-    dom.window.close();
+    // Cleanup is allowed to fail, for the reason `namespaceAnchors` gives at its own `close()`
+    // below: `close()` walks the tree recursively and overflows from about 4,000 levels, and this
+    // function reaches pages that deep on purpose — it ignores `rewritable`, because reading ids
+    // off a too-deep tree is exact where scanning its source is a guess. A throw from a `finally`
+    // would replace the counts with a `RangeError`, and the two call sites turn that into
+    // different damage: `duplicateIds` at the page step lands in the per-page catch and marks
+    // @page-failed a page Iris already holds (the shape #171 fixed), while `idCounts` is
+    // evaluated inline in the roll-up event, outside any catch, and would fail the whole run
+    // after every page had been billed. Neither is worth a count of ids.
+    try {
+      dom.window.close();
+    } catch {
+      // Deliberately empty: see above.
+    }
   }
 }
 
