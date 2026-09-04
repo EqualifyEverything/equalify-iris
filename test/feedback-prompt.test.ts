@@ -390,9 +390,22 @@ test("the verify task bounds a supplied reading by the shape of the problem, not
     // The shapes enumerated, because "supplies a reading" is the abstraction the p084 problem would
     // not have recognised itself in: it named states and a fill pattern, nothing about "readings".
     ["with the shapes that count as supplying one enumerated",
-      /A problem that names a place, a region, a cell or a swatch and states which category, band or value it belongs in has supplied a reading of the picture/],
+      /a problem that names that part and states the category, band or term it belongs in has supplied a reading of the picture/],
+    // Scoped to what the ink leaves open, because the unscoped version reached content_wrong's own
+    // definition — "a value in the wrong cell" IS a problem naming a cell and stating its value.
+    ["scoped to what the printed characters do not settle",
+      /Where what a part of the picture MEANS is not settled by characters the page prints — which category a place falls in, which band a region runs in, which term a swatch of ink stands for/],
     ["and what may be said instead",
-      /Say the reading is unsupported and ask for it to be hedged, scoped or re-read, and name no members of your own/],
+      /Say the reading is unsupported and ask for it to be hedged, scoped, re-read or removed, and name no members of your own/],
+    // Round 1 of #394: the bound as first written told a checker reading legible digits to stop
+    // naming the cell it can plainly read, i.e. suppressed the strongest fidelity finding there is
+    // on a scanned table. The carve-out is stated with an example, and states the tag.
+    ["with transcription carved out by name, so a misread number is still named exactly",
+      /THAT BOUND IS ON WHAT THE INK LEAVES OPEN AND NEVER ON WHAT THE PAGE PRINTS, so it does not silence a character you can read/],
+    ["with the carve-out's worked case and its kind",
+      /where the image shows 1,234 and the HTML says 1,334, name the cell and name the number, because that is the transcription being wrong rather than a reading being supplied — it is "content_wrong"/],
+    ["and the other transcription shapes it reaches",
+      /The same for a misread word, a value standing in the wrong cell, and a row's figures out of order/],
     ["with the mechanism, so it is not read as caution for its own sake",
       /a problem is an instruction the correction obeys literally, so asserting what part of a picture means when you cannot support it writes your guess into the delivered document as a fact/],
     // The 2-of-9 correct assignments are the case this sentence is for. Without it the rule reads as
@@ -470,6 +483,13 @@ test("the verify task is given the asymmetry that makes a false marker unrecover
       /it reaches a reader as the source being unreadable when no pass that saw the source said so/],
     ["against what the other direction costs",
       /A marker you wrongly leave alone costs a log line/],
+    // Round 1 of #394: the silence is scoped, because a reply that stops short AND writes no log is
+    // the one page the marker rule now says nothing about. What a reader loses there is the content,
+    // and that has always been reportable on its own terms — say so, or the silence reads as blanket.
+    ["with the silence scoped to the marker, so a truncated page's missing content is still reported",
+      /That silence covers the MARKER and nothing else\. Content the image holds and the HTML does not is missing whether or not any log admits it/],
+    ["and the page that recorded nothing is named as the case that needs saying",
+      /a reply that stops short without recording anything is exactly where you have to say so yourself: report what is absent as "content_missing", quote where the HTML stops, and let the marker alone/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
   }

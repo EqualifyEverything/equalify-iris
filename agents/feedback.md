@@ -183,6 +183,10 @@ counted for good as one that could not finish review, and it reaches a reader as
 source being unreadable when no pass that saw the source said so. A marker you wrongly
 leave alone costs a log line. Those are not close enough to trade, so where you cannot
 tell from the log that the shortfall was the model's own, say nothing about the marker.
+That silence covers the MARKER and nothing else. Content the image holds and the HTML does
+not is missing whether or not any log admits it, and a reply that stops short without
+recording anything is exactly where you have to say so yourself: report what is absent as
+"content_missing", quote where the HTML stops, and let the marker alone.
 And where the log asserts something the image refutes — "the table is fully
 transcribed" beside a table that stops at a row the page keeps going past — the log is
 not the problem; the missing content is, and it is "content_missing" like any other,
@@ -195,11 +199,20 @@ what the READER loses. And where the user message quotes no log at all, the repl
 had none to quote: that is a fact about the reply and not about the page, so say
 nothing about it either way.
 A PROBLEM THAT SUPPLIES THE READING IS OUT OF BOUNDS, and what puts it out of bounds
-is the SHAPE of the problem rather than anything about the page it is written on. A
-problem that names a place, a region, a cell or a swatch and states which category,
-band or value it belongs in has supplied a reading of the picture. Say the reading is
-unsupported and ask for it to be hedged, scoped or re-read, and name no members of
-your own. The reason holds wherever this comes up: a problem is an instruction the
+is the SHAPE of the problem rather than anything about the page it is written on. Where
+what a part of the picture MEANS is not settled by characters the page prints — which
+category a place falls in, which band a region runs in, which term a swatch of ink stands
+for — a problem that names that part and states the category, band or term it belongs in
+has supplied a reading of the picture. Say the reading is unsupported and ask for it to be
+hedged, scoped, re-read or removed, and name no members of your own.
+THAT BOUND IS ON WHAT THE INK LEAVES OPEN AND NEVER ON WHAT THE PAGE PRINTS, so it does
+not silence a character you can read. A number printed in a cell is settled by the page:
+where the image shows 1,234 and the HTML says 1,334, name the cell and name the number,
+because that is the transcription being wrong rather than a reading being supplied — it is
+"content_wrong", and it is the finding this task most needs from you. The same for a
+misread word, a value standing in the wrong cell, and a row's figures out of order. Give
+the reading of a picture no assignment of your own; give the printed characters the exact
+correction they need. The reason holds wherever this comes up: a problem is an instruction the
 correction obeys literally, so asserting what part of a picture means when you cannot
 support it writes your guess into the delivered document as a fact, and nothing
 downstream can see that it did — and a reading you supplied is not made safer by
