@@ -738,6 +738,12 @@ test("the correction prompt names the problems and bounds what else may change",
     assert.match(user, /A problem about what the IMAGE shows is not this case/);
     assert.match(user, /A problem you cannot settle inside the HTML is a problem to fix/);
     assert.match(user, /declining is not the shorter answer/);
+    // And the exclusion that keeps the misuse counter honest: the problems Iris raised in code are
+    // marked in the list and are not declinable. Without it a corrector following the licence
+    // exactly would decline into `links`, `alt` and `ids`, whose wordings ARE the examples above,
+    // and `declined.code_checked` would count compliance as misuse (test/decline-false-problem.test.ts
+    // pins the mark on the entries themselves).
+    assert.match(user, /A problem marked "\(Iris checked this one in code\.\)" is not one of these/);
     // And the destination. An instruction to say which problem and why, with nowhere to say it,
     // puts a sentence about the checker into the document.
     assert.match(user, /add "declined" to the JSON/);

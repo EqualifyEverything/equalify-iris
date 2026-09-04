@@ -61,13 +61,26 @@ test("the reply's own words for the same two fields are read too", () => {
   assert.deepEqual(parseDeclined([{ number: 2, reason: "no such attribute" }]), [
     { problem: 2, why: "no such attribute" },
   ]);
-  assert.deepEqual(parseDeclined([{ index: 4, because: "the table has six rows" }]), [
+  assert.deepEqual(parseDeclined([{ number: 4, because: "the table has six rows" }]), [
     { problem: 4, why: "the table has six rows" },
   ]);
   // A number that came back as a string, which is what an envelope re-serialized by hand carries.
   assert.deepEqual(parseDeclined([{ problem: " 2 ", why: "not duplicated" }]), [
     { problem: 2, why: "not duplicated" },
   ]);
+});
+
+test("`index` is not read as the citation, because nothing says which base it is in", () => {
+  // A model does send `index`, and the word conventionally means the 0-based position: `{ index: 1 }`
+  // is the first problem to one writer and the second to another, with nothing on the reply to
+  // settle it. A citation read off by one is worse than no citation, because `source` is computed
+  // from it and then read as evidence about which check was refused — so a `verify` decline lands in
+  // `ids` and the run reports the misuse this feature is measured by, manufactured by the parser.
+  // The decline is kept; only the number it could not verify is dropped.
+  assert.deepEqual(parseDeclined([{ index: 1, why: "the alt is a sentence" }]), [
+    { why: "the alt is a sentence" },
+  ]);
+  assert.deepEqual(parseDeclined([{ problem: 3, index: 2, why: "x" }]), [{ problem: 3, why: "x" }]);
 });
 
 test("a decline written as a sentence keeps the number it cites", () => {
@@ -116,6 +129,26 @@ test("a reply that declined nothing produces no entries", () => {
   assert.deepEqual(parseDeclined(["", "   "]), []);
   // And the shapes that are neither: a number, a boolean, a nested array member.
   assert.deepEqual(parseDeclined([1, true, null]), []);
+});
+
+test("a model that would not omit the key does not thereby decline something", () => {
+  // The request says to omit `declined` where it is acting on every problem, and the shapes a model
+  // sends instead of omitting a key are these. Each would otherwise write a `page_correction_declined`
+  // line and add 1 to `declined.pages`, `problems` and `unattributed` for EVERY corrected page in a
+  // run — which does not skew those rates, it replaces them, since they are read against the number
+  // of corrections.
+  assert.deepEqual(parseDeclined({}), [], "an object with nothing in it declined nothing");
+  assert.deepEqual(parseDeclined([{}, {}]), []);
+  assert.deepEqual(parseDeclined("none"), []);
+  for (const word of ["none", "None", "N/A", "n/a", "na", "nil", "nothing", "null", "-", "—", "None."]) {
+    assert.deepEqual(parseDeclined([word]), [], `"${word}" is not a decline`);
+  }
+  // And the near miss that IS one: a reason that merely begins with one of those words.
+  assert.deepEqual(parseDeclined(["none of the ids are duplicated"]), [
+    { why: "none of the ids are duplicated" },
+  ]);
+  // An object carrying only a key that is not a reason is the same nothing.
+  assert.deepEqual(parseDeclined([{ note: "looks fine" }]), []);
 });
 
 test("one decline sent bare, outside a list, is read as one decline", () => {
@@ -198,7 +231,11 @@ const body = (order: number): string =>
 const withAlt = (order: number): string => `${body(order)}<p><img src="f.png" alt="image"></p>`;
 const repaired = (order: number): string => body(order).replace("<h2>", "<h3>").replace("</h2>", "</h3>");
 
-function makeCtx(dir: string, pages: number, spec: Record<number, PageSpec>): { ctx: PipelineContext; events: Event[] } {
+function makeCtx(
+  dir: string,
+  pages: number,
+  spec: Record<number, PageSpec>,
+): { ctx: PipelineContext; events: Event[]; prompts: string[] } {
   const agentsDir = join(dir, "agents");
   const fragDir = join(dir, "fragments");
   const inputDir = join(dir, "input");
@@ -212,6 +249,9 @@ function makeCtx(dir: string, pages: number, spec: Record<number, PageSpec>): { 
     images.push({ name, order, path: join(inputDir, name), links: [] });
   }
   const events: Event[] = [];
+  // The correction requests, in the order they were made: the licence's own wording is under test
+  // here as much as what the pipeline does with a reply to it.
+  const prompts: string[] = [];
   const ctx = {
     sessionId: "ses_test",
     images,
@@ -244,6 +284,7 @@ function makeCtx(dir: string, pages: number, spec: Record<number, PageSpec>): { 
         if (step === "correct") {
           const img = images.find((i) => prompt.includes(`page ${i.order} content`))!;
           const s = spec[img.order] ?? {};
+          prompts.push(messages.find((m) => m.role === "user")?.content ?? "");
           return {
             text: JSON.stringify({
               html: s.corrected ?? repaired(img.order),
@@ -262,7 +303,7 @@ function makeCtx(dir: string, pages: number, spec: Record<number, PageSpec>): { 
       agentCall: () => {},
     },
   } as unknown as PipelineContext;
-  return { ctx, events };
+  return { ctx, events, prompts };
 }
 
 async function withTemp<T>(fn: (dir: string) => Promise<T>): Promise<T> {
@@ -282,6 +323,37 @@ const diagnose = (events: Event[]) =>
   );
 
 const rejected = ["The table on this page lost its six aggregate rows."];
+
+test("the problems Iris checked itself are marked, and the licence excludes the marked ones", async () => {
+  // What keeps `declined.code_checked` meaning one thing. The licence is written around claims about
+  // the markup, and the code-checked problems are phrased as exactly that — "More than one element on
+  // this page has id=…", "your output does not link to it", "has a placeholder for alt text" — so a
+  // corrector following the licence AS WRITTEN would decline into them, and the field that exists to
+  // count the misuse would be counting compliance. One number, two behaviours, and no way to tell
+  // them apart afterwards. So the entries Iris raised in code say so, and the licence says a marked
+  // problem is not one to decline.
+  await withTemp(async (dir) => {
+    const { ctx, prompts } = makeCtx(dir, 2, { 1: { problems: rejected, genericAlt: true } });
+    await runExtraction(ctx);
+    assert.equal(prompts.length, 1);
+    const [problem1, problem2] = prompts[0]
+      .split("\n")
+      .filter((l) => /^\d+\. /.test(l))
+      .map((l) => l.replace(/\s+/g, " "));
+    // The verifier's problem, as it wrote it, unmarked: it is a reading, and a reading is what may
+    // be false. #373's instance C is this entry saying an id is duplicated on a page that has none.
+    assert.match(problem1, /^1\. The table on this page lost its six aggregate rows\.$/);
+    assert.doesNotMatch(problem1, /checked this one in code/);
+    // The alt rule's problem, which was matched against a closed word list in the fragment before the
+    // call was made.
+    assert.match(problem2, /^2\. The image described as alt="image" has a placeholder/);
+    assert.match(problem2, /\(Iris checked this one in code\.\)$/, "and it says so, at the end");
+    // The licence names the mark, in the mark's own words, so the two cannot drift apart.
+    const licence = prompts[0].replace(/\s+/g, " ");
+    assert.match(licence, /A problem marked "\(Iris checked this one in code\.\)" is not one of these/);
+    assert.match(licence, /settled against the source file or this page's own markup/);
+  });
+});
 
 test("a decline is logged with the problem it names, the reason, and how many were on offer", async () => {
   await withTemp(async (dir) => {

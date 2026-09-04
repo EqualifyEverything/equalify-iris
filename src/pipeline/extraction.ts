@@ -2708,6 +2708,20 @@ export interface Declination {
   why: string;
 }
 
+// What separates the three problems Iris CHECKED from the one it was told, where the corrector reads
+// them (#373 directive 4). The list it is shown is four sources concatenated with nothing to say
+// which is which, and the licence to decline is written around claims about the markup — whose
+// wordings are exactly the code-checked ones ("More than one element on this page has id=…"). Without
+// this mark a corrector following the licence as written declines into `links`, `alt` and `ids`, and
+// `verification.declined.code_checked`, the field that exists to count the misuse, counts compliance
+// instead. With it the number means one thing.
+//
+// A suffix on the entry rather than a section heading over each group, because the groups are
+// numbered as one sequence for the decline to cite and a heading between them invites the model to
+// renumber from 1 inside each. 33 characters, on the problems this run raised in code — 2 of 1,501
+// page replies for the id rule, none from the deployed model.
+export const CHECKED_IN_CODE = " (Iris checked this one in code.)";
+
 // What a corrector's reply says it declined, out of whatever shape the reply used.
 //
 // Deliberately loose about the container and strict about nothing else: the field is introduced in
@@ -2721,13 +2735,21 @@ export interface Declination {
 // A leading number IS read out of a string ("2. the id appears once"), because that is the shape a
 // model gives when it is answering a numbered list in prose and the number is its own citation, not
 // an inference of ours.
+//
+// The one thing this must not do is mint a decline out of a reply that declined nothing. The request
+// says to omit the key, and a model that will not omit a key sends `{}`, `"none"` or `"N/A"` instead
+// — so those are the shapes that would otherwise put a `page_correction_declined` line, and a count
+// in `declined.unattributed`, against every corrected page in a run. Both counts are read as rates
+// against corrections, so a per-page phantom would not skew them, it would replace them.
+const NOTHING_DECLINED = /^(none|no|n\/?a|nil|nothing|null|undefined|-|—)[.!]?$/i;
+
 export function parseDeclined(value: unknown): Declination[] {
   const entries = Array.isArray(value) ? value : value == null ? [] : [value];
   const out: Declination[] = [];
   for (const entry of entries) {
     if (typeof entry === "string") {
       const why = entry.trim();
-      if (!why) continue;
+      if (!why || NOTHING_DECLINED.test(why)) continue;
       const cited = /^\s*#?(\d{1,3})\s*[.):\-–]/.exec(entry);
       out.push({ ...(cited ? { problem: Number(cited[1]) } : {}), why });
       continue;
@@ -2739,10 +2761,20 @@ export function parseDeclined(value: unknown): Declination[] {
     // logged with an empty `why` rather than discarded, since the count is the load-bearing part
     // and a silent drop would report the reply as fully compliant.
     const why = [rec.why, rec.reason, rec.because].find((v) => typeof v === "string" && v.trim());
-    const raw = rec.problem ?? rec.number ?? rec.index;
+    // `problem` and `number` only. `index` is not read, though a model does send it: it conventionally
+    // means the 0-based position, so `{ index: 1 }` may be the FIRST problem or the second, and there
+    // is nothing on the reply to say which. A citation read off by one is worse than no citation,
+    // because `source` is computed from it and then read as evidence about which check was refused —
+    // a `verify` decline filed under `ids` is the misuse this feature is measured by, manufactured
+    // here. Such a reply is logged as a decline with no number, which is what it actually is.
+    const raw = rec.problem ?? rec.number;
     const problem = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.trim()) : NaN;
+    const cited = Number.isInteger(problem);
+    // Nothing said, in object form: no reason and no number either. Dropped for the same reason as
+    // `"none"` above — there is no disagreement here to record, only a key the model would not omit.
+    if (!cited && !(typeof why === "string" && why.trim())) continue;
     out.push({
-      ...(Number.isInteger(problem) ? { problem } : {}),
+      ...(cited ? { problem } : {}),
       why: typeof why === "string" ? why.trim() : "",
     });
   }
@@ -2831,7 +2863,19 @@ async function correctPage(
     `this case: whether content is missing, whether an alt describes the picture, whether a heading ` +
     `sits at the right level are judgements about the page, and you are looking at the page again ` +
     `in order to settle them. A problem you cannot settle inside the HTML is a problem to fix, and ` +
-    `declining is not the shorter answer to a problem you are unsure of.\n` +
+    `declining is not the shorter answer to a problem you are unsure of. ` +
+    // The other half of the bound, and it is why the entries carry `CHECKED_IN_CODE` at all. Three
+    // of the four problem sources are Iris's own comparisons — the source file's link annotations,
+    // a closed word list of placeholder alts, this page's own parsed tree — and their wordings are
+    // exactly the examples above ("More than one element on this page has id=…"). So a corrector
+    // following the licence as written would decline into them, and the field that counts the misuse
+    // (`verification.declined.code_checked`) would be counting compliance. Marking those entries and
+    // excluding them here is what makes that number mean one thing: an unmarked claim about the
+    // markup is the verifier's reading and is declinable, which is #373's instance C exactly — the
+    // CHECKER asserting a duplicate id on a page that has none — while the marked one is the id
+    // really being duplicated, since it was read off the tree this call was handed.
+    `A problem marked "${CHECKED_IN_CODE.trim()}" is not one of these: it was settled against the ` +
+    `source file or this page's own markup before you were asked, so fix it.\n` +
     // The destination, because an instruction to "say which problem and why" with nowhere to say it
     // lands in the document — the page gains a sentence about the checker, which is the defect
     // #373's own instance A describes in the other direction. `declined` is introduced here rather
@@ -3696,11 +3740,15 @@ async function extractPage(
   // writes: `repaired` is set exactly where that event's `result` is `kept`. A reader can check
   // the set against the log without a rule about which values count.
   let repaired = false;
+  // The verifier's problems as it wrote them, then the three Iris raised itself, each marked as
+  // checked in code (#373 directive 4 — `CHECKED_IN_CODE` has why). The mark is on the string the
+  // corrector reads and on nothing that is counted: `problems.length` is the same number either way,
+  // and `declinedSource` reads positions in this order rather than the text.
   const problems = [
     ...(verifyFailed ? verdict.problems : []),
-    ...missing.map(missingLinkProblem),
-    ...generic.map(genericAltProblem),
-    ...duplicated.map(duplicateIdProblem),
+    ...missing.map((l) => missingLinkProblem(l) + CHECKED_IN_CODE),
+    ...generic.map((a) => genericAltProblem(a) + CHECKED_IN_CODE),
+    ...duplicated.map((id) => duplicateIdProblem(id) + CHECKED_IN_CODE),
   ];
   if (problems.length) {
     // What the correction was asked to fix, for the event below. Any of the four can fire on one
