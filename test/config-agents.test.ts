@@ -1262,18 +1262,24 @@ test("§7 states how much of the run log it does not document, and the count is 
   const runlog = readFileSync(RUNLOG, "utf8");
   for (const m of runlog.matchAll(/\btype:\s*"([a-z0-9_]+)"/g)) emitted.add(m[1]!);
 
-  // What makes one file enough: the run log is appended to in exactly one place. If a second file
-  // ever opens it, shape 3 stops being findable where this looks and the count goes quietly stale —
-  // which is the failure `agent_call` already demonstrated once.
+  // What makes one file enough: nothing else in src/ reaches for an append-shaped fs call. If a
+  // second file ever writes the log, shape 3 stops being findable where this looks and the count
+  // goes quietly stale — the failure `agent_call` already demonstrated once.
+  //
+  // This cannot be an invariant, and the comment does not claim to be one: an `open`/`write` pair, a
+  // spawned process or a stream handed in from elsewhere would all slip past. It is the four spellings
+  // a writer would actually reach for, and it fails loudly on a plain mention — one message asking
+  // someone to check, against a silently stale count, is the right direction to be wrong in.
+  const APPENDS = /appendFileSync\(|appendFile\(|createWriteStream\(|flags?:\s*"a/;
   const appenders = sources(SRC)
-    .filter((f) => readFileSync(f, "utf8").includes("appendFileSync("))
+    .filter((f) => APPENDS.test(readFileSync(f, "utf8")))
     .map((f) => f.slice(ROOT.length));
   assert.deepEqual(
     appenders,
     ["src/store/runlog.ts"],
-    `something outside src/store/runlog.ts appends to a file: ${appenders.join(", ")}. If any of ` +
-      "them writes the run log, reading shape 3 from runlog.ts alone no longer sees every event — " +
-      "widen the search with the writers.",
+    `something outside src/store/runlog.ts opens a file for appending: ${appenders.join(", ")}. If ` +
+      "any of them writes the run log, reading shape 3 from runlog.ts alone no longer sees every " +
+      "event — widen that search with the writers rather than adjusting the count.",
   );
 
   assert.ok(emitted.size > 90, `only ${emitted.size} event names found in src/ — the grep missed`);
