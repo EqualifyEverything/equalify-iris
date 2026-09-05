@@ -126,14 +126,29 @@ function flatten(text: string): string {
   return text.replace(/\s+/g, " ");
 }
 
-// The one paragraph about `name`, up to the blank line that ends it.
+// The one paragraph about `name`, whole.
+//
+// Anchored on the `‼` that opens the block AND on the path separator before the name,
+// because the reporter prints each file's FULL PATH and "failsthenexits.test.ts" ENDS WITH
+// "exits.test.ts". A bare suffix search returns whichever of the two appears first, and that
+// is scheduling — the runner runs these files concurrently, so the order of `test:complete`
+// follows whichever child dies first, not their 50ms/100ms timers. Both take the exit-code
+// branch, so today the text is identical and the wrong pick is invisible; it stops being
+// invisible the moment that branch's prose varies by code or `failureType`. The count
+// assertion is the point: a collision fails loudly here instead of quietly asserting about
+// the wrong file while the intended one goes unchecked.
 function paragraphFor(name: string): string {
-  const at = OUT.indexOf(`${name}: the process `);
-  assert.notEqual(at, -1, `no paragraph for ${name}`);
-  const rest = OUT.slice(at);
-  const end = rest.indexOf("\n\n");
-  assert.notEqual(end, -1, `paragraph for ${name} never ended`);
-  return flatten(rest.slice(0, end));
+  const opener = new RegExp(`^‼ .*/${name.replace(/\./g, "\\.")}: the process `);
+  const lines = OUT.split("\n");
+  // By line, not by splitting on a blank line: what precedes a shout is whatever `spec`
+  // wrote last, and spec's own `ℹ Error: ...` diagnostic does not always leave a blank line
+  // in front of it, so a paragraph can start mid-block.
+  const starts = lines.map((line, i) => (opener.test(line) ? i : -1)).filter((i) => i !== -1);
+  assert.equal(starts.length, 1, `expected exactly one paragraph for ${name}, got ${starts.length}`);
+  const from = starts[0];
+  let to = from + 1;
+  while (to < lines.length && lines[to].trim() !== "") to++;
+  return flatten(lines.slice(from, to).join("\n"));
 }
 
 test("a child killed by a signal says so, where spec says only 'test failed'", () => {
@@ -257,11 +272,14 @@ test("the deaths are repeated at the very end, where CI's tail can see them", ()
   const at = OUT.indexOf("‼ dead child processes in this run");
   assert.notEqual(at, -1, "no end-of-run summary");
   const summary = OUT.slice(at);
-  assert.match(summary, /killed\.test\.ts/);
-  assert.match(summary, /exits\.test\.ts/);
-  assert.match(summary, /both\.test\.ts/);
-  assert.match(summary, /failsthenexits\.test\.ts/);
-  assert.match(summary, /latereject\.test\.ts/);
+  // On `/` + the basename, not the basename: "failsthenexits.test.ts" ends with
+  // "exits.test.ts", so a bare /exits\.test\.ts/ is satisfied by the failsthenexits line
+  // alone and this test cannot tell that exits.test.ts dropped out of the summary at all.
+  assert.match(summary, /\/killed\.test\.ts/);
+  assert.match(summary, /\/exits\.test\.ts/);
+  assert.match(summary, /\/both\.test\.ts/);
+  assert.match(summary, /\/failsthenexits\.test\.ts/);
+  assert.match(summary, /\/latereject\.test\.ts/);
   assert.ok(!summary.includes("asserts.test.ts"), "the summary listed an assertion failure");
   // Last, so no tail depth can cut it. Which of the two deaths is last depends on which
   // child died first, so assert on the placement, not on the file.
