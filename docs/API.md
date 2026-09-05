@@ -12,9 +12,10 @@ Requests are rate limited per client, and every response says how much of the bu
 §3.2 has the numbers, the headers, and what a `429` looks like.
 
 `fragment`, `block`, `verdict`, `declaration` and `round` all mean something specific here, and
-[README § Terms](../README.md#terms) defines them. Both senses of `round` appear below: a round of
-the reader/editor loop, and a captured run of a corpus, which the text calls a **bench round** or a
-**deployed round**.
+[README § Terms](../README.md#terms) defines them. Two of them appear below in both of their senses.
+A `round` is either a round of the reader/editor loop or a captured run of a corpus, which the text
+calls a **bench round** or a **deployed round**. A `fragment` is either one page's extracted HTML or
+the `#id` part of a link — that second sense is what §3's `links_unresolved_rate` is about.
 
 ```bash
 export BASE=http://localhost:8080/v1
