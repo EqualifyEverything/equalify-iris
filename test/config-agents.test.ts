@@ -1102,6 +1102,30 @@ test("a heading slug keeps both spaces around a dropped character", () => {
   assert.ok(anchors.has("9-close-a--b"), [...anchors].join(", "));
 });
 
+// The other way that helper lies, and the reason it is a Set: two headings that slug the same
+// collapse into one entry, so a link to either resolves against the check below while GitHub numbers
+// the second `#thing-1` and every link written to `#thing` lands on the first. There are none today
+// across the 13 prose docs, which is what makes this cheap to keep.
+test("no two headings in one doc slug the same", () => {
+  const clashes: string[] = [];
+  for (const file of PROSE_DOCS) {
+    const counts = new Map<string, number>();
+    let fenced = false;
+    for (const line of readFileSync(join(ROOT, file), "utf8").split("\n")) {
+      if (line.startsWith("```")) fenced = !fenced;
+      if (fenced || !/^#{1,6}\s/.test(line)) continue;
+      for (const a of headingAnchors(line)) counts.set(a, (counts.get(a) ?? 0) + 1);
+    }
+    for (const [a, n] of counts) if (n > 1) clashes.push(`${file}: ${n} headings make #${a}`);
+  }
+  assert.deepEqual(
+    clashes,
+    [],
+    `heading anchor(s) are ambiguous, so a link to them cannot say which section it means:\n  ` +
+      clashes.join("\n  "),
+  );
+});
+
 // A cross-reference that does not resolve is the failure mode of moving prose between files, and it
 // is silent: GitHub renders a dead relative link as a link, and a dead `#anchor` scrolls nowhere.
 // The commit that split ~1,950 lines out of README.md into docs/design-notes.md, docs/ci.md,
@@ -1163,16 +1187,30 @@ test("every run-log event in docs/API.md is both indexed and written up, once ea
   assert.ok(after > from, "`## 7. Run log` is the last section in the file, which it should not be");
   const body = lines.slice(from, after);
 
-  // A row of the index, and only the index: its first cell is a link and nothing else is.
-  const rows = body.filter((l) => l.startsWith("| ["));
-  const indexed = rows.map((l) => {
-    const m = /^\| \[(.+?)\]\(#([^)]+)\) \| .+ \|$/.exec(l);
-    assert.ok(m, `an index row is not \`| [name](#anchor) | summary |\`:\n  ${l}`);
-    return { name: m[1], anchor: m[2] };
-  });
+  // The index is everything before the first section, so a table inside a section body is not read
+  // as a malformed index row — which is how this would have failed, naming the wrong file.
+  const firstSection = body.findIndex((l) => l.startsWith("### "));
+  assert.ok(firstSection > 0, "§7 has no `### ` sections, so the restructure was undone");
+  const indexed = body.slice(0, firstSection)
+    .filter((l) => l.startsWith("|") && l !== "| --- | --- |" && !l.startsWith("| `type`"))
+    .map((l) => {
+      const m = /^\| \[(.+?)\]\(#([^)]+)\) \| .+ \|$/.exec(l);
+      assert.ok(m, `an index row is not \`| [name](#anchor) | summary |\`:\n  ${l}`);
+      return { name: m[1]!, anchor: m[2]! };
+    });
   assert.ok(indexed.length > 60, `only ${indexed.length} events indexed in §7`);
 
   const headings = body.filter((l) => l.startsWith("### ")).map((l) => l.slice(4));
+  // "Once each" is not implied by the comparison below: two same-order lists are deepEqual with a
+  // repeat in both. It is also the case where the anchors go wrong and nothing else notices —
+  // GitHub disambiguates a second `### `page_blank`` to `#page_blank-1`, while `headingAnchors`
+  // slugs each heading alone and returns `page_blank` for both, so the second row scrolls to the
+  // first section and the link check above is satisfied because `#page_blank` does exist.
+  assert.equal(
+    new Set(headings).size,
+    headings.length,
+    "two §7 sections have the same heading; GitHub numbers the second anchor and links to it break",
+  );
   assert.deepEqual(
     indexed.map((e) => e.name),
     headings,
@@ -1193,4 +1231,74 @@ test("every run-log event in docs/API.md is both indexed and written up, once ea
     if (j >= body.length || body[j]!.startsWith("### ")) empty.push(line.slice(4));
   }
   assert.deepEqual(empty, [], `§7 section(s) with no text under the heading: ${empty.join(", ")}`);
+});
+
+// §7 documents the events a reader looks something up about, not all of them, and its opening
+// paragraph says so with numbers. That paragraph exists because the sentence it replaced claimed
+// every event had a section, and 40 did not: a reader who greps a `run_start` line would have
+// concluded the log could not carry it. A count in prose that nothing reads goes stale on the next
+// commit, so the numbers are read back out of the paragraph and checked against src/. A new event
+// fails this until it is either written up or counted.
+test("§7 states how much of the run log it does not document, and the count is current", () => {
+  // Two emit shapes reach the log: `ctx.log.event("name", …)` everywhere in the pipeline, and
+  // `this.onEvent?.("model_call_start", meta)` in src/providers, which is why `model_call` and
+  // `model_call_start` are absent from a grep for the first alone.
+  const emitted = new Set<string>();
+  for (const file of sources(SRC)) {
+    const text = readFileSync(file, "utf8");
+    for (const m of text.matchAll(/(?:\.event|onEvent\?\.)\(\s*"([a-z0-9_]+)"/g)) emitted.add(m[1]!);
+  }
+  assert.ok(emitted.size > 90, `only ${emitted.size} event names found in src/ — the grep missed`);
+
+  const api = readFileSync(join(ROOT, "docs/API.md"), "utf8");
+  const lines = api.split("\n");
+  const from = lines.indexOf("## 7. Run log");
+  const after = lines.findIndex((l, i) => i > from && l.startsWith("## "));
+  const headings = lines.slice(from, after).filter((l) => l.startsWith("### ")).map((l) => l.slice(4));
+  const documented = new Set(
+    headings.flatMap((h) => [...h.matchAll(/`([a-z0-9_]+)`/g)].map((m) => m[1]!)),
+  );
+
+  // A section for an event nothing emits any more is dead documentation, and reads as current.
+  const ghosts = [...documented].filter((n) => !emitted.has(n)).sort();
+  assert.deepEqual(ghosts, [], `§7 documents event(s) src/ no longer emits: ${ghosts.join(", ")}`);
+
+  const undocumented = [...emitted].filter((n) => !documented.has(n));
+  const stated = /`src\/` emits \*\*(\d+)\*\* event types; the (\d+) sections below cover \*\*(\d+)\*\* of them and \*\*(\d+)\*\* have no section here/.exec(
+    api.replace(/\s+/g, " "),
+  );
+  assert.ok(
+    stated,
+    "§7's coverage paragraph was reworded, so its numbers are no longer checked. Keep the shape " +
+      "`emits **N** event types; the N sections below cover **N** of them and **N** have no " +
+      "section here`, or move the check with the words.",
+  );
+  assert.deepEqual(
+    stated.slice(1, 5).map(Number),
+    [emitted.size, headings.length, documented.size, undocumented.length],
+    `§7 says ${stated.slice(1, 5).join("/")} (emitted/sections/covered/uncovered) and src/ says ` +
+      `${[emitted.size, headings.length, documented.size, undocumented.length].join("/")}`,
+  );
+
+  // Counts alone cannot see a RENAME — one name out, one name in, every total unchanged — and the
+  // paragraph names three events as its examples of the undocumented ones. Each has to still be
+  // emitted, and still be undocumented, or the example is the wrong way round.
+  for (const example of ["run_start", "phase", "reader_start"]) {
+    assert.ok(
+      api.includes(`\`${example}\``),
+      `§7's coverage paragraph no longer names \`${example}\`; update this list with it`,
+    );
+    assert.ok(emitted.has(example), `§7 names \`${example}\` as an event and src/ emits no such one`);
+    assert.ok(!documented.has(example), `\`${example}\` now HAS a §7 section, so it is a bad example`);
+  }
+
+  // The fourth example is a family rather than a name, so it is checked as one.
+  assert.ok(api.includes("`agent_update_*`"), "§7 no longer names the `agent_update_*` family");
+  const family = [...emitted].filter((n) => n.startsWith("agent_update_"));
+  assert.ok(family.length > 0, "src/ emits no `agent_update_*` event, so §7's example is stale");
+  assert.deepEqual(
+    family.filter((n) => documented.has(n)),
+    [],
+    "§7 offers the `agent_update_*` family as undocumented and now documents part of it",
+  );
 });

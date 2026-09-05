@@ -951,9 +951,15 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/logs"
 `application/x-ndjson` — one JSON object per line (agent calls with git-SHA / inline-content
 version pinning, model-call timing, no-content signals, phase transitions).
 
-Every event this log can carry has its own section below, and the index is a link to it.
-Reach for the index when you have a `type` off a log line and want to know what it means;
-read a section when you want to know what the field it names is for and what it costs.
+The events worth grepping for have a section each below, and the index is a link to it. Reach for
+the index when you have a `type` off a log line and want to know what it means; read a section when
+you want to know what the field it names is for and what it costs.
+
+**The index is not the whole log.** `src/` emits **110** event types; the 65 sections below cover
+**70** of them and **40** have no section here — `run_start`, `phase`, `reader_start` and the
+`agent_update_*` contribution family among them. A `type` missing from the index is a real event,
+not a malformed line. Every number and every event name in this paragraph is checked against `src/`,
+so a new event makes this paragraph fail until it is either written up or counted.
 
 | `type` | What it records |
 | --- | --- |
