@@ -1885,7 +1885,15 @@ are checked, since only there is there a ground truth to be outside of.
 
 A correction bought for a page that had already passed its fidelity check was refused by the second
 verdict, so the page shipped as it was: `image`; `trigger`, what the correction had been asked to fix;
-`links`, the hrefs that were missing; and `alts` or `ids` where those were part of the same call.
+`links`, the hrefs that were missing; `alts` or `ids` where those were part of the same call; and
+`problems`, what the **second** verdict objected to — the field that says why the billed rewrite lost.
+
+`problems` is that verdict's objections **as prose**, an array of the strings it wrote. That is not
+what the field of the same name carries on [`page_corrected`](#page_corrected), which is a count of the
+problems the correction was *given*; the two lines can appear for the same `image` in one round, so a
+reader summing "problems" across the log without checking which line it came off is adding a list to a
+number.
+
 `links` is always present and is `[]` where the refused correction was bought for a placeholder `alt`
 or a duplicate `id` alone, so the field to read for what the call was for is `trigger`, not this one.
 
@@ -1896,8 +1904,10 @@ cannot read `verify` here, though that value exists on [`page_corrected`](#page_
 recheck is only bought for a page whose fidelity check **passed**, since a page that failed has no
 standing to protect.
 
-`both` means more than one source fired, and deliberately not which pair: four sources would be
-fifteen buckets, and the per-source detail is already exact on
+`both` means more than one source fired, and deliberately not which pair. That collapse is a property
+of the shared `trigger`, computed once for this line and [`page_corrected`](#page_corrected) from four
+sources — where naming the combination would be fifteen buckets — and only three of the four can reach
+*this* line, since `verify` cannot. The per-source detail is already exact on
 [`page_links_missing`](#page_links_missing), [`page_generic_alt`](#page_generic_alt) and
 [`page_duplicate_ids`](#page_duplicate_ids), all keyed by the same `image`. `alts` and `ids` are on the
 line anyway, and that is the reason: `both` cannot say the alt or the duplicate id was part of what the
@@ -2064,13 +2074,16 @@ spliced into the page leaves exactly the page a fragment-less run would have lef
 unmet and the delivered page is the general pass's own unaided work. Only `merged: true` met it.
 
 That is the general shape of this family, and it is why the log carries five lines rather than a
-boolean. The pipeline's internal `dispatched` flag answers a different question — "is this suggestion
-already covered, or should it be filed as a new-agent issue" — and it disagrees with "did specialist
-content reach the HTML" on four of the six exits. Three of the four are silent: no content, a throw,
-and a fragment that would not merge all count as dispatched. The fourth is
-[`specialist_declined`](#specialist_declined), where nothing ran and the request was nonetheless
-answered. So a count of `specialist_dispatched` lines is not a count of pages that got specialist
-content; the `merged` field is.
+boolean. The pipeline keeps two internal signals across these six exits and they disagree on **four**
+of them: `dispatched`, which answers "is this suggestion already covered, or should it be filed as a
+new-agent issue", and the caution sent to the verifier, which answers whether the request went unmet.
+Three of the four disagreements are silent — no content, a throw, and a fragment that would not merge
+all count as dispatched while no specialist content reached the page. The fourth is the other way
+round: [`specialist_declined`](#specialist_declined) is not dispatched and sends no caution, because
+nothing ran and the request was nonetheless answered.
+
+So a count of `specialist_dispatched` lines is not a count of pages that got specialist content; the
+`merged` field is.
 
 ### `specialist_dispatch_failed`
 

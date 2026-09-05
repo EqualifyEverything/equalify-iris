@@ -1430,8 +1430,13 @@ test("§7 states how much of the run log it does not document, and the count is 
   // "calibration is a tool, `src/tools/calibrate.ts`, and not a phase of a run" — the one claim in
   // the paragraph that is about the pipeline rather than about the log, and the one a later change
   // would silently falsify. Nothing else in src/ may import it.
+  //
+  // Both import forms, because a DYNAMIC import is the likeliest way a run reaches this: the module
+  // is only wanted on the calibration path, and `await import(...)` inside the branch that wants it
+  // is what someone adding it would reach for. A static-only pattern would let exactly that through.
+  const IMPORTS_CALIBRATION = /(?:from|import\()\s*"[^"]*\/calibration\.ts"/;
   const importers = sources(SRC)
-    .filter((f) => /from\s+"[^"]*\/calibration\.ts"/.test(readFileSync(f, "utf8")))
+    .filter((f) => IMPORTS_CALIBRATION.test(readFileSync(f, "utf8")))
     .map((f) => f.slice(ROOT.length));
   assert.deepEqual(
     importers,
