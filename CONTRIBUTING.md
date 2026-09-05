@@ -57,9 +57,16 @@ Before opening a PR:
 
 ```bash
 npm run typecheck               # tsc --noEmit
-npm test                        # the unit suite (node --test)
+npm test                        # the unit suite (node --test; run it through npm, see below)
 ./test/e2e.sh                   # full API lifecycle against mock GitHub + mock model (needs jq)
 ```
+
+Run the unit suite through `npm`, not as a bare `node --test`. The `npm test` script
+registers a second reporter (`test/spec-with-signals.mjs`) that prints `signal` and
+`exitCode` when a test file's *process* dies. Node's default reporter shows that as `✖
+some.test.ts` and `'test failed'` — identical to a failed assertion, with nothing on
+stderr — and the tests after the death simply never run, so the pass count reads clean
+while being short. See #405.
 
 The demo page must stay accessible — it's audited with the project's own axe-core lint and
 should report **0 violations**.
