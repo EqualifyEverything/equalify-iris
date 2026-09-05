@@ -76,9 +76,13 @@
              + ([$tally.lint_error_where[] | "`\(.where)` \(.documents)"] | join(", "))
              + ". `parse` is jsdom refusing the assembled HTML, `inject` is axe's own source failing to evaluate (a dependency problem — it cannot depend on the document), `run` is the rule pass throwing while it walks the document. Those three point at three different fixes. A sum below the \(.value * $tally.documents | round) document(s) in the rate is documents linted before this breakdown was recorded, not a fourth kind of failure.\n\n"
            # The field is there and attributed nothing. Said plainly, because the
-           # breakdown printed as three zeroes reads as the opposite.
+           # breakdown printed as three zeroes reads as the opposite. Both causes are
+           # named rather than the likely one asserted: "they all predate the field" is
+           # true as Iris ships, but `src/pipeline/orchestrator.ts` deliberately skips a
+           # `LintResult` carrying an error and no step, so a second writer of lint
+           # failures would make the assertion false while leaving this branch reachable.
            elif ($tally.lint_error_where // []) | length > 0 then
-             "**Which step failed: not recorded for any of them.** This deployment does record which lint step failed, and none of the \(.value * $tally.documents | round) document(s) in the rate above carries one — every one of them ran before that field shipped. So `parse`, `inject` and `run` are all 0 because nothing wrote a step down, NOT because no step failed, and this report cannot yet tell a fixed cause from a new one. The next failure will name its step: `parse` is jsdom refusing the assembled HTML, `inject` is axe's own source failing to evaluate (a dependency problem — it cannot depend on the document), `run` is the rule pass throwing while it walks the document.\n\n"
+             "**Which step failed: not recorded for any of them.** This deployment does record which lint step failed, and none of the \(.value * $tally.documents | round) document(s) in the rate above carries one. So `parse`, `inject` and `run` are all 0 because nothing wrote a step down, NOT because no step failed, and this report cannot yet tell a fixed cause from a new one. As Iris ships, the only way to reach this is documents that ran before the field existed — every failure path in `src/pipeline/lint.ts` goes through `failure()`, which always records a step — so waiting for a window whose failures postdate it is the remedy. The other way in is a lint error assembled outside `runAxe`, which reaches the store with no step and is skipped rather than guessed at (`src/pipeline/orchestrator.ts`); if this sentence appears on a recent window, that is what to look for. The next attributed failure will name its step: `parse` is jsdom refusing the assembled HTML, `inject` is axe's own source failing to evaluate (a dependency problem — it cannot depend on the document), `run` is the rule pass throwing while it walks the document.\n\n"
            # No field at all: an older deployment. Left silent rather than given
            # the sentence above, because the two are not the same problem — this
            # one is fixed by deploying a newer Iris, that one by waiting for a
@@ -91,15 +95,26 @@
       "unresolved": ("Over the last \($tally.window_days) days, **\(.value | pct)% of \($tally.documents) documents** finished the review loop with issues the loop could not resolve.\n\nThe threshold is \(.threshold | pct)% of documents.\n\nThese are barriers the Reader Agent found, reported, and that the loop then shipped anyway — listed in each session's `unresolved.md`. Some floor here is inherent, because a source document can be genuinely ambiguous, so what this issue actually asks is whether the current rate is that floor or a pattern. The paragraphs below are what answer it (#264), and each is absent on a deployment that does not record it — zeroes beside a non-zero rate read as a contradiction.\n\n"
         # Which exit ended each document, replacing the guess this body used to
         # offer ("worth checking whether max_review_iterations is too low").
-        + (if ($tally.review_stopped // []) | length > 0 then
-             ([$tally.review_stopped[].documents] | add) as $attributed
+        #
+        # Gated on the sum, like the two breakdowns around it (#407), even though this
+        # site's own first sentence is honest at zero ("these describe 0 of the 95
+        # documents above"). Two sentences DRAWN from the split are not: `N document(s)
+        # here are that` and `those N over-report on purpose` print an unhedged 0 that
+        # reads as a measurement, and the forward reference to `unresolved_severity`
+        # being "over all 95 documents" contradicts that field's own not-recorded
+        # sentence in the one window both fire in — `review_stopped` and
+        # `unresolved_severity` shipped in the same commit (917bb38, #266) and are
+        # written in the same signal block (`src/pipeline/orchestrator.ts`), so they age
+        # together and a zero sum on one is a zero sum on the other.
+        + (([($tally.review_stopped // [])[].documents] | add) as $attributed
+           | if $attributed > 0 then
              # Printed as a fraction of the documents in the rate rather than asserted to equal
              # them, because on the week this ships they do NOT: the exit is written when a run
              # happens, so a 30-day window holds documents delivered before the field existed. The
              # live deployment's first report of it covered 7 of 77. A body that said "these sum to
              # 77" beside five counts adding to 7 would be read as a broken report, and — worse — a
              # reader who scaled the split up to the rate would be inventing 70 documents' exits.
-             | "**Why the loop stopped:** "
+             "**Why the loop stopped:** "
                + ([$tally.review_stopped[] | "`\(.where)` \(.documents)"] | join(", "))
                + ". One per delivered document, so these describe \($attributed) of the \($tally.documents) documents above"
                + (if $attributed < $tally.documents then
@@ -109,6 +124,12 @@
                # The split the rate above cannot make, and the reason it was asked for (#264): a
                # threshold over the mixture is a threshold over two facts at once.
                + "**What the open list is a statement about:** on `cap` and `converged` it was read on the bytes that shipped — the loop re-reads at the top of every round and both of those exits are taken before the next editor call — so an open issue there is an open issue in the delivered document, and \(($tally.review_stopped | map(select(.where == "cap" or .where == "converged")) | map(.documents) | add // 0)) document(s) here are that. On `truncated` the list may be OLDER than the document: the reply was cut off, the sectioned retry may have corrected part of the body afterwards, and the round that would have re-read it is the one that could not be made (`src/pipeline/review.ts`) — so those \(($tally.review_stopped | map(select(.where == "truncated")) | map(.documents) | add // 0)) over-report on purpose, by an amount only the delivered document knows (`@editor-truncated sections N of M`). Read that part beside `editor_truncated_rate` = \($tally.editor_truncated_rate | pct)% and the output ceiling, and the first part as the share that is about the document. One threshold over both cannot be set honestly, which is why this one is still on the mixture.\n\n"
+           # Nothing attributed. The vocabulary is still worth stating — it is what the
+           # next window will say — but every count drawn from it is dropped rather than
+           # printed as a zero, including the `cap`/`converged` and `truncated` shares,
+           # which is where this site's honest first sentence stopped protecting it.
+           elif ($tally.review_stopped // []) | length > 0 then
+             "**Why the loop stopped: not recorded for any of them.** This deployment does record the exit each document left the loop by, and none of the \($tally.documents) documents in this window carries one, so every count is 0 because nothing was written down rather than because no document left that way. Nothing here can be split by exit yet, and no share below is drawn from it. What the next window will say: `cap` is the only exit raising `defaults.max_review_iterations` can help, `converged` is the editor having been shown the issues and answered \"no change\" (final ON PURPOSE, so its remedy is `agents/copy_editor.md` or `agents/reader.md` and never more rounds), `truncated` is the output ceiling, `unread` a review that could not read part of what it judged, and `clean` a document the Reader passed.\n\n"
            else "" end)
         # Severity decides whether the rate above describes a defect at all: it
         # counts any open issue, and a Reader that reports nits has no ceiling.

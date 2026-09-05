@@ -308,6 +308,37 @@ test("the field present and every count zero says nothing was recorded, not that
   );
 });
 
+test("an all-zero exit split drops every share drawn from it, not just the split", { skip }, () => {
+  // This site's own first sentence was already honest at zero ("these describe 0 of the
+  // 70 documents above"), so it looked exempt. The sentences DRAWN from the split were
+  // not: `N document(s) here are that` and `those N over-report on purpose` print an
+  // unhedged 0 that reads as a measurement. And the forward reference to
+  // `unresolved_severity` being "over all 70 documents" contradicted that field's own
+  // not-recorded sentence in the one window both fire in — the two shipped in the same
+  // commit and are written in the same signal block, so they age together.
+  const body = renderBody("unresolved", {
+    ...TALLY,
+    review_stopped: [
+      { where: "clean", documents: 0 },
+      { where: "unread", documents: 0 },
+      { where: "converged", documents: 0 },
+      { where: "truncated", documents: 0 },
+      { where: "cap", documents: 0 },
+    ],
+  });
+  assert.match(body, /\*\*Why the loop stopped: not recorded for any of them\.\*\*/);
+  // The vocabulary survives — it is what the next window will say.
+  assert.match(body, /`cap` is the only exit raising `defaults\.max_review_iterations` can help/);
+  // What must not: the split, and anything derived from it.
+  assert.ok(!/`clean` 0, `unread` 0/.test(body), "the zeroed exits are still printed as a split");
+  for (const derived of ["document(s) here are that", "over-report on purpose"]) {
+    assert.ok(!body.includes(derived), `a share drawn from an empty split is still printed: ${derived}`);
+  }
+  // And the contradiction is gone: nothing claims the severities are over all 70 while
+  // the severity paragraph says they were never recorded.
+  assert.ok(!body.includes("`unresolved_severity` and `unfinished_page_rate` below are both over"), "the forward reference survives an empty split");
+});
+
 test("an all-zero severity split says so too, where there is no total to catch it", { skip }, () => {
   // The same guard shape on `unresolved_severity`, and the worse of the two: it is
   // explicitly not a partition of the rate, so unlike `review_stopped` there is no
