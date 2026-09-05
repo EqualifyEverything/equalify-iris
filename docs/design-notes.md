@@ -5,7 +5,7 @@ Decisions the code makes that are worth knowing before you read it.
 This file is for someone about to change the code. If you only want to run Iris, the
 [README](../README.md) is enough.
 
-Several of these decisions reverse an earlier design, and they are written as decisions rather than
+Several of these decisions reverse an earlier design, so they are written as decisions rather than
 as a diff against it. Iris was specified up front in a requirements document. That document was
 amended twenty-odd times as the build disagreed with it, and it has now been retired. The design
 record is the git history and the issues each decision cites. What is true today is here, in
@@ -99,7 +99,9 @@ Each decision below is one bullet, and the headings only group them:
   many sections came back — or, where nothing could be, that no editor pass ever worked on the
   issues `@unresolved` lists. A third comment, `@lint-unavailable`, is emitted when axe-core could
   not run on the document at all. Nothing in it was checked, so an `@unresolved` list that is short
-  — or absent — is not evidence that there is nothing left to fix.
+  — or absent — is not evidence that there is nothing left to fix. A fourth, `@page-failed`, stands
+  where the content of a page extraction lost would have been (`assembly.ts`, and the rejoin list
+  below).
 - **Contributions are issues, not PRs.** Instead of fork+PR-on-close, when the extractor flags
   content a specialist would handle better, Iris drafts that agent and files a
   `New agent suggestion: <type>` GitHub issue with the agent code + context. Feedback that
@@ -219,7 +221,7 @@ Places where a decision was left open, and where v1 intentionally stops:
   `internal_links`, until there is enough of a rate to calibrate.
 - **Four more questions are asked in the same pass, about promises the document makes and does not
   keep (issue #255).** These are not malformed markup, which is why they needed their own checks.
-  Each is a reference or a container with nothing behind it: a reference to an `id` no page defines
+  Each is a promise with nothing behind it: a reference to an `id` no page defines
   (`aria-labelledby`, `aria-describedby`, `label[for]`), a `<dl>` with terms and no definitions, a
   `lang` on an element with no text for it to apply to, and a `<nav>`, `<aside>` or *named*
   `<section>` with nothing in it. "No text" means neither a text node nor text in an attribute:
