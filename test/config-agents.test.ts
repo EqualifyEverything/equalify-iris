@@ -1265,9 +1265,16 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
     if (!where.has(name)) where.set(name, new Set());
     where.get(name)!.add(file.slice(ROOT.length));
   };
+  // Shapes 1 and 2 share everything up to the name, so they share the prefix — including
+  // `onEvent(` without the optional chain. Nothing spells it that way today, but it is one character
+  // from a spelling that IS here, and it would otherwise be invisible both to the literal-name search
+  // on the next line and to the computed-name check below it.
+  const EMIT = String.raw`(?:\.event|onEvent(?:\?\.)?)\(\s*`;
+  const EMIT_LITERAL = new RegExp(EMIT + String.raw`"([a-z0-9_]+)"`, "g");
+  const EMIT_CALL = new RegExp(EMIT + String.raw`(?!")([^\s,)][^,)]*)`, "g");
   for (const file of sources(SRC)) {
     const text = readFileSync(file, "utf8");
-    for (const m of text.matchAll(/(?:\.event|onEvent\?\.)\(\s*"([a-z0-9_]+)"/g)) emit(m[1]!, file);
+    for (const m of text.matchAll(EMIT_LITERAL)) emit(m[1]!, file);
   }
   const runlog = readFileSync(RUNLOG, "utf8");
   for (const m of runlog.matchAll(/\btype:\s*"([a-z0-9_]+)"/g)) emit(m[1]!, RUNLOG);
@@ -1302,17 +1309,21 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   // in a lookup table, or a bridge added inside a class, would each slip past), but the shape a caller
   // would actually write, failing loudly on a third bridge rather than dropping its events from a
   // coverage claim that says it has none.
+  //
+  // Each entry is file + the argument's own text and carries NO line number, deliberately: an import
+  // added to orchestrator.ts moves the bridge a line, and this would then fail an unrelated PR with a
+  // message accusing it of emitting under an unreadable name. Dropping to a set of paths would go too
+  // far the other way — a THIRD bridge in a file that already has one would vanish into it, and the
+  // duplicate entry is what catches that.
   const bridges = sources(SRC)
     .flatMap((file) => {
       const text = readFileSync(file, "utf8");
-      return [...text.matchAll(/(?:\.event|onEvent\?\.)\(\s*(?!")([^\s,)][^,)]*)/g)].map(
-        (m) => `${file.slice(ROOT.length)}:${text.slice(0, m.index).split("\n").length} ${m[1]!.trim()}`,
-      );
+      return [...text.matchAll(EMIT_CALL)].map((m) => `${file.slice(ROOT.length)} ${m[1]!.trim()}`);
     })
     .sort();
   assert.deepEqual(
     bridges,
-    ["src/pipeline/orchestrator.ts:92 type", "src/tools/calibrate.ts:448 type"],
+    ["src/pipeline/orchestrator.ts type", "src/tools/calibrate.ts type"],
     `an event is emitted under a name this test cannot read: ${bridges.join(", ")}. §7 claims to ` +
       "document every event src/ emits, and a computed name is documented or not without this test " +
       "being able to tell — give the new call site a literal name, or teach the searches above where " +
