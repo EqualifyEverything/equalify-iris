@@ -968,10 +968,12 @@ the index when you have a `type` off a log line and want to know what it means; 
 you want to know what the field it names is for and what it costs.
 
 **The index is not the whole log.** `src/` emits **111** event types; the 77 sections below cover
-**82** of them and **29** have no section here — what is left is three paths: link repair
-(`page_links`), specialist dispatch (`specialist_dispatched`), and the feedback-learning and
-contribution one (`feedback_learned`, the `agent_update_*` family). A `type` missing from the index
-is a real event, not a malformed line. Every number and every event name in this paragraph is
+**82** of them and **29** have no section here. Those 29 are two paths, one family and two strays:
+**5** link-repair events (`page_links` and four more), **5** specialist-dispatch ones
+(`specialist_dispatched` and four more), **17** feedback-learning and contribution ones
+(`feedback_learned`, the `agent_update_*` family), and **2** that belong to none of them —
+`page_lessons_injected` and `reextract_skipped`, both emitted during extraction. A `type` missing
+from the index is a real event, not a malformed line. Every number and every event name in this paragraph is
 checked against `src/`, so a new event makes this paragraph fail until it is either written up or
 counted.
 
@@ -1087,16 +1089,33 @@ diagnostics slices at the **last** `run_start` and reports the run after it, end
 round's post-delivery window, and with `max_concurrent_runs` above 1 the next round's `run_start` is
 then written before the previous round's completion line.
 
+**`phase_durations_ms` is not cut here, and cannot be.** It reads the whole log rather than the slice,
+and the `extraction` marker is written *before* this line on every mode, so on a first run the field
+covers slightly more than the run and on a session with feedback rounds it mixes them
+([`phase`](#phase)).
+
 ### `phase`
 
 A phase marker for timing: `phase` is `extraction`, `assembly` or `review`, written as the session's
 own `phase` field is set (§4). §7b turns these into `phase_durations_ms` by measuring each to the
-next, and the last to the run's terminal line — or to now, on a run still going.
+next, and the last one to the run's terminal line — or to now, on a run still going.
 
 Three values here and four in §4: `done` is a phase the session record reaches and never a log line,
 so the last phase is measured to `run_complete`. A `feedback_iterative` round has no `assembly`
-marker either, because it assembles nothing — it re-reviews the body already delivered. So a phase
-missing from a session's log is not always a phase that failed.
+marker, because it assembles nothing — it re-reviews the body already delivered. So a phase missing
+from a session's log is not always a phase that failed.
+
+The inverse holds too, and it is the one to watch: **an `extraction` marker is written on every mode,
+`feedback_iterative` included**, before [`run_start`](#run_start) and before the mode is even decided.
+So that marker's duration on a round that re-extracted nothing is the time spent routing the feedback
+and reviewing, filed under a phase that did not run.
+
+`phase_durations_ms` reads the **whole** log and not the current run's slice, which matters once a
+session has taken feedback. Its keys are one per phase NAME, so a later round's marker overwrites an
+earlier round's: `extraction` and `review` end up the last round's, since every round writes both.
+`assembly` does not, and that is the field to distrust — a `feedback_iterative` round writes no
+`assembly` marker, so the value left standing beside that round's numbers is **a previous round's
+assembly**, measured from a run that is over.
 
 ### `model_call_start` / `model_call`
 
@@ -1169,17 +1188,24 @@ written rather than omitted, unlike the count fields elsewhere in this log.
 by one agent apart: a table join and a correction round are both the Copy Editor, and they are
 `copy_editor_table_join.md` and `copy_editor.md`. Read it as a label rather than as a path, though.
 `agent_sha` is the git blob SHA of the prompt text that was **sent**, so a round's prompt is
-recoverable from a checkout however the file has moved since. It is `null` for an agent whose prompt
-is a literal in this codebase rather than a file — the Reader and both editor contracts are — and
-those are versioned by the application's own commit. One `agent` value spans both cases: a
-specialist merge sends `MERGE_SYSTEM` under the name `page.md` with `agent_sha: null`, beside
-ordinary page calls that carry `page.md`'s real SHA. So `agent_sha`, and the `step` on the
-`model_call` next to it, are what identify the text that went out; `agent` alone groups the two
-together.
+recoverable from a checkout however the file has moved since. It is `null` for a prompt that is a
+literal in this codebase rather than a file, which is **five** call sites: the Reader, the two editor
+contracts, the table join, and the specialist merge. Those five are versioned by the application's
+own commit. One `agent` value spans both cases: the merge sends `MERGE_SYSTEM` under the name
+`page.md` with `agent_sha: null`, beside ordinary page calls that carry `page.md`'s real SHA. So
+`agent_sha`, and the `step` on the `model_call` next to it, are what identify the text that went out;
+`agent` alone groups the two together.
 
-`agent_content` is the opposite case and is the reason `agent_sha` can be absent without losing the
-prompt: the full text inline, present only for a **session-built** agent, which has no upstream
-object to pin against.
+`agent_content` is on **every** line and `null` on all but one case, so read it as
+present-and-null rather than omitted — the convention `image` follows above. It carries the prompt
+inline for a **session-built** agent, meaning one loaded from `tmp/<id>/agents` in preference to the
+agent library. Nothing in this pipeline puts a file there: the one write into that directory is the
+feedback-training step overwriting an agent that is *already* session-built, so today every line
+reads `agent_content: null` unless an operator dropped a file in by hand.
+
+A session-built agent does still carry an `agent_sha`, computed over the text it was built from. It
+just names no blob a checkout holds, which is what `agent_content` is there to cover. The five
+literal prompts are the case where **neither** field recovers the text.
 
 A call that **threw** has no line here. The provider's failure is on `model_call` with `ok: false`,
 and this line is written after the call returned — so these lines count answers, not attempts, and a
