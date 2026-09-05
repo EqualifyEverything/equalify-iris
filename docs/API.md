@@ -955,11 +955,12 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is not the whole log.** `src/` emits **110** event types; the 65 sections below cover
-**70** of them and **40** have no section here — `run_start`, `phase`, `reader_start` and the
-`agent_update_*` contribution family among them. A `type` missing from the index is a real event,
-not a malformed line. Every number and every event name in this paragraph is checked against `src/`,
-so a new event makes this paragraph fail until it is either written up or counted.
+**The index is not the whole log.** `src/` emits **111** event types; the 65 sections below cover
+**70** of them and **41** have no section here — `agent_call`, which the line above advertises,
+plus `run_start`, `phase`, `reader_start` and the `agent_update_*` contribution family among them.
+A `type` missing from the index is a real event, not a malformed line. Every number and every
+event name in this paragraph is checked against `src/`, so a new event makes this paragraph fail
+until it is either written up or counted.
 
 | `type` | What it records |
 | --- | --- |

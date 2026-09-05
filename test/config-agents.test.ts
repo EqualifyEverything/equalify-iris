@@ -1240,21 +1240,49 @@ test("every run-log event in docs/API.md is both indexed and written up, once ea
 // commit, so the numbers are read back out of the paragraph and checked against src/. A new event
 // fails this until it is either written up or counted.
 test("§7 states how much of the run log it does not document, and the count is current", () => {
-  // Two emit shapes reach the log: `ctx.log.event("name", …)` everywhere in the pipeline, and
-  // `this.onEvent?.("model_call_start", meta)` in src/providers, which is why `model_call` and
-  // `model_call_start` are absent from a grep for the first alone.
+  // THREE emit shapes reach the log, and each is invisible to a grep for the others:
+  //   1. `ctx.log.event("name", …)` everywhere in the pipeline — 108 names.
+  //   2. `this.onEvent?.("model_call_start", meta)` in src/providers — `model_call_start` and
+  //      `model_call`, the two §7 documents best.
+  //   3. a RunLog method that skips event() and hands the private writer a literal type. `agentCall`
+  //      does, on every one of 13 call sites, so `agent_call` is one of the commonest lines in the
+  //      log while its name appears nowhere either grep above can reach.
   const emitted = new Set<string>();
   for (const file of sources(SRC)) {
     const text = readFileSync(file, "utf8");
     for (const m of text.matchAll(/(?:\.event|onEvent\?\.)\(\s*"([a-z0-9_]+)"/g)) emitted.add(m[1]!);
+    for (const m of text.matchAll(/this\.write\(\s*\{\s*type:\s*"([a-z0-9_]+)"/g)) emitted.add(m[1]!);
   }
   assert.ok(emitted.size > 90, `only ${emitted.size} event names found in src/ — the grep missed`);
+  // The third shape is the fragile one: it is one regex against one method body, and losing it would
+  // silently shrink the count rather than fail anything, which is how `agent_call` went unnoticed.
+  assert.ok(
+    emitted.has("agent_call"),
+    "`agent_call` is not in the emitted set. Either the third pattern above stopped matching " +
+      "src/store/runlog.ts, or that literal `type` was renamed — check which, because the first " +
+      "means fixing the pattern and not the count. Every RunLog method that hands the writer a " +
+      "literal `type` has to be seen here.",
+  );
 
   const api = readFileSync(join(ROOT, "docs/API.md"), "utf8");
   const lines = api.split("\n");
   const from = lines.indexOf("## 7. Run log");
   const after = lines.findIndex((l, i) => i > from && l.startsWith("## "));
   const headings = lines.slice(from, after).filter((l) => l.startsWith("### ")).map((l) => l.slice(4));
+
+  // Every §7 heading is event names and nothing else, which is what makes reading its code spans as
+  // event names safe. A heading that also named a field — `### `quality_report` (`score`)` — would
+  // have to fail HERE, as a heading this test cannot parse, and not two lines down as an event src/
+  // no longer emits. If §7 ever needs such a heading, widen this shape and the extraction together.
+  for (const h of headings) {
+    assert.match(
+      h,
+      /^`[a-z0-9_]+`( \/ `[a-z0-9_]+`)*$/,
+      `a §7 heading is not event names only: \`### ${h}\`. Every code span in a §7 heading is read ` +
+        "below as an event name, so anything else in one is reported as a deleted event.",
+    );
+  }
+
   const documented = new Set(
     headings.flatMap((h) => [...h.matchAll(/`([a-z0-9_]+)`/g)].map((m) => m[1]!)),
   );
@@ -1264,8 +1292,18 @@ test("§7 states how much of the run log it does not document, and the count is 
   assert.deepEqual(ghosts, [], `§7 documents event(s) src/ no longer emits: ${ghosts.join(", ")}`);
 
   const undocumented = [...emitted].filter((n) => !documented.has(n));
+
+  // Read the numbers out of THAT paragraph, not out of the file: every event name §7 offers as an
+  // example is also a section heading or a mention somewhere else in these 4,000 lines, so a check
+  // against the whole document would pass on a paragraph that had dropped the example entirely.
+  const opens = "**The index is not the whole log.**";
+  const paraStart = lines.findIndex((l) => l.startsWith(opens));
+  assert.ok(paraStart > 0, `§7 no longer opens its coverage paragraph with ${opens}`);
+  const paraEnd = lines.findIndex((l, i) => i > paraStart && l.trim() === "");
+  const para = lines.slice(paraStart, paraEnd).join(" ").replace(/\s+/g, " ");
+
   const stated = /`src\/` emits \*\*(\d+)\*\* event types; the (\d+) sections below cover \*\*(\d+)\*\* of them and \*\*(\d+)\*\* have no section here/.exec(
-    api.replace(/\s+/g, " "),
+    para,
   );
   assert.ok(
     stated,
@@ -1283,9 +1321,9 @@ test("§7 states how much of the run log it does not document, and the count is 
   // Counts alone cannot see a RENAME — one name out, one name in, every total unchanged — and the
   // paragraph names three events as its examples of the undocumented ones. Each has to still be
   // emitted, and still be undocumented, or the example is the wrong way round.
-  for (const example of ["run_start", "phase", "reader_start"]) {
+  for (const example of ["agent_call", "run_start", "phase", "reader_start"]) {
     assert.ok(
-      api.includes(`\`${example}\``),
+      para.includes(`\`${example}\``),
       `§7's coverage paragraph no longer names \`${example}\`; update this list with it`,
     );
     assert.ok(emitted.has(example), `§7 names \`${example}\` as an event and src/ emits no such one`);
@@ -1293,7 +1331,7 @@ test("§7 states how much of the run log it does not document, and the count is 
   }
 
   // The fourth example is a family rather than a name, so it is checked as one.
-  assert.ok(api.includes("`agent_update_*`"), "§7 no longer names the `agent_update_*` family");
+  assert.ok(para.includes("`agent_update_*`"), "§7 no longer names the `agent_update_*` family");
   const family = [...emitted].filter((n) => n.startsWith("agent_update_"));
   assert.ok(family.length > 0, "src/ emits no `agent_update_*` event, so §7's example is stale");
   assert.deepEqual(
