@@ -482,7 +482,8 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   windows that *did* answer may have found issues. The delivered document carries a `@review-unread`
   comment saying how many windows of how many, and `reader_no_output` in the run log carries the
   reply's size and which of the two ways it failed. A non-zero value is a statement about the reader
-  model or its prompt, and the run log's `agentCall` output for that call is where to start. The
+  model or its prompt, and that call's [`agent_call`](#agent_call) `output` in the run log — the
+  reply itself — is where to start. The
   **last** read is the one this counts, because what ships is one reading of the body that shipped;
   `first_read.unread_documents` above is the same failure on the first read, where it is an error bar
   on that read's count rather than a gap in the delivered document's verdict.
@@ -856,7 +857,10 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID" | jq
   "updated_at": "..."
 }
 ```
-`status` is one of `queued`, `running`, `ready_for_review`, `closed`, `failed`.
+`status` is one of `queued`, `running`, `ready_for_review`, `closed`, `failed`. One field is not in
+the payload above because it appears on a failed session and only there: `error`, the message the run
+threw, the same one the run log's [`run_failed`](#run_failed) line carries. Absent rather than empty
+on every other status, so branch on the status and not on the field.
 
 `phase` is one of `extraction`, `assembly`, `review`, `done`, and is only meaningful while
 `status` is `running` — a `queued` session reports the phase it will start in, not one it has
@@ -963,18 +967,25 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is not the whole log.** `src/` emits **111** event types; the 65 sections below cover
-**70** of them and **41** have no section here — `agent_call`, which the line above advertises,
-plus `run_start`, `phase`, `reader_start` and the `agent_update_*` contribution family among them.
-A `type` missing from the index is a real event, not a malformed line. Every number and every
-event name in this paragraph is checked against `src/`, so a new event makes this paragraph fail
-until it is either written up or counted.
+**The index is not the whole log.** `src/` emits **111** event types; the 77 sections below cover
+**82** of them and **29** have no section here. Those 29 split four ways, and the split is checked
+too, not just the totals: **5** link-repair events (`page_links` and four more), **5** specialist-dispatch ones
+(`specialist_dispatched` and four more), **17** feedback-learning and contribution ones
+(`feedback_learned`, the `agent_update_*` family), and **2** that belong to none of them —
+`page_lessons_injected` and `reextract_skipped`, both emitted during extraction. A `type` missing
+from the index is a real event, not a malformed line. Every number and every event name in this paragraph is
+checked against `src/`, so a new event makes this paragraph fail until it is either written up or
+counted.
 
 | `type` | What it records |
 | --- | --- |
 | [`run_queued` / `run_dequeued`](#run_queued--run_dequeued) | The run's wait for a concurrency slot |
+| [`run_start`](#run_start) | The run's opening line: how many source pages, and which of the three paths it took |
+| [`phase`](#phase) | The pipeline entered a phase |
 | [`model_call_start` / `model_call`](#model_call_start--model_call) | One completion, from the layer that resolved it |
+| [`agent_call`](#agent_call) | One agent call that returned, with **the reply itself** and the prompt version that produced it |
 | [`extraction_start`](#extraction_start) | The page pass is about to run |
+| [`feedback_rerun`](#feedback_rerun) | Feedback arrived, and the document it is about was snapshotted first |
 | [`feedback_scoped`](#feedback_scoped) | How a feedback re-run was routed |
 | [`first_read_carried`](#first_read_carried) | A feedback re-run kept the document's earlier first-read count |
 | [`reextract_start` / `reextract_complete`](#reextract_start--reextract_complete) | Which pages went back to the page agent |
@@ -1023,7 +1034,10 @@ until it is either written up or counted.
 | [`editor_sections`](#editor_sections) | A round that could not be answered whole is being re-made a piece at a time |
 | [`editor_section_failed`](#editor_section_failed) | One section could not be corrected |
 | [`editor_sections_declined`](#editor_sections_declined) | The round could not be re-made a section at a time, and why |
+| [`reader_start`](#reader_start) | The Reader is about to read the document, in this many windows |
 | [`reader` / `editor`](#reader--editor) | Per-iteration review-loop progress |
+| [`reader_issues_dropped`](#reader_issues_dropped) | Entries in one window's reply that could not be issues |
+| [`reader_no_output`](#reader_no_output) | One window was paid for and produced **no verdict** |
 | [`lint_unavailable`](#lint_unavailable) | axe-core could not run on a body no `assembly` line covers |
 | [`lint_debris`](#lint_debris) | The linted body carried attributes whose **names no valid markup produces** |
 | [`editor_patch`](#editor_patch) | What one ordinary correction round's reply did to the body, block by block |
@@ -1031,18 +1045,77 @@ until it is either written up or counted.
 | [`editor_no_output`](#editor_no_output) | The Copy Editor's reply carried no usable body |
 | [`editor_shrank`](#editor_shrank) | A round came back with **less than half the prose** it was given, and was refused |
 | [`editor_navigation`](#editor_navigation) | The structures a reader navigates by, on a reply that was **adopted** |
+| [`assembly`](#assembly) | The pages were joined into one body, and the first lint of it |
+| [`assembly_anchors`](#assembly_anchors) | What namespacing the pages' `id`s cost |
 | [`deprecated_roles_stripped`](#deprecated_roles_stripped) | A deprecated ARIA role was removed from an element that already said it |
 | [`invalid_roles_stripped`](#invalid_roles_stripped) | A `role` naming something that is **not an ARIA role at all** was removed |
 | [`page_main_stripped`](#page_main_stripped) | A `<main>` a page emitted for its own content was taken out of the body |
 | [`page_markers`](#page_markers) | Page-break markers were checked against the document's own numbering |
 | [`reader_page_reports_deduped`](#reader_page_reports_deduped) | Reader reports about a page with **no content** were reduced to one per page |
 | [`review_converged`](#review_converged) | The loop stopped early because a round changed nothing |
+| [`run_signals_failed`](#run_signals_failed) | The quality tally could not be written for this document |
+| [`run_complete`](#run_complete) | The run's terminal marker, and the state it delivered |
+| [`run_failed`](#run_failed) | The run threw, so there is **no document** |
 
 ### `run_queued` / `run_dequeued`
 
 The run's wait for a concurrency slot: how busy the queue was when it was admitted (`running` of
 `limit`, plus `waiting`), and `waited_ms` when it actually started. A large `waited_ms` means the
 deployment is saturated, not that this run is slow.
+
+### `run_start`
+
+The run's own opening line: `images`, how many source pages the session has; `feedback`, the text a
+re-run was asked to act on, `null` on a first run; and `mode`, one of `full`, `feedback_reextract`
+and `feedback_iterative`.
+
+`mode` is not on the session's first line ([`run_queued`](#run_queued--run_dequeued)) because it is
+not decided that early. A re-run with saved state
+routes its feedback first, so [`feedback_scoped`](#feedback_scoped) sits **above** this line and
+decides it: `target: "extraction"` is `feedback_reextract` and `target: "document"` is
+`feedback_iterative`. Scoping is a model call, so such a session can have spent money before its own
+`run_start` — `feedback_scoped`'s `reason` reads `feedback agent unavailable` on the one path that
+routes without buying one. Feedback that arrives with no saved state to build on runs `full`, since
+there is nothing to refine — so a `full` run with a [`feedback_rerun`](#feedback_rerun) line above it
+is not a first run. [`run_complete`](#run_complete) carries `mode` again.
+
+`images` counts source pages, blank ones and pages that go on to fail included, and it is the only
+count of them present on **every** mode: `feedback_iterative` runs no extraction at all, so it has
+neither an `extraction_start` nor an `extraction_complete` line to read `pages` off.
+
+This is also where §7b cuts the log. A session's log accumulates across feedback rounds, so
+diagnostics slices at the **last** `run_start` and reports the run after it, ending at that run's
+`run_complete` or `run_failed`. One case straddles that cut: a client may POST feedback inside a
+round's post-delivery window, and with `max_concurrent_runs` above 1 the next round's `run_start` is
+then written before the previous round's completion line.
+
+**`phase_durations_ms` is not cut here, and cannot be.** It reads the whole log rather than the slice,
+and the `extraction` marker is written *before* this line on every mode, so on a first run the field
+covers slightly more than the run and on a session with feedback rounds it mixes them
+([`phase`](#phase)).
+
+### `phase`
+
+A phase marker for timing: `phase` is `extraction`, `assembly` or `review`, written as the session's
+own `phase` field is set (§4). §7b turns these into `phase_durations_ms` by measuring each to the
+next, and the last one to the run's terminal line — or to now, on a run still going.
+
+Three values here and four in §4: `done` is a phase the session record reaches and never a log line,
+so the last phase is measured to `run_complete`. A `feedback_iterative` round has no `assembly`
+marker, because it assembles nothing — it re-reviews the body already delivered. So a phase missing
+from a session's log is not always a phase that failed.
+
+The inverse holds too, and it is the one to watch: **an `extraction` marker is written on every mode,
+`feedback_iterative` included**, before [`run_start`](#run_start) and before the mode is even decided.
+So that marker's duration on a round that re-extracted nothing is the time spent routing the feedback
+and reviewing, filed under a phase that did not run.
+
+`phase_durations_ms` reads the **whole** log and not the current run's slice, which matters once a
+session has taken feedback. Its keys are one per phase NAME, so a later round's marker overwrites an
+earlier round's: `extraction` and `review` end up the last round's, since every round writes both.
+`assembly` does not, and that is the field to distrust — a `feedback_iterative` round writes no
+`assembly` marker, so the value left standing beside that round's numbers is **a previous round's
+assembly**, measured from a run that is over.
 
 ### `model_call_start` / `model_call`
 
@@ -1097,6 +1170,92 @@ below).
 It is on the **start** line too, for the same reason `step` is: the calls worth attributing are
 the ones with no answer to attribute them by.
 
+### `agent_call`
+
+One agent call that returned, carrying the whole reply in `output` and the prompt version that
+produced it. This is the only place a model's raw text is kept — every other line about a call
+reports what was *read out of* it — so a question about what an agent actually said is answered here
+and nowhere else, and a reply that this pipeline then rejected is still on record in full.
+
+`phase` is `extraction`, `assembly` or `review`, matching the [`phase`](#phase) markers.
+`capabilities` is what the agent **declared** it needs (`text`, `vision`, `structured_output`), read
+off its `## Required capability` section — the one capability that actually routed this call is
+`capability` on the [`model_call`](#model_call_start--model_call) beside it, and an agent declaring
+two does not use both at once. `image` is the source image on a per-page call and `null` otherwise —
+written rather than omitted, unlike the count fields elsewhere in this log.
+
+`agent` is the agent's **file** name, not its logical name, which is what tells two contracts served
+by one agent apart: a table join and a correction round are both the Copy Editor, and they are
+`copy_editor_table_join.md` and `copy_editor.md`. Read it as a label rather than as a path, though.
+`agent_sha` is the git blob SHA of the prompt text that was **sent**, so a round's prompt is
+recoverable from a checkout however the file has moved since. It is `null` at **eight** call sites, of
+two kinds. **Six** send a prompt that is a literal in this codebase rather than a file: the Reader,
+the two editor contracts, the table join, the specialist merge, and the page agent's own
+`DEFAULT_PAGE_PROMPT` fallback, taken when `agents/page.md` does not load. Those six are versioned by
+the application's commit. The other **two** are a training round's fixture replays, and only one of
+them loses anything. The regression gate sends the *candidate* prompt the round proposed: in no
+commit, in no file, and not on this line either, so that reply is to a prompt nothing keeps. The eval
+gate sends the **current** library prompt, for comparison against it — recoverable at the deployed
+commit, its real SHA just discarded on the way here.
+
+Those two lines are the ones worth telling apart, and nothing on them does it: same `agent`, both
+`agent_sha: null`, both `agent_content: null`, and both replays hardcode `step: "agent_regression"` on
+their `model_call`, so the tiebreak this section offers elsewhere fails here. The `eval_gate` line
+that follows them delimits the pair, but it sits after **both** halves, so it does not split them by
+itself. Order and count do that. The regression gate is awaited to completion before the eval gate
+starts, so every one of the regression gate's lines precedes every one of the eval gate's. And the two
+halves are the same length, subject to the two caveats below. Both gates read the same fixture
+directory, sorted and capped the same way at three cases, and skip a fixture for the same two reasons:
+a case file that will not parse, an image file that is not there. Each then issues exactly one of these
+calls per surviving fixture — so the first half is the candidate prompt's, and the second half the
+current prompt's. The regression gate also emits a verifier `agent_call`, for each fixture that
+survived its own checks, and that one names the Feedback Agent's file, carries a real `agent_sha`, and
+reads `phase: "extraction"` rather than `review`, so it stays out of this population. Fixtures it
+never reaches — the replay produced nothing, or the content check failed — have a replay line and no
+verifier line, which is a gap in *that* set rather than in this one.
+
+Both caveats are themselves visible in the log, so the rule can be checked before it is applied. **A
+gate that threw leaves a short half.** A provider error or timeout on any one replay rejects the whole
+gate, and neither gate call is wrapped, so the round logs `feedback_training_failed` and the run
+finishes — with whichever replay lines were already written still in place. That is the case to watch
+for, because a truncated eval half read under the count rule is attributed to the candidate prompt,
+which is the exact confusion this paragraph exists to prevent. **And the fixture set can change
+between the two reads.** The directory is keyed by the agent rather than by the session, and the two
+reads are a whole gate apart, so another session accepting a fixture in that window can leave a
+two-line half followed by a three-line one. The paired scoring absorbs that for the *scores*; only the
+count rule here depends on it.
+
+An `eval_gate` line missing altogether is the other half of the rule, and it does not mean the log was
+cut short. A regression gate that *failed* logs `agent_update_blocked` and returns before the eval gate
+is reached — so a round with no `eval_gate` **and** no `feedback_training_failed` ran no eval gate, and
+every `agent_sha: null` replay in it was the regression gate's. A round carrying
+`feedback_training_failed` instead is the throwing case, and there the replays could belong to either
+gate.
+
+One `agent` value spans two cases: the merge sends `MERGE_SYSTEM` under the name `page.md` with
+`agent_sha: null`, beside ordinary page calls that carry `page.md`'s real SHA. So `agent_sha`, and the
+`step` on the `model_call` next to it, are what identify the text that went out; `agent` alone groups
+the two together. On a deployment that fell back to `DEFAULT_PAGE_PROMPT` even that breaks down —
+every `page.md` line reads `agent_sha: null`, and `step` is the only field left that tells a page call
+from a merge.
+
+`agent_content` is on **every** line and `null` on all but one case, so read it as
+present-and-null rather than omitted — the convention `image` follows above. It carries the prompt
+inline for a **session-built** agent, meaning one loaded from `tmp/<id>/agents` in preference to the
+agent library. Nothing in this pipeline puts a file there: the one write into that directory is the
+feedback-training step overwriting an agent that is *already* session-built, so today every line
+reads `agent_content: null` unless an operator dropped a file in by hand.
+
+A session-built agent does still carry an `agent_sha`, computed over the text it was built from. It
+just names no blob a checkout holds, which is what `agent_content` is there to cover. The eight
+`agent_sha: null` sites above are the case where **neither** field recovers the text. Seven of the
+eight are recoverable anyway — six from the application's commit, the eval gate's from the deployed
+agent library. Exactly one is recoverable nowhere: the candidate prompt the regression gate replays.
+
+A call that **threw** has no line here. The provider's failure is on `model_call` with `ok: false`,
+and this line is written after the call returned — so these lines count answers, not attempts, and a
+phase's spend cannot be read off them.
+
 ### `extraction_start`
 
 The page pass is about to run: `pages`, the `concurrency` it will run them at, and what it will
@@ -1109,6 +1268,18 @@ those have different remedies (issue #288).
 
 The thresholds are computed from the orders of the pages **this** batch runs, so they say which
 pages could have answered and not merely how many.
+
+### `feedback_rerun`
+
+Feedback arrived, and the document it is about was copied aside before this round overwrote it:
+`feedback` is the text as submitted, and `prior_output` the path the previous `output.html` was
+snapshotted to, relative to the session directory (`history/output-<timestamp>.html`). That copy is
+the only record of the document as it was delivered before this round; nothing else keeps it, and §5
+serves what this round produces.
+
+`prior_output: null` means there was no delivered output to snapshot. Written for **every** re-run,
+including one that goes on to run `full` for want of saved state ([`run_start`](#run_start)) — so
+this line, and not `mode`, is what says feedback was submitted at all.
 
 ### `feedback_scoped`
 
@@ -2726,6 +2897,21 @@ carries no images, which is the whole of that reason's objection. Without `cover
 discarded as it was before any of this existed: the document that entered it is delivered with
 that round's issues unresolved.
 
+### `reader_start`
+
+The Reader is about to read the document: which `iteration`, how many `chunks` it goes out in, and
+the `concurrency` those run at.
+
+`concurrency` is `defaults.extraction_concurrency` — the same knob page extraction is bounded by,
+because a Reader chunk is the same kind of model call: a run's peak stays where the operator set it
+in this phase as in the other, and a deployment that lowered it for a rate-limited provider gets its
+reviews bounded too. It falls back to 1 for a directly-constructed context that never set it, which
+is what this step did before it ran chunks in parallel at all.
+
+`chunks` is the denominator behind the `window` / `of` pair on the two lines below, and behind the
+`@review-unread` comment's "how many windows of how many" in the delivered document: one round can
+lose part of a document and read the rest.
+
 ### `reader` / `editor`
 
 Per-iteration review-loop progress: the Reader's `issues` count, and whether that round's
@@ -2808,6 +2994,33 @@ describe the body that ships. On a sectioned round they are still the whole body
 *reply* is a fraction of the body it belongs to (0.016–0.379 on the bench rounds) because it is
 one section, and a round whose reply carried nothing usable reports equal sizes by construction,
 with `editor_no_output` beside it to say so.
+
+### `reader_issues_dropped`
+
+One window's reply listed entries that could not be issues, and they were dropped: `iteration`,
+`window` of `of`, `dropped` how many went, and `of_entries` how many the list held.
+
+A reply's shape is the model's and not this pipeline's, so none of it is assumed — and this line is
+what that check costs, said out loud rather than silently. An entry that is not an object cannot be an issue, and
+reading a page list off one throws — the same crash as an `issues` that arrived as a string, one
+level in. So it is dropped rather than fatal, on the argument the whole path is built on: a reply
+that is partly usable is worth its usable part. `dropped` equal to `of_entries` is a window that
+said nothing readable at all, and it has a `reader_no_output` line beside it.
+
+### `reader_no_output`
+
+One window was paid for and produced no verdict: `iteration`, `window` of `of`, `chars` of reply
+text, and `reason` — `no_issue_list` for a reply with no `issues` list in it this code can read
+(prose, an apology, `{"issues": "none"}`), `no_readable_issue` for one that listed entries and had
+none survive the shape check. Two different replies, which is why the reason is a field. Said the way
+`editor_no_output` is said, because it is the same event about the other agent: a call that was
+bought and gave nothing to act on.
+
+One line per window that failed, because a document is read in windows and only one of them may
+have. An **empty** `issues` list is not this event — that is a verdict, and the one the whole loop is
+for. The delivered document carries a `@review-unread` comment saying how many windows of how many,
+and the tally counts the document (§0c `review_unread_rate`), because otherwise this outcome reads as
+the best one there is: no issues found, no `iris:unresolved` row, a document counted clean.
 
 ### `lint_unavailable`
 
@@ -3176,6 +3389,48 @@ the record. Not folded into `editor_headings_gated_rate` in §0c: that rate coun
 something **was** handed back, and adding rounds where nothing was would make a signal about a
 working guard into a mixture of that and a reading nobody acted on.
 
+### `assembly`
+
+The assembly phase's own line: `pages`, how many page fragments were joined into one body, and the
+first accessibility lint of it — `lint_ok`, plus `violations` when there were any to count.
+
+`violations` is **omitted rather than zeroed** when the lint did not run, and that omission is the
+point of the field: `violations: 0` read beside `lint_ok: true` was a clean bill of health for a
+document axe had never looked at, and anything tallying these lines added it as a real zero (#164).
+A lint that could not run carries `lint_error`, and `lint_error_where`, `lint_error_name` and
+`lint_error_stack` where they could be said — which step threw, its error class, the first frames —
+because the message on its own read "Octal escape sequences are not allowed in strict mode" and named
+nothing anyone could reproduce from. The document that provoked it needs no second copy to
+reconstruct: this lints `wrapDocument(assembleBody(fragments))`, both pure, and `fragments.json` is
+written before this phase runs.
+
+`malformed_attributes`, `malformed_attributes_removed` and `malformed_attribute_names` are the same
+three fields [`lint_debris`](#lint_debris) carries, on the same argument. Later lints of the same
+document have no `assembly` line to sit on: a correction round's re-lint and a feedback re-run that
+skipped assembly report through [`lint_unavailable`](#lint_unavailable) and `lint_debris` with a
+`stage` instead.
+
+### `assembly_anchors`
+
+What namespacing the pages' `id`s cost, written **only when the join had to do something**, so an
+ordinary run adds no line. `collisions` are the ids more than one page claimed. `ambiguous` are the
+references naming one of those, as `page N: #ref`, each repointed at the first claimant — which is
+what the un-namespaced document resolved it to, but no page vouches for that being the copy it meant,
+so this is the field worth a person's eye. Without this line there is no symptom at all.
+
+`unrepointed` is the subset aimed at no owner, because every page claiming the id already links to
+its own copy (#233): the page that wrote the reference transcribed a marker whose note nothing in
+this document holds, which is a page worth looking at. Left **bare**, not dead — the link still
+resolves, to a note that has its own marker. `pinned_ids` are ids whose FIRST owner was deliberately
+left un-namespaced so that a reference on a page that could not be rewritten keeps landing; without
+that field, `collisions` would claim an id was namespaced when it was on purpose not. `skipped_pages`
+are pages left exactly as written rather than risk losing markup on reserialization, so one may still
+carry a collision — lint's `duplicate-id` / `duplicate-id-active` names those — or a reference the
+other pages renamed away from.
+
+Whether a reference lands in the bytes that ship is measured on the delivered document
+([`internal_links`](#internal_links)), not here.
+
 ### `deprecated_roles_stripped`
 
 A deprecated ARIA role was removed from an element whose own role already said it — `roles` (the
@@ -3409,6 +3664,53 @@ headings, a `[page not fully transcribed]` marker.
 
 Frequent lines here with `issues` the editor *should* be able to fix are the signal worth chasing:
 that is the editor declining work, not the loop saving a wasted round.
+
+### `run_signals_failed`
+
+The deployment-wide quality tally could not be written for this document (`error`). The document still
+ships: recording is soft, on the same argument the agent-suggestion filing at the end of a run is —
+a tally is not worth failing a document someone has already waited for.
+
+Logged loudly for the one reason the tally itself cannot show it: **fewer signals recorded looks
+exactly like fewer problems found**, so the silent version of this failure is a quality tally that
+reads better over time as recording breaks. The row that goes missing is `iris:rounds`, written for
+every delivered document including a flawless one because it is the document count §0b and §0c
+divide by — so a window with these lines under it is short by however many documents they cover,
+with those documents' defects gone from the numerators along with them.
+
+### `run_complete`
+
+The run's own terminal marker: `iterations` the review loop completed, `unresolved` issues left open
+in the delivered document, and the `mode` it ran in ([`run_start`](#run_start)).
+
+`failed_pages` and `uncorrected_pages` are present **only when there were any**: a `failed_pages:
+[]` on every successful run would read as a field about failure on the lines that have none. This
+line is also the only place either set can be read on **every** mode, since a feedback round that
+re-extracts nothing has no `extraction_complete` line to carry them. What the run **delivered** is
+the question, not what it attempted (#328). Neither set is what §7b reports: its `pages_failed` is
+folded from the per-page `page_extraction_failed` and `page_recovered` lines, and the uncorrected set
+has no diagnostics field at all — so this line is where a client reads it.
+
+Written **after** the feedback-training step that follows delivery, even though the session has been
+`ready_for_review` since before it, because the run holds its `max_concurrent_runs` slot until it
+returns: a marker written before that training would report the run as shorter than the time it
+actually occupied the machine. §7b measures a finished run's duration up to this line.
+
+There is no `pages` field here. The count of source pages is `images` on [`run_start`](#run_start),
+and `pages` on [`extraction_start`](#extraction_start).
+
+### `run_failed`
+
+The run threw, so there is no document: `error` is the message, and §4 hands the client that same
+string in its own `error` field, which exists on a failed session and nowhere else.
+
+A page that fails on its own does **not** reach here — the run finishes and delivers the rest (§7c),
+which is what `failed_pages` above is for — so a line here means nothing was delivered at all.
+
+Where a run does end in extraction, [`extraction_failed`](#extraction_failed) is the line that says
+which failure it was, and this `error` is written to match: with `blank: 0` it is the first page's own
+provider error, standing for all of them because that is the diagnosis; otherwise it counts the source
+pages reported blank, which an empty document could not.
 
 ## 7b. Diagnostics (timing / hang detection)
 
@@ -3936,8 +4238,9 @@ apart from `pages_failed` because what a reader should do about the two is oppos
 page is work to redo, a blank page is work already finished — and because the alternative was
 measured: six of 100 bench pages were blank versos reported as lost source pages, which made three
 of four documents read as partial when all four were complete (issue #179). Nothing is subtracted
-for them: `pages` on `run_complete` counts source images, so `pages - pages_blank.length` is how
-many produced markup. The two sets are disjoint, and follow the document the same way — a page
+for them: `images` on [`run_start`](#run_start) counts source images, blank ones included, so
+`images - pages_blank.length` is how many produced markup. The two sets are disjoint, and follow the
+document the same way — a page
 that failed in round 1 and came back blank in round 3 has been answered, so it leaves
 `pages_failed` and arrives here.
 

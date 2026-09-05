@@ -1284,8 +1284,11 @@ test("§7 states how much of the run log it does not document, and the count is 
 
   assert.ok(emitted.size > 90, `only ${emitted.size} event names found in src/ — the grep missed`);
   // Losing shape 3 would SHRINK a count rather than fail anything, which is how `agent_call` went
-  // unnoticed: `model_call` and `model_call_start` have §7 sections, so a broken shape-2 pattern
-  // fails `ghosts` loudly, while an event with no section just stops being counted.
+  // undocumented for as long as it did: an event with no §7 section just stops being counted, while
+  // a broken shape-2 pattern fails `ghosts` loudly because `model_call` has one. `agent_call` has a
+  // section now, so a broken shape 3 would reach `ghosts` as well — this assertion stays because it
+  // says WHICH of the two failures it is, and because the next event added this way will again have
+  // no section to be missed from.
   assert.ok(
     emitted.has("agent_call"),
     "`agent_call` is not in the emitted set. Either the shape-3 search above stopped matching " +
@@ -1350,7 +1353,7 @@ test("§7 states how much of the run log it does not document, and the count is 
   // Counts alone cannot see a RENAME — one name out, one name in, every total unchanged — and the
   // paragraph names three events as its examples of the undocumented ones. Each has to still be
   // emitted, and still be undocumented, or the example is the wrong way round.
-  for (const example of ["agent_call", "run_start", "phase", "reader_start"]) {
+  for (const example of ["page_links", "specialist_dispatched", "feedback_learned"]) {
     assert.ok(
       para.includes(`\`${example}\``),
       `§7's coverage paragraph no longer names \`${example}\`; update this list with it`,
@@ -1358,6 +1361,50 @@ test("§7 states how much of the run log it does not document, and the count is 
     assert.ok(emitted.has(example), `§7 names \`${example}\` as an event and src/ emits no such one`);
     assert.ok(!documented.has(example), `\`${example}\` now HAS a §7 section, so it is a bad example`);
   }
+
+  // The paragraph splits the undocumented set into groups and states each group's SIZE, and its own
+  // last sentence promises every number in it is checked against src/. The four totals above are not
+  // enough for that: a sixth link-repair event added later leaves 29 correct — one more emitted, one
+  // more undocumented — and makes `**5**` quietly wrong. So each group is counted here by the prefix
+  // the paragraph names it by.
+  // Named rather than derived: these two are undocumented events that fit NONE of the three groups,
+  // and the paragraph promises them by name. A third one appearing must fail rather than be absorbed
+  // into the remainder, which is why `rest` below subtracts this list instead of pattern-matching.
+  const STRAYS = ["page_lessons_injected", "reextract_skipped"];
+  const groups: [string, (n: string) => boolean][] = [
+    ["link-repair", (n) => n.startsWith("page_links")],
+    ["specialist-dispatch", (n) => n.startsWith("specialist_")],
+  ];
+  for (const [label, inGroup] of groups) {
+    const size = undocumented.filter(inGroup).length;
+    assert.match(
+      para,
+      new RegExp(`\\*\\*${size}\\*\\* ${label}`),
+      `§7 no longer says **${size}** ${label} events, and src/ has ${size} undocumented ones`,
+    );
+  }
+  // The third group is the remainder rather than a prefix, and the two strays are named individually.
+  const rest = undocumented.filter((n) => !groups.some(([, f]) => f(n)) && !STRAYS.includes(n));
+  assert.match(
+    para,
+    new RegExp(`\\*\\*${rest.length}\\*\\* feedback-learning and contribution`),
+    `§7 no longer says **${rest.length}** feedback-learning and contribution events`,
+  );
+  for (const stray of STRAYS) {
+    assert.ok(
+      para.includes(`\`${stray}\``),
+      `§7's coverage paragraph no longer names the stray \`${stray}\``,
+    );
+    assert.ok(
+      emitted.has(stray) && !documented.has(stray),
+      `\`${stray}\` is offered as an undocumented stray and is now documented or not emitted`,
+    );
+  }
+  assert.match(
+    para,
+    new RegExp(`\\*\\*${STRAYS.length}\\*\\* that belong to none of them`),
+    `§7 no longer says **${STRAYS.length}** belong to no group`,
+  );
 
   // The fourth example is a family rather than a name, so it is checked as one.
   assert.ok(para.includes("`agent_update_*`"), "§7 no longer names the `agent_update_*` family");
