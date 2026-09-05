@@ -1362,6 +1362,50 @@ test("§7 states how much of the run log it does not document, and the count is 
     assert.ok(!documented.has(example), `\`${example}\` now HAS a §7 section, so it is a bad example`);
   }
 
+  // The paragraph splits the undocumented set into groups and states each group's SIZE, and its own
+  // last sentence promises every number in it is checked against src/. The four totals above are not
+  // enough for that: a sixth link-repair event added later leaves 29 correct — one more emitted, one
+  // more undocumented — and makes `**5**` quietly wrong. So each group is counted here by the prefix
+  // the paragraph names it by.
+  // Named rather than derived: these two are undocumented events that fit NONE of the three groups,
+  // and the paragraph promises them by name. A third one appearing must fail rather than be absorbed
+  // into the remainder, which is why `rest` below subtracts this list instead of pattern-matching.
+  const STRAYS = ["page_lessons_injected", "reextract_skipped"];
+  const groups: [string, (n: string) => boolean][] = [
+    ["link-repair", (n) => n.startsWith("page_links")],
+    ["specialist-dispatch", (n) => n.startsWith("specialist_")],
+  ];
+  for (const [label, inGroup] of groups) {
+    const size = undocumented.filter(inGroup).length;
+    assert.match(
+      para,
+      new RegExp(`\\*\\*${size}\\*\\* ${label}`),
+      `§7 no longer says **${size}** ${label} events, and src/ has ${size} undocumented ones`,
+    );
+  }
+  // The third group is the remainder rather than a prefix, and the two strays are named individually.
+  const rest = undocumented.filter((n) => !groups.some(([, f]) => f(n)) && !STRAYS.includes(n));
+  assert.match(
+    para,
+    new RegExp(`\\*\\*${rest.length}\\*\\* feedback-learning and contribution`),
+    `§7 no longer says **${rest.length}** feedback-learning and contribution events`,
+  );
+  for (const stray of STRAYS) {
+    assert.ok(
+      para.includes(`\`${stray}\``),
+      `§7's coverage paragraph no longer names the stray \`${stray}\``,
+    );
+    assert.ok(
+      emitted.has(stray) && !documented.has(stray),
+      `\`${stray}\` is offered as an undocumented stray and is now documented or not emitted`,
+    );
+  }
+  assert.match(
+    para,
+    new RegExp(`\\*\\*${STRAYS.length}\\*\\* that belong to none of them`),
+    `§7 no longer says **${STRAYS.length}** belong to no group`,
+  );
+
   // The fourth example is a family rather than a name, so it is checked as one.
   assert.ok(para.includes("`agent_update_*`"), "§7 no longer names the `agent_update_*` family");
   const family = [...emitted].filter((n) => n.startsWith("agent_update_"));

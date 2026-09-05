@@ -968,8 +968,8 @@ the index when you have a `type` off a log line and want to know what it means; 
 you want to know what the field it names is for and what it costs.
 
 **The index is not the whole log.** `src/` emits **111** event types; the 77 sections below cover
-**82** of them and **29** have no section here. Those 29 are two paths, one family and two strays:
-**5** link-repair events (`page_links` and four more), **5** specialist-dispatch ones
+**82** of them and **29** have no section here. Those 29 split four ways, and the split is checked
+too, not just the totals: **5** link-repair events (`page_links` and four more), **5** specialist-dispatch ones
 (`specialist_dispatched` and four more), **17** feedback-learning and contribution ones
 (`feedback_learned`, the `agent_update_*` family), and **2** that belong to none of them —
 `page_lessons_injected` and `reextract_skipped`, both emitted during extraction. A `type` missing
@@ -1188,13 +1188,20 @@ written rather than omitted, unlike the count fields elsewhere in this log.
 by one agent apart: a table join and a correction round are both the Copy Editor, and they are
 `copy_editor_table_join.md` and `copy_editor.md`. Read it as a label rather than as a path, though.
 `agent_sha` is the git blob SHA of the prompt text that was **sent**, so a round's prompt is
-recoverable from a checkout however the file has moved since. It is `null` for a prompt that is a
-literal in this codebase rather than a file, which is **five** call sites: the Reader, the two editor
-contracts, the table join, and the specialist merge. Those five are versioned by the application's
-own commit. One `agent` value spans both cases: the merge sends `MERGE_SYSTEM` under the name
-`page.md` with `agent_sha: null`, beside ordinary page calls that carry `page.md`'s real SHA. So
-`agent_sha`, and the `step` on the `model_call` next to it, are what identify the text that went out;
-`agent` alone groups the two together.
+recoverable from a checkout however the file has moved since. It is `null` at **eight** call sites, of
+two kinds. **Six** send a prompt that is a literal in this codebase rather than a file: the Reader,
+the two editor contracts, the table join, the specialist merge, and the page agent's own
+`DEFAULT_PAGE_PROMPT` fallback, taken when `agents/page.md` does not load. Those six are versioned by
+the application's commit. **Two** are the regression and eval gates, which send a *candidate* agent
+text a training round proposed — that prompt is in no commit and no file, and it is not on this line
+either, so a gate's `agent_call` holds a reply to a prompt nothing keeps.
+
+One `agent` value spans two cases: the merge sends `MERGE_SYSTEM` under the name `page.md` with
+`agent_sha: null`, beside ordinary page calls that carry `page.md`'s real SHA. So `agent_sha`, and the
+`step` on the `model_call` next to it, are what identify the text that went out; `agent` alone groups
+the two together. On a deployment that fell back to `DEFAULT_PAGE_PROMPT` even that breaks down —
+every `page.md` line reads `agent_sha: null`, and `step` is the only field left that tells a page call
+from a merge.
 
 `agent_content` is on **every** line and `null` on all but one case, so read it as
 present-and-null rather than omitted — the convention `image` follows above. It carries the prompt
@@ -1204,8 +1211,9 @@ feedback-training step overwriting an agent that is *already* session-built, so 
 reads `agent_content: null` unless an operator dropped a file in by hand.
 
 A session-built agent does still carry an `agent_sha`, computed over the text it was built from. It
-just names no blob a checkout holds, which is what `agent_content` is there to cover. The five
-literal prompts are the case where **neither** field recovers the text.
+just names no blob a checkout holds, which is what `agent_content` is there to cover. The eight
+`agent_sha: null` sites above are the case where **neither** field recovers the text. Six of them are
+recoverable anyway, from the application's commit. The two gate prompts are not recoverable at all.
 
 A call that **threw** has no line here. The provider's failure is on `model_call` with `ok: false`,
 and this line is written after the call returned — so these lines count answers, not attempts, and a
