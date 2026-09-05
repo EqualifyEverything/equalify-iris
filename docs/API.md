@@ -967,15 +967,24 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is not the whole log.** `src/` emits **111** event types; the 77 sections below cover
-**82** of them and **29** have no section here. Those 29 split four ways, and the split is checked
-too, not just the totals: **5** link-repair events (`page_links` and four more), **5** specialist-dispatch ones
-(`specialist_dispatched` and four more), **17** feedback-learning and contribution ones
-(`feedback_learned`, the `agent_update_*` family), and **2** that belong to none of them —
-`page_lessons_injected` and `reextract_skipped`, both emitted during extraction. A `type` missing
-from the index is a real event, not a malformed line. Every number and every event name in this paragraph is
-checked against `src/`, so a new event makes this paragraph fail until it is either written up or
-counted.
+**The index is not the whole log.** `src/` emits **111** event types; the 89 sections below cover
+**94** of them and **17** have no section here. Those 17 are one region of the pipeline rather than a
+scatter: what a run does with feedback once the document has been delivered. Training an agent on it
+(`agent_trained`, `regression_gate`, `eval_gate`, the `agent_update_*` family), filing a proposal as a
+GitHub issue where the library has no agent for what a page needed (`agent_issue`), and the harness
+that measures the verifier against seeded defects (`calibrate_call_failed`).
+
+What is checked here is not those names but where they come from: every one of the 17 is emitted from
+`src/pipeline/feedback.ts`, `src/pipeline/contribute.ts`, `src/pipeline/calibration.ts`, or one of the
+two catches in `src/pipeline/orchestrator.ts` that report those paths failing. **Three of them are not
+named for the family they belong to** — `contribution_failed` and `feedback_training_failed` are the
+orchestrator's catches, and `calibrate_call_failed` is calibration's — so a prefix grep over the names
+finds a smaller set than the emitting file does. One of the 17 an ordinary run never emits at all:
+calibration is a tool, `src/tools/calibrate.ts`, and not a phase of a run.
+
+A `type` missing from the index is a real event, not a malformed line. Every number, every event name
+and every file path above is checked against `src/`, so a new event fails this until it is either
+written up or counted — and an undocumented one emitted from outside those four files fails it too.
 
 | `type` | What it records |
 | --- | --- |
@@ -985,10 +994,12 @@ counted.
 | [`model_call_start` / `model_call`](#model_call_start--model_call) | One completion, from the layer that resolved it |
 | [`agent_call`](#agent_call) | One agent call that returned, with **the reply itself** and the prompt version that produced it |
 | [`extraction_start`](#extraction_start) | The page pass is about to run |
+| [`page_lessons_injected`](#page_lessons_injected) | Past lessons were added to this run's page prompts |
 | [`feedback_rerun`](#feedback_rerun) | Feedback arrived, and the document it is about was snapshotted first |
 | [`feedback_scoped`](#feedback_scoped) | How a feedback re-run was routed |
 | [`first_read_carried`](#first_read_carried) | A feedback re-run kept the document's earlier first-read count |
 | [`reextract_start` / `reextract_complete`](#reextract_start--reextract_complete) | Which pages went back to the page agent |
+| [`reextract_skipped`](#reextract_skipped) | Pages a re-extraction could not attempt, for want of an input |
 | [`page_no_output`](#page_no_output) | The page agent answered, and no HTML could be read out of the answer |
 | [`page_bare_html`](#page_bare_html) | The reply was **markup rather than the envelope**, so the page was rescued as it stood |
 | [`page_blank`](#page_blank) | The page agent read the page and reported it empty |
@@ -999,8 +1010,18 @@ counted.
 | [`page_generic_alt_unrecovered`](#page_generic_alt_unrecovered) | A correction bought for a placeholder `alt` left the placeholder there |
 | [`page_duplicate_ids`](#page_duplicate_ids) | One page fragment used the same `id` on more than one element |
 | [`page_duplicate_ids_unrecovered`](#page_duplicate_ids_unrecovered) | A correction bought for a duplicate `id` left a duplicate there |
+| [`page_links`](#page_links) | The source file's own link annotations were listed in a page's prompt |
+| [`page_links_missing`](#page_links_missing) | A link the source annotates is not in the page's HTML |
+| [`page_links_unrecovered`](#page_links_unrecovered) | A correction bought for a missing link left it missing |
+| [`page_links_unexpected`](#page_links_unexpected) | The page links to a URL **no annotation accounts for** |
+| [`page_links_correction_rejected`](#page_links_correction_rejected) | A correction bought for a page that had already passed was refused |
 | [`page_soft_hyphens`](#page_soft_hyphens) | Soft hyphens (U+00AD) were taken out of a reply before it became markup |
 | [`page_caption_claim`](#page_caption_claim) | A `<figcaption>` makes a claim about the picture its `alt` describes |
+| [`specialist_unresolved`](#specialist_unresolved) | A page asked for a specialist **no available agent answers to** |
+| [`specialist_declined`](#specialist_declined) | A page asked for a specialist the general pass already covers |
+| [`specialist_no_content`](#specialist_no_content) | A specialist ran and returned nothing of its type |
+| [`specialist_dispatched`](#specialist_dispatched) | A specialist ran, and whether its fragment reached the page |
+| [`specialist_dispatch_failed`](#specialist_dispatch_failed) | A specialist's call threw, so the page stands as it was |
 | [`page_recovered`](#page_recovered) | A re-extraction succeeded on a page an earlier run had lost |
 | [`extraction_failed`](#extraction_failed) | **No page produced any content**, so the run is ending |
 | [`page_verify_ok` / `page_verify_failed`](#page_verify_ok--page_verify_failed) | The Feedback Agent's fidelity verdict on one page |
@@ -1269,6 +1290,20 @@ those have different remedies (issue #288).
 The thresholds are computed from the orders of the pages **this** batch runs, so they say which
 pages could have answered and not merely how many.
 
+### `page_lessons_injected`
+
+Lessons learned from earlier feedback were added to the page agent's prompt, so the agent improves
+without `agents/page.md` being rewritten (issue #1). `chars` is how much text was added.
+
+This is a per-**run** line rather than a per-page one. It is written once at the top of the page pass,
+before any page call, and once more at the top of a re-extraction round — which is why it carries no
+`image` and no `page`. What it says is that every page in that round paid for those characters in its
+prompt.
+
+`chars` is a size and not a count: it does not say how many lessons were injected, and the lessons
+themselves are not on the line. A run with nothing to inject writes no line here at all, so the
+absence of this line means the pages were rendered with the shipped prompt.
+
 ### `feedback_rerun`
 
 Feedback arrived, and the document it is about was copied aside before this round overwrote it:
@@ -1323,6 +1358,22 @@ document page by page — a page re-rendered and now accepted leaves the set, on
 stays, one this round never touched keeps the prior round's verdict, and one whose re-extraction
 **threw** keeps it too, because it is the prior fragment that ships and so the prior verdict that
 describes it.
+
+### `reextract_skipped`
+
+Pages this round meant to re-extract and could not: `pages`, the orders it gave up on, and `reason`,
+which is `no source image or prior fragment` — the only value the line carries today.
+
+Re-extracting a page needs both of those. The image is what the agent reads, and the prior fragment is
+what it is shown as its own previous answer, so a page missing either is dropped from the round rather
+than rendered from nothing. Every page named here keeps the status it arrived with: its prior content,
+its prior verdict, and its place in `uncorrected` if it had one.
+
+It is the difference between what the round was asked for and what it ran.
+[`reextract_start`](#reextract_start--reextract_complete)'s `pages` is what went to the agent, this
+line is the remainder, and the two are disjoint — together they are the set feedback pointed at. This
+line is written **above** `reextract_start`, so a reader scanning a round from its start finds the
+skips first.
 
 ### `page_no_output`
 
@@ -1714,11 +1765,13 @@ of a page that had nothing wrong with it.
 ### `page_generic_alt_unrecovered`
 
 A correction bought for a placeholder `alt` was kept and the placeholder is still there (`page`,
-`image`, `alts` — the values that remain). The mirror of `page_links_unrecovered`, and the reason
-a deterministic rule is worth more here than a model that finds the same defect: the check that
+`image`, `alts` — the values that remain). The mirror of
+[`page_links_unrecovered`](#page_links_unrecovered) in what it measures, and the reason a
+deterministic rule is worth more here than a model that finds the same defect: the check that
 raised the complaint can be run again on the answer, exactly and for nothing, so "the rule found
 something" and "the rule got it fixed" are separable at no cost. Only logged where the correction
-was bought for an alt in the first place.
+was bought for an alt in the first place — which is where the mirror stops, since the link line is
+logged whenever a kept correction leaves a link missing, however that correction was bought.
 
 ### `page_duplicate_ids`
 
@@ -1746,6 +1799,115 @@ way. The remaining ids are named rather than counted because, unlike an unrecove
 not matched against anything the page arrived with: a correction renumbers, so it can clear `fn-1`
 and collide on `fn-2`, and that is a repair that **moved** the defect rather than one that failed
 to touch it. Only logged where the correction was bought for a duplicate id in the first place.
+
+### `page_links`
+
+The source file's own link annotations were listed in this page's prompt: `image`, `links` — how many
+were shown — and `dropped`, how many the page had beyond the cap of 40.
+
+They are in the prompt because the image cannot carry them. A PDF link is an annotation over the page
+rather than part of the picture, so a page's targets are given to the agent as text beside it. The URLs
+in that list are exact; the anchor text is approximate, since it comes from a separate text extraction
+and can be split across lines, clipped short, or differ in spacing from what the image shows.
+
+`dropped` is also the width of a blind spot in the two checks that follow, and both err in the same
+direction. [`page_links_missing`](#page_links_missing) compares only the links that were shown, so a
+link past the cap is never reported missing. [`page_links_unexpected`](#page_links_unexpected) compares
+against **all** of the page's annotations, so one past the cap is never reported as fabricated either.
+Neither check blames the agent for a link it was never given.
+
+A page with no annotations writes no line here, and a source that has none at all — images uploaded
+directly rather than a PDF — writes none on any page. So the absence of this line is not a page whose
+links came out right; it is a page with nothing to be right or wrong about.
+
+### `page_links_missing`
+
+Links the source file annotates that the page's HTML does not contain: `image`, and `links`, the hrefs
+that did not arrive.
+
+Checked in code rather than left to the fidelity verifier, because this is the defect that verifier
+structurally cannot see: it judges the output against the **image**, and a link's target does not
+appear there. A dropped link is invisible to it and a fabricated one is unfalsifiable. The comparison
+against the file's own annotations has an exact answer, so it is made in code, for nothing, on every
+page — and its result is handed to the same self-correction pass as any other fidelity problem.
+
+Matched by normalized URL and deduplicated: one `<a>` is enough to say a target survived, so a page
+that links the same URL under two phrases does not report a miss for a link it has.
+
+A page can be listed here and have **passed** its fidelity check. That is the case this rule exists
+for, and it is why the correction it buys is verified in turn — see
+[`page_links_correction_rejected`](#page_links_correction_rejected). What a correction was asked to fix
+is `trigger` on [`page_corrected`](#page_corrected), which reads `links` when this line is why.
+
+### `page_links_unrecovered`
+
+A self-correction was **kept** on this page and the delivered fragment is still missing links the
+source annotates: `image`, and `links`, the hrefs still absent.
+
+The correction pass is single-shot, so this is the delivered document's state rather than an
+intermediate one — a link named here is missing from what the caller receives. The line exists to keep
+apart two questions one count cannot: whether the free check **found** something, and whether it got
+it **fixed**. Only the second is evidence about what the verifier's model is worth.
+
+Only on a **kept** correction, which on [`page_corrected`](#page_corrected) is `result: "kept"` or
+`"identical"`. A page whose correction was rejected shipped its original fragment, so its missing links
+are on [`page_links_missing`](#page_links_missing) and here on neither.
+
+**Not gated on links having been the reason for the correction**, and that is the one respect in which
+it is not the mirror of [`page_generic_alt_unrecovered`](#page_generic_alt_unrecovered), which is. So
+this line's pages are not a subset of `page_links_missing`'s: a correction bought for a placeholder
+`alt`, a duplicate `id` or a failed fidelity check can **drop** a link the page already had, and that
+lands here with no `page_links_missing` line before it. It is the same failure
+[`editor_links_dropped`](#editor_links_dropped) records for the Copy Editor, one step earlier in the
+run. Which of the two happened is readable: look for a `page_links_missing` line with the same `image`.
+With one, a repair was bought and did not take; without one, the correction lost a link that was there.
+
+### `page_links_unexpected`
+
+Absolute URLs the delivered fragment links to that no annotation on this page accounts for: `image`,
+and `hrefs`.
+
+**Logged, never corrected**, because two of the three ways to land here are legitimate. A URL printed
+visibly in the text may link to itself, which the page prompt explicitly permits. A link the extractor
+could not attribute to any text — one over an image, say — is real and simply unmatched. The third is a
+model that invented a URL, and that is why the list is kept at all: a fabricated href looks exactly
+like a real one in the delivered document, so without this line the failure this feature introduces
+has no symptom.
+
+Checked last, on the fragment that actually ships, because a correction pass rewrites anchors and an
+href invented there is the one worth seeing. Only hrefs with a scheme count. An in-document reference
+like `#fn-1` is the page's own anchor and is reported by [`internal_links`](#internal_links) when it
+lands nowhere, and a relative href is not something an annotation could have supplied either way —
+counting one here would dilute the single signal this line is for. Only pages that **had** annotations
+are checked, since only there is there a ground truth to be outside of.
+
+### `page_links_correction_rejected`
+
+A correction bought for a page that had already passed its fidelity check was refused by the second
+verdict, so the page shipped as it was: `image`; `trigger`, what the correction had been asked to fix;
+`links`, the hrefs that were missing; and `alts` or `ids` where those were part of the same call.
+`links` is always present and is `[]` where the refused correction was bought for a placeholder `alt`
+or a duplicate `id` alone, so the field to read for what the call was for is `trigger`, not this one.
+
+The name is older than the rest of the line, and keeping it is deliberate. It began as the links-only
+case, and renaming it now would split one measurement across two event names in a log that is read
+across rounds. `trigger` is what says which repair was refused: `links`, `alt`, `ids`, or `both`. It
+cannot read `verify` here, though that value exists on [`page_corrected`](#page_corrected) — this
+recheck is only bought for a page whose fidelity check **passed**, since a page that failed has no
+standing to protect.
+
+`both` means more than one source fired, and deliberately not which pair: four sources would be
+fifteen buckets, and the per-source detail is already exact on
+[`page_links_missing`](#page_links_missing), [`page_generic_alt`](#page_generic_alt) and
+[`page_duplicate_ids`](#page_duplicate_ids), all keyed by the same `image`. `alts` and `ids` are on the
+line anyway, and that is the reason: `both` cannot say the alt or the duplicate id was part of what the
+refused call was asked to fix.
+
+The correction is billed either way, so this is a line about money that bought nothing — a page that
+was known to be good was re-rendered, the rewrite was judged in turn, and the rewrite lost. A verdict
+that could not be **obtained** lands on [`page_verify_error`](#page_verify_error) with
+`correction_discarded` instead, so no verdict and a failed verdict are the same outcome for the page
+and two different lines in the log.
 
 ### `page_soft_hyphens`
 
@@ -1837,6 +1999,88 @@ check had nothing to work with.
 
 **Logged only where a claim was found**, so 3 or 4 lines per 91-page arm, and a run with none is a
 run whose captions claimed nothing of the kind.
+
+### `specialist_unresolved`
+
+The page agent named a specialist and no available agent answers to that name: `agent`, `image`,
+`reason`, and two lists.
+
+This is the first of the five `specialist_*` lines, which are the five exits from one attempt: a page
+agent that judges some content beyond its own reach names the specialist it wants, in its own words, and
+the pipeline tries to route the page to it. **Every exit writes a line, including the ones that change
+nothing** — because without them, "no routing was attempted" and "routing was attempted and the name
+did not resolve" are the same observation: a page that came out of the general pass unchanged. Their
+counts reconcile against the requests in one run. `agent` names the request on all five, but not in the
+same form: here the raw string the model wrote when it normalized to nothing, the normalized type when
+it did not resolve to a file, and on the three lines after a successful load, the agent's **filename**.
+
+`reason` distinguishes the two ways to get here. `empty name` means the request normalized to nothing,
+and `agent` is then the raw string, since that is what a maintainer has to recognize. `no agent file of
+that name` means it normalized fine and no file matched — `chart` for `chartDataAgent.md`, a display
+name, a plural. Both are one defect in practice: the model's wording and the library's filenames
+disagree, and the specialist silently does not run.
+
+The two lists are the explanation, and they are kept apart on purpose. `candidates` is what **was**
+dispatchable — real files, so a near-miss reads as a near-miss without a second run to investigate.
+`declined_types` is the standard types, and it is the commoner half of the answer: a suggestion of
+"tables" is not a standard type, so it never reaches the decline branch and resolves to no file, and
+reporting "table" among `candidates` would claim the opposite of what is true. Had the model written
+"table", it would have been **declined**, not dispatched.
+
+The page is delivered as the general pass wrote it, and the fidelity verifier is told so — this exit
+sets the caution "No agent of that name was available".
+
+### `specialist_declined`
+
+The page agent asked for a specialist of a type the general page pass already covers, so the request was
+refused by policy: `agent` (the normalized type), `image`, and `reason: "standard type"`.
+
+**Not a failure.** The decline is keyed on the standard list rather than on what is on disk, so a
+deployment that drops a `table.md` into its agents directory does not get the original defect back — a
+standard specialist splicing its fragment over content the general pass already rendered, which is the
+duplication the page prompt forbids. Matched case-insensitively, so `Table` declines here rather than
+falling through to a file lookup that on a case-insensitive volume would find the very file the rule
+exists to refuse.
+
+This is the one exit that answers the request rather than merely not granting it, and so the only one
+that sends the verifier no caution. Narrowing the verifier's licence here would apply to the commonest
+suggestion shape there is — on a table page, it would mean declining to say a cell reads wrongly — and
+it would buy nothing measured: of the 7 requests behind #353, 0 named a standard type.
+
+### `specialist_no_content`
+
+A specialist loaded, ran, and returned nothing of its type: `agent` (its filename) and `image`.
+
+The page ships as the general pass wrote it. Non-blocking, like every failure on this path, so the run
+does not stop — but the request went unmet, and the verifier is told that in those words rather than
+told no agent existed.
+
+### `specialist_dispatched`
+
+A specialist ran and produced a fragment: `agent` (its filename), `image`, and `merged`.
+
+**`merged: false` on this line is a failure, not a detail.** A fragment that was written and then not
+spliced into the page leaves exactly the page a fragment-less run would have left, so the request is
+unmet and the delivered page is the general pass's own unaided work. Only `merged: true` met it.
+
+That is the general shape of this family, and it is why the log carries five lines rather than a
+boolean. The pipeline's internal `dispatched` flag answers a different question — "is this suggestion
+already covered, or should it be filed as a new-agent issue" — and it disagrees with "did specialist
+content reach the HTML" on four of the six exits. Three of the four are silent: no content, a throw,
+and a fragment that would not merge all count as dispatched. The fourth is
+[`specialist_declined`](#specialist_declined), where nothing ran and the request was nonetheless
+answered. So a count of `specialist_dispatched` lines is not a count of pages that got specialist
+content; the `merged` field is.
+
+### `specialist_dispatch_failed`
+
+The specialist call threw: `agent` (its filename), `image`, and `error`.
+
+Non-blocking — the page is delivered as the general pass wrote it and the run continues, so this is a
+line about content the pipeline knows it did not get rather than about a stopped round. The verifier is
+told the specialist call failed, which is a different statement from no such agent existing, and the
+distinction is kept because telling it "no agent of that name was available" about a specialist that
+ran and threw is simply false.
 
 ### `page_recovered`
 
