@@ -235,6 +235,12 @@ test("every page failing is a failed run, not an empty document", async () => {
       // `ids_duplicated: 0` alone would take it for a clean bill on three pages (#373).
       ids_checked: 0,
       ids_duplicated: 0,
+      // And 0 of 0 words, which is where the denominator earns its place most plainly: this rule is
+      // the one EXPECTED to fire (#334's census contradicts itself on every arm), so `words_split: 0`
+      // on its own is the reading a reader would most wrongly take for a clean document. 0 of 0 says
+      // there was no prose to read.
+      words_checked: 0,
+      words_split: 0,
     });
     assert.equal(ev(rec, "extraction_failed").length, 1, "the log says why the run ended, not just that a page did");
   });
@@ -291,6 +297,9 @@ test("a whole run logs an empty failed list rather than no list", async () => {
       alts_generic: 0,
       ids_checked: 0,
       ids_duplicated: 0,
+      // One word per page in these fixtures, so the split rule looked at two and found nothing.
+      words_checked: 2,
+      words_split: 0,
     });
   });
 });
@@ -417,11 +426,16 @@ test("a re-extraction cannot blank a page the document has content for", async (
       uncorrected: [],
       alts_checked: 0,
       alts_generic: 0,
-      // Counted over the pages this re-extraction returned, not over the document: page 2 kept
-      // its prior content and is not on this line at all, so a 0 here is a statement about
-      // page 3 (#373).
+      // Counted over the WHOLE document this round delivers — the prior round's pages with the
+      // re-extracted ones substituted in — and not over the pages `pages` names. That is what makes
+      // it comparable with `extraction_complete`'s, so a session's log does not read as its corpus
+      // shrinking every time a client sends feedback (#290, #373).
       ids_checked: 0,
       ids_duplicated: 0,
+      // Which the split rule's denominator is what shows: three pages of one word each, including
+      // page 2, whose prior content this round kept rather than re-rendering (#334).
+      words_checked: 3,
+      words_split: 0,
     });
   });
 });
@@ -500,6 +514,9 @@ test("a source whose every page is blank is a failed run, not an empty document"
       alts_generic: 0,
       ids_checked: 0,
       ids_duplicated: 0,
+      // Every page came back blank, so there is no prose: 0 of 0 rather than a clean bill.
+      words_checked: 0,
+      words_split: 0,
     });
     assert.deepEqual(ev(rec, "extraction_failed")[0].data, {
       pages: 0,
@@ -535,6 +552,10 @@ test("a page that threw is not counted among the pages re-extracted", async () =
       alts_generic: 0,
       ids_checked: 0,
       ids_duplicated: 0,
+      // Over the whole document, so page 2's kept content is in the denominator even though the
+      // page it threw on is not in `pages`.
+      words_checked: 3,
+      words_split: 0,
     });
   });
 });

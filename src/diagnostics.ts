@@ -339,17 +339,25 @@ export interface Diagnostics {
     // page that passed and lost a link the code found in the PDF, `alt` is a page that passed
     // and described an image with a placeholder instead of a description (pipeline/alt.ts,
     // #290), `ids` is a page that passed and used one id on two elements (pipeline/anchors.ts,
-    // #373), and `both` is one with more than one of those. These are the split that makes
-    // `corrections` readable as a bill — a `links`, `alt` or `ids` correction is a page call with
-    // no verify failure behind it, so a consumer reading `verify_failed` as the number of extra
-    // page calls undercounts by all three.
+    // #373), `words` is a page that passed and wrote one word two ways (pipeline/hyphens.ts,
+    // #334), and `both` is one with more than one of those. These are the split that makes
+    // `corrections` readable as a bill — a `links`, `alt`, `ids` or `words` correction is a page
+    // call with no verify failure behind it, so a consumer reading `verify_failed` as the number of
+    // extra page calls undercounts by all four.
     //
     // `alt` and `ids` are both expected to be 0 on a healthy run, and that is the point of
     // counting them: the alt rule flags nothing in Iris's own output (0 of 1,064 alts across the
     // bench corpus) and the id rule flags 2 of 1,501 page replies, none of them from the model
     // deployed today, so a non-zero is either a page agent that has started writing placeholders
     // or reusing ids, or a regression in one of the rules. Neither is a cost line at that rate.
-    triggers: { verify: number; links: number; alt: number; ids: number; both: number };
+    //
+    // `words` is the one of the four that is expected to be NON-zero, and it is therefore the one
+    // with a cost line. On #334's 100-page census the shipped model wrote one word two ways on 4
+    // pages of 91 — and no arm was clean, where the other three arms are clean on `alt` and on the
+    // soft hyphen — so this trigger buys a page call at a rate somewhere near 4%, on pages that had
+    // already passed. That is a rate to watch rather than a number to fear at these volumes, but it
+    // is the trigger a reader should look at first when `corrections` grows without `verify_failed`.
+    triggers: { verify: number; links: number; alt: number; ids: number; words: number; both: number };
     // What the corrector said it would NOT do, and why that is a number worth publishing rather
     // than a log line worth grepping (#373 directive 4). Before it, the corrector's only legal move
     // was compliance: a checker's claim that a page's ids are duplicated when they are not is
@@ -370,11 +378,25 @@ export interface Diagnostics {
     // reading the licence wider than it is written, which is the failure #373 warns about in
     // advance — and it is countable now rather than arguable later.
     //
+    // `words` is the fifth source (#334 part B) and is deliberately NOT part of `code_checked`,
+    // though it is checked in code. A split-word problem tells the model that the page writes one
+    // word two ways and asks the image which spelling is right, so "the page really prints both" is
+    // an answer that problem invites — the one code-checked class where a decline may be correct. It
+    // is counted because a rate matters in the other direction: this is the check that can raise a
+    // false problem, and `words` against the `page_split_words` lines is what says how often it does.
+    //
     // `unattributed` is a decline that cited no problem number, or cited one the request never
-    // listed. Kept apart from both: it is not evidence about a code-checked fact, and it is not
+    // listed. Kept apart from all of them: it is not evidence about a code-checked fact, and it is not
     // nothing either — it is a disagreement whose subject cannot be recovered, which is a fact about
     // the reply's shape and the first thing to look at if `problems` is large and unreadable.
-    declined: { pages: number; problems: number; problems_offered: number; code_checked: number; unattributed: number };
+    declined: {
+      pages: number;
+      problems: number;
+      problems_offered: number;
+      code_checked: number;
+      words: number;
+      unattributed: number;
+    };
     // What the corrections that DID change something changed, as observed on the two
     // fragments rather than claimed by the verdict (pipeline/correction.ts). Not a
     // partition: a re-render that rebuilds a table counts under both `text` and
@@ -656,15 +678,17 @@ function parse(logText: string): LogEvent[] {
 const CORRECTION_RESULTS = ["kept", "rejected", "identical", "empty", "failed"] as const;
 
 // And why it ran. A closed list for the same reason, and read off the same event. `alt` since
-// #290 and `ids` since #373; `both` has always meant more than one source, so neither addition
-// changes what an old log's `both` counted.
+// #290, `ids` since #373 and `words` since #334; `both` has always meant more than one source, so
+// none of the three additions changes what an old log's `both` counted.
 //
 // A value missing from this list is worse here than a missing `result` is, and that is why each new
 // source has to be added: an unknown `result` leaves one bucket short of `corrections`, while an
-// unknown TRIGGER leaves the four buckets no longer summing to `corrections` at all — a run whose
-// every correction was bought by the id rule would report `corrections: 12` and four zeros, which
-// reads as a reader that cannot count rather than as a source it has not heard of.
-const CORRECTION_TRIGGERS = ["verify", "links", "alt", "ids", "both"] as const;
+// unknown TRIGGER leaves the buckets no longer summing to `corrections` at all — a run whose
+// every correction was bought by the id rule would report `corrections: 12` and zeros across the
+// board, which reads as a reader that cannot count rather than as a source it has not heard of. The
+// guard on line ~1200 finds the value in this list before indexing, so an unlisted trigger is
+// silently dropped rather than turned into a NaN, which is what makes the omission hard to see.
+const CORRECTION_TRIGGERS = ["verify", "links", "alt", "ids", "words", "both"] as const;
 
 // What the Feedback Agent said was wrong with a page (`page_verify_failed`'s `kinds`).
 // Declared here rather than imported from pipeline/feedback.ts, like the two lists above
@@ -1061,8 +1085,8 @@ export function summarizeRun(
     },
     corrections: 0,
     results: { kept: 0, rejected: 0, identical: 0, empty: 0, failed: 0 },
-    triggers: { verify: 0, links: 0, alt: 0, ids: 0, both: 0 },
-    declined: { pages: 0, problems: 0, problems_offered: 0, code_checked: 0, unattributed: 0 },
+    triggers: { verify: 0, links: 0, alt: 0, ids: 0, words: 0, both: 0 },
+    declined: { pages: 0, problems: 0, problems_offered: 0, code_checked: 0, words: 0, unattributed: 0 },
     effects: { alt_only: 0, text: 0, attrs: 0, structure: 0, text_grew: 0, text_shrank: 0 },
     rechecks: {
       sampled: 0,
@@ -1225,13 +1249,24 @@ export function summarizeRun(
         if (typeof entry !== "object" || entry === null) continue;
         const source = (entry as { source?: unknown }).source;
         verification.declined.problems += 1;
-        // `verify` is the one source the licence covers. The other three were checked in code, so a
-        // decline naming one of them is wrong by construction — matched against the same closed list
-        // the triggers use, minus `both`, which is a property of a correction and never of a single
-        // problem. A `source` this code does not know lands in neither bucket rather than in
-        // `code_checked`: manufacturing the evidence that the licence is being misused is worse than
-        // a total that is visibly short.
+        // `verify` is the one source the licence was written for. `links`, `alt` and `ids` were
+        // checked in code, so a decline naming one of them is wrong by construction — matched against
+        // the same closed list the triggers use, minus `both`, which is a property of a correction and
+        // never of a single problem. A `source` this code does not know lands in neither bucket rather
+        // than in `code_checked`: manufacturing the evidence that the licence is being misused is
+        // worse than a total that is visibly short.
+        //
+        // `words` is checked in code and counted separately, because on that one a decline is a
+        // legitimate answer rather than a misuse (#334 part B). What Iris verified there is that the
+        // page carries both spellings; what it cannot know is which the printing shows, and
+        // `splitWordProblem` says so and invites the model to refuse. Folding those into
+        // `code_checked` would put compliance in the field that exists to count the licence being
+        // abused — the same mistake `CHECKED_IN_CODE` was added to stop, one field along. It is its
+        // own count and not silence for the reason the unknown-`source` case is silent in a
+        // DIFFERENT way: a gap between `problems` and the buckets means "a source this build does not
+        // know", and a legitimate refusal is not that.
         if (source === "links" || source === "alt" || source === "ids") verification.declined.code_checked += 1;
+        else if (source === "words") verification.declined.words += 1;
         else if (source === null || source === undefined) verification.declined.unattributed += 1;
       }
     } else if (e.type === "page_correction_recheck") {

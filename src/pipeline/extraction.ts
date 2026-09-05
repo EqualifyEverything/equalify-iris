@@ -21,6 +21,7 @@ import { examplesForPrompt } from "./memory.ts";
 import { altTexts, genericAltProblem, genericAlts } from "./alt.ts";
 import { missingLinkProblem, missingLinks, pageLinkContext, unexpectedHrefs } from "./links.ts";
 import { duplicateIdProblem, duplicateIds, idAudit } from "./anchors.ts";
+import { splitWordAudit, splitWordContradictions, splitWordProblem } from "./hyphens.ts";
 import { STANDARD as STANDARD_AGENTS, isStandardType, logicalType } from "./contribute.ts";
 import { isTruncatedResponseError, replyExcerpt, TruncatedResponseError } from "../providers/types.ts";
 import type { Fragment } from "./fragment.ts";
@@ -2695,7 +2696,7 @@ async function renderPage(
 
 // One problem the corrector says it is not acting on, and what the HTML shows instead (#373
 // directive 4). `problem` is the number it was listed under in the request, so the decline can be
-// joined back to the problem itself and to which of the four sources raised it — the join is by
+// joined back to the problem itself and to which of the five sources raised it — the join is by
 // index rather than by matching the sentence back, because a model quoting a problem back
 // paraphrases it and a paraphrase cannot be matched to the entry it came from.
 //
@@ -2708,13 +2709,20 @@ export interface Declination {
   why: string;
 }
 
-// What separates the three problems Iris CHECKED from the one it was told, where the corrector reads
-// them (#373 directive 4). The list it is shown is four sources concatenated with nothing to say
-// which is which, and the licence to decline is written around claims about the markup — whose
-// wordings are exactly the code-checked ones ("More than one element on this page has id=…"). Without
-// this mark a corrector following the licence as written declines into `links`, `alt` and `ids`, and
+// What separates the problems Iris CHECKED from the one it was told, where the corrector reads them
+// (#373 directive 4). The list it is shown is five sources concatenated with nothing to say which is
+// which, and the licence to decline is written around claims about the markup — whose wordings are
+// exactly the code-checked ones ("More than one element on this page has id=…"). Without this mark a
+// corrector following the licence as written declines into `links`, `alt` and `ids`, and
 // `verification.declined.code_checked`, the field that exists to count the misuse, counts compliance
 // instead. With it the number means one thing.
+//
+// The split-word problem (#334 part B) carries the mark too, and what it means there is narrower:
+// what Iris checked is that BOTH spellings are on the page, which is not arguable, and not which one
+// is right, which is — the problem's own last sentences say so and invite a refusal. So the mark is
+// doing its job there as well, keeping the decline out of a band it would be misread in, and the
+// separation is finished one field along: a decline citing `words` is counted as `declined.words`
+// rather than `declined.code_checked` (see diagnostics.ts).
 //
 // A suffix on the entry rather than a section heading over each group, because the groups are
 // numbered as one sequence for the decline to cite and a heading between them invites the model to
@@ -2787,23 +2795,28 @@ export function parseDeclined(value: unknown): Declination[] {
   return out;
 }
 
-// Which of the four sources raised the problem a decline names, by its position in the list the
+// Which of the five sources raised the problem a decline names, by its position in the list the
 // request numbered. The order here is the order `problems` is built in at the call site and the two
 // cannot be allowed to drift, so this takes the counts rather than re-deriving them.
 //
 // `null` for a number naming no entry in that list. That is not a decline of anything — a reply
 // citing problem 7 of 3 has declined something the request did not ask — and folding it into the
 // last bucket would report it as a refusal of a fact Iris checked in code.
+//
+// `words` is last because it is appended last, and its band is the one where a decline is an
+// expected answer rather than a misuse: a page that really prints both spellings is a page whose
+// contradiction was Iris's reading and not the model's error (#334 part B, `splitWordProblem`).
 export function declinedSource(
   problem: number | undefined,
-  counts: { verify: number; links: number; alt: number; ids: number },
-): "verify" | "links" | "alt" | "ids" | null {
+  counts: { verify: number; links: number; alt: number; ids: number; words: number },
+): "verify" | "links" | "alt" | "ids" | "words" | null {
   if (problem === undefined) return null;
-  const bands: ["verify" | "links" | "alt" | "ids", number][] = [
+  const bands: ["verify" | "links" | "alt" | "ids" | "words", number][] = [
     ["verify", counts.verify],
     ["links", counts.links],
     ["alt", counts.alt],
     ["ids", counts.ids],
+    ["words", counts.words],
   ];
   let seen = 0;
   for (const [source, n] of bands) {
@@ -3629,6 +3642,33 @@ async function extractPage(
     ctx.log.event("page_duplicate_ids", { image: img.name, page: img.order, ids: duplicated });
   }
 
+  // And whether the page wrote one word two ways — `Compos-ite` here, `Composite` there — which is
+  // exact and free on the same terms as the three above, and is the half of #334's hyphen family that
+  // a strip cannot do (part B; `hyphens.ts` has the argument, and `stripSoftHyphens` is part A).
+  //
+  // The difference from the three above is what Iris knows after finding one. A dropped link, a
+  // placeholder alt and a duplicate id each have one right answer that this code can state, so their
+  // problems name the repair. Here the page contradicts itself and only the agent holding the image
+  // can say which spelling the printing carries, so the problem names the contradiction and asks —
+  // and a page that genuinely prints both is a legitimate decline rather than a defect.
+  //
+  // After the soft-hyphen strip, and load-bearing that it is. #334 measured the interaction on the
+  // page this rule is written from: `Govern<U+00AD>ment` has contiguous letters, so a page carrying
+  // the invisible break writes the word "whole" as far as any text comparison is concerned and the
+  // contradiction goes undetected. Every seam feeding `innerHtml` is stripped (see `stripped`), so
+  // the fragment read here cannot hide one that way.
+  const contradictions = splitWordContradictions(innerHtml);
+  if (contradictions.length) {
+    ctx.log.event("page_split_words", {
+      image: img.name,
+      page: img.order,
+      // Both spellings, as the page wrote each. The split form alone would name the word but not the
+      // evidence, and the evidence is the pair: a reader checking this line against the document is
+      // asking whether the page really contains both, which is the one thing that makes it a defect.
+      words: contradictions.map((w) => `${w.split} / ${w.joined}`),
+    });
+  }
+
   // page_verify_ok / page_verify_failed report the Feedback Agent's verdict and
   // nothing else, exactly as they did before links existed — a missing link is not
   // part of that verdict, and folding it in would make the two events mean different
@@ -3747,7 +3787,7 @@ async function extractPage(
   // writes: `repaired` is set exactly where that event's `result` is `kept`. A reader can check
   // the set against the log without a rule about which values count.
   let repaired = false;
-  // The verifier's problems as it wrote them, then the three Iris raised itself, each marked as
+  // The verifier's problems as it wrote them, then the four Iris raised itself, each marked as
   // checked in code (#373 directive 4 — `CHECKED_IN_CODE` has why). The mark is on the string the
   // corrector reads and on nothing that is counted: `problems.length` is the same number either way,
   // and `declinedSource` reads positions in this order rather than the text.
@@ -3756,24 +3796,32 @@ async function extractPage(
     ...missing.map((l) => missingLinkProblem(l) + CHECKED_IN_CODE),
     ...generic.map((a) => genericAltProblem(a) + CHECKED_IN_CODE),
     ...duplicated.map((id) => duplicateIdProblem(id) + CHECKED_IN_CODE),
+    ...contradictions.map((w) => splitWordProblem(w) + CHECKED_IN_CODE),
   ];
   if (problems.length) {
-    // What the correction was asked to fix, for the event below. Any of the four can fire on one
+    // What the correction was asked to fix, for the event below. Any of the five can fire on one
     // page, and they cost the same call but mean different things: a link the model dropped, a
-    // placeholder alt and a duplicate id are exact, code-checked misses, while a fidelity problem
-    // is the Feedback Agent's judgement.
+    // placeholder alt, a duplicate id and a word written two ways are exact, code-checked findings,
+    // while a fidelity problem is the Feedback Agent's judgement.
+    //
+    // `words` is the one of the five whose right answer Iris does not hold — the other three name
+    // their repair, this one names a contradiction and asks the image — but that is a fact about the
+    // problem text, not about this line, which only records what bought the call.
     //
     // `both` is more than one source, which is what it has always counted — until #290 there
-    // were two sources, and until #373's directive 3 three, so every line an old log calls `both`
-    // is still one and no reading of an old log changes. What it no longer does is name WHICH
-    // pair, and that is on purpose rather than traded away: the alternative is fifteen buckets for
-    // four sources, and the per-source detail is already exact on `page_links_missing`,
-    // `page_generic_alt` and `page_duplicate_ids`, all keyed by the same `image` as this line.
+    // were two sources, until #373's directive 3 three, and until #334's part B four, so every line
+    // an old log calls `both` is still one and no reading of an old log changes. What it no longer
+    // does is name WHICH pair, and that is on purpose rather than traded away: the alternative is
+    // thirty-one buckets for five sources, where four gave fifteen, and the per-source detail is
+    // already exact on
+    // `page_links_missing`, `page_generic_alt`, `page_duplicate_ids` and `page_split_words`, all
+    // keyed by the same `image` as this line.
     const sources = [
       verifyFailed ? "verify" : null,
       missing.length ? "links" : null,
       generic.length ? "alt" : null,
       duplicated.length ? "ids" : null,
+      contradictions.length ? "words" : null,
     ].filter((s): s is string => s !== null);
     const trigger = sources.length > 1 ? "both" : sources[0];
     const before = innerHtml.trim();
@@ -3868,7 +3916,7 @@ async function extractPage(
     // never silence. What it removes is the edit: today the corrector's only legal move is
     // compliance, so a false claim about the HTML is answered by changing a page that was right.
     if (attempt.declined.length) {
-      const counts = { verify: verifyFailed ? verdict.problems.length : 0, links: missing.length, alt: generic.length, ids: duplicated.length };
+      const counts = { verify: verifyFailed ? verdict.problems.length : 0, links: missing.length, alt: generic.length, ids: duplicated.length, words: contradictions.length };
       ctx.log.event("page_correction_declined", {
         image: img.name,
         page: img.order,
@@ -4114,6 +4162,12 @@ async function extractPage(
             // fired this is the only field that says the id was part of what the refused call was
             // asked to fix.
             ...(duplicated.length ? { ids: duplicated } : {}),
+            // And the words written two ways, on those same terms. A fifth source that `both` cannot
+            // name is a fifth way for this line to say a good page was re-rendered for nothing
+            // without saying what for — and this one has a reading the others do not: a rejected
+            // correction bought for a split word may be a rewrite that lost, or a model that
+            // declined and was overruled by the recheck, and the words are where that starts.
+            ...(contradictions.length ? { words: contradictions.map((w) => `${w.split} / ${w.joined}`) } : {}),
             problems: recheck.problems,
           });
         }
@@ -4242,6 +4296,15 @@ async function extractPage(
           // fidelity problem and two duplicated ids read as three-in-one-out. Whether the ids came
           // back is answered exactly and for free by `page_duplicate_ids_unrecovered`.
           ids_before: duplicated.length,
+          // The fifth share (#334 part B), kept apart for the same arithmetic reason: a page with one
+          // fidelity problem and three words written two ways must not read as four-in-one-out. The
+          // reason it is kept apart is NOT the one above, and the difference is worth writing down —
+          // a link target and an id are invisible to a verdict judged against the image, while a
+          // visible hyphen is on the page, and #334 found both candidate verifiers raising this
+          // family unprompted on four pages. So `problems_after` may legitimately name a split word
+          // this field also counts, and the pair is not a clean in/out on this share. What is exact
+          // and free is `page_split_words_unrecovered`; read that, not the difference.
+          words_before: contradictions.length,
           problems_after: recheck.problems.length,
           // The same two sides as kinds (issue #182), which is what turns "the recheck did
           // not pass" into an answer about the CORRECTION: `content_missing` going in and
@@ -4348,6 +4411,27 @@ async function extractPage(
             });
           }
         }
+        // And the same question about the words written two ways, with one reading this line does NOT
+        // support that the three above do. A link still missing, an alt still generic and an id still
+        // duplicated are failures; a word still written two ways may be the model declining, which on
+        // this check is a legitimate answer — a page that really prints both spellings is one Iris was
+        // wrong about. So this line says the contradiction survived the pass and nothing about whose
+        // fault that is. `page_correction_declined`, keyed by the same `image`, is where the model's
+        // side is, and `declinedSource` puts a cited decline in the `words` band.
+        //
+        // Recomputed rather than intersected with the list going in, for `page_duplicate_ids_unrecovered`'s
+        // reason: a correction that joins `Compos-ite` and breaks `col-lections` in the same reply has
+        // moved the defect, not failed to touch it, and only the words on the line separate those.
+        if (contradictions.length) {
+          const stillSplit = splitWordContradictions(innerHtml);
+          if (stillSplit.length) {
+            ctx.log.event("page_split_words_unrecovered", {
+              image: img.name,
+              page: img.order,
+              words: stillSplit.map((w) => `${w.split} / ${w.joined}`),
+            });
+          }
+        }
       }
     }
   }
@@ -4400,6 +4484,27 @@ function idCounts(fragments: { innerHtml: string }[]): { ids_checked: number; id
     ids_duplicated += audit.duplicated.length;
   }
   return { ids_checked, ids_duplicated };
+}
+
+// And the split-word rule's pair (#334 part B), one function for `idCounts`' reason. Per fragment
+// and summed for a different reason worth stating rather than borrowing: a word written one way on
+// page 3 and the other way on page 40 is not this defect at all — a printing breaks a word at the
+// column it happens to fall in, and two pages disagreeing is ordinary — so pooling a document's
+// words would manufacture contradictions out of the whole corpus's vocabulary.
+//
+// `words_checked` is the denominator, and it is what tells a run whose pages carry prose from one
+// whose fragments came back empty. Unlike the alt and id rules, `words_split` is EXPECTED to be
+// non-zero: on #334's census every arm contradicted itself somewhere, so a run reporting 0 of 20,000
+// is the reading to be suspicious of rather than reassured by.
+function splitWordCounts(fragments: { innerHtml: string }[]): { words_checked: number; words_split: number } {
+  let words_checked = 0;
+  let words_split = 0;
+  for (const f of fragments) {
+    const audit = splitWordAudit(f.innerHtml);
+    words_checked += audit.words;
+    words_split += audit.split.length;
+  }
+  return { words_checked, words_split };
 }
 
 // One fragment per page, in submitted order. Each page is verified for source
@@ -4508,6 +4613,11 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
     // is what sees that one (`duplicate-id`, enabled by name in lint.ts because the WCAG 2.2 tag
     // filter drops it).
     ...idCounts(fragments),
+    // And the split-word rule's pair (#334 part B). Asked after any correction, like the two above,
+    // so a non-zero `words_split` is a contradiction this step did not settle — which here may be a
+    // page that legitimately prints both spellings and said so, not only a repair that failed. Also
+    // not what shipped, for the same reason: the review loop rewrites blocks after this line.
+    ...splitWordCounts(fragments),
   });
 
   // Nothing was extracted. Containment trades a thrown run for the pages that DID
@@ -4703,6 +4813,8 @@ export async function reExtractPages(
     // round reporting only the pages it re-ran would read as the id corpus shrinking every time a
     // client sends feedback (#373 directive 3).
     ...idCounts(fragments),
+    // And the split-word pair, over the whole document for that same reason (#334 part B).
+    ...splitWordCounts(fragments),
     // Over the whole document this round delivers, like the two alt fields above and unlike
     // `pages`: a feedback round that repairs one rejected page out of three should read as two
     // left, not as one page re-run. Always present, including empty, for the same reason it is

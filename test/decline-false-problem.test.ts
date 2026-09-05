@@ -174,23 +174,28 @@ test("a decline that named a problem and no reason keeps the number and says the
   assert.deepEqual(parseDeclined([{ problem: 2 }]), [{ problem: 2, why: "" }]);
 });
 
-// --- which of the four sources a citation lands in ----------------------------
+// --- which of the five sources a citation lands in ----------------------------
 
 test("a cited number is attributed by the band it falls in", () => {
-  // The problem list is four lists concatenated, in this order, and the model is shown one numbered
+  // The problem list is five lists concatenated, in this order, and the model is shown one numbered
   // sequence over all of them. So the number it cites is attributable, and nothing else on the
   // reply is: this is what makes a decline of a code-checked fact countable.
-  const counts = { verify: 2, links: 1, alt: 1, ids: 3 };
+  const counts = { verify: 2, links: 1, alt: 1, ids: 3, words: 2 };
   assert.equal(declinedSource(1, counts), "verify");
   assert.equal(declinedSource(2, counts), "verify");
   assert.equal(declinedSource(3, counts), "links");
   assert.equal(declinedSource(4, counts), "alt");
   assert.equal(declinedSource(5, counts), "ids");
   assert.equal(declinedSource(7, counts), "ids");
+  // The fifth band (#334 part B), which is appended after `ids` and is the one band where a decline
+  // may be right — a page that really prints both spellings. It has to be attributable for that to
+  // be countable, and it is the band a wrong `ids` boundary would silently swallow.
+  assert.equal(declinedSource(8, counts), "words");
+  assert.equal(declinedSource(9, counts), "words");
   // Past the end of the list, and before its start. Both are `null` rather than the nearest band:
   // a citation the list cannot account for has not refused a code-checked fact, and filing it as
   // one would manufacture the evidence the field exists to collect.
-  assert.equal(declinedSource(8, counts), null);
+  assert.equal(declinedSource(10, counts), null);
   assert.equal(declinedSource(0, counts), null);
   assert.equal(declinedSource(-1, counts), null);
   // No citation at all.
@@ -199,20 +204,25 @@ test("a cited number is attributed by the band it falls in", () => {
 
 test("an empty band is skipped, not counted as a position", () => {
   // The common shape by far: a page rejected by the verifier with no missing link, no placeholder
-  // alt and no duplicate id. Problem 1 is the verdict's first problem. A band that took a position
-  // while holding nothing would shift every number after it and attribute each decline to the
-  // wrong source — silently, since the numbers all still resolve.
-  assert.equal(declinedSource(1, { verify: 3, links: 0, alt: 0, ids: 0 }), "verify");
-  assert.equal(declinedSource(3, { verify: 3, links: 0, alt: 0, ids: 0 }), "verify");
-  assert.equal(declinedSource(4, { verify: 3, links: 0, alt: 0, ids: 0 }), null);
+  // alt, no duplicate id and no split word. Problem 1 is the verdict's first problem. A band that
+  // took a position while holding nothing would shift every number after it and attribute each
+  // decline to the wrong source — silently, since the numbers all still resolve.
+  assert.equal(declinedSource(1, { verify: 3, links: 0, alt: 0, ids: 0, words: 0 }), "verify");
+  assert.equal(declinedSource(3, { verify: 3, links: 0, alt: 0, ids: 0, words: 0 }), "verify");
+  assert.equal(declinedSource(4, { verify: 3, links: 0, alt: 0, ids: 0, words: 0 }), null);
   // And the mirror: a correction bought by a code check on a page the verifier passed, where the
   // verify band is the empty one and problem 1 belongs to `ids`.
-  assert.equal(declinedSource(1, { verify: 0, links: 0, alt: 0, ids: 2 }), "ids");
-  assert.equal(declinedSource(2, { verify: 0, links: 0, alt: 0, ids: 2 }), "ids");
-  assert.equal(declinedSource(1, { verify: 0, links: 1, alt: 1, ids: 0 }), "links");
-  assert.equal(declinedSource(2, { verify: 0, links: 1, alt: 1, ids: 0 }), "alt");
+  assert.equal(declinedSource(1, { verify: 0, links: 0, alt: 0, ids: 2, words: 0 }), "ids");
+  assert.equal(declinedSource(2, { verify: 0, links: 0, alt: 0, ids: 2, words: 0 }), "ids");
+  assert.equal(declinedSource(1, { verify: 0, links: 1, alt: 1, ids: 0, words: 0 }), "links");
+  assert.equal(declinedSource(2, { verify: 0, links: 1, alt: 1, ids: 0, words: 0 }), "alt");
+  // The last band with every band before it empty, which is the shape a page bought by this check
+  // alone produces — a page the verifier passed, with all its links, no placeholder alt and no
+  // duplicate id, that writes one word two ways. Problem 1 is `words` and not `verify`.
+  assert.equal(declinedSource(1, { verify: 0, links: 0, alt: 0, ids: 0, words: 1 }), "words");
+  assert.equal(declinedSource(2, { verify: 0, links: 0, alt: 0, ids: 0, words: 1 }), null);
   // A list with nothing in it buys no correction, so nothing can cite into it.
-  assert.equal(declinedSource(1, { verify: 0, links: 0, alt: 0, ids: 0 }), null);
+  assert.equal(declinedSource(1, { verify: 0, links: 0, alt: 0, ids: 0, words: 0 }), null);
 });
 
 // --- through the pipeline -----------------------------------------------------
@@ -228,6 +238,10 @@ interface PageSpec {
   // A placeholder alt in the render, which raises a problem checked in CODE — the band a decline
   // is not defensible over, and the one this file has to be able to see a decline land in.
   genericAlt?: true;
+  // One word written two ways, which raises a problem checked in code where a decline IS defensible
+  // (#334 part B). The band that has to be visible separately from `genericAlt`'s, because folding
+  // the two together would put compliance in the field that counts misuse.
+  splitWord?: true;
   // What the correction answers with. `undefined` is the repaired page; `""` is a reply with no
   // usable page in it at all.
   corrected?: string;
@@ -238,6 +252,11 @@ interface PageSpec {
 const body = (order: number): string =>
   `<h2>Page ${order}</h2><p>page ${order} ${"content ".repeat(20)}</p>`;
 const withAlt = (order: number): string => `${body(order)}<p><img src="f.png" alt="image"></p>`;
+// `non-farm` beside `nonfarm`, which is the pair to test with rather than a made-up one: it is one of
+// the shipped model's six on #334's census, and it is a case where the printing keeps the hyphen — so
+// a corrector saying "the page really prints both" is exactly the answer the problem invites.
+const withSplitWord = (order: number): string =>
+  `${body(order)}<p>The non-farm series is here, and the nonfarm total is in the column beside it.</p>`;
 const repaired = (order: number): string => body(order).replace("<h2>", "<h3>").replace("</h2>", "</h3>");
 
 function makeCtx(
@@ -302,9 +321,9 @@ function makeCtx(
           };
         }
         const img = images.find((i) => prompt.includes(`filename: ${i.name}`))!;
-        return {
-          text: JSON.stringify({ html: spec[img.order]?.genericAlt ? withAlt(img.order) : body(img.order), log: "" }),
-        };
+        const s = spec[img.order] ?? {};
+        const html = s.genericAlt ? withAlt(img.order) : s.splitWord ? withSplitWord(img.order) : body(img.order);
+        return { text: JSON.stringify({ html, log: "" }) };
       },
     },
     log: {
@@ -481,6 +500,47 @@ test("a decline over a fact Iris checked in code is counted as one", async () =>
     // about. Page 1 was offered two problems and page 2 was offered none.
     assert.equal(d.verification.declined.problems_offered, 2);
     assert.equal(d.verification.corrections, 1);
+  });
+});
+
+test("a decline over a word written two ways is counted apart from the misuse", async () => {
+  // The one code-checked band where a decline may be RIGHT, and therefore the one that must not be
+  // added to `code_checked`. What Iris checked is that the page carries both `non-farm` and
+  // `nonfarm`, which is not arguable; which spelling the printing shows is, and the problem's own
+  // last sentences invite the corrector to say the page prints both and change nothing. Counting
+  // that as misuse would put compliance in the field whose whole job is to count the licence being
+  // stretched — the same mistake `CHECKED_IN_CODE` exists to stop, one field along.
+  await withTemp(async (dir) => {
+    const { ctx, events } = makeCtx(dir, 2, {
+      1: {
+        problems: rejected,
+        splitWord: true,
+        // Problem 1 is the verdict's and is declined defensibly; problem 2 is the split word and is
+        // declined defensibly too. Two declines, and they belong in two different fields.
+        declined: [
+          { problem: 1, why: "the six rows are present" },
+          { problem: 2, why: "the page prints both: the series is non-farm and the total is nonfarm" },
+        ],
+      },
+    });
+    await runExtraction(ctx);
+
+    const line = of(events, "page_correction_declined")[0];
+    assert.equal(line.trigger, "both", "a verdict and a code check on the same page");
+    assert.deepEqual(
+      (line.declined as { source: string | null }[]).map((d) => d.source),
+      ["verify", "words"],
+      "the fifth band reads off its own position, after verify/links/alt/ids",
+    );
+
+    const d = diagnose(events);
+    assert.equal(d.verification.declined.problems, 2);
+    assert.equal(d.verification.declined.words, 1, "the split word, in its own count");
+    assert.equal(d.verification.declined.code_checked, 0, "and NOT in the field that counts misuse");
+    assert.equal(d.verification.declined.unattributed, 0);
+    // And the finding itself is on the record with both spellings, which is what a reader checking
+    // this decline against the document needs: the claim was that the page contains the pair.
+    assert.deepEqual(of(events, "page_split_words")[0].words, ["non-farm / nonfarm"]);
   });
 });
 
