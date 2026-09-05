@@ -1265,26 +1265,38 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
     if (!where.has(name)) where.set(name, new Set());
     where.get(name)!.add(file.slice(ROOT.length));
   };
-  // Shapes 1 and 2 share everything up to the name, so they share the prefix — including
-  // `onEvent(` without the optional chain. Nothing spells it that way today, but it is one character
-  // from a spelling that IS here, and it would otherwise be invisible both to the literal-name search
-  // on the next line and to the computed-name check below it.
+  // Shapes 1 and 2 differ only in the name, so the two searches below are nearly the same pattern —
+  // and both spell `onEvent(` without the optional chain as well as with it. Nothing writes it that
+  // way today, but it is one character from a spelling that IS here.
   //
-  // The leading `\.` is what keeps this a search for CALLS. Without it `onEvent(` also matches a
-  // method signature — `onEvent(type: string, data: …): void` in an interface, where today's
-  // `TelemetryFn` is a type alias — and the computed-name check below would report a type-only change
-  // as an event emitted under a name it cannot read. An emit is a call on something; a declaration has
-  // no receiver. The cost is that a destructured `onEvent(…)` called with no receiver at all is outside
-  // this search, which is the same concession the check below already states.
-  const EMIT = String.raw`\.(?:event|onEvent(?:\?\.)?)\(\s*`;
-  const EMIT_LITERAL = new RegExp(EMIT + String.raw`"([a-z0-9_]+)"`, "g");
-  const EMIT_CALL = new RegExp(EMIT + String.raw`(?!")([^\s,)][^,)]*)`, "g");
+  // THE TWO ARE DELIBERATELY NOT THE SAME WIDTH, because they fail in opposite directions.
+  //
+  // EMIT_LITERAL stays wide: it is anchored on a string literal, and a method signature —
+  // `onEvent(type: string, data: …): void` in an interface, where today's `TelemetryFn` is a type
+  // alias — has none, so nothing that is not a call can reach it. That matters because an event this
+  // search misses is an event the coverage claim below is never made over, and it goes missing with no
+  // message at all: a receiverless `onEvent?.("new_event")` would leave `undocumented` empty and the
+  // suite green while §7 says it documents everything. Silent staleness is the exact failure the
+  // `agent_call` history left behind, so this half concedes nothing it does not have to.
+  //
+  // EMIT_CALL requires a receiver. With no literal to anchor on it cannot tell a call from a
+  // signature, and a match on a signature accuses a type-only change of emitting under a name the
+  // test cannot read. What that narrowing gives up is a receiverless COMPUTED bridge, and losing that
+  // costs a warning rather than a claim — the same one-directional standing as APPENDS above.
+  const EMIT_NAMED = String.raw`(?:\.event|onEvent(?:\?\.)?)\(\s*`;
+  // The name class is `[^"]`, not `[a-z0-9_]`: a `log.event("foo-bar")` cannot have a §7 section,
+  // because every heading there is asserted to be snake_case — so it must fail as undocumented and be
+  // renamed, rather than slip past the search and out of the claim.
+  const EMIT_LITERAL = new RegExp(EMIT_NAMED + String.raw`"([^"]+)"`, "g");
+  const EMIT_CALL = new RegExp(String.raw`\.(?:event|onEvent(?:\?\.)?)\(\s*(?!")([^\s,)][^,)]*)`, "g");
   for (const file of sources(SRC)) {
     const text = readFileSync(file, "utf8");
     for (const m of text.matchAll(EMIT_LITERAL)) emit(m[1]!, file);
   }
   const runlog = readFileSync(RUNLOG, "utf8");
-  for (const m of runlog.matchAll(/\btype:\s*"([a-z0-9_]+)"/g)) emit(m[1]!, RUNLOG);
+  // `[^"]` for the same reason as EMIT_LITERAL: an off-convention name must fail loudly as
+  // undocumented rather than fall out of the search and out of the claim.
+  for (const m of runlog.matchAll(/\btype:\s*"([^"]+)"/g)) emit(m[1]!, RUNLOG);
 
   // What makes one file enough: nothing else in src/ reaches for an append-shaped fs call. If a
   // second file ever writes the log, shape 3 stops being findable where this looks and the count
