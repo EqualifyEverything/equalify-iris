@@ -278,6 +278,130 @@ test("a deployment that records no step gets no breakdown sentence, not three ze
   assert.match(body, /Start with `src\/pipeline\/lint\.ts`/);
 });
 
+// The state the test above cannot reach, and the one the reference deployment was
+// actually in (#407). Deleting the key is a shape `qualityStats` never emits: it builds
+// the field from the closed vocabulary, so all three entries are ALWAYS present and the
+// only way "nothing was recorded" arrives is as three zeroes. The guard used to be
+// `length > 0`, which is true here, so this rendered "`parse` 0, `inject` 0, `run` 0"
+// beside a non-zero rate — answering "which step failed" with "none of them".
+test("the field present and every count zero says nothing was recorded, not that no step failed", { skip }, () => {
+  const body = renderBody("lint-error", {
+    ...TALLY,
+    lint_error_where: [
+      { where: "parse", documents: 0 },
+      { where: "inject", documents: 0 },
+      { where: "run", documents: 0 },
+    ],
+  });
+  assert.match(body, /\*\*Which step failed: not recorded for any of them\.\*\*/);
+  // The distinction the sentence has to carry, in the direction that matters: a reader
+  // who takes the zeroes at face value concludes the linter is fine.
+  assert.match(body, /NOT because no step failed/);
+  // And it still says how many documents are unattributed, and what the three steps
+  // mean, because the next failure is the one that will name one.
+  assert.match(body, /none of the 6 document\(s\) in the rate above carries one/);
+  assert.match(body, /`run` is the rule pass throwing/);
+  // What must NOT be here: the breakdown itself. A row of zeroes is the whole defect.
+  assert.ok(
+    !/\*\*Which step failed:\*\* `parse` 0, `inject` 0, `run` 0/.test(body),
+    "the three zeroes are still being printed as a breakdown",
+  );
+});
+
+test("an all-zero exit split drops every share drawn from it, not just the split", { skip }, () => {
+  // This site's own first sentence was already honest at zero ("these describe 0 of the
+  // 70 documents above"), so it looked exempt. The sentences DRAWN from the split were
+  // not: `N document(s) here are that` and `those N over-report on purpose` print an
+  // unhedged 0 that reads as a measurement. And the forward reference to
+  // `unresolved_severity` being "over all 70 documents" contradicted that field's own
+  // not-recorded sentence in the one window both fire in — the two shipped in the same
+  // commit and are written in the same signal block, so they age together.
+  const body = renderBody("unresolved", {
+    ...TALLY,
+    review_stopped: [
+      { where: "clean", documents: 0 },
+      { where: "unread", documents: 0 },
+      { where: "converged", documents: 0 },
+      { where: "truncated", documents: 0 },
+      { where: "cap", documents: 0 },
+    ],
+  });
+  assert.match(body, /\*\*Why the loop stopped: not recorded for any of them\.\*\*/);
+  // The vocabulary survives — it is what the next window will say.
+  assert.match(body, /`cap` is the only exit raising `defaults\.max_review_iterations` can help/);
+  // What must not: the split, and anything derived from it.
+  assert.ok(!/`clean` 0, `unread` 0/.test(body), "the zeroed exits are still printed as a split");
+  for (const derived of ["document(s) here are that", "over-report on purpose"]) {
+    assert.ok(!body.includes(derived), `a share drawn from an empty split is still printed: ${derived}`);
+  }
+  // And the contradiction is gone: nothing claims the severities are over all 70 while
+  // the severity paragraph says they were never recorded.
+  assert.ok(!body.includes("`unresolved_severity` and `unfinished_page_rate` below are both over"), "the forward reference survives an empty split");
+});
+
+test("a partly attributed exit split names only the paragraphs that will be there", { skip }, () => {
+  // The last window in which those two paragraphs could disagree, and the review of
+  // `654f232` judged it out of arithmetic reach. It is not: 15 of 70 documents postdate
+  // #266's fields and are all `clean`, so no post-field document carries an open issue
+  // and the severity sum is 0, while the 59 that do are in the pre-field remainder. The
+  // exits ageing together with the severities does not prevent it, because a clean
+  // document lands in no severity bucket at all.
+  const body = renderBody("unresolved", {
+    ...TALLY,
+    review_stopped: [
+      { where: "clean", documents: 15 },
+      { where: "unread", documents: 0 },
+      { where: "converged", documents: 0 },
+      { where: "truncated", documents: 0 },
+      { where: "cap", documents: 0 },
+    ],
+    unresolved_severity: [
+      { severity: "high", documents: 0 },
+      { severity: "medium", documents: 0 },
+      { severity: "low", documents: 0 },
+      { severity: "unrated", documents: 0 },
+    ],
+  });
+  // The exit split is real and still printed with its shortfall.
+  assert.match(body, /these describe 15 of the 70 documents above and NOT the window/);
+  assert.match(body, /\*\*How the Reader rated what was left: not recorded for any of them\.\*\*/);
+  // And it does NOT send the reader to a paragraph that says it recorded nothing.
+  assert.ok(
+    !body.includes("`unresolved_severity` and `unfinished_page_rate` below are both over"),
+    "the forward reference still names a field whose split was never recorded",
+  );
+  // The half of the clause that is still true survives — the floor is printed, and it
+  // really is over all 70.
+  assert.match(body, /`unfinished_page_rate` below is over all 70 documents/);
+  assert.match(body, /\*\*The floor:\*\* 20% of documents/);
+});
+
+test("an all-zero severity split says so too, where there is no total to catch it", { skip }, () => {
+  // The same guard shape on `unresolved_severity`, and the worse of the two: it is
+  // explicitly not a partition of the rate, so unlike `review_stopped` there is no
+  // "these describe N of M" sentence to reveal a shortfall. "`high` 0, `medium` 0,
+  // `low` 0, `unrated` 0" beside an 84.3% unresolved rate reads as a Reader that rated
+  // nothing a barrier — which is the reading that decides this rate is nits.
+  const body = renderBody("unresolved", {
+    ...TALLY,
+    unresolved_severity: [
+      { severity: "high", documents: 0 },
+      { severity: "medium", documents: 0 },
+      { severity: "low", documents: 0 },
+      { severity: "unrated", documents: 0 },
+    ],
+  });
+  assert.match(body, /\*\*How the Reader rated what was left: not recorded for any of them\.\*\*/);
+  assert.match(body, /rather than because nothing was rated/);
+  assert.ok(
+    !/`high` 0, `medium` 0, `low` 0, `unrated` 0/.test(body),
+    "the zeroed severities are still being printed as a split",
+  );
+  // The rest of the finding survives, including the exits, which are unaffected: that
+  // site already states its own shortfall and is the model this fix follows.
+  assert.match(body, /\*\*Why the loop stopped:\*\* `clean` 11/);
+});
+
 test("the unresolved body names the exit each document left by, and what each one asks for", { skip }, () => {
   // The sentence that replaced a guess. This body used to say it was "worth checking
   // whether `defaults.max_review_iterations` (3) is simply too low" — advice that the
