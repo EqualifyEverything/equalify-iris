@@ -437,7 +437,7 @@ this step's contract does not ask for it. The issue list is what a Reader raised
 outside it is unrequested by definition.
 
 On the shipped deployment, `copy_editor` is $3.0849 of the **$10.7106 §5 prices for
-four agents**. Carrying the table's 9.5% across it gives
+four agents**. Carrying the table's 9.5% across that line gives
 **$3.0849 → ≈$0.29, so $10.7106 → ≈$7.92 and $0.1071 → ≈$0.0792/page — a saving of
 $2.79 per 100 pages, −26.1% of the priced bill and ≈−25.9% of the round including `builder`
 (≈$10.79).** Both are quoted because they are different denominators and this document has already
@@ -705,7 +705,7 @@ recommendation is priced against a page agent running `claude-sonnet-4-6`, where
 #330 expresses break-even as the rejection rate at which the swap stops saving: its 88.8% against the
 84.4% it measures. Recomputed from the inputs published here it is **88.9%**, which is neither of the
 two quantities printed as 88.9% in the table above — the incumbent's detect rate and the union's trigger
-rate, each of which appears once per corrector block. So the recomputed figure is 4.5
+rate, each of which appears once per corrector block. So the gap is 4.5
 points, a tenth of a point from #330's and not worth reconciling. This document expresses the same
 threshold as a correction price instead — $0.0644 a pass on its own inputs, $0.0708 on #330's — and
 the matching rejection-rate form of it is 86.5% against a measured 85.2%, or **1.3 points**.
