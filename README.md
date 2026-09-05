@@ -62,8 +62,8 @@ filer, so it works no matter who filed.
 ## Terms
 
 Five words in this repo mean something narrower than they do in ordinary English. Every document
-here uses them in the senses below. **Only `declaration` has just one sense.** The other four each
-carry at least one unrelated one, listed with them, and the text has to say which it means.
+here uses them in the senses below. **Every one of the five also carries at least one unrelated
+sense**, listed with it, and the text has to say which it means.
 
 - **fragment** — one page's extracted HTML, plus the record of where it came from. A fragment
   carries the source page image, the page's position in the submitted document, which agent
@@ -90,7 +90,9 @@ carry at least one unrelated one, listed with them, and the text has to say whic
 - **declaration** — the page agent's answer that a page holds no content. It is a claim, not an
   absence. The agent asserts blankness with `"blank": true` or says so in its log, and the pipeline
   can refuse the claim: a page too dark to read is not a blank page (`blankDeclaration` in
-  `src/pipeline/extraction.ts`).
+  `src/pipeline/extraction.ts`). One unrelated use: the **`lang` declaration** on the document's root
+  element, which is [docs/design-notes.md](docs/design-notes.md)'s only use of the word and appears
+  once in [docs/API.md](docs/API.md), under `page_main_stripped`.
 - **round** — one pass of the review loop. The Reader reads the whole document, and the Copy Editor
   answers what it raised. `max_review_iterations` (default 3) caps the editor rounds, so the Reader
   can read up to four times. The measurement documents mean something else by the word. A
