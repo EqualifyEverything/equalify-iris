@@ -1284,8 +1284,11 @@ test("§7 states how much of the run log it does not document, and the count is 
 
   assert.ok(emitted.size > 90, `only ${emitted.size} event names found in src/ — the grep missed`);
   // Losing shape 3 would SHRINK a count rather than fail anything, which is how `agent_call` went
-  // unnoticed: `model_call` and `model_call_start` have §7 sections, so a broken shape-2 pattern
-  // fails `ghosts` loudly, while an event with no section just stops being counted.
+  // undocumented for as long as it did: an event with no §7 section just stops being counted, while
+  // a broken shape-2 pattern fails `ghosts` loudly because `model_call` has one. `agent_call` has a
+  // section now, so a broken shape 3 would reach `ghosts` as well — this assertion stays because it
+  // says WHICH of the two failures it is, and because the next event added this way will again have
+  // no section to be missed from.
   assert.ok(
     emitted.has("agent_call"),
     "`agent_call` is not in the emitted set. Either the shape-3 search above stopped matching " +
@@ -1350,7 +1353,7 @@ test("§7 states how much of the run log it does not document, and the count is 
   // Counts alone cannot see a RENAME — one name out, one name in, every total unchanged — and the
   // paragraph names three events as its examples of the undocumented ones. Each has to still be
   // emitted, and still be undocumented, or the example is the wrong way round.
-  for (const example of ["agent_call", "run_start", "phase", "reader_start"]) {
+  for (const example of ["page_links", "specialist_dispatched", "feedback_learned"]) {
     assert.ok(
       para.includes(`\`${example}\``),
       `§7's coverage paragraph no longer names \`${example}\`; update this list with it`,

@@ -561,8 +561,8 @@ export interface Diagnostics {
   // were reported as failures before this split, which made a document with a blank verso
   // look partial to every client following docs/API.md §7c.
   //
-  // Not subtracted from anything: `pages` in `run_complete` counts source images, blank
-  // ones included, so `pages - pages_blank.length` is the count that produced markup. The
+  // Not subtracted from anything: `images` in `run_start` counts source images, blank
+  // ones included, so `images - pages_blank.length` is the count that produced markup. The
   // two sets are disjoint, and stay disjoint across feedback rounds: a page that failed in
   // round 1 and came back blank in round 3 has been answered, so it leaves `pages_failed`
   // (as `page_recovered`) and arrives here.
