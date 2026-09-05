@@ -317,7 +317,7 @@ test("a specialist that grows the page grows the cap, through the pipeline", asy
     // caller's ceiling and the deployment's, and a caller may only ever lower one — so this call is
     // sent at 32,000 and is bounded by the config. The log line then carries a `ceiling` larger than
     // `max_tokens`, which reads correctly: the deployment is what bound the call, and the truncation
-    // message on that same line names the config accordingly (docs/API.md §7a).
+    // message on that same line names the config accordingly (docs/API.md §7).
     assert.ok((cap ?? 0) > 32_000, "a merge can compute past the deployment's ceiling");
     // The dispatch really did happen — otherwise this test would be asserting about a merge that
     // never ran and a cap that was never scaled.

@@ -1064,6 +1064,11 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
 // GitHub's own heading slug, near enough for the links this repo writes: lowercase, drop anything
 // that is not a word character, hyphen or space, then spaces to hyphens. Inline code and a link
 // inside a heading contribute their text, not their markup.
+//
+// One hyphen per space, and NOT one per run of spaces: a dropped character between two spaces
+// leaves both of them, so `### \`a\` / \`b\`` is `a--b` on GitHub. Collapsing instead would have
+// been invisible here — a docs link written to the collapsed slug resolves against a guard that
+// collapses too, and dies in the browser. Thirteen headings in these docs are of that shape.
 function headingAnchors(markdown: string): Set<string> {
   const anchors = new Set<string>();
   let fenced = false;
@@ -1078,11 +1083,24 @@ function headingAnchors(markdown: string): Set<string> {
         .toLowerCase()
         .replace(/[^\w\- ]+/g, "")
         .trim()
-        .replace(/ +/g, "-"),
+        .replace(/ /g, "-"),
     );
   }
   return anchors;
 }
+
+// The slug rule itself, pinned on a heading rather than on the docs. The link check below does
+// fail on a collapsing rule today — seven of the links in docs/API.md point at headings of this
+// shape — but it fails by calling a correct link broken, which reads as the link needing repair.
+// It also only fails while some document happens to link to such a heading.
+test("a heading slug keeps both spaces around a dropped character", () => {
+  const anchors = headingAnchors("### `page_verify_ok` / `page_verify_failed`\n## 9. Close (a / b)\n");
+  assert.ok(
+    anchors.has("page_verify_ok--page_verify_failed"),
+    `got ${[...anchors].join(", ")} — GitHub replaces each space, so the dropped "/" leaves "--"`,
+  );
+  assert.ok(anchors.has("9-close-a--b"), [...anchors].join(", "));
+});
 
 // A cross-reference that does not resolve is the failure mode of moving prose between files, and it
 // is silent: GitHub renders a dead relative link as a link, and a dead `#anchor` scrolls nowhere.
@@ -1129,4 +1147,50 @@ test("every relative link in the docs resolves, file and anchor", () => {
     `${broken.length} relative link(s) in the docs do not resolve. A moved section takes its ` +
       `anchor with it, so repoint the link rather than deleting it:\n  ${broken.join("\n  ")}`,
   );
+});
+
+// docs/API.md §7 was one table of 65 rows, and the largest cell in it ran to 9,176 characters — a
+// reference nobody could scan and nobody could read. It is now an index of one row per event and a
+// section per event, which introduces a way to be wrong that the single table did not have: the two
+// halves can disagree. A new event indexed and not written up is a row that scrolls nowhere, and one
+// written up and not indexed cannot be found from the top at all. The link check above catches the
+// first (a dead anchor) and is blind to the second.
+test("every run-log event in docs/API.md is both indexed and written up, once each", () => {
+  const lines = readFileSync(join(ROOT, "docs/API.md"), "utf8").split("\n");
+  const from = lines.indexOf("## 7. Run log");
+  assert.notEqual(from, -1, "docs/API.md has no `## 7. Run log` heading any more");
+  const after = lines.findIndex((l, i) => i > from && l.startsWith("## "));
+  assert.ok(after > from, "`## 7. Run log` is the last section in the file, which it should not be");
+  const body = lines.slice(from, after);
+
+  // A row of the index, and only the index: its first cell is a link and nothing else is.
+  const rows = body.filter((l) => l.startsWith("| ["));
+  const indexed = rows.map((l) => {
+    const m = /^\| \[(.+?)\]\(#([^)]+)\) \| .+ \|$/.exec(l);
+    assert.ok(m, `an index row is not \`| [name](#anchor) | summary |\`:\n  ${l}`);
+    return { name: m[1], anchor: m[2] };
+  });
+  assert.ok(indexed.length > 60, `only ${indexed.length} events indexed in §7`);
+
+  const headings = body.filter((l) => l.startsWith("### ")).map((l) => l.slice(4));
+  assert.deepEqual(
+    indexed.map((e) => e.name),
+    headings,
+    "§7's index and its sections name different events, or name them in a different order",
+  );
+  assert.deepEqual(
+    indexed.map((e) => e.anchor),
+    headings.map((h) => [...headingAnchors(`### ${h}`)][0]),
+    "an index row's anchor is not the slug of the section it names",
+  );
+
+  // A heading with nothing under it: the shape a half-finished move leaves.
+  const empty: string[] = [];
+  for (const [i, line] of body.entries()) {
+    if (!line.startsWith("### ")) continue;
+    let j = i + 1;
+    while (j < body.length && !body[j]!.startsWith("### ") && body[j]!.trim() === "") j++;
+    if (j >= body.length || body[j]!.startsWith("### ")) empty.push(line.slice(4));
+  }
+  assert.deepEqual(empty, [], `§7 section(s) with no text under the heading: ${empty.join(", ")}`);
 });

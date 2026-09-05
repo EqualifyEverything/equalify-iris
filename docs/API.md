@@ -951,75 +951,2449 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/logs"
 `application/x-ndjson` — one JSON object per line (agent calls with git-SHA / inline-content
 version pinning, model-call timing, no-content signals, phase transitions).
 
-Useful events to grep for:
+Every event this log can carry has its own section below, and the index is a link to it.
+Reach for the index when you have a `type` off a log line and want to know what it means;
+read a section when you want to know what the field it names is for and what it costs.
 
-| `type` | Meaning |
+| `type` | What it records |
 | --- | --- |
-| `run_queued` / `run_dequeued` | The run's wait for a concurrency slot: how busy the queue was when it was admitted (`running` of `limit`, plus `waiting`), and `waited_ms` when it actually started. A large `waited_ms` means the deployment is saturated, not that this run is slow. |
-| `model_call_start` / `model_call` | One completion, from the layer that resolved it: `agent`, `step`, `capability`, `model`, `provider`, and `api` for a provider that has more than one wire format (Bedrock's `invoke` vs `converse`, so a comparison of the two says on every line which side produced its numbers). `step` is the **job** the call was bought for, on both lines, and it is a different question from `agent`: an agent file is a contract and one contract serves several jobs — the Feedback Agent checks a freshly extracted page, re-checks a corrected one, routes a user's feedback and classifies a lesson from it — so the agent name alone cannot price a step, and reading extraction's cost off it understated the step by a third (§7b, which reads these back as `by_step` and lists the closed set of names). It is on the **start** line because that is what an in-flight or hung call is asked about, and on a **failed** line because a call that threw still spent — a truncated editor round paid for a full ceiling of output — and those are exactly the calls with no answer to attribute them by. The start marker is written **before** the call, so a hung or in-flight call is a start with no end; the end line adds `duration_ms`, `ok`, an `error` when it failed, and the token counts flat (`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`) — taken from the result where there is one, and otherwise from what the adapter reported through a callback as the call ran, so a call that **threw** still says what it spent (§7b reads these back as `tokens`). One line per completion, not per HTTP request. `output_ceiling_clamped: true` says this call ran below the output ceiling the deployment configured, with `output_ceiling_asked` (what `providers.<provider>.max_tokens` says) and `output_ceiling_stated` (what the model grants): several Bedrock models cap output well below 32000 and **refuse** the request rather than clamping it, so the adapter re-sends at the ceiling the rejection names and remembers it (issue #249). Present means a config error is live — the pages arrive, so nothing else downstream shows it, and a deployment can otherwise run for a month at a ceiling nobody chose with a dense page truncating occasionally. Read the pair as the remedy: set `max_tokens` to `output_ceiling_stated`, or route that capability to a model whose ceiling is at least what you asked for. It is on **every** clamped call, not only the one that discovered it, because the adapter's stderr paragraph is said once per process and the remembered ceiling outlives the session — a field that copied that dedup would mark one call in the life of a server and leave every document after the first reading clean. `output_ceiling_refused: true`, present only on the call that paid for the lesson, is what separates the condition from its cost: that line's `duration_ms` covers a rejected round-trip as well as the request that worked. Absent on a deployment whose models accept their ceiling, which is every deployment today. `max_output_tokens` is the opposite direction and is **not** a config problem: a ceiling the caller asked for, below the deployment's, because it already knows roughly how large the answer should be. Present on the page-correction call only (`correctionCeiling` in `src/pipeline/extraction.ts`, issue #285) and absent everywhere else, so a truncation on a line carrying it is the caller's estimate being low and a truncation on a line without it is the deployment's ceiling — the same two remedies the error message itself distinguishes (**Errors** below). It is on the **start** line too, for the same reason `step` is: the calls worth attributing are the ones with no answer to attribute them by. |
-| `extraction_start` | The page pass is about to run: `pages`, the `concurrency` it will run them at, and what it will measure while it does — `recheck_sample_size` (`defaults.recheck_sample_size`, the number of corrected pages to be re-verified, 0 for none) with `recheck_thresholds`, the page orders those slots sit on. The two measurement fields are here rather than left implicit because their absence made a log ambiguous three ways: no `page_correction_recheck` in a run can mean the measurement is off, no page needed correcting, or every corrected page falling below the first threshold, and those have different remedies (issue #288). The thresholds are computed from the orders of the pages **this** batch runs, so they say which pages could have answered and not merely how many. |
-| `feedback_scoped` | How a feedback re-run was routed (`document` vs `extraction`, and which pages) |
-| `first_read_carried` | A document-level feedback re-run kept the document's earlier first-read count for the quality tally instead of recording its own (§0c `first_read`, issue #313). `carried` is the number kept, `unread` its window count, and `found` what this round's own first read came to — which is the one this round's `reader` events describe, so without this line a session's log and `/v1/quality` disagree about it with nothing to say why. `carried: null` means the session had no first read on record — one delivered before the field existed — and contributes none. Written on the review-only path only: a re-run that re-extracts reads fresh extraction output and records it. |
-| `reextract_start` / `reextract_complete` | Which pages went back to the page agent. `reextract_start` also carries the same `recheck_sample_size` / `recheck_thresholds` pair as `extraction_start`, spread over the pages this round re-extracts rather than over the whole document — a round re-running pages 7, 12 and 20 of 25 has its own thresholds, since bands taken from the document's length would all fall below page 7. `reextract_complete.pages` is what was actually re-extracted; a `failed` list is pages whose re-extraction threw and which therefore kept their **prior** content unchanged. `reextract_complete` also carries `alts_checked` / `alts_generic` and `ids_checked` / `ids_duplicated`, and they are over the **whole** document this round delivers rather than the pages it re-ran — the prior round's pages with the re-extracted ones substituted in — so they are comparable with `extraction_complete`'s and a session's log does not read as its alt or id corpus shrinking every time a client sends feedback. Comments are stripped before the two alt counts, as on `extraction_complete`, and the two id counts are read off each fragment's parsed tree, where a comment is not an element. `uncorrected` is over the whole document too, and for the same reason: a round that repairs one rejected page out of three should read as two left rather than as one page re-run. It follows the document page by page — a page re-rendered and now accepted leaves the set, one rejected again stays, one this round never touched keeps the prior round's verdict, and one whose re-extraction **threw** keeps it too, because it is the prior fragment that ships and so the prior verdict that describes it. |
-| `page_no_output` | The page agent answered, and no HTML could be read out of the answer (`page`, `image`, `chars` of text, and the `shape` it was in). The page is then lost the way any failed page is lost — the `page_extraction_failed` line below follows it — because "the reply could not be read" and "this text is the page" are different claims, and a reply delivered as content puts a JSON envelope, or an apology, into the document while the run reports every page delivered. `shape` names the remedy: `truncated_envelope` is the output ceiling (raise `providers.*.max_tokens`), `envelope` is a complete reply whose escaping defeated the parser (rare, because a reply whose only fault is the page's own unescaped punctuation is repaired before it reaches here), `prose` is the agent answering conversationally, `empty_html` is an envelope that was read perfectly and carried no page in it (no `html` key at all, or one whose HTML holds nothing a reader receives and whose `log` does not say the page is blank — the model answering with no page and not saying why, or saying it could not read it), and `empty` is a reply with nothing in it at all. "Nothing a reader receives" is not the same as "an empty string": a comment, an empty wrapper and a bare page-break marker are all nothing, and 33 of 818 initial renders in the bench logs answered a blank page in one of those spellings rather than with the empty `html` the prompt asks for (issue #219), so a refused declaration reaches this line whichever way its fragment was written. The last three are prompt problems and say nothing about the parser. `bare_html` is a sixth value: the reply IS the page's markup rather than the envelope, which the pipeline normally accepts and delivers (`bareHtml` in `src/pipeline/extraction.ts`). On **this** line it is two different findings with opposite remedies, and the shape cannot separate them — `dropped`, on the same line, is what does. Either the markup arrived behind a fence that never closed, so a page was refused by the parser and the text on the line is that page; or the markup arrived fine and carried nothing a reader receives, which is a blank declaration written as `<!-- blank page -->` or a lone page-break marker (#219's own spellings) and reaches this line through "carries nothing" rather than through the parser — a prompt problem, exactly as `prose` said before. It is on `page_correction_failed` that the value earns its keep, where 24 of 180 corrections in one bench round answered in bare markup and were being read as `prose` (issue #365). A page the agent reports as **blank** is not one of them: that is `page_blank` below and not a failure. Where markup did arrive and carried nothing, `dropped` carries it — the same field, and the same 200-character bound, as on `page_blank` below — because `chars` is the length of the whole reply and not of the fragment, so without it the line says a page produced nothing readable and not whether that was an empty envelope, a comment or a marker naming a folio the paper never printed. On a refused declaration that is the difference between triaging the wording from a run and replaying the replies to find it, which is the half of #219's reconstruction its fix left behind (issue #223). Where the reply *did* claim the page was blank and the claim was refused, more fields say so: `blank_vetoed` lists the doubt words that refused it and `log` carries the agent's own sentence. `blank_stated: true` beside them says the refused claim was made in the `blank` field rather than left to be read out of the sentence, and that pair is the one thing in these logs that can show the field being misused: a page whose log says it could not be read is the one page the prompt tells the model never to send the field for, and a run that carried `blank_stated` only on the line that honoured it could count the field working and not the field failing (issue #371). Without them the line reads as "the model answered with no page", which is the opposite of what happened, and tracing four such pages back to a word meant rerunning the regexes on the replies by hand (issue #190). `blank_contradicted` is the other way a claim made **in prose** is refused — a claim the reply STATED in its `blank` field is not refused for this, and lands on `page_blank` with the same field name and a verify call instead (§7a, issue #371), and a different finding: the log declared the page empty and then said something was on it, and the field carries the words that said so (issue #194). The page's own printed number is the one thing a log may name without contradicting itself (issue #222): a folio is not content that page could have delivered, so `blank apart from the printed page number` and `blank except for its printed folio` are declarations rather than refusals, while `the printed page number and a heading are visible` still refuses — through the heading, which is what a reader would have got nothing of. They are two findings with two remedies — a doubt word means the page could not be read and wants a better scan, a contradiction means the agent answered with no page for a page it says has content on it, which wants a re-extraction — and they are read independently, so a log can carry both: "Page is blank. The scan is blurry. There is handwriting on the page." fills `blank_vetoed` with `blurry` and `blank_contradicted` with `there is handwriting`. On a line with both, the doubt is the one to act on first, because a reply that could not read the page is not a reliable witness to what is on it. |
-| `page_bare_html` | The page agent's reply was **markup rather than the envelope**, so the page was rescued from the text as it stood (`page`, `image`, `chars` of the whole reply, `html_chars` of the markup taken from it, and `reextract: true` on a feedback round). The page **shipped**: it is in neither `pages_failed` nor `pages_blank`, the HTML is usable, and that is why the rescue exists. What it did not ship is a `"log"` — there was no field to put one in, and `agents/page.md` asks for that field by name in 26 places, six of which are obligations it discharges there and **nowhere else**: a page ending mid-sentence, a heading with no parent on the page, a symbol with no key, a placeholder image source, a language change, an irregular table. On these pages every one of those is unmet and unreported while the run says every page was delivered. Not rare, which is why it is now a line of its own: 41 of 300 first page calls across two multi-vendor bench rounds and 54 of 400 across four deployed rounds of one PDF (13.7%), and 0 of those 41 left any other line behind. It is also the discriminator between the two readings of an empty log — `log: ""` **with** this line means the reply had no envelope, and without it means the model sent one and left the field empty, which is a prompt-compliance question rather than a parse one and has the opposite remedy. Which of the two the deployed models do is answerable now: over 67 round logs on file, 2,320 `page.md` replies are 2,001 with a non-empty log and 319 bare, and **0** with an envelope whose log is empty. `chars` and `html_chars` are both here because they answer different questions — `chars` is what the reply was billed for and `html_chars` is what the page got, so a rescue that delivered a whole page and one that salvaged a fragment of a truncated reply are otherwise the same event. `reextract` marks the feedback round because the 13.7% is a rate over **first** calls and a count that pools rounds is not comparable with it. The verify step is sent no log section for these pages, and `agents/feedback.md` tells it to say nothing about the absence: that is a fact about the reply, not about the page (issue #349). |
-| `page_blank` | The page agent read the page and reported it empty (`page`, `image`, and its own `log` line), so the page is delivered as an empty fragment because there was nothing on it to deliver. That is true of the page as this line records it and not always of the document: since issue #371 one kind of declaration — one **stated** in the `blank` field whose own log names something on the page — is delivered empty and then judged, and a correction it earns can put content back on that page while this line still counts it. The count is kept that way deliberately, because it is the declarations that were made and §7b reads the ones that cost a verify call off it as `pages_blank - pages_skipped_blank`; a page whose content came back that way is the `page_corrected` line beside it, with `trigger: "verify"`. Not a failure and not in `pages_failed`:  the remedies are opposite, since a failed page is work to redo and a blank page is work already finished. The reply that earns this is a complete envelope whose `html` is present and carries **nothing a reader receives** — no visible text, and none of the elements that are content with no text in them (a picture, a grid, a form control) — **and** that says the page is blank — either in the reply's own `"blank": true` field, or, where that field is absent, in a `log` that asserts it in so many words. The field is what the prompt asks for since issue #371, and `blank_stated: true` on this line says the declaration arrived that way: five blank pages had been lost to five different words while the sentence read was being got right — `resolve` (#190), a contradiction that was not one (#194), a negator four tokens behind its noun (#220), `image` (#343), `document` (#367) — and each fix bought the word it was written for, so a reply that can simply state the answer is the one change that is not about a word. The field is not the whole answer even so, because a reply that does not send it is read exactly as it was before the field existed: `document` and `body` are read as modifiers on the name for text since issue #379, which is what `page` and `number` had always been (`no printed page number or heading`), so `No text, images, tables, or other document content is visible.` is a declaration and not a contradiction. That is the axis and not the length of the list — the same sentence with `document` deleted was already delivered, and with the coordination deleted was not — and it is the floor under the replies the field cannot reach, which is every reply sent before it and any model that ignores it. How large that set is now is **unmeasured**: `blank_stated` postdates every bench round on disk, so nothing recorded can say what share of the declarations arriving today state blankness in the field rather than leave it to be read out of a sentence. What the walk does read is one axis and not a vocabulary: a noun modifying the name for text, which is why `no other document content` is a declaration while `only document headings are visible` and `the document heading is visible` are contradictions — a determiner, an `only` or a verb in front of the noun ends the walk before it reaches the negator. What does **not** end it is a comma: a denial with no verb of its own reaches across one, so `No text or images, document headings are visible.` is read as one denied list and delivered as a declaration, with nothing on this line naming the heading. That is the reading issue #200's review chose for `No printed text, and handwriting is present.` — refusing it loses a blank page whose log denied twice — and the punctuation cannot separate the two cases, because the members of a denial are divided by bare commas exactly as the clauses are. It is not the only way a page with content on it is delivered empty leaving no field to act on — a confident wrong declaration about a page whose file says nothing is described the same way below — but it is the only one where the log **named** the content and Iris discarded the sentence that named it, so there was something to act on and it is not on the line. A run triaged off `page_blank` lines is therefore not evidence that no such page occurred. The field states and cannot deny: `"blank": false` is read as no answer at all and the sentence decides, exactly as it did for every reply sent before the field existed, so every error the field can make is in one direction. It is read loosely enough for `"true"` as a string and no further — `1`, `"yes"` and `"blank"` are silence, because a field read loosely enough to accept them is one that deletes a page on a typo. And it cannot declare a page blank that came back with a page on it: what a reader receives is decided as below, so a reply that says both things is not a declaration. Present-and-carrying-nothing rather than present-and-empty, because the empty `html` the prompt asks for is not the only way the model writes a blank page: of 78 such replies in 818 initial renders of the bench logs, 33 spelled it in markup — 18 a bare page-break marker, 13 a comment (`<!-- blank page -->`), 2 an empty paragraph — and read as content each of those was a page counted as having produced markup, with the comment or the anchor delivered into the document (issue #219). Prose is content whatever it says, so a reply of `<p>This page is blank.</p>` is delivered as the page's words: a page that *prints* "This page intentionally left blank" has that sentence as its correct transcription, and nothing in the pipeline can tell the two apart. Where the declaration was spelled in markup, `dropped` carries that markup (bounded to 200 characters), because the fragment delivered is `""` whichever spelling arrived and the line would otherwise not say which one did. What `dropped` discards on the marker spelling is a `doc-pagebreak` anchor, and deliberately: every one of those logs says the paper prints no number, which makes the label the image's position in the file and the anchor a claim that the document's page 14 begins there. The test is positive and doubt is fatal: an absent `html` key, an empty one with nothing said about it, one whose `log` says the page could not be *read* (illegible, too dark to resolve, truncated — including a hedge like "appears blank, though the scan is very faint"), and one that describes the **image's** condition rather than the paper's ("the page is very dark and appears empty", "low resolution scan; no text") are all still the model giving up, and stay `page_no_output`. That reply is the one that most needs a human to look at the page, and reading it as a declaration would leave nothing in the document to look at. A blank page whose wording falls outside both patterns is reported as a failed page, which is the safe direction — a page wrongly reported as failed costs a glance, a page wrongly dropped costs the page. One thing is **not** doubt, though: a doubt word used to describe the *marks on an empty sheet* rather than the image. "Specks/dots are visible but do not resolve into any characters", "a few faint specks/artifacts … no legible text" — that is the blank declaration itself, stated positively, and reading `resolve`, `faint` and `noise` there as doubt about the scan cost four blank pages of 100 on one bench round, while an agent that answered "Page is blank." and stopped was believed (issue #190; two pages of one document opened with a verbatim identical sentence and only the one that explained itself was refused). What is exempt is the *phrase* — `faint specks` is the paper, `faint scan` is the image — so a log that describes both in one sentence still refuses: "the scan is blurry, showing only faint specks and no legible text" loses `faint` and keeps `blurry`. It also needs the marks named *as* marks: `stray marks do not resolve into characters` is the paper, while bare `marks do not resolve into characters` is the phrase the page prompt uses for content that could not be read, and a `dark streak`, `dark spot` or `dark shadow` is the capture and can cover content. It reaches across one sentence or semicolon boundary only where the next clause continues the same observation — the marks referred back to, no subject at all, or a denial — so "a few specks of dust are visible. The handwritten note in the corner does not resolve into words" is still a failed page. And a log that says *where* something illegible sits ("not legible printing in the margin") is naming what the page bears rather than denying it, while naming the substrate ("not legible text on the page") is another way of saying the sheet is empty; the whole rest of that statement has to be made of denial for it to count as one, so a word for a place on the paper — `margin`, `header`, `corner`, `seal`, `spine` — refuses whatever punctuation or preposition leads into it, and a name for what the page bears has to be introduced by a denial there (`or content`, `nor any figures`, `no writing`) rather than by a determiner, and not handed on to a verb that says it is there, because "not legible text, only a heading is visible" and "not legible text, and printing on the page is visible" are built from the same words as a denial and say the opposite — while a tail that goes on to deny something else carries verbs of its own ("not legible text or content, and no writing is visible", "…and no printed page number is visible") and is read as the denial it is. The same read applies to "do not resolve into …", one noun further on — that construction's object is what the `do not` denies, and everything after it has to deny too, so "do not resolve into any characters or content" is a blank page and "do not resolve into any characters, only a heading in the margin" is a failed one. And no exemption applies at all to a log that anywhere says the reading failed or hedges the answer (`illegible`, `obscured`, `too dark`, `could not`, `though`), which are claims about the page wherever they sit. The claim is not paid to be checked, and it used to be: the empty fragment went to the Feedback Agent like any other page, which was shown the source image and an empty code block and asked whether the one was faithful to the other. In 36 such judgements — 9 pages of a 100-page corpus, two page-model arms, two shas — it passed every one, for $0.0859 an arm (issue #294), so the call is not made and the page's `page_verify_ok` line says so with `skipped: "blank"` and `unjudged`, with one exception, which is the only spend issue #371 adds: a declaration **stated** in the field whose own log names something on the page is delivered *and* judged. That page carries `blank_contradicted` on this line, no `skipped` on its `page_verify_ok`, and the log's claim is quoted to the verifier in the log's own words beside the empty fragment — so a log that was right about the heading it named buys a correction and the reader gets the page, and a log the regex misread costs a verify call instead of a page. Before the field there were two answers and both were worse: believe the prose and drop the page in silence, or refuse it and report a page nobody has. What it costs is bounded by how rarely the two halves disagree — 1 of the 125 blank declarations in every bench round on disk, off 2,189 page renders — and that one is a page whose log says it is blank three times, refused today by a misread first clause. A declaration made in prose alone is unchanged and still refused on a contradiction (`blank_contradicted` on `page_no_output`), because for a prose declaration refusing remains the cheaper of the two errors available (§7a above, `pages_skipped_blank` in §7b). What still checks the claim are the checks that cost nothing, and they are the ones that can prove it wrong: the veto refuses a hedged declaration before it is ever accepted, whether the reply stated blankness or described it — a page the model says it could not read is not a page it can state anything about, including that it is empty — and the contradiction refuses a self-contradicting one that was described in prose, and a page reported blank whose **source file** carries link annotations for it is a page the document itself contradicts — `page_links_missing` fires on it as on any other page, buys a re-render against the image, and that fragment is verified in turn. What is no longer caught is a *confident* wrong declaration about a page whose file says nothing: it is delivered as an empty page, and this line is the whole of the evidence it leaves. Before this existed, six of 100 bench pages across three of four documents were well-formed envelopes correctly saying the page was blank, and every one shipped a `@page-failed` marker and counted as a lost source page (issue #179). No page-break marker is delivered for a blank page, and the prompt no longer asks for one on such a page whatever the paper prints — it did, which was an instruction the pipeline could not honour once every accepted declaration returned an empty fragment (issue #222) — so a marker that arrives anyway goes to `dropped` with the rest of the fragment rather than into the document. A blank page that did print its folio loses an anchor to a page with nothing to anchor to, which is the cheaper of the two mistakes. A page whose only printed content **is** its folio is one of these pages, and by decision rather than by accident: the folio is never transcribed as text and the marker it may be carried in is never delivered, so such a sheet has nothing on it a reader receives, and a marker-only fragment is not a page. The alternative — delivering a lone `doc-pagebreak` where no declaration was asserted — was refused because that gate also passes a reply whose log says the page's table was too faint to transcribe, which is a page silently dropped while the run reports it delivered, and because every one of the 18 bare markers measured in the corpus carried a label the paper never printed. |
-| `page_blank_refused` | A feedback re-extraction declared a page blank that the document already has content for (`page`, `image`, `chars_kept`, the agent's `log`, and `dropped` — the markup the declaration was spelled in, where it was spelled in any), so the declaration is refused and the page keeps that content. `blank_stated: true` is on this line too where the declaration came from the `blank` field, for the same reason as on `page_no_output` above: the field can be sent for a page Iris already holds content for, and a log that recorded the field only where it was believed could not show it (issue #371). The model was shown its own previous output for the page and then said the paper was empty, which contradicts what Iris already holds; the page is then handled as any re-extraction that could not improve it — `page_extraction_failed` with `kept: "prior"`, and the page in `reextract_complete.failed`. Nothing else would catch it: the shrink floor guards the *correction* pass, where the comparison is against that round's own render, so prior → empty never reaches it. That is also why the test is what a reader receives rather than whether `html` is empty — a re-extraction answering `<!-- blank page -->` for a page with content used to walk straight past this refusal and replace the content with the comment, and 13 renders in the bench corpus are that reply (issue #219). A page that was **lost** can still come back blank and be recovered: there is no content to contradict. |
-| `page_extraction_failed` | One page's own extraction threw (`page`, `image`, `error`). The rest of the document still ran — see §7c. `kept: "prior"` marks the feedback-re-extraction case, where the page keeps the content it already had and the document stays whole. A **truncation** carries three more fields (#293), the same three as `page_correction_failed` below and for a stronger reason: there the page survives the failure, while here its content is gone, so the excerpt is the only record of what the model had written when the ceiling cut it. `reply_chars` is how far the reply reached, `reply_head` its first 240 characters and `reply_tail` its last 240 — one budget of the user's text, quoted **entire** under `reply_head` when the fragment is shorter than both excerpts together, exactly as on `editor_truncated`. Deployment only: like every excerpt of a document, it stays in the run log and never reaches `GET /v1/quality`. There is no `ceiling` field here because a first pass carries no cap of its own — the ceiling is the deployment's, and the error names it. `truncated: true` with **no** `reply_head` at all is the shape worth watching: a call that spent a whole ceiling of output and never began the page, which is a reasoning model burning the budget before the answer, not a page that needed more room (see §9.3 and `EMPTY_REPLY` in `src/providers/types.ts`). |
-| `extraction_complete` | How many page fragments came out (`pages`) and which page numbers failed (`failed`, always present, `[]` on a whole run). `uncorrected` is the other set, and the opposite failure: page numbers the fidelity check **rejected** whose one correction pass repaired nothing, so what the document carries for them is content Iris named a defect in and never fixed (§7c, `@page-uncorrected`, #328). Always present and `[]` where no page shipped that way, for the reason `failed` is — a field that only appears when it fires cannot tell "every rejected page was repaired" from "this run predates the count". Disjoint from `failed` by construction: a page whose render threw never reached a verdict, so it cannot be in this set, and the two counts add rather than overlap. It is the roll-up of what `page_verify_failed` and then `page_correction_failed` or `page_corrected` already say a line at a time — worth having as one field because reading it off those needs a join per page, though the rule is one line: a page whose verdict failed is in this set exactly when its `page_corrected` `result` is **not** `kept` (§7c). `alts_checked` / `alts_generic` are the generic-alt rule over the fragments the document is built from — every non-empty `alt` on an `<img>`, and how many of them are a placeholder rather than a description (#290). Asked **after** any correction, so a non-zero `alts_generic` is a placeholder this step could not repair, which is a different statement from the per-page `page_generic_alt` finding. It is not a statement about the delivered document: the review loop runs afterwards and can replace a block's `<img>` along with its markup, which is what `delivered_alt` is measured on. Both are present at zero on every run, for the same reason `failed` is: a class reported only when it fires cannot distinguish "it never happened" from "the check never ran", and this rule's whole claim is that it fires on nothing the page agents write. `alts_checked` is what makes the zero readable — 0 of 0 says nothing about the rule, 0 of 40 says something. Comments are stripped before either count, as on `page_generic_alt` and `delivered_alt`. `ids_checked` / `ids_duplicated` are the same pair for the id rule (#373): how many elements across those fragments carry a usable `id`, and how many of those ids are used more than once **within one fragment**. Per fragment and summed, which is the only count this rule can make — two pages sharing an id is not a defect at this point, since `namespaceAnchors` prefixes each page at assembly, and pooling the document's ids into one set would report that fix as a failure once per page. Present at zero on every run, and it matters more here than for the alts: this rule fires on 2 of 1,501 measured page replies and on none at all from the model deployed today, so a field that appeared only when it fired would be indistinguishable from the check not running. Read off the parsed tree, so markup the HTML parser discards — an orphan `<td>`, anything inside a comment — owns no id: an over-collected id would be a phantom duplicate, and on this path that buys a rewrite of a page with nothing wrong with it. |
-| `page_generic_alt` | A page described an image with a placeholder instead of a description (`page`, `image`, `alts` — the values as written, duplicates included). Free and exact, run on every page rather than on the ones a sampled verifier looks at, and fed to the same self-correction pass as a dropped link: the fix needs the image, so it needs the page agent. This is not a blind spot being covered — the deployed verifier catches a gutted `alt` 6 times out of 6 — it is a capability being moved off the model's bill, because the cheaper verifiers it may be swapped for catch it 0–2 times out of 6 and `axe` catches it never (#290, #246). The list is closed and matched whole: `alt="logo"` is a finding, `alt="Meta logo"` is not, and `alt=""` is left alone as a valid statement that an image is decorative. Comments are stripped before the scan, here as on `delivered_alt`: an `<img>` a page quoted inside a comment is not an image a reader is offered, and on this path a false finding is not just noise — it buys a rewrite of a page that had nothing wrong with it. |
-| `page_generic_alt_unrecovered` | A correction bought for a placeholder `alt` was kept and the placeholder is still there (`page`, `image`, `alts` — the values that remain). The mirror of `page_links_unrecovered`, and the reason a deterministic rule is worth more here than a model that finds the same defect: the check that raised the complaint can be run again on the answer, exactly and for nothing, so "the rule found something" and "the rule got it fixed" are separable at no cost. Only logged where the correction was bought for an alt in the first place. |
-| `page_duplicate_ids` | One page fragment used the same `id` on more than one element (`page`, `image`, `ids` — each duplicated id named once and sorted, however many copies it has). Free and exact, on every page, fed to the same self-correction pass as a dropped link. It is at the page step rather than left to lint for a reason the other two free rules do not have: this defect **does** have a downstream reporter and that reporter cannot fix it. `namespaceAnchors` makes ids unique across the document by prefixing each page's, so a page that collided with **itself** gets the same prefix on both copies and stays collided — the one case it declines by name — and lint then names the collision on the assembled document, on a page nobody will look at again with the image in front of them, usually as `p3-fn-1` rather than under the name the page wrote (usually and not always: nothing is prefixed unless more than one *page* claimed the id). Here the model that chose the ids is still holding the picture. A blank `id` is not this rule's finding: it is invalid markup, but "renumber every copy after the first" is not its repair. |
-| `page_duplicate_ids_unrecovered` | A correction bought for a duplicate `id` was kept and a duplicate is still there (`page`, `image`, `ids` — the ones that remain). The mirror of `page_generic_alt_unrecovered` and free in the same way. The remaining ids are named rather than counted because, unlike an unrecovered link, this is not matched against anything the page arrived with: a correction renumbers, so it can clear `fn-1` and collide on `fn-2`, and that is a repair that **moved** the defect rather than one that failed to touch it. Only logged where the correction was bought for a duplicate id in the first place. |
-| `page_soft_hyphens` | Soft hyphens (U+00AD) were taken out of a page reply before it became markup Iris keeps (`page`, `image`, `removed` — every occurrence, not every word — and `where`: the step whose reply carried them, one of `extract`, `correct`, `specialist`, `specialist_merge`). A word the printing broke across a column, carried into the HTML as an invisible character: `agents/page.md` forbids exactly that, with a worked example, and three models from three labs do it anyway — 63 occurrences on 9 pages of one 100-page arm, reaching 23 of 62 delivered documents, on pages the fidelity check passed (#334). It renders as nothing, so the page reads as clean while find-in-page fails: a reader searching a delivered document for `Insurance` does not match `Insur&shy;ance`, and the words this lands on are table row labels and column headings. The strip is unconditional because there is no output where the character is the right answer — it needs no image, no word list and no second model — and it covers the entity spellings (`&shy;`, `&#173;`, `&#xAD;`) as well as the codepoint, since those render and defeat a search identically. **Logged only where it fired**, so a run with none of these lines is a run in which no reply carried one. `where` is what makes the count attributable: the same character from a first render, from the correction pass and from a specialist are three facts about three different calls. It is written AFTER `agent_call`, so the reply on record in the round logs is still the model's own — the census behind this row was a $0 regrade of logs already on disk, and a strip applied before the log would have left no way to take that measurement or any future one. |
-| `page_caption_claim` | A figure whose `<figcaption>` makes a claim about the picture its `alt` describes, recorded as the two free caption checks found it (`image`, `page`, `figure`: its place among the fragment's figures, and `caption`: the caption's visible text, clipped to 200 characters). Written per figure, from the page's own fragment, **after** any specialist merge and **before** the verify call, so it reads the same two strings the verifier is about to be shown. Two of the three axes it covers are already rules in both prompts — a count the page PRINTS against the length of the description's list (issue #353), and a region the caption calls highest or lowest against the bands the description sorts places into (v1.12) — and this line is not a third rule. **Nothing here refuses, corrects, reaches a verdict or reaches the model**: it is the record that a free check had a subject on this page, and the reason it had no answer. That is what was missing. v1.12's clause ends by refusing the comparison where the caption's named group is not one the page itself sorts — supplying "which states are New England" out of a model's own knowledge is how that check invents the problem it then reports — so a round reporting no region contradiction was either a round with none or a round in which every subject was refused, and from outside those two are the same silence (#356). `quantifier` is the caption's own words where it quantifies a category as a fraction ("About Half", hedge kept as printed) and `share` is the value those words name (`0.5`); `band` is the band word a verb asserts of a group (`highest`, `lowest`, `high`, `low` — bare `high` and `low` only after a ranking verb, since "Unemployment Is High Throughout" sorts no places, while a superlative counts after a copula too because nothing separates that wording from the plate this was written for); `enumerations` is how many lists the description sorts anything into; `named` is up to 6 members of those lists that the caption names, matched case-sensitively and on word boundaries. `declined` is why nothing was compared, and each reason belongs to one axis: `proportion` wherever a caption quantifies in words, `no_enumeration` where the description sorts nothing at all, `membership` where a band claim's group is nowhere among the bands. `no_enumeration` and `membership` are exclusive — where there are no bands there is no band for a region's members to be missing from — and a line with no `declined` at all is a check that was decidable. **`share` is the fraction the caption states and not a proportion of anything measured, and no ratio between the two strings is on this line.** That is the finding rather than a gap: both terms of such a ratio are readings of the ink rather than transcriptions of the page, `p092` is the corpus's only subject, and its five reads put the quantified category at 34.7%, 35.6%, 41.7%, 41.9% and 50.0% of the states enumerated — no tolerance separates a miss from an exact hit on the one plate a tolerance could be fitted to. The member parse says the same thing independently: over 16 reads of that plate's one unchanged legend it answers 1, 2 or 3 lists, and on the read yielding "30 and 16" two of the 46 members are fragments of prose while one state's name is lost to a length bound. So `enumerations` is a shape and not a denominator, and the arithmetic is left to whoever regrades the log at whatever tolerance a later corpus can justify. Over 1,302 delivered pages of the rounds on disk this fires on 66 figures across four plates, and 47 of the 50 region claims among them are subjects the clause must decline (44 `membership`, 3 `no_enumeration`); the 3 that are decidable are all one arm describing the map BY region, which is the shape that puts the membership on the page. Its limits, before a corpus is counted off it: a figure's own title asserting a band with a verb ("Figure 7. Where Tax Effort Is Highest") is a `membership` decline here, since no wording separates it from a caption's real claim, so the declined counts are an upper bound on how often the clause had a page to refuse on; it reads a `<figcaption>` and nothing else, so a claim in a `<p>` beside the figure or in a `<table><caption>` — v1.12's subject too, since the prompts say "a `<figcaption>` or a sentence in the fragment" — is a decline this cannot count; the members come from the same enumeration parse `alt_relocated` uses and are tokens rather than necessarily places; "most", "a majority", "many", "few" and "nearly all" are deliberately not subjects, since each names an inequality rather than a value and a report that turned one into a number would be inventing the number it compared; and a group the caption re-typed in another case goes uncounted, so it reads as declined — the conservative direction for a field whose whole job is to say the check had nothing to work with. **Logged only where a claim was found**, so 3 or 4 lines per 91-page arm, and a run with none is a run whose captions claimed nothing of the kind. |
-| `page_recovered` | A feedback re-extraction succeeded on a page an earlier run had lost, so the document is whole again for those `pages`. Logged late in the run, once that document has been persisted: a round that re-extracts the page and then throws in review leaves the earlier document — hole and all — as the one the session holds. |
-| `extraction_failed` | **No page produced any content**, so the run is ending rather than delivering a document with no words in it (`pages`: how many failed, `blank`: how many were reported blank). With `blank: 0` the `run_failed` line that follows carries the first page's provider error, because that is the diagnosis. Otherwise the source itself was empty — one blank scan uploaded alone, a rasterization that yielded white pages — and the error says how many of its pages were blank, which an empty document could not. |
-| `page_verify_ok` / `page_verify_failed` | The Feedback Agent's fidelity verdict on one page, checked against its source image. A failure names its `problems` and buys that page one self-correction pass. A page that passes can still be re-rendered (a dropped link), so a run's `page` call count is `pages + corrections`, not `pages + failures`. A failure also carries `kinds`: the distinct kinds of problem the verdict named, out of `content_missing`, `content_wrong`, `structure_wrong`, `a11y_only` and `alt_quality` (defined in `agents/feedback.md`, in the order the agent is told to prefer them — content that is absent is `content_missing` even though it is also a WCAG failure). It is a **set**, not one label per problem: two missing rows are one page that lost content. Without it a page that lost three table rows and a page whose alt text was refined from "orange kayak" to "orange-yellow kayak" wrote the same line, which made `verify_failed` a count of pages the verifier had an opinion about and nothing more. `untagged` is how many of that page's `problems` — a count of problems, where the diagnostics fold's `untagged_pages` counts pages — carried no kind this version recognizes — an agent file whose VERIFY contract predates the kinds, a session-built or trained one that dropped the field, or a kind the agent invented. Read it beside `kinds` or a split reads as covering pages it never saw. A problem is never dropped for being untagged or unrecognizably shaped: a lost label costs a label, and a lost problem ships the page. A `page_verify_ok` line carries `unjudged: true` when nothing actually judged the page — no Feedback Agent loaded, nothing to verify, a reply that would not parse. Verification is non-blocking, so all three answer "faithful" and the page ships; the field is what separates "the verifier looked and was satisfied" from "nobody looked", which is otherwise the same line. Omitted rather than false on a real verdict, and absent from every log written before it existed. The diagnostics fold counts them as `pages_unjudged`. A fourth case joins those three and is the one that saves money: `skipped: "blank"`, a page the agent declared blank, which is not sent to the verifier at all because an empty fragment has no content to be unfaithful with (issue #294). Not every blank page: a declaration the reply **stated** in its `blank` field whose own log names something on the page is judged, and its line carries no `skipped` at all — it is the one blank page a verdict is bought for, and `blank_contradicted` on its `page_blank` line is why (§7a `page_blank`, issue #371). It carries `unjudged: true` too — both are pages nothing looked at and neither may enter a pass rate — and the extra field is what separates a call that could not be made from one that was not bought, which is the difference between a broken run and a saving. Counted as `pages_skipped_blank`, a subset of `pages_unjudged`. The free checks still run on that page, so a blank page carrying link annotations still fails the link comparison and still buys a correction. A fifth case is `skipped: "error"`, the second value that same distinction always described and nothing had ever emitted: the call that could **not be made**, as against the one that was not bought (issue #364, and `page_verify_error` below for what went wrong). It is `unjudged` too and stays out of every pass rate for the same reason, but it is the opposite of a saving — that page was billed for a full ceiling of output and got no verdict for it — so `pages_skipped_blank` and `pages_verify_error` are counted separately and must not be added. |
-| `page_verify_error` | A page's fidelity check could not be obtained: the call was made and the provider errored, was throttled, stalled, or the reply overran its output ceiling. Carries `image`, `page`, the `step` that failed (`verify`, the check that decides whether a correction is bought, or `recheck_binding`, the gate on keeping one), the `error` message, and for a truncation the same evidence `page_correction_failed` carries — `truncated`, `reply_chars`, and both ends of the reply, which is what separates a verifier that needed the room from one that wrote an essay about a page it had already judged. **A verdict that cannot be obtained is not a page that cannot be extracted**, and until issue #364 this pipeline could not say so on the first check: `verifyAgentOutput` is non-blocking for an absent Feedback Agent and for an unparseable reply, but a provider error is rethrown, and that first call had nothing to catch it — so a throttled or over-long *check* propagated out of the page's extraction and shipped a `@page-failed` marker for a page that had rendered fine. Measured once on a 100-page bench arm: a page extracted as 8,855 characters of HTML, a complete statistical table of 568 words, was delivered as a 156-byte comment, and $0.5051 of that page's $0.6634 was the call that deleted it. Three things it cost besides the page, which is why this is its own event rather than a silent `catch`: the delivered document asserted "the source pages above could not be extracted", which was false; `pages_failed` and every triage of *why* pages fail recorded a vision failure, so anyone tuning the page agent on that signal was tuning the wrong agent; and the marker advised raising `providers.*.max_tokens`, which buys the verifier room to write more about a page it has already judged — the wrong lever, pushed the wrong way. The policy it is fixed to is this pipeline's own: a specialist that fails leaves the page as the general pass wrote it, and a fidelity check that cannot run is nothing to correct, so no correction is bought and the page ships as extracted. That matches an unconfigured deployment on any page whose only route to a repair was the verdict, and **not** on a page the link comparison would have repaired: with no Feedback Agent loaded every call site returns a passing unjudged verdict, so a links- or alt-triggered correction reaches the binding recheck and is **kept**, while under a provider failure that recheck throws too and the correction is discarded. A page with a dropped `href` therefore ships without it here and with it there — the discard decision below, stated rather than folded into a claim of equivalence. On `recheck_binding` the line also carries `trigger` and `correction_discarded: true`: that recheck exists to stop a correction bought for one link or one placeholder alt from damaging a page that had already **passed**, so where its verdict cannot be obtained the correction is not kept — no verdict is no licence, and the status quo is a page that passed. The correction is billed either way, and that field is what puts the discard on the record rather than leaving it inferred from an absent rejection line. The third verify call, the sampled recheck, keeps its own older `page_correction_recheck_failed` and is not folded in here: it decides nothing whether it answers or not, and it has been read across rounds under that name. |
-| `page_verify_inconsistent` | The verifier **described** a defect and then passed the page (`page`, `image`, `problems`, `kinds`, `untagged`). A verdict's pass/fail is its `faithful` / `accessible` flags, and a correction is bought only when a flag is false **and** a problem is named, so a verdict that names one with both flags true ships the page — and its sentence was not previously anywhere in the log, since `page_verify_ok` carries no `problems`. Calibrating the verifier against injected defects found 3 of 30 damaged pages described in full and passed: a swapped pair of paragraphs quoted back verbatim, an `<h4>` among `<h2>` siblings named as such, `faithful: true` on both. That is most of the gap between what it perceived (28 of 30) and what it flagged (25), and it is a different failure from a verifier that cannot see (issue #210). Written on the FIRST verdict only, the one that decides whether a correction is bought; a recheck's own disagreement is already readable on its line, which carries both `ok` and `problems`. It decides nothing and costs nothing — the page ships exactly as it did — because the fix worth having is kind-gated (a `content_missing`, `content_wrong` or `structure_wrong` problem failing the page whatever the flags say) and pricing that needs this counted over a fleet; failing on any named problem would instead buy a correction round for every `alt_quality` suggestion the same agent is asked to volunteer. The diagnostics fold counts them as `verification.verify_inconsistent`. |
-| `page_corrected` | What a self-correction pass did (`trigger`: `verify`, `links`, `alt`, `ids` or `both`; `problems`: how many it was given; `kinds`: what the verdict said was wrong going in — the same set as `page_verify_failed`'s, and empty on the `links`, `alt` and `ids` triggers, where the defect was found by code against the file's own annotations, a closed word list or the fragment's own parsed tree rather than named by the verifier). `both` means **more than one** source, which is what it has always counted: until #290 there were two and until #373 three, so no reading of an older log changes, and it no longer names which combination — `page_links_missing`, `page_generic_alt` and `page_duplicate_ids`, keyed by the same `image`, are where the per-source detail is exact. `result` is `kept` (it changed the delivered document), `rejected` (thrown away in favour of the page it was meant to improve — for **three** reasons, and only two of them have a rejection event: `page_correction_rejected` where the reply came back a fraction of the page's size, `page_links_correction_rejected` where a second verdict named something the rewrite had lost, and — with neither of those beside it — a binding recheck that could not be obtained at all, which logs `page_verify_error` with `correction_discarded: true` and is counted as `rechecks.binding_error`. Anyone triaging a `rejected` by looking only for the first two will find no event for the third, which is why it is named here: the first two are a correction judged and found wanting, and the third was never judged), `identical` (it changed nothing about the page), `empty` (nothing usable came back) or `failed` (the model call threw, so nothing came back at all — see `page_correction_failed`); the last three are calls paid for that bought nothing, and `failed` is the expensive one, since a truncation has already paid for a full ceiling of output. `identical` is decided on the **effect**, not on string identity, so a model that returns its own page re-indented or with `&` for `&amp;` is counted here rather than as `kept`. Note that such a fragment is still **adopted** — what ships is decided on string identity, deliberately, so that a change no signal here observes cannot be silently reverted; `identical` means the page call bought nothing, not that its output was discarded (that is `rejected`). Two shapes of `identical` are worth telling apart, and field presence is what tells them apart: with `chars_before` / `chars_after` and all four flags `false`, the model re-typed the page to no effect; with no sizes and no flags at all, it handed back the exact string it was given. Same bill, different behaviour. When it changed something, `text_changed` / `alt_changed` / `attrs_changed` / `structure_changed` and `chars_before` / `chars_after` say **what** changed — observed on the two fragments, not claimed by the verdict, so an alt-text refinement, a re-typed `href` and a restored table row are distinguishable. `alt_relocated` is on the line only where the correction moved one or more NAMED members from one enumeration in a description into a disjoint one — a state that left `darkest` and entered `cross-hatched` (#355) — and it names them rather than counting them, because a boolean saying something moved somewhere is not a claim anyone can check afterwards. It is not a fifth flag: a relocation is always an `alt_changed` too, and what this adds is what KIND of alt change it was, which the four booleans and the sizes cannot say — that page's line read as an alt refinement, the same bucket as "orange kayak" becoming "orange-yellow kayak", and its two sizes were equal. It takes no view on which of the two replies is right, and it is not a gate: nothing about what ships is decided here. Absent where nothing moved, which is the ordinary case, and absent rather than empty. Its limits are worth knowing before a corpus is counted off it: two lists written as two sentences with no semicolon between them read as one list, a member added or dropped is not a relocation — an added one is `alt_added` below, and a dropped one is reported only by the sizes — a correction that changes how many images a fragment has is skipped, since descriptions are paired by position, and a name whose own words include "and" or "or" is read as one member wherever the list it sits in also uses commas, except as the first half of that list's last item ("Ohio, Health and Human Services and Education"), where nothing in the string says which conjunction is the list's and a member is silently not seen. In a run written with no commas at all the conjunction is the only separator there is, so such a name is split there — which costs the name itself and not its neighbours, since its two halves always travel together. Reading a run-on at all is also what lets a word that is not a name onto the line — "the legend runs pale and light and medium and dark" separates into band words — so an entry here is a **token that changed bucket** and not necessarily a place, and a corpus counted off this field will contain some adjectives. `alt_added` is the same shape of claim for a member that ARRIVED: a name the corrected description lists in one of its categories, named nowhere in the words of the description it corrected — **in a list or out of one**, since a band of a single member and a mention in running prose are both the earlier reply naming the place — joining a list at least two of whose members that earlier description had already listed together — #373's `p084`, whose `below` band went from four members to six by gaining Colorado and Illinois. Everything said above about `alt_relocated` holds of it: it names them rather than counting them, it is not a fifth flag, it takes no view on which of the two replies is right, nothing about what ships is decided here, and it is absent rather than empty where nothing arrived. The two fields are disjoint **by construction** rather than by a rule — a member `alt_added` names the earlier description did not name at all, and a member `alt_relocated` names it listed — so a reader can add them. That the first test is on the earlier description's **text** rather than on its parsed lists is what makes the partition hold: a band of one leaves no list behind, so a member read off the lists alone read as new, and the one move `alt_relocated` declines on purpose — out of a category of one, which has no first company to compare a second against — landed here instead. Each field is capped at **six** names independently, so one line carries at most twelve; separately rather than between them, because a shared budget would let a description that moved six members hide every one it added behind a cap spent on the other field. The destination requirement is the whole of the discipline here: every correction re-emits the description entire, so new WORDS are ordinary and a rewritten clause is full of them; what is not ordinary is a new name inside a list the earlier reply already wrote. A wholly new list of wholly new names is a category the correction invented — a different claim, and `structure_changed` and the sizes are what report a description rebuilt. Its limits are `alt_relocated`'s, plus two of its own. A description that lost **any** member it no longer names anywhere reports no arrivals at all, because a state written out in full ("N.D." becoming "North Dakota") drops one key and adds another, and nothing in the two strings says the two are one place — the descriptions this reads abbreviate constantly. Read across the whole description rather than per band, because a re-spelling can re-band in the same stroke, and a check scoped to the band the new name landed in would report a place newly asserted into a band whose predecessor had already classified it. A member that merely moved between two of the description's own bands is not such a loss, since the correction still names it — and "still names it", like "named nowhere" above, is read off the **words**, so a state re-banded into a band of one or left in running prose has not been lost either. The two readings are not the same match, and the asymmetry is deliberate: "named nowhere" folds case and reads the normalised member, since a generous reading there only makes the field quieter, while "still names it" matches the member **exactly as the earlier reply wrote it**, capital and abbreviating dot included. A generous reading on that side puts a wrong name on the line, which is the one thing this field must not do — a member whose abbreviation is also an ordinary English word ("Or.", "Miss.") is otherwise found in the corrected description's prose, and its expansion reported as an arrival. What that exact test costs is worth stating in its own terms, since it is wider than the re-spelling it was written for: it is reached only for a member in **no** category of the corrected description, so it bites where a member was re-banded out of every list **and** re-typed — and then for **any** re-typing, an abbreviation losing its dot ("Wis." written "Wis") or a name losing its capitals ("MISSOURI" written "Missouri") as much as an expansion — and every arrival in that description goes unreported. Either condition on its own still reports, for a re-typing that leaves the **key** intact — case and trailing dots are normalised out of it. A re-typing that changes the key needs no re-banding at all: "N.D." written "North Dakota" inside the list it was already in is caught by the sentence above, which is that guard working rather than this cost. A member the earlier description listed **twice** has no single written form to match, so it too reads as lost. That costs the case where a description genuinely gained one state and dropped another in the same pass, and it is the direction every bound in this module errs in: a name here sends a reader to look for a member that arrived, and a wrong one sends them looking for a member that never did. A member merely dropped from a category is not on this line at all, because #373's evidence is about assertions the corrector makes rather than ones it withdraws, and `text_chars_before` / `text_chars_after` already say a description lost prose. `markers_added` names which of the two body markers — `[not legible]`, `[page not fully transcribed]` — the corrected page has MORE of, which is the completeness claim a correction appended and the third of #373's reviewable shapes. **Additions only, deliberately**: this corrector is handed the page image and resolving an illegible passage is its job, so a marker LEAVING is as often the repair as the harm; and where prose arrived the two text sizes say so, whereas for a marker no such number exists, because the marker is itself the prose. The count is over the whole fragment, so a marker that arrives in an **attribute** is on this line too — inside an `alt`, with `text_changed` **false**, `alt_changed` true and the two text sizes **equal**, since nothing a reader reads as prose moved; and inside any other attribute (a `title`, an `aria-label`), with `text_changed` and `alt_changed` both false and only `attrs_changed` true. The page agent describing an unreadable region inside an image description is what reaches the first, and it is much the commoner of the two. A corpus expecting `text_changed: true` beside every `markers_added` line, or sizing the marker off the two text numbers, would read either wrong. The copy editor's `editor_markers_changed` counts the same way and records both directions off the same shared constants, for the opposite reason — that stage is handed no image, so a marker leaving its body is a claim dropped rather than answered. `text_chars_before` / `text_chars_after` are the same two sizes with the markup taken out — how much prose a *reader* receives — which is what separates a correction that added markup to a page that was already complete from one that brought back content the vision pass had dropped. |
-| `page_correction_rejected` | A correction came back at less than a quarter of the size of the page it was given (`page`, `image`, `trigger`, `reason: "shrank"`, `chars_before`, `chars_after`), so it was refused and the page it was asked to correct is what ships — paired with `page_corrected` `result: "rejected"`. A correction is single-shot, so what it returns is what the document would keep; a reply this much smaller did not correct that page. Applies on **every** trigger, unlike the links path's own check, and it is decided before either re-verification, so no Feedback Agent call is spent judging a fragment nothing will deliver. In the bench logs the two replies that would have hit this were an agent's scratch template and an abandoned draft, both bound by a parser that took the first `{…}` in a reasoning model's reply rather than the last (issue #170); the parser now reads the right one, and this is the floor under that judgement. |
-| `page_correction_failed` | A self-correction's model call threw (`page`, `image`, `trigger`, `problems`, `kinds`, `error`, `truncated`, `ceiling`, `ceiling_bound`, `chars_kept`, and on a truncation `reply_chars` / `reply_head` / `reply_tail` / `shape`), so the page keeps the version it already had — the extraction that succeeded, verified minutes earlier. It costs the **correction**, not the page: before this, the error propagated out of the page's own task and the run logged `page_extraction_failed` and shipped a `@page-failed` marker for a page it still had, which also named a stage that had worked (issue #171). Paired with `page_corrected` `result: "failed"`. Every error class is survivable here, not only a ceiling — a throttle, a stall and a truncation all leave behind a page good enough to have been worth correcting — and nothing is retried, because a correction truncating because the *page* is large will truncate again for a second full ceiling of output. `truncated: true` says the model wrote an essay where a page was asked for, which is worth reading beside `page_verify_failed`'s problem list. `problems` is how much work the call was given and `kinds` is what kind of work, spelled exactly as `page_corrected` spells it so a failed correction and a kept one can be grouped together (issue #182): without it, the failures were the one part of the correction path that could not be grouped by what was asked — 205 successful corrections in a bench round were split by whether the verdict named `content_missing`, the kind that asks a model for content its first pass never produced, and not one failed correction could be put in either half. It is empty on the `links` and `alt` triggers, where the defect was found by code against the source file's own annotations and no verdict named anything; a kind there would be a count the verifier never made. `ceiling` is the output ceiling this call **asked for**, which since #285 is usually **this call's own** and not the deployment's: a correction is capped at twice what the first pass of that page spent — scaled up if a specialist handed it a document longer than that pass produced — with a 4,000-token floor (`correctionCeiling` in `src/pipeline/extraction.ts`). So the remedy on a truncated correction is that multiple, not `providers.*.max_tokens` — one uncapped correction ran to 32,000 tokens on a page whose render cost 6,233 and was discarded for being truncated, and the error it raised advised raising the ceiling, which would only have bought a larger discarded reply. It is the number asked for and not the number reached, so it is on **every** failure this line reports and not only a truncation: read it with `truncated`, which says whether the ceiling is what the call died of. A throttle or a stall carries a `ceiling` it never got near. A `ceiling` **larger** than `providers.<provider>.max_tokens` is not a contradiction and is the one case where this field is not what the call asked the provider for: a caller may lower a call's ceiling and never raise it, so the adapter sent the smaller of the two, and a truncation on such a line is the deployment's ceiling — which is what its error message will name. `ceiling` is absent where the call ran uncapped, and the configuration is the remedy again on such a line — but it is two causes, not one, and the *page* tells them apart. Either the first pass reported no token usage, so there was no measurement to take a cap from; or the page rendered **nothing** and was delivered as blank (`page_blank`), whose correction is a re-render of the page from its image rather than an edit of a page, so nothing its first pass spent bounds it (issue #294 — this line is reachable there only on the `links` trigger, and it is the repair that catches a page the source file says was wrongly declared blank, which is why it is not capped at the floor). `ceiling_bound` says which of `correctionCeiling`'s two terms produced that number, because `ceiling` alone cannot and the answer decides which constant a truncated correction is evidence about: `multiple` is twice this page's own first pass, scaled by a specialist's growth where there was one, and `floor` is the 4,000-token floor binding on a small page whose doubling falls under it. Of the three corrections that truncated in one bench round, one is a `floor` line — a 1,618-token first pass capped at 4,000 rather than 3,236 — so triaging all three as evidence about the multiple counts a line the multiple never bound, and raising the multiple would move that page's cap not at all (issue #365). Reading the term off the number instead is wrong on exactly one page: the one whose doubling lands on 4,000, where the multiple is what bound it and `ceiling === 4000` says otherwise. Absent wherever `ceiling` is, and for the same reason — no cap means no term that produced one. `chars_kept` is the size of the fragment that ships. On a truncation, four fields say what the reply itself was, which is the evidence `ceiling` only poses a question about (#293): the same cap is either too tight for a page that genuinely needs more room than its first pass took, or exactly right for a model that went on rewriting the page it was given, and nothing else on the line can tell those apart — two truncations at 34,573 and 41,959 characters against pages of 11,908 and 11,456 were argued both ways off the same log, and the round cannot be asked again, because a truncation has already been billed for a full ceiling of output. `reply_chars` is how far the reply reached (the number `editor_truncated` calls `chars`, renamed here because `chars_kept` is on the same line and a bare `chars` would read as the page's own length — read as a ratio against it, those two pages are 2.9x and 3.7x), `reply_head` its first 240 characters and `reply_tail` its last 240, on `editor_truncated`'s terms exactly: whitespace folded, a fragment shorter than both excerpts together quoted **entire** under `reply_head` with no `reply_tail`, and deployment-only — never on `GET /v1/quality`. A tail mid-sentence in content the head has not reached is a page that needed the room; a tail repeating rows already in the head is a model looping. Absent on every other failure, which has no reply to quote, and absent on a truncation that returned nothing at all — `reply_chars: 0` is the zero-character shape §9.3 describes, where raising anything buys a larger burn. On this line uniquely it is `reply_chars` and not the missing `reply_head` that says so: `truncated` here is a predicate over the error's *message*, so it is also true of a truncation whose class was lost crossing a boundary, and such a line carries no `reply_chars` at all. So a bare `truncated: true` is two shapes — a reply of zero characters, or a truncation that arrived without its evidence — and only `reply_chars` separates them. `shape` is that head-and-tail reading turned into something countable, in `page_no_output`'s vocabulary above: `truncated_envelope` is the reply the prompt asked for, cut; `bare_html` is a reply that IS the page's markup, which is how 24 of the 180 corrections in that round answered and the shape both of its page-shaped truncations had; `prose` is a reply that never began the page. Two more are reachable and worth expecting if the field is being counted: `envelope`, where the ceiling landed after the closing brace of a reply the model was still adding to, and `empty`, where the reply is whitespace only — that one is not the zero-character shape below, which carries no `shape` at all, and `reply_chars` tells them apart. Only `prose` settles the question by itself — a cap spent on something other than the page buys more of the same if it is raised (§9.3). `bare_html` says where the reply **began** and not where the output went: a correction that starts the page and then narrates at it carries the same value as one that transcribed to its last character, both happened in that round on the same model, and `reply_tail` is still what tells them apart — nothing counts narration off this field. Absent on a truncation that returned nothing, where `reply_chars: 0` is already the whole of what is known, and absent on every failure with no reply at all, exactly as the excerpts are (issue #365). `blocks_named` has no counterpart here: this call is asked for the page's HTML and not for an edits list. The fidelity problems the correction was asked to fix are still unfixed and still on record — keeping the page is not a claim that it was right. |
-| `page_correction_no_output` | A self-correction's reply carried no readable HTML (`page`, `image`, `chars`, `shape` — the same shapes as `page_no_output`), so the page keeps the version it had. That version had already passed everything except the fidelity problem the correction was asked to fix, which makes it strictly better than the reply. Paired with `page_corrected` `result: "empty"`, which is the existing record of a correction call that bought nothing; this line says what came back instead. `declined` is on the line — a count, absent where it is 0 — where the reply refused a problem (below) and sent no page with the refusal: the prompt argues against that shape by name, because a reply with no `html` is a reply the run cannot use, and it is the one the field exists to make visible. A reader looking at a correction that came back empty needs to know whether the model was refusing or failing, and the two have different remedies. The count is a flag and not the record; the reasons are on `page_correction_declined`, keyed by the same `image`. |
-| `page_correction_declined` | The corrector refused one or more of the problems it was given, saying which and why (`page`, `image`, `trigger`, `problems` — the whole list it was offered — and `declined`, one entry per refusal with `problem`, `source` and `why`). Since #373: a correction's only legal move used to be compliance, so a problem asserting something about the HTML that the HTML itself refutes — an id used twice that is used once, an attribute missing that is present — was answered by editing a page that was right, and the edit was indistinguishable in the log from a repair. The licence is narrow by construction: it covers a claim about **the HTML the corrector was shown, refuted by that HTML**, and explicitly not a claim about what the *image* shows, which is the judgement the check was asked to make. **It gates nothing.** No verdict, no `page_corrected` `result`, no recheck and not the `uncorrected` set are decided here, so a problem declined wrongly leaves the page exactly where a correction that failed to fix it leaves it — named in `uncorrected`, with `@page-uncorrected` on the delivered document. The licence can buy a different *explanation* of a bad page and never silence about it. `problem` is the number the reply cited, against the numbered list in the request (numbered for this reason: matching a paraphrase back against the list would attribute a disagreement to the wrong entry), and is **absent** where the reply cited nothing rather than guessed at. `source` is which of the four checks raised that problem — `verify`, `links`, `alt`, `ids` — read off the bands of the concatenated list, and `null` where no number was cited or the number falls outside the list. It is the field that makes the risk measurable: a decline over `verify` is a disagreement with the Feedback Agent's reading and may well be right, while `links`, `alt` and `ids` were checked in code, so a decline there is a refusal of a fact — and those three entries are marked `(Iris checked this one in code.)` in the list the corrector reads, with the licence excluding a marked problem by name, so a `code_checked` decline is a corrector going past what it was told rather than following it. `problems` is the denominator without which none of this can be read — 2 declined of 2 is a correction refused outright, 2 of 9 is the pass working. Written per **page** and not folded into a field on `page_corrected`, because a decline is per problem and that line is per page: a reply that declined one of five problems and fixed the other four is the shape this pass is meant to produce, and a count on the page's line could not be told apart from a reply that declined all five. Absent from a run where nothing declined, which is the ordinary case; the diagnostics fold counts it as `verification.declined`. |
-| `page_correction_recheck` | A second verdict on a corrected page (`ok`, `problems`), with `problems_before` / `problems_after` — how many **fidelity** problems the page was sent to be corrected with, and how many this verdict names — `kinds_before` / `kinds_after`, the same two sides as kinds, and `links_before` / `alt_before` / `ids_before`, the missing links, placeholder alts and duplicated ids it was also given. The kinds are what turn "the recheck did not pass" into an answer about the correction: `content_missing` in and `alt_quality` out is a page whose content came back and whose description is now the complaint, while `content_missing` on both sides is a correction that did not do the one thing it was asked to. Both are `ok: false` with the same counts. `binding: true` is the links path re-verifying a rewrite it may discard; `binding: false` is a measurement-only sample, `defaults.recheck_sample_size` pages of the batch (default 1, `0` for none), which changes nothing about what is delivered. The two are counted apart in `verification.rechecks`, and a line with `ok: false` has its `problems` reported there as `rechecks.failures` — **not** in `diagnostics.errors`, which is failures of the run and rendered every one of these `"unknown"` while the diagnosis sat on this line (issue #296). At the default the sample is a **count and not a rate**: one draw per run, so `1 of 1 cleared` is everything it says. Reading a proportion off it is what this field invited and got — four draws split 2/2 quoted as "half", and the same instrument reading 50% on one model's four draws and 25% on another's over one 100-page corpus (issue #288). `sampled_ok / sampled` is a rate over corrected pages only at a size at or above the page count, which is a census and costs one Feedback Agent call per correction; the answer at that setting, replayed off 57 corrected bench pages, is that **26%** of corrected pages clear their recheck against a 2% floor for re-asking about the page as it was — 19 pages better and 2 worse, p = 0.000. Between the two, which pages answer is a deterministic threshold spread across the batch rather than a random draw, and is not evidence that any position is representative: it replaced a rule that handed the slot to whichever corrected page finished **first**, which under concurrency is the front of the batch, and on one 8-run corpus put all 8 slots on six pages of 100. `extraction_start` / `reextract_start` carry `recheck_sample_size` and `recheck_thresholds`, so a log with none of these lines in it says which of three things happened: the measurement is off, no page was corrected, or every correction landed below the first threshold. On a `binding: false` line, read the two counts beside it: a correction pass is single-shot and was never expected to reach zero problems, so five-in-one-out and five-in-five-out are both `ok: false` and only these say which happened. On a `binding: true` line the page had **passed**, so `problems_before` is 0 by construction and a problem named here is a rewrite of a good page that lost something — not a correction that failed to converge. The link, alt and id shares are carried apart because this verdict judges the fragment against the *image* and names the Feedback Agent's own problems: a link target does not appear in the image at all, and a placeholder alt or a duplicated id was found by code rather than by this verdict, so none of them could be counted coming out. Folding them in would make a page with one fidelity problem and two gutted alts read as three-in-one-out — a correction that fixed nothing, logged as converging. `page_corrected`'s `problems` is the correction's whole bill, `page_links_unrecovered` says whether the links came back, and `page_generic_alt_unrecovered` / `page_duplicate_ids_unrecovered` answer the alts and the ids exactly and for free. Counts, not a diff — deciding whether two of the Feedback Agent's prose descriptions are the same problem is fuzzy matching on model output, so both lists are on the line in full instead. `unjudged: true` marks a recheck nothing judged, on the same terms as `page_verify_ok`: `ok` is also what an unavailable Feedback Agent looks like, and with none loaded every page passes its first check, so every corrected page's recheck is the binding one and every one of them would otherwise read as a rewrite checked and found good. `verification.rechecks.binding_unjudged` and `sampled_unjudged` are those, per population. |
-| `page_correction_recheck_failed` | The measurement-only sample could not be taken — the extra Feedback Agent call hit a provider error (`error`). Logged rather than raised: the page ships as it would have with no measurement at all, and the slot this page claimed stays spent, so a throttled provider is not retried once per corrected page — and at a census that is one failed call per correction, not one per run. A `binding` recheck has no such line, because there the verdict decides whether the rewrite is kept. |
-| `table_continuations` | The assembled document holds a table whose caption says it continues the one before it: `tables` (how many tables the document has), `pairs` (how many of them are second halves that were located in the source bytes) and `declined` (how many said so and could not be paired). Logged once per run, before any join is attempted, so the ratio is readable on a run whose joins then all failed. A table printed across a page break arrives as two tables with duplicate headers and no connection between them, and no page agent can fix it: each printed page is its own call, so the agent that wrote the second half had one image and the other half was not on it (issue #239). It knew — all 18 continuation captions in the reference corpus say "Continued" — and emitted a fresh `<table>` because there was nothing to append to. `declined` is a fact about the bytes rather than about the model: the pair is found in the DOM and its two source spans are not, which happens when a page delivered an unclosed `<table>` (an unclosed opener swallows the table after it, so the bytes delimit nothing to splice). Those halves ship as they arrived. |
-| `table_joined` | Two halves were merged into one table: `by` (`"code"` or `"editor"`, which path produced the merge), the merged `caption`, `rows_first` / `rows_second` / `rows_joined`, `chars_before` / `chars_after` for the two halves against the one table, and — on the editor path only — that editor's own `editor_log`. The merge is not a plain concatenation, because the halves do not always agree on what to concatenate: in the reference corpus two of 18 pairs declare a different column count from their own first half, 13 carry footnote-reference ids in the repeated header block that an endnote links back to, and a bracketed unit note ("[In millions of dollars]") is reprinted with the header and belongs in the joined table once. Where one of those judgements is real the merge is a Copy Editor call (`copy_editor_table_join.md` in the agent ledger); where it is not — three of the editor's six rules are "move these bytes and change nothing" — the merge is made in code and costs nothing, which is 26 of 50 pairs measured out of already-delivered documents (issue #276). Read `by` rather than the agent ledger to split the two: a pair joined in code never reaches the ledger at all, so a run's `table_joined` count and its `copy_editor_table_join.md` call count are different numbers on purpose. What the answer is *checked* for is deterministic and is the reason this line is trustworthy: one table, a caption without the continuation marker, no column lost, the header block still made of `<th>` cells, at least `rows_first + rows_second` rows less one header block and one droppable row — the header credit is the more permissive of two readings, either one shared block (the smaller of the two declared depths) or what the joined table's own depth says went, because neither alone is right on its own: the two halves may declare headers of different depths (4 of the corpus's 18 pairs do, so the smaller depth alone under-credits a merge that kept the deeper block), and reading the drop off the joined table alone charges a merge that PROMOTED the reprinted unit note into `<thead>` for a row that is still in the table. The shared-block reading is available only while the joined header is no deeper than one block plus that one promotable row: past that depth the extra header rows are a block **kept** — the duplicate header repeated mid-table, the state this stage exists to remove — rather than a row promoted, nothing went, and crediting a shared block would let a merge keep that block and drop its worth of unlabelled rows along with it. The two cases are separated to within one row rather than outright — a reply that kept a single duplicated header row is inside the bound and can lose one unlabelled row with it, which is the size of the drop the floor forgives anyway — so what the bound rules out is slack a whole header block deep, and every distinct row label from either half still present as a cell somewhere. Two row checks rather than one, because neither sees what the other does: the label set is blind to a row that has no label (a printed table's multi-line row labels have continuation lines whose first cell is empty), and a count cannot tell a legitimately dropped duplicate from a dropped state. The one row the count forgives is the bracketed unit note a continued page reprints. `rows_joined` under `rows_first + rows_second` is therefore not a defect. |
-| `table_join_code_declined` | The merge was tried in code on this pair and stood down, so a Copy Editor call was bought for it: the second half's `caption` and the `reason`. `header_differs` (the second half's header block is not the first half's, so which one describes the joined rows is a reading of the table — 17 of the 50 measured pairs, and the commonest), `id_would_be_lost` (an id on the half being dropped has no free counterpart to move onto: a footnote-reference anchor in the repeated header block, whose cell in the surviving block nothing but a reading can pick, or an id on both halves' own `<caption>` or `<table>` element, where keeping one live target means choosing which — 7 of the 50), `columns_differ` (a row of the continued page is wider than the first half already is, so appending it would put cells under a header block that does not describe them — reached where the continued page reprinted no header at all, which is the case the header comparison above cannot see), `note_repeat_unclear` (the continued page opens with a bracketed unit note the first half does not carry, so it is not the reprint rule 6 licenses dropping), `caption_unclear` / `no_caption_available` (the continuation marker is not wholly inside one text node, so taking it off means rewriting markup; or neither half has a caption, which the verification requires), `content_outside_table` (a half's span parses to something beside its own table — the parser fosters a stray `<p>` out of a `<table>` and the joined table's `outerHTML` would not carry it, which is the one way this path can lose content where a model reply cannot), `id_would_collide` (the join would print one id twice, a defect it would have introduced), `tfoot_no_tbody` (the first half has no `<tbody>` to append to and a `<tfoot>`, so the rows would land after the table's own summary), `unreadable` / `read_failed` (a half no parser could read), or `verify:<reason>` for a code merge the same verification as `table_join_failed` refused. Logged on every pair the code path did not take, because the share it takes is what a later round has to be able to re-measure and `table_joined` alone cannot tell a free join from a paid one. A decline costs nothing: the pair goes to the editor exactly as it did before this path existed. |
-| `table_join_failed` | One pair was left as two tables, with `reason`: `unmatched_source` / `not_adjacent` for a pair the source bytes cannot delimit (see `table_continuations`), `declined` for an editor that judged the halves not to be one table, `no_output` for a reply with no HTML in it, `truncated` / `call_failed` for a request that did not come back, `read_failed` for markup no parser could read (with `stage: "body"` when it was the document rather than the reply — jsdom parses by recursion and overflows on a body nested a few hundred thousand levels deep, which is reachable because `anchors.ts` delivers a page past 500 levels as written; the document then ships exactly as it arrived rather than failing the phase, the way the lint one step later reports its own overflow as `@lint-unavailable`), or one of the verification failures — `not_one_table`, `no_caption`, `still_continued`, `columns_lost`, `header_cells_lost` (the merged header block came back as `<td>`, which axe does not report and which would have removed the header association from the one table this stage exists to improve), `rows_lost`, `labels_lost:<n>`. The document keeps **both halves byte for byte**, so every failure here delivers the output the pipeline had before this stage existed, which is what makes the merge safe to ask a model for at all: unlike a correction round, a refusal costs one table's structure and not the document. A pair that failed is not asked again in the same run — the next pass would send the same two tables to the same prompt — so one unjoinable pair does not starve the joinable pair after it. |
-| `table_joins_capped` | The document had more continuation pairs than one run will spend requests on (`joined`, `pending`, `max`), and the `pending` ones ship split. Present only when pairs remain. The cap is not a bound anything measured comes near — the worst 25-page chunk of the reference corpus has 7 pairs — and since #276 a pass need not cost anything at all, because a pair the code path takes buys no request. It bounds **passes**, not spend: a body that keeps producing pairs needs something to stop on. Pairs are re-read from the body each pass, which is how a table in three pieces closes: joining the first two leaves a document whose remaining half now follows a joined table. |
-| `prose_joined` | A sentence the source printed across a page turn was delivered whole (issue #248). `markers` page-break markers stood between the pages, `candidates` of those turns had the next page opening with a `<p>` that begins with a lowercase letter, `joined` were mended, `unmarked` of the joins had no marker between the halves at all (a page printing no number emits none), and `word_splits` were breaks that fell inside a word. Then one count per refusal: `declined_interrupted` (something other than a paragraph stands between the halves — a footnote list, in all 9 of the reference corpus's cases — so the marker is not what interrupts the sentence; a page that FAILED extraction lands here too, because its fragment is the `@page-failed` comment and that comment is exactly such a node), `declined_not_continuing` (the paragraph before ended a sentence, so the lowercase start after it is something else), `declined_page_gap` (a page between the two returned nothing at all, so the middle of the sentence may be what is missing — the page that came back empty with no marker, #194, which is dropped from the body and then visible only as a hole in the numbering), `declined_no_cut` (the continuing sentence begins inside an inline element that opened earlier, so no cut leaves both halves balanced markup), `declined_attrs_kept` (the whole paragraph would have moved and it carries an attribute the move cannot take with it — `id` above all, which something may refer to), `declined_lang_mismatch` (the two paragraphs disagree about `lang` or `dir`, so the words would arrive in a language nothing said they were in), `declined_as_written` (one of the pages is being shipped byte for byte, `skipped_pages`) and `declined_too_far` (more than 500 characters of text would cross the marker — a paragraph with no sentence boundary in it moves entire, so without the bound a page of unpunctuated prose would deliver its whole text after the *next* page's anchor, which is not the few words the direction below was chosen for). Plus `word_split_examples`, up to five words the break split, cut at 40 characters — text out of the user's own document, so it stays on the deployment and never reaches `GET /v1/quality`. Absent unless at least one turn was a candidate, so a document whose pages happen never to break a sentence adds no line, and `markers` high beside `candidates: 0` is what a caseless script looks like here: the lowercase test is the measured one and has no signal in Hangul, Chinese, Japanese, Arabic or Hebrew, so those sentences ship split. **The words move forward, past the marker**, which is a decision about what a page anchor means and not a detail: the sentence is then whole with `#page-74` standing immediately before it, so a reader following that anchor hears a few words of page 73 first — where pulling the next page's head back instead would land `#page-74` after the sentence it should open on and cost that reader the start of it. A word the printer broke **keeps its hyphen** and is closed up ("Simi-" + "larly" ships as "Simi-larly"), because nothing at this seam can tell a line-fill hyphen from a real one and dropping it would be the one place this pass deleted a character the source printed; `word_splits` is what makes that answerable with data. Deterministic, so no model call is spent on it — unlike the table join, which needs one wherever the two halves' headers disagree about what the table is. |
-| `editor_images` | How many source images the Copy Editor received this round (`attached` of `of`, plus `pages`). A `dropped` count means the selection did not fit in one request and was trimmed to the pages issues actually named. `attached == of` on a multi-page document means at least one issue in that round carried no page attribution, so the round asked for everything. |
-| `editor_images_refused` | The provider refused the round's payload as too large, so the same prompt was re-sent **without** images. The correction still had the whole body and every issue; only a fidelity problem that must be checked against the source can go unfixed. |
-| `editor_fidelity_observed` | The Copy Editor, looking at a page image it was sent for some other reason, says the HTML and the page disagree about something **nobody asked it about**: `count` observations, the `attached` pages it actually had, and the `observations` themselves — each a `page`, a sentence, and one of `page_verify_failed`'s five `kind`s (the same taxonomy, so this can be read against `verify_kinds`; `null` where the reply named a kind this version does not recognize, and the sentence is kept either way). Reported and **not acted on**: acting would mean re-reading that page in full, which is a re-extraction and not this loop's job, and an edit made from one glance at an image reaches a reader as what the page says. So nothing about the delivered document changes because of this line — it is the only trace, and it is addressed to a person. Its value is that it is the **only** second opinion on fidelity in the run: VERIFY checks each page once, with the same model family on the same image as the transcriber, so its blind spots are the transcriber's by construction, and the Reader cannot see the source images at all (issue #183). `unattached` counts observations about a page whose image was **not** in `attached` — the prompt asks for attached pages only, so those are guesses about a page the model could not see, kept but counted apart so a mostly-guesswork set can be discounted whole. `unplaced` counts observations that named no page. Absent on the ordinary round, where the editor noticed nothing. |
-| `editor_links_dropped` | An `href` present before that round's correction was missing after it (`iteration`, `hrefs`). A link's target came from the source **file**, not from a page image, so a dropped one cannot be recovered by looking again — logged rather than repaired, and counted into `links_dropped_rate`. |
-| `internal_links` | The delivered document contains an in-document reference that lands nowhere (`refs` fragment links in all, of which `empty` are `href="#"` and `dangling` name an `id` the document does not have, plus `ids` — up to 20 of the fragments that failed). Those three are counted per **reference**, so `refs` is the denominator of the other two and one missing section linked forty times is forty references a reader can activate to no effect; `ids` alone is the **distinct** set, because the cap is 20 and one dead target must not spend it. Measured on the bytes actually written, after every rename and every correction round, because that is the only place the question "does this reference land" has a final answer; `@`-comment markers are stripped first, since those quote model prose and an `<a>` inside one is not a link. Absent on a document where every reference resolves. The two shapes are apart because the remedies are: `empty` is a link the page agent wrote knowing it had no target — nothing to rename — while a `dangling` one had a target that moved, was never transcribed, or is in a part of the document this run did not hold. The ids are here and not in `links_unresolved_rate` on purpose: a fragment is text chosen out of the document, so it stays on the deployment while the public tally gets counts only. |
-| `delivered_markup` | The delivered document's own structure disagrees with itself (#240): `unbalanced` lists `element open/close` for every element whose end tag HTML **requires** and whose start and end tag counts differ (e.g. `table 16/15`), `tables` and `tables_without_body` count the parsed tables and those holding no row a reader receives as content (no rows at all, none outside a declared `<thead>`, or — with no header block declared — none that is anything but column headers; a body of `<th scope="row">` cells is content), and `empty_table_captions` names up to 10 of those tables. Absent when both are clean. The two halves are one question asked either side of the parser, which is why they share a line: an HTML parser repairs malformed markup before axe is handed the document, so the **bytes** are the only place an unclosed `<table>` is still visible, while a table with no rows is what survives that repair and reaches a reader. `@`-comment markers are stripped before counting, since those quote model prose — with them in, one bench document read `table 25/19` with nothing actually wrong; an unterminated `<!--` is treated as running to the end of the document, which is what a parser does with one. Elements with optional end tags (`li`, `tr`, `td`, `p`, `tbody`, …) are excluded: `<ul><li>a<li>b</ul>` is correct HTML and counting it would bury the real finding. A `parse_error` key means the table half could not be measured at all, so its zeros are not a clean bill of health (#164). |
-| `delivered_structure` | Four structural defects in the delivered document that **no rule in the gate reports** (#255), each decidable from the HTML alone: `dangling_idrefs` (an `aria-labelledby`, `aria-describedby` or `<label for>` naming an id that exists nowhere in the joined document), `dl_without_dd` (a `<dl>` holding terms and no definitions), `lang_on_void` (`lang` on an `<img>`, `<hr>`, `<br>`, `<input>` … — an element with no text at all for it to apply to, holding neither a text node nor text in an attribute: HTML scopes `lang` to an element's contents **and** to its text-bearing attributes, so `<img alt="Un graphique" lang="fr">` is correct authoring and is not counted, while the same image with `alt=""` is) and `empty_landmarks` (a `<nav>`, `<aside>`, or NAMED `<section>` with no text and no image, table or form field in it). All four counts appear whenever any of them fired, zeros included — on a line that exists, a zero says that class was looked for in this document and is not in it — plus `dangling_idref_examples`, `dl_without_dd_examples`, `lang_on_void_examples` and `empty_landmark_elements`, up to five instances each, written as `element[attribute=value]` and cut at 40 characters. Absent entirely when all four are clean, which is the ordinary document. Measurement only: nothing is repaired and no run is failed, for the same reason as `delivered_markup` — these are a class worth seeing, not a rate anyone can calibrate yet. Three of the four do reach the deployment-wide tally as `iris:structural-defect`, one row per document however many instances it had, surfaced as `structural_defect_rate` above; `lang_on_void` is left out of it on purpose (wasted output, not something a reader loses), and so are the examples — ids and language tags are text out of the user's own document and stay on the deployment. Why each is here rather than in the lint, measured against this deployment's own axe config: a dead `aria-labelledby` or `aria-describedby` is filed by axe as `incomplete` and never as a violation (`aria-valid-attr-value` is `reviewOnFail`), and a dead `<label for>` reaches the `label` rule only when the input has no other name, so the gate is CLEAN on all three; `definition-list` does report a bare `<dl><dt>Term</dt></dl>`, but HTML allows a `<div>` between a list and its groups and axe passes as soon as one is present, so `<dl><div><dt>Term</dt></div></dl>` lints clean with every definition missing; `lang` is a global attribute, so a `lang` on a void element is legal markup and there is nothing for a rule to fail; and no rule fires on an announced region with nothing in it. The ARIA rule is not promoted into the gate the way `duplicate-id-aria` is, because the rule is wider than the finding — `aria-controls` naming an element that appears on activation is genuinely undecidable statically, and promoting the id would fail runs on it. The scope is the **joined** document, not a page: a page agent writes one page at a time and a reference to an id defined on page 40 is correct in the document those pages assemble into, which is the same reason the issue's `href="#x"` check was left out. An unnamed empty `<section>` is not counted: a `<section>` is exposed as a `region` only with an accessible name, so an unnamed one is a generic container no reader is offered — and a name that resolves to nothing is no name, so `<section aria-labelledby="nope"></section>` is one finding (the dead reference) and not two. A `<main>` a page emitted for itself is deliberately NOT among these: that one is fixed rather than counted (`page_main_stripped`, #251). `parse_error` on the `delivered_markup` line means these four were never measured, so their zeros are not a clean bill of health (#164). |
-| `delivered_alt` | A placeholder where a description belongs, in the file the caller receives (#290): `generic` counts the `alt` values that are only a word for the medium (`image`, `photo`, `logo`, `null`, …), `checked` is every non-empty `alt` in the document as the denominator, and `examples` names up to five of the values. Its own line rather than a field on `extraction_complete`, because they answer different questions: that one reads the fragments the document is assembled **from**, and the review loop runs afterwards and replaces a top-level block's markup wholesale — `<img>` and its `alt` included — so a copy-edit round that guts an alt, or writes a placeholder into a block it was patching for another reason, is invisible there and visible here. Absent when there is none, like `delivered_markup` and `delivered_structure`, and for the same reason: the ordinary document needs no line. A missing line still cannot be read as a check that never ran, because `extraction_complete.alts_checked` is on every run whatever it found. Comments are stripped before the scan, exactly as `internal_links` and `delivered_markup` strip them off the same bytes: the `@unresolved` list is model-written prose ABOUT the document and quotes markup freely, so an `<img>` inside one would report a placeholder on a document whose images are all described and inflate `checked` besides. Measurement only — nothing is repaired at delivery, since the repair is to describe the picture and the page agent is the only component holding it, which is what the correction pass (`page_generic_alt`) is for. Nothing here reaches the tally. |
-| `editor_markers_changed` | The count of a `[not legible]` or `[page not fully transcribed]` marker changed across one correction round (`iteration`, `before`, `after`, plus `fewer` and/or `more`). `fewer` is expected where the editor read that region off the attached page image, and is a loss anywhere else — nothing downstream can tell those apart, and no other signal sees it at all, since the flattened view strips bracketed tokens before comparing words. `more` is a placeholder written over words the extractor did read, which no instruction in the loop allows. |
-| `editor_truncated` | A correction round's response hit the model's output ceiling (`max_tokens`, `chars` returned, plus `attached`/`of` images and `after: "images_refused"` when it was the retry that truncated). The review loop stops after this round either way, but the round itself is not given up on: what the reply already said is read (`editor_salvaged`), and only the part it never reached is re-made a section at a time (`editor_sections` below). The whole ceiling of output was billed, so this is the log's most expensive line. Since #250 the round asks only for the blocks the editor changed, so a ceiling hit here is no longer what a long document costs: it is either a document whose changed blocks really do fill a response, or — read `editor_patch` and `editor_whole_body` on the rounds around it — a model returning the whole document when it was asked for a few blocks of it. **Which of those two it was is on this line** (#277): `reply_head` is the first 240 characters of what the model did emit, `reply_tail` the last 240, and `blocks_named` counts the `"block"` keys it managed. One budget of the user's text, spent one of two ways: a fragment longer than both excerpts together is quoted at each end, and a shorter one is quoted **entire** under `reply_head` with no `reply_tail` at all — rather than reported as a head whose middle and end are missing while `chars` says there was more. `blocks_named` is a count of a key and not a parse, so a document quoting `"block":` in its own text counts its own prose; the excerpts are logged beside the count for that reason and not only for colour. Between them, an `edits` array that genuinely did not fit is distinguishable from a whole document returned out of habit — a block-size problem and a prompt problem respectively. Recorded because the round **cannot be asked again**, so the fragment is the only evidence that will ever exist about why it did not fit, and the round was billed in full; the count is the answer and the excerpts are how a person checks the count. `blocks_named` is also the closest thing here to a prediction of what the next line will say: it counts a key rather than parsing, so it is an upper bound on the edits `editor_salvaged` could recover, and a `blocks_named` well above that line's `edits` means most of the count was the model's own prose or an entry the ceiling cut. This is the user's own document coming back, so like `prose_joined`'s `word_split_examples` it stays in the run log on the deployment and never reaches `GET /v1/quality`, which gets `editor_truncated_rate` and no text. |
-| `editor_salvaged` | The truncated reply was read as far as it got, and this is what it turned out to have said (#295). The contract makes the answer a list of independent block edits, so an entry that arrived complete is a whole correction to a whole top-level node: `edits` is how many were used, `applied` how many changed their block, `unchanged` how many named a block and returned it as it was, `refused` how many could not be used (a duplicate, or a replacement that ends inside an element — each costs its own block, exactly as on `editor_patch`), and `markers` / `navigation_lost` read as they do there. `reached` of `of` is the share of the document this covers, and it is the number to read first: the blocks before it carry this round's own corrections, made by a call that saw the whole document and the page images, and the `rest` characters after it are what the section calls are then asked for. `closed: true` says the edits list itself finished — the ceiling was reached on the way *out* of the envelope, in `fidelity_observed` or in trailing prose — so every block was considered, and unless the claim was then cut back (`lost_at` below) `reached` is the whole document and no section call is made at all: the one truncation that costs a reader nothing. `edits: 0` with `closed: true` is that same answer with nothing in it: the list closed **empty**, meaning the editor considered every block and had no change to make, which is a round that converges rather than a round that failed — the document is delivered as it entered, unsectioned, and its marker says it was passed rather than lost. (`edits: 0` cannot appear without `closed`: an unclosed empty list is `no_complete_edit` below, and a list whose every edit was refused is `all_refused`.) `lost_at` and `dropped` are a claim that was **cut back** (#317), and are on the line only when one was: the block the reply emptied or handed back with less content in it than it had, which is where `reached` now stops, and how many of the reply's edits were left unapplied because they named that block or a block behind it. A cut-back claim is the case that used to be refused outright, and the change is a cost decision — refusing it re-requested every block of the document in section calls to avoid applying one edit, which on the round that filed it was 6 and 5 calls at $0.2243 each against replies holding 6 and 7 usable edits. What it trades is named on that issue: a move carrying content *backwards* leaves it in the document twice rather than losing it — and **that duplicate is delivered**, because a truncated round is the review loop's last round and the section calls see only the remainder, so nothing later in the run removes it (a feedback re-run is the pass that can). Which is why the count is here to be read rather than assumed to be zero: a deployment seeing `lost_at` often is a deployment whose delivered documents may hold duplicated content, and the remedy for the ceiling itself is still `providers.<name>.max_tokens` or fewer pages per session. `lost_at` may appear beside `closed: true`, which reads oddly and is real — the patch was complete and part of it is being re-asked for anyway — and then `rest` is non-zero where a `closed` line otherwise has none. Read `chars` against `editor_truncated`'s `chars` on the line above (they are the same number) and against `blocks_named` there. The waste this line exists to end was the largest measured in the pipeline: 24 truncated editor calls across 10 deployment rounds, $17.23 of a $158.67 bill, every dollar of it on a response nothing looked at. |
-| `editor_salvage_declined` | The reply could not be read as a prefix, and why (`reason`): `no_edits_list` (no `edits` array in it at all — the model answered with the document or with prose about it, which is a prompt problem and not evidence this document is too big for its ceiling), `no_complete_edit` (an `edits` array that opened and whose first entry never finished: the contract followed and the ceiling reached inside the *first* block — one enormous table, typically, and the only one of these that says the document cannot be answered whole. An empty list that **closed** is not this and is not a decline at all — see `edits: 0` on `editor_salvaged` above), `unknown_block` (a block number this document does not have, so the reply is not about this document), `unreadable_edit` (an entry whose `block` could not be read, which might have named a block past the cut), `out_of_order` (block numbers that jump backwards, so the blocks *between* two named ones cannot be read as deliberately left alone and the coverage this rests on is not claimable), `all_refused` (every edit read and none usable), `loss_before_cut` (the reply gave content up and there is nothing in front of the loss to keep: `lost_at` names the block it emptied or handed back with less in it than it had, and `lost_at: 0` — the very first block it claimed — is the common shape. A higher one says the same thing about a claim that started later: there was nothing usable in front of that block, either because the reply named no earlier one at all (its first edit was the lossy one, so the blocks in front of it were only ever covered by silence) or because the edits it did name there were themselves refused. This contract makes a *move* a pair of edits, and here the cut **is** a refusal of everything after it, so the source half without its landing half would delete content nothing downstream can miss. A loss with usable edits in front of it is **not** this and is not a decline at all — since #317 the claim is cut back to that block and those edits are applied, which is `lost_at` on `editor_salvaged` above). The counts that decided it are on the line, with `reached` and `of` where they are known — `reached` on a decline is the whole claim the reply made, since nothing was applied and there is no shorter prefix to report. The round then takes the route it took before this existed: the **whole** body, a section at a time (`editor_sections`, with no `covers` field). The last three are the strict ones, and being wrong about them costs a longer route rather than a document. |
-| `editor_sections` | A round that could not be answered whole is being re-made a piece at a time: the body was cut into `sections` pieces of at most `budget` characters, sized from the `chars` that response actually returned, and they are corrected `concurrency` at a time. The budget is measured rather than estimated — nothing here is computed until the ceiling has actually been hit — and it is deliberately well under what came back, because a correction adds characters. `covers: "remainder"` says this is the tail of a salvaged round rather than the document: `chars` on such a line is the size of what the reply never reached, not of the body, and the blocks before it are already corrected (`editor_salvaged` above). Absent on the whole-document path, which is what every log before #295 holds. |
-| `editor_section_failed` | One section could not be corrected (`section` of `of`, and `reason`: `truncated` or `too_large` for a section whose own response or request did not fit, `no_output` for a reply with no usable HTML in it, `shrank` for one that parsed but came back with under half the section's prose — the same floor the ordinary round applies to the body it assembles, with the same four sizes and `floor` on the line, see `editor_shrank`). A `truncated` section carries the same `reply_head` / `reply_tail` / `blocks_named` as `editor_truncated` above, on the same terms — deployment only, a few hundred characters — with one difference in how to read them: a section round asks for the section's corrected HTML and not for an edits list, so `blocks_named` is 0 on a section that answered the request it was given, and it is `reply_head` that says whether it was. A count above 0 here is not noise but the same prompt problem in its other form — the whole-document contract's shape coming back to a request that never used it. `covers: "remainder"` where the sections are the sections of the **tail** a truncated reply never reached rather than of the document — the same marker `editor_sections` carries, on the same terms, because `section 2 of 3` means two different things without it. That section's **original text** goes back into the document, so the cost is that section and not the round. Anything that is not a size failure — a stall, a stream error, a bad key — is not logged here and still ends the run. |
-| `editor_sections_declined` | The round could not be re-made a section at a time, and why (`reason`): `unmeasured` (no character count to size a budget from), `budget_too_small` (the response was cut so early that the sections would be too small to be worth asking about), `budget_exceeds_body` (the response was *longer than the document* — a reply that ran away with itself, so the sections would be one section and the same request), `indivisible` (the piece to correct is over budget and has no top-level boundary to cut at — one enormous table, say), `too_many_sections` (more requests than one round may spend, with `sections`, `max` and `budget`). `covers: "remainder"` means this was the tail of a salvaged round (`editor_salvaged`), and it changes what the line costs: the blocks the reply reached keep their corrections and only the remainder goes uncorrected. `budget_exceeds_body` is not reachable there — a remainder short enough to fit under the budget is *asked for* in one call, because it is strictly smaller than the request that truncated and carries no images, which is the whole of that reason's objection. Without `covers`, the round is discarded as it was before any of this existed: the document that entered it is delivered with that round's issues unresolved. |
-| `reader` / `editor` | Per-iteration review-loop progress: the Reader's `issues` count, and whether that round's correction `changed` the document. A round answered piece by piece carries `sections` and `corrected` as well, which is how a log tells one from an ordinary round (`editor_patch`) — and how much of the document the corrections actually reached. On a **salvaged** round it carries `blocks_reached` of `blocks` too (the pair `editor_salvaged` calls `reached` and `of`), and then `covers: "remainder"` beside the section counts, because those sections are the sections of the tail the reply never got to and not of the document (#295): a truncated round that was salvaged and sectioned corrected `blocks_reached` blocks with the whole document in view *and* `corrected` of `sections` pieces of what was left. Without those fields this line — the one a reader greps per round — would read as document-wide coverage on the one round where the section counts are over something smaller. A truncated round that rescued nothing has **no** `editor` line, which is how it is told apart from a round that ran and changed nothing (`review_converged`). `chars_before` / `chars_after` and `text_chars_before` / `text_chars_after` are the size of the body that entered the round and the size of the one that left it, whole and with the markup taken out — the same two readings `page_corrected` carries, so a round and a page correction can be read against each other. What the round produces is adopted for the body **verbatim** — each block the editor returned in place of the one it named, every block it did not name carried across character for character — so without these the body that entered a successful round is gone and the ratio it moved by is unrecoverable: before they existed the distribution of a legitimate round was measurable only on the rounds that FAILED, which is three samples on one document (issue #174). Both pairs, because a length alone cannot say whether a round lost content or lost wrappers: markup-only work leaves the prose pair equal and moves the whole-fragment one, and a round that deleted a paragraph moves both. Both published ranges are whole-fragment ratios, and they are not both this line's quantity: 0.62–2.32 over 265 page corrections is delivered-against-given, as here, while 0.982–0.984 over the three rounds is the *reply* against the body that went in, reconstructed from `agent_call`. This line reports 1.000 for those same three rounds, because a reply with nothing usable in it is a body handed back untouched — so the published span and a fresh one are the same rounds measured two ways. The prose pair is what the floor on this path is read on, and the four rounds that first carried it are what placed the number: they land at 0.997–1.006 of the body they were given, and a reply under half is refused (`editor_shrank`). What the three earlier rounds *do* show beyond length is structure: one of them dropped 5 of 7 lists and 13 of 47 list items while its length moved 1.6%, which is an argument for a structure count rather than for either size — so `structure_before` / `structure_after` carry one, counting headings, paragraphs, lists, items, terms, definitions, tables, captions, rows, header cells, data cells, images and links in the body on each side of the round. Full counts, because a ratio needs its denominator. Grouped, and `h1`-`h6` into one number in particular: the page agent's rules promote a sub-topic the page named, make a printed group label the parent of the cluster under it, and put a procedure's step one level under its heading, so a round that re-levels a section is doing its job and a per-level count would report every one of those as a heading lost. What no rule asks for is a heading that stops existing, which is what this number sees. Since #271 that is acted on and not only counted — on the other line and at a different grain: `editor_patch`'s `navigation_lost` reads the same fold per BLOCK, where the question is whether one replacement gave up its heading, not what proportion of the document's headings are left. That is why a fall can be read there when no ratio can be placed here: a block's heading either survived its rewrite or it did not, and there is no denominator to be wrong about. Read the residual as unwatched, not as covered: a round that rewrote every heading to the *same* level leaves no downward skip, so the re-lint's `heading-order` is silent on it (that rule fires only where a level goes down by more than one), `headings` is unchanged, and the prose pair is equal — every level distinction gone with nothing on the line to say so. Header cells are counted APART from data cells for the same missing-second-opinion reason in the direction that costs nothing: no axe rule fires on a `<th>` demoted to a `<td>`, which is the loss that strips a table's header association from a screen reader, so folding the two would report that round as no structure moved. `<caption>` is counted for the same reason. Wrappers (`<section>`, `<div>`) are not counted, since unwrapping a mis-structured page is one of the corrections this loop is for. Read them knowing which way that evidence points, because the next bench round settled it and it went the other way: on those three rounds the structure counts were already the *less* stable number, moving in both directions on rounds that were working, and the first round to log all three had one turn a 55-item `<dl>` into list items — `terms` 55 → 3, a ratio of 0.055 — while its prose moved 0.3%. So no threshold on a structure count both permits that round and refuses a reply carrying a fifth of the document, and the floor reads the prose pair instead (`editor_shrank`). All three readings stay on the line regardless: two of them are what a person reads once the third has fired. The sizes are the **body**: the wrapper and the `@`-comments after `</main>` are added downstream and are not what any round returned, and they are taken after the deprecated-role strip, so they describe the body that ships. On a sectioned round they are still the whole body's, which is why `sections` on the same line matters to anyone reading them as a distribution: one section's *reply* is a fraction of the body it belongs to (0.016–0.379 on the bench rounds) because it is one section, and a round whose reply carried nothing usable reports equal sizes by construction, with `editor_no_output` beside it to say so. |
-| `lint_unavailable` | axe-core could not run on a body no `assembly` line covers, with the same `lint_error` / `lint_error_where` / `lint_error_name` / `lint_error_stack` fields that line carries. `stage: "correction_round"` is the review loop's re-lint of a body an editor round changed, with the `iteration` that produced it; `stage: "feedback_relint"` is a feedback re-run that skipped extraction, where there is no assembly to report one. The document ships with **no accessibility verdict** either way: the loop had no violations to work from, and the delivered HTML says so in an `@lint-unavailable` comment. |
-| `lint_debris` | The linted body carried attributes whose **names no valid markup produces**: `malformed_attributes` (how many, exact), `malformed_attributes_removed` (how many of them the lint had to take out of its own copy of the document for axe to run at all — absent when none, which is the ordinary case), and `malformed_attribute_names` (up to three of the names, removed ones first, each cut at 40 characters). The same fields appear on the `assembly` line; this event carries `stage: "correction_round"` (plus `iteration`) or `stage: "feedback_relint"`, matching `lint_unavailable`. Absent when there were none, so a line carrying it means something. These are evidence about a bug **one stage earlier**, not a defect in the document: an attribute named `1\"` is what the HTML parser makes of `aria-label=\"Page 1\"` arriving with its JSON escaping still on it, and the same leak puts `\"doc-pagebreak\"` in a `role` and `\"page-1\"` in an `id` (#233, #234) — an invalid role, a marker that announces the wrong text, and a dead target for every reference to it. Those are findable only by reading the document; this is a number. A removal is not cosmetic: axe escapes an attribute name it builds a selector from, a name beginning with a digit escapes to `\39`, jsdom's selector engine splices the name into JavaScript source where that is an octal escape, and the SyntaxError killed **the entire rule set** — one such attribute anywhere in a 25-page document and there was no verdict on any of it (#257). So `malformed_attributes_removed` on a line is a run that would otherwise have had no verdict on any page. Everything else is counted and **left in place**, because removing an attribute takes the rules that read it away too: a name that lost a quote (`aria-label"Note"`) is reported by `aria-valid-attr` — critical, wcag2a — *because* it is malformed, and removing it turns that document into a clean pass. The document that ships keeps every byte either way, including the removed ones: what the attribute was meant to be is not this stage's to decide. |
-| `editor_patch` | What one ordinary correction round's reply actually did to the body, block by block (#250). The editor is shown the body as numbered top-level blocks and answers with the blocks it changed, so this line is the whole accounting: `blocks` in the body, `edits` named in the reply, and how many were `applied`, `deleted` (a block emptied with `"html": ""`) — those four always, so a round that named nothing is still on the record. Then, only when non-zero, what was not used: `unchanged` (a block returned byte-identical to the one it replaces — paid for and delivered as it stood), `unknown` (block numbers that are not in the body: out of range, negative, or not whole), `duplicate` (a second edit for a block already named; the first is kept), `incomplete` (a replacement whose markup does not close what it opens, which is what a reply cut off mid-block looks like), `markers` (`<!-- @block N -->` comments copied back into a replacement and stripped out of it) and `unreadable` (entries in the array that are not an edit at all). Four of those are a **refusal** — `unknown`, `duplicate`, `incomplete`, `unreadable`: that block keeps its original text, and the rest of the reply is still applied. The other two are costs on the record rather than rejections, which is why they are named apart: an `unchanged` block is delivered exactly as it stood, and a stripped `markers` comment leaves a replacement that is then applied like any other. `incomplete` covers both ends of the same question — a replacement that leaves an element open, and one carrying an end tag that closes nothing (`</figure><p>x</p>`, which a parser ignores and which would splice an unbalanced tag into the delivered bytes for `delivered_markup` to report). `shrunk` counts applied replacements carrying less of the document than the block they replace — on the line whenever it happened, because that is one of the ordinary ways this contract removes content the document printed twice. Read as the **prose**, plus the two things a block holds that carry no words — `<img>` and `<a>` — plus one structure count, `headings`. The prose, so that unwrapping a mis-structured block — shorter markup, every word kept — is not counted as content leaving; the images and links because a source block that hands back its figcaption and drops the image is a loss no prose comparison can see, the words being unchanged, and an image with its alt text leaving the deliverable is worse than a sentence and not smaller. Headings for the same reason in the third direction (#271): a heading rewritten as a paragraph of the same words keeps every size on every line equal and takes away the only means a screen-reader user had of finding that content. `h1`-`h6` are folded into one number, so the re-levelling this loop asks for does not move it, and the one heading removal the prompt does sanction — a title the pages reprinted — takes that title's words with it and is already a prose shortfall. Still not every structure count: splitting one paragraph in two, merging two the extractor split across a page turn, or correcting a table's headers (`<td>` → `<th>`, which takes `cells` down by exactly the number corrected) are corrections this loop asks for and each moves a count down while taking nothing out of the document. `navigation_lost` is the same reading at a different grain, widened past the one count that gates to the two that do not: `{ "headings": 1, "items": 2, "rows": 1 }`, how many of each stopped existing, read on the **joined body** rather than block by block and present only where that body's prose did **not** shorten. Two conditions, each doing work. The grain, because a reorder is a pair of edits under this contract — `EDITOR_SYSTEM` sanctions "reorder blocks", so a heading moved down past a paragraph is one block giving it up and another taking it — and a sum of per-block falls would report a document that kept every heading as having lost one. `shrunk` is deliberately the other way round, per block, because its job is to spot the source half of a move so that a refusal on the landing half cannot take the heading with it. The prose condition, because a structure falling alongside a word loss is the ordinary shape of every deletion the prompt sanctions and is already `shrunk`, so counting it here too would put the sanctioned case and the silent one in one number and leave neither readable. At this grain that condition is coarse and knowingly so: one sanctioned deletion anywhere in the reply silences the count for the whole round, so a round that drops a reprinted title in one block and demotes a real heading in another logs nothing here. The alternative is worse rather than better — two headings are gone, one of them legitimately, and nothing in the counts says which — and since this number is a sample used to decide whether `items` and `rows` can gate, a filter that under-collects is right where one that over-collects is not. Since #331 the `headings` half of this reading is no longer only a reading, and that coarseness is what it costs: a body that would have carried fewer headings than the body it was given, with its prose no shorter and nothing refused beside it, has the blocks that dropped them handed back and the rest of the reply applied (`headings_reverted` below), but the round that demotes one real heading *and* drops a reprinted title takes words with it, so nothing appears here and nothing is handed back here. Per-block `shrunk` sees that demotion, and turns it into a refused round only where the same reply also holds a refusal (`refusal_with_loss`) — so the round that is both sanctioned and silent in one reply is still the shape this contract cannot tell apart, and it is the reason the count above under-collects rather than over-collects. `items` and `rows` are reported without gating, because there the content can land in a DIFFERENT structure a reader can still navigate with every word intact — a `<ul>` rewritten as the `<dl>` the page rules ask for takes `items` to 0, and a list mis-extracted as a single-column table, corrected, takes `rows` to 0 — so reading either as a loss would report a working round as damage. A grouped total does not rescue them: summing the list-ish counts makes `<ul>` → `<dl>` rise but makes the measured `runs-231` round (a 55-item `<dl>` rewritten as list items) fall. What would settle it is the rate at which a working round moves them, which no round on file measures, so a line carrying `navigation_lost` with no `shrunk` beside it is that population being collected. That population is now collected on the other two apply paths as well, under its own line (`editor_navigation` below, #375) — this reading was computed here and only here until then, so a rate quoted off this field was a rate over the block-patch rounds alone and did not name that as its population. The evidence for the headings half: 13 of 151 bench rounds lost headings and 5 of those lost no text at all (#271, measured outside this repo in equalify-iris-bench's `editorround.mjs`, run `runs-editor-1`). One case the headings reading counts and should not, named rather than compensated for: `EDITOR_SYSTEM` also sanctions "correct labels and table headers", so a field label the extractor emitted as `<h4>Name</h4>` corrected into a `<label>` inside the same `<form>` block keeps every word and takes `headings` down. Discounting a fall wherever `captions`/`terms`/`header_cells` rose would cover a heading turned into a `<caption>`, a `<dt>` or a `<th>` but not that one, since `<label>` and `<legend>` are not counted at all — so the cost is accepted rather than compensated for, and since #331 it is paid with no refusal needed beside it. That is why what it costs had to come down to one block: the `<form>` block holding the corrected label is handed back with its `<h4>` intact and every other correction in the reply — an alt text, a table header, a split paragraph — is applied and delivered. `editor_headings_gated_rate` in §0c is what says how often it happens. `discarded` names the case where the reply is NOT applied in part, and which of the three it was: `all_refused` (edits were sent and not one could be used), `refusal_with_loss` (a refusal in the same reply as a block that gave content up — `deleted` or `shrunk`) or `headings_lost` (#331: `navigation_lost` on this same line reports a `headings` fall — the body this round would have delivered has fewer headings than the body it was given and its prose is no shorter, with nothing refused anywhere in the reply, which is what the first two need and this one does not — **and** handing back the blocks that dropped them could not be shown to fix it, because the reply also moved a heading somewhere else (`headings_gained`), or a block that dropped one gave content to another edit in the same reply and so could not be handed back (`headings_dropped`), or left nothing to apply once they were handed back; the ordinary heading fall is `headings_reverted`, not this). The second is there because this contract makes a MOVE a pair of edits — the block the content lands in, and the block it came from — so taking the source half and refusing the landing half deletes content that nothing downstream can miss: the size floor cannot see one paragraph, and the next Reader round reads a document that no longer mentions it. Both forms of the source half count, because the prompt offers both ("with what is left of it, or `""` if nothing is"), and the shrinking one is the commoner: a move usually leaves something behind. Either way the body is handed back untouched and the next round is a retry (see `editor_no_output` for why that is not convergence). Each is an ordinary correction on its own, so `refusal_with_loss` fires only on a reply that ALREADY has a defect in it: the cost of being wrong about whether two such edits were really a pair is one round, and the cost of being wrong the other way is in the deliverable. The heading fall is the one that acts on a reply with no defect anywhere in it, and it is the same trade at a finer grain: every edit applied, nothing refused, not a word missing, and the document that would have shipped has lost part of the outline a screen-reader user navigates it by — a barrier of exactly the kind this pipeline exists to remove, introduced by the pipeline. So what is held back is the block, not the round: `headings_reverted` lists, in ascending order, the block numbers whose own heading count fell **and that gave nothing to another edit in the reply**; those blocks keep their original text, the reply is re-applied without them, and the round is delivered with everything else it corrected. A block may only be re-seated when nothing else in the reply is now holding what it held, and that has two failure modes, which are the same hazard from opposite ends. `headings_gained` appears in place of `headings_reverted`, carrying how many headings arrived somewhere they were not, when the thing that moved was a heading — a reply that both moves one and loses one, which this contract sanctions ("reorder blocks") and which moves three blocks' counts for a document that fell by one, so handing all three back would leave the moved heading in two places at once. The other end is the heading's WORDS moving into another block as something no structure count counts: the extractor's stray `<h4>Name</h4>` sibling emptied while `<label for="name">Name</label>` is seated inside the `<form>`, which keeps every word (so the fall reads as ordinary) and gains no heading anywhere (so `headings_gained` is 0). A block that **gave what it lost to another edit in the same reply** is therefore never re-seated: the words it no longer has, or an `<img>` or an `<a>`, turning up where another edit put something new. Where the words WENT, and not whether they changed, which is the narrowing #376 asked for — read as "are these the words it had", a block that demotes a heading and fixes a typo in the same `<div>` was unseatable too, so a reply whose only demotion was that block was refused entire with nothing having moved anywhere. A departure is still an inequality and not a shortfall, because a block can shed the heading's words and grow in the same edit by rewording what survives, and a "did it get shorter" test sees no departure at all. Nor is the re-seat licensed by size, which is the comparison that suggests itself and is refuted by measurement (#376): the re-applied body's prose against the fully patched body's is 34 against 34 on the safe shape and **24 against 59** on the duplication hazard, so `kept <= patched` passes the hazard by a mile — the edit that grew is the one being reverted. Arrivals are counted rather than looked up, and at word grain rather than as text: the landing block may have had the word already, and the words are re-expressed where they land (`Name` seated as `Name:`), so a set comparison or a string comparison would license exactly the re-seat that prints them twice. On those rounds the line carries `headings_dropped` instead: every block whose own heading count fell, which is the reading of what the model did rather than of what could be salvaged — where some of those blocks could have been handed back and were refused with the round anyway, they are named beside it as `headings_abandoned`, so subtracting one from the other leaves the blocks that could not be handed back and the presence of the field is the rate at which refusing the round throws a safe salvage away. A round whose revert left nothing to apply, or did not bring the count back, is also refused — the re-check is fail-closed, and it is read **per block** rather than on the joined body, which is the one place in this reading where the grain has to be the other way round. Only the blocks that could be handed back were, so a block that dropped a heading *and* gave its content to another edit keeps its edit and keeps its fall: one reply that demotes in two places — one of them the `<label>` migration — lands there, and it is the case above reached from the other side, so it logs `headings_dropped` like the other. The joined reading cannot be the test here, because it is silent wherever the body it reads is shorter in prose and **the revert is itself an edit that can get under that floor** — hand back the block that added prose and the re-applied body can be shorter than the one that came in, so a fall that was visible before the revert reports nothing after it, and the held block's demotion would ship (found in review of #376). `headings_recheck: true` is beside `headings_dropped` only where the joined body lost a heading and NO block still dropping one accounts for it, which is unreachable by construction — the joined count is the sum of the blocks' own — so its firing at all is the finding. All of them log `discarded: "headings_lost"` and hand the body back untouched for a retry, and which of the three it was is readable from the line: `headings_gained` (a heading moved), `headings_dropped` (its words moved), or `headings_reverted` present beside `discarded` (blocks were handed back and nothing was left to apply). The first two are mutually exclusive on a line. What the reading can be wrong about is a heading correctly re-expressed as something this count does not count (the `<label>` case above, or a reprinted title dropped in a way that left the prose no shorter), and being wrong now costs that one block on that one round rather than every other correction in the reply — which is the principle `applyBlockEdits` is built on, that an unusable edit costs the block it was about and not the document's corrections, and a gate is not exempt from it. An editor that demotes on every round therefore still delivers what it corrected on the way, round after round, instead of spending `max_review_iterations` re-sending the same body and shipping the document as it entered with its issues in `@unresolved` (`stopped_at: "cap"`) — and the run log names the held-back blocks round by round, which is a statement about the prompt or the model. What #331 asked for and this deliberately does NOT do is the narrower predicate — refuse the fall only in a block no reported issue asked about — because `ReviewIssue` attributes an issue to the source **pages** it was found on and nothing binds an edit's block to the issue it answers, so that reading is not available to write. The counters are the point of the design: the failure this contract could have had is a replacement landing on the wrong block, which is well-formed markup in the wrong place and invisible to everything downstream, so the block number is written above each block for the model to copy rather than counted by it, and every number that does not resolve is reported here instead of being guessed at. |
-| `editor_whole_body` | The reply carried no `edits` array but did carry an `html` string, so the round was read as the whole corrected body — the contract every round used before #250 (`blocks` in the body it was given, `chars` in the reply). Accepted rather than refused because refusing it spends the round, and on a model that falls back to a familiar shape under load it would spend every round of the run; a whole body arriving this way goes through the same `editor_shrank` check it always did. It costs one thing the old contract could not, and `markers` is that cost measured: the document this model was SHOWN carries a `<!-- @block N -->` line above every top-level element, so the likeliest whole-body reply is that document retyped, markers and all. They are stripped before the body is taken and counted here. Adopting them would write Iris's own request scaffolding into the delivered HTML, and it compounds — a comment is a top-level node, so the next round would be shown the markers as blocks in their own right, the body would double every round, and a document that never stops changing never converges. A run where this line appears on most rounds is a model not following the block contract, which is worth knowing about a deployment even though the document is fine. |
-| `editor_no_output` | The Copy Editor's reply carried no usable body (`chars` of text came back), so the round kept the document it was given. A call paid for and nothing said — which is why it does not end the loop: the next round is a retry, not a repeat. |
-| `editor_shrank` | The body a correction round produced came back with **less than half the prose** of the one it was given, so it was refused and the round kept the body it was given (`chars_before`/`chars_after`, `text_chars_before`/`text_chars_after`, and the `floor` divisor). `stage: "patch"` is the ordinary round, measured on the **joined** body rather than on the reply — the reply is a few blocks, and the question this floor asks is about the document those blocks assemble into — and it carries `deleted` and `shrunk` of `of` beside the sizes, because that is what a shrink under the block contract is made of: blocks emptied with `"html": ""`, and blocks returned with less in them than they had, in a reply where each edit on its own was well-formed. Both, because this path is only reached when nothing was refused — a refusal beside a block that gave content up is `discarded` on `editor_patch` before the floor is read — so the commonest reply that lands here empties nothing and returns blocks holding a fifth of their prose, and `deleted: 0` alone would say nothing about where the document went. With no `stage` the round returned a whole body, where the model's `html` is adopted for the document with nothing compared against what went in and the blast radius is the deliverable — a reply that answered about one section, or summarised, or quoted the contract back after answering, arrives shaped like a corrected document (issue #174). Reported the same way as `editor_no_output` and for the same reason: nothing came back that can be used as *this* document, so the next round is a retry rather than a repeat and this is not a `review_converged`. Read on the **prose**, not on the characters and not on the structure counts, because only the prose pair is stable on a legitimate round: the four rounds that record all three readings land within 0.6% of their input on it, while unwrapping a mis-structured document keeps every word and loses half the bytes, and one of those rounds rewrote a 55-item `<dl>` into list items — a ratio of 0.055 on `terms` — while its prose moved 0.3%. Bodies with under 1,000 characters of prose are not judged at all: the legitimate deletions are fixed-size (a `[page not fully transcribed]` marker is 28 characters, a duplicated heading 20–60), so on a short body the floor would fire on the editor doing its job. |
-| `editor_navigation` | The structures a reader navigates by, counted on a reply that was **adopted**, for the two apply paths that do not gate on the count (#375). `stage: "whole_body"` is the pre-#250 contract's reply taken as the whole corrected document (`editor_whole_body` above); `stage: "section"` is one section of a sectioned round, with `section` of `of` — and `covers: "remainder"` where those are the sections of the **tail** a truncated reply never reached rather than of the document (`editor_sections`, `editor_section_failed`, and `editor_salvaged`'s `covers` are the same marker; a rate grouped per round off a line without it would read `of: 3` as "the document was cut in three"). The reading is `navigation_lost` on `editor_patch`, and until #375 it was computed there and nowhere else — so a `<h2>` rewritten as `<p><strong>` fell silently on both of these paths, and the only check either had cannot see it by construction: `editor_shrank`'s floor is a prose floor at half the document, and a demotion keeps every word and grows the bytes. On the sectioned path that matters most, because a sectioned round is the loop's **last** round (`editor_sections`), so what falls there ships with no retry behind it. **Nothing is refused on this line, and that is deliberate rather than pending.** #331's remedy is a block handed back, and neither path has blocks: a whole-body reply is one string and a section reply *is* the section, so the only refusal expressible is the whole thing — which is what #331 did in its first version on the patch path and what it was changed away from, because on the commonest false positive (a stray `<h4>Name</h4>` corrected into the `<label>` axe's `label` rule asks for) it threw away every other correction in the reply, every round, until the budget ran out. Doing that here would be worse: it would cost a whole section's corrections, on the round that has no successor. What has to come first is the rate, and this line is the rate. **It prints on every delivered reply**, counts or no counts, because a rate needs its denominator on the record and a line that appeared only when something fell could not tell a round nothing fell on from a round that never took this path — so a clean whole-body round is `{"stage": "whole_body"}` and that is a row in the denominator. `headings`, `items` and `rows` appear only where each fell, and only where the reply's prose did **not** shorten; where it did, `shortened: true` is on the line **instead** of the counts, because the reading is silenced there — a deletion the prompt sanctions takes its own words with it, which is the ordinary shape of a correction rather than damage — and an empty reading would otherwise read as "nothing fell" when it means "not asked". The grain is the unit the reply was about, so the sectioned path reads each section rather than the joined body. That is sound here and finer than the patch path can manage: sections are corrected independently and joined, so no heading can move *between* them, and the reorder hazard that forces `navigation_lost` to be read on a whole body does not exist. It is also cheaper in the one way the patch path's grain is expensive — there, one sanctioned deletion anywhere in a reply silences the reading for the whole round; here it silences that section, so a demotion in section 3 is still on the record. Not folded into `editor_headings_gated_rate` in §0c: that rate counts documents where something **was** handed back, and adding rounds where nothing was would make a signal about a working guard into a mixture of that and a reading nobody acted on. |
-| `deprecated_roles_stripped` | A deprecated ARIA role was removed from an element whose own role already said it — `roles` (the set) and `nodes` (how many attributes went), with `stage: "assembly"` for what extraction produced, `stage: "correction_round"` plus `iteration` for what an editor round introduced, or `stage: "feedback_prior_body"` for one already in a stored body that a feedback re-run picked up without re-extracting. ARIA deprecates exactly three roles — `directory`, `doc-biblioentry`, `doc-endnote` — all folded into list semantics, so an `<li role="doc-endnote">` inside an `<ol>` is announced identically without it and axe's `aria-deprecated-role` has nothing left to report. **This line is the only trace.** The delivered document is clean and the lint that would have named the role now finds nothing, so a run log with this line in it is the page agent's FOOTNOTES rule not being followed (`stage: "assembly"`) or the Copy Editor introducing markup nobody asked for (`stage: "correction_round"`) — which is how issue #187 shipped: axe reported the role, the editor was told, it rewrote five sections, and the role survived. The strip is deliberately narrow: the role is removed only where the host element already provides it, so a `<div role="doc-endnote">` is left to fail the gate, because deleting it there would leave nothing marking the element as a note at all and the remedy is to make it a list item. **The host table is not the only thing that narrows it**: it shares its attribute locator with the row below, so the shape that row declines to edit — a `role` whose unquoted value runs into a quote — is declined here too, and a **repeated** `role` is handled here the same way, by emptying the attribute rather than deleting it so the second copy cannot be promoted. Both are set out in that row. |
-| `invalid_roles_stripped` | A `role` naming something that is **not an ARIA role at all** was removed — `roles` (the set, spelled as the document spelled them) and `nodes` (how many elements were edited), with the same three `stage` values as `deprecated_roles_stripped`. The case this was built for is `role="doc-footnotes"`, which does not exist: DPUB defines `doc-footnote` for one note and `doc-endnotes` for a collection, and never a plural of the first, so a model following the footnote rule generalises from the `doc-endnotes` example beside it and invents the name. axe reports that as `aria-roles` at **critical** — the most severe thing this gate says about any document Iris produces — and it has reached a delivered `output.html`, on a round where the lint had degraded to *did not run*. **This line is the only trace**, on the same argument as the row above, and it is the harder evidence of the two: `doc-endnotes` is a real role reached for in the wrong place, while a name like `doc-footnotes` was never in any specification. Unlike the deprecated strip this one is not narrow, and does not need to be — assistive technology already ignores an invalid role and announces the element's own, which is exactly what it announces with the attribute gone, so no element can lose anything by the removal. **That argument holds of a role token and of nothing else, so the attribute has to be located as a parser locates it** — by walking the start tag's attributes as `name(=value)?` pairs — and not by searching the tag for something shaped like `role=`. A search matches inside another attribute's *value*, and the values on these elements are prose: an `alt` reading "each user and role = admin, editor or viewer" put `admin,` where a role name goes and the word was cut out of the accessible name. Nothing can report that loss — the name is still non-empty and not generic, so the gate sees a clean element — and this very line would have named the eaten word as an invented role, blaming the page agent for it. The row above shares the locator and was reachable the same way, on `<ul aria-label="the role=directory column">`, because `directory` is an ordinary English word and `<ul>` is one of its hosts. What the removal does not do is NAME the block: a stripped `<section role="doc-footnotes">` is an anonymous `<section>`, which is compliant, and the page agent's FOOTNOTES rule is the half that says what to write instead (`<aside>`, `<footer>`, a bare `<ol>`, or `<section aria-label="Footnotes">`). Which names count as real is asked of axe rather than listed in Iris, so this strip and the gate are one judgement, and asked case-folded, because the rule folds a role token and the underlying predicate does not — `role="DOC-ENDNOTES"` is a document the gate passes and is left alone. **One shape is declined rather than stripped**, and there the document is passed through untouched and the gate goes on reporting the role: a `role` whose unquoted value runs into a quote, which is what the JSON-escaping leak (`<hr role=\"doc-pagebreak\" …>`) delivers. Editing that would cut one character out of the middle of an attribute; `lint`'s `malformed_attributes` still counts and names the debris. **A second shape is edited but not deleted: a repeated `role`, where the attribute is left in place with an empty value.** Deleting it would *promote the second copy* — `<div role="doc-footnotes" role="main">` computes to generic today, since the parser keeps the invalid first value and discards the duplicate, and deleting the attribute would leave `<div role="main">`, an element handed a landmark it never had (`aria-roles` at critical traded for `landmark-main-is-top-level` and `landmark-no-duplicate-main`). A removal that puts the next attribute into effect is not the removal this row's argument is about. `role=""` avoids it without giving the strip up: ARIA treats a value with no valid token as no role at all, so the element computes to exactly what it computed to before and the gate reads it clean, while the attribute stays in the position the parser reads. Measured on all four shapes rather than argued, including `<ol><li role="doc-endnote" role="listitem">` and `<ul role="directory" role="list">`, which the row above delivers clean by the same mechanism. |
-| `page_main_stripped` | A `<main>` a page emitted for its own content was taken out of the body, because `wrapDocument` puts the assembled body inside one and a `main` inside a `main` takes away the landmark a screen-reader user jumps to in order to skip the furniture (issue #251, 18% of page answers). `unwrapped` (a bare `<main>`, tags removed and children promoted), `downgraded` (one carrying attributes, rewritten to a `<div>` keeping them, since unwrapping it would drop the `lang` the document's root declaration is derived from or an `id` an `href` elsewhere resolves to) `dropped` (a stray `</main>` closing nothing, deleted) and `declined` (a `<main>` nothing closed, left in place), with the same three `stage` values as `deprecated_roles_stripped`. **This line is the only trace of the first three counts**, exactly as with the role strip: the delivered document is clean, and a run log with this line in it is the page contract's shell sentence not being followed (`stage: "assembly"`) or the Copy Editor supplying a wrapper it was told not to (`stage: "correction_round"`). `declined` is the one that ships: the element's extent is whatever the parser decides, so there is no correct edit for an unclosed `<main>`, and `landmark-no-duplicate-main`/`landmark-main-is-top-level` report it in the gate. The unpaired END tag is not left, for the reason that reverses: a parser discards it, so nothing is being weighed — and it is the one shape no rule reports, because inside the shell it closes the document's own `<main>` early and every element after it is delivered outside the landmark with the lint clean. That escape predates this rewrite; what would be new is a `declined` count promising a violation nobody can find. A `role="main"` on an element that was never a `<main>` is not counted here at all and goes straight to the gate, for the reason the role strip stays narrow. |
-| `page_markers` | Page-break markers were checked against the document's own numbering, and any label naming the **position of the image in the file** instead of the number the page prints was removed (issue #333). `markers` found, `readable` (labels that parse as a numeral), `unreadable` (a sectioned folio — `A-3`, `M-16` — plus markers carrying no label at all), `systems` (one entry per numbering system that produced at least three markers, `arabic: offset -11 on 22 of 23` where an offset was acted on, or one of the two ways nothing was: `arabic: no offset holds 8 markers (best: 3)` where no offset held both a run of three and a majority, and `arabic: offset 0 on 8 of 10, 8 of them repeating their own filename` where the check refused this document), `stripped` (one entry per label removed, `page 52: "Page 52" → 38`, cut at 40 characters, with the derived folio omitted where the derivation computes below 1), `departures` (the shape those removals form, one entry per offset they sat at — `arabic: 1 removed at offset -50, page 2` against `arabic: 6 removed at offset 0, pages 1-6 (every marker in that span)`), `off_mode`, `undecided`, `unchecked`, and `stage: "assembly"`. **The number is checkable because Iris supplied it**: the page agent is handed `filename: acir-p052.png, page 2 of 25`, so a leak can only be one of two numbers, and the one tested is the FILENAME's — its **last integer**, which is the part Iris writes. A label is touched only when it repeats that number, AND its numbering system's own modal offset says the folio is something else, AND the markers holding that offset do not repeat their own filenames. The last integer and not every integer, because `<base>-p<N>.png` takes `<base>` from the uploaded file's own name: a check reading all of them finds the label `Page 1` written in `volume-1-p13.png` and takes a true page number off a document whose only distinction was being called `volume-1.pdf`. The third condition is what a document is refused on — where the honest majority repeats its own filenames, a label repeating its filename is the shape of a CORRECT label there and the test carries no information, which covers both a caller who names images after the printed folios and a plain report whose sheets really do print their own submitted positions. Three markers to ask and three agreeing to act are also different gates: a strict majority of three markers is two, so without the second `Page 1` and `Page 2` would hold an offset and delete `Page 9`'s number, and the smallest document that can lose a label carries four markers. The other half, `page N of M`, is deliberately not tested: replayed over 61 chunks of paid rounds this removed 29 labels, all 29 repeating the filename, and the only label that ever matched the position alone was CORRECT — a round re-submitting a non-contiguous subset of a rendered document, where the sheet printing `iv` happened to arrive 4th. Where Iris rasterizes a whole PDF itself the two numbers are the same one anyway (`<base>-p<N>.png`), so what is uncovered is a caller uploading images whose names carry no position — counted as `unchecked`, since a marker with no number to check against is not one this agreed with. Roman and arabic are counted apart, because a document with both has two offsets and a pooled reading would both exempt a `Page xv` leak and read correct front matter as a departure. **The label is removed, not corrected, and the `id` stays.** The derived folio is right where it can be checked — the four it named on the reference corpus are the four read off the scans — but delivering it would have Iris assert a number nobody saw printed, on a page whose own model just proved it was guessing, so it is logged and not shipped; and taking out `id="page-52"` would turn a `#page-52` reference that lands on the wrong sheet today into one that lands nowhere. Every copy of the attribute goes, not the one a parser keeps, since deleting the first would promote a repeated `aria-label` into its place and leave the line claiming a removal the page did not get. What is left is a break saying only that something ended, which is what the page contract prescribes for a page whose number is not known. **This line prints on clean documents too**, unlike `assembly_anchors` above: `stripped: []` beside `arabic: offset 14 on 23 of 25` is a document this checked and agreed with, while no line at all is one it could not decide, and a round measuring whether the defect is fixed cannot tell those apart from silence. `off_mode` counts readable labels that disagree with their system's offset and were left alone because they repeat no positional number — a page printing `ix` labelled `Page 9` — and `undecided` counts labels that do repeat one where nothing could be concluded — too few markers, no offset holding a run of them, or a document refused above — which is this check's blind spot with a size on it, and `unchecked` counts readable labels on a page whose filename carries no number at all, so that `readable: 25, stripped: []` cannot read as agreement when nothing could be checked. Three more blind spots, each of which reads as a clean document: a model that leaks on EVERY page (which is the same input as a report printing its own positions, so the document is refused and the log says so); a document whose arabic numbering restarts partway through, where the minority run's folios coincide with the numbers in their filenames while the majority's do not — an active removal of true labels rather than a missed leak, which is why `departures` is logged: a restart takes out a block of consecutive positions with no surviving label among them, a leak is interleaved with the labels that contradict it, and the check cannot act on that difference but a round can count it; and a positional number announced through `aria-labelledby` instead, which is not read — #333's shape is `aria-label` on both failing arms, and resolving an ID reference into another element's text is a different pass on a different input. `stage` is only ever `"assembly"` — unlike the role strips above, this cannot run on a corrected body, because deriving an offset needs every page's filename and position and by then there is one string with the pages' provenance spent, so a marker the Copy Editor introduces later is not reached. Measured cause, and why this is code and not more prose: `agents/page.md` forbids exactly this by name (`never the position of the image you were given in the file`) at every prompt blob there is a round for, and two of three vendors did it anyway on the same document and the same blob — 6 of 88 markers on the shipped page model, 5 of 90 on another, on the same two pages. The labels are text out of the user's own document, so like `prose_joined`'s `word_split_examples` this line stays in the run log on the deployment and never reaches `GET /v1/quality`. |
-| `reader_page_reports_deduped` | One round's Reader reports about a page the document has **no content** for were reduced to one per page: `dropped` (how many reports went), `pages` (which pages the kept ones stand for) and `reports` (each dropped report's severity and text, folded and bounded), for that `iteration`. Two kinds of page have no content — one extraction lost (`pages_failed`, a `@page-failed` comment) and one that is blank in the source (`page_blank`, correctly delivered as an empty page) — and neither is something a correction round can act on. The Reader is told so in the index it reads and in its own prompt; this line is what happens when a sampled model raises them anyway, which it did **once per chunk**, in a different wording each time, so exact-string dedupe caught none of them (issue #188). Per chunk of the FINAL round, to be exact: `@unresolved` is written from the last read of the document, so that read's chunk count is how many copies were delivered — six of one document's 26 on the round that filed the issue. What the iterations multiplied was the spend, not the list: every round's editor was handed the same unrepairable reports. Only the FIRST report of a page is kept, deliberately: an issue whose attribution is entirely pages with no content can only be about the absence, but the attribution is the Reader's and a misattributed real issue must not vanish without trace — which is what `reports` is for, since which report came first is an accident of chunk order. An issue that names any page with content in it is never touched, and an unattributed report cannot be reached here at all. |
-| `review_converged` | The loop stopped early because a round changed nothing (`iteration`, the `issues` that round was given, and the `rounds_left` it did not spend). The editor answered and handed back the document it was given, so the same request next round would be answered the same way; what ships is that document with those issues written to `@unresolved`. Expect this on a document whose remaining issues are the ones the loop is designed not to resolve — an undecidable pair of same-worded headings, a `[page not fully transcribed]` marker. Frequent lines here with `issues` the editor *should* be able to fix are the signal worth chasing: that is the editor declining work, not the loop saving a wasted round. |
+| [`run_queued` / `run_dequeued`](#run_queued--run_dequeued) | The run's wait for a concurrency slot |
+| [`model_call_start` / `model_call`](#model_call_start--model_call) | One completion, from the layer that resolved it |
+| [`extraction_start`](#extraction_start) | The page pass is about to run |
+| [`feedback_scoped`](#feedback_scoped) | How a feedback re-run was routed |
+| [`first_read_carried`](#first_read_carried) | A feedback re-run kept the document's earlier first-read count |
+| [`reextract_start` / `reextract_complete`](#reextract_start--reextract_complete) | Which pages went back to the page agent |
+| [`page_no_output`](#page_no_output) | The page agent answered, and no HTML could be read out of the answer |
+| [`page_bare_html`](#page_bare_html) | The reply was **markup rather than the envelope**, so the page was rescued as it stood |
+| [`page_blank`](#page_blank) | The page agent read the page and reported it empty |
+| [`page_blank_refused`](#page_blank_refused) | A re-extraction declared a page blank that the document already has content for |
+| [`page_extraction_failed`](#page_extraction_failed) | One page's own extraction threw |
+| [`extraction_complete`](#extraction_complete) | How many page fragments came out, and which pages failed |
+| [`page_generic_alt`](#page_generic_alt) | A page described an image with a placeholder instead of a description |
+| [`page_generic_alt_unrecovered`](#page_generic_alt_unrecovered) | A correction bought for a placeholder `alt` left the placeholder there |
+| [`page_duplicate_ids`](#page_duplicate_ids) | One page fragment used the same `id` on more than one element |
+| [`page_duplicate_ids_unrecovered`](#page_duplicate_ids_unrecovered) | A correction bought for a duplicate `id` left a duplicate there |
+| [`page_soft_hyphens`](#page_soft_hyphens) | Soft hyphens (U+00AD) were taken out of a reply before it became markup |
+| [`page_caption_claim`](#page_caption_claim) | A `<figcaption>` makes a claim about the picture its `alt` describes |
+| [`page_recovered`](#page_recovered) | A re-extraction succeeded on a page an earlier run had lost |
+| [`extraction_failed`](#extraction_failed) | **No page produced any content**, so the run is ending |
+| [`page_verify_ok` / `page_verify_failed`](#page_verify_ok--page_verify_failed) | The Feedback Agent's fidelity verdict on one page |
+| [`page_verify_error`](#page_verify_error) | A page's fidelity check could not be obtained |
+| [`page_verify_inconsistent`](#page_verify_inconsistent) | The verifier **described** a defect and then passed the page |
+| [`page_corrected`](#page_corrected) | What a self-correction pass did |
+| [`page_correction_rejected`](#page_correction_rejected) | A correction came back under a quarter the size of the page it was given |
+| [`page_correction_failed`](#page_correction_failed) | A self-correction's model call threw |
+| [`page_correction_no_output`](#page_correction_no_output) | A self-correction's reply carried no readable HTML |
+| [`page_correction_declined`](#page_correction_declined) | The corrector refused problems it was given, saying which and why |
+| [`page_correction_recheck`](#page_correction_recheck) | A second verdict on a corrected page |
+| [`page_correction_recheck_failed`](#page_correction_recheck_failed) | The measurement-only sample could not be taken |
+| [`table_continuations`](#table_continuations) | A table whose caption says it continues the one before it |
+| [`table_joined`](#table_joined) | Two halves were merged into one table |
+| [`table_join_code_declined`](#table_join_code_declined) | The code merge stood down on this pair, so a Copy Editor call was bought |
+| [`table_join_failed`](#table_join_failed) | One pair was left as two tables, and why |
+| [`table_joins_capped`](#table_joins_capped) | More continuation pairs than one run will spend requests on |
+| [`prose_joined`](#prose_joined) | A sentence the source printed across a page turn was delivered whole |
+| [`editor_images`](#editor_images) | How many source images the Copy Editor received this round |
+| [`editor_images_refused`](#editor_images_refused) | The payload was refused as too large, so it was re-sent **without** images |
+| [`editor_fidelity_observed`](#editor_fidelity_observed) | The Copy Editor reports a disagreement **nobody asked it about** |
+| [`editor_links_dropped`](#editor_links_dropped) | An `href` present before that round's correction was missing after it |
+| [`internal_links`](#internal_links) | The delivered document has an in-document reference that lands nowhere |
+| [`delivered_markup`](#delivered_markup) | The delivered document's own structure disagrees with itself |
+| [`delivered_structure`](#delivered_structure) | Four structural defects **no rule in the gate reports** |
+| [`delivered_alt`](#delivered_alt) | A placeholder where a description belongs, in the file the caller receives |
+| [`editor_markers_changed`](#editor_markers_changed) | A `[not legible]` marker count changed across one correction round |
+| [`editor_truncated`](#editor_truncated) | A correction round's response hit the model's output ceiling |
+| [`editor_salvaged`](#editor_salvaged) | The truncated reply was read as far as it got |
+| [`editor_salvage_declined`](#editor_salvage_declined) | The reply could not be read as a prefix, and why |
+| [`editor_sections`](#editor_sections) | A round that could not be answered whole is being re-made a piece at a time |
+| [`editor_section_failed`](#editor_section_failed) | One section could not be corrected |
+| [`editor_sections_declined`](#editor_sections_declined) | The round could not be re-made a section at a time, and why |
+| [`reader` / `editor`](#reader--editor) | Per-iteration review-loop progress |
+| [`lint_unavailable`](#lint_unavailable) | axe-core could not run on a body no `assembly` line covers |
+| [`lint_debris`](#lint_debris) | The linted body carried attributes whose **names no valid markup produces** |
+| [`editor_patch`](#editor_patch) | What one ordinary correction round's reply did to the body, block by block |
+| [`editor_whole_body`](#editor_whole_body) | The reply carried an `html` string and no `edits`, so it was read whole |
+| [`editor_no_output`](#editor_no_output) | The Copy Editor's reply carried no usable body |
+| [`editor_shrank`](#editor_shrank) | A round came back with **less than half the prose** it was given, and was refused |
+| [`editor_navigation`](#editor_navigation) | The structures a reader navigates by, on a reply that was **adopted** |
+| [`deprecated_roles_stripped`](#deprecated_roles_stripped) | A deprecated ARIA role was removed from an element that already said it |
+| [`invalid_roles_stripped`](#invalid_roles_stripped) | A `role` naming something that is **not an ARIA role at all** was removed |
+| [`page_main_stripped`](#page_main_stripped) | A `<main>` a page emitted for its own content was taken out of the body |
+| [`page_markers`](#page_markers) | Page-break markers were checked against the document's own numbering |
+| [`reader_page_reports_deduped`](#reader_page_reports_deduped) | Reader reports about a page with **no content** were reduced to one per page |
+| [`review_converged`](#review_converged) | The loop stopped early because a round changed nothing |
+
+### `run_queued` / `run_dequeued`
+
+The run's wait for a concurrency slot: how busy the queue was when it was admitted (`running` of
+`limit`, plus `waiting`), and `waited_ms` when it actually started. A large `waited_ms` means the
+deployment is saturated, not that this run is slow.
+
+### `model_call_start` / `model_call`
+
+One completion, from the layer that resolved it: `agent`, `step`, `capability`, `model`,
+`provider`, and `api` for a provider that has more than one wire format (Bedrock's `invoke` vs
+`converse`, so a comparison of the two says on every line which side produced its numbers).
+
+`step` is the **job** the call was bought for, on both lines, and it is a different question from
+`agent`: an agent file is a contract and one contract serves several jobs — the Feedback Agent
+checks a freshly extracted page, re-checks a corrected one, routes a user's feedback and
+classifies a lesson from it — so the agent name alone cannot price a step, and reading
+extraction's cost off it understated the step by a third (§7b, which reads these back as `by_step`
+and lists the closed set of names). It is on the **start** line because that is what an in-flight
+or hung call is asked about, and on a **failed** line because a call that threw still spent — a
+truncated editor round paid for a full ceiling of output — and those are exactly the calls with no
+answer to attribute them by.
+
+The start marker is written **before** the call, so a hung or in-flight call is a start with no
+end; the end line adds `duration_ms`, `ok`, an `error` when it failed, and the token counts flat
+(`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`) —
+taken from the result where there is one, and otherwise from what the adapter reported through a
+callback as the call ran, so a call that **threw** still says what it spent (§7b reads these back
+as `tokens`). One line per completion, not per HTTP request.
+
+`output_ceiling_clamped: true` says this call ran below the output ceiling the deployment
+configured, with `output_ceiling_asked` (what `providers.<provider>.max_tokens` says) and
+`output_ceiling_stated` (what the model grants): several Bedrock models cap output well below
+32000 and **refuse** the request rather than clamping it, so the adapter re-sends at the ceiling
+the rejection names and remembers it (issue #249). Present means a config error is live — the
+pages arrive, so nothing else downstream shows it, and a deployment can otherwise run for a month
+at a ceiling nobody chose with a dense page truncating occasionally.
+
+Read the pair as the remedy: set `max_tokens` to `output_ceiling_stated`, or route that capability
+to a model whose ceiling is at least what you asked for. It is on **every** clamped call, not only
+the one that discovered it, because the adapter's stderr paragraph is said once per process and
+the remembered ceiling outlives the session — a field that copied that dedup would mark one call
+in the life of a server and leave every document after the first reading clean.
+
+`output_ceiling_refused: true`, present only on the call that paid for the lesson, is what
+separates the condition from its cost: that line's `duration_ms` covers a rejected round-trip as
+well as the request that worked. Absent on a deployment whose models accept their ceiling, which
+is every deployment today.
+
+`max_output_tokens` is the opposite direction and is **not** a config problem: a ceiling the
+caller asked for, below the deployment's, because it already knows roughly how large the answer
+should be. Present on the page-correction call only (`correctionCeiling` in
+`src/pipeline/extraction.ts`, issue #285) and absent everywhere else, so a truncation on a line
+carrying it is the caller's estimate being low and a truncation on a line without it is the
+deployment's ceiling — the same two remedies the error message itself distinguishes (**Errors**
+below).
+
+It is on the **start** line too, for the same reason `step` is: the calls worth attributing are
+the ones with no answer to attribute them by.
+
+### `extraction_start`
+
+The page pass is about to run: `pages`, the `concurrency` it will run them at, and what it will
+measure while it does — `recheck_sample_size` (`defaults.recheck_sample_size`, the number of
+corrected pages to be re-verified, 0 for none) with `recheck_thresholds`, the page orders those
+slots sit on. The two measurement fields are here rather than left implicit because their absence
+made a log ambiguous three ways: no `page_correction_recheck` in a run can mean the measurement is
+off, no page needed correcting, or every corrected page falling below the first threshold, and
+those have different remedies (issue #288).
+
+The thresholds are computed from the orders of the pages **this** batch runs, so they say which
+pages could have answered and not merely how many.
+
+### `feedback_scoped`
+
+How a feedback re-run was routed (`document` vs `extraction`, and which pages)
+
+### `first_read_carried`
+
+A document-level feedback re-run kept the document's earlier first-read count for the quality
+tally instead of recording its own (§0c `first_read`, issue #313).
+
+`carried` is the number kept, `unread` its window count, and `found` what this round's own first
+read came to — which is the one this round's `reader` events describe, so without this line a
+session's log and `/v1/quality` disagree about it with nothing to say why.
+
+`carried: null` means the session had no first read on record — one delivered before the field
+existed — and contributes none. Written on the review-only path only: a re-run that re-extracts
+reads fresh extraction output and records it.
+
+### `reextract_start` / `reextract_complete`
+
+Which pages went back to the page agent. `reextract_start` also carries the same
+`recheck_sample_size` / `recheck_thresholds` pair as `extraction_start`, spread over the pages
+this round re-extracts rather than over the whole document — a round re-running pages 7, 12 and 20
+of 25 has its own thresholds, since bands taken from the document's length would all fall below
+page 7.
+
+`reextract_complete.pages` is what was actually re-extracted; a `failed` list is pages whose
+re-extraction threw and which therefore kept their **prior** content unchanged.
+
+`reextract_complete` also carries `alts_checked` / `alts_generic` and `ids_checked` /
+`ids_duplicated`, and they are over the **whole** document this round delivers rather than the
+pages it re-ran — the prior round's pages with the re-extracted ones substituted in — so they are
+comparable with `extraction_complete`'s and a session's log does not read as its alt or id corpus
+shrinking every time a client sends feedback. Comments are stripped before the two alt counts, as
+on `extraction_complete`, and the two id counts are read off each fragment's parsed tree, where a
+comment is not an element.
+
+`uncorrected` is over the whole document too, and for the same reason: a round that repairs one
+rejected page out of three should read as two left rather than as one page re-run. It follows the
+document page by page — a page re-rendered and now accepted leaves the set, one rejected again
+stays, one this round never touched keeps the prior round's verdict, and one whose re-extraction
+**threw** keeps it too, because it is the prior fragment that ships and so the prior verdict that
+describes it.
+
+### `page_no_output`
+
+The page agent answered, and no HTML could be read out of the answer (`page`, `image`, `chars` of
+text, and the `shape` it was in). The page is then lost the way any failed page is lost — the
+`page_extraction_failed` line below follows it — because "the reply could not be read" and "this
+text is the page" are different claims, and a reply delivered as content puts a JSON envelope, or
+an apology, into the document while the run reports every page delivered.
+
+`shape` names the remedy: `truncated_envelope` is the output ceiling (raise
+`providers.*.max_tokens`), `envelope` is a complete reply whose escaping defeated the parser
+(rare, because a reply whose only fault is the page's own unescaped punctuation is repaired before
+it reaches here), `prose` is the agent answering conversationally, `empty_html` is an envelope
+that was read perfectly and carried no page in it (no `html` key at all, or one whose HTML holds
+nothing a reader receives and whose `log` does not say the page is blank — the model answering
+with no page and not saying why, or saying it could not read it), and `empty` is a reply with
+nothing in it at all. "Nothing a reader receives" is not the same as "an empty string": a comment,
+an empty wrapper and a bare page-break marker are all nothing, and 33 of 818 initial renders in
+the bench logs answered a blank page in one of those spellings rather than with the empty `html`
+the prompt asks for (issue #219), so a refused declaration reaches this line whichever way its
+fragment was written.
+
+The last three are prompt problems and say nothing about the parser. `bare_html` is a sixth value:
+the reply IS the page's markup rather than the envelope, which the pipeline normally accepts and
+delivers (`bareHtml` in `src/pipeline/extraction.ts`). On **this** line it is two different
+findings with opposite remedies, and the shape cannot separate them — `dropped`, on the same line,
+is what does. Either the markup arrived behind a fence that never closed, so a page was refused by
+the parser and the text on the line is that page; or the markup arrived fine and carried nothing a
+reader receives, which is a blank declaration written as `<!-- blank page -->` or a lone
+page-break marker (#219's own spellings) and reaches this line through "carries nothing" rather
+than through the parser — a prompt problem, exactly as `prose` said before.
+
+It is on `page_correction_failed` that the value earns its keep, where 24 of 180 corrections in
+one bench round answered in bare markup and were being read as `prose` (issue #365). A page the
+agent reports as **blank** is not one of them: that is `page_blank` below and not a failure. Where
+markup did arrive and carried nothing, `dropped` carries it — the same field, and the same
+200-character bound, as on `page_blank` below — because `chars` is the length of the whole reply
+and not of the fragment, so without it the line says a page produced nothing readable and not
+whether that was an empty envelope, a comment or a marker naming a folio the paper never printed.
+
+On a refused declaration that is the difference between triaging the wording from a run and
+replaying the replies to find it, which is the half of #219's reconstruction its fix left behind
+(issue #223). Where the reply *did* claim the page was blank and the claim was refused, more
+fields say so:
+
+`blank_vetoed` lists the doubt words that refused it and `log` carries the agent's own sentence.
+`blank_stated: true` beside them says the refused claim was made in the `blank` field rather than
+left to be read out of the sentence, and that pair is the one thing in these logs that can show
+the field being misused: a page whose log says it could not be read is the one page the prompt
+tells the model never to send the field for, and a run that carried `blank_stated` only on the
+line that honoured it could count the field working and not the field failing (issue #371).
+
+Without them the line reads as "the model answered with no page", which is the opposite of what
+happened, and tracing four such pages back to a word meant rerunning the regexes on the replies by
+hand (issue #190).
+
+`blank_contradicted` is the other way a claim made **in prose** is refused — a claim the reply
+STATED in its `blank` field is not refused for this, and lands on [`page_blank`](#page_blank) with
+the same field name and a verify call instead (issue #371), and a different finding: the log
+declared the page empty and then said something was on it, and the field carries the words that
+said so (issue #194). The page's own printed number is the one thing a log may name without
+contradicting itself (issue #222): a folio is not content that page could have delivered, so
+`blank apart from the printed page number` and `blank except for its printed folio` are
+declarations rather than refusals, while `the printed page number and a heading are visible` still
+refuses — through the heading, which is what a reader would have got nothing of.
+
+They are two findings with two remedies — a doubt word means the page could not be read and wants
+a better scan, a contradiction means the agent answered with no page for a page it says has
+content on it, which wants a re-extraction — and they are read independently, so a log can carry
+both: "Page is blank. The scan is blurry. There is handwriting on the page." fills `blank_vetoed`
+with `blurry` and `blank_contradicted` with `there is handwriting`. On a line with both, the doubt
+is the one to act on first, because a reply that could not read the page is not a reliable witness
+to what is on it.
+
+### `page_bare_html`
+
+The page agent's reply was **markup rather than the envelope**, so the page was rescued from the
+text as it stood (`page`, `image`, `chars` of the whole reply, `html_chars` of the markup taken
+from it, and `reextract: true` on a feedback round). The page **shipped**: it is in neither
+`pages_failed` nor `pages_blank`, the HTML is usable, and that is why the rescue exists. What it
+did not ship is a `"log"` — there was no field to put one in, and `agents/page.md` asks for that
+field by name in 26 places, six of which are obligations it discharges there and **nowhere else**:
+a page ending mid-sentence, a heading with no parent on the page, a symbol with no key, a
+placeholder image source, a language change, an irregular table.
+
+On these pages every one of those is unmet and unreported while the run says every page was
+delivered. Not rare, which is why it is now a line of its own: 41 of 300 first page calls across
+two multi-vendor bench rounds and 54 of 400 across four deployed rounds of one PDF (13.7%), and 0
+of those 41 left any other line behind. It is also the discriminator between the two readings of
+an empty log — `log: ""` **with** this line means the reply had no envelope, and without it means
+the model sent one and left the field empty, which is a prompt-compliance question rather than a
+parse one and has the opposite remedy.
+
+Which of the two the deployed models do is answerable now: over 67 round logs on file, 2,320
+`page.md` replies are 2,001 with a non-empty log and 319 bare, and **0** with an envelope whose
+log is empty.
+
+`chars` and `html_chars` are both here because they answer different questions — `chars` is what
+the reply was billed for and `html_chars` is what the page got, so a rescue that delivered a whole
+page and one that salvaged a fragment of a truncated reply are otherwise the same event.
+
+`reextract` marks the feedback round because the 13.7% is a rate over **first** calls and a count
+that pools rounds is not comparable with it. The verify step is sent no log section for these
+pages, and `agents/feedback.md` tells it to say nothing about the absence: that is a fact about
+the reply, not about the page (issue #349).
+
+### `page_blank`
+
+The page agent read the page and reported it empty (`page`, `image`, and its own `log` line), so
+the page is delivered as an empty fragment because there was nothing on it to deliver. That is
+true of the page as this line records it and not always of the document: since issue #371 one kind
+of declaration — one **stated** in the `blank` field whose own log names something on the page —
+is delivered empty and then judged, and a correction it earns can put content back on that page
+while this line still counts it. The count is kept that way deliberately, because it is the
+declarations that were made and §7b reads the ones that cost a verify call off it as
+`pages_blank - pages_skipped_blank`; a page whose content came back that way is the
+`page_corrected` line beside it, with `trigger: "verify"`.
+
+Not a failure and not in `pages_failed`: the remedies are opposite, since a failed page is work to
+redo and a blank page is work already finished. The reply that earns this is a complete envelope
+whose `html` is present and carries **nothing a reader receives** — no visible text, and none of
+the elements that are content with no text in them (a picture, a grid, a form control) — **and**
+that says the page is blank — either in the reply's own `"blank": true` field, or, where that
+field is absent, in a `log` that asserts it in so many words.
+
+The field is what the prompt asks for since issue #371, and `blank_stated: true` on this line says
+the declaration arrived that way: five blank pages had been lost to five different words while the
+sentence read was being got right — `resolve` (#190), a contradiction that was not one (#194), a
+negator four tokens behind its noun (#220), `image` (#343), `document` (#367) — and each fix
+bought the word it was written for, so a reply that can simply state the answer is the one change
+that is not about a word. The field is not the whole answer even so, because a reply that does not
+send it is read exactly as it was before the field existed:
+
+`document` and `body` are read as modifiers on the name for text since issue #379, which is what
+`page` and `number` had always been (`no printed page number or heading`), so
+`No text, images, tables, or other document content is visible.` is a declaration and not a
+contradiction. That is the axis and not the length of the list — the same sentence with `document`
+deleted was already delivered, and with the coordination deleted was not — and it is the floor
+under the replies the field cannot reach, which is every reply sent before it and any model that
+ignores it.
+
+How large that set is now is **unmeasured**: `blank_stated` postdates every bench round on disk,
+so nothing recorded can say what share of the declarations arriving today state blankness in the
+field rather than leave it to be read out of a sentence. What the walk does read is one axis and
+not a vocabulary: a noun modifying the name for text, which is why `no other document content` is
+a declaration while `only document headings are visible` and `the document heading is visible` are
+contradictions — a determiner, an `only` or a verb in front of the noun ends the walk before it
+reaches the negator.
+
+What does **not** end it is a comma: a denial with no verb of its own reaches across one, so
+`No text or images, document headings are visible.` is read as one denied list and delivered as a
+declaration, with nothing on this line naming the heading. That is the reading issue #200's review
+chose for `No printed text, and handwriting is present.` — refusing it loses a blank page whose
+log denied twice — and the punctuation cannot separate the two cases, because the members of a
+denial are divided by bare commas exactly as the clauses are.
+
+It is not the only way a page with content on it is delivered empty leaving no field to act on — a
+confident wrong declaration about a page whose file says nothing is described the same way below —
+but it is the only one where the log **named** the content and Iris discarded the sentence that
+named it, so there was something to act on and it is not on the line. A run triaged off
+`page_blank` lines is therefore not evidence that no such page occurred. The field states and
+cannot deny: `"blank": false` is read as no answer at all and the sentence decides, exactly as it
+did for every reply sent before the field existed, so every error the field can make is in one
+direction.
+
+It is read loosely enough for `"true"` as a string and no further — `1`, `"yes"` and `"blank"` are
+silence, because a field read loosely enough to accept them is one that deletes a page on a typo.
+And it cannot declare a page blank that came back with a page on it: what a reader receives is
+decided as below, so a reply that says both things is not a declaration.
+Present-and-carrying-nothing rather than present-and-empty, because the empty `html` the prompt
+asks for is not the only way the model writes a blank page: of 78 such replies in 818 initial
+renders of the bench logs, 33 spelled it in markup — 18 a bare page-break marker, 13 a comment
+(`<!-- blank page -->`), 2 an empty paragraph — and read as content each of those was a page
+counted as having produced markup, with the comment or the anchor delivered into the document
+(issue #219).
+
+Prose is content whatever it says, so a reply of `<p>This page is blank.</p>` is delivered as the
+page's words: a page that *prints* "This page intentionally left blank" has that sentence as its
+correct transcription, and nothing in the pipeline can tell the two apart. Where the declaration
+was spelled in markup, `dropped` carries that markup (bounded to 200 characters), because the
+fragment delivered is `""` whichever spelling arrived and the line would otherwise not say which
+one did. What `dropped` discards on the marker spelling is a `doc-pagebreak` anchor, and
+deliberately: every one of those logs says the paper prints no number, which makes the label the
+image's position in the file and the anchor a claim that the document's page 14 begins there.
+
+The test is positive and doubt is fatal: an absent `html` key, an empty one with nothing said
+about it, one whose `log` says the page could not be *read* (illegible, too dark to resolve,
+truncated — including a hedge like "appears blank, though the scan is very faint"), and one that
+describes the **image's** condition rather than the paper's ("the page is very dark and appears
+empty", "low resolution scan; no text") are all still the model giving up, and stay
+`page_no_output`. That reply is the one that most needs a human to look at the page, and reading
+it as a declaration would leave nothing in the document to look at.
+
+A blank page whose wording falls outside both patterns is reported as a failed page, which is the
+safe direction — a page wrongly reported as failed costs a glance, a page wrongly dropped costs
+the page. One thing is **not** doubt, though: a doubt word used to describe the *marks on an empty
+sheet* rather than the image. "Specks/dots are visible but do not resolve into any characters", "a
+few faint specks/artifacts … no legible text" — that is the blank declaration itself, stated
+positively, and reading `resolve`, `faint` and `noise` there as doubt about the scan cost four
+blank pages of 100 on one bench round, while an agent that answered "Page is blank." and stopped
+was believed (issue #190; two pages of one document opened with a verbatim identical sentence and
+only the one that explained itself was refused).
+
+What is exempt is the *phrase* — `faint specks` is the paper, `faint scan` is the image — so a log
+that describes both in one sentence still refuses: "the scan is blurry, showing only faint specks
+and no legible text" loses `faint` and keeps `blurry`. It also needs the marks named *as* marks:
+
+`stray marks do not resolve into characters` is the paper, while bare
+`marks do not resolve into characters` is the phrase the page prompt uses for content that could
+not be read, and a `dark streak`, `dark spot` or `dark shadow` is the capture and can cover
+content. It reaches across one sentence or semicolon boundary only where the next clause continues
+the same observation — the marks referred back to, no subject at all, or a denial — so "a few
+specks of dust are visible. The handwritten note in the corner does not resolve into words" is
+still a failed page.
+
+And a log that says *where* something illegible sits ("not legible printing in the margin") is
+naming what the page bears rather than denying it, while naming the substrate ("not legible text
+on the page") is another way of saying the sheet is empty; the whole rest of that statement has to
+be made of denial for it to count as one, so a word for a place on the paper — `margin`, `header`,
+`corner`, `seal`, `spine` — refuses whatever punctuation or preposition leads into it, and a name
+for what the page bears has to be introduced by a denial there (`or content`, `nor any figures`,
+`no writing`) rather than by a determiner, and not handed on to a verb that says it is there,
+because "not legible text, only a heading is visible" and "not legible text, and printing on the
+page is visible" are built from the same words as a denial and say the opposite — while a tail
+that goes on to deny something else carries verbs of its own ("not legible text or content, and no
+writing is visible", "…and no printed page number is visible") and is read as the denial it is.
+
+The same read applies to "do not resolve into …", one noun further on — that construction's object
+is what the `do not` denies, and everything after it has to deny too, so "do not resolve into any
+characters or content" is a blank page and "do not resolve into any characters, only a heading in
+the margin" is a failed one. And no exemption applies at all to a log that anywhere says the
+reading failed or hedges the answer (`illegible`, `obscured`, `too dark`, `could not`, `though`),
+which are claims about the page wherever they sit.
+
+The claim is not paid to be checked, and it used to be: the empty fragment went to the Feedback
+Agent like any other page, which was shown the source image and an empty code block and asked
+whether the one was faithful to the other. In 36 such judgements — 9 pages of a 100-page corpus,
+two page-model arms, two shas — it passed every one, for $0.0859 an arm (issue #294), so the call
+is not made and the page's `page_verify_ok` line says so with `skipped: "blank"` and `unjudged`,
+with one exception, which is the only spend issue #371 adds: a declaration **stated** in the field
+whose own log names something on the page is delivered *and* judged.
+
+That page carries `blank_contradicted` on this line, no `skipped` on its `page_verify_ok`, and the
+log's claim is quoted to the verifier in the log's own words beside the empty fragment — so a log
+that was right about the heading it named buys a correction and the reader gets the page, and a
+log the regex misread costs a verify call instead of a page. Before the field there were two
+answers and both were worse: believe the prose and drop the page in silence, or refuse it and
+report a page nobody has. What it costs is bounded by how rarely the two halves disagree — 1 of
+the 125 blank declarations in every bench round on disk, off 2,189 page renders — and that one is
+a page whose log says it is blank three times, refused today by a misread first clause.
+
+A declaration made in prose alone is unchanged and still refused on a contradiction
+(`blank_contradicted` on `page_no_output`), because for a prose declaration refusing remains the
+cheaper of the two errors available ([`page_no_output`](#page_no_output) above,
+`pages_skipped_blank` in §7b). What still checks the claim are the checks that cost nothing, and
+they are the ones that can prove it wrong: the veto refuses a hedged declaration before it is ever
+accepted, whether the reply stated blankness or described it — a page the model says it could not
+read is not a page it can state anything about, including that it is empty — and the contradiction
+refuses a self-contradicting one that was described in prose, and a page reported blank whose
+**source file** carries link annotations for it is a page the document itself contradicts —
+`page_links_missing` fires on it as on any other page, buys a re-render against the image, and
+that fragment is verified in turn.
+
+What is no longer caught is a *confident* wrong declaration about a page whose file says nothing:
+it is delivered as an empty page, and this line is the whole of the evidence it leaves. Before
+this existed, six of 100 bench pages across three of four documents were well-formed envelopes
+correctly saying the page was blank, and every one shipped a `@page-failed` marker and counted as
+a lost source page (issue #179). No page-break marker is delivered for a blank page, and the
+prompt no longer asks for one on such a page whatever the paper prints — it did, which was an
+instruction the pipeline could not honour once every accepted declaration returned an empty
+fragment (issue #222) — so a marker that arrives anyway goes to `dropped` with the rest of the
+fragment rather than into the document.
+
+A blank page that did print its folio loses an anchor to a page with nothing to anchor to, which
+is the cheaper of the two mistakes. A page whose only printed content **is** its folio is one of
+these pages, and by decision rather than by accident: the folio is never transcribed as text and
+the marker it may be carried in is never delivered, so such a sheet has nothing on it a reader
+receives, and a marker-only fragment is not a page. The alternative — delivering a lone
+`doc-pagebreak` where no declaration was asserted — was refused because that gate also passes a
+reply whose log says the page's table was too faint to transcribe, which is a page silently
+dropped while the run reports it delivered, and because every one of the 18 bare markers measured
+in the corpus carried a label the paper never printed.
+
+### `page_blank_refused`
+
+A feedback re-extraction declared a page blank that the document already has content for (`page`,
+`image`, `chars_kept`, the agent's `log`, and `dropped` — the markup the declaration was spelled
+in, where it was spelled in any), so the declaration is refused and the page keeps that content.
+
+`blank_stated: true` is on this line too where the declaration came from the `blank` field, for
+the same reason as on `page_no_output` above: the field can be sent for a page Iris already holds
+content for, and a log that recorded the field only where it was believed could not show it (issue
+#371). The model was shown its own previous output for the page and then said the paper was empty,
+which contradicts what Iris already holds; the page is then handled as any re-extraction that
+could not improve it — `page_extraction_failed` with `kept: "prior"`, and the page in
+`reextract_complete.failed`.
+
+Nothing else would catch it: the shrink floor guards the *correction* pass, where the comparison
+is against that round's own render, so prior → empty never reaches it. That is also why the test
+is what a reader receives rather than whether `html` is empty — a re-extraction answering
+`<!-- blank page -->` for a page with content used to walk straight past this refusal and replace
+the content with the comment, and 13 renders in the bench corpus are that reply (issue #219). A
+page that was **lost** can still come back blank and be recovered: there is no content to
+contradict.
+
+### `page_extraction_failed`
+
+One page's own extraction threw (`page`, `image`, `error`). The rest of the document still ran —
+see §7c. `kept: "prior"` marks the feedback-re-extraction case, where the page keeps the content
+it already had and the document stays whole. A **truncation** carries three more fields (#293),
+the same three as `page_correction_failed` below and for a stronger reason: there the page
+survives the failure, while here its content is gone, so the excerpt is the only record of what
+the model had written when the ceiling cut it.
+
+`reply_chars` is how far the reply reached, `reply_head` its first 240 characters and `reply_tail`
+its last 240 — one budget of the user's text, quoted **entire** under `reply_head` when the
+fragment is shorter than both excerpts together, exactly as on `editor_truncated`. Deployment
+only: like every excerpt of a document, it stays in the run log and never reaches
+`GET /v1/quality`. There is no `ceiling` field here because a first pass carries no cap of its own
+— the ceiling is the deployment's, and the error names it.
+
+`truncated: true` with **no** `reply_head` at all is the shape worth watching: a call that spent a
+whole ceiling of output and never began the page, which is a reasoning model burning the budget
+before the answer, not a page that needed more room (see §9.3 and `EMPTY_REPLY` in
+`src/providers/types.ts`).
+
+### `extraction_complete`
+
+How many page fragments came out (`pages`) and which page numbers failed (`failed`, always
+present, `[]` on a whole run).
+
+`uncorrected` is the other set, and the opposite failure: page numbers the fidelity check
+**rejected** whose one correction pass repaired nothing, so what the document carries for them is
+content Iris named a defect in and never fixed (§7c, `@page-uncorrected`, #328). Always present
+and `[]` where no page shipped that way, for the reason `failed` is — a field that only appears
+when it fires cannot tell "every rejected page was repaired" from "this run predates the count".
+Disjoint from `failed` by construction: a page whose render threw never reached a verdict, so it
+cannot be in this set, and the two counts add rather than overlap.
+
+It is the roll-up of what `page_verify_failed` and then `page_correction_failed` or
+`page_corrected` already say a line at a time — worth having as one field because reading it off
+those needs a join per page, though the rule is one line: a page whose verdict failed is in this
+set exactly when its `page_corrected` `result` is **not** `kept` (§7c).
+
+`alts_checked` / `alts_generic` are the generic-alt rule over the fragments the document is built
+from — every non-empty `alt` on an `<img>`, and how many of them are a placeholder rather than a
+description (#290). Asked **after** any correction, so a non-zero `alts_generic` is a placeholder
+this step could not repair, which is a different statement from the per-page `page_generic_alt`
+finding. It is not a statement about the delivered document: the review loop runs afterwards and
+can replace a block's `<img>` along with its markup, which is what `delivered_alt` is measured on.
+
+Both are present at zero on every run, for the same reason `failed` is: a class reported only when
+it fires cannot distinguish "it never happened" from "the check never ran", and this rule's whole
+claim is that it fires on nothing the page agents write.
+
+`alts_checked` is what makes the zero readable — 0 of 0 says nothing about the rule, 0 of 40 says
+something. Comments are stripped before either count, as on `page_generic_alt` and
+`delivered_alt`.
+
+`ids_checked` / `ids_duplicated` are the same pair for the id rule (#373): how many elements
+across those fragments carry a usable `id`, and how many of those ids are used more than once
+**within one fragment**. Per fragment and summed, which is the only count this rule can make — two
+pages sharing an id is not a defect at this point, since `namespaceAnchors` prefixes each page at
+assembly, and pooling the document's ids into one set would report that fix as a failure once per
+page. Present at zero on every run, and it matters more here than for the alts: this rule fires on
+2 of 1,501 measured page replies and on none at all from the model deployed today, so a field that
+appeared only when it fired would be indistinguishable from the check not running.
+
+Read off the parsed tree, so markup the HTML parser discards — an orphan `<td>`, anything inside a
+comment — owns no id: an over-collected id would be a phantom duplicate, and on this path that
+buys a rewrite of a page with nothing wrong with it.
+
+### `page_generic_alt`
+
+A page described an image with a placeholder instead of a description (`page`, `image`, `alts` —
+the values as written, duplicates included). Free and exact, run on every page rather than on the
+ones a sampled verifier looks at, and fed to the same self-correction pass as a dropped link: the
+fix needs the image, so it needs the page agent. This is not a blind spot being covered — the
+deployed verifier catches a gutted `alt` 6 times out of 6 — it is a capability being moved off the
+model's bill, because the cheaper verifiers it may be swapped for catch it 0–2 times out of 6 and
+`axe` catches it never (#290, #246).
+
+The list is closed and matched whole: `alt="logo"` is a finding, `alt="Meta logo"` is not, and
+`alt=""` is left alone as a valid statement that an image is decorative. Comments are stripped
+before the scan, here as on `delivered_alt`: an `<img>` a page quoted inside a comment is not an
+image a reader is offered, and on this path a false finding is not just noise — it buys a rewrite
+of a page that had nothing wrong with it.
+
+### `page_generic_alt_unrecovered`
+
+A correction bought for a placeholder `alt` was kept and the placeholder is still there (`page`,
+`image`, `alts` — the values that remain). The mirror of `page_links_unrecovered`, and the reason
+a deterministic rule is worth more here than a model that finds the same defect: the check that
+raised the complaint can be run again on the answer, exactly and for nothing, so "the rule found
+something" and "the rule got it fixed" are separable at no cost. Only logged where the correction
+was bought for an alt in the first place.
+
+### `page_duplicate_ids`
+
+One page fragment used the same `id` on more than one element (`page`, `image`, `ids` — each
+duplicated id named once and sorted, however many copies it has). Free and exact, on every page,
+fed to the same self-correction pass as a dropped link. It is at the page step rather than left to
+lint for a reason the other two free rules do not have: this defect **does** have a downstream
+reporter and that reporter cannot fix it.
+
+`namespaceAnchors` makes ids unique across the document by prefixing each page's, so a page that
+collided with **itself** gets the same prefix on both copies and stays collided — the one case it
+declines by name — and lint then names the collision on the assembled document, on a page nobody
+will look at again with the image in front of them, usually as `p3-fn-1` rather than under the
+name the page wrote (usually and not always: nothing is prefixed unless more than one *page*
+claimed the id). Here the model that chose the ids is still holding the picture.
+
+A blank `id` is not this rule's finding: it is invalid markup, but "renumber every copy after the
+first" is not its repair.
+
+### `page_duplicate_ids_unrecovered`
+
+A correction bought for a duplicate `id` was kept and a duplicate is still there (`page`, `image`,
+`ids` — the ones that remain). The mirror of `page_generic_alt_unrecovered` and free in the same
+way. The remaining ids are named rather than counted because, unlike an unrecovered link, this is
+not matched against anything the page arrived with: a correction renumbers, so it can clear `fn-1`
+and collide on `fn-2`, and that is a repair that **moved** the defect rather than one that failed
+to touch it. Only logged where the correction was bought for a duplicate id in the first place.
+
+### `page_soft_hyphens`
+
+Soft hyphens (U+00AD) were taken out of a page reply before it became markup Iris keeps (`page`,
+`image`, `removed` — every occurrence, not every word — and `where`: the step whose reply carried
+them, one of `extract`, `correct`, `specialist`, `specialist_merge`). A word the printing broke
+across a column, carried into the HTML as an invisible character:
+
+`agents/page.md` forbids exactly that, with a worked example, and three models from three labs do
+it anyway — 63 occurrences on 9 pages of one 100-page arm, reaching 23 of 62 delivered documents,
+on pages the fidelity check passed (#334). It renders as nothing, so the page reads as clean while
+find-in-page fails: a reader searching a delivered document for `Insurance` does not match
+`Insur&shy;ance`, and the words this lands on are table row labels and column headings. The strip
+is unconditional because there is no output where the character is the right answer — it needs no
+image, no word list and no second model — and it covers the entity spellings (`&shy;`, `&#173;`,
+`&#xAD;`) as well as the codepoint, since those render and defeat a search identically.
+
+**Logged only where it fired**, so a run with none of these lines is a run in which no reply
+carried one. `where` is what makes the count attributable: the same character from a first render,
+from the correction pass and from a specialist are three facts about three different calls. It is
+written AFTER `agent_call`, so the reply on record in the round logs is still the model's own —
+the census behind this row was a $0 regrade of logs already on disk, and a strip applied before
+the log would have left no way to take that measurement or any future one.
+
+### `page_caption_claim`
+
+A figure whose `<figcaption>` makes a claim about the picture its `alt` describes, recorded as the
+two free caption checks found it (`image`, `page`, `figure`: its place among the fragment's
+figures, and `caption`: the caption's visible text, clipped to 200 characters). Written per
+figure, from the page's own fragment, **after** any specialist merge and **before** the verify
+call, so it reads the same two strings the verifier is about to be shown. Two of the three axes it
+covers are already rules in both prompts — a count the page PRINTS against the length of the
+description's list (issue #353), and a region the caption calls highest or lowest against the
+bands the description sorts places into (v1.12) — and this line is not a third rule.
+
+**Nothing here refuses, corrects, reaches a verdict or reaches the model**: it is the record that
+a free check had a subject on this page, and the reason it had no answer. That is what was
+missing. v1.12's clause ends by refusing the comparison where the caption's named group is not one
+the page itself sorts — supplying "which states are New England" out of a model's own knowledge is
+how that check invents the problem it then reports — so a round reporting no region contradiction
+was either a round with none or a round in which every subject was refused, and from outside those
+two are the same silence (#356).
+
+`quantifier` is the caption's own words where it quantifies a category as a fraction ("About
+Half", hedge kept as printed) and `share` is the value those words name (`0.5`); `band` is the
+band word a verb asserts of a group (`highest`, `lowest`, `high`, `low` — bare `high` and `low`
+only after a ranking verb, since "Unemployment Is High Throughout" sorts no places, while a
+superlative counts after a copula too because nothing separates that wording from the plate this
+was written for); `enumerations` is how many lists the description sorts anything into; `named` is
+up to 6 members of those lists that the caption names, matched case-sensitively and on word
+boundaries.
+
+`declined` is why nothing was compared, and each reason belongs to one axis: `proportion` wherever
+a caption quantifies in words, `no_enumeration` where the description sorts nothing at all,
+`membership` where a band claim's group is nowhere among the bands.
+
+`no_enumeration` and `membership` are exclusive — where there are no bands there is no band for a
+region's members to be missing from — and a line with no `declined` at all is a check that was
+decidable.
+
+**`share` is the fraction the caption states and not a proportion of anything measured, and no
+ratio between the two strings is on this line.** That is the finding rather than a gap: both terms
+of such a ratio are readings of the ink rather than transcriptions of the page, `p092` is the
+corpus's only subject, and its five reads put the quantified category at 34.7%, 35.6%, 41.7%,
+41.9% and 50.0% of the states enumerated — no tolerance separates a miss from an exact hit on the
+one plate a tolerance could be fitted to.
+
+The member parse says the same thing independently: over 16 reads of that plate's one unchanged
+legend it answers 1, 2 or 3 lists, and on the read yielding "30 and 16" two of the 46 members are
+fragments of prose while one state's name is lost to a length bound. So `enumerations` is a shape
+and not a denominator, and the arithmetic is left to whoever regrades the log at whatever
+tolerance a later corpus can justify. Over 1,302 delivered pages of the rounds on disk this fires
+on 66 figures across four plates, and 47 of the 50 region claims among them are subjects the
+clause must decline (44 `membership`, 3 `no_enumeration`); the 3 that are decidable are all one
+arm describing the map BY region, which is the shape that puts the membership on the page.
+
+Its limits, before a corpus is counted off it: a figure's own title asserting a band with a verb
+("Figure 7. Where Tax Effort Is Highest") is a `membership` decline here, since no wording
+separates it from a caption's real claim, so the declined counts are an upper bound on how often
+the clause had a page to refuse on; it reads a `<figcaption>` and nothing else, so a claim in a
+`<p>` beside the figure or in a `<table><caption>` — v1.12's subject too, since the prompts say "a
+`<figcaption>` or a sentence in the fragment" — is a decline this cannot count; the members come
+from the same enumeration parse `alt_relocated` uses and are tokens rather than necessarily
+places; "most", "a majority", "many", "few" and "nearly all" are deliberately not subjects, since
+each names an inequality rather than a value and a report that turned one into a number would be
+inventing the number it compared; and a group the caption re-typed in another case goes uncounted,
+so it reads as declined — the conservative direction for a field whose whole job is to say the
+check had nothing to work with.
+
+**Logged only where a claim was found**, so 3 or 4 lines per 91-page arm, and a run with none is a
+run whose captions claimed nothing of the kind.
+
+### `page_recovered`
+
+A feedback re-extraction succeeded on a page an earlier run had lost, so the document is whole
+again for those `pages`. Logged late in the run, once that document has been persisted: a round
+that re-extracts the page and then throws in review leaves the earlier document — hole and all —
+as the one the session holds.
+
+### `extraction_failed`
+
+**No page produced any content**, so the run is ending rather than delivering a document with no
+words in it (`pages`: how many failed, `blank`: how many were reported blank). With `blank: 0` the
+`run_failed` line that follows carries the first page's provider error, because that is the
+diagnosis. Otherwise the source itself was empty — one blank scan uploaded alone, a rasterization
+that yielded white pages — and the error says how many of its pages were blank, which an empty
+document could not.
+
+### `page_verify_ok` / `page_verify_failed`
+
+The Feedback Agent's fidelity verdict on one page, checked against its source image. A failure
+names its `problems` and buys that page one self-correction pass. A page that passes can still be
+re-rendered (a dropped link), so a run's `page` call count is `pages + corrections`, not
+`pages + failures`. A failure also carries `kinds`: the distinct kinds of problem the verdict
+named, out of `content_missing`, `content_wrong`, `structure_wrong`, `a11y_only` and `alt_quality`
+(defined in `agents/feedback.md`, in the order the agent is told to prefer them — content that is
+absent is `content_missing` even though it is also a WCAG failure).
+
+It is a **set**, not one label per problem: two missing rows are one page that lost content.
+Without it a page that lost three table rows and a page whose alt text was refined from "orange
+kayak" to "orange-yellow kayak" wrote the same line, which made `verify_failed` a count of pages
+the verifier had an opinion about and nothing more.
+
+`untagged` is how many of that page's `problems` — a count of problems, where the diagnostics
+fold's `untagged_pages` counts pages — carried no kind this version recognizes — an agent file
+whose VERIFY contract predates the kinds, a session-built or trained one that dropped the field,
+or a kind the agent invented. Read it beside `kinds` or a split reads as covering pages it never
+saw. A problem is never dropped for being untagged or unrecognizably shaped: a lost label costs a
+label, and a lost problem ships the page.
+
+A `page_verify_ok` line carries `unjudged: true` when nothing actually judged the page — no
+Feedback Agent loaded, nothing to verify, a reply that would not parse. Verification is
+non-blocking, so all three answer "faithful" and the page ships; the field is what separates "the
+verifier looked and was satisfied" from "nobody looked", which is otherwise the same line. Omitted
+rather than false on a real verdict, and absent from every log written before it existed. The
+diagnostics fold counts them as `pages_unjudged`. A fourth case joins those three and is the one
+that saves money:
+
+`skipped: "blank"`, a page the agent declared blank, which is not sent to the verifier at all
+because an empty fragment has no content to be unfaithful with (issue #294). Not every blank page:
+a declaration the reply **stated** in its `blank` field whose own log names something on the page
+is judged, and its line carries no `skipped` at all — it is the one blank page a verdict is bought
+for, and `blank_contradicted` on its [`page_blank`](#page_blank) line is why (issue #371). It
+carries `unjudged: true` too — both are pages nothing looked at and neither may enter a pass rate
+— and the extra field is what separates a call that could not be made from one that was not
+bought, which is the difference between a broken run and a saving.
+
+Counted as `pages_skipped_blank`, a subset of `pages_unjudged`. The free checks still run on that
+page, so a blank page carrying link annotations still fails the link comparison and still buys a
+correction. A fifth case is `skipped: "error"`, the second value that same distinction always
+described and nothing had ever emitted: the call that could **not be made**, as against the one
+that was not bought (issue #364, and `page_verify_error` below for what went wrong). It is
+`unjudged` too and stays out of every pass rate for the same reason, but it is the opposite of a
+saving — that page was billed for a full ceiling of output and got no verdict for it — so
+`pages_skipped_blank` and `pages_verify_error` are counted separately and must not be added.
+
+### `page_verify_error`
+
+A page's fidelity check could not be obtained: the call was made and the provider errored, was
+throttled, stalled, or the reply overran its output ceiling. Carries `image`, `page`, the `step`
+that failed (`verify`, the check that decides whether a correction is bought, or
+`recheck_binding`, the gate on keeping one), the `error` message, and for a truncation the same
+evidence `page_correction_failed` carries — `truncated`, `reply_chars`, and both ends of the
+reply, which is what separates a verifier that needed the room from one that wrote an essay about
+a page it had already judged.
+
+**A verdict that cannot be obtained is not a page that cannot be extracted**, and until issue #364
+this pipeline could not say so on the first check:
+
+`verifyAgentOutput` is non-blocking for an absent Feedback Agent and for an unparseable reply, but
+a provider error is rethrown, and that first call had nothing to catch it — so a throttled or
+over-long *check* propagated out of the page's extraction and shipped a `@page-failed` marker for
+a page that had rendered fine. Measured once on a 100-page bench arm: a page extracted as 8,855
+characters of HTML, a complete statistical table of 568 words, was delivered as a 156-byte
+comment, and $0.5051 of that page's $0.6634 was the call that deleted it.
+
+Three things it cost besides the page, which is why this is its own event rather than a silent
+`catch`: the delivered document asserted "the source pages above could not be extracted", which
+was false; `pages_failed` and every triage of *why* pages fail recorded a vision failure, so
+anyone tuning the page agent on that signal was tuning the wrong agent; and the marker advised
+raising `providers.*.max_tokens`, which buys the verifier room to write more about a page it has
+already judged — the wrong lever, pushed the wrong way.
+
+The policy it is fixed to is this pipeline's own: a specialist that fails leaves the page as the
+general pass wrote it, and a fidelity check that cannot run is nothing to correct, so no
+correction is bought and the page ships as extracted. That matches an unconfigured deployment on
+any page whose only route to a repair was the verdict, and **not** on a page the link comparison
+would have repaired: with no Feedback Agent loaded every call site returns a passing unjudged
+verdict, so a links- or alt-triggered correction reaches the binding recheck and is **kept**,
+while under a provider failure that recheck throws too and the correction is discarded.
+
+A page with a dropped `href` therefore ships without it here and with it there — the discard
+decision below, stated rather than folded into a claim of equivalence. On `recheck_binding` the
+line also carries `trigger` and `correction_discarded: true`: that recheck exists to stop a
+correction bought for one link or one placeholder alt from damaging a page that had already
+**passed**, so where its verdict cannot be obtained the correction is not kept — no verdict is no
+licence, and the status quo is a page that passed.
+
+The correction is billed either way, and that field is what puts the discard on the record rather
+than leaving it inferred from an absent rejection line. The third verify call, the sampled
+recheck, keeps its own older `page_correction_recheck_failed` and is not folded in here: it
+decides nothing whether it answers or not, and it has been read across rounds under that name.
+
+### `page_verify_inconsistent`
+
+The verifier **described** a defect and then passed the page (`page`, `image`, `problems`,
+`kinds`, `untagged`). A verdict's pass/fail is its `faithful` / `accessible` flags, and a
+correction is bought only when a flag is false **and** a problem is named, so a verdict that names
+one with both flags true ships the page — and its sentence was not previously anywhere in the log,
+since `page_verify_ok` carries no `problems`. Calibrating the verifier against injected defects
+found 3 of 30 damaged pages described in full and passed: a swapped pair of paragraphs quoted back
+verbatim, an `<h4>` among `<h2>` siblings named as such, `faithful: true` on both.
+
+That is most of the gap between what it perceived (28 of 30) and what it flagged (25), and it is a
+different failure from a verifier that cannot see (issue #210). Written on the FIRST verdict only,
+the one that decides whether a correction is bought; a recheck's own disagreement is already
+readable on its line, which carries both `ok` and `problems`. It decides nothing and costs nothing
+— the page ships exactly as it did — because the fix worth having is kind-gated (a
+`content_missing`, `content_wrong` or `structure_wrong` problem failing the page whatever the
+flags say) and pricing that needs this counted over a fleet; failing on any named problem would
+instead buy a correction round for every `alt_quality` suggestion the same agent is asked to
+volunteer.
+
+The diagnostics fold counts them as `verification.verify_inconsistent`.
+
+### `page_corrected`
+
+What a self-correction pass did (`trigger`: `verify`, `links`, `alt`, `ids` or `both`; `problems`:
+how many it was given; `kinds`: what the verdict said was wrong going in — the same set as
+`page_verify_failed`'s, and empty on the `links`, `alt` and `ids` triggers, where the defect was
+found by code against the file's own annotations, a closed word list or the fragment's own parsed
+tree rather than named by the verifier).
+
+`both` means **more than one** source, which is what it has always counted: until #290 there were
+two and until #373 three, so no reading of an older log changes, and it no longer names which
+combination — `page_links_missing`, `page_generic_alt` and `page_duplicate_ids`, keyed by the same
+`image`, are where the per-source detail is exact.
+
+`result` is `kept` (it changed the delivered document), `rejected` (thrown away in favour of the
+page it was meant to improve — for **three** reasons, and only two of them have a rejection event:
+`page_correction_rejected` where the reply came back a fraction of the page's size,
+`page_links_correction_rejected` where a second verdict named something the rewrite had lost, and
+— with neither of those beside it — a binding recheck that could not be obtained at all, which
+logs `page_verify_error` with `correction_discarded: true` and is counted as
+`rechecks.binding_error`. Anyone triaging a `rejected` by looking only for the first two will find
+no event for the third, which is why it is named here: the first two are a correction judged and
+found wanting, and the third was never judged), `identical` (it changed nothing about the page),
+`empty` (nothing usable came back) or `failed` (the model call threw, so nothing came back at all
+— see `page_correction_failed`); the last three are calls paid for that bought nothing, and
+`failed` is the expensive one, since a truncation has already paid for a full ceiling of output.
+
+`identical` is decided on the **effect**, not on string identity, so a model that returns its own
+page re-indented or with `&` for `&amp;` is counted here rather than as `kept`. Note that such a
+fragment is still **adopted** — what ships is decided on string identity, deliberately, so that a
+change no signal here observes cannot be silently reverted; `identical` means the page call bought
+nothing, not that its output was discarded (that is `rejected`). Two shapes of `identical` are
+worth telling apart, and field presence is what tells them apart: with `chars_before` /
+`chars_after` and all four flags `false`, the model re-typed the page to no effect; with no sizes
+and no flags at all, it handed back the exact string it was given.
+
+Same bill, different behaviour. When it changed something, `text_changed` / `alt_changed` /
+`attrs_changed` / `structure_changed` and `chars_before` / `chars_after` say **what** changed —
+observed on the two fragments, not claimed by the verdict, so an alt-text refinement, a re-typed
+`href` and a restored table row are distinguishable.
+
+`alt_relocated` is on the line only where the correction moved one or more NAMED members from one
+enumeration in a description into a disjoint one — a state that left `darkest` and entered
+`cross-hatched` (#355) — and it names them rather than counting them, because a boolean saying
+something moved somewhere is not a claim anyone can check afterwards. It is not a fifth flag: a
+relocation is always an `alt_changed` too, and what this adds is what KIND of alt change it was,
+which the four booleans and the sizes cannot say — that page's line read as an alt refinement, the
+same bucket as "orange kayak" becoming "orange-yellow kayak", and its two sizes were equal.
+
+It takes no view on which of the two replies is right, and it is not a gate: nothing about what
+ships is decided here. Absent where nothing moved, which is the ordinary case, and absent rather
+than empty. Its limits are worth knowing before a corpus is counted off it: two lists written as
+two sentences with no semicolon between them read as one list, a member added or dropped is not a
+relocation — an added one is `alt_added` below, and a dropped one is reported only by the sizes —
+a correction that changes how many images a fragment has is skipped, since descriptions are paired
+by position, and a name whose own words include "and" or "or" is read as one member wherever the
+list it sits in also uses commas, except as the first half of that list's last item ("Ohio, Health
+and Human Services and Education"), where nothing in the string says which conjunction is the
+list's and a member is silently not seen.
+
+In a run written with no commas at all the conjunction is the only separator there is, so such a
+name is split there — which costs the name itself and not its neighbours, since its two halves
+always travel together. Reading a run-on at all is also what lets a word that is not a name onto
+the line — "the legend runs pale and light and medium and dark" separates into band words — so an
+entry here is a **token that changed bucket** and not necessarily a place, and a corpus counted
+off this field will contain some adjectives.
+
+`alt_added` is the same shape of claim for a member that ARRIVED: a name the corrected description
+lists in one of its categories, named nowhere in the words of the description it corrected — **in
+a list or out of one**, since a band of a single member and a mention in running prose are both
+the earlier reply naming the place — joining a list at least two of whose members that earlier
+description had already listed together — #373's `p084`, whose `below` band went from four members
+to six by gaining Colorado and Illinois.
+
+Everything said above about `alt_relocated` holds of it: it names them rather than counting them,
+it is not a fifth flag, it takes no view on which of the two replies is right, nothing about what
+ships is decided here, and it is absent rather than empty where nothing arrived. The two fields
+are disjoint **by construction** rather than by a rule — a member `alt_added` names the earlier
+description did not name at all, and a member `alt_relocated` names it listed — so a reader can
+add them. That the first test is on the earlier description's **text** rather than on its parsed
+lists is what makes the partition hold: a band of one leaves no list behind, so a member read off
+the lists alone read as new, and the one move `alt_relocated` declines on purpose — out of a
+category of one, which has no first company to compare a second against — landed here instead.
+
+Each field is capped at **six** names independently, so one line carries at most twelve;
+separately rather than between them, because a shared budget would let a description that moved
+six members hide every one it added behind a cap spent on the other field. The destination
+requirement is the whole of the discipline here: every correction re-emits the description entire,
+so new WORDS are ordinary and a rewritten clause is full of them; what is not ordinary is a new
+name inside a list the earlier reply already wrote.
+
+A wholly new list of wholly new names is a category the correction invented — a different claim,
+and `structure_changed` and the sizes are what report a description rebuilt. Its limits are
+`alt_relocated`'s, plus two of its own. A description that lost **any** member it no longer names
+anywhere reports no arrivals at all, because a state written out in full ("N.D." becoming "North
+Dakota") drops one key and adds another, and nothing in the two strings says the two are one place
+— the descriptions this reads abbreviate constantly.
+
+Read across the whole description rather than per band, because a re-spelling can re-band in the
+same stroke, and a check scoped to the band the new name landed in would report a place newly
+asserted into a band whose predecessor had already classified it. A member that merely moved
+between two of the description's own bands is not such a loss, since the correction still names it
+— and "still names it", like "named nowhere" above, is read off the **words**, so a state
+re-banded into a band of one or left in running prose has not been lost either.
+
+The two readings are not the same match, and the asymmetry is deliberate: "named nowhere" folds
+case and reads the normalised member, since a generous reading there only makes the field quieter,
+while "still names it" matches the member **exactly as the earlier reply wrote it**, capital and
+abbreviating dot included. A generous reading on that side puts a wrong name on the line, which is
+the one thing this field must not do — a member whose abbreviation is also an ordinary English
+word ("Or.", "Miss.") is otherwise found in the corrected description's prose, and its expansion
+reported as an arrival.
+
+What that exact test costs is worth stating in its own terms, since it is wider than the
+re-spelling it was written for: it is reached only for a member in **no** category of the
+corrected description, so it bites where a member was re-banded out of every list **and** re-typed
+— and then for **any** re-typing, an abbreviation losing its dot ("Wis." written "Wis") or a name
+losing its capitals ("MISSOURI" written "Missouri") as much as an expansion — and every arrival in
+that description goes unreported. Either condition on its own still reports, for a re-typing that
+leaves the **key** intact — case and trailing dots are normalised out of it.
+
+A re-typing that changes the key needs no re-banding at all: "N.D." written "North Dakota" inside
+the list it was already in is caught by the sentence above, which is that guard working rather
+than this cost. A member the earlier description listed **twice** has no single written form to
+match, so it too reads as lost. That costs the case where a description genuinely gained one state
+and dropped another in the same pass, and it is the direction every bound in this module errs in:
+a name here sends a reader to look for a member that arrived, and a wrong one sends them looking
+for a member that never did.
+
+A member merely dropped from a category is not on this line at all, because #373's evidence is
+about assertions the corrector makes rather than ones it withdraws, and `text_chars_before` /
+`text_chars_after` already say a description lost prose.
+
+`markers_added` names which of the two body markers — `[not legible]`,
+`[page not fully transcribed]` — the corrected page has MORE of, which is the completeness claim a
+correction appended and the third of #373's reviewable shapes. **Additions only, deliberately**:
+this corrector is handed the page image and resolving an illegible passage is its job, so a marker
+LEAVING is as often the repair as the harm; and where prose arrived the two text sizes say so,
+whereas for a marker no such number exists, because the marker is itself the prose.
+
+The count is over the whole fragment, so a marker that arrives in an **attribute** is on this line
+too — inside an `alt`, with `text_changed` **false**, `alt_changed` true and the two text sizes
+**equal**, since nothing a reader reads as prose moved; and inside any other attribute (a `title`,
+an `aria-label`), with `text_changed` and `alt_changed` both false and only `attrs_changed` true.
+The page agent describing an unreadable region inside an image description is what reaches the
+first, and it is much the commoner of the two.
+
+A corpus expecting `text_changed: true` beside every `markers_added` line, or sizing the marker
+off the two text numbers, would read either wrong. The copy editor's `editor_markers_changed`
+counts the same way and records both directions off the same shared constants, for the opposite
+reason — that stage is handed no image, so a marker leaving its body is a claim dropped rather
+than answered.
+
+`text_chars_before` / `text_chars_after` are the same two sizes with the markup taken out — how
+much prose a *reader* receives — which is what separates a correction that added markup to a page
+that was already complete from one that brought back content the vision pass had dropped.
+
+### `page_correction_rejected`
+
+A correction came back at less than a quarter of the size of the page it was given (`page`,
+`image`, `trigger`, `reason: "shrank"`, `chars_before`, `chars_after`), so it was refused and the
+page it was asked to correct is what ships — paired with `page_corrected` `result: "rejected"`. A
+correction is single-shot, so what it returns is what the document would keep; a reply this much
+smaller did not correct that page. Applies on **every** trigger, unlike the links path's own
+check, and it is decided before either re-verification, so no Feedback Agent call is spent judging
+a fragment nothing will deliver.
+
+In the bench logs the two replies that would have hit this were an agent's scratch template and an
+abandoned draft, both bound by a parser that took the first `{…}` in a reasoning model's reply
+rather than the last (issue #170); the parser now reads the right one, and this is the floor under
+that judgement.
+
+### `page_correction_failed`
+
+A self-correction's model call threw (`page`, `image`, `trigger`, `problems`, `kinds`, `error`,
+`truncated`, `ceiling`, `ceiling_bound`, `chars_kept`, and on a truncation `reply_chars` /
+`reply_head` / `reply_tail` / `shape`), so the page keeps the version it already had — the
+extraction that succeeded, verified minutes earlier. It costs the **correction**, not the page:
+before this, the error propagated out of the page's own task and the run logged
+`page_extraction_failed` and shipped a `@page-failed` marker for a page it still had, which also
+named a stage that had worked (issue #171).
+
+Paired with `page_corrected` `result: "failed"`. Every error class is survivable here, not only a
+ceiling — a throttle, a stall and a truncation all leave behind a page good enough to have been
+worth correcting — and nothing is retried, because a correction truncating because the *page* is
+large will truncate again for a second full ceiling of output.
+
+`truncated: true` says the model wrote an essay where a page was asked for, which is worth reading
+beside `page_verify_failed`'s problem list.
+
+`problems` is how much work the call was given and `kinds` is what kind of work, spelled exactly
+as `page_corrected` spells it so a failed correction and a kept one can be grouped together (issue
+#182): without it, the failures were the one part of the correction path that could not be grouped
+by what was asked — 205 successful corrections in a bench round were split by whether the verdict
+named `content_missing`, the kind that asks a model for content its first pass never produced, and
+not one failed correction could be put in either half.
+
+It is empty on the `links` and `alt` triggers, where the defect was found by code against the
+source file's own annotations and no verdict named anything; a kind there would be a count the
+verifier never made.
+
+`ceiling` is the output ceiling this call **asked for**, which since #285 is usually **this call's
+own** and not the deployment's: a correction is capped at twice what the first pass of that page
+spent — scaled up if a specialist handed it a document longer than that pass produced — with a
+4,000-token floor (`correctionCeiling` in `src/pipeline/extraction.ts`). So the remedy on a
+truncated correction is that multiple, not `providers.*.max_tokens` — one uncapped correction ran
+to 32,000 tokens on a page whose render cost 6,233 and was discarded for being truncated, and the
+error it raised advised raising the ceiling, which would only have bought a larger discarded
+reply.
+
+It is the number asked for and not the number reached, so it is on **every** failure this line
+reports and not only a truncation: read it with `truncated`, which says whether the ceiling is
+what the call died of. A throttle or a stall carries a `ceiling` it never got near. A `ceiling`
+**larger** than `providers.<provider>.max_tokens` is not a contradiction and is the one case where
+this field is not what the call asked the provider for: a caller may lower a call's ceiling and
+never raise it, so the adapter sent the smaller of the two, and a truncation on such a line is the
+deployment's ceiling — which is what its error message will name.
+
+`ceiling` is absent where the call ran uncapped, and the configuration is the remedy again on such
+a line — but it is two causes, not one, and the *page* tells them apart. Either the first pass
+reported no token usage, so there was no measurement to take a cap from; or the page rendered
+**nothing** and was delivered as blank (`page_blank`), whose correction is a re-render of the page
+from its image rather than an edit of a page, so nothing its first pass spent bounds it (issue
+#294 — this line is reachable there only on the `links` trigger, and it is the repair that catches
+a page the source file says was wrongly declared blank, which is why it is not capped at the
+floor).
+
+`ceiling_bound` says which of `correctionCeiling`'s two terms produced that number, because
+`ceiling` alone cannot and the answer decides which constant a truncated correction is evidence
+about:
+
+`multiple` is twice this page's own first pass, scaled by a specialist's growth where there was
+one, and `floor` is the 4,000-token floor binding on a small page whose doubling falls under it.
+Of the three corrections that truncated in one bench round, one is a `floor` line — a 1,618-token
+first pass capped at 4,000 rather than 3,236 — so triaging all three as evidence about the
+multiple counts a line the multiple never bound, and raising the multiple would move that page's
+cap not at all (issue #365). Reading the term off the number instead is wrong on exactly one page:
+the one whose doubling lands on 4,000, where the multiple is what bound it and `ceiling === 4000`
+says otherwise.
+
+Absent wherever `ceiling` is, and for the same reason — no cap means no term that produced one.
+`chars_kept` is the size of the fragment that ships. On a truncation, four fields say what the
+reply itself was, which is the evidence `ceiling` only poses a question about (#293): the same cap
+is either too tight for a page that genuinely needs more room than its first pass took, or exactly
+right for a model that went on rewriting the page it was given, and nothing else on the line can
+tell those apart — two truncations at 34,573 and 41,959 characters against pages of 11,908 and
+11,456 were argued both ways off the same log, and the round cannot be asked again, because a
+truncation has already been billed for a full ceiling of output.
+
+`reply_chars` is how far the reply reached (the number `editor_truncated` calls `chars`, renamed
+here because `chars_kept` is on the same line and a bare `chars` would read as the page's own
+length — read as a ratio against it, those two pages are 2.9x and 3.7x), `reply_head` its first
+240 characters and `reply_tail` its last 240, on `editor_truncated`'s terms exactly: whitespace
+folded, a fragment shorter than both excerpts together quoted **entire** under `reply_head` with
+no `reply_tail`, and deployment-only — never on `GET /v1/quality`.
+
+A tail mid-sentence in content the head has not reached is a page that needed the room; a tail
+repeating rows already in the head is a model looping. Absent on every other failure, which has no
+reply to quote, and absent on a truncation that returned nothing at all — `reply_chars: 0` is the
+zero-character shape §9.3 describes, where raising anything buys a larger burn. On this line
+uniquely it is `reply_chars` and not the missing `reply_head` that says so:
+
+`truncated` here is a predicate over the error's *message*, so it is also true of a truncation
+whose class was lost crossing a boundary, and such a line carries no `reply_chars` at all. So a
+bare `truncated: true` is two shapes — a reply of zero characters, or a truncation that arrived
+without its evidence — and only `reply_chars` separates them.
+
+`shape` is that head-and-tail reading turned into something countable, in `page_no_output`'s
+vocabulary above: `truncated_envelope` is the reply the prompt asked for, cut; `bare_html` is a
+reply that IS the page's markup, which is how 24 of the 180 corrections in that round answered and
+the shape both of its page-shaped truncations had; `prose` is a reply that never began the page.
+Two more are reachable and worth expecting if the field is being counted:
+
+`envelope`, where the ceiling landed after the closing brace of a reply the model was still adding
+to, and `empty`, where the reply is whitespace only — that one is not the zero-character shape
+below, which carries no `shape` at all, and `reply_chars` tells them apart. Only `prose` settles
+the question by itself — a cap spent on something other than the page buys more of the same if it
+is raised (§9.3).
+
+`bare_html` says where the reply **began** and not where the output went: a correction that starts
+the page and then narrates at it carries the same value as one that transcribed to its last
+character, both happened in that round on the same model, and `reply_tail` is still what tells
+them apart — nothing counts narration off this field. Absent on a truncation that returned
+nothing, where `reply_chars: 0` is already the whole of what is known, and absent on every failure
+with no reply at all, exactly as the excerpts are (issue #365).
+
+`blocks_named` has no counterpart here: this call is asked for the page's HTML and not for an
+edits list. The fidelity problems the correction was asked to fix are still unfixed and still on
+record — keeping the page is not a claim that it was right.
+
+### `page_correction_no_output`
+
+A self-correction's reply carried no readable HTML (`page`, `image`, `chars`, `shape` — the same
+shapes as `page_no_output`), so the page keeps the version it had. That version had already passed
+everything except the fidelity problem the correction was asked to fix, which makes it strictly
+better than the reply. Paired with `page_corrected` `result: "empty"`, which is the existing
+record of a correction call that bought nothing; this line says what came back instead.
+
+`declined` is on the line — a count, absent where it is 0 — where the reply refused a problem
+(below) and sent no page with the refusal: the prompt argues against that shape by name, because a
+reply with no `html` is a reply the run cannot use, and it is the one the field exists to make
+visible. A reader looking at a correction that came back empty needs to know whether the model was
+refusing or failing, and the two have different remedies. The count is a flag and not the record;
+the reasons are on `page_correction_declined`, keyed by the same `image`.
+
+### `page_correction_declined`
+
+The corrector refused one or more of the problems it was given, saying which and why (`page`,
+`image`, `trigger`, `problems` — the whole list it was offered — and `declined`, one entry per
+refusal with `problem`, `source` and `why`). Since #373: a correction's only legal move used to be
+compliance, so a problem asserting something about the HTML that the HTML itself refutes — an id
+used twice that is used once, an attribute missing that is present — was answered by editing a
+page that was right, and the edit was indistinguishable in the log from a repair.
+
+The licence is narrow by construction: it covers a claim about **the HTML the corrector was shown,
+refuted by that HTML**, and explicitly not a claim about what the *image* shows, which is the
+judgement the check was asked to make. **It gates nothing.** No verdict, no `page_corrected`
+`result`, no recheck and not the `uncorrected` set are decided here, so a problem declined wrongly
+leaves the page exactly where a correction that failed to fix it leaves it — named in
+`uncorrected`, with `@page-uncorrected` on the delivered document.
+
+The licence can buy a different *explanation* of a bad page and never silence about it. `problem`
+is the number the reply cited, against the numbered list in the request (numbered for this reason:
+matching a paraphrase back against the list would attribute a disagreement to the wrong entry),
+and is **absent** where the reply cited nothing rather than guessed at.
+
+`source` is which of the four checks raised that problem — `verify`, `links`, `alt`, `ids` — read
+off the bands of the concatenated list, and `null` where no number was cited or the number falls
+outside the list. It is the field that makes the risk measurable: a decline over `verify` is a
+disagreement with the Feedback Agent's reading and may well be right, while `links`, `alt` and
+`ids` were checked in code, so a decline there is a refusal of a fact — and those three entries
+are marked `(Iris checked this one in code.)` in the list the corrector reads, with the licence
+excluding a marked problem by name, so a `code_checked` decline is a corrector going past what it
+was told rather than following it.
+
+`problems` is the denominator without which none of this can be read — 2 declined of 2 is a
+correction refused outright, 2 of 9 is the pass working. Written per **page** and not folded into
+a field on `page_corrected`, because a decline is per problem and that line is per page: a reply
+that declined one of five problems and fixed the other four is the shape this pass is meant to
+produce, and a count on the page's line could not be told apart from a reply that declined all
+five. Absent from a run where nothing declined, which is the ordinary case; the diagnostics fold
+counts it as `verification.declined`.
+
+### `page_correction_recheck`
+
+A second verdict on a corrected page (`ok`, `problems`), with `problems_before` / `problems_after`
+— how many **fidelity** problems the page was sent to be corrected with, and how many this verdict
+names — `kinds_before` / `kinds_after`, the same two sides as kinds, and `links_before` /
+`alt_before` / `ids_before`, the missing links, placeholder alts and duplicated ids it was also
+given. The kinds are what turn "the recheck did not pass" into an answer about the correction:
+
+`content_missing` in and `alt_quality` out is a page whose content came back and whose description
+is now the complaint, while `content_missing` on both sides is a correction that did not do the
+one thing it was asked to. Both are `ok: false` with the same counts.
+
+`binding: true` is the links path re-verifying a rewrite it may discard; `binding: false` is a
+measurement-only sample, `defaults.recheck_sample_size` pages of the batch (default 1, `0` for
+none), which changes nothing about what is delivered. The two are counted apart in
+`verification.rechecks`, and a line with `ok: false` has its `problems` reported there as
+`rechecks.failures` — **not** in `diagnostics.errors`, which is failures of the run and rendered
+every one of these `"unknown"` while the diagnosis sat on this line (issue #296).
+
+At the default the sample is a **count and not a rate**: one draw per run, so `1 of 1 cleared` is
+everything it says. Reading a proportion off it is what this field invited and got — four draws
+split 2/2 quoted as "half", and the same instrument reading 50% on one model's four draws and 25%
+on another's over one 100-page corpus (issue #288).
+
+`sampled_ok / sampled` is a rate over corrected pages only at a size at or above the page count,
+which is a census and costs one Feedback Agent call per correction; the answer at that setting,
+replayed off 57 corrected bench pages, is that **26%** of corrected pages clear their recheck
+against a 2% floor for re-asking about the page as it was — 19 pages better and 2 worse, p =
+0.000. Between the two, which pages answer is a deterministic threshold spread across the batch
+rather than a random draw, and is not evidence that any position is representative: it replaced a
+rule that handed the slot to whichever corrected page finished **first**, which under concurrency
+is the front of the batch, and on one 8-run corpus put all 8 slots on six pages of 100.
+
+`extraction_start` / `reextract_start` carry `recheck_sample_size` and `recheck_thresholds`, so a
+log with none of these lines in it says which of three things happened: the measurement is off, no
+page was corrected, or every correction landed below the first threshold. On a `binding: false`
+line, read the two counts beside it: a correction pass is single-shot and was never expected to
+reach zero problems, so five-in-one-out and five-in-five-out are both `ok: false` and only these
+say which happened. On a `binding: true` line the page had **passed**, so `problems_before` is 0
+by construction and a problem named here is a rewrite of a good page that lost something — not a
+correction that failed to converge.
+
+The link, alt and id shares are carried apart because this verdict judges the fragment against the
+*image* and names the Feedback Agent's own problems: a link target does not appear in the image at
+all, and a placeholder alt or a duplicated id was found by code rather than by this verdict, so
+none of them could be counted coming out. Folding them in would make a page with one fidelity
+problem and two gutted alts read as three-in-one-out — a correction that fixed nothing, logged as
+converging.
+
+`page_corrected`'s `problems` is the correction's whole bill, `page_links_unrecovered` says
+whether the links came back, and `page_generic_alt_unrecovered` / `page_duplicate_ids_unrecovered`
+answer the alts and the ids exactly and for free. Counts, not a diff — deciding whether two of the
+Feedback Agent's prose descriptions are the same problem is fuzzy matching on model output, so
+both lists are on the line in full instead.
+
+`unjudged: true` marks a recheck nothing judged, on the same terms as `page_verify_ok`: `ok` is
+also what an unavailable Feedback Agent looks like, and with none loaded every page passes its
+first check, so every corrected page's recheck is the binding one and every one of them would
+otherwise read as a rewrite checked and found good.
+
+`verification.rechecks.binding_unjudged` and `sampled_unjudged` are those, per population.
+
+### `page_correction_recheck_failed`
+
+The measurement-only sample could not be taken — the extra Feedback Agent call hit a provider
+error (`error`). Logged rather than raised: the page ships as it would have with no measurement at
+all, and the slot this page claimed stays spent, so a throttled provider is not retried once per
+corrected page — and at a census that is one failed call per correction, not one per run. A
+`binding` recheck has no such line, because there the verdict decides whether the rewrite is kept.
+
+### `table_continuations`
+
+The assembled document holds a table whose caption says it continues the one before it: `tables`
+(how many tables the document has), `pairs` (how many of them are second halves that were located
+in the source bytes) and `declined` (how many said so and could not be paired). Logged once per
+run, before any join is attempted, so the ratio is readable on a run whose joins then all failed.
+A table printed across a page break arrives as two tables with duplicate headers and no connection
+between them, and no page agent can fix it: each printed page is its own call, so the agent that
+wrote the second half had one image and the other half was not on it (issue #239).
+
+It knew — all 18 continuation captions in the reference corpus say "Continued" — and emitted a
+fresh `<table>` because there was nothing to append to.
+
+`declined` is a fact about the bytes rather than about the model: the pair is found in the DOM and
+its two source spans are not, which happens when a page delivered an unclosed `<table>` (an
+unclosed opener swallows the table after it, so the bytes delimit nothing to splice). Those halves
+ship as they arrived.
+
+### `table_joined`
+
+Two halves were merged into one table: `by` (`"code"` or `"editor"`, which path produced the
+merge), the merged `caption`, `rows_first` / `rows_second` / `rows_joined`, `chars_before` /
+`chars_after` for the two halves against the one table, and — on the editor path only — that
+editor's own `editor_log`. The merge is not a plain concatenation, because the halves do not
+always agree on what to concatenate: in the reference corpus two of 18 pairs declare a different
+column count from their own first half, 13 carry footnote-reference ids in the repeated header
+block that an endnote links back to, and a bracketed unit note ("[In millions of dollars]") is
+reprinted with the header and belongs in the joined table once.
+
+Where one of those judgements is real the merge is a Copy Editor call (`copy_editor_table_join.md`
+in the agent ledger); where it is not — three of the editor's six rules are "move these bytes and
+change nothing" — the merge is made in code and costs nothing, which is 26 of 50 pairs measured
+out of already-delivered documents (issue #276). Read `by` rather than the agent ledger to split
+the two: a pair joined in code never reaches the ledger at all, so a run's `table_joined` count
+and its `copy_editor_table_join.md` call count are different numbers on purpose.
+
+What the answer is *checked* for is deterministic and is the reason this line is trustworthy: one
+table, a caption without the continuation marker, no column lost, the header block still made of
+`<th>` cells, at least `rows_first + rows_second` rows less one header block and one droppable row
+— the header credit is the more permissive of two readings, either one shared block (the smaller
+of the two declared depths) or what the joined table's own depth says went, because neither alone
+is right on its own: the two halves may declare headers of different depths (4 of the corpus's 18
+pairs do, so the smaller depth alone under-credits a merge that kept the deeper block), and
+reading the drop off the joined table alone charges a merge that PROMOTED the reprinted unit note
+into `<thead>` for a row that is still in the table.
+
+The shared-block reading is available only while the joined header is no deeper than one block
+plus that one promotable row: past that depth the extra header rows are a block **kept** — the
+duplicate header repeated mid-table, the state this stage exists to remove — rather than a row
+promoted, nothing went, and crediting a shared block would let a merge keep that block and drop
+its worth of unlabelled rows along with it. The two cases are separated to within one row rather
+than outright — a reply that kept a single duplicated header row is inside the bound and can lose
+one unlabelled row with it, which is the size of the drop the floor forgives anyway — so what the
+bound rules out is slack a whole header block deep, and every distinct row label from either half
+still present as a cell somewhere.
+
+Two row checks rather than one, because neither sees what the other does: the label set is blind
+to a row that has no label (a printed table's multi-line row labels have continuation lines whose
+first cell is empty), and a count cannot tell a legitimately dropped duplicate from a dropped
+state. The one row the count forgives is the bracketed unit note a continued page reprints.
+
+`rows_joined` under `rows_first + rows_second` is therefore not a defect.
+
+### `table_join_code_declined`
+
+The merge was tried in code on this pair and stood down, so a Copy Editor call was bought for it:
+the second half's `caption` and the `reason`.
+
+`header_differs` (the second half's header block is not the first half's, so which one describes
+the joined rows is a reading of the table — 17 of the 50 measured pairs, and the commonest),
+`id_would_be_lost` (an id on the half being dropped has no free counterpart to move onto: a
+footnote-reference anchor in the repeated header block, whose cell in the surviving block nothing
+but a reading can pick, or an id on both halves' own `<caption>` or `<table>` element, where
+keeping one live target means choosing which — 7 of the 50), `columns_differ` (a row of the
+continued page is wider than the first half already is, so appending it would put cells under a
+header block that does not describe them — reached where the continued page reprinted no header at
+all, which is the case the header comparison above cannot see), `note_repeat_unclear` (the
+continued page opens with a bracketed unit note the first half does not carry, so it is not the
+reprint rule 6 licenses dropping), `caption_unclear` / `no_caption_available` (the continuation
+marker is not wholly inside one text node, so taking it off means rewriting markup; or neither
+half has a caption, which the verification requires), `content_outside_table` (a half's span
+parses to something beside its own table — the parser fosters a stray `<p>` out of a `<table>` and
+the joined table's `outerHTML` would not carry it, which is the one way this path can lose content
+where a model reply cannot), `id_would_collide` (the join would print one id twice, a defect it
+would have introduced), `tfoot_no_tbody` (the first half has no `<tbody>` to append to and a
+`<tfoot>`, so the rows would land after the table's own summary), `unreadable` / `read_failed` (a
+half no parser could read), or `verify:<reason>` for a code merge the same verification as
+`table_join_failed` refused.
+
+Logged on every pair the code path did not take, because the share it takes is what a later round
+has to be able to re-measure and `table_joined` alone cannot tell a free join from a paid one. A
+decline costs nothing: the pair goes to the editor exactly as it did before this path existed.
+
+### `table_join_failed`
+
+One pair was left as two tables, with `reason`: `unmatched_source` / `not_adjacent` for a pair the
+source bytes cannot delimit (see `table_continuations`), `declined` for an editor that judged the
+halves not to be one table, `no_output` for a reply with no HTML in it, `truncated` /
+`call_failed` for a request that did not come back, `read_failed` for markup no parser could read
+(with `stage: "body"` when it was the document rather than the reply — jsdom parses by recursion
+and overflows on a body nested a few hundred thousand levels deep, which is reachable because
+`anchors.ts` delivers a page past 500 levels as written; the document then ships exactly as it
+arrived rather than failing the phase, the way the lint one step later reports its own overflow as
+`@lint-unavailable`), or one of the verification failures — `not_one_table`, `no_caption`,
+`still_continued`, `columns_lost`, `header_cells_lost` (the merged header block came back as
+`<td>`, which axe does not report and which would have removed the header association from the one
+table this stage exists to improve), `rows_lost`, `labels_lost:<n>`.
+
+The document keeps **both halves byte for byte**, so every failure here delivers the output the
+pipeline had before this stage existed, which is what makes the merge safe to ask a model for at
+all: unlike a correction round, a refusal costs one table's structure and not the document. A pair
+that failed is not asked again in the same run — the next pass would send the same two tables to
+the same prompt — so one unjoinable pair does not starve the joinable pair after it.
+
+### `table_joins_capped`
+
+The document had more continuation pairs than one run will spend requests on (`joined`, `pending`,
+`max`), and the `pending` ones ship split. Present only when pairs remain. The cap is not a bound
+anything measured comes near — the worst 25-page chunk of the reference corpus has 7 pairs — and
+since #276 a pass need not cost anything at all, because a pair the code path takes buys no
+request. It bounds **passes**, not spend: a body that keeps producing pairs needs something to
+stop on. Pairs are re-read from the body each pass, which is how a table in three pieces closes:
+joining the first two leaves a document whose remaining half now follows a joined table.
+
+### `prose_joined`
+
+A sentence the source printed across a page turn was delivered whole (issue #248). `markers`
+page-break markers stood between the pages, `candidates` of those turns had the next page opening
+with a `<p>` that begins with a lowercase letter, `joined` were mended, `unmarked` of the joins
+had no marker between the halves at all (a page printing no number emits none), and `word_splits`
+were breaks that fell inside a word. Then one count per refusal:
+
+`declined_interrupted` (something other than a paragraph stands between the halves — a footnote
+list, in all 9 of the reference corpus's cases — so the marker is not what interrupts the
+sentence; a page that FAILED extraction lands here too, because its fragment is the `@page-failed`
+comment and that comment is exactly such a node), `declined_not_continuing` (the paragraph before
+ended a sentence, so the lowercase start after it is something else), `declined_page_gap` (a page
+between the two returned nothing at all, so the middle of the sentence may be what is missing —
+the page that came back empty with no marker, #194, which is dropped from the body and then
+visible only as a hole in the numbering), `declined_no_cut` (the continuing sentence begins inside
+an inline element that opened earlier, so no cut leaves both halves balanced markup),
+`declined_attrs_kept` (the whole paragraph would have moved and it carries an attribute the move
+cannot take with it — `id` above all, which something may refer to), `declined_lang_mismatch` (the
+two paragraphs disagree about `lang` or `dir`, so the words would arrive in a language nothing
+said they were in), `declined_as_written` (one of the pages is being shipped byte for byte,
+`skipped_pages`) and `declined_too_far` (more than 500 characters of text would cross the marker —
+a paragraph with no sentence boundary in it moves entire, so without the bound a page of
+unpunctuated prose would deliver its whole text after the *next* page's anchor, which is not the
+few words the direction below was chosen for).
+
+Plus `word_split_examples`, up to five words the break split, cut at 40 characters — text out of
+the user's own document, so it stays on the deployment and never reaches `GET /v1/quality`. Absent
+unless at least one turn was a candidate, so a document whose pages happen never to break a
+sentence adds no line, and `markers` high beside `candidates: 0` is what a caseless script looks
+like here: the lowercase test is the measured one and has no signal in Hangul, Chinese, Japanese,
+Arabic or Hebrew, so those sentences ship split.
+
+**The words move forward, past the marker**, which is a decision about what a page anchor means
+and not a detail: the sentence is then whole with `#page-74` standing immediately before it, so a
+reader following that anchor hears a few words of page 73 first — where pulling the next page's
+head back instead would land `#page-74` after the sentence it should open on and cost that reader
+the start of it. A word the printer broke **keeps its hyphen** and is closed up ("Simi-" + "larly"
+ships as "Simi-larly"), because nothing at this seam can tell a line-fill hyphen from a real one
+and dropping it would be the one place this pass deleted a character the source printed;
+`word_splits` is what makes that answerable with data.
+
+Deterministic, so no model call is spent on it — unlike the table join, which needs one wherever
+the two halves' headers disagree about what the table is.
+
+### `editor_images`
+
+How many source images the Copy Editor received this round (`attached` of `of`, plus `pages`). A
+`dropped` count means the selection did not fit in one request and was trimmed to the pages issues
+actually named. `attached == of` on a multi-page document means at least one issue in that round
+carried no page attribution, so the round asked for everything.
+
+### `editor_images_refused`
+
+The provider refused the round's payload as too large, so the same prompt was re-sent **without**
+images. The correction still had the whole body and every issue; only a fidelity problem that must
+be checked against the source can go unfixed.
+
+### `editor_fidelity_observed`
+
+The Copy Editor, looking at a page image it was sent for some other reason, says the HTML and the
+page disagree about something **nobody asked it about**:
+
+`count` observations, the `attached` pages it actually had, and the `observations` themselves —
+each a `page`, a sentence, and one of `page_verify_failed`'s five `kind`s (the same taxonomy, so
+this can be read against `verify_kinds`; `null` where the reply named a kind this version does not
+recognize, and the sentence is kept either way). Reported and **not acted on**: acting would mean
+re-reading that page in full, which is a re-extraction and not this loop's job, and an edit made
+from one glance at an image reaches a reader as what the page says.
+
+So nothing about the delivered document changes because of this line — it is the only trace, and
+it is addressed to a person. Its value is that it is the **only** second opinion on fidelity in
+the run: VERIFY checks each page once, with the same model family on the same image as the
+transcriber, so its blind spots are the transcriber's by construction, and the Reader cannot see
+the source images at all (issue #183).
+
+`unattached` counts observations about a page whose image was **not** in `attached` — the prompt
+asks for attached pages only, so those are guesses about a page the model could not see, kept but
+counted apart so a mostly-guesswork set can be discounted whole.
+
+`unplaced` counts observations that named no page. Absent on the ordinary round, where the editor
+noticed nothing.
+
+### `editor_links_dropped`
+
+An `href` present before that round's correction was missing after it (`iteration`, `hrefs`). A
+link's target came from the source **file**, not from a page image, so a dropped one cannot be
+recovered by looking again — logged rather than repaired, and counted into `links_dropped_rate`.
+
+### `internal_links`
+
+The delivered document contains an in-document reference that lands nowhere (`refs` fragment links
+in all, of which `empty` are `href="#"` and `dangling` name an `id` the document does not have,
+plus `ids` — up to 20 of the fragments that failed). Those three are counted per **reference**, so
+`refs` is the denominator of the other two and one missing section linked forty times is forty
+references a reader can activate to no effect; `ids` alone is the **distinct** set, because the
+cap is 20 and one dead target must not spend it.
+
+Measured on the bytes actually written, after every rename and every correction round, because
+that is the only place the question "does this reference land" has a final answer; `@`-comment
+markers are stripped first, since those quote model prose and an `<a>` inside one is not a link.
+Absent on a document where every reference resolves. The two shapes are apart because the remedies
+are:
+
+`empty` is a link the page agent wrote knowing it had no target — nothing to rename — while a
+`dangling` one had a target that moved, was never transcribed, or is in a part of the document
+this run did not hold. The ids are here and not in `links_unresolved_rate` on purpose: a fragment
+is text chosen out of the document, so it stays on the deployment while the public tally gets
+counts only.
+
+### `delivered_markup`
+
+The delivered document's own structure disagrees with itself (#240): `unbalanced` lists
+`element open/close` for every element whose end tag HTML **requires** and whose start and end tag
+counts differ (e.g. `table 16/15`), `tables` and `tables_without_body` count the parsed tables and
+those holding no row a reader receives as content (no rows at all, none outside a declared
+`<thead>`, or — with no header block declared — none that is anything but column headers; a body
+of `<th scope="row">` cells is content), and `empty_table_captions` names up to 10 of those
+tables.
+
+Absent when both are clean. The two halves are one question asked either side of the parser, which
+is why they share a line: an HTML parser repairs malformed markup before axe is handed the
+document, so the **bytes** are the only place an unclosed `<table>` is still visible, while a
+table with no rows is what survives that repair and reaches a reader. `@`-comment markers are
+stripped before counting, since those quote model prose — with them in, one bench document read
+`table 25/19` with nothing actually wrong; an unterminated `<!--` is treated as running to the end
+of the document, which is what a parser does with one.
+
+Elements with optional end tags (`li`, `tr`, `td`, `p`, `tbody`, …) are excluded:
+`<ul><li>a<li>b</ul>` is correct HTML and counting it would bury the real finding. A `parse_error`
+key means the table half could not be measured at all, so its zeros are not a clean bill of health
+(#164).
+
+### `delivered_structure`
+
+Four structural defects in the delivered document that **no rule in the gate reports** (#255),
+each decidable from the HTML alone:
+
+`dangling_idrefs` (an `aria-labelledby`, `aria-describedby` or `<label for>` naming an id that
+exists nowhere in the joined document), `dl_without_dd` (a `<dl>` holding terms and no
+definitions), `lang_on_void` (`lang` on an `<img>`, `<hr>`, `<br>`, `<input>` … — an element with
+no text at all for it to apply to, holding neither a text node nor text in an attribute: HTML
+scopes `lang` to an element's contents **and** to its text-bearing attributes, so
+`<img alt="Un graphique" lang="fr">` is correct authoring and is not counted, while the same image
+with `alt=""` is) and `empty_landmarks` (a `<nav>`, `<aside>`, or NAMED `<section>` with no text
+and no image, table or form field in it).
+
+All four counts appear whenever any of them fired, zeros included — on a line that exists, a zero
+says that class was looked for in this document and is not in it — plus `dangling_idref_examples`,
+`dl_without_dd_examples`, `lang_on_void_examples` and `empty_landmark_elements`, up to five
+instances each, written as `element[attribute=value]` and cut at 40 characters. Absent entirely
+when all four are clean, which is the ordinary document. Measurement only: nothing is repaired and
+no run is failed, for the same reason as `delivered_markup` — these are a class worth seeing, not
+a rate anyone can calibrate yet.
+
+Three of the four do reach the deployment-wide tally as `iris:structural-defect`, one row per
+document however many instances it had, surfaced as `structural_defect_rate` above; `lang_on_void`
+is left out of it on purpose (wasted output, not something a reader loses), and so are the
+examples — ids and language tags are text out of the user's own document and stay on the
+deployment. Why each is here rather than in the lint, measured against this deployment's own axe
+config: a dead `aria-labelledby` or `aria-describedby` is filed by axe as `incomplete` and never
+as a violation (`aria-valid-attr-value` is `reviewOnFail`), and a dead `<label for>` reaches the
+`label` rule only when the input has no other name, so the gate is CLEAN on all three;
+`definition-list` does report a bare `<dl><dt>Term</dt></dl>`, but HTML allows a `<div>` between a
+list and its groups and axe passes as soon as one is present, so
+`<dl><div><dt>Term</dt></div></dl>` lints clean with every definition missing; `lang` is a global
+attribute, so a `lang` on a void element is legal markup and there is nothing for a rule to fail;
+and no rule fires on an announced region with nothing in it.
+
+The ARIA rule is not promoted into the gate the way `duplicate-id-aria` is, because the rule is
+wider than the finding — `aria-controls` naming an element that appears on activation is genuinely
+undecidable statically, and promoting the id would fail runs on it. The scope is the **joined**
+document, not a page: a page agent writes one page at a time and a reference to an id defined on
+page 40 is correct in the document those pages assemble into, which is the same reason the issue's
+`href="#x"` check was left out. An unnamed empty `<section>` is not counted: a `<section>` is
+exposed as a `region` only with an accessible name, so an unnamed one is a generic container no
+reader is offered — and a name that resolves to nothing is no name, so
+`<section aria-labelledby="nope"></section>` is one finding (the dead reference) and not two.
+
+A `<main>` a page emitted for itself is deliberately NOT among these: that one is fixed rather
+than counted (`page_main_stripped`, #251).
+
+`parse_error` on the `delivered_markup` line means these four were never measured, so their zeros
+are not a clean bill of health (#164).
+
+### `delivered_alt`
+
+A placeholder where a description belongs, in the file the caller receives (#290): `generic`
+counts the `alt` values that are only a word for the medium (`image`, `photo`, `logo`, `null`, …),
+`checked` is every non-empty `alt` in the document as the denominator, and `examples` names up to
+five of the values. Its own line rather than a field on `extraction_complete`, because they answer
+different questions: that one reads the fragments the document is assembled **from**, and the
+review loop runs afterwards and replaces a top-level block's markup wholesale — `<img>` and its
+`alt` included — so a copy-edit round that guts an alt, or writes a placeholder into a block it
+was patching for another reason, is invisible there and visible here.
+
+Absent when there is none, like `delivered_markup` and `delivered_structure`, and for the same
+reason: the ordinary document needs no line. A missing line still cannot be read as a check that
+never ran, because `extraction_complete.alts_checked` is on every run whatever it found. Comments
+are stripped before the scan, exactly as `internal_links` and `delivered_markup` strip them off
+the same bytes: the `@unresolved` list is model-written prose ABOUT the document and quotes markup
+freely, so an `<img>` inside one would report a placeholder on a document whose images are all
+described and inflate `checked` besides.
+
+Measurement only — nothing is repaired at delivery, since the repair is to describe the picture
+and the page agent is the only component holding it, which is what the correction pass
+(`page_generic_alt`) is for. Nothing here reaches the tally.
+
+### `editor_markers_changed`
+
+The count of a `[not legible]` or `[page not fully transcribed]` marker changed across one
+correction round (`iteration`, `before`, `after`, plus `fewer` and/or `more`).
+
+`fewer` is expected where the editor read that region off the attached page image, and is a loss
+anywhere else — nothing downstream can tell those apart, and no other signal sees it at all, since
+the flattened view strips bracketed tokens before comparing words.
+
+`more` is a placeholder written over words the extractor did read, which no instruction in the
+loop allows.
+
+### `editor_truncated`
+
+A correction round's response hit the model's output ceiling (`max_tokens`, `chars` returned, plus
+`attached`/`of` images and `after: "images_refused"` when it was the retry that truncated). The
+review loop stops after this round either way, but the round itself is not given up on: what the
+reply already said is read (`editor_salvaged`), and only the part it never reached is re-made a
+section at a time (`editor_sections` below). The whole ceiling of output was billed, so this is
+the log's most expensive line. Since #250 the round asks only for the blocks the editor changed,
+so a ceiling hit here is no longer what a long document costs: it is either a document whose
+changed blocks really do fill a response, or — read `editor_patch` and `editor_whole_body` on the
+rounds around it — a model returning the whole document when it was asked for a few blocks of it.
+
+**Which of those two it was is on this line** (#277): `reply_head` is the first 240 characters of
+what the model did emit, `reply_tail` the last 240, and `blocks_named` counts the `"block"` keys
+it managed. One budget of the user's text, spent one of two ways: a fragment longer than both
+excerpts together is quoted at each end, and a shorter one is quoted **entire** under `reply_head`
+with no `reply_tail` at all — rather than reported as a head whose middle and end are missing
+while `chars` says there was more.
+
+`blocks_named` is a count of a key and not a parse, so a document quoting `"block":` in its own
+text counts its own prose; the excerpts are logged beside the count for that reason and not only
+for colour. Between them, an `edits` array that genuinely did not fit is distinguishable from a
+whole document returned out of habit — a block-size problem and a prompt problem respectively.
+Recorded because the round **cannot be asked again**, so the fragment is the only evidence that
+will ever exist about why it did not fit, and the round was billed in full; the count is the
+answer and the excerpts are how a person checks the count.
+
+`blocks_named` is also the closest thing here to a prediction of what the next line will say: it
+counts a key rather than parsing, so it is an upper bound on the edits `editor_salvaged` could
+recover, and a `blocks_named` well above that line's `edits` means most of the count was the
+model's own prose or an entry the ceiling cut. This is the user's own document coming back, so
+like `prose_joined`'s `word_split_examples` it stays in the run log on the deployment and never
+reaches `GET /v1/quality`, which gets `editor_truncated_rate` and no text.
+
+### `editor_salvaged`
+
+The truncated reply was read as far as it got, and this is what it turned out to have said (#295).
+The contract makes the answer a list of independent block edits, so an entry that arrived complete
+is a whole correction to a whole top-level node:
+
+`edits` is how many were used, `applied` how many changed their block, `unchanged` how many named
+a block and returned it as it was, `refused` how many could not be used (a duplicate, or a
+replacement that ends inside an element — each costs its own block, exactly as on `editor_patch`),
+and `markers` / `navigation_lost` read as they do there.
+
+`reached` of `of` is the share of the document this covers, and it is the number to read first:
+the blocks before it carry this round's own corrections, made by a call that saw the whole
+document and the page images, and the `rest` characters after it are what the section calls are
+then asked for.
+
+`closed: true` says the edits list itself finished — the ceiling was reached on the way *out* of
+the envelope, in `fidelity_observed` or in trailing prose — so every block was considered, and
+unless the claim was then cut back (`lost_at` below) `reached` is the whole document and no
+section call is made at all: the one truncation that costs a reader nothing.
+
+`edits: 0` with `closed: true` is that same answer with nothing in it: the list closed **empty**,
+meaning the editor considered every block and had no change to make, which is a round that
+converges rather than a round that failed — the document is delivered as it entered, unsectioned,
+and its marker says it was passed rather than lost. (`edits: 0` cannot appear without `closed`: an
+unclosed empty list is `no_complete_edit` below, and a list whose every edit was refused is
+`all_refused`.) `lost_at` and `dropped` are a claim that was **cut back** (#317), and are on the
+line only when one was: the block the reply emptied or handed back with less content in it than it
+had, which is where `reached` now stops, and how many of the reply's edits were left unapplied
+because they named that block or a block behind it.
+
+A cut-back claim is the case that used to be refused outright, and the change is a cost decision —
+refusing it re-requested every block of the document in section calls to avoid applying one edit,
+which on the round that filed it was 6 and 5 calls at $0.2243 each against replies holding 6 and 7
+usable edits. What it trades is named on that issue: a move carrying content *backwards* leaves it
+in the document twice rather than losing it — and **that duplicate is delivered**, because a
+truncated round is the review loop's last round and the section calls see only the remainder, so
+nothing later in the run removes it (a feedback re-run is the pass that can).
+
+Which is why the count is here to be read rather than assumed to be zero: a deployment seeing
+`lost_at` often is a deployment whose delivered documents may hold duplicated content, and the
+remedy for the ceiling itself is still `providers.<name>.max_tokens` or fewer pages per session.
+
+`lost_at` may appear beside `closed: true`, which reads oddly and is real — the patch was complete
+and part of it is being re-asked for anyway — and then `rest` is non-zero where a `closed` line
+otherwise has none. Read `chars` against `editor_truncated`'s `chars` on the line above (they are
+the same number) and against `blocks_named` there. The waste this line exists to end was the
+largest measured in the pipeline: 24 truncated editor calls across 10 deployment rounds, $17.23 of
+a $158.67 bill, every dollar of it on a response nothing looked at.
+
+### `editor_salvage_declined`
+
+The reply could not be read as a prefix, and why (`reason`): `no_edits_list` (no `edits` array in
+it at all — the model answered with the document or with prose about it, which is a prompt problem
+and not evidence this document is too big for its ceiling), `no_complete_edit` (an `edits` array
+that opened and whose first entry never finished: the contract followed and the ceiling reached
+inside the *first* block — one enormous table, typically, and the only one of these that says the
+document cannot be answered whole. An empty list that **closed** is not this and is not a decline
+at all — see `edits: 0` on `editor_salvaged` above), `unknown_block` (a block number this document
+does not have, so the reply is not about this document), `unreadable_edit` (an entry whose `block`
+could not be read, which might have named a block past the cut), `out_of_order` (block numbers
+that jump backwards, so the blocks *between* two named ones cannot be read as deliberately left
+alone and the coverage this rests on is not claimable), `all_refused` (every edit read and none
+usable), `loss_before_cut` (the reply gave content up and there is nothing in front of the loss to
+keep: `lost_at` names the block it emptied or handed back with less in it than it had, and
+`lost_at: 0` — the very first block it claimed — is the common shape. A higher one says the same
+thing about a claim that started later: there was nothing usable in front of that block, either
+because the reply named no earlier one at all (its first edit was the lossy one, so the blocks in
+front of it were only ever covered by silence) or because the edits it did name there were
+themselves refused. This contract makes a *move* a pair of edits, and here the cut **is** a
+refusal of everything after it, so the source half without its landing half would delete content
+nothing downstream can miss. A loss with usable edits in front of it is **not** this and is not a
+decline at all — since #317 the claim is cut back to that block and those edits are applied, which
+is `lost_at` on `editor_salvaged` above).
+
+The counts that decided it are on the line, with `reached` and `of` where they are known —
+`reached` on a decline is the whole claim the reply made, since nothing was applied and there is
+no shorter prefix to report. The round then takes the route it took before this existed: the
+**whole** body, a section at a time (`editor_sections`, with no `covers` field). The last three
+are the strict ones, and being wrong about them costs a longer route rather than a document.
+
+### `editor_sections`
+
+A round that could not be answered whole is being re-made a piece at a time: the body was cut into
+`sections` pieces of at most `budget` characters, sized from the `chars` that response actually
+returned, and they are corrected `concurrency` at a time. The budget is measured rather than
+estimated — nothing here is computed until the ceiling has actually been hit — and it is
+deliberately well under what came back, because a correction adds characters.
+`covers: "remainder"` says this is the tail of a salvaged round rather than the document:
+
+`chars` on such a line is the size of what the reply never reached, not of the body, and the
+blocks before it are already corrected (`editor_salvaged` above). Absent on the whole-document
+path, which is what every log before #295 holds.
+
+### `editor_section_failed`
+
+One section could not be corrected (`section` of `of`, and `reason`: `truncated` or `too_large`
+for a section whose own response or request did not fit, `no_output` for a reply with no usable
+HTML in it, `shrank` for one that parsed but came back with under half the section's prose — the
+same floor the ordinary round applies to the body it assembles, with the same four sizes and
+`floor` on the line, see `editor_shrank`). A `truncated` section carries the same `reply_head` /
+`reply_tail` / `blocks_named` as `editor_truncated` above, on the same terms — deployment only, a
+few hundred characters — with one difference in how to read them: a section round asks for the
+section's corrected HTML and not for an edits list, so `blocks_named` is 0 on a section that
+answered the request it was given, and it is `reply_head` that says whether it was.
+
+A count above 0 here is not noise but the same prompt problem in its other form — the
+whole-document contract's shape coming back to a request that never used it. `covers: "remainder"`
+where the sections are the sections of the **tail** a truncated reply never reached rather than of
+the document — the same marker `editor_sections` carries, on the same terms, because
+`section 2 of 3` means two different things without it. That section's **original text** goes back
+into the document, so the cost is that section and not the round.
+
+Anything that is not a size failure — a stall, a stream error, a bad key — is not logged here and
+still ends the run.
+
+### `editor_sections_declined`
+
+The round could not be re-made a section at a time, and why (`reason`): `unmeasured` (no character
+count to size a budget from), `budget_too_small` (the response was cut so early that the sections
+would be too small to be worth asking about), `budget_exceeds_body` (the response was *longer than
+the document* — a reply that ran away with itself, so the sections would be one section and the
+same request), `indivisible` (the piece to correct is over budget and has no top-level boundary to
+cut at — one enormous table, say), `too_many_sections` (more requests than one round may spend,
+with `sections`, `max` and `budget`).
+
+`covers: "remainder"` means this was the tail of a salvaged round (`editor_salvaged`), and it
+changes what the line costs: the blocks the reply reached keep their corrections and only the
+remainder goes uncorrected.
+
+`budget_exceeds_body` is not reachable there — a remainder short enough to fit under the budget is
+*asked for* in one call, because it is strictly smaller than the request that truncated and
+carries no images, which is the whole of that reason's objection. Without `covers`, the round is
+discarded as it was before any of this existed: the document that entered it is delivered with
+that round's issues unresolved.
+
+### `reader` / `editor`
+
+Per-iteration review-loop progress: the Reader's `issues` count, and whether that round's
+correction `changed` the document. A round answered piece by piece carries `sections` and
+`corrected` as well, which is how a log tells one from an ordinary round (`editor_patch`) — and
+how much of the document the corrections actually reached. On a **salvaged** round it carries
+`blocks_reached` of `blocks` too (the pair `editor_salvaged` calls `reached` and `of`), and then
+`covers: "remainder"` beside the section counts, because those sections are the sections of the
+tail the reply never got to and not of the document (#295): a truncated round that was salvaged
+and sectioned corrected `blocks_reached` blocks with the whole document in view *and* `corrected`
+of `sections` pieces of what was left.
+
+Without those fields this line — the one a reader greps per round — would read as document-wide
+coverage on the one round where the section counts are over something smaller. A truncated round
+that rescued nothing has **no** `editor` line, which is how it is told apart from a round that ran
+and changed nothing (`review_converged`).
+
+`chars_before` / `chars_after` and `text_chars_before` / `text_chars_after` are the size of the
+body that entered the round and the size of the one that left it, whole and with the markup taken
+out — the same two readings `page_corrected` carries, so a round and a page correction can be read
+against each other. What the round produces is adopted for the body **verbatim** — each block the
+editor returned in place of the one it named, every block it did not name carried across character
+for character — so without these the body that entered a successful round is gone and the ratio it
+moved by is unrecoverable: before they existed the distribution of a legitimate round was
+measurable only on the rounds that FAILED, which is three samples on one document (issue #174).
+
+Both pairs, because a length alone cannot say whether a round lost content or lost wrappers:
+markup-only work leaves the prose pair equal and moves the whole-fragment one, and a round that
+deleted a paragraph moves both. Both published ranges are whole-fragment ratios, and they are not
+both this line's quantity: 0.62–2.32 over 265 page corrections is delivered-against-given, as
+here, while 0.982–0.984 over the three rounds is the *reply* against the body that went in,
+reconstructed from `agent_call`. This line reports 1.000 for those same three rounds, because a
+reply with nothing usable in it is a body handed back untouched — so the published span and a
+fresh one are the same rounds measured two ways.
+
+The prose pair is what the floor on this path is read on, and the four rounds that first carried
+it are what placed the number: they land at 0.997–1.006 of the body they were given, and a reply
+under half is refused (`editor_shrank`). What the three earlier rounds *do* show beyond length is
+structure: one of them dropped 5 of 7 lists and 13 of 47 list items while its length moved 1.6%,
+which is an argument for a structure count rather than for either size — so `structure_before` /
+`structure_after` carry one, counting headings, paragraphs, lists, items, terms, definitions,
+tables, captions, rows, header cells, data cells, images and links in the body on each side of the
+round.
+
+Full counts, because a ratio needs its denominator. Grouped, and `h1`-`h6` into one number in
+particular: the page agent's rules promote a sub-topic the page named, make a printed group label
+the parent of the cluster under it, and put a procedure's step one level under its heading, so a
+round that re-levels a section is doing its job and a per-level count would report every one of
+those as a heading lost. What no rule asks for is a heading that stops existing, which is what
+this number sees. Since #271 that is acted on and not only counted — on the other line and at a
+different grain:
+
+`editor_patch`'s `navigation_lost` reads the same fold per BLOCK, where the question is whether
+one replacement gave up its heading, not what proportion of the document's headings are left. That
+is why a fall can be read there when no ratio can be placed here: a block's heading either
+survived its rewrite or it did not, and there is no denominator to be wrong about. Read the
+residual as unwatched, not as covered: a round that rewrote every heading to the *same* level
+leaves no downward skip, so the re-lint's `heading-order` is silent on it (that rule fires only
+where a level goes down by more than one), `headings` is unchanged, and the prose pair is equal —
+every level distinction gone with nothing on the line to say so.
+
+Header cells are counted APART from data cells for the same missing-second-opinion reason in the
+direction that costs nothing: no axe rule fires on a `<th>` demoted to a `<td>`, which is the loss
+that strips a table's header association from a screen reader, so folding the two would report
+that round as no structure moved. `<caption>` is counted for the same reason. Wrappers
+(`<section>`, `<div>`) are not counted, since unwrapping a mis-structured page is one of the
+corrections this loop is for. Read them knowing which way that evidence points, because the next
+bench round settled it and it went the other way: on those three rounds the structure counts were
+already the *less* stable number, moving in both directions on rounds that were working, and the
+first round to log all three had one turn a 55-item `<dl>` into list items — `terms` 55 → 3, a
+ratio of 0.055 — while its prose moved 0.3%.
+
+So no threshold on a structure count both permits that round and refuses a reply carrying a fifth
+of the document, and the floor reads the prose pair instead (`editor_shrank`). All three readings
+stay on the line regardless: two of them are what a person reads once the third has fired. The
+sizes are the **body**: the wrapper and the `@`-comments after `</main>` are added downstream and
+are not what any round returned, and they are taken after the deprecated-role strip, so they
+describe the body that ships. On a sectioned round they are still the whole body's, which is why
+`sections` on the same line matters to anyone reading them as a distribution: one section's
+*reply* is a fraction of the body it belongs to (0.016–0.379 on the bench rounds) because it is
+one section, and a round whose reply carried nothing usable reports equal sizes by construction,
+with `editor_no_output` beside it to say so.
+
+### `lint_unavailable`
+
+axe-core could not run on a body no `assembly` line covers, with the same `lint_error` /
+`lint_error_where` / `lint_error_name` / `lint_error_stack` fields that line carries.
+`stage: "correction_round"` is the review loop's re-lint of a body an editor round changed, with
+the `iteration` that produced it; `stage: "feedback_relint"` is a feedback re-run that skipped
+extraction, where there is no assembly to report one. The document ships with **no accessibility
+verdict** either way: the loop had no violations to work from, and the delivered HTML says so in
+an `@lint-unavailable` comment.
+
+### `lint_debris`
+
+The linted body carried attributes whose **names no valid markup produces**:
+`malformed_attributes` (how many, exact), `malformed_attributes_removed` (how many of them the
+lint had to take out of its own copy of the document for axe to run at all — absent when none,
+which is the ordinary case), and `malformed_attribute_names` (up to three of the names, removed
+ones first, each cut at 40 characters). The same fields appear on the `assembly` line; this event
+carries `stage: "correction_round"` (plus `iteration`) or `stage: "feedback_relint"`, matching
+`lint_unavailable`.
+
+Absent when there were none, so a line carrying it means something. These are evidence about a bug
+**one stage earlier**, not a defect in the document: an attribute named `1\"` is what the HTML
+parser makes of `aria-label=\"Page 1\"` arriving with its JSON escaping still on it, and the same
+leak puts `\"doc-pagebreak\"` in a `role` and `\"page-1\"` in an `id` (#233, #234) — an invalid
+role, a marker that announces the wrong text, and a dead target for every reference to it. Those
+are findable only by reading the document; this is a number.
+
+A removal is not cosmetic: axe escapes an attribute name it builds a selector from, a name
+beginning with a digit escapes to `\39`, jsdom's selector engine splices the name into JavaScript
+source where that is an octal escape, and the SyntaxError killed **the entire rule set** — one
+such attribute anywhere in a 25-page document and there was no verdict on any of it (#257). So
+`malformed_attributes_removed` on a line is a run that would otherwise have had no verdict on any
+page. Everything else is counted and **left in place**, because removing an attribute takes the
+rules that read it away too: a name that lost a quote (`aria-label"Note"`) is reported by
+`aria-valid-attr` — critical, wcag2a — *because* it is malformed, and removing it turns that
+document into a clean pass.
+
+The document that ships keeps every byte either way, including the removed ones: what the
+attribute was meant to be is not this stage's to decide.
+
+### `editor_patch`
+
+What one ordinary correction round's reply actually did to the body, block by block (#250). The
+editor is shown the body as numbered top-level blocks and answers with the blocks it changed, so
+this line is the whole accounting:
+
+`blocks` in the body, `edits` named in the reply, and how many were `applied`, `deleted` (a block
+emptied with `"html": ""`) — those four always, so a round that named nothing is still on the
+record. Then, only when non-zero, what was not used:
+
+`unchanged` (a block returned byte-identical to the one it replaces — paid for and delivered as it
+stood), `unknown` (block numbers that are not in the body: out of range, negative, or not whole),
+`duplicate` (a second edit for a block already named; the first is kept), `incomplete` (a
+replacement whose markup does not close what it opens, which is what a reply cut off mid-block
+looks like), `markers` (`<!-- @block N -->` comments copied back into a replacement and stripped
+out of it) and `unreadable` (entries in the array that are not an edit at all).
+
+Four of those are a **refusal** — `unknown`, `duplicate`, `incomplete`, `unreadable`: that block
+keeps its original text, and the rest of the reply is still applied. The other two are costs on
+the record rather than rejections, which is why they are named apart: an `unchanged` block is
+delivered exactly as it stood, and a stripped `markers` comment leaves a replacement that is then
+applied like any other.
+
+`incomplete` covers both ends of the same question — a replacement that leaves an element open,
+and one carrying an end tag that closes nothing (`</figure><p>x</p>`, which a parser ignores and
+which would splice an unbalanced tag into the delivered bytes for `delivered_markup` to report).
+
+`shrunk` counts applied replacements carrying less of the document than the block they replace —
+on the line whenever it happened, because that is one of the ordinary ways this contract removes
+content the document printed twice. Read as the **prose**, plus the two things a block holds that
+carry no words — `<img>` and `<a>` — plus one structure count, `headings`. The prose, so that
+unwrapping a mis-structured block — shorter markup, every word kept — is not counted as content
+leaving; the images and links because a source block that hands back its figcaption and drops the
+image is a loss no prose comparison can see, the words being unchanged, and an image with its alt
+text leaving the deliverable is worse than a sentence and not smaller.
+
+Headings for the same reason in the third direction (#271): a heading rewritten as a paragraph of
+the same words keeps every size on every line equal and takes away the only means a screen-reader
+user had of finding that content.
+
+`h1`-`h6` are folded into one number, so the re-levelling this loop asks for does not move it, and
+the one heading removal the prompt does sanction — a title the pages reprinted — takes that
+title's words with it and is already a prose shortfall. Still not every structure count: splitting
+one paragraph in two, merging two the extractor split across a page turn, or correcting a table's
+headers (`<td>` → `<th>`, which takes `cells` down by exactly the number corrected) are
+corrections this loop asks for and each moves a count down while taking nothing out of the
+document.
+
+`navigation_lost` is the same reading at a different grain, widened past the one count that gates
+to the two that do not: `{ "headings": 1, "items": 2, "rows": 1 }`, how many of each stopped
+existing, read on the **joined body** rather than block by block and present only where that
+body's prose did **not** shorten. Two conditions, each doing work. The grain, because a reorder is
+a pair of edits under this contract — `EDITOR_SYSTEM` sanctions "reorder blocks", so a heading
+moved down past a paragraph is one block giving it up and another taking it — and a sum of
+per-block falls would report a document that kept every heading as having lost one.
+
+`shrunk` is deliberately the other way round, per block, because its job is to spot the source
+half of a move so that a refusal on the landing half cannot take the heading with it. The prose
+condition, because a structure falling alongside a word loss is the ordinary shape of every
+deletion the prompt sanctions and is already `shrunk`, so counting it here too would put the
+sanctioned case and the silent one in one number and leave neither readable. At this grain that
+condition is coarse and knowingly so: one sanctioned deletion anywhere in the reply silences the
+count for the whole round, so a round that drops a reprinted title in one block and demotes a real
+heading in another logs nothing here.
+
+The alternative is worse rather than better — two headings are gone, one of them legitimately, and
+nothing in the counts says which — and since this number is a sample used to decide whether
+`items` and `rows` can gate, a filter that under-collects is right where one that over-collects is
+not. Since #331 the `headings` half of this reading is no longer only a reading, and that
+coarseness is what it costs: a body that would have carried fewer headings than the body it was
+given, with its prose no shorter and nothing refused beside it, has the blocks that dropped them
+handed back and the rest of the reply applied (`headings_reverted` below), but the round that
+demotes one real heading *and* drops a reprinted title takes words with it, so nothing appears
+here and nothing is handed back here.
+
+Per-block `shrunk` sees that demotion, and turns it into a refused round only where the same reply
+also holds a refusal (`refusal_with_loss`) — so the round that is both sanctioned and silent in
+one reply is still the shape this contract cannot tell apart, and it is the reason the count above
+under-collects rather than over-collects.
+
+`items` and `rows` are reported without gating, because there the content can land in a DIFFERENT
+structure a reader can still navigate with every word intact — a `<ul>` rewritten as the `<dl>`
+the page rules ask for takes `items` to 0, and a list mis-extracted as a single-column table,
+corrected, takes `rows` to 0 — so reading either as a loss would report a working round as damage.
+A grouped total does not rescue them: summing the list-ish counts makes `<ul>` → `<dl>` rise but
+makes the measured `runs-231` round (a 55-item `<dl>` rewritten as list items) fall.
+
+What would settle it is the rate at which a working round moves them, which no round on file
+measures, so a line carrying `navigation_lost` with no `shrunk` beside it is that population being
+collected. That population is now collected on the other two apply paths as well, under its own
+line (`editor_navigation` below, #375) — this reading was computed here and only here until then,
+so a rate quoted off this field was a rate over the block-patch rounds alone and did not name that
+as its population. The evidence for the headings half: 13 of 151 bench rounds lost headings and 5
+of those lost no text at all (#271, measured outside this repo in equalify-iris-bench's
+`editorround.mjs`, run `runs-editor-1`).
+
+One case the headings reading counts and should not, named rather than compensated for:
+`EDITOR_SYSTEM` also sanctions "correct labels and table headers", so a field label the extractor
+emitted as `<h4>Name</h4>` corrected into a `<label>` inside the same `<form>` block keeps every
+word and takes `headings` down. Discounting a fall wherever `captions`/`terms`/`header_cells` rose
+would cover a heading turned into a `<caption>`, a `<dt>` or a `<th>` but not that one, since
+`<label>` and `<legend>` are not counted at all — so the cost is accepted rather than compensated
+for, and since #331 it is paid with no refusal needed beside it.
+
+That is why what it costs had to come down to one block: the `<form>` block holding the corrected
+label is handed back with its `<h4>` intact and every other correction in the reply — an alt text,
+a table header, a split paragraph — is applied and delivered.
+
+`editor_headings_gated_rate` in §0c is what says how often it happens. `discarded` names the case
+where the reply is NOT applied in part, and which of the three it was:
+
+`all_refused` (edits were sent and not one could be used), `refusal_with_loss` (a refusal in the
+same reply as a block that gave content up — `deleted` or `shrunk`) or `headings_lost` (#331:
+`navigation_lost` on this same line reports a `headings` fall — the body this round would have
+delivered has fewer headings than the body it was given and its prose is no shorter, with nothing
+refused anywhere in the reply, which is what the first two need and this one does not — **and**
+handing back the blocks that dropped them could not be shown to fix it, because the reply also
+moved a heading somewhere else (`headings_gained`), or a block that dropped one gave content to
+another edit in the same reply and so could not be handed back (`headings_dropped`), or left
+nothing to apply once they were handed back; the ordinary heading fall is `headings_reverted`, not
+this).
+
+The second is there because this contract makes a MOVE a pair of edits — the block the content
+lands in, and the block it came from — so taking the source half and refusing the landing half
+deletes content that nothing downstream can miss: the size floor cannot see one paragraph, and the
+next Reader round reads a document that no longer mentions it. Both forms of the source half
+count, because the prompt offers both ("with what is left of it, or `""` if nothing is"), and the
+shrinking one is the commoner: a move usually leaves something behind.
+
+Either way the body is handed back untouched and the next round is a retry (see `editor_no_output`
+for why that is not convergence). Each is an ordinary correction on its own, so
+`refusal_with_loss` fires only on a reply that ALREADY has a defect in it: the cost of being wrong
+about whether two such edits were really a pair is one round, and the cost of being wrong the
+other way is in the deliverable. The heading fall is the one that acts on a reply with no defect
+anywhere in it, and it is the same trade at a finer grain: every edit applied, nothing refused,
+not a word missing, and the document that would have shipped has lost part of the outline a
+screen-reader user navigates it by — a barrier of exactly the kind this pipeline exists to remove,
+introduced by the pipeline.
+
+So what is held back is the block, not the round: `headings_reverted` lists, in ascending order,
+the block numbers whose own heading count fell **and that gave nothing to another edit in the
+reply**; those blocks keep their original text, the reply is re-applied without them, and the
+round is delivered with everything else it corrected. A block may only be re-seated when nothing
+else in the reply is now holding what it held, and that has two failure modes, which are the same
+hazard from opposite ends.
+
+`headings_gained` appears in place of `headings_reverted`, carrying how many headings arrived
+somewhere they were not, when the thing that moved was a heading — a reply that both moves one and
+loses one, which this contract sanctions ("reorder blocks") and which moves three blocks' counts
+for a document that fell by one, so handing all three back would leave the moved heading in two
+places at once. The other end is the heading's WORDS moving into another block as something no
+structure count counts: the extractor's stray `<h4>Name</h4>` sibling emptied while
+`<label for="name">Name</label>` is seated inside the `<form>`, which keeps every word (so the
+fall reads as ordinary) and gains no heading anywhere (so `headings_gained` is 0).
+
+A block that **gave what it lost to another edit in the same reply** is therefore never re-seated:
+the words it no longer has, or an `<img>` or an `<a>`, turning up where another edit put something
+new. Where the words WENT, and not whether they changed, which is the narrowing #376 asked for —
+read as "are these the words it had", a block that demotes a heading and fixes a typo in the same
+`<div>` was unseatable too, so a reply whose only demotion was that block was refused entire with
+nothing having moved anywhere.
+
+A departure is still an inequality and not a shortfall, because a block can shed the heading's
+words and grow in the same edit by rewording what survives, and a "did it get shorter" test sees
+no departure at all. Nor is the re-seat licensed by size, which is the comparison that suggests
+itself and is refuted by measurement (#376): the re-applied body's prose against the fully patched
+body's is 34 against 34 on the safe shape and **24 against 59** on the duplication hazard, so
+`kept <= patched` passes the hazard by a mile — the edit that grew is the one being reverted.
+
+Arrivals are counted rather than looked up, and at word grain rather than as text: the landing
+block may have had the word already, and the words are re-expressed where they land (`Name` seated
+as `Name:`), so a set comparison or a string comparison would license exactly the re-seat that
+prints them twice. On those rounds the line carries `headings_dropped` instead: every block whose
+own heading count fell, which is the reading of what the model did rather than of what could be
+salvaged — where some of those blocks could have been handed back and were refused with the round
+anyway, they are named beside it as `headings_abandoned`, so subtracting one from the other leaves
+the blocks that could not be handed back and the presence of the field is the rate at which
+refusing the round throws a safe salvage away.
+
+A round whose revert left nothing to apply, or did not bring the count back, is also refused — the
+re-check is fail-closed, and it is read **per block** rather than on the joined body, which is the
+one place in this reading where the grain has to be the other way round. Only the blocks that
+could be handed back were, so a block that dropped a heading *and* gave its content to another
+edit keeps its edit and keeps its fall: one reply that demotes in two places — one of them the
+`<label>` migration — lands there, and it is the case above reached from the other side, so it
+logs `headings_dropped` like the other.
+
+The joined reading cannot be the test here, because it is silent wherever the body it reads is
+shorter in prose and **the revert is itself an edit that can get under that floor** — hand back
+the block that added prose and the re-applied body can be shorter than the one that came in, so a
+fall that was visible before the revert reports nothing after it, and the held block's demotion
+would ship (found in review of #376).
+
+`headings_recheck: true` is beside `headings_dropped` only where the joined body lost a heading
+and NO block still dropping one accounts for it, which is unreachable by construction — the joined
+count is the sum of the blocks' own — so its firing at all is the finding. All of them log
+`discarded: "headings_lost"` and hand the body back untouched for a retry, and which of the three
+it was is readable from the line:
+
+`headings_gained` (a heading moved), `headings_dropped` (its words moved), or `headings_reverted`
+present beside `discarded` (blocks were handed back and nothing was left to apply). The first two
+are mutually exclusive on a line. What the reading can be wrong about is a heading correctly
+re-expressed as something this count does not count (the `<label>` case above, or a reprinted
+title dropped in a way that left the prose no shorter), and being wrong now costs that one block
+on that one round rather than every other correction in the reply — which is the principle
+`applyBlockEdits` is built on, that an unusable edit costs the block it was about and not the
+document's corrections, and a gate is not exempt from it.
+
+An editor that demotes on every round therefore still delivers what it corrected on the way, round
+after round, instead of spending `max_review_iterations` re-sending the same body and shipping the
+document as it entered with its issues in `@unresolved` (`stopped_at: "cap"`) — and the run log
+names the held-back blocks round by round, which is a statement about the prompt or the model.
+What #331 asked for and this deliberately does NOT do is the narrower predicate — refuse the fall
+only in a block no reported issue asked about — because `ReviewIssue` attributes an issue to the
+source **pages** it was found on and nothing binds an edit's block to the issue it answers, so
+that reading is not available to write.
+
+The counters are the point of the design: the failure this contract could have had is a
+replacement landing on the wrong block, which is well-formed markup in the wrong place and
+invisible to everything downstream, so the block number is written above each block for the model
+to copy rather than counted by it, and every number that does not resolve is reported here instead
+of being guessed at.
+
+### `editor_whole_body`
+
+The reply carried no `edits` array but did carry an `html` string, so the round was read as the
+whole corrected body — the contract every round used before #250 (`blocks` in the body it was
+given, `chars` in the reply). Accepted rather than refused because refusing it spends the round,
+and on a model that falls back to a familiar shape under load it would spend every round of the
+run; a whole body arriving this way goes through the same `editor_shrank` check it always did. It
+costs one thing the old contract could not, and `markers` is that cost measured: the document this
+model was SHOWN carries a `<!-- @block N -->` line above every top-level element, so the likeliest
+whole-body reply is that document retyped, markers and all.
+
+They are stripped before the body is taken and counted here. Adopting them would write Iris's own
+request scaffolding into the delivered HTML, and it compounds — a comment is a top-level node, so
+the next round would be shown the markers as blocks in their own right, the body would double
+every round, and a document that never stops changing never converges. A run where this line
+appears on most rounds is a model not following the block contract, which is worth knowing about a
+deployment even though the document is fine.
+
+### `editor_no_output`
+
+The Copy Editor's reply carried no usable body (`chars` of text came back), so the round kept the
+document it was given. A call paid for and nothing said — which is why it does not end the loop:
+the next round is a retry, not a repeat.
+
+### `editor_shrank`
+
+The body a correction round produced came back with **less than half the prose** of the one it was
+given, so it was refused and the round kept the body it was given (`chars_before`/`chars_after`,
+`text_chars_before`/`text_chars_after`, and the `floor` divisor). `stage: "patch"` is the ordinary
+round, measured on the **joined** body rather than on the reply — the reply is a few blocks, and
+the question this floor asks is about the document those blocks assemble into — and it carries
+`deleted` and `shrunk` of `of` beside the sizes, because that is what a shrink under the block
+contract is made of: blocks emptied with `"html": ""`, and blocks returned with less in them than
+they had, in a reply where each edit on its own was well-formed.
+
+Both, because this path is only reached when nothing was refused — a refusal beside a block that
+gave content up is `discarded` on `editor_patch` before the floor is read — so the commonest reply
+that lands here empties nothing and returns blocks holding a fifth of their prose, and
+`deleted: 0` alone would say nothing about where the document went. With no `stage` the round
+returned a whole body, where the model's `html` is adopted for the document with nothing compared
+against what went in and the blast radius is the deliverable — a reply that answered about one
+section, or summarised, or quoted the contract back after answering, arrives shaped like a
+corrected document (issue #174).
+
+Reported the same way as `editor_no_output` and for the same reason: nothing came back that can be
+used as *this* document, so the next round is a retry rather than a repeat and this is not a
+`review_converged`. Read on the **prose**, not on the characters and not on the structure counts,
+because only the prose pair is stable on a legitimate round: the four rounds that record all three
+readings land within 0.6% of their input on it, while unwrapping a mis-structured document keeps
+every word and loses half the bytes, and one of those rounds rewrote a 55-item `<dl>` into list
+items — a ratio of 0.055 on `terms` — while its prose moved 0.3%.
+
+Bodies with under 1,000 characters of prose are not judged at all: the legitimate deletions are
+fixed-size (a `[page not fully transcribed]` marker is 28 characters, a duplicated heading 20–60),
+so on a short body the floor would fire on the editor doing its job.
+
+### `editor_navigation`
+
+The structures a reader navigates by, counted on a reply that was **adopted**, for the two apply
+paths that do not gate on the count (#375). `stage: "whole_body"` is the pre-#250 contract's reply
+taken as the whole corrected document (`editor_whole_body` above); `stage: "section"` is one
+section of a sectioned round, with `section` of `of` — and `covers: "remainder"` where those are
+the sections of the **tail** a truncated reply never reached rather than of the document
+(`editor_sections`, `editor_section_failed`, and `editor_salvaged`'s `covers` are the same marker;
+a rate grouped per round off a line without it would read `of: 3` as "the document was cut in
+three").
+
+The reading is `navigation_lost` on `editor_patch`, and until #375 it was computed there and
+nowhere else — so a `<h2>` rewritten as `<p><strong>` fell silently on both of these paths, and
+the only check either had cannot see it by construction:
+
+`editor_shrank`'s floor is a prose floor at half the document, and a demotion keeps every word and
+grows the bytes. On the sectioned path that matters most, because a sectioned round is the loop's
+**last** round (`editor_sections`), so what falls there ships with no retry behind it. **Nothing
+is refused on this line, and that is deliberate rather than pending.** #331's remedy is a block
+handed back, and neither path has blocks: a whole-body reply is one string and a section reply
+*is* the section, so the only refusal expressible is the whole thing — which is what #331 did in
+its first version on the patch path and what it was changed away from, because on the commonest
+false positive (a stray `<h4>Name</h4>` corrected into the `<label>` axe's `label` rule asks for)
+it threw away every other correction in the reply, every round, until the budget ran out.
+
+Doing that here would be worse: it would cost a whole section's corrections, on the round that has
+no successor. What has to come first is the rate, and this line is the rate. **It prints on every
+delivered reply**, counts or no counts, because a rate needs its denominator on the record and a
+line that appeared only when something fell could not tell a round nothing fell on from a round
+that never took this path — so a clean whole-body round is `{"stage": "whole_body"}` and that is a
+row in the denominator.
+
+`headings`, `items` and `rows` appear only where each fell, and only where the reply's prose did
+**not** shorten; where it did, `shortened: true` is on the line **instead** of the counts, because
+the reading is silenced there — a deletion the prompt sanctions takes its own words with it, which
+is the ordinary shape of a correction rather than damage — and an empty reading would otherwise
+read as "nothing fell" when it means "not asked". The grain is the unit the reply was about, so
+the sectioned path reads each section rather than the joined body.
+
+That is sound here and finer than the patch path can manage: sections are corrected independently
+and joined, so no heading can move *between* them, and the reorder hazard that forces
+`navigation_lost` to be read on a whole body does not exist. It is also cheaper in the one way the
+patch path's grain is expensive — there, one sanctioned deletion anywhere in a reply silences the
+reading for the whole round; here it silences that section, so a demotion in section 3 is still on
+the record. Not folded into `editor_headings_gated_rate` in §0c: that rate counts documents where
+something **was** handed back, and adding rounds where nothing was would make a signal about a
+working guard into a mixture of that and a reading nobody acted on.
+
+### `deprecated_roles_stripped`
+
+A deprecated ARIA role was removed from an element whose own role already said it — `roles` (the
+set) and `nodes` (how many attributes went), with `stage: "assembly"` for what extraction
+produced, `stage: "correction_round"` plus `iteration` for what an editor round introduced, or
+`stage: "feedback_prior_body"` for one already in a stored body that a feedback re-run picked up
+without re-extracting. ARIA deprecates exactly three roles — `directory`, `doc-biblioentry`,
+`doc-endnote` — all folded into list semantics, so an `<li role="doc-endnote">` inside an `<ol>`
+is announced identically without it and axe's `aria-deprecated-role` has nothing left to report.
+
+**This line is the only trace.** The delivered document is clean and the lint that would have
+named the role now finds nothing, so a run log with this line in it is the page agent's FOOTNOTES
+rule not being followed (`stage: "assembly"`) or the Copy Editor introducing markup nobody asked
+for (`stage: "correction_round"`) — which is how issue #187 shipped: axe reported the role, the
+editor was told, it rewrote five sections, and the role survived. The strip is deliberately
+narrow: the role is removed only where the host element already provides it, so a
+`<div role="doc-endnote">` is left to fail the gate, because deleting it there would leave nothing
+marking the element as a note at all and the remedy is to make it a list item.
+
+**The host table is not the only thing that narrows it**: it shares its attribute locator with the
+row below, so the shape that row declines to edit — a `role` whose unquoted value runs into a
+quote — is declined here too, and a **repeated** `role` is handled here the same way, by emptying
+the attribute rather than deleting it so the second copy cannot be promoted. Both are set out in
+that row.
+
+### `invalid_roles_stripped`
+
+A `role` naming something that is **not an ARIA role at all** was removed — `roles` (the set,
+spelled as the document spelled them) and `nodes` (how many elements were edited), with the same
+three `stage` values as `deprecated_roles_stripped`. The case this was built for is
+`role="doc-footnotes"`, which does not exist: DPUB defines `doc-footnote` for one note and
+`doc-endnotes` for a collection, and never a plural of the first, so a model following the
+footnote rule generalises from the `doc-endnotes` example beside it and invents the name. axe
+reports that as `aria-roles` at **critical** — the most severe thing this gate says about any
+document Iris produces — and it has reached a delivered `output.html`, on a round where the lint
+had degraded to *did not run*.
+
+**This line is the only trace**, on the same argument as the row above, and it is the harder
+evidence of the two: `doc-endnotes` is a real role reached for in the wrong place, while a name
+like `doc-footnotes` was never in any specification. Unlike the deprecated strip this one is not
+narrow, and does not need to be — assistive technology already ignores an invalid role and
+announces the element's own, which is exactly what it announces with the attribute gone, so no
+element can lose anything by the removal. **That argument holds of a role token and of nothing
+else, so the attribute has to be located as a parser locates it** — by walking the start tag's
+attributes as `name(=value)?` pairs — and not by searching the tag for something shaped like
+`role=`.
+
+A search matches inside another attribute's *value*, and the values on these elements are prose:
+an `alt` reading "each user and role = admin, editor or viewer" put `admin,` where a role name
+goes and the word was cut out of the accessible name. Nothing can report that loss — the name is
+still non-empty and not generic, so the gate sees a clean element — and this very line would have
+named the eaten word as an invented role, blaming the page agent for it. The row above shares the
+locator and was reachable the same way, on `<ul aria-label="the role=directory column">`, because
+`directory` is an ordinary English word and `<ul>` is one of its hosts.
+
+What the removal does not do is NAME the block: a stripped `<section role="doc-footnotes">` is an
+anonymous `<section>`, which is compliant, and the page agent's FOOTNOTES rule is the half that
+says what to write instead (`<aside>`, `<footer>`, a bare `<ol>`, or
+`<section aria-label="Footnotes">`). Which names count as real is asked of axe rather than listed
+in Iris, so this strip and the gate are one judgement, and asked case-folded, because the rule
+folds a role token and the underlying predicate does not — `role="DOC-ENDNOTES"` is a document the
+gate passes and is left alone.
+
+**One shape is declined rather than stripped**, and there the document is passed through untouched
+and the gate goes on reporting the role: a `role` whose unquoted value runs into a quote, which is
+what the JSON-escaping leak (`<hr role=\"doc-pagebreak\" …>`) delivers. Editing that would cut one
+character out of the middle of an attribute; `lint`'s `malformed_attributes` still counts and
+names the debris. **A second shape is edited but not deleted: a repeated `role`, where the
+attribute is left in place with an empty value.** Deleting it would *promote the second copy* —
+`<div role="doc-footnotes" role="main">` computes to generic today, since the parser keeps the
+invalid first value and discards the duplicate, and deleting the attribute would leave
+`<div role="main">`, an element handed a landmark it never had (`aria-roles` at critical traded
+for `landmark-main-is-top-level` and `landmark-no-duplicate-main`).
+
+A removal that puts the next attribute into effect is not the removal this row's argument is
+about. `role=""` avoids it without giving the strip up: ARIA treats a value with no valid token as
+no role at all, so the element computes to exactly what it computed to before and the gate reads
+it clean, while the attribute stays in the position the parser reads. Measured on all four shapes
+rather than argued, including `<ol><li role="doc-endnote" role="listitem">` and
+`<ul role="directory" role="list">`, which the row above delivers clean by the same mechanism.
+
+### `page_main_stripped`
+
+A `<main>` a page emitted for its own content was taken out of the body, because `wrapDocument`
+puts the assembled body inside one and a `main` inside a `main` takes away the landmark a
+screen-reader user jumps to in order to skip the furniture (issue #251, 18% of page answers).
+
+`unwrapped` (a bare `<main>`, tags removed and children promoted), `downgraded` (one carrying
+attributes, rewritten to a `<div>` keeping them, since unwrapping it would drop the `lang` the
+document's root declaration is derived from or an `id` an `href` elsewhere resolves to) `dropped`
+(a stray `</main>` closing nothing, deleted) and `declined` (a `<main>` nothing closed, left in
+place), with the same three `stage` values as `deprecated_roles_stripped`. **This line is the only
+trace of the first three counts**, exactly as with the role strip: the delivered document is
+clean, and a run log with this line in it is the page contract's shell sentence not being followed
+(`stage: "assembly"`) or the Copy Editor supplying a wrapper it was told not to
+(`stage: "correction_round"`).
+
+`declined` is the one that ships: the element's extent is whatever the parser decides, so there is
+no correct edit for an unclosed `<main>`, and
+`landmark-no-duplicate-main`/`landmark-main-is-top-level` report it in the gate. The unpaired END
+tag is not left, for the reason that reverses: a parser discards it, so nothing is being weighed —
+and it is the one shape no rule reports, because inside the shell it closes the document's own
+`<main>` early and every element after it is delivered outside the landmark with the lint clean.
+
+That escape predates this rewrite; what would be new is a `declined` count promising a violation
+nobody can find. A `role="main"` on an element that was never a `<main>` is not counted here at
+all and goes straight to the gate, for the reason the role strip stays narrow.
+
+### `page_markers`
+
+Page-break markers were checked against the document's own numbering, and any label naming the
+**position of the image in the file** instead of the number the page prints was removed (issue
+#333).
+
+`markers` found, `readable` (labels that parse as a numeral), `unreadable` (a sectioned folio —
+`A-3`, `M-16` — plus markers carrying no label at all), `systems` (one entry per numbering system
+that produced at least three markers, `arabic: offset -11 on 22 of 23` where an offset was acted
+on, or one of the two ways nothing was: `arabic: no offset holds 8 markers (best: 3)` where no
+offset held both a run of three and a majority, and
+`arabic: offset 0 on 8 of 10, 8 of them repeating their own filename` where the check refused this
+document), `stripped` (one entry per label removed, `page 52: "Page 52" → 38`, cut at 40
+characters, with the derived folio omitted where the derivation computes below 1), `departures`
+(the shape those removals form, one entry per offset they sat at —
+`arabic: 1 removed at offset -50, page 2` against
+`arabic: 6 removed at offset 0, pages 1-6 (every marker in that span)`), `off_mode`, `undecided`,
+`unchecked`, and `stage: "assembly"`.
+
+**The number is checkable because Iris supplied it**: the page agent is handed
+`filename: acir-p052.png, page 2 of 25`, so a leak can only be one of two numbers, and the one
+tested is the FILENAME's — its **last integer**, which is the part Iris writes. A label is touched
+only when it repeats that number, AND its numbering system's own modal offset says the folio is
+something else, AND the markers holding that offset do not repeat their own filenames. The last
+integer and not every integer, because `<base>-p<N>.png` takes `<base>` from the uploaded file's
+own name: a check reading all of them finds the label `Page 1` written in `volume-1-p13.png` and
+takes a true page number off a document whose only distinction was being called `volume-1.pdf`.
+
+The third condition is what a document is refused on — where the honest majority repeats its own
+filenames, a label repeating its filename is the shape of a CORRECT label there and the test
+carries no information, which covers both a caller who names images after the printed folios and a
+plain report whose sheets really do print their own submitted positions. Three markers to ask and
+three agreeing to act are also different gates: a strict majority of three markers is two, so
+without the second `Page 1` and `Page 2` would hold an offset and delete `Page 9`'s number, and
+the smallest document that can lose a label carries four markers.
+
+The other half, `page N of M`, is deliberately not tested: replayed over 61 chunks of paid rounds
+this removed 29 labels, all 29 repeating the filename, and the only label that ever matched the
+position alone was CORRECT — a round re-submitting a non-contiguous subset of a rendered document,
+where the sheet printing `iv` happened to arrive 4th. Where Iris rasterizes a whole PDF itself the
+two numbers are the same one anyway (`<base>-p<N>.png`), so what is uncovered is a caller
+uploading images whose names carry no position — counted as `unchecked`, since a marker with no
+number to check against is not one this agreed with.
+
+Roman and arabic are counted apart, because a document with both has two offsets and a pooled
+reading would both exempt a `Page xv` leak and read correct front matter as a departure. **The
+label is removed, not corrected, and the `id` stays.** The derived folio is right where it can be
+checked — the four it named on the reference corpus are the four read off the scans — but
+delivering it would have Iris assert a number nobody saw printed, on a page whose own model just
+proved it was guessing, so it is logged and not shipped; and taking out `id="page-52"` would turn
+a `#page-52` reference that lands on the wrong sheet today into one that lands nowhere.
+
+Every copy of the attribute goes, not the one a parser keeps, since deleting the first would
+promote a repeated `aria-label` into its place and leave the line claiming a removal the page did
+not get. What is left is a break saying only that something ended, which is what the page contract
+prescribes for a page whose number is not known. **This line prints on clean documents too**,
+unlike `assembly_anchors` above: `stripped: []` beside `arabic: offset 14 on 23 of 25` is a
+document this checked and agreed with, while no line at all is one it could not decide, and a
+round measuring whether the defect is fixed cannot tell those apart from silence.
+
+`off_mode` counts readable labels that disagree with their system's offset and were left alone
+because they repeat no positional number — a page printing `ix` labelled `Page 9` — and
+`undecided` counts labels that do repeat one where nothing could be concluded — too few markers,
+no offset holding a run of them, or a document refused above — which is this check's blind spot
+with a size on it, and `unchecked` counts readable labels on a page whose filename carries no
+number at all, so that `readable: 25, stripped: []` cannot read as agreement when nothing could be
+checked.
+
+Three more blind spots, each of which reads as a clean document: a model that leaks on EVERY page
+(which is the same input as a report printing its own positions, so the document is refused and
+the log says so); a document whose arabic numbering restarts partway through, where the minority
+run's folios coincide with the numbers in their filenames while the majority's do not — an active
+removal of true labels rather than a missed leak, which is why `departures` is logged: a restart
+takes out a block of consecutive positions with no surviving label among them, a leak is
+interleaved with the labels that contradict it, and the check cannot act on that difference but a
+round can count it; and a positional number announced through `aria-labelledby` instead, which is
+not read — #333's shape is `aria-label` on both failing arms, and resolving an ID reference into
+another element's text is a different pass on a different input.
+
+`stage` is only ever `"assembly"` — unlike the role strips above, this cannot run on a corrected
+body, because deriving an offset needs every page's filename and position and by then there is one
+string with the pages' provenance spent, so a marker the Copy Editor introduces later is not
+reached. Measured cause, and why this is code and not more prose:
+
+`agents/page.md` forbids exactly this by name
+(`never the position of the image you were given in the file`) at every prompt blob there is a
+round for, and two of three vendors did it anyway on the same document and the same blob — 6 of 88
+markers on the shipped page model, 5 of 90 on another, on the same two pages. The labels are text
+out of the user's own document, so like `prose_joined`'s `word_split_examples` this line stays in
+the run log on the deployment and never reaches `GET /v1/quality`.
+
+### `reader_page_reports_deduped`
+
+One round's Reader reports about a page the document has **no content** for were reduced to one
+per page: `dropped` (how many reports went), `pages` (which pages the kept ones stand for) and
+`reports` (each dropped report's severity and text, folded and bounded), for that `iteration`. Two
+kinds of page have no content — one extraction lost (`pages_failed`, a `@page-failed` comment) and
+one that is blank in the source (`page_blank`, correctly delivered as an empty page) — and neither
+is something a correction round can act on.
+
+The Reader is told so in the index it reads and in its own prompt; this line is what happens when
+a sampled model raises them anyway, which it did **once per chunk**, in a different wording each
+time, so exact-string dedupe caught none of them (issue #188). Per chunk of the FINAL round, to be
+exact: `@unresolved` is written from the last read of the document, so that read's chunk count is
+how many copies were delivered — six of one document's 26 on the round that filed the issue. What
+the iterations multiplied was the spend, not the list: every round's editor was handed the same
+unrepairable reports.
+
+Only the FIRST report of a page is kept, deliberately: an issue whose attribution is entirely
+pages with no content can only be about the absence, but the attribution is the Reader's and a
+misattributed real issue must not vanish without trace — which is what `reports` is for, since
+which report came first is an accident of chunk order. An issue that names any page with content
+in it is never touched, and an unattributed report cannot be reached here at all.
+
+### `review_converged`
+
+The loop stopped early because a round changed nothing (`iteration`, the `issues` that round was
+given, and the `rounds_left` it did not spend). The editor answered and handed back the document
+it was given, so the same request next round would be answered the same way; what ships is that
+document with those issues written to `@unresolved`. Expect this on a document whose remaining
+issues are the ones the loop is designed not to resolve — an undecidable pair of same-worded
+headings, a `[page not fully transcribed]` marker.
+
+Frequent lines here with `issues` the editor *should* be able to fix are the signal worth chasing:
+that is the editor declining work, not the loop saving a wasted round.
 
 ## 7b. Diagnostics (timing / hang detection)
 
@@ -1502,30 +3876,31 @@ feedback round that re-extracts three pages adds three more verifications.
 
 `fidelity_observed` sits outside `verification` because it is not part of that loop and does not
 gate anything: it is what the **Copy Editor** noticed about a page it happened to be looking at,
-folded from `editor_fidelity_observed` (§7a). Everything under `verification` is the one fidelity
-check each page gets, and that check's weakness is structural rather than a matter of rate — the
-verifier is the same model family looking at the same image as the transcriber, so a page whose text
-it misread once it can misread twice, and a page it declared blank it will declare blank again.
-Nothing else in the run had standing to disagree. The Reader never sees a source image; the editor
-does, for the pages the Reader's issues name, and now has a field to say so in (issue #183). So read
-this as **evidence, not a rate**: the denominator is "pages an unrelated issue happened to attach an
-image for", which is not a sample of anything, and `observed: 0` on a run means nobody noticed
-something in passing, not that the document is faithful. What it is good for is the direction of a
-disagreement between the two — `kinds` uses the same five as `verify_kinds` on purpose, so a run
-whose editor reports `content_missing` on pages whose VERIFY passed is saying the check missed
-content, which is the failure mode no count in `verification` can see. `pages` is the distinct pages
-observations were filed about, so one page reported in three rounds is one page and three
-observations; `observed` is the observations. `unattached` and `unplaced` are the ones to discount
-first — an observation about a page whose image was not attached is a guess about a page the model
-could not see, and one that named no page cannot be checked at all. `pages` includes the guessed
-pages, because it is where a person should look and a guess that turns out to be right is worth the
-look; `unattached_pages` is the subset the editor could **not** see, so the difference between the
-two is the set that was backed by an image in front of the model. Attachment is judged per round, so
-a page attached in round 1 and reported in round 2 without its image counts as a guess — and a log
-line that does not say what was attached puts its pages in `pages` and none in `unattached_pages`,
-leaving its own `unattached` count as the only statement that some were guesses. `untagged` in `kinds` is the
-usual companion: an observation whose kind this version does not recognize is counted there and in no
-other bucket, and the kinds are not a partition, so read each against `observed`. None of this
+folded from [`editor_fidelity_observed`](#editor_fidelity_observed). Everything under
+`verification` is the one fidelity check each page gets, and that check's weakness is structural
+rather than a matter of rate — the verifier is the same model family looking at the same image as
+the transcriber, so a page whose text it misread once it can misread twice, and a page it declared
+blank it will declare blank again. Nothing else in the run had standing to disagree. The Reader
+never sees a source image; the editor does, for the pages the Reader's issues name, and now has a
+field to say so in (issue #183). So read this as **evidence, not a rate**: the denominator is
+"pages an unrelated issue happened to attach an image for", which is not a sample of anything, and
+`observed: 0` on a run means nobody noticed something in passing, not that the document is
+faithful. What it is good for is the direction of a disagreement between the two — `kinds` uses
+the same five as `verify_kinds` on purpose, so a run whose editor reports `content_missing` on
+pages whose VERIFY passed is saying the check missed content, which is the failure mode no count
+in `verification` can see. `pages` is the distinct pages observations were filed about, so one
+page reported in three rounds is one page and three observations; `observed` is the observations.
+`unattached` and `unplaced` are the ones to discount first — an observation about a page whose
+image was not attached is a guess about a page the model could not see, and one that named no page
+cannot be checked at all. `pages` includes the guessed pages, because it is where a person should
+look and a guess that turns out to be right is worth the look; `unattached_pages` is the subset
+the editor could **not** see, so the difference between the two is the set that was backed by an
+image in front of the model. Attachment is judged per round, so a page attached in round 1 and
+reported in round 2 without its image counts as a guess — and a log line that does not say what
+was attached puts its pages in `pages` and none in `unattached_pages`, leaving its own
+`unattached` count as the only statement that some were guesses. `untagged` in `kinds` is the
+usual companion: an observation whose kind this version does not recognize is counted there and in
+no other bucket, and the kinds are not a partition, so read each against `observed`. None of this
 changes the delivered document — an observation is addressed to a person, and acting on one would
 mean re-extracting that page.
 
@@ -1541,31 +3916,33 @@ across feedback rounds, so a page lost in round 1 and re-extracted in round 3 (`
 leaves this list, while one that failed again is still in it.
 
 `pages_blank` is the other reason a source page contributes nothing to the document, and the
-opposite one: the agent read the page and reported it empty (`page_blank` in §7a). Kept apart from
-`pages_failed` because what a reader should do about the two is opposite — a failed page is work to
-redo, a blank page is work already finished — and because the alternative was measured: six of 100
-bench pages were blank versos reported as lost source pages, which made three of four documents read
-as partial when all four were complete (issue #179). Nothing is subtracted for them: `pages` on
-`run_complete` counts source images, so `pages - pages_blank.length` is how many produced markup.
-The two sets are disjoint, and follow the document the same way — a page that failed in round 1 and
-came back blank in round 3 has been answered, so it leaves `pages_failed` and arrives here.
+opposite one: the agent read the page and reported it empty ([`page_blank`](#page_blank)). Kept
+apart from `pages_failed` because what a reader should do about the two is opposite — a failed
+page is work to redo, a blank page is work already finished — and because the alternative was
+measured: six of 100 bench pages were blank versos reported as lost source pages, which made three
+of four documents read as partial when all four were complete (issue #179). Nothing is subtracted
+for them: `pages` on `run_complete` counts source images, so `pages - pages_blank.length` is how
+many produced markup. The two sets are disjoint, and follow the document the same way — a page
+that failed in round 1 and came back blank in round 3 has been answered, so it leaves
+`pages_failed` and arrives here.
 
 `pages_bare_html` is a third state, and unlike those two it is not about a page that contributed
-nothing: these pages contributed their content and not their `log`. The reply was markup rather than
-the envelope, so it was rescued as it stood (`page_bare_html` in §7a) and carried no `"log"` field at
-all — and `agents/page.md` discharges six kinds of obligation in that field and nowhere else, so on
-these pages a mid-sentence cut, an orphan heading, an unkeyed symbol, a placeholder image source, a
-language change and an irregular table all go unrecorded while the run reports every page delivered.
-It was 13.7% of pages across four deployed rounds of one PDF (issue #349). Named for the reply's
-SHAPE rather than for the consequence, because that is the narrower claim: an enveloped reply that
-merely leaves `"log"` empty also has no log and has a different remedy, and is not counted here —
-though over 67 round logs on file that shape is 0 of 2,320 page replies, so today this field is the
-whole population of pages with no log. It follows the document like the other two: a page
-re-extracted with a proper envelope has a log and leaves the set, one that came back bare stays, and
-a round that threw keeps the prior fragment and so keeps the page. No one page is ANSWERED two of these ways: a blank declaration needs
-an envelope with a `log` asserting the page is empty, and a page that failed has no fragment of its own
-at all. The sets are not quite disjoint as memberships, though, and the exception is worth knowing before
-you subtract one from another: `page_bare_html` is emitted while the page is being rendered, and the
+nothing: these pages contributed their content and not their `log`. The reply was markup rather
+than the envelope, so it was rescued as it stood ([`page_bare_html`](#page_bare_html)) and carried
+no `"log"` field at all — and `agents/page.md` discharges six kinds of obligation in that field
+and nowhere else, so on these pages a mid-sentence cut, an orphan heading, an unkeyed symbol, a
+placeholder image source, a language change and an irregular table all go unrecorded while the run
+reports every page delivered. It was 13.7% of pages across four deployed rounds of one PDF (issue
+#349). Named for the reply's SHAPE rather than for the consequence, because that is the narrower
+claim: an enveloped reply that merely leaves `"log"` empty also has no log and has a different
+remedy, and is not counted here — though over 67 round logs on file that shape is 0 of 2,320 page
+replies, so today this field is the whole population of pages with no log. It follows the document
+like the other two: a page re-extracted with a proper envelope has a log and leaves the set, one
+that came back bare stays, and a round that threw keeps the prior fragment and so keeps the page.
+No one page is ANSWERED two of these ways: a blank declaration needs an envelope with a `log`
+asserting the page is empty, and a page that failed has no fragment of its own at all. The sets
+are not quite disjoint as memberships, though, and the exception is worth knowing before you
+subtract one from another: `page_bare_html` is emitted while the page is being rendered, and the
 verify call that follows is unwrapped, so a bare page whose verifier takes a provider error is in
 `pages_bare_html` and `pages_failed` both. Nothing on file has done it.
 
@@ -1640,13 +4017,14 @@ failure comment is not.
 The opposite failure, and the one Iris knows the most about and used to say the least about (issue
 #328). These pages **are** in the document: they were rendered, the fidelity check rejected them
 naming what was wrong, one self-correction pass was bought, and it repaired nothing. So what those
-pages carry is content Iris named a defect in and never fixed. Not necessarily the rejected bytes: the
-marker is written after the review loop, and the Copy Editor may have rewritten a block on one of
-these pages since. What no later round can have done is **answer the check** — nothing after
-extraction asks whether a page is faithful to its source, and the editor, which is the one step that
-does see a source image after that point (for the pages the Reader's issues name), is told to *report*
-a discrepancy it notices rather than edit from one reading of an image (`editor_fidelity_observed`,
-§7a). The rejection therefore stands whatever the markup became, and only a re-extraction can lift it.
+pages carry is content Iris named a defect in and never fixed. Not necessarily the rejected bytes:
+the marker is written after the review loop, and the Copy Editor may have rewritten a block on one
+of these pages since. What no later round can have done is **answer the check** — nothing after
+extraction asks whether a page is faithful to its source, and the editor, which is the one step
+that does see a source image after that point (for the pages the Reader's issues name), is told to
+*report* a discrepancy it notices rather than edit from one reading of an image
+([`editor_fidelity_observed`](#editor_fidelity_observed)). The rejection therefore stands whatever
+the markup became, and only a re-extraction can lift it.
 
 ```html
 <!-- @page-uncorrected 5, 31
@@ -1830,35 +4208,37 @@ run only ends `failed` (with this as its `error`) when every page failed. Raise 
 that provider block and re-run. Dense full-page tables and forms are the usual trigger.
 
 Two ceilings are **not** that one, and both say so in the same message rather than leaving the
-advice above to be followed: `That ceiling is <model>'s own, below the 32000 in
-providers.bedrock.max_tokens` is a model that refuses the ceiling the deployment asked for and
-needs a different model rather than a different setting (§7a, `output_ceiling_clamped`), and `That
-ceiling is this call's own` is a ceiling **Iris** asked for, on a call whose answer has a size it
-can predict. Only the page-correction call does that today: it is handed a page and asked to return
-it with named problems fixed, so it is capped at twice what the first pass of that page spent (with
-a floor, `correctionCeiling` in `src/pipeline/extraction.ts`). Before the cap, one such call ran to
-the full 32,000 tokens on a page whose render cost 6,233, and the reply was discarded for being
-truncated — a bill 5.13x the first pass for output nothing read. The remedy is that caller's
-multiple, and `step` on the `model_call` line says which caller it was; raising `max_tokens` moves
-nothing.
+advice above to be followed:
+`That ceiling is <model>'s own, below the 32000 in providers.bedrock.max_tokens` is a model that
+refuses the ceiling the deployment asked for and needs a different model rather than a different
+setting ([`output_ceiling_clamped`](#model_call_start--model_call)), and
+`That ceiling is this call's own` is a ceiling **Iris** asked for, on a call whose answer has a
+size it can predict. Only the page-correction call does that today: it is handed a page and asked
+to return it with named problems fixed, so it is capped at twice what the first pass of that page
+spent (with a floor, `correctionCeiling` in `src/pipeline/extraction.ts`). Before the cap, one
+such call ran to the full 32,000 tokens on a page whose render cost 6,233, and the reply was
+discarded for being truncated — a bill 5.13x the first pass for output nothing read. The remedy is
+that caller's multiple, and `step` on the `model_call` line says which caller it was; raising
+`max_tokens` moves nothing.
 
-A **third** shape wears the same stop reason and is not a size problem at all: `(0 chars returned)`,
-where the ceiling was reached with no reply written. That message carries its own sentence too — `No
-text was returned at all, so raising that ceiling is not the remedy: look at the model's reasoning
-behaviour and at the size of what it was asked to produce. The ceiling was spent before the reply
-began, and a larger one buys more of whatever consumed it.` A response cut mid-document is an answer
-too long for its ceiling, and a larger one — whichever of the two above the call died of — is the
-fix. Zero characters means the whole
-ceiling went somewhere other than the text — reasoning a model streams as its own channel, which
-Iris counts as output tokens and not as reply (§7a, `model_call`) — so raising the number is a bet
-that the thinking finishes inside the new ceiling, and a lost bet is billed for the whole of the new
-one. One extract call in a 100-page benchmark round spent 32,000 output tokens this way and returned
-nothing (issue #293). It is a reasoning model's failure, so the thing to change is the model or the
-size of the request; on the two page paths the run log says which shape it was — `reply_chars: 0`
-is this one (`page_extraction_failed`, `page_correction_failed`). Read that field and not the
-absence of `reply_head`: on `page_extraction_failed` the two say the same thing, but on
-`page_correction_failed` `truncated` is a predicate over the error's message and a bare
-`truncated: true` there has a second cause, which §7a's row for that event spells out.
+A **third** shape wears the same stop reason and is not a size problem at all:
+`(0 chars returned)`, where the ceiling was reached with no reply written. That message carries
+its own sentence too — `No text was returned at all, so raising that ceiling is not the remedy:
+look at the model's reasoning behaviour and at the size of what it was asked to produce. The
+ceiling was spent before the reply began, and a larger one buys more of whatever consumed it.` A
+response cut mid-document is an answer too long for its ceiling, and a larger one — whichever of
+the two above the call died of — is the fix. Zero characters means the whole ceiling went
+somewhere other than the text — reasoning a model streams as its own channel, which Iris counts as
+output tokens and not as reply ([`model_call`](#model_call_start--model_call)) — so raising the
+number is a bet that the thinking finishes inside the new ceiling, and a lost bet is billed for
+the whole of the new one. One extract call in a 100-page benchmark round spent 32,000 output
+tokens this way and returned nothing (issue #293). It is a reasoning model's failure, so the thing
+to change is the model or the size of the request; on the two page paths the run log says which
+shape it was — `reply_chars: 0` is this one (`page_extraction_failed`, `page_correction_failed`).
+Read that field and not the absence of `reply_head`: on `page_extraction_failed` the two say the
+same thing, but on `page_correction_failed` `truncated` is a predicate over the error's message
+and a bare `truncated: true` there has a second cause, which [that event's own
+section](#page_correction_failed) spells out.
 
 The order of the two sentences in that message is load-bearing, which is why it is quoted here whole:
 a page's `@page-failed` marker carries only the message's first 300 characters, and the advice this
@@ -1868,19 +4248,21 @@ marker gets the advice without the take-back. `test/bedrock-output-ceiling.test.
 margin is a handful of characters, so lengthening that sentence means re-measuring the cut.
 
 A reply that arrives whole and still cannot be read is the neighbouring case, and reads as
-`page agent returned no HTML (prose, 412 chars)` — `page_no_output` in §7a, with the `shape` that
-says which remedy applies. Where HTML did arrive and carried nothing a reader receives, the same
-line says that instead — `page agent returned no page in 19 chars of HTML` — because a comment or
-a bare page-break marker is not the model answering with no HTML, and the first reading of these
-reported the reply's whole length under a message that said none of it was markup. It costs the same as the ceiling does (that page, not the run) and for
-the same reason: a page whose content is a JSON envelope or an apology is a document that lies
-about being complete, which is worse than one page short and saying so.
+`page agent returned no HTML (prose, 412 chars)` — [`page_no_output`](#page_no_output), with the
+`shape` that says which remedy applies. Where HTML did arrive and carried nothing a reader
+receives, the same line says that instead — `page agent returned no page in 19 chars of HTML` —
+because a comment or a bare page-break marker is not the model answering with no HTML, and the
+first reading of these reported the reply's whole length under a message that said none of it was
+markup. It costs the same as the ceiling does (that page, not the run) and for the same reason: a
+page whose content is a JSON envelope or an apology is a document that lies about being complete,
+which is worse than one page short and saying so.
 
 The same ceiling reached by a **correction** round is contained differently, because there the
 whole document is what did not fit: whatever the reply managed before the cut is applied and the
 part it never reached is re-made a section at a time, the loop then stops, and the delivered
 document says so in an `@editor-truncated` comment (§5, and
-`editor_truncated` / `editor_salvaged` / `editor_sections` in §7a). The remedy is the same knob.
+[`editor_truncated`](#editor_truncated) / [`editor_salvaged`](#editor_salvaged) /
+[`editor_sections`](#editor_sections)). The remedy is the same knob.
 
 ## Prove it works
 
