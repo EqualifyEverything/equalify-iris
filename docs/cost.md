@@ -33,14 +33,17 @@ while its actual spend **fell 26%** ($1.6701 → $1.2362).
 
 ## About the sample
 
-**What it is.** 100 pages of a 1962 [report of the US Advisory Commission on Intergovernmental
+**What it is.** Pages **1–100 of a 166-page** 1962 [report of the US Advisory Commission on Intergovernmental
 Relations](https://library.unt.edu/gpo/acir/Reports/information/M-16.pdf) — dense hierarchical statistical tables, no charts, little running prose. Rendered at 150
-dpi. In the benchmark repo as **`pages100/`**, page ids `acir-p001`–`acir-p100`. Name the corpus when
+dpi. The source PDF's sha256 is
+`679f0a956868fa935b3bec38ebd83b3fb486e74dd87762e17248bc523c797188`, which is also its filename in the
+benchmark repo's `cache/`, so any figure here can be tied to the exact bytes it came from. In the
+benchmark repo as **`pages100/`**, page ids `acir-p001`–`acir-p100`. Name the corpus when
 you quote a figure from it: a second corpus there, `pages-hard57/`, uses the same `acir-pNNN` ids, and
 one published figure of "54% more per call" was **18%** on the 57 pages the choice actually applied
 to.
 
-**Five things that bound every number above:**
+**Six things that bound every number above:**
 
 1. **It is one document, not four.** The round reports "4 documents" because this deployment caps a
    request at 25 pages (`limits.max_pages: 25`), so the PDF was submitted as four 25-page pieces.
@@ -53,7 +56,10 @@ to.
    transcription.
 4. **One genre.** Statistical tables. It is why some agents never fire at all on this corpus, and it
    is the standing limit on every figure here.
-5. **Repeat runs on identical input disagree on 8 and 19 pages of 100.** The cost column is token
+5. **The 100 pages are the front of the report, not a sample of it.** They are pages 1–100 of 166,
+   taken in order. Pages 101–166 have never been run, so nothing here says what they cost or how
+   Iris handles them, and no figure above may be read as covering the whole document.
+6. **Repeat runs on identical input disagree on 8 and 19 pages of 100.** The cost column is token
    spend and reproduces to four decimal places. Quality figures carry that noise.
 
 ## What could change it

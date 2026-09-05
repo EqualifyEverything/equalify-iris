@@ -238,7 +238,7 @@ export interface ReviewResult {
 // sentence is neither the cost the old numbers made it nor the bargain their reversal makes it.
 // The Reader model is
 // a config line (`providers.per_agent.reader`), so this is re-measured on a swap — the Reader
-// bullet under "Implementation notes" in README says what to measure, quote fidelity
+// bullet in docs/design-notes.md says what to measure, quote fidelity
 // included, since that is the one metric this arm moved the wrong way. Record the SHARE OF REPLIES
 // THAT CONTAIN ANY PROSE rather than the share of characters: the reply share separates these two
 // models in every round measured — the incumbent 67-75% over the four large rounds and 91% in the
