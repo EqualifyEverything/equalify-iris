@@ -81,6 +81,21 @@ const TAG = /<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
 // common case (a line break splits a word in one place), and requiring exactly one is what keeps a
 // printed compound out: `state-by-state` is not compared against a `statebystate` nothing writes,
 // and its pieces do not vouch for anyone else's break either.
+//
+// The hyphen must be followed by a letter IMMEDIATELY, and that is a fifth limit of a different kind
+// from the four above — those are about which tokens get compared, this one is about a break that
+// never becomes a token at all. A fragment that soft-wraps its own source at the break
+// (`Compos-\nite`) tokenises as two whole words, so `Compos` and `ite` both enter the map as
+// evidence and nothing is a candidate. Under-detection, in the direction this rule already accepts.
+//
+// Not widened to `-\s*\p{L}+`, and the reason is measured rather than assumed. Making that case work
+// needs whitespace out of the lookup key as well, and with the key normalized the same widening fires
+// across an element boundary — `<td>Total-</td><td>farm</td>` beside a `Totalfarm` reports
+// `Total- farm / Totalfarm`, because `textOf` renders every tag as a space and a widened pattern
+// cannot tell that space from a wrapped line. It also breaks `split`'s contract: the reported string
+// becomes `Compos- ite`, which is not a string the document contains, so a corrector sent looking for
+// it finds nothing. A page that wraps at the break also SHOWS the reader `Compos- ite`, hyphen and
+// space, which is a defect on its own terms and not the contradiction this rule is about.
 const WORD = /\p{L}+(?:-\p{L}+)*/gu;
 
 export interface SplitWord {

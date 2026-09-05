@@ -120,6 +120,21 @@ test("a word broken in two places is skipped, and #334 named the cost of that", 
   });
 });
 
+test("a break the fragment wraps its own source at is invisible, and that is the stated behaviour", () => {
+  // The fifth limit, and a different kind from the four: those are about which tokens get compared,
+  // this is about a break that never becomes a token. `Compos-` ending a source line makes `Compos`
+  // and `ite` two whole words, so both stand as evidence and neither is a candidate.
+  assert.deepEqual(splitWordAudit(`<p>The Compos-\nite index and the Composite index.</p>`), {
+    words: 8,
+    split: [],
+  });
+  // Pinned rather than left to the comment, because the fix for it is a pattern that also joins
+  // across an element boundary — every tag becomes a space here, so `<td>Total-</td><td>farm</td>`
+  // beside a `Totalfarm` would be a finding, and the `split` string reported would be one the
+  // document does not contain. This assertion is what a later widening has to argue with.
+  assert.deepEqual(splitWordContradictions(`<td>Total-</td><td>farm</td><p>and Totalfarm</p>`), []);
+});
+
 test("markup is not prose, so nothing inside a tag or a comment is evidence", () => {
   // Attributes are the false-positive surface, since `href`, `id` and `class` values carry hyphens by
   // convention. `id="non-tax"` beside the word `nontax` in the text is not a contradiction about

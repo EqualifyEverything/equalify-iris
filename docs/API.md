@@ -2018,6 +2018,17 @@ have added nothing to this count on **that** corpus, which is a fact about the c
 kept because it is the shape of the common case and because it keeps a printed compound like
 `state-by-state` from being compared against a `statebystate` nothing writes.
 
+A fifth limit, of a different kind from those four: they are about which tokens get compared, this
+one is about a break that never becomes a token. The hyphen must be followed by a letter
+immediately, so a fragment that soft-wraps its own source at the break (`Compos-` ending a line,
+`ite` beginning the next) is read as two whole words and nothing is a candidate. Under-detection
+again, and deliberately not widened to allow whitespace after the hyphen: that needs whitespace out
+of the lookup key too, and the same widening then fires across an element boundary
+(`<td>Total-</td><td>farm</td>` beside a `Totalfarm`, since every tag renders as a space here), and
+it reports a `split` string the document does not contain, which is the one thing a corrector is
+asked to go and find. Such a fragment also shows the reader `Compos- ite`, hyphen and space — a
+defect on its own terms rather than the contradiction this rule is about.
+
 Skipped means skipped in **both** roles: a word carrying more than one hyphen is neither a candidate
 nor evidence that some other word was broken. Both halves matter, and the second is the one a reader
 would not assume. The tokeniser consumes a whole hyphen chain as one word, so `up-to-date` does not
