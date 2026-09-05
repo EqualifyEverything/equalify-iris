@@ -1201,7 +1201,20 @@ commit, its real SHA just discarded on the way here.
 Those two lines are the ones worth telling apart, and nothing on them does it: same `agent`, both
 `agent_sha: null`, both `agent_content: null`, and both replays hardcode `step: "agent_regression"` on
 their `model_call`, so the tiebreak this section offers elsewhere fails here. The `eval_gate` line
-that follows them is what separates them.
+that follows them delimits the pair, but it sits after **both** halves, so it does not split them by
+itself. Order and count do that. The regression gate is awaited to completion before the eval gate
+starts, so every one of the regression gate's lines precedes every one of the eval gate's. And the two
+halves are the same length. Both gates read the same fixture directory, sorted and capped the same way
+at three cases, and skip a fixture on the same two conditions: a case file that will not parse, an
+image file that is not there. Each then issues exactly one of these calls per surviving fixture — so
+the first half is the candidate prompt's, and the second half the current prompt's. The regression gate
+does emit a second `agent_call` per fixture, the verifier's, but that one names the Feedback Agent's
+file and carries a real `agent_sha`, which is what keeps it out of this population.
+
+An `eval_gate` line missing altogether is the other half of the rule, and it does not mean the log was
+cut short. A failing regression gate logs `agent_update_blocked` and returns before the eval gate is
+reached, so a training round with no `eval_gate` ran no eval gate: every `agent_sha: null` replay in it
+was the regression gate's.
 
 One `agent` value spans two cases: the merge sends `MERGE_SYSTEM` under the name `page.md` with
 `agent_sha: null`, beside ordinary page calls that carry `page.md`'s real SHA. So `agent_sha`, and the
