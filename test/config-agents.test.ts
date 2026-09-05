@@ -1255,12 +1255,21 @@ test("§7 states how much of the run log it does not document, and the count is 
   // a claim about the rest of src/, so the claim is checked below rather than assumed.
   const RUNLOG = join(SRC, "store/runlog.ts");
   const emitted = new Set<string>();
+  // Where each name is emitted FROM, not just that it is. §7's coverage paragraph makes its claim
+  // about the undocumented events by file rather than by name — three of them are not named for the
+  // family they belong to — so the check needs the file, and the same loop already has it.
+  const where = new Map<string, Set<string>>();
+  const emit = (name: string, file: string) => {
+    emitted.add(name);
+    if (!where.has(name)) where.set(name, new Set());
+    where.get(name)!.add(file.slice(ROOT.length));
+  };
   for (const file of sources(SRC)) {
     const text = readFileSync(file, "utf8");
-    for (const m of text.matchAll(/(?:\.event|onEvent\?\.)\(\s*"([a-z0-9_]+)"/g)) emitted.add(m[1]!);
+    for (const m of text.matchAll(/(?:\.event|onEvent\?\.)\(\s*"([a-z0-9_]+)"/g)) emit(m[1]!, file);
   }
   const runlog = readFileSync(RUNLOG, "utf8");
-  for (const m of runlog.matchAll(/\btype:\s*"([a-z0-9_]+)"/g)) emitted.add(m[1]!);
+  for (const m of runlog.matchAll(/\btype:\s*"([a-z0-9_]+)"/g)) emit(m[1]!, RUNLOG);
 
   // What makes one file enough: nothing else in src/ reaches for an append-shaped fs call. If a
   // second file ever writes the log, shape 3 stops being findable where this looks and the count
@@ -1328,10 +1337,16 @@ test("§7 states how much of the run log it does not document, and the count is 
   // Read the numbers out of THAT paragraph, not out of the file: every event name §7 offers as an
   // example is also a section heading or a mention somewhere else in these 4,000 lines, so a check
   // against the whole document would pass on a paragraph that had dropped the example entirely.
+  //
+  // Scoped from that opening to the index table rather than to the next blank line: the coverage
+  // prose is three paragraphs, and its own promise is that every number in it is checked. Stopping
+  // at the first blank line would leave the middle one — the claim about WHICH files the
+  // undocumented events come from — unchecked while reading as though it were checked.
   const opens = "**The index is not the whole log.**";
   const paraStart = lines.findIndex((l) => l.startsWith(opens));
   assert.ok(paraStart > 0, `§7 no longer opens its coverage paragraph with ${opens}`);
-  const paraEnd = lines.findIndex((l, i) => i > paraStart && l.trim() === "");
+  const paraEnd = lines.findIndex((l, i) => i > paraStart && l.startsWith("| `type`"));
+  assert.ok(paraEnd > paraStart, "§7's coverage prose is no longer followed by the index table");
   const para = lines.slice(paraStart, paraEnd).join(" ").replace(/\s+/g, " ");
 
   const stated = /`src\/` emits \*\*(\d+)\*\* event types; the (\d+) sections below cover \*\*(\d+)\*\* of them and \*\*(\d+)\*\* have no section here/.exec(
@@ -1351,9 +1366,9 @@ test("§7 states how much of the run log it does not document, and the count is 
   );
 
   // Counts alone cannot see a RENAME — one name out, one name in, every total unchanged — and the
-  // paragraph names three events as its examples of the undocumented ones. Each has to still be
+  // paragraph names several events as its examples of the undocumented ones. Each has to still be
   // emitted, and still be undocumented, or the example is the wrong way round.
-  for (const example of ["page_links", "specialist_dispatched", "feedback_learned"]) {
+  for (const example of ["agent_trained", "regression_gate", "eval_gate", "agent_issue", "calibrate_call_failed"]) {
     assert.ok(
       para.includes(`\`${example}\``),
       `§7's coverage paragraph no longer names \`${example}\`; update this list with it`,
@@ -1362,48 +1377,72 @@ test("§7 states how much of the run log it does not document, and the count is 
     assert.ok(!documented.has(example), `\`${example}\` now HAS a §7 section, so it is a bad example`);
   }
 
-  // The paragraph splits the undocumented set into groups and states each group's SIZE, and its own
-  // last sentence promises every number in it is checked against src/. The four totals above are not
-  // enough for that: a sixth link-repair event added later leaves 29 correct — one more emitted, one
-  // more undocumented — and makes `**5**` quietly wrong. So each group is counted here by the prefix
-  // the paragraph names it by.
-  // Named rather than derived: these two are undocumented events that fit NONE of the three groups,
-  // and the paragraph promises them by name. A third one appearing must fail rather than be absorbed
-  // into the remainder, which is why `rest` below subtracts this list instead of pattern-matching.
-  const STRAYS = ["page_lessons_injected", "reextract_skipped"];
-  const groups: [string, (n: string) => boolean][] = [
-    ["link-repair", (n) => n.startsWith("page_links")],
-    ["specialist-dispatch", (n) => n.startsWith("specialist_")],
+  // The paragraph's claim about the undocumented set is no longer a split into sizes — they are one
+  // region now — but a claim about WHERE they come from, which is the stronger form: an undocumented
+  // event added anywhere else in src/ fails here, while a size-per-prefix check would only have
+  // failed for the prefixes it knew. Read one-directionally, undocumented -> file, because the
+  // reverse is not claimed: these four files also emit events §7 documents.
+  const REGION = [
+    "src/pipeline/feedback.ts",
+    "src/pipeline/contribute.ts",
+    "src/pipeline/calibration.ts",
+    "src/pipeline/orchestrator.ts",
   ];
-  for (const [label, inGroup] of groups) {
-    const size = undocumented.filter(inGroup).length;
-    assert.match(
-      para,
-      new RegExp(`\\*\\*${size}\\*\\* ${label}`),
-      `§7 no longer says **${size}** ${label} events, and src/ has ${size} undocumented ones`,
-    );
+  for (const path of REGION) {
+    assert.ok(para.includes(`\`${path}\``), `§7's coverage prose no longer names \`${path}\``);
   }
-  // The third group is the remainder rather than a prefix, and the two strays are named individually.
-  const rest = undocumented.filter((n) => !groups.some(([, f]) => f(n)) && !STRAYS.includes(n));
-  assert.match(
-    para,
-    new RegExp(`\\*\\*${rest.length}\\*\\* feedback-learning and contribution`),
-    `§7 no longer says **${rest.length}** feedback-learning and contribution events`,
+  const strays = undocumented
+    .map((n) => [n, [...(where.get(n) ?? [])].filter((f) => !REGION.includes(f))] as const)
+    .filter(([, outside]) => outside.length > 0)
+    .map(([n, outside]) => `${n} (${outside.join(", ")})`);
+  assert.deepEqual(
+    strays,
+    [],
+    "§7 says every undocumented event comes from the feedback/contribution/calibration region, and " +
+      `these do not: ${strays.join("; ")}. Either write them up in §7 or widen that sentence.`,
   );
-  for (const stray of STRAYS) {
-    assert.ok(
-      para.includes(`\`${stray}\``),
-      `§7's coverage paragraph no longer names the stray \`${stray}\``,
-    );
-    assert.ok(
-      emitted.has(stray) && !documented.has(stray),
-      `\`${stray}\` is offered as an undocumented stray and is now documented or not emitted`,
+
+  // Three of the 17 are named for neither their family nor their file, which is the reason the check
+  // above reads files instead of prefixes — and the paragraph says so, so which file each comes from
+  // is a claim in its own right.
+  const MISNAMED: [string, string][] = [
+    ["contribution_failed", "src/pipeline/orchestrator.ts"],
+    ["feedback_training_failed", "src/pipeline/orchestrator.ts"],
+    ["calibrate_call_failed", "src/pipeline/calibration.ts"],
+  ];
+  for (const [name, file] of MISNAMED) {
+    assert.ok(para.includes(`\`${name}\``), `§7 no longer names \`${name}\` among the misnamed three`);
+    assert.deepEqual(
+      [...(where.get(name) ?? [])],
+      [file],
+      `§7 attributes \`${name}\` to ${file}`,
     );
   }
-  assert.match(
-    para,
-    new RegExp(`\\*\\*${STRAYS.length}\\*\\* that belong to none of them`),
-    `§7 no longer says **${STRAYS.length}** belong to no group`,
+  // And that the orchestrator contributes exactly the two the prose calls "the two catches": a third
+  // one there would make "two" wrong while leaving every total above correct.
+  const fromOrchestrator = undocumented.filter((n) => where.get(n)?.has("src/pipeline/orchestrator.ts")).sort();
+  assert.deepEqual(
+    fromOrchestrator,
+    ["contribution_failed", "feedback_training_failed"],
+    "§7 calls the orchestrator's share of the undocumented events \"the two catches\"",
+  );
+
+  // "calibration is a tool, `src/tools/calibrate.ts`, and not a phase of a run" — the one claim in
+  // the paragraph that is about the pipeline rather than about the log, and the one a later change
+  // would silently falsify. Nothing else in src/ may import it.
+  //
+  // Both import forms, because a DYNAMIC import is the likeliest way a run reaches this: the module
+  // is only wanted on the calibration path, and `await import(...)` inside the branch that wants it
+  // is what someone adding it would reach for. A static-only pattern would let exactly that through.
+  const IMPORTS_CALIBRATION = /(?:from|import\()\s*"[^"]*\/calibration\.ts"/;
+  const importers = sources(SRC)
+    .filter((f) => IMPORTS_CALIBRATION.test(readFileSync(f, "utf8")))
+    .map((f) => f.slice(ROOT.length));
+  assert.deepEqual(
+    importers,
+    ["src/tools/calibrate.ts"],
+    `§7 says an ordinary run never emits \`calibrate_call_failed\` because calibration is a tool. ` +
+      `These import it: ${importers.join(", ")}. If a run reaches it now, that sentence is wrong.`,
   );
 
   // The fourth example is a family rather than a name, so it is checked as one.
