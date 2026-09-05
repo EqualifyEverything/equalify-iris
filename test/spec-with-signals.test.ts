@@ -27,12 +27,31 @@ function runProbe(): { stdout: string; stderr: string } {
   try {
     // Killed by a signal, part-way through: the #405 shape. `first runs` reports, the
     // timer fires, `never reports` never does.
+    //
+    // SIGKILL, not SIGSEGV. macOS reports a FATAL signal through ReportCrash whether or not
+    // it came from `kill(2)`, so a self-sent SIGSEGV writes a real `node-*.ips` into
+    // ~/Library/Logs/DiagnosticReports on every run — the exact directory this reporter
+    // tells the reader to go and trust. The first draft of this file put seven of them there
+    // in under an hour. SIGKILL exercises the same branch and is not reported.
     writeFileSync(
-      join(dir, "segv.test.ts"),
+      join(dir, "killed.test.ts"),
       'import { test } from "node:test";\n' +
-        'test("segv first runs", () => {});\n' +
-        'setTimeout(() => process.kill(process.pid, "SIGSEGV"), 50);\n' +
-        'test("segv never reports", async () => { await new Promise((r) => setTimeout(r, 2000)); });\n',
+        'test("killed first runs", () => {});\n' +
+        'setTimeout(() => process.kill(process.pid, "SIGKILL"), 50);\n' +
+        'test("killed never reports", async () => { await new Promise((r) => setTimeout(r, 2000)); });\n',
+    );
+    // A file that fails an assertion AND THEN dies. Node reports the file's own failure as
+    // `subtestsFailed` here and emits no `test:fail` for it at all, so spec prints the
+    // assertion and nothing else — the death is invisible unless the reporter reads
+    // `test:complete`. An ordinary shape during a bisect, and the one this reporter exists
+    // for.
+    writeFileSync(
+      join(dir, "both.test.ts"),
+      'import { test } from "node:test";\n' +
+        'import assert from "node:assert/strict";\n' +
+        'test("a failing assertion before the death", () => { assert.equal(1, 2); });\n' +
+        'setTimeout(() => process.kill(process.pid, "SIGKILL"), 100);\n' +
+        'test("both never reports", async () => { await new Promise((r) => setTimeout(r, 2000)); });\n',
     );
     // Non-zero exit with no signal: the other way a child dies without reporting.
     writeFileSync(
@@ -49,6 +68,17 @@ function runProbe(): { stdout: string; stderr: string } {
       'import { test } from "node:test";\n' +
         'import assert from "node:assert/strict";\n' +
         'test("an ordinary assertion failure", () => { assert.equal(1, 2); });\n',
+    );
+    // Fails a test AND exits non-zero with a code the runner would never choose. This is
+    // what forces the discriminator to be `subtestsFailed` + exitCode 1 specifically,
+    // rather than "any file that failed a test exits 1, so ignore non-zero codes there".
+    writeFileSync(
+      join(dir, "failsthenexits.test.ts"),
+      'import { test } from "node:test";\n' +
+        'import assert from "node:assert/strict";\n' +
+        'test("a failing assertion before the exit", () => { assert.equal(1, 2); });\n' +
+        "setTimeout(() => process.exit(4), 100);\n" +
+        'test("failsthenexits never reports", async () => { await new Promise((r) => setTimeout(r, 2000)); });\n',
     );
     writeFileSync(
       join(dir, "passes.test.ts"),
@@ -80,43 +110,99 @@ const OUT = PROBE.stdout;
 test("a child killed by a signal says so, where spec says only 'test failed'", () => {
   // Spec's own account of the same file, which is all #405 had to go on.
   assert.match(OUT, /'test failed'/);
-  assert.match(OUT, /segv\.test\.ts: the process was killed by SIGSEGV without reporting a failure/);
-  // And it says the count below is short, because the tests after the death never ran.
-  assert.match(OUT, /never ran, so a green count below is short, not clean/);
-  assert.match(OUT, /✔ segv first runs/);
-  assert.ok(!OUT.includes("segv never reports"), "the test after the death should not have run");
+  assert.match(
+    OUT,
+    /killed\.test\.ts: the process was killed by SIGKILL without reporting a failure/,
+  );
+  // And it says the count is short, because the tests after the death never ran.
+  assert.match(OUT, /never ran, so the count below is short, not clean/);
+  assert.match(OUT, /✔ killed first runs/);
+  assert.ok(!OUT.includes("killed never reports"), "the test after the death should not have run");
+  // Only a signal sends the reader to the crash logs.
+  assert.match(OUT, /A fatal signal here is a crash inside node itself \(#405\)/);
 });
 
-test("a child that exits non-zero without reporting says the code, not a signal", () => {
+test("a file that fails an assertion and THEN dies still reports the death", () => {
+  // The gap that `test:fail` left: node reports this file as `subtestsFailed`, with the
+  // signal on the event and no `test:fail` for the file, so spec prints only the assertion.
+  assert.match(OUT, /✖ a failing assertion before the death/);
+  assert.match(
+    OUT,
+    /both\.test\.ts: the process was killed by SIGKILL without reporting a failure/,
+  );
+  assert.ok(!OUT.includes("both never reports"), "the test after the death should not have run");
+});
+
+test("a child that exits non-zero without reporting says the code, and not to read crash logs", () => {
   assert.match(OUT, /exits\.test\.ts: the process exited 3 without reporting a failure/);
   assert.ok(
     !/exits\.test\.ts: the process was killed/.test(OUT),
     "an exit code was reported as a signal",
   );
+  // The advice differs by branch: a non-zero exit is nearly always a syntax error or a bad
+  // import, and sending its author to ~/Library/Logs/DiagnosticReports — in CI, where
+  // `tail` has already cut the SyntaxError off the top — is the inverse of #405's problem.
+  const paragraph = OUT.slice(OUT.indexOf("exits.test.ts: the process exited 3"));
+  const untilBlank = paragraph.slice(0, paragraph.indexOf("\n\n"));
+  assert.match(untilBlank, /usually a syntax error or a failed import/);
+  assert.ok(
+    !untilBlank.includes("node-*.ips"),
+    "a non-zero exit was sent to the crash logs, where a syntax error is not",
+  );
 });
 
-test("an ordinary assertion failure is left to the spec reporter", () => {
+test("a file whose tests merely failed is left to the spec reporter", () => {
   assert.match(OUT, /✖ an ordinary assertion failure/);
-  // Named by what the reporter PRINTS, not by what it omits. `event.data.name` on an
-  // assertion failure is the TEST's name, not its file, so asserting that
-  // `asserts.test.ts` never appears is a claim nothing could ever falsify — it passed with
-  // the guard mutated to fire on every failure. Count the shouts instead: two event-time
-  // lines and one summary header, and no shout naming a test.
   const shouted = OUT.split("\n").filter((line) => line.startsWith("‼"));
-  assert.equal(shouted.length, 3, `expected two deaths and one summary header, got:\n${shouted.join("\n")}`);
+  // Four deaths (killed, exits 3, assertion-then-killed, assertion-then-exit 4) and one
+  // summary header. Counting is the point: a file whose tests simply failed exits 1 and its
+  // `test:complete` carries that code, so reading `test:complete` instead of `test:fail`
+  // made every red build shout until the discriminator was narrowed to the runner's own
+  // `subtestsFailed` + 1.
+  assert.equal(
+    shouted.length,
+    5,
+    `expected four deaths and one summary header, got:\n${shouted.join("\n")}`,
+  );
+  assert.ok(
+    !shouted.some((line) => line.includes("asserts.test.ts")),
+    "the reporter fired on a file whose tests merely failed",
+  );
+  // `event.data.name` on a subtest failure is the TEST's name, not its file, so this is a
+  // second, independent way for a stray shout to show up.
   assert.ok(
     !shouted.some((line) => line.includes("an ordinary assertion failure")),
-    "the reporter fired on a failing assertion, which is not a dead child",
+    "the reporter fired on an individual failing test",
+  );
+});
+
+test("a file that fails a test and then exits with its own code is a death", () => {
+  // Not covered by "the runner exits 1 when tests fail": the code is 4, so the exit did not
+  // come from the runner, even though the file also has a real failure to report.
+  assert.match(OUT, /✖ a failing assertion before the exit/);
+  assert.match(
+    OUT,
+    /failsthenexits\.test\.ts: the process exited 4 without reporting a failure/,
+  );
+  assert.ok(
+    !OUT.includes("failsthenexits never reports"),
+    "the test after the exit should not have run",
   );
 });
 
 test("the deaths are repeated at the very end, where CI's tail can see them", () => {
   // Both workflows read `npm test` through `tail` (code-review.yml -120,
   // issue-to-pr.yml -40), so a file that dies early in a 1,500-test run is above the cut.
-  const summary = OUT.slice(OUT.indexOf("‼ dead child processes in this run"));
-  assert.ok(summary.length > 0, "no end-of-run summary");
-  assert.match(summary, /segv\.test\.ts/);
+  // On the index, not on the slice: with the summary absent, `indexOf` is -1 and
+  // `slice(-1)` is the LAST CHARACTER of the output, whose length is 1, so a `length > 0`
+  // check here holds no matter what and its message never prints.
+  const at = OUT.indexOf("‼ dead child processes in this run");
+  assert.notEqual(at, -1, "no end-of-run summary");
+  const summary = OUT.slice(at);
+  assert.match(summary, /killed\.test\.ts/);
   assert.match(summary, /exits\.test\.ts/);
+  assert.match(summary, /both\.test\.ts/);
+  assert.match(summary, /failsthenexits\.test\.ts/);
   assert.ok(!summary.includes("asserts.test.ts"), "the summary listed an assertion failure");
   // Last, so no tail depth can cut it. Which of the two deaths is last depends on which
   // child died first, so assert on the placement, not on the file.
