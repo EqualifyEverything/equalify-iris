@@ -72,8 +72,8 @@ has made two model calls in the whole sprint, both of them on the swapped deploy
 **Every figure here names the benchmark round it came from**, because some of them are stale by
 design and several are superseded outright — §6 says which. **"The incumbent" below means the
 unswapped Sonnet-4.6 baseline every round was measured against** — not the reference deployment as it
-stands today, whose `page` agent has run on `moonshotai.kimi-k2.5` since 2026-09-02. It does not mean
-`config.example.yaml` as shipped either: that file's `providers.default` is `openrouter`, so its
+stands today, whose `page` agent has run on `moonshotai.kimi-k2.5` since 2026-09-02. The phrase does
+not mean `config.example.yaml` as shipped either: that file's `providers.default` is `openrouter`, so its
 capabilities resolve to `anthropic/claude-sonnet-4.6`, and the Bedrock id
 `us.anthropic.claude-sonnet-4-6` is only the `bedrock` block's default. Same model generation, two providers and two ids — a
 distinction §1 spends a paragraph on, because a Bedrock id under an OpenRouter default does not
@@ -436,8 +436,9 @@ the defect. It is doing something defensible — reading the page and reporting 
 this step's contract does not ask for it. The issue list is what a Reader raised, and an edit
 outside it is unrequested by definition.
 
-Carried to the shipped deployment, `copy_editor` is $3.0849 of the **$10.7106 §5 prices for
-four agents**. **That is $3.0849 → ≈$0.29, so $10.7106 → ≈$7.92 and $0.1071 → ≈$0.0792/page — a saving of
+On the shipped deployment, `copy_editor` is $3.0849 of the **$10.7106 §5 prices for
+four agents**. Carrying the table's 9.5% across it gives
+**$3.0849 → ≈$0.29, so $10.7106 → ≈$7.92 and $0.1071 → ≈$0.0792/page — a saving of
 $2.79 per 100 pages, −26.1% of the priced bill and ≈−25.9% of the round including `builder`
 (≈$10.79).** Both are quoted because they are different denominators and this document has already
 published one as the other once (§5, §7). That is the largest single move left, and unlike the `page`
@@ -454,7 +455,8 @@ unchanged, and the denominator moves (§7).
   Confinement, in the table above, is the on-distribution form of the same question.
 - **One document carries the capability gap.** `amazon.nova-2-lite-v1_0` is 8 of the 23 instances
   and accounts for −8 of the incumbent's −10 and **+6 of Luna's +5** — a component larger than the
-  net it sits in. Luna also lost one instance on `nvidia.nemotron-nano-12b-v2` (8 → 7), and
+  net it sits in. It can exceed that net because Luna also lost one instance on
+  `nvidia.nemotron-nano-12b-v2` (8 → 7), and
   the incumbent's other −2 is one instance each on that document and on
   `anthropic.claude-sonnet-4-6`. The *direction* is corroborated by obedience to the issue list and
   by the other documents; the *size* does not survive dropping it.
@@ -649,10 +651,10 @@ a correction pass, that pass is billed to whichever model runs `page`, and the c
 62% more of them (85.2% of calls against 52.6%).
 
 Total cost per page judged follows, with the trigger rate measured per draw on the 135 control calls
-and the correction price measured rather than assumed. It is also measured on a round whose `page.md`
-**blob** sha matches the one the trigger rates were taken at, which is not the same test as matching
-`iris_sha`. That is the reason the sonnet figure here is $0.0619 rather than the $0.0607 an earlier
-revision published (#330, and §6):
+and the correction price measured rather than assumed. That correction price is also measured on a
+round whose `page.md` **blob** sha matches the one the trigger rates were taken at, which is not the
+same test as matching `iris_sha`. That is the reason the sonnet figure here is $0.0619 rather than the
+$0.0607 an earlier revision published (#330, and §6):
 
 | operating point | detect | trigger | $verify | $correct | **$total/page** | vs incumbent | $/page actually fixed |
 |---|---|---|---|---|---|---|---|
@@ -703,7 +705,7 @@ recommendation is priced against a page agent running `claude-sonnet-4-6`, where
 #330 expresses break-even as the rejection rate at which the swap stops saving: its 88.8% against the
 84.4% it measures. Recomputed from the inputs published here it is **88.9%**, which is neither of the
 two quantities printed as 88.9% in the table above — the incumbent's detect rate and the union's trigger
-rate, each of which appears once per corrector block. That gives 4.5
+rate, each of which appears once per corrector block. So the recomputed figure is 4.5
 points, a tenth of a point from #330's and not worth reconciling. This document expresses the same
 threshold as a correction price instead — $0.0644 a pass on its own inputs, $0.0708 on #330's — and
 the matching rejection-rate form of it is 86.5% against a measured 85.2%, or **1.3 points**.
@@ -711,7 +713,7 @@ the matching rejection-rate form of it is 86.5% against a measured 85.2%, or **1
 That brings out why the borrowed 4.4 was ambiguous rather than merely unlabelled. Points-above-break-even
 is `(incumbent − challenger) ÷ $pass` and percent-cheaper is `(incumbent − challenger) ÷ incumbent`, so
 the two coincide whenever a correction pass costs about what a page costs in total — $0.0619 against
-$0.0622 and $0.0631 here. That is exactly the case at the sonnet corrector, and is why 4.5 points and
+$0.0622 and $0.0631 here. The sonnet corrector is exactly that case, and is why 4.5 points and
 −4.5% are the same digits. **The mechanisms do not convert; on this corrector the answers nearly do.**
 That is a fair reading of the sonnet arm, and it is not the deployed one. `page` has run
 `moonshotai.kimi-k2.5` since #312, and on the cheap corrector both readings agree that **no reachable
@@ -765,8 +767,8 @@ The verifier swap priced above is worth, at most, about **$1.61 per 100 document
 $0.0177 per page *judged* under the deployed corrector, and only ≈91 of every 100 pages are judged
 since #294 stopped sending blank versos. Under the incumbent corrector the same swap is worth **$0.07**:
 there the per-page gap is $0.0008, so the *fourth* decimal decides it and differencing the table's
-rounded cells gives $0.08 instead. That is a ≈22x spread in dollars, which §7's eighth limit states as
-1.3% against 50.9% — a ≈39x spread,
+rounded cells gives $0.08 instead. $1.61 against $0.07 is a ≈22x spread in dollars, which §7's eighth
+limit states as 1.3% against 50.9% — a ≈39x spread,
 because the two percentages carry different denominators. Two correct ratios of the same two arms,
 and neither is a substitute for the other. These are
 defects a reader can catch the service out on, and fixing the extraction is worth more than changing
