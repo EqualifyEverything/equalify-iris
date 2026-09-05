@@ -84,9 +84,10 @@ sense**, listed with it, and the text has to say which it means.
 - **verdict** — the Feedback Agent's decision about one page: two booleans, `faithful` and
   `accessible`, plus the problems it lists. Both booleans have to be there. A reply missing either
   one is not a verdict on that page and is not counted as one (`VerifyOutput` in
-  `src/pipeline/feedback.ts`). In [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/ci.md](docs/ci.md),
-  a verdict is the CI review bot's advisory decision about a pull request. That is a different
-  thing, about your code rather than about a page.
+  `src/pipeline/feedback.ts`). One unrelated use, in [CONTRIBUTING.md](CONTRIBUTING.md) and
+  [docs/ci.md](docs/ci.md): a CI session's structured output — the review bot's advisory decision
+  about a pull request, and the triage session's about an issue. That is about your repository rather
+  than about a page.
 - **declaration** — the page agent's answer that a page holds no content. It is a claim, not an
   absence. The agent asserts blankness with `"blank": true` or says so in its log, and the pipeline
   can refuse the claim: a page too dark to read is not a blank page (`blankDeclaration` in
