@@ -4050,8 +4050,9 @@ recovers the prompt that went out.
 ### `eval_gate`
 
 The candidate prompt scored against the current one over the fixtures **both** could be scored on:
-`current` and `candidate` are the two paired means rounded to three decimals, `paired` the fixtures
-that counted, and `unpaired` those that could not.
+`agent` is the file, as on [`regression_gate`](#regression_gate), `current` and `candidate` are the two
+paired means rounded to three decimals, `paired` the fixtures that counted, and `unpaired` those that
+could not.
 
 `paired` and `unpaired` are lists of fixture image filenames, not counts.
 
@@ -4131,7 +4132,8 @@ session's `agent-updates.md`. Filing is a side effect ([Contributions](#contribu
 
 ### `agent_update_issue_skipped`
 
-There was no GitHub token, so nothing was filed: `reason` is `no github token`, the only value.
+There was no GitHub token, so nothing was filed: `agent` is the file the proposal was about, and
+`reason` is `no github token`, the only value it takes.
 
 The proposal stays in the session's `agent-updates.md`, which is where it was written either way —
 what this line says is that it stayed there. A deployment that sets `github.issue_token` never writes

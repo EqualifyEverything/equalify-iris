@@ -1292,6 +1292,33 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
       "event — widen that search with the writers rather than adjusting the count.",
   );
 
+  // All three shapes above read a LITERAL name, so a call whose first argument is an expression is
+  // invisible to every one of them — and §7 now claims to document every event, which a name the grep
+  // cannot see would make quietly false. Two such call sites exist and both are the router's telemetry
+  // bridge, which forwards names that originate in a literal `this.onEvent?.("…")` in src/providers, so
+  // shape 2 still sees all of them.
+  //
+  // Same standing as APPENDS above, and the same reason: not an invariant (a name built from a literal
+  // in a lookup table, or a bridge added inside a class, would each slip past), but the shape a caller
+  // would actually write, failing loudly on a third bridge rather than dropping its events from a
+  // coverage claim that says it has none.
+  const bridges = sources(SRC)
+    .flatMap((file) => {
+      const text = readFileSync(file, "utf8");
+      return [...text.matchAll(/(?:\.event|onEvent\?\.)\(\s*(?!")([^\s,)][^,)]*)/g)].map(
+        (m) => `${file.slice(ROOT.length)}:${text.slice(0, m.index).split("\n").length} ${m[1]!.trim()}`,
+      );
+    })
+    .sort();
+  assert.deepEqual(
+    bridges,
+    ["src/pipeline/orchestrator.ts:92 type", "src/tools/calibrate.ts:448 type"],
+    `an event is emitted under a name this test cannot read: ${bridges.join(", ")}. §7 claims to ` +
+      "document every event src/ emits, and a computed name is documented or not without this test " +
+      "being able to tell — give the new call site a literal name, or teach the searches above where " +
+      "its names come from before the claim goes stale.",
+  );
+
   assert.ok(emitted.size > 90, `only ${emitted.size} event names found in src/ — the grep missed`);
   // Losing shape 3 would SHRINK a count rather than fail anything, which is how `agent_call` went
   // undocumented for as long as it did: an event with no §7 section just stops being counted, while
