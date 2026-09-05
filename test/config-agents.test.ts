@@ -1269,7 +1269,14 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   // `onEvent(` without the optional chain. Nothing spells it that way today, but it is one character
   // from a spelling that IS here, and it would otherwise be invisible both to the literal-name search
   // on the next line and to the computed-name check below it.
-  const EMIT = String.raw`(?:\.event|onEvent(?:\?\.)?)\(\s*`;
+  //
+  // The leading `\.` is what keeps this a search for CALLS. Without it `onEvent(` also matches a
+  // method signature — `onEvent(type: string, data: …): void` in an interface, where today's
+  // `TelemetryFn` is a type alias — and the computed-name check below would report a type-only change
+  // as an event emitted under a name it cannot read. An emit is a call on something; a declaration has
+  // no receiver. The cost is that a destructured `onEvent(…)` called with no receiver at all is outside
+  // this search, which is the same concession the check below already states.
+  const EMIT = String.raw`\.(?:event|onEvent(?:\?\.)?)\(\s*`;
   const EMIT_LITERAL = new RegExp(EMIT + String.raw`"([a-z0-9_]+)"`, "g");
   const EMIT_CALL = new RegExp(EMIT + String.raw`(?!")([^\s,)][^,)]*)`, "g");
   for (const file of sources(SRC)) {
