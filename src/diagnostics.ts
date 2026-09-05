@@ -568,6 +568,58 @@ export interface Diagnostics {
       verdicts_omitted: number;
     };
   };
+  // What the table-join stage did with the pairs it found, and how much of it was free.
+  //
+  // Here because nothing looked at it (#326 ask 1). The events have carried all of this since #278
+  // put `by` on `table_joined`, and reading it meant parsing log.jsonl by hand — so the one step
+  // whose cost swings most between runs was the one step with no line in the file an operator
+  // actually reads. `table_join` was 11.5% of a 100-page bench round's bill and moved $0.9533 →
+  // $1.6701 → $1.2362 across three rounds with this stage's code, `agents/` and the model all
+  // byte-identical. Every dollar of that swing is `code_declined` moving 8 → 13 → 11.
+  //
+  // Counts, and no share. `joined_in_code / (joined_in_code + code_declined)` is a number anyone can
+  // divide, but this file will not publish it, because the measurement it looks like — "the free path
+  // takes half the pairs" — is a draw and not a property: 53%, 24% and 31% on the same corpus with
+  // nothing changed. A range with its corpus attached is in `joinInCode`'s comment; a point here would
+  // be read as the rate.
+  //
+  // Summed across feedback rounds like everything else in this file. A round re-joins the tables of
+  // every page it re-extracted, so a document whose second round changed one page has two passes'
+  // worth of pairs here, and that is the bill.
+  tables: {
+    // By `by` on `table_joined`, so these are pairs that were merged AND cleared `verifyJoin`. A line
+    // whose `by` this build does not recognize is counted in neither, for the reason an unknown
+    // correction trigger is: a total that is visibly short beats a bucket filled by guesswork. Old
+    // logs from before #278 have no `by` at all, and read as zero joins rather than as free ones.
+    joined_in_code: number;
+    joined_by_editor: number;
+    // Pairs the free path stood down on, each of which bought a Copy Editor call. NOT a failure
+    // count: a decline delivers exactly what the pipeline delivered before the code path existed. The
+    // per-reason split stays in log.jsonl, because the reasons are an open set — `verify:<reason>`
+    // among them — and a fixed list here would silently stop summing the day a rule is added.
+    code_declined: number;
+    // Of those declines, the ones where both halves actually declared a header block, and of THOSE
+    // the ones whose two signatures differ. Two numbers because the first is the denominator and it
+    // is not `code_declined`: a continued page that reprinted no header has nothing to compare, and
+    // counting it as agreement or as disagreement would both be inventions. `header_compared: 0` with
+    // declines above it therefore means "no pair could show this", not "every header was stable".
+    //
+    // This is the canary #326 asked for, and it is deliberately not `code_declined` filtered to
+    // `header_differs`: that reason is one guard's verdict, while the instability behind it was
+    // observed firing the width check and the id rule too, on pairs that had joined for free a round
+    // earlier. A pair declined for `id_would_be_lost` whose headers also disagree is evidence of the
+    // same thing and would not be in that filter.
+    //
+    // Two readings of one printed header agreed 48–61% of the time across three rounds, so a nonzero
+    // count here is the expected state of a healthy run rather than an alarm. What is worth reading is
+    // the direction across rounds of the same corpus: the code did not change between those three.
+    header_compared: number;
+    header_differs: number;
+    // Pairs left as two tables, from `table_join_failed` — the editor refused or could not be read,
+    // or the pair could not be located in the source bytes at all. The one count here that IS a
+    // shortfall in the output: the document ships both halves, so a reader meets a table cut in two.
+    failed: number;
+  };
   // Source pages whose own extraction threw, so the delivered document carries a
   // failure marker instead of that page's content (pipeline/extraction.ts
   // `failedPage`). Its own field because a run that ends `ready_for_review` with a
@@ -1102,6 +1154,14 @@ export function summarizeRun(
       verdicts_omitted: 0,
     },
   };
+  const tables: Diagnostics["tables"] = {
+    joined_in_code: 0,
+    joined_by_editor: 0,
+    code_declined: 0,
+    header_compared: 0,
+    header_differs: 0,
+    failed: 0,
+  };
   for (const e of events) {
     if (e.type === "page_verify_ok") {
       verification.pages_verified += 1;
@@ -1334,6 +1394,35 @@ export function summarizeRun(
           verification.rechecks.sampled_problems_after += e.problems_after;
         }
       }
+    } else if (e.type === "table_joined") {
+      // Matched against the two values the emitter writes, not `=== "code"` with an else: an
+      // unrecognized `by` — an old log from before #278, or a third path added later — has to land in
+      // neither bucket, because the whole question this field answers is which of the two spent
+      // output tokens. Guessing it would report a paid join as free, and the free share is the number
+      // #326 says a later round must be able to re-measure.
+      if (e.by === "code") tables.joined_in_code += 1;
+      else if (e.by === "editor") tables.joined_by_editor += 1;
+    } else if (e.type === "table_join_code_declined") {
+      tables.code_declined += 1;
+      // The comparison is only counted where the log line says one was possible: `headers_identical`
+      // is absent when a half did not parse as a table, and the shapes are absent with it. Read
+      // strictly as a boolean for the reason every flag here is, and gated on BOTH shapes declaring a
+      // header row, because a continued page that reprinted no header compares an empty signature
+      // against a real one and writes `false` — a fact about the printing, not two readings
+      // disagreeing (`0x…` is that shape). Counting it would put the commonest legitimate case into
+      // the instability number.
+      const compared =
+        typeof e.headers_identical === "boolean" &&
+        typeof e.header_shape_first === "string" &&
+        typeof e.header_shape_second === "string" &&
+        !e.header_shape_first.startsWith("0x") &&
+        !e.header_shape_second.startsWith("0x");
+      if (compared) {
+        tables.header_compared += 1;
+        if (e.headers_identical === false) tables.header_differs += 1;
+      }
+    } else if (e.type === "table_join_failed") {
+      tables.failed += 1;
     }
   }
 
@@ -1477,6 +1566,7 @@ export function summarizeRun(
     slowest_calls: slowest,
     errors,
     verification,
+    tables,
     pages_failed: pagesFailed,
     pages_blank: pagesBlank,
     pages_bare_html: pagesBareHtml,

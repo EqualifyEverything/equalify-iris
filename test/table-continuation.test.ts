@@ -18,6 +18,7 @@ import {
   CONTINUED_CAPTION,
   MAX_TABLE_JOINS,
   continuationPairs,
+  headerSignatures,
   joinContinuedTables,
   joinInCode,
   normalizeCell,
@@ -633,6 +634,49 @@ test("a half the parser cannot read is the editor's rather than the document's p
   assert.throws(() => joinInCode(asPair(deep, ok)));
 });
 
+// --- what a decline says about the two headers (#326) ---
+
+// The free path's coverage is not a property of this code: the same rules on the same corpus took 9 of
+// 17 pairs one round and 4 the next, because two readings of one printed header agree 48-61% of the
+// time. `headerSignatures` is what puts that on the decline line, so the next round's declines can be
+// re-scored without paying for a round.
+
+test("a decline carries both halves' header blocks, as rule 3 compared them", async () => {
+  const first = piece("Table 10.—Collections", STATES);
+  const second = reworded("Table 10.—Collections—Continued", REST);
+  const read = headerSignatures(onePair(first + second));
+
+  assert.ok(read !== null);
+  assert.deepEqual(read, {
+    first: { signature: "TH:1:Col 1|TH:1:Col 2|TH:1:Col 3", rows: 1, cells: 3 },
+    second: { signature: "TH:1:Column 1|TH:1:Column 2|TH:1:Column 3", rows: 1, cells: 3 },
+  });
+});
+
+test("a header cell's own text can hold the separators, so the counts are not read off the string", async () => {
+  // `normalizeCell` folds whitespace and drops soft hyphens and leaves `|` alone, and a printed census
+  // header really does write `Farm | Non-farm`. Splitting the signature back up would call this four
+  // cells; the DOM says three, and the DOM is what the signature was built from.
+  const piped = `<thead><tr><th scope="col">Farm | Non-farm</th><th scope="col">Col 2</th><th scope="col">Col 3</th></tr></thead>`;
+  const first = `<table><caption>Table 3.—Income</caption>${piped}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 3.—Income—Continued</caption>${HEAD}<tbody>${dataRow("Vermont")}</tbody></table>`;
+  const read = headerSignatures(onePair(first + second));
+
+  assert.equal(read?.first.cells, 3);
+  assert.equal(read?.first.signature.split("|").length, 4, "the string has one more piece than the block has cells");
+});
+
+test("no header block and no readable table are different answers", async () => {
+  // The middle piece of a chain declares no header block at all, which is a fact about the printing —
+  // `rows: 0` and an empty signature. A half no parser can read is a fact about the parser, and the
+  // whole reading is withheld: null, never a zero that would be counted as a stable header.
+  const first = `<table><caption>Table 8.—Yield</caption>${HEAD}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 8.—Yield—Continued</caption><tbody>${dataRow("Vermont")}</tbody></table>`;
+
+  assert.deepEqual(headerSignatures(onePair(first + second))?.second, { signature: "", rows: 0, cells: 0 });
+  assert.equal(headerSignatures(asPair(first, "<p>no table here</p>")), null);
+});
+
 // --- the splice ---
 
 test("a joined pair becomes one table and the rest of the body is untouched", async () => {
@@ -666,11 +710,66 @@ test("a joined pair becomes one table and the rest of the body is untouched", as
   const [stood] = events(rec, "table_join_code_declined");
   assert.equal(stood.data.reason, "header_differs");
   assert.equal(stood.data.caption, "Table 1.—Income by State—Continued");
+  // And the two headers themselves, which is what a later round needs to tell a pair whose halves
+  // really describe different columns from a pair whose header was read twice and came out differently
+  // (#326). A reason and a caption can count declines; only these can explain one.
+  assert.equal(stood.data.headers_identical, false);
+  assert.equal(stood.data.header_shape_first, "1x3");
+  assert.equal(stood.data.header_shape_second, "1x3");
+  assert.equal(stood.data.header_first, "TH:1:Col 1|TH:1:Col 2|TH:1:Col 3");
+  assert.equal(stood.data.header_second, "TH:1:Column 1|TH:1:Column 2|TH:1:Column 3");
+});
+
+test("a decline for another reason still says whether the headers agreed", async () => {
+  // The point of putting the comparison on every decline rather than on `header_differs` alone. This
+  // pair stands down over an id in a repeated note row, and its two header blocks are the same block:
+  // `headers_identical: true` beside a decline is the shape that keeps the stability count honest,
+  // because the alternative — filtering declines to `header_differs` — reads one guard's verdict as
+  // the measurement, and #326 watched the width check and the id rule fire on pairs that had joined
+  // for free a round earlier.
+  const marked = (page: number) =>
+    noteRow(`[In millions of dollars<sup><a href="#p${page}-fn-1" id="p${page}-fnref-1">1</a></sup>]`);
+  const first = `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody>${marked(7)}${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 5.—Debt—Continued</caption>${HEAD}<tbody>${marked(8)}${dataRow("Vermont")}</tbody></table>`;
+  // The editor's answer is not what this test is about; it fails, and the document keeps both halves.
+  const { ctx, rec } = ctxWith(() => envelope(null));
+
+  await joinContinuedTables(ctx, first + second);
+
+  const [stood] = events(rec, "table_join_code_declined");
+  assert.equal(stood.data.reason, "id_would_be_lost");
+  assert.equal(stood.data.headers_identical, true);
+  assert.equal(stood.data.header_first, stood.data.header_second);
+});
+
+test("a capped signature cannot be read as agreement, because the line already answered that", async () => {
+  // A header wider than the 1,200-character cap, differing only past it: both strings arrive at the log
+  // CUT AT THE SAME PREFIX, which is exactly the reading that would manufacture the stability this
+  // field exists to measure. So `headers_identical` is computed on the full text before either is cut,
+  // and the truncation is visible.
+  const wide = (last: string) =>
+    `<thead><tr>${Array.from({ length: 50 }, (_, c) => `<th scope="col">Column heading number ${c + 1}</th>`).join("")}` +
+    `<th scope="col">${last}</th></tr></thead>`;
+  const first = `<table><caption>Table 20.—Wide</caption>${wide("Alpha")}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 20.—Wide—Continued</caption>${wide("Omega")}<tbody>${dataRow("Vermont")}</tbody></table>`;
+  const { ctx, rec } = ctxWith(() => envelope(null));
+
+  await joinContinuedTables(ctx, first + second);
+
+  const [stood] = events(rec, "table_join_code_declined");
+  assert.equal(stood.data.reason, "header_differs");
+  assert.equal(stood.data.headers_identical, false, "the difference is past the cap and still counted");
+  assert.equal(stood.data.header_first, stood.data.header_second, "the capped strings are identical");
+  assert.equal(String(stood.data.header_first).length, 1201, "1,200 characters and the marker");
+  assert.ok(String(stood.data.header_first).endsWith("…"));
+  // The shapes are computed on the whole block too, so the cells past the cap are still counted.
+  assert.equal(stood.data.header_shape_first, "1x51");
 });
 
 test("a pair the code path can join costs no request and splices the same way", async () => {
   // The same body, differing only in that its second half describes its columns the way the first
-  // half does — which is 26 of the corpus's 50 pairs (#276). The splice is one closure for both
+  // half does — which was 26 of the corpus's 50 pairs (#276) and 24–53% of them across three later
+  // rounds of the same corpus with nothing here changing (#326). The splice is one closure for both
   // paths, so what is pinned here is that reaching it without a model changes nothing about the
   // document: same bytes, same figures, and `by` saying which path paid.
   const first = piece("Table 1.—Income by State", STATES);
