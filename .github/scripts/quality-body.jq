@@ -118,9 +118,30 @@
                + ([$tally.review_stopped[] | "`\(.where)` \(.documents)"] | join(", "))
                + ". One per delivered document, so these describe \($attributed) of the \($tally.documents) documents above"
                + (if $attributed < $tally.documents then
-                    " and NOT the window: the other \($tally.documents - $attributed) were delivered before this breakdown was recorded, so these counts — and the `cap`/`converged`/`truncated` split in the next paragraph, which is drawn from them — are out of \($attributed) and do not scale up to the rate. Those \($tally.documents - $attributed) are not a sixth kind of exit. Nothing after the split rescales either: `unresolved_severity` and `unfinished_page_rate` below are both over all \($tally.documents) documents, so subtract the floor from the rate as it stands and do not rescale it first"
-                  else ", which is all of them" end)
-               + ". `cap` is the only one raising `defaults.max_review_iterations` can help — read it beside `mean_rounds` = \($tally.mean_rounds), and check what the cap on this deployment actually IS before assuming the default of 3: a `cap` document spends exactly that many editor rounds, so on a window where every document named its exit the two numbers together bound it, and a deployment that sets 1 reports `cap` for a document that got a single round. `converged` is the editor having been shown the issues and answered \"no change\", which the loop treats as final ON PURPOSE (the next round is the same request about the same body), so its remedy is `agents/copy_editor.md` or `agents/reader.md` and never more rounds. `truncated` is the output ceiling, `unread` a review that could not read part of what it judged.\n\n"
+                    " and NOT the window: the other \($tally.documents - $attributed) were delivered before this breakdown was recorded, so these counts — and the `cap`/`converged`/`truncated` split in the next paragraph, which is drawn from them — are out of \($attributed) and do not scale up to the rate. Those \($tally.documents - $attributed) are not a sixth kind of exit."
+                    # This clause names the paragraphs below, so it must name only the ones
+                    # that will be there. A partially attributed exit split CAN sit beside a
+                    # severity split that recorded nothing: 15 recent documents all `clean`
+                    # while the 80 carrying an open issue are all in the pre-field remainder
+                    # is 84.2%, the live rate. The two fields ageing together does not
+                    # prevent it, because a clean document lands in no severity bucket at
+                    # all. Rendered, that printed "`unresolved_severity` … below are both
+                    # over all 95 documents" three paragraphs above "How the Reader rated
+                    # what was left: not recorded for any of them". The review of `654f232`
+                    # judged this out of arithmetic reach; it is not, and it is the last
+                    # place these two paragraphs could disagree (#407).
+                    + (
+                        (([($tally.unresolved_severity // [])[].documents] | add) > 0) as $rated
+                        | if $rated and $tally.unfinished_page_rate then
+                            " Nothing after the split rescales either: `unresolved_severity` and `unfinished_page_rate` below are both over all \($tally.documents) documents, so subtract the floor from the rate as it stands and do not rescale it first."
+                          elif $rated then
+                            " Nothing after the split rescales either: `unresolved_severity` below is over all \($tally.documents) documents, not out of \($attributed)."
+                          elif $tally.unfinished_page_rate then
+                            " Nothing after the split rescales either: `unfinished_page_rate` below is over all \($tally.documents) documents, so subtract the floor from the rate as it stands and do not rescale it first."
+                          else "" end
+                      )
+                  else ", which is all of them." end)
+               + " `cap` is the only one raising `defaults.max_review_iterations` can help — read it beside `mean_rounds` = \($tally.mean_rounds), and check what the cap on this deployment actually IS before assuming the default of 3: a `cap` document spends exactly that many editor rounds, so on a window where every document named its exit the two numbers together bound it, and a deployment that sets 1 reports `cap` for a document that got a single round. `converged` is the editor having been shown the issues and answered \"no change\", which the loop treats as final ON PURPOSE (the next round is the same request about the same body), so its remedy is `agents/copy_editor.md` or `agents/reader.md` and never more rounds. `truncated` is the output ceiling, `unread` a review that could not read part of what it judged.\n\n"
                # The split the rate above cannot make, and the reason it was asked for (#264): a
                # threshold over the mixture is a threshold over two facts at once.
                + "**What the open list is a statement about:** on `cap` and `converged` it was read on the bytes that shipped — the loop re-reads at the top of every round and both of those exits are taken before the next editor call — so an open issue there is an open issue in the delivered document, and \(($tally.review_stopped | map(select(.where == "cap" or .where == "converged")) | map(.documents) | add // 0)) document(s) here are that. On `truncated` the list may be OLDER than the document: the reply was cut off, the sectioned retry may have corrected part of the body afterwards, and the round that would have re-read it is the one that could not be made (`src/pipeline/review.ts`) — so those \(($tally.review_stopped | map(select(.where == "truncated")) | map(.documents) | add // 0)) over-report on purpose, by an amount only the delivered document knows (`@editor-truncated sections N of M`). Read that part beside `editor_truncated_rate` = \($tally.editor_truncated_rate | pct)% and the output ceiling, and the first part as the share that is about the document. One threshold over both cannot be set honestly, which is why this one is still on the mixture.\n\n"

@@ -339,6 +339,43 @@ test("an all-zero exit split drops every share drawn from it, not just the split
   assert.ok(!body.includes("`unresolved_severity` and `unfinished_page_rate` below are both over"), "the forward reference survives an empty split");
 });
 
+test("a partly attributed exit split names only the paragraphs that will be there", { skip }, () => {
+  // The last window in which those two paragraphs could disagree, and the review of
+  // `654f232` judged it out of arithmetic reach. It is not: 15 of 70 documents postdate
+  // #266's fields and are all `clean`, so no post-field document carries an open issue
+  // and the severity sum is 0, while the 59 that do are in the pre-field remainder. The
+  // exits ageing together with the severities does not prevent it, because a clean
+  // document lands in no severity bucket at all.
+  const body = renderBody("unresolved", {
+    ...TALLY,
+    review_stopped: [
+      { where: "clean", documents: 15 },
+      { where: "unread", documents: 0 },
+      { where: "converged", documents: 0 },
+      { where: "truncated", documents: 0 },
+      { where: "cap", documents: 0 },
+    ],
+    unresolved_severity: [
+      { severity: "high", documents: 0 },
+      { severity: "medium", documents: 0 },
+      { severity: "low", documents: 0 },
+      { severity: "unrated", documents: 0 },
+    ],
+  });
+  // The exit split is real and still printed with its shortfall.
+  assert.match(body, /these describe 15 of the 70 documents above and NOT the window/);
+  assert.match(body, /\*\*How the Reader rated what was left: not recorded for any of them\.\*\*/);
+  // And it does NOT send the reader to a paragraph that says it recorded nothing.
+  assert.ok(
+    !body.includes("`unresolved_severity` and `unfinished_page_rate` below are both over"),
+    "the forward reference still names a field whose split was never recorded",
+  );
+  // The half of the clause that is still true survives — the floor is printed, and it
+  // really is over all 70.
+  assert.match(body, /`unfinished_page_rate` below is over all 70 documents/);
+  assert.match(body, /\*\*The floor:\*\* 20% of documents/);
+});
+
 test("an all-zero severity split says so too, where there is no total to catch it", { skip }, () => {
   // The same guard shape on `unresolved_severity`, and the worse of the two: it is
   // explicitly not a partition of the rate, so unlike `review_stopped` there is no
