@@ -1259,7 +1259,11 @@ export function summarizeRun(
         // `words` is checked in code and counted separately, because on that one a decline is a
         // legitimate answer rather than a misuse (#334 part B). What Iris verified there is that the
         // page carries both spellings; what it cannot know is which the printing shows, and
-        // `splitWordProblem` says so and invites the model to refuse. Folding those into
+        // `splitWordProblem` says so, `SPELLINGS_CHECKED_IN_CODE` marks the entry as settled in that
+        // one part only, and `correctPage` spends a sentence telling the model that here — and only
+        // here — the image showing otherwise is a reason not to act. Three texts, one channel; a
+        // count of refusals is worth nothing if the request the refusal answers forbids it. Folding
+        // those into
         // `code_checked` would put compliance in the field that exists to count the licence being
         // abused — the same mistake `CHECKED_IN_CODE` was added to stop, one field along. It is its
         // own count and not silence for the reason the unknown-`source` case is silent in a

@@ -2018,6 +2018,13 @@ have added nothing to this count on **that** corpus, which is a fact about the c
 kept because it is the shape of the common case and because it keeps a printed compound like
 `state-by-state` from being compared against a `statebystate` nothing writes.
 
+Skipped means skipped in **both** roles: a word carrying more than one hyphen is neither a candidate
+nor evidence that some other word was broken. Both halves matter, and the second is the one a reader
+would not assume. The tokeniser consumes a whole hyphen chain as one word, so `up-to-date` does not
+contribute a bare `date`, and a page writing `up-to-date` beside `dat-e` reports nothing — the
+`joined` spelling in every finding is one the page writes on its own. Such a word still counts
+toward `words_checked`, since that field is how many words were looked at.
+
 ### `page_split_words_unrecovered`
 
 A correction bought for a word written two ways was kept and a word is still written two ways
@@ -2031,7 +2038,10 @@ still generic and an id still duplicated are failures. A word still written two 
 model declining, and on this check a decline is a legitimate answer: Iris knows the page
 contradicts itself and cannot know which spelling the printing carries, so the problem it raises
 asks rather than instructs, and ends by saying that a page which really prints both spellings
-should say so and change nothing. This line therefore says the contradiction survived the pass and
+should say so and change nothing. The request licenses that refusal by name rather than leaving it
+implied — see the second mark under
+[`page_correction_declined`](#page_correction_declined), which is the sentence that makes this
+reading a real channel instead of a hope. This line therefore says the contradiction survived the pass and
 nothing about whose fault that is. [`page_correction_declined`](#page_correction_declined), keyed by
 the same `image`, is where the model's side of it is, and a cited decline lands in `declined.words`
 rather than `declined.code_checked` for exactly this reason.
@@ -2656,13 +2666,25 @@ are marked `(Iris checked this one in code.)` in the list the corrector reads, w
 excluding a marked problem by name, so a `code_checked` decline is a corrector going past what it
 was told rather than following it.
 
-`words` carries the same mark and does **not** count as `code_checked`, which is the one asymmetry
-in this field. What Iris verified there is that the page contains both spellings, and that is not
-arguable; which spelling is right is, and the problem's own text says so — it ends by inviting the
-corrector to say the page really prints both and change nothing. So a decline citing `words` may be
-the licence working exactly as written, and folding it into the field that counts abuse of the
-licence would put compliance in the numerator. It gets its own `declined.words` count in §7b
-instead.
+`words` does **not** count as `code_checked`, which is the one asymmetry in this field. What Iris
+verified there is that the page contains both spellings, and that is not arguable; which spelling is
+right is, and the problem's own text says so — it ends by inviting the corrector to say the page
+really prints both and change nothing. So a decline citing `words` may be the licence working
+exactly as written, and folding it into the field that counts abuse of the licence would put
+compliance in the numerator. It gets its own `declined.words` count in §7b instead.
+
+That asymmetry is in the request too, and it has to be, or the count above measures a channel the
+request closes. A split-word entry carries a **different** mark —
+`(Iris checked in code that both spellings are on this page, not which one is right.)` — because the
+sentence excluding a marked problem from the licence ends "so fix it", which is true of a missing
+link, a placeholder alt and a duplicated id and false here. `non-farm`, `co-operation` and
+`inter-state` are forms a 1962 report prints, so "fix it" on such a page means joining a word the
+page does not print into the delivered document. The request therefore carries one more sentence,
+naming that mark: both spellings really are in the HTML, so that much is not in question, but which
+one the page prints is for the image to answer, and if the image shows both then no change is to be
+made. It is the only place in that request where what the image shows is a reason **not** to act,
+and it says so in those words, because the paragraph above it spends four sentences ruling that
+reason out everywhere else.
 
 `problems` is the denominator without which none of this can be read — 2 declined of 2 is a
 correction refused outright, 2 of 9 is the pass working. Written per **page** and not folded into
@@ -4593,14 +4615,18 @@ the parsed fragment, so it is wrong by construction, where a declined `verify` p
 disagreement with a *reading* and may well be right. A non-zero there is a corrector reading the
 licence wider than it is written — the risk #373 states against its own proposal, countable now rather
 than arguable later. What makes that reading of the number sound is that the corrector can tell the
-two apart: the problems Iris raised itself are all marked `(Iris checked this one in code.)` in the
-list it is shown, and the licence excludes a marked problem by name. Without the mark a corrector
-following the licence exactly would decline into those bands — their wordings are the licence's own
-examples almost verbatim — and this field would be counting compliance. `words` is the fifth
-code-checked band and is counted **apart** from `code_checked` for exactly that reason: on a word
-written two ways, Iris verified that both spellings are present and cannot know which the printing
-shows, and the problem it raises says so and invites a refusal, so a decline there is the licence
-working rather than being stretched. Reading it as misuse would put compliance in the one field whose
+two apart: the `links`, `alt` and `ids` problems Iris raised itself are marked
+`(Iris checked this one in code.)` in the list it is shown, and the licence excludes a marked problem
+by name. Without the mark a corrector following the licence exactly would decline into those bands —
+their wordings are the licence's own examples almost verbatim — and this field would be counting
+compliance. `words` is the fifth code-checked band, it carries a **different** mark
+(`(Iris checked in code that both spellings are on this page, not which one is right.)`) and it is
+counted **apart** from `code_checked`, all three for one reason: on a word written two ways, Iris
+verified that both spellings are present and cannot know which the printing shows, so the entry is
+settled in one part and open in the other. The request says that in its own sentence, since the
+sentence excluding a marked problem ends "so fix it" and that would order the corrector to join
+`non-farm` into a `nonfarm` the page never prints. A decline there is therefore the licence working
+rather than being stretched. Reading it as misuse would put compliance in the one field whose
 job is to count abuse. A non-zero `words` is a rate to compare against the
 [`page_split_words`](#page_split_words) lines — how often a page really did print both — and not a
 number to act on by itself. `unattributed` is a decline that cited no problem number, or cited one

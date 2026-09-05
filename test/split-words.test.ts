@@ -99,6 +99,25 @@ test("a word broken in two places is skipped, and #334 named the cost of that", 
   // What one hyphen buys is the printed compound: `state-by-state` is skipped rather than compared
   // against a `statebystate` nothing writes.
   assert.deepEqual(splitWordContradictions(`<p>a state-by-state table and statebystate nowhere</p>`), []);
+
+  // SKIPPED IN BOTH ROLES, which the first draft of this rule got wrong twice and this test could
+  // not see. `WORD` matched at most one hyphen and matching restarts after the match, so a two-hyphen
+  // word came out as its first two pieces PLUS its tail — and the tail then stood as evidence that
+  // somebody else's break was a break.
+  //
+  // The assertion above passed for the wrong reason: it wrote `statebystate`, and the joined form the
+  // tokeniser actually produced was `stateby`. That is the word to write.
+  assert.deepEqual(splitWordContradictions(`<p>state-by-state and stateby</p>`), []);
+  // And the tail as evidence: `date` is not a word this page writes, it is the end of `up-to-date`.
+  assert.deepEqual(splitWordContradictions(`<p>up-to-date, the date is here, and dat-e</p>`), [
+    { split: "dat-e", joined: "date" },
+  ]);
+  assert.deepEqual(splitWordContradictions(`<p>up-to-date, and dat-e</p>`), []);
+  // Skipped from both roles, still counted in the denominator: `words` is how many words were read.
+  assert.deepEqual(splitWordAudit(`<p>state-by-state and stateby</p>`), {
+    words: 3,
+    split: [],
+  });
 });
 
 test("markup is not prose, so nothing inside a tag or a comment is evidence", () => {
@@ -301,7 +320,22 @@ test("a page that PASSES its check and wrote one word two ways buys a correction
     // only the agent holding the image can say which spelling the printing carries.
     assert.equal(captured.length, 1);
     assert.match(captured[0], /writes one word two ways: "Compos-ite" in one place and "Composite" in another/);
-    assert.match(captured[0], /\(Iris checked this one in code\.\)/, "the mark that keeps the decline bands apart");
+    // The ENTRY, not the whole request — the licence paragraph below it names both marks, so a
+    // whole-request search cannot tell which one this problem carries.
+    const [entry] = captured[0]
+      .split("\n")
+      .filter((l) => /^\d+\. /.test(l))
+      .map((l) => l.replace(/\s+/g, " "));
+    assert.match(
+      entry,
+      /\(Iris checked in code that both spellings are on this page, not which one is right\.\)$/,
+      "its own mark, which says what was settled and what was not",
+    );
+    assert.doesNotMatch(
+      entry,
+      /\(Iris checked this one in code\.\)/,
+      "and NOT the mark whose licence sentence ends `so fix it`",
+    );
 
     // And the rewrite had to earn the standing the original had: this page had PASSED, so its
     // correction is re-verified and that verdict is binding.
@@ -317,6 +351,48 @@ test("a page that PASSES its check and wrote one word two ways buys a correction
     assert.equal(complete.words_split, 0, "the contradiction is gone from what shipped");
     assert.ok((complete.words_checked as number) > 30, "and the denominator is the fragment's words");
     assert.equal(of(events, "page_split_words_unrecovered").length, 0);
+  });
+});
+
+test("the request does not order a fix for the one problem whose remedy it cannot know", async () => {
+  // The pin the counting depends on, and the defect the first draft shipped. `declined.words`,
+  // `page_split_words_unrecovered`'s "may be the model declining" reading and the docs' "the licence
+  // working rather than being stretched" all assume the corrector is allowed to refuse this one. That
+  // permission lives in a THIRD text — not the problem, not the accounting, but the licence paragraph
+  // — and giving the split-word entry `CHECKED_IN_CODE` put "so fix it" and "say so and change
+  // nothing" in one message about one numbered entry. On `non-farm` beside `nonfarm`, a form a 1962
+  // report really prints, obeying the general sentence puts a word the page does not print into
+  // delivered content.
+  //
+  // So the two texts are pinned against each other here, in each other's words, the way
+  // `test/decline-false-problem.test.ts` pins the licence against `CHECKED_IN_CODE`.
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const captured: string[] = [];
+    await runExtraction(
+      makeCtx(dir, events, [{ first: body("non-farm", "nonfarm"), corrected: body("non-farm", "non-farm") }], captured),
+    );
+    assert.equal(captured.length, 1);
+    const request = captured[0].replace(/\s+/g, " ");
+
+    // The sentence that ends "so fix it" names ONE mark, and it is not this problem's.
+    assert.match(
+      request,
+      /A problem marked "\(Iris checked this one in code\.\)" is not one of these: it was settled against the source file or this page's own markup before you were asked, so fix it\./,
+    );
+    // And the sentence that governs this problem's mark says the opposite, in the terms the rest of
+    // the paragraph rules out everywhere else.
+    assert.match(
+      request,
+      /A problem marked "\(Iris checked in code that both spellings are on this page, not which one is right\.\)" is settled in one part and open in the other/,
+    );
+    assert.match(request, /which one this page prints is a question only the image answers/);
+    assert.match(
+      request,
+      /If the image shows the page printing both spellings, make no change for it and say so — for this one problem, what the image shows IS a reason not to act\./,
+    );
+    // The problem's own closing sentence and the licence's now say one thing rather than two.
+    assert.match(request, /If the page really does print both spellings, say so and change nothing\./);
   });
 });
 

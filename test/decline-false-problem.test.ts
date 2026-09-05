@@ -510,6 +510,11 @@ test("a decline over a word written two ways is counted apart from the misuse", 
   // last sentences invite the corrector to say the page prints both and change nothing. Counting
   // that as misuse would put compliance in the field whose whole job is to count the licence being
   // stretched — the same mistake `CHECKED_IN_CODE` exists to stop, one field along.
+  //
+  // What this test does NOT check is that the request permits the refusal it counts: the decline
+  // comes from a mock. That is `SPELLINGS_CHECKED_IN_CODE`'s own mark and the licence sentence naming
+  // it, pinned in `test/split-words.test.ts` — and the first draft of this change had the two texts
+  // contradicting each other while this test passed.
   await withTemp(async (dir) => {
     const { ctx, events } = makeCtx(dir, 2, {
       1: {

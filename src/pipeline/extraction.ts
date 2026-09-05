@@ -2717,18 +2717,35 @@ export interface Declination {
 // `verification.declined.code_checked`, the field that exists to count the misuse, counts compliance
 // instead. With it the number means one thing.
 //
-// The split-word problem (#334 part B) carries the mark too, and what it means there is narrower:
-// what Iris checked is that BOTH spellings are on the page, which is not arguable, and not which one
-// is right, which is — the problem's own last sentences say so and invite a refusal. So the mark is
-// doing its job there as well, keeping the decline out of a band it would be misread in, and the
-// separation is finished one field along: a decline citing `words` is counted as `declined.words`
-// rather than `declined.code_checked` (see diagnostics.ts).
-//
 // A suffix on the entry rather than a section heading over each group, because the groups are
 // numbered as one sequence for the decline to cite and a heading between them invites the model to
 // renumber from 1 inside each. 33 characters, on the problems this run raised in code — 2 of 1,501
 // page replies for the id rule, none from the deployed model.
 export const CHECKED_IN_CODE = " (Iris checked this one in code.)";
+
+// The split-word problem's mark (#334 part B), and it is a DIFFERENT STRING from the one above
+// because the two marks assert different amounts. `CHECKED_IN_CODE` means the problem is settled, and
+// the licence paragraph in `correctPage` spends its last sentence saying so — "so fix it". That
+// sentence is true of a missing link, a placeholder alt and a duplicated id, each of which is wrong
+// by construction. It is NOT true here, and the first draft of this change gave the split-word
+// problem the same mark: the request then carried "so fix it" and the problem's own closing sentence
+// ("If the page really does print both spellings, say so and change nothing") in one message, about
+// one numbered entry, and the general sentence is the one written as a rule.
+//
+// What that would have cost is not an accounting error, it is a transcription defect in delivered
+// content: `non-farm` beside `nonfarm` and `co-operation` beside `cooperation` are forms a 1962 report
+// really prints, three of the shipped model's six census cases are of that kind, and the likeliest
+// reading of "so fix it" on such a page is to join the two — which puts a word the page does not
+// print into the document, bought by a rule that fired on a page which had already passed.
+//
+// So this mark states the split instead of the verdict: what Iris compared in code is that both
+// spellings are present, which is not arguable, and NOT which one is right, which is. `correctPage`
+// carries one sentence naming this mark, and it is the only place in that request where what the
+// image shows is a reason not to act. The separation is finished one field along: a decline citing
+// `words` is counted as `declined.words` rather than `declined.code_checked` (see diagnostics.ts),
+// so the field that exists to count misuse still counts only misuse.
+export const SPELLINGS_CHECKED_IN_CODE =
+  " (Iris checked in code that both spellings are on this page, not which one is right.)";
 
 // What a corrector's reply says it declined, out of whatever shape the reply used.
 //
@@ -2884,7 +2901,7 @@ async function correctPage(
     `in order to settle them. A problem you cannot settle inside the HTML is a problem to fix, and ` +
     `declining is not the shorter answer to a problem you are unsure of. ` +
     // The other half of the bound, and it is why the entries carry `CHECKED_IN_CODE` at all. Three
-    // of the four problem sources are Iris's own comparisons — the source file's link annotations,
+    // of the five problem sources are Iris's own comparisons — the source file's link annotations,
     // a closed word list of placeholder alts, this page's own parsed tree — and their wordings are
     // exactly the examples above ("More than one element on this page has id=…"). So a corrector
     // following the licence as written would decline into them, and the field that counts the misuse
@@ -2895,6 +2912,20 @@ async function correctPage(
     // really being duplicated, since it was read off the tree this call was handed.
     `A problem marked "${CHECKED_IN_CODE.trim()}" is not one of these: it was settled against the ` +
     `source file or this page's own markup before you were asked, so fix it.\n` +
+    // The FOURTH code-checked source is not covered by that sentence and must not be, which is why it
+    // carries its own mark and gets its own line here (#334 part B). "So fix it" is true of a missing
+    // link, a placeholder alt and a duplicated id; on a word written two ways it would order the model
+    // to join `non-farm` into `nonfarm` on a page that prints the hyphen — three of the shipped
+    // model's six census cases — putting a word the page does not print into delivered content, on a
+    // page that had already passed. So this is the one entry in the request where the IMAGE showing
+    // something else is a reason not to act, and it says so in those terms, because the paragraph
+    // above spends four sentences ruling that reason out everywhere else. Stated as a split rather
+    // than as an exemption: the presence of both spellings is not open, the choice between them is.
+    `A problem marked "${SPELLINGS_CHECKED_IN_CODE.trim()}" is settled in one part and open in the ` +
+    `other: both spellings really are in the HTML above, so that is not the thing to check, but ` +
+    `which one this page prints is a question only the image answers. Make the page agree with the ` +
+    `image. If the image shows the page printing both spellings, make no change for it and say so — ` +
+    `for this one problem, what the image shows IS a reason not to act.\n` +
     // The destination, because an instruction to "say which problem and why" with nowhere to say it
     // lands in the document — the page gains a sentence about the checker, which is the defect
     // #373's own instance A describes in the other direction. `declined` is introduced here rather
@@ -3791,12 +3822,17 @@ async function extractPage(
   // checked in code (#373 directive 4 — `CHECKED_IN_CODE` has why). The mark is on the string the
   // corrector reads and on nothing that is counted: `problems.length` is the same number either way,
   // and `declinedSource` reads positions in this order rather than the text.
+  //
+  // TWO marks, not one, and the difference is which sentence of the licence the entry then falls
+  // under: three of these problems are wrong by construction and the request tells the model to fix
+  // them, while a word written two ways is a settled FACT with an open remedy that the image decides
+  // (`SPELLINGS_CHECKED_IN_CODE` has the whole argument).
   const problems = [
     ...(verifyFailed ? verdict.problems : []),
     ...missing.map((l) => missingLinkProblem(l) + CHECKED_IN_CODE),
     ...generic.map((a) => genericAltProblem(a) + CHECKED_IN_CODE),
     ...duplicated.map((id) => duplicateIdProblem(id) + CHECKED_IN_CODE),
-    ...contradictions.map((w) => splitWordProblem(w) + CHECKED_IN_CODE),
+    ...contradictions.map((w) => splitWordProblem(w) + SPELLINGS_CHECKED_IN_CODE),
   ];
   if (problems.length) {
     // What the correction was asked to fix, for the event below. Any of the five can fire on one

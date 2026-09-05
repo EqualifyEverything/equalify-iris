@@ -57,20 +57,31 @@ const COMMENT = /<!--[\s\S]*?(?:-->|$)/g;
 // building a second attribute-aware reader. Neither is worth it for a case nothing has measured.
 const TAG = /<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
 
-// A run of letters with at most one internal hyphen, plus the hyphen itself, so both halves of the
-// comparison come out of one pass. Letters only: `\p{L}` excludes digits, which keeps a printed
-// range (`1962-63`) and a table's `12-4` out of it, and excludes `_`, which keeps an identifier that
-// leaked out of a code span from being read as a broken word.
+// A run of letters and the WHOLE chain of hyphenated pieces after it, so a word is one token however
+// many hyphens it carries. Letters only: `\p{L}` excludes digits, which keeps a printed range
+// (`1962-63`) and a table's `12-4` out of it, and excludes `_`, which keeps an identifier that leaked
+// out of a code span from being read as a broken word.
 //
-// AT MOST one hyphen is a stated limit, and #334 names the cost by name: `Con-struc-tion` and
+// The `*` is load-bearing and the first draft of this file had `?`, which is a different check than
+// its own comment claimed. Matching is greedy and restarts after the match, so with `?` a two-hyphen
+// word came out as its first two pieces PLUS its tail: `Con-struc-tion` became `Con-struc` and
+// `tion`, and `state-by-state` became `state-by` and `state`. The tail then entered the whole-word
+// map below as EVIDENCE, so a page writing `up-to-date` and `dat-e` reported a contradiction whose
+// `joined` form (`date`) the page never writes on its own, and a page writing `state-by-state` beside
+// `stateby` reported the very comparison the comment said was impossible. Consuming the chain is what
+// makes "skipped" true.
+//
+// Skipped in BOTH roles, which is the whole of the limit: a word with more than one hyphen is
+// neither a candidate nor evidence for another candidate. It still counts toward `words`, since that
+// is how many words were looked at. #334 names the cost by name — `Con-struc-tion` and
 // `Trans-porta-tion` carry two breaks each on `p032`, and its first detector missed them for exactly
-// this reason. Kept anyway on two grounds. One, neither of those words is written whole anywhere on
-// its own page, so on that census admitting them adds nothing HERE — which is a fact about one
-// corpus, not about the pattern, and is why this is a limit rather than a proof. Two, one hyphen is
-// the shape of the common case (a line break splits a word in one place) and it is what keeps a
-// printed compound out: `state-by-state` is skipped rather than compared against a `statebystate`
-// nothing writes.
-const WORD = /\p{L}+(?:-\p{L}+)?/gu;
+// this reason. Accepted on two grounds. One, neither of those words is written whole anywhere on its
+// own page, so on that census admitting them adds nothing HERE — a fact about one corpus, not about
+// the pattern, and why this is a limit rather than a proof. Two, one hyphen is the shape of the
+// common case (a line break splits a word in one place), and requiring exactly one is what keeps a
+// printed compound out: `state-by-state` is not compared against a `statebystate` nothing writes,
+// and its pieces do not vouch for anyone else's break either.
+const WORD = /\p{L}+(?:-\p{L}+)*/gu;
 
 export interface SplitWord {
   // As the page wrote it, hyphen included, so the correction request can quote it back and the
@@ -116,7 +127,12 @@ export function splitWordAudit(html: string): { words: number; split: SplitWord[
   let words = 0;
   for (const [word] of text.matchAll(WORD)) {
     words += 1;
-    if (word.includes("-")) {
+    // Counted, then dropped from both roles above one hyphen. The three-way split is written out
+    // rather than folded into `includes("-")` because the middle case is the limit `WORD` documents,
+    // and a reader looking for where a two-hyphen word goes should find it here.
+    const hyphens = word.split("-").length - 1;
+    if (hyphens > 1) continue;
+    if (hyphens === 1) {
       splits.push(word);
       continue;
     }
