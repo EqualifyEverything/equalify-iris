@@ -795,7 +795,9 @@ jobs:
                well-commented modules, no linter or formatter in this repo. Comments explain
                *why*, and there is a lot of precedent for that in `src/`; follow it.
             3. Add or extend a test. Unit tests are `test/*.test.ts`, run by `npm test`
-               (`node --test "test/*.test.ts"` — the glob picks up new files automatically).
+               (a glob, so new files are picked up automatically — run it through `npm`, not
+               as a bare `node --test`, or you lose the reporter that tells a crashed child
+               from a failed assertion).
                Endpoint behaviour goes in `test/e2e.sh`, which drives the real API against the
                mocks in `test/mock-services.mjs`. A behaviour change with no assertion is not
                finished.
