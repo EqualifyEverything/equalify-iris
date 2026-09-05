@@ -1192,9 +1192,16 @@ recoverable from a checkout however the file has moved since. It is `null` at **
 two kinds. **Six** send a prompt that is a literal in this codebase rather than a file: the Reader,
 the two editor contracts, the table join, the specialist merge, and the page agent's own
 `DEFAULT_PAGE_PROMPT` fallback, taken when `agents/page.md` does not load. Those six are versioned by
-the application's commit. **Two** are the regression and eval gates, which send a *candidate* agent
-text a training round proposed — that prompt is in no commit and no file, and it is not on this line
-either, so a gate's `agent_call` holds a reply to a prompt nothing keeps.
+the application's commit. The other **two** are a training round's fixture replays, and only one of
+them loses anything. The regression gate sends the *candidate* prompt the round proposed: in no
+commit, in no file, and not on this line either, so that reply is to a prompt nothing keeps. The eval
+gate sends the **current** library prompt, for comparison against it — recoverable at the deployed
+commit, its real SHA just discarded on the way here.
+
+Those two lines are the ones worth telling apart, and nothing on them does it: same `agent`, both
+`agent_sha: null`, both `agent_content: null`, and both replays hardcode `step: "agent_regression"` on
+their `model_call`, so the tiebreak this section offers elsewhere fails here. The `eval_gate` line
+that follows them is what separates them.
 
 One `agent` value spans two cases: the merge sends `MERGE_SYSTEM` under the name `page.md` with
 `agent_sha: null`, beside ordinary page calls that carry `page.md`'s real SHA. So `agent_sha`, and the
@@ -1212,8 +1219,9 @@ reads `agent_content: null` unless an operator dropped a file in by hand.
 
 A session-built agent does still carry an `agent_sha`, computed over the text it was built from. It
 just names no blob a checkout holds, which is what `agent_content` is there to cover. The eight
-`agent_sha: null` sites above are the case where **neither** field recovers the text. Six of them are
-recoverable anyway, from the application's commit. The two gate prompts are not recoverable at all.
+`agent_sha: null` sites above are the case where **neither** field recovers the text. Seven of the
+eight are recoverable anyway — six from the application's commit, the eval gate's from the deployed
+agent library. Exactly one is recoverable nowhere: the candidate prompt the regression gate replays.
 
 A call that **threw** has no line here. The provider's failure is on `model_call` with `ok: false`,
 and this line is written after the call returned — so these lines count answers, not attempts, and a
