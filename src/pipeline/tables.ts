@@ -469,6 +469,64 @@ function headerSignature(rows: Element[]): string {
     .join(" // ");
 }
 
+// What one half declares as its header block, for the DECLINE LINE rather than for the merge (#326
+// ask 2). `joinInCode` needs only the equality above; a round asking why the free path's coverage
+// moved needs the two strings that were unequal, and today's event carries a reason and a caption,
+// which is enough to count declines and not enough to explain one.
+//
+// `rows` and `cells` are counted off the DOM and not by splitting `signature` back up, because a
+// header cell's own text can contain the separators — `normalizeCell` folds whitespace and drops soft
+// hyphens and leaves `|` and `/` alone, so a column headed `Farm | Non-farm` writes a signature no
+// reader can re-split correctly. Equality never cared; a count does.
+//
+// `cells` is every CHILD of a header row and not every `<th>` in one, which is deliberately not
+// `read`'s `headerCells` one screen up: this number exists to describe the string beside it, the
+// signature is built from all the children, and a `<td>` sitting in a `<thead>` is one of the
+// differences worth being able to see — it is the whole of `header_cells_lost`. Two counts of the
+// same block under two definitions is a trap, so neither name is shared with the other.
+export interface HeaderRead {
+  signature: string;
+  rows: number;
+  cells: number;
+}
+
+// Both halves' header blocks, or null if either half is not a table this can read — which is the
+// same `null` `read` and `checkJoin` use for markup no parser could handle, and it means "not
+// measured", never "no header".
+//
+// A half with no header ROWS is a different thing and reports `rows: 0` with an empty signature: the
+// continued page that reprinted no header is the case rule 3 skips and the width check catches, and
+// it is a normal shape in this corpus rather than a failure. The two must stay distinguishable at the
+// log line, since one is a fact about the page and the other a fact about the parser.
+export function headerSignatures(pair: ContinuationPair): { first: HeaderRead; second: HeaderRead } | null {
+  const first = headerRead(pair.first.html);
+  const second = headerRead(pair.second.html);
+  return first === null || second === null ? null : { first, second };
+}
+
+// A signature on a log line is bounded, and the bound says so when it bites. 1,200 rather than the
+// 200 the captions use, because the point of the field is a header a reader can compare cell by cell:
+// this corpus's widest printed headers are three rows of eleven columns with short labels, which is
+// about 750 characters, so a cap here truncates a pathological page and not a real one. Nothing is
+// concluded from a capped string — `headers_identical` and the shapes beside it are computed on the
+// full text — so the worst a truncation costs is a reader who cannot see WHICH cell moved.
+const MAX_SIGNATURE_CHARS = 1200;
+
+function capSignature(s: string): string {
+  return s.length <= MAX_SIGNATURE_CHARS ? s : `${s.slice(0, MAX_SIGNATURE_CHARS)}…`;
+}
+
+function headerRead(html: string): HeaderRead | null {
+  const table = parse(html).querySelector("table");
+  if (table === null) return null;
+  const rows = [...table.querySelectorAll("tr")].filter(isHeaderRow);
+  return {
+    signature: headerSignature(rows),
+    rows: rows.length,
+    cells: rows.reduce((n, r) => n + r.children.length, 0),
+  };
+}
+
 // Every id this element carries or contains. The element ITSELF counts: a `<table id>` or a
 // `<caption id>` on the half being dropped is a link target like any other, and `querySelectorAll`
 // alone would not see it.
@@ -520,12 +578,31 @@ function stripMarker(caption: Element): boolean {
 // `<th scope="rowgroup">` group labels in place) comes free, because they arrive as ordinary rows in
 // the order they were printed.
 //
-// Rules 3 and 6 ask what the table MEANS, and every decline below is a case where that question is
+// Rules 3 and 6 ask what the table MEANS, and a decline below is a case where that question CAN be
 // real. Declining is the design and not a shortfall in it: the pair goes to the editor exactly as it
 // did before this path existed, so a decline costs what today costs and a wrong guess would cost a
-// table nothing downstream can see is wrong. On 50 pairs read out of already-delivered documents,
-// 26 join here and `verifyJoin` refuses none of them; the 24 declines are 17 `header_differs` and 7
-// `id_would_be_lost` (#276).
+// table nothing downstream can see is wrong.
+//
+// How OFTEN it declines is not a property of this code, and the first draft of this comment stated it
+// as one: "on 50 pairs, 26 join here" (#276), which reproduced at 9 of 17 pairs in one round and then
+// gave 4 of 17 and 5 of 16 on the same 100-page corpus with this file, `agents/`, the model and the
+// prompt all byte-identical — a $0.72/100-page swing in `table_join`, entirely in call count (#326).
+// The coverage belongs to the EXTRACTION: two readings of one printed header agree 48–61% of the
+// time, so `header_differs` is usually a disagreement between two readings of the same header rather
+// than two different headers, and three separate guards were seen firing on pairs that had joined for
+// free a round earlier. So the honest figure is a range with its corpus attached — **24–53% of pairs
+// over three rounds of ACIR M-16 pp.1-100** — and any change credited with moving it by less than
+// about 2x is inside that spread. What has NOT moved is the price of a decline: $0.1124–$0.1285 per
+// paid call across the same three rounds, so the whole swing is how many pairs were bought and none
+// of it is the pairs getting dearer. On the 50 pairs of #276, `verifyJoin` refused none of the 26 code
+// joins; #326 did not re-derive that on its three rounds, so it is one corpus's figure and not a
+// standing property either.
+//
+// The guards are NOT loosened on that finding, and #326 recommends against it: `verifyJoin` would
+// catch a wrong loosening, but the pre-join assembled body is not persisted, so a looser rule cannot
+// be scored on the artifacts in hand. `headerSignatures` above is the half of the answer that is
+// free — it puts both signatures on the decline line, which is what makes the next round's declines
+// re-scorable without paying for one.
 //
 // A caller must still put the result through `verifyJoin`. Nothing here is trusted on its own —
 // which is the whole reason this is safe to add rather than merely cheap: a bad code join is refused
@@ -841,6 +918,23 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
       splice(codeChecked as Checked, "code");
       continue;
     }
+    // Both halves' header blocks go on the line, on EVERY decline and not only on `header_differs`
+    // (#326 ask 2). Two reasons it is not scoped to the rule that reads them. One, the finding that
+    // asked for this is that the coverage of this whole path tracks how steadily the extraction reads
+    // a printed header, and three different guards — rule 3, the width check and the id rule — were
+    // seen firing on pairs that had joined for free a round earlier, so a header comparison is
+    // evidence about a `columns_differ` decline too. Two, a field present on some declines and absent
+    // on others cannot be counted: the denominator would be chosen by the reason.
+    //
+    // Absent altogether only when a half is not readable as a table, which is `read_failed`'s own
+    // case. `headers_identical` is string equality on the FULL signatures and is computed here rather
+    // than left to a reader of the two capped strings, because a cap that cut both at the same prefix
+    // would read as agreement — the truncation would manufacture the stability this line exists to
+    // measure. It is not the same question rule 3 asked: rule 3 skips the comparison where the second
+    // half has no header block at all, and that pair reports `0x0` beside a `false` here, which is a
+    // page that reprinted no header rather than two readings disagreeing. The shapes are on the line
+    // so that case can be excluded by whoever counts.
+    const headers = attempt(() => headerSignatures(pair));
     ctx.log.event("table_join_code_declined", {
       reason:
         coded === null
@@ -851,6 +945,15 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
               ? "read_failed"
               : `verify:${codeChecked.reason}`,
       caption: pair.second.caption.slice(0, 200),
+      ...(headers === null
+        ? {}
+        : {
+            headers_identical: headers.first.signature === headers.second.signature,
+            header_shape_first: `${headers.first.rows}x${headers.first.cells}`,
+            header_shape_second: `${headers.second.rows}x${headers.second.cells}`,
+            header_first: capSignature(headers.first.signature),
+            header_second: capSignature(headers.second.signature),
+          }),
     });
 
     let answer: Awaited<ReturnType<typeof joinCall>>;

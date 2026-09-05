@@ -432,6 +432,15 @@ Places where a decision was left open, and where v1 intentionally stops:
   `verifyJoin` refuses none of what the code path produces (#276). The 24 that stand down are 17
   whose second half describes its columns differently and 7 carrying an id with nowhere to move to.
 
+  How large that free share is belongs to the extraction and not to this code: three later rounds of
+  the same corpus, with this stage, `agents/` and the model byte-identical, took 9 of 17 pairs, then 4
+  of 17, then 5 of 16 — 24–53%, a $0.72-per-100-pages swing in a step that is 11.5% of the bill. Two
+  readings of one printed header agree 48–61% of the time, so `header_differs` is usually two readings
+  of the same header rather than two different headers (#326). The guards are not loosened on that:
+  the pre-join body is not persisted, so a looser rule cannot be scored on the rounds already paid
+  for. What the decline line carries instead is both halves' header signatures, which makes the next
+  round's declines re-scorable for nothing.
+
   An id on the dropped half's own `<caption>` or `<table>` element does move, onto the counterpart
   that survives the join, and only where that counterpart carries no id of its own. Two live link
   targets collapsing onto one element is a choice about which link keeps working, and that choice is

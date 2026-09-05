@@ -2813,8 +2813,10 @@ reprinted with the header and belongs in the joined table once.
 
 Where one of those judgements is real the merge is a Copy Editor call (`copy_editor_table_join.md`
 in the agent ledger); where it is not — three of the editor's six rules are "move these bytes and
-change nothing" — the merge is made in code and costs nothing, which is 26 of 50 pairs measured
-out of already-delivered documents (issue #276). Read `by` rather than the agent ledger to split
+change nothing" — the merge is made in code and costs nothing, which was 26 of 50 pairs measured
+out of already-delivered documents (issue #276) and has since been measured at 24–53% of pairs
+across three rounds of one corpus with nothing in this stage changing (issue #326, and see
+[`table_join_code_declined`](#table_join_code_declined)). Read `by` rather than the agent ledger to split
 the two: a pair joined in code never reaches the ledger at all, so a run's `table_joined` count
 and its `copy_editor_table_join.md` call count are different numbers on purpose.
 
@@ -2851,7 +2853,8 @@ The merge was tried in code on this pair and stood down, so a Copy Editor call w
 the second half's `caption` and the `reason`.
 
 `header_differs` (the second half's header block is not the first half's, so which one describes
-the joined rows is a reading of the table — 17 of the 50 measured pairs, and the commonest),
+the joined rows is a reading of the table — 17 of 50 pairs on the corpus of #276, where it was the
+commonest; how often it fires is not a property of this code, see below),
 `id_would_be_lost` (an id on the half being dropped has no free counterpart to move onto: a
 footnote-reference anchor in the repeated header block, whose cell in the surviving block nothing
 but a reading can pick, or an id on both halves' own `<caption>` or `<table>` element, where
@@ -2874,6 +2877,37 @@ half no parser could read), or `verify:<reason>` for a code merge the same verif
 Logged on every pair the code path did not take, because the share it takes is what a later round
 has to be able to re-measure and `table_joined` alone cannot tell a free join from a paid one. A
 decline costs nothing: the pair goes to the editor exactly as it did before this path existed.
+
+**How often it declines is not a property of the code.** The same rules on the same 100-page corpus
+took 9 of 17 pairs, then 4 of 17, then 5 of 16, with this stage, `agents/` and the model
+byte-identical — a $0.72-per-100-pages swing in `table_join`, all of it in call count (issue #326).
+The cause is upstream: two extractions of one printed table header agree 48–61% of the time, so
+`header_differs` is usually a disagreement between two readings of one header rather than two
+different headers, and three separate guards were seen firing on pairs that had joined for free a
+round earlier. So the line also carries the two headers, and carries them on **every** decline rather
+than only on `header_differs`, since a header comparison is evidence about a `columns_differ` decline
+too and a field present on some declines only would have its denominator chosen by the reason:
+
+- `headers_identical` — string equality on the two **full** signatures, computed at the line rather
+  than left to a reader of the two capped strings below, because a cap that cut both at the same
+  prefix would read as agreement and manufacture the stability this exists to measure. It is not the
+  question rule 3 asked: that rule skips the comparison entirely where the second half declares no
+  header block, and such a pair reports `false` here with a `0x0` shape beside it — a page that
+  reprinted no header, not two readings disagreeing. Count with the shapes, not without them.
+- `header_shape_first` / `header_shape_second` — `<header rows>x<header cells>`, off the whole block,
+  so the structural disagreement that is the commonest kind (the same printed header coming out as a
+  different number of rows) is readable without the text. `cells` counts every child of a header row,
+  `<td>` included, because the signature does and because a header block returning as `<td>` is its
+  own defect (`header_cells_lost`).
+- `header_first` / `header_second` — the signatures themselves, as rule 3 compares them: per header
+  cell, tag name, `colspan` and normalized text, cells joined with `|` and rows with ` // `. Capped at
+  1,200 characters with a trailing `…` when cut, which this corpus's widest real headers (about 750)
+  do not reach. A cell's own text can contain `|`, so these are not re-splittable into a cell count —
+  that is what the shapes are for.
+
+All five are **absent** when a half is not readable as a table at all, which is the `read_failed`
+case; a half with no header block is present with an empty signature and a `0` row count. The
+per-round totals are folded into `tables` in the diagnostics payload (§7b).
 
 ### `table_join_failed`
 
@@ -4444,6 +4478,10 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
       "failures": [], "verdicts_omitted": 0
     }
   },
+  "tables": {
+    "joined_in_code": 5, "joined_by_editor": 8, "code_declined": 11,
+    "header_compared": 9, "header_differs": 4, "failed": 3
+  },
   "fidelity_observed": {
     "observed": 3, "pages": [2, 5], "unattached_pages": [],
     "kinds": { "content_missing": 2, "content_wrong": 0, "structure_wrong": 0,
@@ -4882,6 +4920,32 @@ was turned up would make every rate it collected a measurement of a different pi
 re-render until a page passes, or to run a cheaper verifier, is a policy question, and the rate it
 needs is now buyable (`defaults.recheck_sample_size`) rather than only inferable from a bench replay. Like `model_calls`, the counts sum over every run a session has had, so a
 feedback round that re-extracts three pages adds three more verifications.
+
+`tables` is what the table-join stage did with the pairs it found, folded from
+[`table_joined`](#table_joined), [`table_join_code_declined`](#table_join_code_declined) and
+[`table_join_failed`](#table_join_failed). `joined_in_code` is the pairs merged with no model call and
+`joined_by_editor` the pairs a Copy Editor call was bought for; `code_declined` is every pair the free
+path stood down on, each of which bought that call. A decline is **not** a failure — the pair goes to
+the editor exactly as it did before the free path existed — while `failed` is the count that does show
+in the output: those pairs ship as two tables, so a reader meets a table cut in two.
+
+Read the free share as a **range, not a rate**, which is why no share is published here. The same code
+on the same 100-page corpus took 9 of 17 pairs, then 4 of 17, then 5 of 16 — 53%, 24% and 31% — with
+this stage, `agents/` and the model byte-identical, a $0.72-per-100-pages swing in a step that is
+11.5% of the bill (issue #326). The cause is upstream of the join: two extractions of one printed
+header agree 48–61% of the time, so a pair's fate depends on how steadily the header was read. Any
+change credited with moving the free share by less than about 2x is inside that spread.
+
+`header_compared` and `header_differs` are that instability, read for free off the declines. The
+denominator is `header_compared` and **not** `code_declined`, because a continued page that reprinted
+no header has nothing to compare: such a line reports the two signatures as unequal — one of them is
+empty — and counting it either way would be an invention. So `header_compared: 0` under a run with
+declines means *no pair could show this*, not *every header was stable*. It is also deliberately not
+`code_declined` filtered to `header_differs`: that reason is one guard's verdict, and #326 watched the
+width check and the id rule stand down on pairs that had joined for free a round earlier, so a pair
+declined for `id_would_be_lost` whose headers also disagree is evidence of the same thing. A non-zero
+`header_differs` is the expected state of a healthy run; what is worth reading is its direction across
+rounds of the same corpus.
 
 `fidelity_observed` sits outside `verification` because it is not part of that loop and does not
 gate anything: it is what the **Copy Editor** noticed about a page it happened to be looking at,

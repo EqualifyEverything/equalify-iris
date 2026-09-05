@@ -1038,3 +1038,90 @@ test("a verdict longer than the payload will carry is cut, and marked", () => {
   // Nothing was omitted from the LIST — both verdicts are reported, one of them abridged.
   assert.equal(d.verification.rechecks.verdicts_omitted, 0);
 });
+
+// --- what the table-join stage did, and how much of it was free (#326) ---
+
+test("the join tally splits free from paid, and counts the pairs that were bought", () => {
+  // `table_join` was 11.5% of a 100-page round's bill and swung $0.9533 → $1.6701 → $1.2362 with this
+  // stage's code, `agents/` and the model byte-identical; every dollar of it is how many pairs the free
+  // path stood down on. The events have carried that since #278 and nothing read them, so a round's
+  // free share meant parsing log.jsonl by hand.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "table_joined", by: "code", caption: "Table 1" },
+    { ts: T(2), type: "table_join_code_declined", reason: "header_differs", caption: "Table 2—Continued",
+      headers_identical: false, header_shape_first: "1x3", header_shape_second: "1x3",
+      header_first: "TH:1:Col 1", header_second: "TH:1:Column 1" },
+    { ts: T(3), type: "table_joined", by: "editor", caption: "Table 2" },
+    { ts: T(4), type: "table_join_code_declined", reason: "id_would_be_lost", caption: "Table 3—Continued",
+      headers_identical: true, header_shape_first: "2x8", header_shape_second: "2x8",
+      header_first: "same", header_second: "same" },
+    { ts: T(5), type: "table_join_failed", reason: "truncated", caption: "Table 3—Continued" },
+    { ts: T(6), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(6))));
+
+  assert.deepEqual(d.tables, {
+    joined_in_code: 1,
+    joined_by_editor: 1,
+    code_declined: 2,
+    header_compared: 2,
+    header_differs: 1,
+    failed: 1,
+  });
+});
+
+test("a pair whose second half reprinted no header is not counted as an unstable one", () => {
+  // The continued page that declares no header block compares an empty signature against a real one,
+  // so its line says `headers_identical: false` — a fact about the printing, not two readings of one
+  // header disagreeing. Counting it would put the commonest legitimate shape into the instability
+  // number, and `header_compared` is the denominator that keeps it out: one decline, no comparison.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "table_join_code_declined", reason: "columns_differ", caption: "Table 4—Continued",
+      headers_identical: false, header_shape_first: "1x3", header_shape_second: "0x0",
+      header_first: "TH:1:Col 1", header_second: "" },
+    { ts: T(2), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(2))));
+
+  assert.equal(d.tables.code_declined, 1);
+  assert.equal(d.tables.header_compared, 0, "no pair could show this, which is not a stable header");
+  assert.equal(d.tables.header_differs, 0);
+});
+
+test("a join line this build cannot read is counted in neither path, and an old log reports zeros", () => {
+  // `by` is matched against the two values the emitter writes. A log from before #278 carries no `by`
+  // at all, and a third path added later would carry a third value: both land in neither bucket, so the
+  // total is visibly short of the joins rather than reporting a paid join as free — which is the one
+  // number #326 says a later round has to be able to re-measure.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "table_joined", caption: "Table 1" },
+    { ts: T(2), type: "table_joined", by: "elsewhere", caption: "Table 2" },
+    { ts: T(3), type: "table_join_code_declined", reason: "header_differs", caption: "Table 3—Continued" },
+    { ts: T(4), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(4))));
+
+  assert.equal(d.tables.joined_in_code, 0);
+  assert.equal(d.tables.joined_by_editor, 0);
+  // The decline still counts — it is the line's existence that says a call was bought — while the
+  // comparison it carries nothing about is withheld rather than guessed.
+  assert.equal(d.tables.code_declined, 1);
+  assert.equal(d.tables.header_compared, 0);
+});
+
+test("a run with no continued tables reports zeros rather than an absent section", () => {
+  const text = log({ ts: T(0), type: "run_start" }, { ts: T(1), type: "run_complete" });
+  const d = summarizeRun(text, done(Date.parse(T(1))));
+
+  assert.deepEqual(d.tables, {
+    joined_in_code: 0,
+    joined_by_editor: 0,
+    code_declined: 0,
+    header_compared: 0,
+    header_differs: 0,
+    failed: 0,
+  });
+});
