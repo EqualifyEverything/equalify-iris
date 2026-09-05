@@ -54,14 +54,35 @@
         # Which step failed, from the tally rather than from a session log — the
         # detail this body used to send the reader to the deployment for, which
         # is where the documents are and so is the one place a maintainer cannot
-        # go (#263). Written from the field when the deployment has it, and the
-        # sentence is skipped entirely rather than printed as three zeroes when
-        # it does not: an older deployment recorded no step, and "0 parse, 0
-        # inject, 0 run" beside a non-zero rate reads as a contradiction.
-        + (if ($tally.lint_error_where // []) | length > 0 then
+        # go (#263).
+        #
+        # Gated on the SUM of the counts, not on the array's length. Length was
+        # the original test and it was dead from the day the field shipped:
+        # `qualityStats` builds this from the closed vocabulary
+        # (`src/store/db.ts`), so all three entries are ALWAYS present — that is
+        # deliberate, and it is what keeps "this step did not fail" apart from
+        # "this deployment does not record steps". The cost is a third state
+        # neither of them covers: a deployment that records the step where every
+        # failure in the window predates the field. Against the reference
+        # deployment that state printed "`parse` 0, `inject` 0, `run` 0" beside a
+        # 6.3% rate — the exact contradiction the length test was written to
+        # prevent, and answering "which step failed" with "none of them" (#407).
+        # A sum of zero is not a measured zero here: the rate above says
+        # documents failed, so nothing being attributed means nothing was
+        # written down.
+        + (([($tally.lint_error_where // [])[].documents] | add) as $attributed
+           | if $attributed > 0 then
              "**Which step failed:** "
              + ([$tally.lint_error_where[] | "`\(.where)` \(.documents)"] | join(", "))
              + ". `parse` is jsdom refusing the assembled HTML, `inject` is axe's own source failing to evaluate (a dependency problem — it cannot depend on the document), `run` is the rule pass throwing while it walks the document. Those three point at three different fixes. A sum below the \(.value * $tally.documents | round) document(s) in the rate is documents linted before this breakdown was recorded, not a fourth kind of failure.\n\n"
+           # The field is there and attributed nothing. Said plainly, because the
+           # breakdown printed as three zeroes reads as the opposite.
+           elif ($tally.lint_error_where // []) | length > 0 then
+             "**Which step failed: not recorded for any of them.** This deployment does record which lint step failed, and none of the \(.value * $tally.documents | round) document(s) in the rate above carries one — every one of them ran before that field shipped. So `parse`, `inject` and `run` are all 0 because nothing wrote a step down, NOT because no step failed, and this report cannot yet tell a fixed cause from a new one. The next failure will name its step: `parse` is jsdom refusing the assembled HTML, `inject` is axe's own source failing to evaluate (a dependency problem — it cannot depend on the document), `run` is the rule pass throwing while it walks the document.\n\n"
+           # No field at all: an older deployment. Left silent rather than given
+           # the sentence above, because the two are not the same problem — this
+           # one is fixed by deploying a newer Iris, that one by waiting for a
+           # window whose failures postdate the field.
            else "" end)
         + "Start with `src/pipeline/lint.ts` and the `iris:lint-error` signal recorded in `src/pipeline/orchestrator.ts`. A `run` failure has one known cause, fixed in #257: an attribute name the selector engine cannot compile took the whole rule set offline, and the lint now drops those names from its own copy of the document and counts them as `malformed_attributes_removed`. If `run` is what this report names and that fix is deployed, it is a NEW cause — the run log for an affected session carries the error, its stack and where it happened, on the `assembly` line or on a `lint_unavailable` line if a correction round is what broke it."),
       "links-dropped": "Over the last \($tally.window_days) days, **\(.value | pct)% of \($tally.documents) documents** lost at least one hyperlink between the assembled HTML and what the copy editor returned.\n\nThe threshold is \(.threshold | pct)% of documents.\n\nThis is content loss rather than imperfect output: the link was in the user's source document, Iris had it, and the delivered HTML does not. The editor is a text model rewriting a fragment, so dropping an `href` while otherwise improving the prose around it is a plausible failure — and one the loop currently records (`editor_links_dropped`) without preventing.\n\nWhere to look: `droppedHrefs` and its caller in `src/pipeline/review.ts` for how it is detected, and `agents/copy_editor.md` for the instruction that is not holding. Whether the fix is a stronger instruction or a mechanical restore of the missing `href`s is the interesting question; the PDF link-preservation work in the recent history is relevant prior art.",
@@ -91,10 +112,19 @@
            else "" end)
         # Severity decides whether the rate above describes a defect at all: it
         # counts any open issue, and a Reader that reports nits has no ceiling.
-        + (if ($tally.unresolved_severity // []) | length > 0 then
+        #
+        # Gated on the sum for the reason `lint_error_where` above is (#407), and
+        # this one had no mitigating sentence at all: because it is explicitly not
+        # a partition of the rate, there is no total to compare it against, so
+        # "`high` 0, `medium` 0, `low` 0, `unrated` 0" beside an 82% unresolved
+        # rate would have read as a Reader that rated nothing a barrier.
+        + (([($tally.unresolved_severity // [])[].documents] | add) as $rated
+           | if $rated > 0 then
              "**How the Reader rated what was left:** "
              + ([$tally.unresolved_severity[] | "`\(.severity)` \(.documents)"] | join(", "))
              + " document(s). Per document and NOT a partition of the rate above — one document with a high issue and three low ones is in both — so these can sum to more than it does. `high` is the part a reader would call a barrier, and where a threshold belongs if the rate turns out to be the honest floor. `unrated` is the Reader having written something outside the three, not a fifth severity.\n\n"
+           elif ($tally.unresolved_severity // []) | length > 0 then
+             "**How the Reader rated what was left: not recorded for any of them.** This deployment does record a severity per document and no document in this window carries one, so every count is 0 because nothing was written down rather than because nothing was rated. The rate above cannot be split by severity yet, which means it cannot yet say whether it describes barriers or nits — the question this paragraph exists to answer.\n\n"
            else "" end)
         # `if` on the number rather than on `> 0`: in jq only `false` and `null`
         # are falsy, so this prints an honest 0% and skips only a deployment that
