@@ -80,6 +80,18 @@ function runProbe(): { stdout: string; stderr: string } {
         "setTimeout(() => process.exit(4), 100);\n" +
         'test("failsthenexits never reports", async () => { await new Promise((r) => setTimeout(r, 2000)); });\n',
     );
+    // Every test RAN, and then the file threw after one of them ended. Node reports this as
+    // `testCodeFailure` + exitCode 1, exactly like a syntax error, so it takes the same
+    // branch — but nothing was cut short and the count is complete. A suite that aborts
+    // fetches and tears down servers produces this shape for real, so the exit-code
+    // paragraph must not assert the count is short.
+    writeFileSync(
+      join(dir, "latereject.test.ts"),
+      'import { test } from "node:test";\n' +
+        'test("latereject ran", () => {});\n' +
+        'test("latereject also ran", () => {});\n' +
+        'setTimeout(() => { Promise.reject(new Error("late rejection")); }, 50);\n',
+    );
     writeFileSync(
       join(dir, "passes.test.ts"),
       'import { test } from "node:test";\ntest("a test that passes", () => {});\n',
@@ -107,6 +119,23 @@ function runProbe(): { stdout: string; stderr: string } {
 const PROBE = runProbe();
 const OUT = PROBE.stdout;
 
+// The paragraphs are hard-wrapped, so a phrase in one of them straddles a newline and two
+// spaces of indent. Match against this, never against the raw slice: a wrapped phrase makes
+// a regex silently unmatchable, which reads as the reporter having stopped saying it.
+function flatten(text: string): string {
+  return text.replace(/\s+/g, " ");
+}
+
+// The one paragraph about `name`, up to the blank line that ends it.
+function paragraphFor(name: string): string {
+  const at = OUT.indexOf(`${name}: the process `);
+  assert.notEqual(at, -1, `no paragraph for ${name}`);
+  const rest = OUT.slice(at);
+  const end = rest.indexOf("\n\n");
+  assert.notEqual(end, -1, `paragraph for ${name} never ended`);
+  return flatten(rest.slice(0, end));
+}
+
 test("a child killed by a signal says so, where spec says only 'test failed'", () => {
   // Spec's own account of the same file, which is all #405 had to go on.
   assert.match(OUT, /'test failed'/);
@@ -114,12 +143,15 @@ test("a child killed by a signal says so, where spec says only 'test failed'", (
     OUT,
     /killed\.test\.ts: the process was killed by SIGKILL without reporting a failure/,
   );
-  // And it says the count is short, because the tests after the death never ran.
-  assert.match(OUT, /never ran, so the count below is short, not clean/);
+  // And it says the count is short, because the tests after the death never ran. A signal is
+  // the only branch that can say that flatly: it is the only one where the process cannot
+  // have got to the end of the file.
+  const paragraph = paragraphFor("killed.test.ts");
+  assert.match(paragraph, /never ran, so the count below is short, not clean/);
   assert.match(OUT, /✔ killed first runs/);
   assert.ok(!OUT.includes("killed never reports"), "the test after the death should not have run");
   // Only a signal sends the reader to the crash logs.
-  assert.match(OUT, /A fatal signal here is a crash inside node itself \(#405\)/);
+  assert.match(paragraph, /A fatal signal here is a crash inside node itself \(#405\)/);
 });
 
 test("a file that fails an assertion and THEN dies still reports the death", () => {
@@ -142,27 +174,30 @@ test("a child that exits non-zero without reporting says the code, and not to re
   // The advice differs by branch: a non-zero exit is nearly always a syntax error or a bad
   // import, and sending its author to ~/Library/Logs/DiagnosticReports — in CI, where
   // `tail` has already cut the SyntaxError off the top — is the inverse of #405's problem.
-  const paragraph = OUT.slice(OUT.indexOf("exits.test.ts: the process exited 3"));
-  const untilBlank = paragraph.slice(0, paragraph.indexOf("\n\n"));
-  assert.match(untilBlank, /usually a syntax error or a failed import/);
+  const paragraph = paragraphFor("exits.test.ts");
+  assert.match(paragraph, /usually a syntax error or a failed import/);
   assert.ok(
-    !untilBlank.includes("node-*.ips"),
+    !paragraph.includes("node-*.ips"),
     "a non-zero exit was sent to the crash logs, where a syntax error is not",
   );
+  // And it points at THIS stream, not stderr. The runner captures the child's stderr and
+  // republishes it as reporter output, so with a stdout destination the SyntaxError is on
+  // stdout above this line and stderr is empty — a reader sent to stderr finds nothing.
+  assert.match(paragraph, /not on stderr/);
 });
 
 test("a file whose tests merely failed is left to the spec reporter", () => {
   assert.match(OUT, /✖ an ordinary assertion failure/);
   const shouted = OUT.split("\n").filter((line) => line.startsWith("‼"));
-  // Four deaths (killed, exits 3, assertion-then-killed, assertion-then-exit 4) and one
-  // summary header. Counting is the point: a file whose tests simply failed exits 1 and its
-  // `test:complete` carries that code, so reading `test:complete` instead of `test:fail`
-  // made every red build shout until the discriminator was narrowed to the runner's own
-  // `subtestsFailed` + 1.
+  // Five deaths (killed, exits 3, assertion-then-killed, assertion-then-exit 4, late
+  // rejection) and one summary header. Counting is the point: a file whose tests simply
+  // failed exits 1 and its `test:complete` carries that code, so reading `test:complete`
+  // instead of `test:fail` made every red build shout until the discriminator was narrowed
+  // to the runner's own `subtestsFailed` + 1.
   assert.equal(
     shouted.length,
-    5,
-    `expected four deaths and one summary header, got:\n${shouted.join("\n")}`,
+    6,
+    `expected five deaths and one summary header, got:\n${shouted.join("\n")}`,
   );
   assert.ok(
     !shouted.some((line) => line.includes("asserts.test.ts")),
@@ -190,6 +225,29 @@ test("a file that fails a test and then exits with its own code is a death", () 
   );
 });
 
+test("a file that ran every test and then threw late is not told its count is short", () => {
+  // `testCodeFailure` + exitCode 1, same as a syntax error, so it takes the exit-code branch
+  // — but both its tests ran and the count is complete. The paragraph may not claim
+  // otherwise. Nothing on the event distinguishes this from a file that died on line 1, so
+  // the fix is to stop asserting either, not to detect it.
+  assert.match(OUT, /✔ latereject ran/);
+  assert.match(OUT, /✔ latereject also ran/);
+  const paragraph = paragraphFor("latereject.test.ts");
+  assert.match(paragraph, /exited 1 without reporting a failure/);
+  assert.ok(
+    !/the count below is short, not clean/.test(paragraph),
+    "a file that ran every test was told its count was short",
+  );
+  assert.match(paragraph, /or it ran every test and then threw after one ended/);
+  // The runner prints the rejection through the REPORTER stream, not the child's stderr, so
+  // the paragraph's "look further up in THIS output" is where it actually is.
+  assert.match(OUT, /A resource generated asynchronous activity after the test ended/);
+  assert.ok(
+    !PROBE.stderr.includes("late rejection"),
+    "the rejection was on stderr after all — the paragraph's advice needs re-checking",
+  );
+});
+
 test("the deaths are repeated at the very end, where CI's tail can see them", () => {
   // Both workflows read `npm test` through `tail` (code-review.yml -120,
   // issue-to-pr.yml -40), so a file that dies early in a 1,500-test run is above the cut.
@@ -203,6 +261,7 @@ test("the deaths are repeated at the very end, where CI's tail can see them", ()
   assert.match(summary, /exits\.test\.ts/);
   assert.match(summary, /both\.test\.ts/);
   assert.match(summary, /failsthenexits\.test\.ts/);
+  assert.match(summary, /latereject\.test\.ts/);
   assert.ok(!summary.includes("asserts.test.ts"), "the summary listed an assertion failure");
   // Last, so no tail depth can cut it. Which of the two deaths is last depends on which
   // child died first, so assert on the placement, not on the file.

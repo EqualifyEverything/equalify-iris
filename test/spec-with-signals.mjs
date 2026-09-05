@@ -43,8 +43,8 @@ export default async function* specWithSignals(source) {
     // itself produced it, which it does as exactly `subtestsFailed` + 1. The blind spot
     // that leaves is a file that fails a test and THEN dies with code 1 — an unhandled
     // rejection after a failing assertion — which is indistinguishable here from a file
-    // that simply failed. That one prints its rejection on stderr unprompted; a signal and
-    // every other exit code do not, which is why they are the ones worth a line.
+    // that simply failed. It is a blind spot in one direction only: that file goes
+    // unreported, and no file is reported that should not be.
     const runnerReportedItsOwnFailure = error?.failureType === "subtestsFailed" && exitCode === 1;
     if (
       signal === null &&
@@ -53,24 +53,38 @@ export default async function* specWithSignals(source) {
       continue;
     }
     const how = signal !== null ? `was killed by ${signal}` : `exited ${exitCode}`;
-    // The two ways in want opposite advice, and giving both the same tail is how this
-    // reporter would start misdirecting people itself: a syntax error or a failed import is
-    // the ORDINARY way a test child exits non-zero without reporting, and telling its
-    // author to go read crash logs — in CI, where `tail` has already cut the SyntaxError
-    // off the top — is the inverse of the problem #405 was about.
-    const advice =
+    // The two ways in want opposite paragraphs, and giving both the same one is how this
+    // reporter would start misdirecting people itself. Two ways it did:
+    //
+    // - A syntax error or a failed import is the ORDINARY way a test child exits non-zero
+    //   without reporting, and telling its author to go read crash logs — in CI, where
+    //   `tail` has already cut the SyntaxError off the top — is the inverse of #405.
+    //
+    // - How much of the file ran is only knowable on the SIGNAL branch. A non-zero exit
+    //   also covers a file that ran every test it had and then threw after one ended: a late
+    //   unhandled rejection (or a late throw) is `testCodeFailure` + exitCode 1, measured,
+    //   so it lands here with a complete count. Saying "the count below is short" there is
+    //   wrong, and the suite has real candidates for it — aborted fetches, server teardown.
+    //
+    // And the cause is never on stderr. The runner captures the child's stderr and its late
+    // async errors and republishes both through the REPORTER stream, so with a stdout
+    // destination the SyntaxError lands on stdout, above this line, and stderr is empty —
+    // measured. The earlier draft of this file sent readers to an empty stream.
+    const tail =
       signal !== null
-        ? "A fatal signal here is a crash inside node itself (#405); look for a fresh\n" +
-          "  node-*.ips under ~/Library/Logs/DiagnosticReports (macOS). One whose top frame is\n" +
-          "  __kill is a deliberate kill, not a crash."
-        : "A non-zero exit with no test event is usually a syntax error or a failed import in\n" +
-          "  this file — look on stderr, above. A fatal SIGNAL instead is the #405 shape.";
+        ? "A dead child, NOT a failing assertion — the tests after the last one this file\n" +
+          "  reported never ran, so the count below is short, not clean. A fatal signal here is\n" +
+          "  a crash inside node itself (#405); look for a fresh node-*.ips under\n" +
+          "  ~/Library/Logs/DiagnosticReports (macOS). One whose top frame is __kill is a\n" +
+          "  deliberate kill, not a crash."
+        : "A dead child, NOT a failing assertion. Either it died part-way, and the count below\n" +
+          "  is short rather than clean, or it ran every test and then threw after one ended,\n" +
+          "  and the count is complete. A non-zero exit with no test event is usually a syntax\n" +
+          "  error or a failed import in this file, or a late unhandled rejection — all three\n" +
+          "  print further up in THIS output, not on stderr, because the runner republishes the\n" +
+          "  child's stderr through the reporter stream. A fatal SIGNAL instead is #405's shape.";
     deaths.push(`${event.data.name}: the process ${how} without reporting a failure`);
-    yield (
-      `\n‼ ${event.data.name}: the process ${how} without reporting a failure.\n` +
-      `  A dead child, NOT a failing assertion — the tests after the last one this file\n` +
-      `  reported never ran, so the count below is short, not clean. ${advice}\n\n`
-    );
+    yield `\n‼ ${event.data.name}: the process ${how} without reporting a failure.\n  ${tail}\n\n`;
   }
   // Again at the end, because both CI workflows read this run through `tail` — `tail -120`
   // in code-review.yml, `tail -40` in issue-to-pr.yml. A file that dies early in a
