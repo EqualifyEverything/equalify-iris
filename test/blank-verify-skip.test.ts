@@ -398,7 +398,7 @@ test("a contradicted stated blank the verifier passes ships empty, and its line 
     assert.equal(of(rec, "page_verify_failed").length, 0);
     // Nothing was repaired, because nothing was found: the page is delivered as the empty fragment it
     // was declared as. This is the loss the design accepts in exchange for #194's page — stated on the
-    // PR and in docs/API.md §7a — and the only evidence it leaves is the `page_blank` line's own
+    // PR and in docs/API.md §7 — and the only evidence it leaves is the `page_blank` line's own
     // two fields.
     assert.equal(of(rec, "page_corrected").length, 0);
     assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "");

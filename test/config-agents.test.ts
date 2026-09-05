@@ -1064,6 +1064,11 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
 // GitHub's own heading slug, near enough for the links this repo writes: lowercase, drop anything
 // that is not a word character, hyphen or space, then spaces to hyphens. Inline code and a link
 // inside a heading contribute their text, not their markup.
+//
+// One hyphen per space, and NOT one per run of spaces: a dropped character between two spaces
+// leaves both of them, so `### \`a\` / \`b\`` is `a--b` on GitHub. Collapsing instead would have
+// been invisible here — a docs link written to the collapsed slug resolves against a guard that
+// collapses too, and dies in the browser. Thirteen headings in these docs are of that shape.
 function headingAnchors(markdown: string): Set<string> {
   const anchors = new Set<string>();
   let fenced = false;
@@ -1078,11 +1083,48 @@ function headingAnchors(markdown: string): Set<string> {
         .toLowerCase()
         .replace(/[^\w\- ]+/g, "")
         .trim()
-        .replace(/ +/g, "-"),
+        .replace(/ /g, "-"),
     );
   }
   return anchors;
 }
+
+// The slug rule itself, pinned on a heading rather than on the docs. The link check below does
+// fail on a collapsing rule today — seven of the links in docs/API.md point at headings of this
+// shape — but it fails by calling a correct link broken, which reads as the link needing repair.
+// It also only fails while some document happens to link to such a heading.
+test("a heading slug keeps both spaces around a dropped character", () => {
+  const anchors = headingAnchors("### `page_verify_ok` / `page_verify_failed`\n## 9. Close (a / b)\n");
+  assert.ok(
+    anchors.has("page_verify_ok--page_verify_failed"),
+    `got ${[...anchors].join(", ")} — GitHub replaces each space, so the dropped "/" leaves "--"`,
+  );
+  assert.ok(anchors.has("9-close-a--b"), [...anchors].join(", "));
+});
+
+// The other way that helper lies, and the reason it is a Set: two headings that slug the same
+// collapse into one entry, so a link to either resolves against the check below while GitHub numbers
+// the second `#thing-1` and every link written to `#thing` lands on the first. There are none today
+// across the 13 prose docs, which is what makes this cheap to keep.
+test("no two headings in one doc slug the same", () => {
+  const clashes: string[] = [];
+  for (const file of PROSE_DOCS) {
+    const counts = new Map<string, number>();
+    let fenced = false;
+    for (const line of readFileSync(join(ROOT, file), "utf8").split("\n")) {
+      if (line.startsWith("```")) fenced = !fenced;
+      if (fenced || !/^#{1,6}\s/.test(line)) continue;
+      for (const a of headingAnchors(line)) counts.set(a, (counts.get(a) ?? 0) + 1);
+    }
+    for (const [a, n] of counts) if (n > 1) clashes.push(`${file}: ${n} headings make #${a}`);
+  }
+  assert.deepEqual(
+    clashes,
+    [],
+    `heading anchor(s) are ambiguous, so a link to them cannot say which section it means:\n  ` +
+      clashes.join("\n  "),
+  );
+});
 
 // A cross-reference that does not resolve is the failure mode of moving prose between files, and it
 // is silent: GitHub renders a dead relative link as a link, and a dead `#anchor` scrolls nowhere.
@@ -1128,5 +1170,202 @@ test("every relative link in the docs resolves, file and anchor", () => {
     [],
     `${broken.length} relative link(s) in the docs do not resolve. A moved section takes its ` +
       `anchor with it, so repoint the link rather than deleting it:\n  ${broken.join("\n  ")}`,
+  );
+});
+
+// docs/API.md §7 was one table of 65 rows, and the largest cell in it ran to 9,176 characters — a
+// reference nobody could scan and nobody could read. It is now an index of one row per event and a
+// section per event, which introduces a way to be wrong that the single table did not have: the two
+// halves can disagree. A new event indexed and not written up is a row that scrolls nowhere, and one
+// written up and not indexed cannot be found from the top at all. The link check above catches the
+// first (a dead anchor) and is blind to the second.
+test("every run-log event in docs/API.md is both indexed and written up, once each", () => {
+  const lines = readFileSync(join(ROOT, "docs/API.md"), "utf8").split("\n");
+  const from = lines.indexOf("## 7. Run log");
+  assert.notEqual(from, -1, "docs/API.md has no `## 7. Run log` heading any more");
+  const after = lines.findIndex((l, i) => i > from && l.startsWith("## "));
+  assert.ok(after > from, "`## 7. Run log` is the last section in the file, which it should not be");
+  const body = lines.slice(from, after);
+
+  // The index is everything before the first section, so a table inside a section body is not read
+  // as a malformed index row — which is how this would have failed, naming the wrong file.
+  const firstSection = body.findIndex((l) => l.startsWith("### "));
+  assert.ok(firstSection > 0, "§7 has no `### ` sections, so the restructure was undone");
+  const indexed = body.slice(0, firstSection)
+    .filter((l) => l.startsWith("|") && l !== "| --- | --- |" && !l.startsWith("| `type`"))
+    .map((l) => {
+      const m = /^\| \[(.+?)\]\(#([^)]+)\) \| .+ \|$/.exec(l);
+      assert.ok(m, `an index row is not \`| [name](#anchor) | summary |\`:\n  ${l}`);
+      return { name: m[1]!, anchor: m[2]! };
+    });
+  assert.ok(indexed.length > 60, `only ${indexed.length} events indexed in §7`);
+
+  const headings = body.filter((l) => l.startsWith("### ")).map((l) => l.slice(4));
+  // "Once each" is not implied by the comparison below: two same-order lists are deepEqual with a
+  // repeat in both. It is also the case where the anchors go wrong and nothing else notices —
+  // GitHub disambiguates a second `### `page_blank`` to `#page_blank-1`, while `headingAnchors`
+  // slugs each heading alone and returns `page_blank` for both, so the second row scrolls to the
+  // first section and the link check above is satisfied because `#page_blank` does exist.
+  assert.equal(
+    new Set(headings).size,
+    headings.length,
+    "two §7 sections have the same heading; GitHub numbers the second anchor and links to it break",
+  );
+  assert.deepEqual(
+    indexed.map((e) => e.name),
+    headings,
+    "§7's index and its sections name different events, or name them in a different order",
+  );
+  assert.deepEqual(
+    indexed.map((e) => e.anchor),
+    headings.map((h) => [...headingAnchors(`### ${h}`)][0]),
+    "an index row's anchor is not the slug of the section it names",
+  );
+
+  // A heading with nothing under it: the shape a half-finished move leaves.
+  const empty: string[] = [];
+  for (const [i, line] of body.entries()) {
+    if (!line.startsWith("### ")) continue;
+    let j = i + 1;
+    while (j < body.length && !body[j]!.startsWith("### ") && body[j]!.trim() === "") j++;
+    if (j >= body.length || body[j]!.startsWith("### ")) empty.push(line.slice(4));
+  }
+  assert.deepEqual(empty, [], `§7 section(s) with no text under the heading: ${empty.join(", ")}`);
+});
+
+// §7 documents the events a reader looks something up about, not all of them, and its opening
+// paragraph says so with numbers. That paragraph exists because the sentence it replaced claimed
+// every event had a section, and 40 did not: a reader who greps a `run_start` line would have
+// concluded the log could not carry it. A count in prose that nothing reads goes stale on the next
+// commit, so the numbers are read back out of the paragraph and checked against src/. A new event
+// fails this until it is either written up or counted.
+test("§7 states how much of the run log it does not document, and the count is current", () => {
+  // THREE emit shapes reach the log, and each is invisible to a grep for the others:
+  //   1. `ctx.log.event("name", …)` everywhere in the pipeline — 108 names.
+  //   2. `this.onEvent?.("model_call_start", meta)` in src/providers — `model_call_start` and
+  //      `model_call`, the two §7 documents best.
+  //   3. a RunLog method that skips event() and names its own type. `agentCall` does, on every one of
+  //      13 call sites, so `agent_call` is one of the commonest lines in the log while its name
+  //      appears nowhere either grep above can reach.
+  //
+  // The first two are searched across src/, because those calls are made from everywhere. The third
+  // is searched in src/store/runlog.ts ALONE, and every literal `type` in that file counts however
+  // its object literal is ordered — `{ phase, type: "x" }` is the same event as `{ type: "x", phase }`
+  // and a pattern keyed on `this.write({ type:` would see only the second. Scoping it to that file is
+  // a claim about the rest of src/, so the claim is checked below rather than assumed.
+  const RUNLOG = join(SRC, "store/runlog.ts");
+  const emitted = new Set<string>();
+  for (const file of sources(SRC)) {
+    const text = readFileSync(file, "utf8");
+    for (const m of text.matchAll(/(?:\.event|onEvent\?\.)\(\s*"([a-z0-9_]+)"/g)) emitted.add(m[1]!);
+  }
+  const runlog = readFileSync(RUNLOG, "utf8");
+  for (const m of runlog.matchAll(/\btype:\s*"([a-z0-9_]+)"/g)) emitted.add(m[1]!);
+
+  // What makes one file enough: nothing else in src/ reaches for an append-shaped fs call. If a
+  // second file ever writes the log, shape 3 stops being findable where this looks and the count
+  // goes quietly stale — the failure `agent_call` already demonstrated once.
+  //
+  // This cannot be an invariant, and the comment does not claim to be one: an `open`/`write` pair, a
+  // spawned process or a stream handed in from elsewhere would all slip past. It is the four spellings
+  // a writer would actually reach for, and it fails loudly on a plain mention — one message asking
+  // someone to check, against a silently stale count, is the right direction to be wrong in.
+  const APPENDS = /appendFileSync\(|appendFile\(|createWriteStream\(|flags?:\s*"a/;
+  const appenders = sources(SRC)
+    .filter((f) => APPENDS.test(readFileSync(f, "utf8")))
+    .map((f) => f.slice(ROOT.length));
+  assert.deepEqual(
+    appenders,
+    ["src/store/runlog.ts"],
+    `something outside src/store/runlog.ts opens a file for appending: ${appenders.join(", ")}. If ` +
+      "any of them writes the run log, reading shape 3 from runlog.ts alone no longer sees every " +
+      "event — widen that search with the writers rather than adjusting the count.",
+  );
+
+  assert.ok(emitted.size > 90, `only ${emitted.size} event names found in src/ — the grep missed`);
+  // Losing shape 3 would SHRINK a count rather than fail anything, which is how `agent_call` went
+  // unnoticed: `model_call` and `model_call_start` have §7 sections, so a broken shape-2 pattern
+  // fails `ghosts` loudly, while an event with no section just stops being counted.
+  assert.ok(
+    emitted.has("agent_call"),
+    "`agent_call` is not in the emitted set. Either the shape-3 search above stopped matching " +
+      `${RUNLOG}, or that literal \`type\` was renamed — check which, because the first means ` +
+      "fixing the search and not the count.",
+  );
+
+  const api = readFileSync(join(ROOT, "docs/API.md"), "utf8");
+  const lines = api.split("\n");
+  const from = lines.indexOf("## 7. Run log");
+  const after = lines.findIndex((l, i) => i > from && l.startsWith("## "));
+  const headings = lines.slice(from, after).filter((l) => l.startsWith("### ")).map((l) => l.slice(4));
+
+  // Every §7 heading is event names and nothing else, which is what makes reading its code spans as
+  // event names safe. A heading that also named a field — `### `quality_report` (`score`)` — would
+  // have to fail HERE, as a heading this test cannot parse, and not two lines down as an event src/
+  // no longer emits. If §7 ever needs such a heading, widen this shape and the extraction together.
+  for (const h of headings) {
+    assert.match(
+      h,
+      /^`[a-z0-9_]+`( \/ `[a-z0-9_]+`)*$/,
+      `a §7 heading is not event names only: \`### ${h}\`. Every code span in a §7 heading is read ` +
+        "below as an event name, so anything else in one is reported as a deleted event.",
+    );
+  }
+
+  const documented = new Set(
+    headings.flatMap((h) => [...h.matchAll(/`([a-z0-9_]+)`/g)].map((m) => m[1]!)),
+  );
+
+  // A section for an event nothing emits any more is dead documentation, and reads as current.
+  const ghosts = [...documented].filter((n) => !emitted.has(n)).sort();
+  assert.deepEqual(ghosts, [], `§7 documents event(s) src/ no longer emits: ${ghosts.join(", ")}`);
+
+  const undocumented = [...emitted].filter((n) => !documented.has(n));
+
+  // Read the numbers out of THAT paragraph, not out of the file: every event name §7 offers as an
+  // example is also a section heading or a mention somewhere else in these 4,000 lines, so a check
+  // against the whole document would pass on a paragraph that had dropped the example entirely.
+  const opens = "**The index is not the whole log.**";
+  const paraStart = lines.findIndex((l) => l.startsWith(opens));
+  assert.ok(paraStart > 0, `§7 no longer opens its coverage paragraph with ${opens}`);
+  const paraEnd = lines.findIndex((l, i) => i > paraStart && l.trim() === "");
+  const para = lines.slice(paraStart, paraEnd).join(" ").replace(/\s+/g, " ");
+
+  const stated = /`src\/` emits \*\*(\d+)\*\* event types; the (\d+) sections below cover \*\*(\d+)\*\* of them and \*\*(\d+)\*\* have no section here/.exec(
+    para,
+  );
+  assert.ok(
+    stated,
+    "§7's coverage paragraph was reworded, so its numbers are no longer checked. Keep the shape " +
+      "`emits **N** event types; the N sections below cover **N** of them and **N** have no " +
+      "section here`, or move the check with the words.",
+  );
+  assert.deepEqual(
+    stated.slice(1, 5).map(Number),
+    [emitted.size, headings.length, documented.size, undocumented.length],
+    `§7 says ${stated.slice(1, 5).join("/")} (emitted/sections/covered/uncovered) and src/ says ` +
+      `${[emitted.size, headings.length, documented.size, undocumented.length].join("/")}`,
+  );
+
+  // Counts alone cannot see a RENAME — one name out, one name in, every total unchanged — and the
+  // paragraph names three events as its examples of the undocumented ones. Each has to still be
+  // emitted, and still be undocumented, or the example is the wrong way round.
+  for (const example of ["agent_call", "run_start", "phase", "reader_start"]) {
+    assert.ok(
+      para.includes(`\`${example}\``),
+      `§7's coverage paragraph no longer names \`${example}\`; update this list with it`,
+    );
+    assert.ok(emitted.has(example), `§7 names \`${example}\` as an event and src/ emits no such one`);
+    assert.ok(!documented.has(example), `\`${example}\` now HAS a §7 section, so it is a bad example`);
+  }
+
+  // The fourth example is a family rather than a name, so it is checked as one.
+  assert.ok(para.includes("`agent_update_*`"), "§7 no longer names the `agent_update_*` family");
+  const family = [...emitted].filter((n) => n.startsWith("agent_update_"));
+  assert.ok(family.length > 0, "src/ emits no `agent_update_*` event, so §7's example is stale");
+  assert.deepEqual(
+    family.filter((n) => documented.has(n)),
+    [],
+    "§7 offers the `agent_update_*` family as undocumented and now documents part of it",
   );
 });
