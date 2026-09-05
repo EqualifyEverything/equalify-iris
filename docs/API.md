@@ -967,8 +967,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **111** event types and every one of them has a section
-below — **106** sections, because a few cover a pair of events that are only read together. So a
+**The index is the whole log.** `src/` emits **113** event types and every one of them has a section
+below — **108** sections, because a few cover a pair of events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1008,6 +1008,8 @@ emits fails it too.
 | [`page_links_unexpected`](#page_links_unexpected) | The page links to a URL **no annotation accounts for** |
 | [`page_links_correction_rejected`](#page_links_correction_rejected) | A correction bought for a page that had already passed was refused |
 | [`page_soft_hyphens`](#page_soft_hyphens) | Soft hyphens (U+00AD) were taken out of a reply before it became markup |
+| [`page_split_words`](#page_split_words) | A page wrote one word two ways, `Compos-ite` here and `Composite` there |
+| [`page_split_words_unrecovered`](#page_split_words_unrecovered) | A correction bought for a word written two ways left both spellings there |
 | [`page_caption_claim`](#page_caption_claim) | A `<figcaption>` makes a claim about the picture its `alt` describes |
 | [`specialist_unresolved`](#specialist_unresolved) | A page asked for a specialist **no available agent answers to** |
 | [`specialist_declined`](#specialist_declined) | A page asked for a specialist the general pass already covers |
@@ -1353,13 +1355,13 @@ page 7.
 `reextract_complete.pages` is what was actually re-extracted; a `failed` list is pages whose
 re-extraction threw and which therefore kept their **prior** content unchanged.
 
-`reextract_complete` also carries `alts_checked` / `alts_generic` and `ids_checked` /
-`ids_duplicated`, and they are over the **whole** document this round delivers rather than the
-pages it re-ran — the prior round's pages with the re-extracted ones substituted in — so they are
-comparable with `extraction_complete`'s and a session's log does not read as its alt or id corpus
-shrinking every time a client sends feedback. Comments are stripped before the two alt counts, as
-on `extraction_complete`, and the two id counts are read off each fragment's parsed tree, where a
-comment is not an element.
+`reextract_complete` also carries `alts_checked` / `alts_generic`, `ids_checked` /
+`ids_duplicated` and `words_checked` / `words_split`, and they are over the **whole** document this
+round delivers rather than the pages it re-ran — the prior round's pages with the re-extracted ones
+substituted in — so they are comparable with `extraction_complete`'s and a session's log does not
+read as its alt, id or word corpus shrinking every time a client sends feedback. Comments are
+stripped before the two alt counts and before the two word counts, as on `extraction_complete`, and
+the two id counts are read off each fragment's parsed tree, where a comment is not an element.
 
 `uncorrected` is over the whole document too, and for the same reason: a round that repairs one
 rejected page out of three should read as two left rather than as one page re-run. It follows the
@@ -1755,6 +1757,19 @@ Read off the parsed tree, so markup the HTML parser discards — an orphan `<td>
 comment — owns no id: an over-collected id would be a phantom duplicate, and on this path that
 buys a rewrite of a page with nothing wrong with it.
 
+`words_checked` / `words_split` are the third pair, for the split-word rule (#334): how many words
+those fragments contain, and how many words a fragment writes **two ways** — one word counted once
+however often it appears. Per fragment and summed, and here for a reason of its own rather than
+`ids_duplicated`'s: a word written one way on page 3 and the other way on page 40 is not this defect
+at all, since a printing breaks a word wherever the column falls, so pooling the document's words
+would manufacture contradictions out of the whole corpus's vocabulary.
+
+Unlike the two pairs above, `words_split` is **expected to be non-zero**. On #334's 100-page census
+every one of three models contradicted itself somewhere — `kimi-k2.5` on 4 pages, `claude-sonnet-4-6`
+on 3, `gpt-5.6-luna` on 2 — so a run reporting 0 of 20,000 is the reading to check the rule against,
+not the reading to be reassured by. And a non-zero here after correction is not necessarily a repair
+that failed: a page that really does print both spellings is invited to say so and change nothing.
+
 ### `page_generic_alt`
 
 A page described an image with a placeholder instead of a description (`page`, `image`, `alts` —
@@ -1894,8 +1909,9 @@ are checked, since only there is there a ground truth to be outside of.
 
 A correction bought for a page that had already passed its fidelity check was refused by the second
 verdict, so the page shipped as it was: `image`; `trigger`, what the correction had been asked to fix;
-`links`, the hrefs that were missing; `alts` or `ids` where those were part of the same call; and
-`problems`, what the **second** verdict objected to — the field that says why the billed rewrite lost.
+`links`, the hrefs that were missing; `alts`, `ids` or `words` where those were part of the same
+call; and `problems`, what the **second** verdict objected to — the field that says why the billed
+rewrite lost.
 
 `problems` is that verdict's objections **as prose**, an array of the strings it wrote. That is not
 what the field of the same name carries on [`page_corrected`](#page_corrected), which is a count of the
@@ -1903,24 +1919,28 @@ problems the correction was *given*; the two lines can appear for the same `imag
 reader summing "problems" across the log without checking which line it came off is adding a list to a
 number.
 
-`links` is always present and is `[]` where the refused correction was bought for a placeholder `alt`
-or a duplicate `id` alone, so the field to read for what the call was for is `trigger`, not this one.
+`links` is always present and is `[]` where the refused correction was bought for a placeholder
+`alt`, a duplicate `id` or a word written two ways alone, so the field to read for what the call was
+for is `trigger`, not this one.
 
 The name is older than the rest of the line, and keeping it is deliberate. It began as the links-only
 case, and renaming it now would split one measurement across two event names in a log that is read
-across rounds. `trigger` is what says which repair was refused: `links`, `alt`, `ids`, or `both`. It
-cannot read `verify` here, though that value exists on [`page_corrected`](#page_corrected) — this
-recheck is only bought for a page whose fidelity check **passed**, since a page that failed has no
-standing to protect.
+across rounds. `trigger` is what says which repair was refused: `links`, `alt`, `ids`, `words`, or
+`both`. It cannot read `verify` here, though that value exists on
+[`page_corrected`](#page_corrected) — this recheck is only bought for a page whose fidelity check
+**passed**, since a page that failed has no standing to protect.
 
-`both` means more than one source fired, and deliberately not which pair. That collapse is a property
-of the shared `trigger`, computed once for this line and [`page_corrected`](#page_corrected) from four
-sources — where naming the combination would be fifteen buckets — and only three of the four can reach
-*this* line, since `verify` cannot. The per-source detail is already exact on
-[`page_links_missing`](#page_links_missing), [`page_generic_alt`](#page_generic_alt) and
-[`page_duplicate_ids`](#page_duplicate_ids), all keyed by the same `image`. `alts` and `ids` are on the
-line anyway, and that is the reason: `both` cannot say the alt or the duplicate id was part of what the
-refused call was asked to fix.
+`both` means more than one source fired, and deliberately not which combination. That collapse is a
+property of the shared `trigger`, computed once for this line and [`page_corrected`](#page_corrected)
+from five sources — where naming the combination would be thirty-one buckets — and only four of the
+five can reach *this* line, since `verify` cannot. The per-source detail is already exact on
+[`page_links_missing`](#page_links_missing), [`page_generic_alt`](#page_generic_alt),
+[`page_duplicate_ids`](#page_duplicate_ids) and [`page_split_words`](#page_split_words), all keyed by
+the same `image`. `alts`, `ids` and `words` are on the line anyway, and that is the reason: `both`
+cannot say the alt, the duplicate id or the split word was part of what the refused call was asked to
+fix. `words` carries one further reading the others do not: a refused correction bought for a split
+word may be a rewrite that lost, or a model that declined the problem — which on that check is a
+legitimate answer — and was overruled by the recheck.
 
 The correction is billed either way, so this is a line about money that bought nothing — a page that
 was known to be good was re-rendered, the rewrite was judged in turn, and the rewrite lost. A verdict
@@ -1950,6 +1970,92 @@ from the correction pass and from a specialist are three facts about three diffe
 written AFTER `agent_call`, so the reply on record in the round logs is still the model's own —
 the census behind this row was a $0 regrade of logs already on disk, and a strip applied before
 the log would have left no way to take that measurement or any future one.
+
+### `page_split_words`
+
+A page wrote one word two ways (`page`, `image`, and `words` — one entry per word, `"Compos-ite /
+Composite"`, each spelling as the page wrote that one, in the order the hyphenated form first
+appears). The other half of the hyphen family above, and the half a strip cannot do: this is the
+**visible** break (U+002D), where `page_soft_hyphens` is the invisible one.
+
+A page that writes both `Compos-ite` and `Composite` has certainly got one of them wrong, whichever
+the paper prints, and that is the whole finding. It needs no word list — the evidence is the page's
+own two spellings, so English is never consulted, and #334 measured what happens when it is
+(`/usr/share/dict/words` scored `totals`, `states` and `populations` as non-words while failing to
+match `manu-facturing` against `manufacturing`, wrong in both directions) — no second model, no
+second arm and not the image. So it is free and exact on the same terms as a dropped link.
+
+It also fires where the strip does not, and on **every** arm rather than one. On #334's 100-page
+three-arm census the soft-hyphen column is 63 occurrences on 9 pages from `claude-sonnet-4-6` and
+zero from the model Iris ships; this check's own column there — one word written both ways on one
+page, the predicate above, not the wider count of retained visible hyphens beside it — is
+`kimi-k2.5` (shipped) **6 words on 4 pages**, `claude-sonnet-4-6` 3 on 3, `gpt-5.6-luna` 2 on 2.
+
+The problem it raises does **not** say which spelling to keep, and that is deliberate to a degree
+the census measures: three of the shipped model's six are `inter-state` and `non-farm`, forms a 1962
+report genuinely prints, so on half the measured cases the hyphen is right and the joined spelling
+is the defect. "Join them" would have been the wrong instruction there, and on a page that
+legitimately prints both forms it is how a defect gets introduced. Only the agent holding the image
+can settle it, and `agents/page.md:131` already tells it how.
+
+Read **after** the soft-hyphen strip, and that order is load-bearing rather than tidy:
+`Govern<U+00AD>ment` has contiguous letters, so a page carrying the invisible break writes the word
+whole as far as any text comparison can tell and the contradiction is hidden (#334 measured this on
+the page this rule comes from).
+
+**A lower bound, not a rate.** A page that breaks a word and never writes it whole is invisible
+here, since it is the second spelling that makes the first a contradiction. #334's cross-arm
+version of this test asks whether *another* arm delivered the word whole, and that is not available
+at run time with one arm running. Three further limits, each narrowing in the same direction:
+attribute text is not examined at all, `alt` included (`href`, `id` and `class` carry hyphens by
+convention, and `id="non-tax"` beside the word `nontax` is not a contradiction about anything a
+reader is shown); only unhyphenated words corroborate, so a page writing `Commu-nications` and
+`communications-related` and never the bare word finds nothing; and only one internal hyphen counts,
+so `Con-struc-tion` and `Trans-porta-tion` — two breaks each, on `p032` of the same census, and
+missed by #334's first detector for this same reason — are skipped. That last one is a limit and not
+a proof: neither of those words is written whole anywhere on its own page, so admitting them would
+have added nothing to this count on **that** corpus, which is a fact about the corpus. One hyphen is
+kept because it is the shape of the common case and because it keeps a printed compound like
+`state-by-state` from being compared against a `statebystate` nothing writes.
+
+A fifth limit, of a different kind from those four: they are about which tokens get compared, this
+one is about a break that never becomes a token. The hyphen must be followed by a letter
+immediately, so a fragment that soft-wraps its own source at the break (`Compos-` ending a line,
+`ite` beginning the next) is read as two whole words and nothing is a candidate. Under-detection
+again, and deliberately not widened to allow whitespace after the hyphen: that needs whitespace out
+of the lookup key too, and the same widening then fires across an element boundary
+(`<td>Total-</td><td>farm</td>` beside a `Totalfarm`, since every tag renders as a space here), and
+it reports a `split` string the document does not contain, which is the one thing a corrector is
+asked to go and find. Such a fragment also shows the reader `Compos- ite`, hyphen and space — a
+defect on its own terms rather than the contradiction this rule is about.
+
+Skipped means skipped in **both** roles: a word carrying more than one hyphen is neither a candidate
+nor evidence that some other word was broken. Both halves matter, and the second is the one a reader
+would not assume. The tokeniser consumes a whole hyphen chain as one word, so `up-to-date` does not
+contribute a bare `date`, and a page writing `up-to-date` beside `dat-e` reports nothing — the
+`joined` spelling in every finding is one the page writes on its own. Such a word still counts
+toward `words_checked`, since that field is how many words were looked at.
+
+### `page_split_words_unrecovered`
+
+A correction bought for a word written two ways was kept and a word is still written two ways
+(`page`, `image`, `words` — the pairs that remain, recomputed on the delivered fragment rather than
+intersected with the list going in, so a correction that joined `Compos-ite` and broke
+`col-lections` in the same reply reads as a defect **moved** rather than one untouched). Only logged
+where the correction was bought for a split word in the first place.
+
+One reading this line does **not** support that its three siblings do. A link still missing, an alt
+still generic and an id still duplicated are failures. A word still written two ways may be the
+model declining, and on this check a decline is a legitimate answer: Iris knows the page
+contradicts itself and cannot know which spelling the printing carries, so the problem it raises
+asks rather than instructs, and ends by saying that a page which really prints both spellings
+should say so and change nothing. The request licenses that refusal by name rather than leaving it
+implied — see the second mark under
+[`page_correction_declined`](#page_correction_declined), which is the sentence that makes this
+reading a real channel instead of a hope. This line therefore says the contradiction survived the pass and
+nothing about whose fault that is. [`page_correction_declined`](#page_correction_declined), keyed by
+the same `image`, is where the model's side of it is, and a cited decline lands in `declined.words`
+rather than `declined.code_checked` for exactly this reason.
 
 ### `page_caption_claim`
 
@@ -2239,16 +2345,16 @@ The diagnostics fold counts them as `verification.verify_inconsistent`.
 
 ### `page_corrected`
 
-What a self-correction pass did (`trigger`: `verify`, `links`, `alt`, `ids` or `both`; `problems`:
-how many it was given; `kinds`: what the verdict said was wrong going in — the same set as
-`page_verify_failed`'s, and empty on the `links`, `alt` and `ids` triggers, where the defect was
-found by code against the file's own annotations, a closed word list or the fragment's own parsed
-tree rather than named by the verifier).
+What a self-correction pass did (`trigger`: `verify`, `links`, `alt`, `ids`, `words` or `both`;
+`problems`: how many it was given; `kinds`: what the verdict said was wrong going in — the same set
+as `page_verify_failed`'s, and empty on the `links`, `alt`, `ids` and `words` triggers, where the
+defect was found by code against the file's own annotations, a closed word list, the fragment's own
+parsed tree or the page's own two spellings of one word rather than named by the verifier).
 
 `both` means **more than one** source, which is what it has always counted: until #290 there were
-two and until #373 three, so no reading of an older log changes, and it no longer names which
-combination — `page_links_missing`, `page_generic_alt` and `page_duplicate_ids`, keyed by the same
-`image`, are where the per-source detail is exact.
+two, until #373 three and until #334 four, so no reading of an older log changes, and it no longer
+names which combination — `page_links_missing`, `page_generic_alt`, `page_duplicate_ids` and
+`page_split_words`, keyed by the same `image`, are where the per-source detail is exact.
 
 `result` is `kept` (it changed the delivered document), `rejected` (thrown away in favour of the
 page it was meant to improve — for **three** reasons, and only two of them have a rejection event:
@@ -2562,14 +2668,34 @@ is the number the reply cited, against the numbered list in the request (numbere
 matching a paraphrase back against the list would attribute a disagreement to the wrong entry),
 and is **absent** where the reply cited nothing rather than guessed at.
 
-`source` is which of the four checks raised that problem — `verify`, `links`, `alt`, `ids` — read
-off the bands of the concatenated list, and `null` where no number was cited or the number falls
-outside the list. It is the field that makes the risk measurable: a decline over `verify` is a
+`source` is which of the five checks raised that problem — `verify`, `links`, `alt`, `ids`, `words`
+— read off the bands of the concatenated list, and `null` where no number was cited or the number
+falls outside the list. It is the field that makes the risk measurable: a decline over `verify` is a
 disagreement with the Feedback Agent's reading and may well be right, while `links`, `alt` and
 `ids` were checked in code, so a decline there is a refusal of a fact — and those three entries
 are marked `(Iris checked this one in code.)` in the list the corrector reads, with the licence
 excluding a marked problem by name, so a `code_checked` decline is a corrector going past what it
 was told rather than following it.
+
+`words` does **not** count as `code_checked`, which is the one asymmetry in this field. What Iris
+verified there is that the page contains both spellings, and that is not arguable; which spelling is
+right is, and the problem's own text says so — it ends by inviting the corrector to say the page
+really prints both and change nothing. So a decline citing `words` may be the licence working
+exactly as written, and folding it into the field that counts abuse of the licence would put
+compliance in the numerator. It gets its own `declined.words` count in §7b instead.
+
+That asymmetry is in the request too, and it has to be, or the count above measures a channel the
+request closes. A split-word entry carries a **different** mark —
+`(Iris checked in code that both spellings are on this page, not which one is right.)` — because the
+sentence excluding a marked problem from the licence ends "so fix it", which is true of a missing
+link, a placeholder alt and a duplicated id and false here. `non-farm`, `co-operation` and
+`inter-state` are forms a 1962 report prints, so "fix it" on such a page means joining a word the
+page does not print into the delivered document. The request therefore carries one more sentence,
+naming that mark: both spellings really are in the HTML, so that much is not in question, but which
+one the page prints is for the image to answer, and if the image shows both then no change is to be
+made. It is the only place in that request where what the image shows is a reason **not** to act,
+and it says so in those words, because the paragraph above it spends four sentences ruling that
+reason out everywhere else.
 
 `problems` is the denominator without which none of this can be read — 2 declined of 2 is a
 correction refused outright, 2 of 9 is the pass working. Written per **page** and not folded into
@@ -2584,8 +2710,15 @@ counts it as `verification.declined`.
 A second verdict on a corrected page (`ok`, `problems`), with `problems_before` / `problems_after`
 — how many **fidelity** problems the page was sent to be corrected with, and how many this verdict
 names — `kinds_before` / `kinds_after`, the same two sides as kinds, and `links_before` /
-`alt_before` / `ids_before`, the missing links, placeholder alts and duplicated ids it was also
-given. The kinds are what turn "the recheck did not pass" into an answer about the correction:
+`alt_before` / `ids_before` / `words_before`, the missing links, placeholder alts, duplicated ids and
+words written two ways it was also given. The four are kept out of `problems_before` so that a page
+with one fidelity problem and two code-found defects does not read as three-in-one-out; on the first
+three the reason is also that a verdict judged against the **image** cannot see them at all, and
+`words_before` is the exception — a visible hyphen is on the page, and #334 found both candidate
+verifiers raising that family unprompted, so `problems_after` may name a split word `words_before`
+also counts. The exact answer to whether any of the four came back is the matching `_unrecovered`
+line, not the difference between these two numbers. The kinds are what turn "the recheck did not
+pass" into an answer about the correction:
 
 `content_missing` in and `alt_quality` out is a page whose content came back and whose description
 is now the complaint, while `content_missing` on both sides is a correction that did not do the
@@ -4300,9 +4433,9 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
                              "structure_wrong": 1, "a11y_only": 0, "alt_quality": 1,
                              "content_or_structure": 2, "undecided_pages": 1 },
     "results": { "kept": 12, "rejected": 0, "identical": 2, "empty": 0, "failed": 0 },
-    "triggers": { "verify": 13, "links": 1, "alt": 0, "ids": 0, "both": 0 },
+    "triggers": { "verify": 13, "links": 1, "alt": 0, "ids": 0, "words": 0, "both": 0 },
     "declined": { "pages": 1, "problems": 1, "problems_offered": 31, "code_checked": 0,
-                  "unattributed": 0 },
+                  "words": 0, "unattributed": 0 },
     "effects": { "alt_only": 4, "text": 8, "attrs": 3, "structure": 6, "text_grew": 5, "text_shrank": 1 },
     "rechecks": {
       "sampled": 1, "sampled_ok": 1, "sampled_unjudged": 0,
@@ -4461,11 +4594,16 @@ one document's bill. `corrections` and **not** `verify_failed`: a page that pass
 re-rendered too when the code finds a link the model dropped, and that costs the same page call, so
 `triggers` is the split — `verify` is a page the Feedback Agent rejected, `links` a page that passed
 and lost a link, `alt` a page that passed and described an image with a placeholder (#290), `ids` a page
-that passed and used one `id` on two elements (#373), `both` one with more than one of those. `alt` and
+that passed and used one `id` on two elements (#373), `words` a page that passed and wrote one word two
+ways (#334), `both` one with more than one of those. `alt` and
 `ids` are both expected to be 0 on a healthy run, and that is the point of counting them: the alt rule
 flags nothing this pipeline writes and the id rule flags 2 of 1,501 measured page replies, none of them
 from the model deployed today, so a non-zero is either a page agent that has started writing
-placeholders or reusing ids, or a regression in one of the rules. `verify_failed / (pages_verified - pages_unjudged)` is the
+placeholders or reusing ids, or a regression in one of the rules. `words` is the one of the four
+expected to be **non-zero**, and so the one with a cost line: on #334's 100-page census the shipped
+model wrote one word two ways on 4 pages of the 91 it produced, and no arm was clean, so this trigger
+buys a page call for a page that had already passed at a rate near 4%. It is the first field to read
+when `corrections` grows and `verify_failed` does not. `verify_failed / (pages_verified - pages_unjudged)` is the
 rejection rate; the raw counts are reported rather than the percentage, because a rate over three
 pages is not a measurement.
 
@@ -4488,11 +4626,22 @@ the parsed fragment, so it is wrong by construction, where a declined `verify` p
 disagreement with a *reading* and may well be right. A non-zero there is a corrector reading the
 licence wider than it is written — the risk #373 states against its own proposal, countable now rather
 than arguable later. What makes that reading of the number sound is that the corrector can tell the
-two apart: the three problems Iris raised itself are marked `(Iris checked this one in code.)` in the
-list it is shown, and the licence excludes a marked problem by name. Without the mark a corrector
-following the licence exactly would decline into those bands — their wordings are the licence's own
-examples almost verbatim — and this field would be counting compliance. `unattributed` is a decline that cited no problem number, or cited one the request
-never listed: not evidence about a code-checked fact and not nothing either, but a disagreement whose
+two apart: the `links`, `alt` and `ids` problems Iris raised itself are marked
+`(Iris checked this one in code.)` in the list it is shown, and the licence excludes a marked problem
+by name. Without the mark a corrector following the licence exactly would decline into those bands —
+their wordings are the licence's own examples almost verbatim — and this field would be counting
+compliance. `words` is the fifth code-checked band, it carries a **different** mark
+(`(Iris checked in code that both spellings are on this page, not which one is right.)`) and it is
+counted **apart** from `code_checked`, all three for one reason: on a word written two ways, Iris
+verified that both spellings are present and cannot know which the printing shows, so the entry is
+settled in one part and open in the other. The request says that in its own sentence, since the
+sentence excluding a marked problem ends "so fix it" and that would order the corrector to join
+`non-farm` into a `nonfarm` the page never prints. A decline there is therefore the licence working
+rather than being stretched. Reading it as misuse would put compliance in the one field whose
+job is to count abuse. A non-zero `words` is a rate to compare against the
+[`page_split_words`](#page_split_words) lines — how often a page really did print both — and not a
+number to act on by itself. `unattributed` is a decline that cited no problem number, or cited one
+the request never listed: not evidence about a code-checked fact and not nothing either, but a disagreement whose
 subject cannot be recovered, which is the first thing to read if `problems` is large and the lines are
 not making sense. Zero on every log written before the field existed, and the block prints at zero on a
 run where nothing declined — `pages: 0` against a non-zero `problems_offered` is the measurement this
