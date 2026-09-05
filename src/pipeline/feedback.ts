@@ -661,9 +661,9 @@ export async function regressionGate(
   // Fixtures are independent — a stored image, its accepted output, and a score computed
   // from the two — so they are checked together instead of one after another. Serially
   // this gate was up to MAX_GATE_FIXTURES x 2 vision calls end to end (a re-run and a
-  // verification each), and it runs while the session that triggered it is still not
-  // `ready_for_review`: the user waits for it, and so does every upload behind it in the
-  // run queue, since the run holds its `max_concurrent_runs` slot throughout.
+  // verification each). The session that triggered it has been `ready_for_review` since before
+  // training began (#156), so the user is no longer waiting on it — but every upload behind them
+  // in the run queue still is, since the run holds its `max_concurrent_runs` slot throughout.
   //
   // The two calls WITHIN a fixture stay sequential, because the second judges the output
   // of the first.
@@ -885,8 +885,13 @@ export async function proposeAgentUpdatesFromFeedback(
   if (!updated || updated === target.content.trim()) return [];
 
   if (target.sessionBuilt) {
-    // Train the session-built agent in place: overwrite its tmp file so the
-    // new-agent PR opened on close carries the improved prompt.
+    // Train the session-built agent in place: overwrite its tmp file so the rest of the
+    // session uses the improved prompt (`loadAgent` prefers tmp over the library).
+    // Nothing carries it any further than the session — the contribution model files
+    // issues rather than PRs, and `runContribution` SKIPS a type an agent already exists
+    // for, tmp included. Unreachable today for the same reason `agent_content` is always
+    // null (agents/loader.ts): the only writer of that directory is this line, which is
+    // behind the flag that only a file there can set.
     writeFileSync(join(ctx.paths.tmpAgentsDir(ctx.sessionId), target.file), updated);
     ctx.log.event("agent_trained", { agent: target.file, scope: "session_built" });
     return [];
