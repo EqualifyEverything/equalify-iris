@@ -5,6 +5,13 @@ Decisions the code makes that are worth knowing before you read it.
 This file is for someone about to change the code. If you only want to run Iris, the
 [README](../README.md) is enough.
 
+`fragment`, `block`, `verdict` and `round` are used here in the senses
+[README § Terms](../README.md#terms) gives them. Both senses of `round` appear: a round of the
+reader/editor loop, and a captured run of a corpus, which is named as a **bench round** or by its
+run directory (`runs-reader-newsha`). **`declaration` is the exception** — the one use of it below is
+the `lang` declaration on the document's root element, not the page agent's claim that a page holds
+no content, which is the sense the README defines first.
+
 Several of these decisions reverse an earlier design, so they are written as decisions rather than
 as a diff against it. Iris was specified up front in a requirements document. That document was
 amended twenty-odd times as the build disagreed with it, and it has now been retired. The design

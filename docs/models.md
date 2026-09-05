@@ -17,6 +17,13 @@ before that one. Where they differ, **sprint-246.md §7 names the three claims h
 one open question it answers** — the largest being that `page`, swapped and live on `moonshotai.kimi-k2.5`
 below, now has a further swap recommended on top of it.
 
+`round`, `block` and `verdict` all mean something specific in this repo, and
+[README § Terms](../README.md#terms) defines them. Most of what follows is about **benchmark**
+rounds — one captured run of a corpus, named like `runs-extract100-95ca64c` — rather than about
+rounds of the review loop. **block** appears below in three of its senses: a block of the document,
+which is what the copy editor patches; a mapping in the config file, such as the `bedrock` block; and
+a group of rows in one of the tables.
+
 Four of the five agents have a cheaper model in play, and no two of the four are at the same stage.
 **One was applied, one was declined, one is recommended and waiting on a decision, and one went back
 to open after the seat that ran its round withdrew the recommendation** — and none of the four was

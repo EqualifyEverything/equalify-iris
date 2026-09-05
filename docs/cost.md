@@ -1,7 +1,10 @@
 # What Iris costs
 
 **10.7¢ a page.** Measured 2026-09-02 over 100 scanned pages — round `runs-postswap-312`, total
-**$10.7106**. That is the configuration deployed on that date, priced end to end.
+**$10.7106**. That is the configuration deployed on that date, priced end to end. A **round** here
+is one captured run of a fixed corpus through the pipeline, kept with its own logs and prices — not
+a round of the review loop, which is the other thing that word means in this repo
+([README § Terms](../README.md#terms)).
 
 | step | cost | share | calls | model | what it's for |
 |---|---|---|---|---|---|

@@ -59,6 +59,53 @@ suggestion every session, under a different person's name each time. If you want
 add a repository rule keyed on the title prefix; it applies them as the repo rather than as the
 filer, so it works no matter who filed.
 
+## Terms
+
+Five words in this repo mean something narrower than they do in ordinary English. Every document
+here uses them in the senses below. **Every one of the five also carries at least one unrelated
+sense**, listed with it, and the text has to say which it means.
+
+- **fragment** — one page's extracted HTML, plus the record of where it came from. A fragment
+  carries the source page image, the page's position in the submitted document, which agent
+  produced it, the agent's own log line, and any edges where content looked cut off (`Fragment` in
+  `src/pipeline/fragment.ts`). Assembly joins fragments in that order; it does not re-read pages.
+  Two unrelated uses: a **URL fragment identifier**, the `#id` a link points at, which is what
+  [docs/API.md](docs/API.md)'s `links_unresolved_rate` is about; and an `issue-<n>` **fragment of a
+  branch name** in [docs/ci.md](docs/ci.md).
+- **block** — one top-level element of the assembled document, with everything nested inside it. The
+  document is normally shown to the Copy Editor with a `<!-- @block N -->` comment above each one,
+  and the editor replies with replacements for the blocks it wants to change rather than with a new
+  document. A document too long to correct in one reply is instead cut **at those same boundaries**
+  into sections, and a section request carries no `@block` markers and is answered whole
+  (`EDITOR_SYSTEM` and `EDITOR_SECTION_SYSTEM` in `src/pipeline/review.ts`). Three unrelated uses:
+  a mapping in the config file — the `providers` block, the `bedrock` block; a `run:` block in a
+  GitHub Actions workflow; and a group of table rows, as in [docs/models.md](docs/models.md)'s "once
+  per corrector block" and [docs/cost.md](docs/cost.md)'s "those three blocks".
+- **verdict** — the Feedback Agent's decision about one page: two booleans, `faithful` and
+  `accessible`, plus the problems it lists. Both booleans have to be there. A reply missing either
+  one is not a verdict on that page and is not counted as one (`VerifyOutput` in
+  `src/pipeline/feedback.ts`). One unrelated use, in [CONTRIBUTING.md](CONTRIBUTING.md) and
+  [docs/ci.md](docs/ci.md): a CI session's structured output — the review bot's advisory decision
+  about a pull request, and the triage session's about an issue. That is about your repository rather
+  than about a page.
+- **declaration** — the page agent's answer that a page holds no content. It is a claim, not an
+  absence. The agent asserts blankness with `"blank": true` or says so in its log, and the pipeline
+  can refuse the claim: a page too dark to read is not a blank page (`blankDeclaration` in
+  `src/pipeline/extraction.ts`). One unrelated use: the **`lang` declaration** on the document's root
+  element, which is [docs/design-notes.md](docs/design-notes.md)'s only use of the word and appears
+  once in [docs/API.md](docs/API.md), under `page_main_stripped`.
+- **round** — one pass of the review loop. The Reader reads the whole document, and the Copy Editor
+  answers what it raised. `max_review_iterations` (default 3) caps the editor rounds, so the Reader
+  can read up to four times. The measurement documents mean something else by the word. A
+  **benchmark round** or a **deployed round** is one captured run of a corpus through the pipeline,
+  named like `runs-postswap-312` and kept with its own logs and prices; the two labels say where it
+  ran.
+  All six documents that use the word that way say so at the top — [docs/API.md](docs/API.md),
+  [docs/cost.md](docs/cost.md), [docs/design-notes.md](docs/design-notes.md),
+  [docs/models.md](docs/models.md), [docs/sprint-246.md](docs/sprint-246.md) and
+  [docs/verifier-calibration.md](docs/verifier-calibration.md). One line of
+  verifier-calibration.md uses it for a third thing, a page's correction pass ("wasted rounds").
+
 ## Quick start
 
 Requires **Node.js 24+** (the service runs TypeScript directly via Node's built-in type
