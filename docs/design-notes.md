@@ -99,9 +99,15 @@ Each decision below is one bullet, and the headings only group them:
   many sections came back — or, where nothing could be, that no editor pass ever worked on the
   issues `@unresolved` lists. A third comment, `@lint-unavailable`, is emitted when axe-core could
   not run on the document at all. Nothing in it was checked, so an `@unresolved` list that is short
-  — or absent — is not evidence that there is nothing left to fix. A fourth, `@page-failed`, stands
-  where the content of a page extraction lost would have been (`assembly.ts`, and the rejoin list
-  below).
+  — or absent — is not evidence that there is nothing left to fix.
+
+  Those three are not the whole set: `wrapDocument` emits six statements of this kind, and numbers
+  them in its own comments (`assembly.ts`). `@page-failed` stands where the content of a page whose
+  extraction was lost would have been, emitted as that page's own fragment (`extraction.ts`, and the
+  rejoin list below). `wrapDocument` adds a document-level trailer of the same name listing every
+  such page. `@page-uncorrected` lists pages whose content IS in the document and never passed
+  Iris's own fidelity check. `@review-unread` gives how many of the windows the document was read in
+  came back with no usable answer — `@lint-unavailable`'s warning, about a different gate.
 - **Contributions are issues, not PRs.** Instead of fork+PR-on-close, when the extractor flags
   content a specialist would handle better, Iris drafts that agent and files a
   `New agent suggestion: <type>` GitHub issue with the agent code + context. Feedback that
