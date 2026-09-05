@@ -1204,17 +1204,33 @@ their `model_call`, so the tiebreak this section offers elsewhere fails here. Th
 that follows them delimits the pair, but it sits after **both** halves, so it does not split them by
 itself. Order and count do that. The regression gate is awaited to completion before the eval gate
 starts, so every one of the regression gate's lines precedes every one of the eval gate's. And the two
-halves are the same length. Both gates read the same fixture directory, sorted and capped the same way
-at three cases, and skip a fixture on the same two conditions: a case file that will not parse, an
-image file that is not there. Each then issues exactly one of these calls per surviving fixture — so
-the first half is the candidate prompt's, and the second half the current prompt's. The regression gate
-does emit a second `agent_call` per fixture, the verifier's, but that one names the Feedback Agent's
-file and carries a real `agent_sha`, which is what keeps it out of this population.
+halves are the same length, subject to the two caveats below. Both gates read the same fixture
+directory, sorted and capped the same way at three cases, and skip a fixture for the same two reasons:
+a case file that will not parse, an image file that is not there. Each then issues exactly one of these
+calls per surviving fixture — so the first half is the candidate prompt's, and the second half the
+current prompt's. The regression gate also emits a verifier `agent_call`, for each fixture that
+survived its own checks, and that one names the Feedback Agent's file, carries a real `agent_sha`, and
+reads `phase: "extraction"` rather than `review`, so it stays out of this population. Fixtures it
+never reaches — the replay produced nothing, or the content check failed — have a replay line and no
+verifier line, which is a gap in *that* set rather than in this one.
+
+Both caveats are themselves visible in the log, so the rule can be checked before it is applied. **A
+gate that threw leaves a short half.** A provider error or timeout on any one replay rejects the whole
+gate, and neither gate call is wrapped, so the round logs `feedback_training_failed` and the run
+finishes — with whichever replay lines were already written still in place. That is the case to watch
+for, because a truncated eval half read under the count rule is attributed to the candidate prompt,
+which is the exact confusion this paragraph exists to prevent. **And the fixture set can change
+between the two reads.** The directory is keyed by the agent rather than by the session, and the two
+reads are a whole gate apart, so another session accepting a fixture in that window can leave a
+two-line half followed by a three-line one. The paired scoring absorbs that for the *scores*; only the
+count rule here depends on it.
 
 An `eval_gate` line missing altogether is the other half of the rule, and it does not mean the log was
-cut short. A failing regression gate logs `agent_update_blocked` and returns before the eval gate is
-reached, so a training round with no `eval_gate` ran no eval gate: every `agent_sha: null` replay in it
-was the regression gate's.
+cut short. A regression gate that *failed* logs `agent_update_blocked` and returns before the eval gate
+is reached — so a round with no `eval_gate` **and** no `feedback_training_failed` ran no eval gate, and
+every `agent_sha: null` replay in it was the regression gate's. A round carrying
+`feedback_training_failed` instead is the throwing case, and there the replays could belong to either
+gate.
 
 One `agent` value spans two cases: the merge sends `MERGE_SYSTEM` under the name `page.md` with
 `agent_sha: null`, beside ordinary page calls that carry `page.md`'s real SHA. So `agent_sha`, and the
