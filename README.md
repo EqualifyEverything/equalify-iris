@@ -59,6 +59,39 @@ suggestion every session, under a different person's name each time. If you want
 add a repository rule keyed on the title prefix; it applies them as the repo rather than as the
 filer, so it works no matter who filed.
 
+## Terms
+
+Five words in this repo mean something narrower than they do in ordinary English. Every document
+here uses them in the senses below. Three of them also carry a second, unrelated sense, and the
+text has to say which one it means.
+
+- **fragment** — one page's extracted HTML, plus the record of where it came from. A fragment
+  carries the source page image, the page's position in the submitted document, which agent
+  produced it, the agent's own log line, and any edges where content looked cut off (`Fragment` in
+  `src/pipeline/fragment.ts`). Assembly joins fragments in that order; it does not re-read pages.
+- **block** — one top-level element of the assembled document, with everything nested inside it. The
+  document is shown to the Copy Editor with a `<!-- @block N -->` comment above each one, and the
+  editor replies with replacements for the blocks it wants to change rather than with a new document
+  (`src/pipeline/review.ts`). The word also names a mapping in the config file — the `providers`
+  block, the `bedrock` block — and a `run:` block in a GitHub Actions workflow. Those are YAML, not
+  document structure.
+- **verdict** — the Feedback Agent's decision about one page: two booleans, `faithful` and
+  `accessible`, plus the problems it lists. Both booleans have to be there. A reply missing either
+  one is not a verdict on that page and is not counted as one (`VerifyOutput` in
+  `src/pipeline/feedback.ts`). In [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/ci.md](docs/ci.md),
+  a verdict is the CI review bot's advisory decision about a pull request. That is a different
+  thing, about your code rather than about a page.
+- **declaration** — the page agent's answer that a page holds no content. It is a claim, not an
+  absence. The agent asserts blankness with `"blank": true` or says so in its log, and the pipeline
+  can refuse the claim: a page too dark to read is not a blank page (`blankDeclaration` in
+  `src/pipeline/extraction.ts`).
+- **round** — one pass of the review loop. The Reader reads the whole document, and the Copy Editor
+  answers what it raised. `max_review_iterations` (default 3) caps the editor rounds, so the Reader
+  can read up to four times. In [docs/cost.md](docs/cost.md), [docs/models.md](docs/models.md) and
+  [docs/sprint-246.md](docs/sprint-246.md), a round is a **benchmark** round instead — one captured
+  run of a fixed corpus through the pipeline, named like `runs-postswap-312` and kept with its own
+  logs and prices. Those documents are about what a model costs, not about the loop.
+
 ## Quick start
 
 Requires **Node.js 24+** (the service runs TypeScript directly via Node's built-in type

@@ -5,6 +5,11 @@ This is the model-selection sprint's report — how every figure in
 the report issue, and what the sprint got wrong. **If you want the price and not the reasoning, read
 [docs/cost.md](cost.md) instead**; it is a price sheet and makes none of the claims below.
 
+A **round** below is a benchmark round — one captured run of a fixed corpus through the pipeline,
+kept with its own logs and prices — and a **block** is a mapping in the config file, such as the
+`bedrock` block. [README § Terms](../README.md#terms) defines both, along with the other sense each
+of those words carries in this repo.
+
 Iris cost about **19.4 cents a document page** in model bills when the sprint
 ([#246](https://github.com/EqualifyEverything/equalify-iris/issues/246)) started. One change has
 shipped and measured **10.7 cents** — a 45% cut with no code touched at all, out of **two lines of

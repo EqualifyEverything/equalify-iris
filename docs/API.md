@@ -11,6 +11,11 @@ runs the whole lifecycle against mock GitHub + mock model services and asserts e
 Requests are rate limited per client, and every response says how much of the budget is left:
 §3.2 has the numbers, the headers, and what a `429` looks like.
 
+`fragment`, `block`, `verdict`, `declaration` and `round` all mean something specific here, and
+[README § Terms](../README.md#terms) defines them. Both senses of `round` appear below: a round of
+the reader/editor loop, and a captured run of a corpus, which the text calls a **bench round** or a
+**deployed round**.
+
 ```bash
 export BASE=http://localhost:8080/v1
 ```
