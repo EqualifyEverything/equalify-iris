@@ -1244,24 +1244,47 @@ test("§7 states how much of the run log it does not document, and the count is 
   //   1. `ctx.log.event("name", …)` everywhere in the pipeline — 108 names.
   //   2. `this.onEvent?.("model_call_start", meta)` in src/providers — `model_call_start` and
   //      `model_call`, the two §7 documents best.
-  //   3. a RunLog method that skips event() and hands the private writer a literal type. `agentCall`
-  //      does, on every one of 13 call sites, so `agent_call` is one of the commonest lines in the
-  //      log while its name appears nowhere either grep above can reach.
+  //   3. a RunLog method that skips event() and names its own type. `agentCall` does, on every one of
+  //      13 call sites, so `agent_call` is one of the commonest lines in the log while its name
+  //      appears nowhere either grep above can reach.
+  //
+  // The first two are searched across src/, because those calls are made from everywhere. The third
+  // is searched in src/store/runlog.ts ALONE, and every literal `type` in that file counts however
+  // its object literal is ordered — `{ phase, type: "x" }` is the same event as `{ type: "x", phase }`
+  // and a pattern keyed on `this.write({ type:` would see only the second. Scoping it to that file is
+  // a claim about the rest of src/, so the claim is checked below rather than assumed.
+  const RUNLOG = join(SRC, "store/runlog.ts");
   const emitted = new Set<string>();
   for (const file of sources(SRC)) {
     const text = readFileSync(file, "utf8");
     for (const m of text.matchAll(/(?:\.event|onEvent\?\.)\(\s*"([a-z0-9_]+)"/g)) emitted.add(m[1]!);
-    for (const m of text.matchAll(/this\.write\(\s*\{\s*type:\s*"([a-z0-9_]+)"/g)) emitted.add(m[1]!);
   }
+  const runlog = readFileSync(RUNLOG, "utf8");
+  for (const m of runlog.matchAll(/\btype:\s*"([a-z0-9_]+)"/g)) emitted.add(m[1]!);
+
+  // What makes one file enough: the run log is appended to in exactly one place. If a second file
+  // ever opens it, shape 3 stops being findable where this looks and the count goes quietly stale —
+  // which is the failure `agent_call` already demonstrated once.
+  const appenders = sources(SRC)
+    .filter((f) => readFileSync(f, "utf8").includes("appendFileSync("))
+    .map((f) => f.slice(ROOT.length));
+  assert.deepEqual(
+    appenders,
+    ["src/store/runlog.ts"],
+    `something outside src/store/runlog.ts appends to a file: ${appenders.join(", ")}. If any of ` +
+      "them writes the run log, reading shape 3 from runlog.ts alone no longer sees every event — " +
+      "widen the search with the writers.",
+  );
+
   assert.ok(emitted.size > 90, `only ${emitted.size} event names found in src/ — the grep missed`);
-  // The third shape is the fragile one: it is one regex against one method body, and losing it would
-  // silently shrink the count rather than fail anything, which is how `agent_call` went unnoticed.
+  // Losing shape 3 would SHRINK a count rather than fail anything, which is how `agent_call` went
+  // unnoticed: `model_call` and `model_call_start` have §7 sections, so a broken shape-2 pattern
+  // fails `ghosts` loudly, while an event with no section just stops being counted.
   assert.ok(
     emitted.has("agent_call"),
-    "`agent_call` is not in the emitted set. Either the third pattern above stopped matching " +
-      "src/store/runlog.ts, or that literal `type` was renamed — check which, because the first " +
-      "means fixing the pattern and not the count. Every RunLog method that hands the writer a " +
-      "literal `type` has to be seen here.",
+    "`agent_call` is not in the emitted set. Either the shape-3 search above stopped matching " +
+      `${RUNLOG}, or that literal \`type\` was renamed — check which, because the first means ` +
+      "fixing the search and not the count.",
   );
 
   const api = readFileSync(join(ROOT, "docs/API.md"), "utf8");
