@@ -967,24 +967,16 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is not the whole log.** `src/` emits **111** event types; the 89 sections below cover
-**94** of them and **17** have no section here. Those 17 are one region of the pipeline rather than a
-scatter: what a run does with feedback once the document has been delivered. Training an agent on it
-(`agent_trained`, `regression_gate`, `eval_gate`, the `agent_update_*` family), filing a proposal as a
-GitHub issue where the library has no agent for what a page needed (`agent_issue`), and the harness
-that measures the verifier against seeded defects (`calibrate_call_failed`).
+**The index is the whole log.** `src/` emits **111** event types and every one of them has a section
+below — **106** sections, because a few cover a pair of events that are only read together. So a
+`type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
+longer emits.
 
-What is checked here is not those names but where they come from: every one of the 17 is emitted from
-`src/pipeline/feedback.ts`, `src/pipeline/contribute.ts`, `src/pipeline/calibration.ts`, or one of the
-two catches in `src/pipeline/orchestrator.ts` that report those paths failing. **Three of them are not
-named for the family they belong to** — `contribution_failed` and `feedback_training_failed` are the
-orchestrator's catches, and `calibrate_call_failed` is calibration's — so a prefix grep over the names
-finds a smaller set than the emitting file does. One of the 17 an ordinary run never emits at all:
-calibration is a tool, `src/tools/calibrate.ts`, and not a phase of a run.
-
-A `type` missing from the index is a real event, not a malformed line. Every number, every event name
-and every file path above is checked against `src/`, so a new event fails this until it is either
-written up or counted — and an undocumented one emitted from outside those four files fails it too.
+That is a claim about the code, so it is not maintained by hand. The test suite reads both numbers
+back out of this paragraph and every event name out of the headings, and checks them against the emit
+sites in `src/` — three different call shapes, since a grep for one of them cannot see the others. A
+new event fails that test until it has a section here, and a section for an event `src/` no longer
+emits fails it too.
 
 | `type` | What it records |
 | --- | --- |
@@ -1075,8 +1067,25 @@ written up or counted — and an undocumented one emitted from outside those fou
 | [`reader_page_reports_deduped`](#reader_page_reports_deduped) | Reader reports about a page with **no content** were reduced to one per page |
 | [`review_converged`](#review_converged) | The loop stopped early because a round changed nothing |
 | [`run_signals_failed`](#run_signals_failed) | The quality tally could not be written for this document |
+| [`feedback_classified`](#feedback_classified) | A correction was classified and **nothing was recorded** |
+| [`feedback_learned`](#feedback_learned) | A lesson was recorded, and how many sessions have reported it |
+| [`feedback_agent_missing`](#feedback_agent_missing) | `agents/feedback.md` could not be loaded, so no proposal was made |
+| [`feedback_target_missing`](#feedback_target_missing) | The agent the correction was about could not be loaded |
+| [`agent_trained`](#agent_trained) | A session-built agent was improved in place, with neither gate run |
+| [`regression_gate`](#regression_gate) | The candidate prompt was re-run against the agent's own fixtures |
+| [`eval_gate`](#eval_gate) | Candidate against current, over the fixtures **both** could be scored on |
+| [`agent_update_blocked`](#agent_update_blocked) | A proposed prompt change was refused — two shapes, told apart by `reason` |
+| [`agent_updates_proposed`](#agent_updates_proposed) | A proposal cleared both gates and was written to the session |
+| [`agent_update_issue`](#agent_update_issue) | The proposal reached GitHub, as an issue or as a comment on one |
+| [`agent_update_issue_failed`](#agent_update_issue_failed) | Filing the proposal threw, and the run carried on |
+| [`agent_update_issue_skipped`](#agent_update_issue_skipped) | No GitHub token, so the proposal stayed on disk |
+| [`feedback_training_failed`](#feedback_training_failed) | The whole training step threw, and the document still shipped |
 | [`run_complete`](#run_complete) | The run's terminal marker, and the state it delivered |
+| [`agent_issue`](#agent_issue) | A new-agent suggestion was filed — or its `url` says it was a duplicate |
+| [`agent_issue_failed`](#agent_issue_failed) | A suggestion did not get filed, and which of the two calls failed |
+| [`contribution_failed`](#contribution_failed) | The filing step threw, **after** `run_complete` |
 | [`run_failed`](#run_failed) | The run threw, so there is **no document** |
+| [`calibrate_call_failed`](#calibrate_call_failed) | One calibration verifier call threw — a tool's line, never a run's |
 
 ### `run_queued` / `run_dequeued`
 
@@ -3935,6 +3944,211 @@ every delivered document including a flawless one because it is the document cou
 divide by — so a window with these lines under it is short by however many documents they cover,
 with those documents' defects gone from the numerators along with them.
 
+### `feedback_classified`
+
+The classify pass read a correction and **nothing was recorded**: `kind` is what it called the lesson,
+and `recorded` is `false`.
+
+There is no line for the other outcome. A lesson that was recorded writes
+[`feedback_learned`](#feedback_learned) instead, so `recorded` is `false` on every line of this type —
+the line's presence is already the negative case, and the field is not one to filter on.
+
+`kind` is the classifier's own word, or `"unknown"` when the reply could not be read as JSON or named
+no kind at all. A `kind` of `generalizable` or `a11y_policy` here is **not** a rejection of the
+lesson: those are the two values that qualify for recording, so a line carrying one of them means the
+reply named a kind worth keeping and left the `instruction` empty. Any other word is the one-off case:
+the correction was judged specific to this document, which is the outcome this path exists for.
+`"unknown"` is neither of those — it is a reply that could not be read, reaching the same branch.
+
+Recording is not what gates training. The update-proposal path runs on the same correction either
+way; with no recorded lesson, the issue it may file is titled from the model's one-line summary
+instead ([`agent_update_issue`](#agent_update_issue)).
+
+### `feedback_learned`
+
+A correction was distilled into a reusable instruction and recorded to the agent's example bank:
+`agent` is the file it was recorded against, `kind` is `generalizable` or `a11y_policy`, `instruction`
+is the sentence stored, and `count` is how many **distinct sessions** have now reported this same
+lesson.
+
+`count` is a session count, not a report count. It is the length of the lesson's session list, so one
+session submitting the same feedback twice leaves it at 1.
+
+**Recorded is not in use.** A `generalizable` lesson is injected into later runs only once `count`
+reaches **2**; an `a11y_policy` lesson is eligible from the first report. So a line with `kind:
+"generalizable"` and `count: 1` is a lesson that is stored and changing nothing yet, and
+[`page_lessons_injected`](#page_lessons_injected) is where it starts to cost anything. Eligibility is
+not injection either: the bank keeps 20 lessons per agent and injects at most 6, highest `count`
+first.
+
+`instruction` is the **stored** wording, which for a `count` above 1 is the wording of the first
+session that reported it: a repeat is matched on a normalized form of the instruction, and keeps the
+instruction it matched while updating the example around it.
+
+### `feedback_agent_missing`
+
+`agents/feedback.md` could not be loaded, so no agent-update proposal was made this round. `note`
+carries the whole of that; there is no other field, and no `agent`.
+
+It says nothing about the lesson bank, and the absence of a lesson has no line of its own: the
+classify pass reads the same file and returns silently when it is missing. So a run with this line
+recorded nothing either, and this is the only line saying why.
+
+### `feedback_target_missing`
+
+The agent the correction was about could not be loaded: `agent` is the file that was asked for, not
+one that was found.
+
+Every run asks for `page.md` — it is the one agent file the orchestrator names — so that is the value
+on every line of this type today.
+
+### `agent_trained`
+
+A **session-built** agent was improved in place: `agent` is its file, and `scope` is `session_built`,
+the only value.
+
+Neither gate ran, and none of the lines they write are in this round. The regression and eval gates
+guard changes to the shared agent library, and this agent is not in it: its file lives in the
+session's own `tmp/<id>/agents`, and it is overwritten there. A round with this line has no
+[`regression_gate`](#regression_gate), no [`eval_gate`](#eval_gate), no
+[`agent_updates_proposed`](#agent_updates_proposed) and no issue.
+
+No run writes this line today, and the reason is a loop — the same one
+[`agent_call`](#agent_call) describes for `agent_content`. The branch is taken only for an agent
+loaded from that tmp directory in preference to the library, and the only line in `src/` that writes a
+file there is this branch. Something outside the pipeline has to seed the directory first.
+
+### `regression_gate`
+
+The candidate prompt was re-run against the agent's stored fixtures before anything was proposed:
+`agent` is the file, `cases` how many fixtures were read, `passed` whether all of them held,
+`failures` **how many** did not, and `meanCoverage` the mean of the candidate's fixture scores.
+
+`failures` here is a count. On [`agent_update_blocked`](#agent_update_blocked) the field of the same
+name is the list of strings behind it, and both lines are written for the same blocked update — so
+summing `failures` across the log adds a list to a number.
+
+`cases` counts fixture **files**, not fixtures judged. It is at most 3, the newest three by filename,
+and a fixture whose JSON cannot be parsed or whose image is gone contributes to neither `failures` nor
+`meanCoverage`. `cases: 3, passed: true` is therefore consistent with nothing having been judged at
+all.
+
+`meanCoverage` is `null` when no fixture was scored, which is not a zero: a score of 0 is a fixture
+the candidate produced no output for, which is a failure on that fixture rather than an absence of
+evidence. The mean is over the candidate alone — the comparison against the prompt in the library is
+[`eval_gate`](#eval_gate)'s.
+
+**A missing line does not mean the gate was skipped; it means it had nothing to check.** An agent with
+no fixtures directory, or an empty one, passes without writing anything here. So an
+[`agent_updates_proposed`](#agent_updates_proposed) with no `regression_gate` above it is a proposal
+that was checked against nothing.
+
+The candidate's own text is not recoverable from the log. Its `agent_call` lines carry `agent_sha:
+null` and `agent_content: null`, which is [`agent_call`](#agent_call)'s one case where neither field
+recovers the prompt that went out.
+
+### `eval_gate`
+
+The candidate prompt scored against the current one over the fixtures **both** could be scored on:
+`current` and `candidate` are the two paired means rounded to three decimals, `paired` the fixtures
+that counted, and `unpaired` those that could not.
+
+`paired` and `unpaired` are lists of fixture image filenames, not counts.
+
+`current: null` and `candidate: null` mean no fixture was measurable on both sides. That is neither a
+regression nor a pass: the update proceeds on [`regression_gate`](#regression_gate)'s verdict alone.
+
+The pairing is what the line is for. Whether a fixture has a score is partly a property of the
+prompt: one that produced nothing scores 0, while a fixture too short to judge abstains. So averaging
+each side over whatever it happened to measure compared two different fixture sets, and one flake on
+the **current** prompt could deflate the bar enough to pass a real regression. Pairing drops
+such a fixture from both means instead of moving the threshold, and leaves it visible in `unpaired`,
+where on the current side it usually means the shipped agent is flaking.
+
+The gate blocks a drop of more than **0.02** only. A line here whose `candidate` is below its
+`current` by less than that is an update that went ahead.
+
+### `agent_update_blocked`
+
+A proposed prompt change was not proposed after all: `agent` is the file it was about.
+
+**Two shapes, and `reason` is what tells them apart.** With no `reason`, this is the regression gate:
+`failures` is the list of strings saying what the candidate broke, at most one per fixture, and the
+[`regression_gate`](#regression_gate) line above it carries the same information as a count. With
+`reason: "eval_regression"`, this is the eval gate: `current`, `candidate` and `paired` repeat the
+[`eval_gate`](#eval_gate) line above it, and there is no `failures` field at all — nothing broke, the
+candidate simply scored lower.
+
+Nothing is filed on either path, and the document the correction was about is unaffected: it was
+delivered before the training step began.
+
+### `agent_updates_proposed`
+
+A proposal cleared both gates and was written to the session's `agent-updates.md` — JSON, despite the
+extension: `agents` is a one-element list and `count` is always 1.
+
+The shape reads like a batch and there is never one. A feedback round proposes for the single agent its
+correction was about. `count` is not the number of proposals on disk either — the file is merged with
+any earlier round's proposals and deduped by agent — so a session that proposed twice writes two of
+these lines, each saying 1, over a file holding one entry per agent. Today that entry count is always
+1 as well: every proposal is for `page.md`.
+
+### `agent_update_issue`
+
+The proposal was filed on the upstream repo: `url` points at what to look at, `action` is `created` or
+`commented`, and `lesson_slug` is the slug the title was deduped by (`null` when nothing could be
+slugged).
+
+**`commented` is a success, not a proposal that was dropped.** Every proposal targets the same
+`page.md`, so before the lesson slug was part of the title, one open issue silently swallowed every
+later lesson from every user. A repeat now lands as a comment on the issue already tracking that
+lesson, carrying this session's id and its corroboration count, and `url` anchors that comment rather
+than the issue.
+
+The slug prefers the recorded lesson's instruction, because that string is stable across the sessions
+that corroborate it. With no recorded lesson ([`feedback_classified`](#feedback_classified)) it is a
+slug of the model's one-line summary, which is re-worded every run — so it separates lessons without
+reliably matching itself. `lesson_slug: null` is the case with no dedupe left at all: the title falls
+back to a bare `Agent update proposal: <agent>`, which can only ever match the one issue already open
+under it.
+
+The dedupe is a GitHub search, with the index lag described under
+[Contributions](#contributions-automatic): two sessions reporting the same lesson within a minute of
+each other can each write `created`.
+
+### `agent_update_issue_failed`
+
+Filing threw and the run carried on: `agent`, `error`, and `hint` when the failure looks like a
+permissions problem.
+
+`hint` is present only for a 403 or 404 that reached GitHub and does not look like a rate limit. Its
+absence is therefore not a claim that the credential is fine — a 403 whose headers say the rate limit
+is exhausted, and any error from a call that never reached GitHub at all, both arrive here without
+one.
+
+The document was delivered before this line was written, and the proposal is still on disk in the
+session's `agent-updates.md`. Filing is a side effect ([Contributions](#contributions-automatic)).
+
+### `agent_update_issue_skipped`
+
+There was no GitHub token, so nothing was filed: `reason` is `no github token`, the only value.
+
+The proposal stays in the session's `agent-updates.md`, which is where it was written either way —
+what this line says is that it stayed there. A deployment that sets `github.issue_token` never writes
+it.
+
+### `feedback_training_failed`
+
+The training step threw and the failure was contained: `error` is the message, and the only field.
+
+This is the catch in `src/pipeline/orchestrator.ts` around **both** halves of training — the
+classification and the update proposal — so the line does not say which half failed, and the first
+may have completed. The lines above it are what say how far it got.
+
+**The session is not failed by it.** The document has been `ready_for_review` since before the step
+began, and training is work about a future document rather than this one: there is no
+[`run_failed`](#run_failed) line under this one, and [`run_complete`](#run_complete) still follows it.
+
 ### `run_complete`
 
 The run's own terminal marker: `iterations` the review loop completed, `unresolved` issues left open
@@ -3956,6 +4170,58 @@ actually occupied the machine. §7b measures a finished run's duration up to thi
 There is no `pages` field here. The count of source pages is `images` on [`run_start`](#run_start),
 and `pages` on [`extraction_start`](#extraction_start).
 
+It is the run's terminal marker and **not the last line of the log**. The suggestion filing below runs
+after it, so [`agent_issue`](#agent_issue), [`agent_issue_failed`](#agent_issue_failed) and
+[`contribution_failed`](#contribution_failed) can all appear underneath it.
+
+### `agent_issue`
+
+A new-agent suggestion was filed on the upstream repo: `agent` is the normalized content type, and
+`url` the issue.
+
+**`url` is not always a URL.** A suggestion whose title already matches an open issue is skipped
+rather than filed, and the field then carries the literal string `(duplicate — skipped)`. That is the
+only thing separating the two outcomes on this line; there is no second field for it. The other filing
+path comments instead of skipping ([`agent_update_issue`](#agent_update_issue)), because its titles are
+not unique per document and skipping lost lessons.
+
+`agent` is a normalized type, and the checks that come before this line leave no trace. A suggestion
+naming one of the standard types, one this run has already filed under a different capitalization, or
+one the library or the session already has an agent for is dropped before anything is drafted, and
+this step writes nothing when that happens. Drafting is a vision call, which is what those checks are
+worth.
+
+### `agent_issue_failed`
+
+A new-agent suggestion did not get filed: `agent`, `error`, `stage`, and `hint` on the filing stage
+only.
+
+`stage` says which call failed, and the two are held apart deliberately. `stage: "draft"` is the
+**model** call that writes the proposed agent markdown; `stage: "file"` is GitHub. A provider error's
+message can itself contain `403` — the status is formatted into the text — so under one `try` a
+drafting failure would be indistinguishable from a permissions failure, and would collect a hint about
+a GitHub App that was never involved. A `stage: "draft"` line therefore never carries `hint`.
+
+On `stage: "file"`, `hint` follows the rule described under
+[`agent_update_issue_failed`](#agent_update_issue_failed): a 403 or 404 that reached GitHub and does
+not look like a rate limit.
+
+Either way the loop continues to the next suggestion, and neither stage costs the caller the document.
+
+### `contribution_failed`
+
+The suggestion-filing step threw outside its own two catches: `error` is the only field. Like
+[`feedback_training_failed`](#feedback_training_failed), it is written by a catch in
+`src/pipeline/orchestrator.ts` rather than by the step it is about, and it is named after neither — so
+a grep for that step's own lines, which are the `agent_issue` ones, does not find it.
+
+Both of the failures **inside** it are already contained per suggestion
+([`agent_issue_failed`](#agent_issue_failed)), so a line here is the step's own work — reading the
+agent library to decide which suggestions are new — rather than a draft or a filing.
+
+This line comes **after** [`run_complete`](#run_complete), and it does not fail the session. The
+document was delivered well before it; a second feedback round can have started by then.
+
 ### `run_failed`
 
 The run threw, so there is no document: `error` is the message, and §4 hands the client that same
@@ -3968,6 +4234,24 @@ Where a run does end in extraction, [`extraction_failed`](#extraction_failed) is
 which failure it was, and this `error` is written to match: with `blank: 0` it is the first page's own
 provider error, standing for all of them because that is the diagnosis; otherwise it counts the source
 pages reported blank, which an empty document could not.
+
+### `calibrate_call_failed`
+
+One verifier call in the calibration harness threw: `image` is the page, `defect` the seeded defect the
+copy it was judging carried, and `error` the message.
+
+`defect: null` means the failed call was judging the **undamaged** copy of that page.
+
+**An ordinary run never writes this line.** Calibration is a tool — `src/tools/calibrate.ts` — and not
+a phase of a run: nothing else in `src/` imports `src/pipeline/calibration.ts`, so a session's log
+cannot contain it.
+
+The failure is not counted as a miss. The call comes back marked unjudged, and every rate the report
+prints leaves the unjudged out of its denominator: a defect's catch rate is over what was applied
+minus what went unjudged, and the false-positive rate over the clean copies that were judged. The
+verdict substituted for the dead call reads `ok: true`, and is not counted as a pass either. What the
+line is for is telling a provider to retry apart from a verifier to fix, which is why an unparseable
+reply is counted separately from this.
 
 ## 7b. Diagnostics (timing / hang detection)
 

@@ -1233,13 +1233,14 @@ test("every run-log event in docs/API.md is both indexed and written up, once ea
   assert.deepEqual(empty, [], `§7 section(s) with no text under the heading: ${empty.join(", ")}`);
 });
 
-// §7 documents the events a reader looks something up about, not all of them, and its opening
-// paragraph says so with numbers. That paragraph exists because the sentence it replaced claimed
-// every event had a section, and 40 did not: a reader who greps a `run_start` line would have
-// concluded the log could not carry it. A count in prose that nothing reads goes stale on the next
-// commit, so the numbers are read back out of the paragraph and checked against src/. A new event
-// fails this until it is either written up or counted.
-test("§7 states how much of the run log it does not document, and the count is current", () => {
+// §7 now claims to document EVERY event src/ emits, which is the claim this test exists because of:
+// the sentence that first made it was wrong by 40 events, and a reader who greps a `run_start` line
+// would have concluded the log could not carry it. It was replaced by a paragraph that counted the
+// gap instead, and the gap has since been closed section by section. So the strong claim is back, and
+// this time nothing about it is maintained by hand — the numbers are read back out of that paragraph,
+// and the coverage itself is asserted rather than counted. A new event fails here until it is written
+// up.
+test("§7 documents every event src/ emits, and says so in numbers that are current", () => {
   // THREE emit shapes reach the log, and each is invisible to a grep for the others:
   //   1. `ctx.log.event("name", …)` everywhere in the pipeline — 108 names.
   //   2. `this.onEvent?.("model_call_start", meta)` in src/providers — `model_call_start` and
@@ -1332,104 +1333,83 @@ test("§7 states how much of the run log it does not document, and the count is 
   const ghosts = [...documented].filter((n) => !emitted.has(n)).sort();
   assert.deepEqual(ghosts, [], `§7 documents event(s) src/ no longer emits: ${ghosts.join(", ")}`);
 
-  const undocumented = [...emitted].filter((n) => !documented.has(n));
+  // The whole claim, and the one assertion a new event fails. Everything below it is about the
+  // paragraph that states it; this is the property. Kept as a list rather than a count so the failure
+  // names what to write up.
+  const undocumented = [...emitted].filter((n) => !documented.has(n)).sort();
+  assert.deepEqual(
+    undocumented,
+    [],
+    `§7 says it documents every event src/ emits, and these have no section: ${undocumented.join(", ")}. ` +
+      "Write them up, or replace that claim with one that is true — a count of the gap is what this " +
+      "paragraph used to carry, and it went stale every time the gap moved.",
+  );
 
-  // Read the numbers out of THAT paragraph, not out of the file: every event name §7 offers as an
-  // example is also a section heading or a mention somewhere else in these 4,000 lines, so a check
-  // against the whole document would pass on a paragraph that had dropped the example entirely.
+  // Read the numbers out of THAT paragraph, not out of the file: a check against the whole document
+  // would pass on a paragraph that had lost the sentence entirely, since both numbers appear
+  // elsewhere in these 4,000 lines.
   //
   // Scoped from that opening to the index table rather than to the next blank line: the coverage
-  // prose is three paragraphs, and its own promise is that every number in it is checked. Stopping
-  // at the first blank line would leave the middle one — the claim about WHICH files the
-  // undocumented events come from — unchecked while reading as though it were checked.
-  const opens = "**The index is not the whole log.**";
+  // prose is two paragraphs, and the second is where the promise about what is checked is made.
+  const opens = "**The index is the whole log.**";
   const paraStart = lines.findIndex((l) => l.startsWith(opens));
   assert.ok(paraStart > 0, `§7 no longer opens its coverage paragraph with ${opens}`);
   const paraEnd = lines.findIndex((l, i) => i > paraStart && l.startsWith("| `type`"));
   assert.ok(paraEnd > paraStart, "§7's coverage prose is no longer followed by the index table");
   const para = lines.slice(paraStart, paraEnd).join(" ").replace(/\s+/g, " ");
 
-  const stated = /`src\/` emits \*\*(\d+)\*\* event types; the (\d+) sections below cover \*\*(\d+)\*\* of them and \*\*(\d+)\*\* have no section here/.exec(
-    para,
-  );
+  const stated =
+    /`src\/` emits \*\*(\d+)\*\* event types and every one of them has a section below — \*\*(\d+)\*\* sections/.exec(
+      para,
+    );
   assert.ok(
     stated,
     "§7's coverage paragraph was reworded, so its numbers are no longer checked. Keep the shape " +
-      "`emits **N** event types; the N sections below cover **N** of them and **N** have no " +
-      "section here`, or move the check with the words.",
+      "`emits **N** event types and every one of them has a section below — **N** sections`, or move " +
+      "the check with the words.",
   );
   assert.deepEqual(
-    stated.slice(1, 5).map(Number),
-    [emitted.size, headings.length, documented.size, undocumented.length],
-    `§7 says ${stated.slice(1, 5).join("/")} (emitted/sections/covered/uncovered) and src/ says ` +
-      `${[emitted.size, headings.length, documented.size, undocumented.length].join("/")}`,
+    stated.slice(1, 3).map(Number),
+    [emitted.size, headings.length],
+    `§7 says ${stated.slice(1, 3).join("/")} (emitted/sections) and src/ says ` +
+      `${[emitted.size, headings.length].join("/")}`,
   );
 
-  // Counts alone cannot see a RENAME — one name out, one name in, every total unchanged — and the
-  // paragraph names several events as its examples of the undocumented ones. Each has to still be
-  // emitted, and still be undocumented, or the example is the wrong way round.
-  for (const example of ["agent_trained", "regression_gate", "eval_gate", "agent_issue", "calibrate_call_failed"]) {
-    assert.ok(
-      para.includes(`\`${example}\``),
-      `§7's coverage paragraph no longer names \`${example}\`; update this list with it`,
-    );
-    assert.ok(emitted.has(example), `§7 names \`${example}\` as an event and src/ emits no such one`);
-    assert.ok(!documented.has(example), `\`${example}\` now HAS a §7 section, so it is a bad example`);
+  // A few sections make a claim about src/ rather than about the log — which file a line comes from,
+  // and what can reach that file — and those are checked where they are written. Bodies keyed by
+  // every event name in the heading, since a section can cover a pair.
+  const sections: { names: string[]; body: string[] }[] = [];
+  for (const line of lines.slice(from, after)) {
+    if (line.startsWith("### ")) {
+      sections.push({ names: [...line.slice(4).matchAll(/`([a-z0-9_]+)`/g)].map((m) => m[1]!), body: [] });
+    } else if (sections.length) {
+      sections[sections.length - 1]!.body.push(line);
+    }
   }
+  const bodyOf = (name: string): string => {
+    const found = sections.find((s) => s.names.includes(name));
+    assert.ok(found, `§7 has no section for \`${name}\`, so the claim below cannot be checked`);
+    return found!.body.join(" ").replace(/\s+/g, " ");
+  };
 
-  // The paragraph's claim about the undocumented set is no longer a split into sizes — they are one
-  // region now — but a claim about WHERE they come from, which is the stronger form: an undocumented
-  // event added anywhere else in src/ fails here, while a size-per-prefix check would only have
-  // failed for the prefixes it knew. Read one-directionally, undocumented -> file, because the
-  // reverse is not claimed: these four files also emit events §7 documents.
-  const REGION = [
-    "src/pipeline/feedback.ts",
-    "src/pipeline/contribute.ts",
-    "src/pipeline/calibration.ts",
-    "src/pipeline/orchestrator.ts",
-  ];
-  for (const path of REGION) {
-    assert.ok(para.includes(`\`${path}\``), `§7's coverage prose no longer names \`${path}\``);
-  }
-  const strays = undocumented
-    .map((n) => [n, [...(where.get(n) ?? [])].filter((f) => !REGION.includes(f))] as const)
-    .filter(([, outside]) => outside.length > 0)
-    .map(([n, outside]) => `${n} (${outside.join(", ")})`);
-  assert.deepEqual(
-    strays,
-    [],
-    "§7 says every undocumented event comes from the feedback/contribution/calibration region, and " +
-      `these do not: ${strays.join("; ")}. Either write them up in §7 or widen that sentence.`,
-  );
-
-  // Three of the 17 are named for neither their family nor their file, which is the reason the check
-  // above reads files instead of prefixes — and the paragraph says so, so which file each comes from
-  // is a claim in its own right.
-  const MISNAMED: [string, string][] = [
+  // Three events are named for neither their family nor the file they come from, and each section
+  // says which file that is. Read one-directionally, name -> file: these files emit others too.
+  const ATTRIBUTED: [string, string][] = [
     ["contribution_failed", "src/pipeline/orchestrator.ts"],
     ["feedback_training_failed", "src/pipeline/orchestrator.ts"],
     ["calibrate_call_failed", "src/pipeline/calibration.ts"],
   ];
-  for (const [name, file] of MISNAMED) {
-    assert.ok(para.includes(`\`${name}\``), `§7 no longer names \`${name}\` among the misnamed three`);
-    assert.deepEqual(
-      [...(where.get(name) ?? [])],
-      [file],
-      `§7 attributes \`${name}\` to ${file}`,
+  for (const [name, file] of ATTRIBUTED) {
+    assert.ok(
+      bodyOf(name).includes(`\`${file}\``),
+      `§7's \`${name}\` section no longer names ${file} as where the line comes from`,
     );
+    assert.deepEqual([...(where.get(name) ?? [])], [file], `§7 attributes \`${name}\` to ${file}`);
   }
-  // And that the orchestrator contributes exactly the two the prose calls "the two catches": a third
-  // one there would make "two" wrong while leaving every total above correct.
-  const fromOrchestrator = undocumented.filter((n) => where.get(n)?.has("src/pipeline/orchestrator.ts")).sort();
-  assert.deepEqual(
-    fromOrchestrator,
-    ["contribution_failed", "feedback_training_failed"],
-    "§7 calls the orchestrator's share of the undocumented events \"the two catches\"",
-  );
 
-  // "calibration is a tool, `src/tools/calibrate.ts`, and not a phase of a run" — the one claim in
-  // the paragraph that is about the pipeline rather than about the log, and the one a later change
-  // would silently falsify. Nothing else in src/ may import it.
+  // "Calibration is a tool — `src/tools/calibrate.ts` — and not a phase of a run", which is what makes
+  // the section's "an ordinary run never writes this line" true. A claim about the pipeline rather
+  // than about the log, and the one a later change would silently falsify.
   //
   // Both import forms, because a DYNAMIC import is the likeliest way a run reaches this: the module
   // is only wanted on the calibration path, and `await import(...)` inside the branch that wants it
@@ -1441,17 +1421,58 @@ test("§7 states how much of the run log it does not document, and the count is 
   assert.deepEqual(
     importers,
     ["src/tools/calibrate.ts"],
-    `§7 says an ordinary run never emits \`calibrate_call_failed\` because calibration is a tool. ` +
+    `§7 says an ordinary run never writes \`calibrate_call_failed\` because calibration is a tool. ` +
       `These import it: ${importers.join(", ")}. If a run reaches it now, that sentence is wrong.`,
   );
+  assert.ok(
+    bodyOf("calibrate_call_failed").includes("`src/tools/calibrate.ts`"),
+    "§7's `calibrate_call_failed` section no longer names the tool that reaches calibration",
+  );
 
-  // The fourth example is a family rather than a name, so it is checked as one.
-  assert.ok(para.includes("`agent_update_*`"), "§7 no longer names the `agent_update_*` family");
-  const family = [...emitted].filter((n) => n.startsWith("agent_update_"));
-  assert.ok(family.length > 0, "src/ emits no `agent_update_*` event, so §7's example is stale");
+  // `agent_update_blocked` is documented as ONE line with two shapes, told apart by a `reason` only
+  // the eval-gate one carries. Two emit sites, exactly one naming `reason`, is what makes that rule
+  // usable — a third site, or a `reason` on the first, would make the section wrong about how to read
+  // a line while every number above stayed right.
+  const feedbackSrc = readFileSync(join(SRC, "pipeline/feedback.ts"), "utf8");
+  const blocked = [...feedbackSrc.matchAll(/\.event\("agent_update_blocked",\s*\{([^}]*)\}/g)].map((m) => m[1]!);
+  assert.equal(
+    blocked.length,
+    2,
+    `§7 documents \`agent_update_blocked\` as two shapes and feedback.ts emits it ${blocked.length} time(s)`,
+  );
   assert.deepEqual(
-    family.filter((n) => documented.has(n)),
-    [],
-    "§7 offers the `agent_update_*` family as undocumented and now documents part of it",
+    blocked.map((fields) => /\breason:/.test(fields)),
+    [false, true],
+    "§7 says the regression-gate shape of `agent_update_blocked` carries no `reason` and the eval-gate " +
+      "one carries `reason: \"eval_regression\"`. The two emit sites no longer split that way.",
+  );
+
+  // And the units of `failures`, which is the collision the two sections warn about: a count on
+  // `regression_gate`, the list behind it on `agent_update_blocked`. One name, two shapes, both lines
+  // written for the same blocked update.
+  assert.ok(
+    /\.event\("regression_gate",[^}]*failures: failures\.length/.test(feedbackSrc),
+    "§7 says `regression_gate`'s `failures` is a count; feedback.ts no longer logs `failures.length`",
+  );
+  assert.ok(
+    /failures: gate\.failures/.test(blocked[0]!),
+    "§7 says `agent_update_blocked`'s `failures` is the list of strings, not a count; the " +
+      "regression-gate emit site no longer passes `gate.failures`",
+  );
+
+  // §7's `agent_trained` section says a run reaches that branch only if something outside the
+  // pipeline seeds the session's tmp agents directory: the branch is behind `sessionBuilt`, which
+  // `loadAgent` sets from a file existing there, and the one line that writes such a file is inside
+  // the branch. Same shape of claim as APPENDS above and the same caveat — these are the write
+  // spellings a seeder would reach for, not an invariant.
+  const seeders = sources(SRC)
+    .filter((f) => /(writeFileSync|writeFile|copyFileSync|renameSync|cpSync)\([^;]*tmpAgentsDir/.test(readFileSync(f, "utf8")))
+    .map((f) => f.slice(ROOT.length));
+  assert.deepEqual(
+    seeders,
+    ["src/pipeline/feedback.ts"],
+    `§7 says the only line writing into tmp/<id>/agents is the training branch itself. These write ` +
+      `there: ${seeders.join(", ")}. If one of them seeds it, \`agent_trained\` is reachable and that ` +
+      "paragraph is wrong.",
   );
 });
