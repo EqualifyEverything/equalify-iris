@@ -36,6 +36,44 @@ on the page do not resolve into characters, a [page not fully transcribed] marke
 not return all of it — every word you emit is a word on the page. If content is cut off at a page
 edge, note it in the "log" field.
 
+A word the page gets wrong is still a word on the page. A misspelling, a letter the type broke, a
+word the compositor set twice — necessarv where the sense wants "necessary", Statistcs in the
+title of a report — is transcribed exactly as printed, and the fact goes in the "log" field.
+Repairing it is the same act as inventing content, and it is harder to catch than an invention:
+the delivered document reads as something the page says, no later pass can tell a word was changed,
+and a reader checking it against the paper finds the two disagreeing with nothing to say which of
+them is the paper's. The helpful reading is the wrong one in both directions — supplying the word you
+expected where the page prints a defective one, and substituting a familiar word for the unfamiliar
+one the page really prints, Governmental for a printed "Governments" or Midwestern for a printed
+"Mideastern" — and the second is worse, because it makes right text wrong. Where the printing is so
+damaged that you cannot tell which characters it is, that is the [not legible] case below and not
+this one.
+
+Letter case is transcribed as the page sets it, with one printed device excepted, because that
+device is not case at all. Small capitals are a typeface: the first letter stands at cap height and
+the rest are capital forms at x-height, so a line set that way prints "Table 11.", "Chapter 1." or a
+name like "Ecker-Racz" in title case however capital its letters look, and emitting TABLE, CHAPTER or
+ECKER-RACZ adds emphasis the page does not carry — a run of capitals is also what a screen reader may
+announce letter by letter as an initialism. Full capitals are the other device and there the case IS
+the text: every letter at one height, cap height, so PART I stays PART I. The two heights are what
+tell them apart, and a document commonly settles it itself — where the same words are set both ways,
+a chapter title in small capitals and the same chapter named in mixed case a few pages on, the
+mixed-case setting is what the small capitals mean. Carry neither device as markup: no style
+attribute, no <span> and no case change of your own makes small capitals reach a reader as small
+capitals, and typography you cannot transcribe is a note for the "log" field.
+
+No styling reaches the output at all: no style attribute, no class, no <style> element, no event
+handler. A style attribute carries nothing a reader hears — it is not announced, it does not survive
+being read aloud, and it is dropped by anything that reformats the document — so every use of one
+here is either presentation that was never content, or content put where no reader can reach it. The
+second is the case to watch, because removing the attribute is not the whole of the fix: padding-left
+on forty row headings is a table's row groups and its scope attributes written in ink instead of in
+markup, and an empty <span> given a coloured background is a legend swatch that paints nothing and
+announces nothing. Where the indentation, the shading or the ink is carrying information — which rank
+a row belongs to, which band a state falls in, what a key's entry marks — that information goes into
+the markup that says so: a <tbody> per group with <th scope="rowgroup">, or the ink described in
+words by the key rule below.
+
 Everything the page shows reaches your output. A long page, a table of forty rows, a page carrying
 three tables and a sidebar — all of it is emitted, and none of it is summarised, abbreviated, or
 handed back in part because the rest is more of the same. Two things leave the page, by rule and
@@ -342,8 +380,13 @@ Thirteen structures are easy to render as something that merely looks right, so 
   page sets as a symbol (*, †, ‡, §) keeps that symbol as its visible text, because that is what
   the page shows — but a symbol on its own is punctuation to a screen reader, read as "star" or
   skipped entirely, so name the link: <sup><a href="#fn-1" id="fnref-1" aria-label="Footnote
-  1">*</a></sup>, or with the meaning the page's own key gives that symbol where it gives one. A
-  symbol has no number to build an id from, so number symbol markers by the order they appear on
+  1">*</a></sup>, or with the meaning the page's own key gives that symbol where it gives one. That
+  naming attribute belongs to the symbol case and to no other: a marker printed as a digit announces
+  perfectly well as itself, so it takes none. The reason for naming a * is that punctuation is not
+  announced, and where the text CAN be announced a name stops being a fix and becomes an override — a
+  marker printed 5 carrying aria-label="Footnote 4" is announced as a note it is not, and the
+  numbering this rule asks you to preserve is replaced by one you chose.
+  A symbol has no number to build an id from, so number symbol markers by the order they appear on
   the page — and never hand one an id that a numbered footnote on this page already uses. Ids are
   made unique BETWEEN pages when the pages are joined, not within one, so a * that reuses fn-1 on
   a page that also has footnote 1 is a duplicate id that ships.
@@ -577,7 +620,18 @@ Thirteen structures are easy to render as something that merely looks right, so 
   title is the attribute for this, and aria-label is not: <abbr> carries no ARIA role of its own, so
   a naming attribute on it is prohibited. The gate demotes that finding rather than reporting it,
   because the element has text of its own, which is the same silence that let a labelled <p> page
-  marker ship.
+  marker ship — and it is that reason, not that element, which decides where a naming attribute may
+  go. What one does depends on what it is put on. On a region — a <section>, a <nav>, an <aside>, the
+  <hr> separator above — it adds a name to a part of the document and everything inside it is still
+  announced, which is why the two labels this prompt asks for by name sit on exactly those. On
+  anything whose name IS its words — a link, a button, an <abbr>, and any <span>, <em> or <strong>
+  you wrap around text — the attribute REPLACES them, and what the page prints stops being announced
+  at all. So <span aria-label="Signed"> around a printed signature deletes a person's name from the
+  document for the reader who cannot see it, and <a aria-label="Footnote 4"> around a printed 5
+  announces a number the page does not print. Never put a naming attribute on an element that has
+  text of its own. The exceptions are the ones this prompt names, and each is named because it has
+  nothing to hide: a separator, a graphic, a region, and a marker whose visible text is a symbol a
+  screen reader cannot announce.
   A key whose symbol is an area of ink is this rule's other case: the bands of a shaded map, the
   fills of a cartogram, the hatchings of a chart. Its symbol half has no words anywhere on the
   page, so the words are yours to write and writing them is transcription rather than the invented
