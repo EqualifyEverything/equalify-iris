@@ -99,9 +99,10 @@ test("the page agent transcribes a defect in the printing instead of repairing i
 // and `William G. Colman`. Both verifiers at different vendors did it independently on one of those
 // pages, which is what an unspecified rule looks like rather than one model's quirk.
 //
-// What is deliberately NOT decided here: whether genuine display capitals should be normalised to
-// title case. #374 item 2 asks for that call and it is the maintainer's; this clause keeps the
-// current answer (transcribe them) and only stops small capitals being read as capitals at all.
+// This clause covers small capitals only. Whether genuine display capitals are normalised to title
+// case was #374 item 2, decided since and pinned by its own test below, and the sentence this one
+// asserts about full capitals is the handoff to it: full capitals are identified here, by the one
+// height, and what their case MEANS is settled there.
 test("the page agent reads small capitals as a typeface and not as letter case", () => {
   const prompt = normalize(section("System prompt")!);
   for (const [what, re] of [
@@ -113,8 +114,12 @@ test("the page agent reads small capitals as a typeface and not as letter case",
       /Small capitals are a typeface: the first letter stands at cap height and the rest are capital forms at x-height/],
     ["the defect is named in the words the models emit",
       /emitting TABLE, CHAPTER or ECKER-RACZ adds emphasis the page does not carry/],
-    ["full capitals are still text, so this is not a licence to down-case the page",
-      /Full capitals are the other device and there the case IS the text/],
+    // The other device is identified here and adjudicated by the display-capitals rule, so this
+    // asserts the identification and the handoff together: a rewrite that drops either leaves the
+    // model with one height and no rule, which is the state that flipped `PART` to `Part` between
+    // two pages of one arm.
+    ["full capitals are identified by their one height and handed to the rule that decides them",
+      /Full capitals are the other device, every letter at one height with no x-height form among\s+them.{0,140}which the display-capitals rule below decides/],
     ["and the document's own second setting of the same words is offered as the control",
       /the mixed-case setting is what the small capitals mean/],
     // The measured alternative to shouting was reproducing the typeface in a style attribute, so
@@ -135,10 +140,128 @@ test("the page agent reads small capitals as a typeface and not as letter case",
     // and not this one") and this clause did not. The discriminator is a comparison of two heights,
     // so a scan too coarse to resolve them — or a line with no letter of each kind in it — leaves
     // the model with the question and no answer, and the direction it would guess in is down-casing
-    // display capitals: the call #374 item 2 reserves for the maintainer. As-printed plus a log note
-    // is the file's own standing answer for an uncertain reading, and it takes no part of that call.
+    // display capitals. As-printed plus a log note is the file's own standing answer for an uncertain
+    // reading, and the display-capitals rule points back at this sentence for its own undecidables.
     ["an undecidable case is transcribed as printed rather than guessed",
       /neither device has been identified, and an unidentified device is transcribed exactly as the page sets\s+it with a note in the "log" field/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// #374 item 2, the other half of the clause above, decided rather than derived: display capitals are
+// normalised to title case and the printed casing goes in the "log" field. The reason it needed a
+// decision at all is that both answers lose something — down-casing moves the delivered text off the
+// ink, keeping the capitals hands a screen reader a word it may spell out — and the arms were already
+// doing both, one emitting `PART` on one page and `Part` on another from the same genuine capitals.
+//
+// What this test is really guarding is the failure path the decision creates, and it is the reason
+// three of the four assertions below are about acronyms rather than about title case. Title-casing
+// `ACIR` gives `Acir`: text the page prints in no sense, produced BY the fix, in the exact direction
+// the fidelity clause above exists to stop. So the discriminator — spelling versus emphasis — is
+// asserted as a rule and its worked cases are asserted by name, because a rewrite that keeps
+// "normalise to title case" and loses "ACIR is spelled that way" is strictly worse than the silence
+// this clause replaced: it would license the corruption on every initialism in a 1962 federal report.
+//
+// The "log" half is unenforceable today and that is stated rather than tested: 0 of 11 round logs
+// name a symbol on any arm, and #349 withholds the "log" field from the checker, so nothing verifies
+// the note was written. The transcription half is what the checker acts on.
+test("display capitals are normalised to title case, and an acronym is not display capitals", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["the two answers are given as a pair, so neither is read as the general rule",
+      /Capitals the page sets for weight are transcribed in title case; capitals that are how a word is\s+spelled are transcribed as printed/],
+    ["the discriminator is which of the two the capitals carry, not the run's length or its position",
+      /the\s+test is which of them the capitals carry — the word's own spelling, or emphasis the page has added to\s+the line/],
+    // Named in the prompt, not just implied by the rule: these are the words a 1962 ACIR report is
+    // full of, and `Acir`/`Hew` is what the fix produces if the model reasons from title case alone.
+    ["the acronyms are named, and so is what title-casing them would produce",
+      /ACIR, HEW and U\.S\. are spelled that way.{0,120}so Acir and\s+Hew are text the page prints in no sense at all/],
+    ["the emphasis case is named too, in the form the arms actually flipped on",
+      /PART I over a part of the report.{0,220}so emit Part I and General Provisions and record the printed casing in the "log" field/],
+    // Both exits from the choice, closed. Keeping the look in CSS is what one arm did with small
+    // capitals, and the undecidable run is where a model would otherwise guess in the down-casing
+    // direction — which is the corruption direction for an unknown initialism.
+    ["the emphasis cannot be kept as styling instead",
+      /the emphasis cannot be carried instead, because a style attribute, a class and text-transform are all\s+prohibited below/],
+    ["and an undecidable run is transcribed as printed with a log note, not down-cased on a guess",
+      /Where the two cannot be told apart —.{0,160}the answer is the one an unidentified device gets: exactly as the page sets it,\s+with a note in the "log" field/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// #374 item 4. Four printed marks, one encoding each, and the clause exists because of the spread
+// rather than because any single encoding was indefensible: the dot leader alone came back four
+// different ways on one 91-page arm, so a reader who learns what a dotted cell means in row 1 has
+// learned nothing about row 20.
+//
+// The empty cell is the one to hold onto. On that census it is 76 cells across 4 pages, and it is the
+// only one of the four that a reader cannot undo — a leader written as dots is ugly and recoverable,
+// while an empty <td> asserts the paper was blank there and leaves nothing behind to contradict it.
+// That is why it is asserted as a prohibition of its own and not as one branch of the leader rule.
+test("the page agent has one encoding for each printed mark, and never an empty cell", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["the clause exists and names the family rather than one mark",
+      /MARKS THE PRINTING USES: a page carries marks that are neither words nor numbers/],
+    ["the reason is consistency across cells, which is what a per-cell choice destroys",
+      /a page left to choose picks a different one in every cell, and a\s+reader who learns in row 1 what a dotted cell means has learned nothing about row 20/],
+    ["an empty cell is forbidden, and what it falsely claims is said",
+      /Never leave a cell empty for one\. An empty <td> says the paper printed nothing there/],
+    ["and it is ranked as the unrecoverable one",
+      /it is the one\s+encoding a reader cannot undo/],
+    // The three-way split is the whole of the leader rule, and the middle branch is the one that
+    // needs the page's own words — a gloss the page prints is content, so it goes in the cell.
+    ["a leader that only joins a row to its figure is layout and is not written",
+      /Where it does no more\s+than carry the eye across to the figure in the same row, it is layout/],
+    ["a leader the page glosses carries that meaning, in the page's words",
+      /Where the page gives the dots a meaning of their own, in a\s+legend or a footnote/],
+    ["an unexplained leader is transcribed as printed and logged as unexplained",
+      /transcribe them as printed, as that\s+cell's text, and say in the "log" field that the page leaves them unexplained/],
+    ["and one table does not mix the three",
+      /every dotted cell in that table is transcribed the same way/],
+    // The digit-separator half has a code repair behind it (`tightenDigitGroups`), on the
+    // soft-hyphen doctrine: the prompt forbids the thing, the strip catches what ships anyway.
+    ["the printer's alignment space comes out of a figure, with the search failure named",
+      /4,271 where the column prints 4, 271 with a\s+gap after the comma/],
+    ["a leading zero the page prints is kept",
+      /A leading zero the page prints is kept, since it is a digit\s+the page shows/],
+    ["and a centred dot is transcribed as what the page means by it",
+      /A centred dot is transcribed as the character the page means by it, a decimal point/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// #374 item 5, and it is a scope sentence rather than a new rule: the prohibition on supplying an
+// expansion the page does not state was already in the file, and the question was how far it reaches.
+// The broad reading is the one taken — every mark, not only short forms made of letters — and the
+// discriminator is whether the page PRINTS the mark's meaning, never what the mark is or operates.
+//
+// That reading is what the measurement supports rather than the narrow one. Both ungrounded
+// expansions on #374's census are `title="not shown"` on table marks (kimi p049, 25 cells; sonnet
+// p055), so the only measured instance of the defect is a mark that operates nothing at all, and a
+// rule scoped to controls would have missed every case that has actually been seen.
+//
+// It sits at the top of the abbreviation rule, beside the prohibition it scopes. The narrower
+// sentence inside the control sub-paragraph ("A name is the page's or it is nobody's") stays where it
+// is: hoisting it would strip it of the control reasoning that makes its last clause true.
+test("the no-invented-expansion rule covers every mark, not only lettered short forms", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["the prohibition it scopes is still there",
+      /Never supply an\s+expansion the page does not state, however obvious it looks/],
+    ["it reaches every mark, with the cases the census found named",
+      /That holds for every mark and not\s+only for short forms made of letters — a symbol in a table cell, a mark beside a figure, a glyph\s+on a diagram/],
+    ["the discriminator is what the page prints, not what the mark is or does",
+      /what decides it is whether the page prints the mark's meaning anywhere, never\s+what the mark is or what it does/],
+    // "in any attribute" rather than "in a title": the measured defect is a `title`, but an
+    // `aria-label` on the same cell invents the same meaning, and the rule is about the invention.
+    ["an unexplained mark gets no meaning in any attribute, and is logged",
+      /transcribed as printed,\s+with no meaning attached to it in any attribute, and named in the "log" field as unexplained/],
+    ["and the control sub-paragraph keeps its own narrower sentence",
+      /A name is the page's or it is nobody's/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
