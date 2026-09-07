@@ -208,6 +208,36 @@ test("the element goes and the whitespace stays, because only one of those two e
   assert.deepEqual(stripStyleAttributes(`<p>a<span style="color:red">\n</span>b</p>`).html, `<p>a\nb</p>`);
 });
 
+test("a styled span whose only content is another one goes too, and both are counted", () => {
+  // One pass cannot see this: `replace` is past the outer span's start by the time the inner is removed,
+  // so the outer would reach only the attribute walk and survive as the bare `<span></span>` this rule
+  // exists to prevent — with `spans` short by one on a mark that is just as gone.
+  assert.deepEqual(stripStyleAttributes(`<p><span style="a:b"><span style="c:d"></span></span>x</p>`), {
+    html: `<p>x</p>`,
+    stripped: 2,
+    spans: 2,
+    cellsEmptied: 0,
+    props: ["a", "c"],
+  });
+  // And in a cell, which is where the count matters: the mark is gone either way, so the number that
+  // names it must not depend on how deeply the model wrapped it.
+  assert.equal(stripStyleAttributes(`<td><span style="a:b"><span style="c:d"></span></span></td>`).cellsEmptied, 1);
+  // The repeat does not reach a span the model wrote empty, at any depth: it has no style attribute, so
+  // no pass matches it and the element it sits in still has content.
+  assert.deepEqual(stripStyleAttributes(`<p><span style="a:b"><span></span></span>x</p>`), {
+    html: `<p><span><span></span></span>x</p>`,
+    stripped: 1,
+    spans: 0,
+    cellsEmptied: 0,
+    props: ["a"],
+  });
+  // Whitespace still comes back, from however many levels: what is removed is elements.
+  assert.equal(
+    stripStyleAttributes(`<p>Ohio<span style="a:b"> <span style="c:d"> </span> </span>5%</p>`).html,
+    `<p>Ohio   5%</p>`,
+  );
+});
+
 test("a cell the strip leaves empty is counted, because that is the encoding a reader cannot undo", () => {
   // A legend swatch written as a cell rather than as a `<p>`. `agents/page.md` now says an empty cell
   // claims the paper printed nothing there, so the one place this strip's residue is not neutral gets

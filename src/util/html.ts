@@ -272,14 +272,33 @@ export function stripStyleAttributes(html: string): {
   // moves everything after its first edit.
   let raw = rawTextRanges(html);
   const inRawText = (at: number): boolean => raw.some(([from, to]) => at >= from && at < to);
-  // The replacer's arguments are (match, …groups, offset, whole string); `EMPTY_STYLED_SPAN` has two
-  // groups, the last style value and the gap, so the offset is the fourth.
-  let out = html.replace(EMPTY_STYLED_SPAN, (whole: string, _value: string, gap: string, at: number) => {
-    if (inRawText(at)) return whole;
-    spans += 1;
-    for (const [, value] of whole.matchAll(STYLE_ATTR)) note(value);
-    return gap;
-  });
+  // Repeated until it stops changing anything, because one pass cannot see a styled span whose only
+  // content is another one: `replace` has advanced past the outer span's start by the time the inner is
+  // removed, so the outer would reach only the attribute walk and survive as a bare `<span></span>` —
+  // the residue this rule exists to prevent, with `spans` and `cells_emptied` both short by one on a
+  // mark that is just as gone. Bounded by construction: a pass that changes anything has removed at
+  // least a `<span></span>` pair, so the string strictly shortens.
+  //
+  // The nesting is not a shape anything has been seen to write — 0 of 69 styled spans over 1,741 of the
+  // bench's kept HTML files, and #374's own 52 are flat swatches and row headings. So this is here
+  // because a counter that names a lost mark should not go quiet on a shape it was not looking at,
+  // rather than because the shape has been observed.
+  let out = html;
+  for (;;) {
+    // The replacer's arguments are (match, …groups, offset, whole string); `EMPTY_STYLED_SPAN` has two
+    // groups, the last style value and the gap, so the offset is the fourth.
+    const pass = out.replace(EMPTY_STYLED_SPAN, (whole: string, _value: string, gap: string, at: number) => {
+      if (inRawText(at)) return whole;
+      spans += 1;
+      for (const [, value] of whole.matchAll(STYLE_ATTR)) note(value);
+      return gap;
+    });
+    if (pass === out) break;
+    out = pass;
+    // The offsets moved with the edit, so the skip regions are re-read before the next pass rather than
+    // carried over — a stale range would let the strip into raw text or keep it out of real markup.
+    raw = rawTextRanges(out);
+  }
   raw = rawTextRanges(out);
   out = out.replace(ANY_TAG, (tag, name: string, attrs: string, at: number) => {
     if (inRawText(at)) return tag;

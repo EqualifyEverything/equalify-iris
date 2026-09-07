@@ -1999,7 +1999,13 @@ is a re-ask against the image and is not something the strip can do — the stat
 an attribute. It covers only the residue THIS strip creates — a `<span>` whose attributes were all
 `style` and whose content is nothing but whitespace — so a `<span></span>` the model wrote empty of its
 own accord is left alone, and a `<span class="…" style="…">` keeps its element because it still has an
-attribute afterwards. **What goes is the element, never content:** a span holding one space hands that
+attribute afterwards. The removal is repeated until it stops changing anything, because a styled span
+whose only content is another styled span is invisible to a single pass — the outer one would survive as
+the bare `<span></span>` the rule exists to prevent, with `spans` and `cells_emptied` both short by one on
+a mark that is just as gone. That nesting is not a shape anything has been seen to write (0 of 69 styled
+spans over 1,741 of the bench's kept HTML files), so the repeat is there to keep the counts honest on a
+shape they were not looking at, not because it was measured. **What goes is the element, never content:**
+a span holding one space hands that
 space back, because the same markup is a legend swatch's width in one place and a word boundary in
 another, and only one of those two mistakes is visible in the delivered text (`Ohio<span
 style="…"> </span>5%` would otherwise be delivered as `Ohio5%`, which the page prints nowhere).
