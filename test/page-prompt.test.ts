@@ -44,6 +44,203 @@ test("agents/page.md has the sections the loader and this test depend on", () =>
   assert.match(pageMd, /##\s*Required capability\s*\n[^#]*\bvision\b/i, "page.md must declare the vision capability");
 });
 
+// #374's fidelity clauses, all three of them silences rather than rules the models broke.
+//
+// The contract above says "every word you emit is a word on the page" and never said what to do
+// when the page is wrong, so a model with nothing to follow does the helpful thing. Measured on one
+// 91-page 1962 report: two arms silently repaired a printed `Statistcs`, and one of them repaired
+// `necessarv` — which is what the letterpress actually printed, magnified 3x — while three other
+// substitutions replaced a correct word with a more familiar one (`Governmental` for `Governments`,
+// `Midwestern` for `Mideastern`, `Arranged` for `Arrayed`). The direction that matters is the
+// second: it makes right text wrong, and it is invisible downstream because the result reads as a
+// clean transcription.
+//
+// Verification is not the fix and the prompt is. On the three pages one arm alone altered, the
+// checker passed 3 of 3 — and on one of them it had quoted the correct word off the same image
+// while complaining about something else. What it judges against is this file: `verifyBlocks` sends
+// `agents/page.md` verbatim as "Agent under test" (src/pipeline/feedback.ts), so a rule missing here
+// is missing from the rubric too.
+test("the page agent transcribes a defect in the printing instead of repairing it", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["a defective printing is still the page's text",
+      /A word the page gets wrong is still a word on the page/],
+    ["and it is transcribed rather than mended, with the fact recorded where notes go",
+      /is transcribed exactly as printed, and the fact goes in the "log" field/],
+    // Named as the same offence the fidelity sentence above already forbids, because that is what
+    // makes this reachable by the checker: `agents/feedback.md` judges invention, and a repair
+    // presented as a repair reads to a model as the opposite of inventing something.
+    ["a repair is named as an invention, not as a lesser fault",
+      /Repairing it is the same act as inventing content/],
+    ["the substitution direction is named, since it is the one that makes right text wrong",
+      /substituting a familiar word for the unfamiliar one the page really prints/],
+    ["and it is ranked against the other direction rather than listed beside it",
+      /the second is worse, because it makes right text wrong/],
+    // Without this the rule fights the [not legible] clause: a broken letter is both a defective
+    // printing and a mark that may not resolve, and a model that reads this as licence to write
+    // [not legible] over a legible misspelling loses a word the page has.
+    ["and the unreadable case is handed back to the clause that owns it",
+      /that is the \[not legible\] case below and not this one/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// Letter case had no clause at all — no occurrence of `capitaliz`, `uppercase`, `small cap` or
+// `letter case` in the whole file — and two printed devices behind it, which is why "preserve the
+// caps" would have been the wrong rule. Full capitals are text; small capitals are a typeface, and
+// the words under them are title case. Every arm flips mid-document: one emitted `PART` on one page
+// and `Part` on another from the same genuine full capitals, and on a page setting a name in small
+// capitals one arm shouted `ECKER-RACZ` while another reproduced the typeface in CSS.
+//
+// This is the one clause of #374 that fixes something the checker is actively making worse: on a
+// 45-page control arm it rejected 3 pages on letter case alone and demanded a corruption in 2 of
+// them — `TABLE 5.` and `WILLIAM G. COLMAN,` where the page prints small capitals meaning `Table 5.`
+// and `William G. Colman`. Both verifiers at different vendors did it independently on one of those
+// pages, which is what an unspecified rule looks like rather than one model's quirk.
+//
+// What is deliberately NOT decided here: whether genuine display capitals should be normalised to
+// title case. #374 item 2 asks for that call and it is the maintainer's; this clause keeps the
+// current answer (transcribe them) and only stops small capitals being read as capitals at all.
+test("the page agent reads small capitals as a typeface and not as letter case", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["case is transcribed, with one device excepted",
+      /Letter case is transcribed as the page sets it, with one printed device excepted/],
+    // The discriminator has to be in the prompt, not just the conclusion: the model is looking at
+    // the artwork, and cap height against x-height is what it can see.
+    ["the device is described by what it looks like, so it can be told apart on the image",
+      /Small capitals are a typeface: the first letter stands at cap height and the rest are capital forms at x-height/],
+    ["the defect is named in the words the models emit",
+      /emitting TABLE, CHAPTER or ECKER-RACZ adds emphasis the page does not carry/],
+    ["full capitals are still text, so this is not a licence to down-case the page",
+      /Full capitals are the other device and there the case IS the text/],
+    ["and the document's own second setting of the same words is offered as the control",
+      /the mixed-case setting is what the small capitals mean/],
+    // The measured alternative to shouting was reproducing the typeface in a style attribute, so
+    // the clause closes both exits rather than the one it was written for.
+    //
+    // Worded so the sentence cannot be read as the imperative its colon used to set up. "no style
+    // attribute, no <span> and no case change of your own" reads as a list of things forbidden as
+    // easily as a compound subject of "makes", and the second reading forbids exactly the
+    // down-casing this clause demands eight lines earlier — in a file that is ALSO the rubric
+    // (`verifyBlocks` sends it verbatim as "Agent under test"), so a verifier taking it would flag a
+    // correctly title-cased line as an unauthorised case change: the false positive this clause
+    // exists to remove. Each technique is now the subject of its own verb.
+    ["neither device is carried as markup, which is the other thing the arms did with it",
+      /a style attribute does not make small capitals reach a reader as small capitals, a <span>\s+does not, and neither does retyping the line in a case the page did not set/],
+    ["and the title case this clause asks for is named as the transcription, not as a case change",
+      /writing\s+"Table 11\." for a line set in small capitals is the transcription of that line and not a case change of\s+your own/],
+    // The undecidable page, which clause 1 closes for itself ("that is the [not legible] case below
+    // and not this one") and this clause did not. The discriminator is a comparison of two heights,
+    // so a scan too coarse to resolve them — or a line with no letter of each kind in it — leaves
+    // the model with the question and no answer, and the direction it would guess in is down-casing
+    // display capitals: the call #374 item 2 reserves for the maintainer. As-printed plus a log note
+    // is the file's own standing answer for an uncertain reading, and it takes no part of that call.
+    ["an undecidable case is transcribed as printed rather than guessed",
+      /neither device has been identified, and an unidentified device is transcribed exactly as the page sets\s+it with a note in the "log" field/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// `prd.md` and `agents/chartDataAgent.md` have both forbidden CSS since they existed; this file
+// carried nothing until one swatch-specific sentence was added to the ink-key rule, and that
+// sentence reaches 4 of the 52 style attributes measured. The other 48 are 46 `padding-left`
+// declarations carrying a region/state hierarchy that row groups exist for, a `font-variant`
+// small-caps span, and a `text-align`. One arm emits them and another emits none, on the same
+// images against the same prompt — the signature of a silence rather than a model defect.
+//
+// Nothing downstream catches any of it: `SILENT` in src/pipeline/flatten.ts is the <style> ELEMENT,
+// not the attribute, and in 270 control-arm verdicts exactly one problem objected to inline styles
+// — citing "the agent contract explicitly forbids CSS/styling", which this file did not say. A
+// prohibition enforced by a model's recollection of other agents' prompts disappears the moment
+// one of them is reworded.
+//
+// The second half is the part a bare "no CSS" rule gets wrong, and it is why the code fix #374 also
+// offers (strip `style=`) is not what landed here: on the measured page the indentation IS the
+// row-group information, so removing the declaration without moving it into markup loses what it
+// was carrying, and an empty swatch <span> is pointless with or without it.
+test("the page agent emits no styling, and is told what a stripped declaration was carrying", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["the prohibition covers the class of attributes, not one use of one of them",
+      /No styling reaches the output at all: no style attribute, no class, no <style> element, no event handler/],
+    ["the reason is what a reader gets, so it survives being quoted at a model",
+      /A style attribute carries nothing a reader hears/],
+    ["and the fix is not the deletion",
+      /removing the attribute is not the whole of the fix/],
+    ["the measured case is named with the markup that should have carried it",
+      /padding-left on forty row headings is a table's row groups and its scope attributes written in ink instead of in markup/],
+    ["so information in the ink is moved rather than dropped",
+      /that information goes into the markup that says so/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+});
+
+// The naming-attribute prohibition was stated for `<abbr>` and reasoned from something else
+// entirely — "the element has text of its own" — so the models obeyed it exactly as narrow as it
+// was written: 183 of 183 `<abbr>` elements in a 274-file corpus carry `title` and none carries
+// `aria-label`, while the same audit found 6 `aria-label`s that REPLACE printed text, all of them
+// on `<span>` and `<a>`, which the old wording left untouched.
+//
+// One of the six deletes a person's name: the page prints the signature `L. L. Ecker-Racz,` and the
+// element is announced "Signed". The other five apply the symbol-marker pattern below to markers
+// printed as digits — `<a aria-label="Footnote 4">5</a>` — so a reader hears one number, follows a
+// link built from a second, and lands on a body describing a third. That pattern is justified in
+// this file by "a symbol on its own is punctuation to a screen reader"; applied where the text can
+// be announced, it stops being a fix and becomes an override, which is the second half of this test.
+//
+// The line the clause draws is where the accessible name comes from, so the exceptions this prompt
+// asks for by name have to stay on the other side of it. Asserted here as the coupling, not just as
+// prose: the clause claims the labels it sanctions are on regions and separators, and if one of
+// those examples moved onto an element with text of its own the clause would be contradicting the
+// prompt that contains it.
+test("a naming attribute never replaces the words the page prints", () => {
+  const prompt = normalize(section("System prompt")!);
+  for (const [what, re] of [
+    ["the prohibition is attached to its reason rather than to <abbr>",
+      /it is that reason, not that element, which decides where a naming attribute may go/],
+    ["a region takes a name in addition to its contents",
+      /it adds a name to a part of the document and everything inside it is still announced/],
+    ["and an element named by its own words has them replaced",
+      /the attribute REPLACES them, and what the page prints stops being announced at all/],
+    ["the wrapper elements a model reaches for are named, since that is where every measured case was",
+      /any <span>, <em> or <strong> you wrap around text/],
+    ["the cost is stated as what the reader loses",
+      /deletes a person's name from the document for the reader who cannot see it/],
+    ["and the rule is stated as an imperative, which is the form this file's obeyed prohibitions take",
+      /Never put a naming attribute on an element that has text of its own/],
+    ["a digit marker announces itself, so the symbol pattern does not reach it",
+      /a marker printed as a digit announces perfectly well as itself, so it takes none/],
+    ["and the reason names the boundary rather than the element",
+      /where the text CAN be announced a name stops being a fix and becomes an override/],
+    // The list after the imperative read as an allowlist, and a form control was not on it — while
+    // this pipeline's own code has treated `aria-label` as the correct name for a field since
+    // `flatten.ts`'s `ariaName` was added, because dropping it made the Reader report a phantom issue
+    // on axe-clean markup. Over-read, the list sends a fill-in line with no printed name beside it
+    // out unnamed, which axe's `label` rule then catches in the gate — so the cost was a round, not a
+    // shipped defect, and the fix is one clause. Stated as the reason the exceptions share rather
+    // than as a longer list, since a list is what got over-read.
+    ["the exceptions are held together by their reason and not by being enumerated",
+      /What the exceptions have in common is that reason and not membership of a list/],
+    ["a form control is named among them, because it has no words of its own to lose",
+      /and a form control — none of them has words of its own for a name to replace/],
+    ["a field's printed name is its label, and the block's words name a field the page leaves bare",
+      /an aria-label\s+carrying those printed words is correct markup rather than a breach of this rule/],
+    ["and neither an unnamed control nor an invented name is licensed by that",
+      /What is never\s+right is a control left unnamed, or one named with words the page does not print anywhere/],
+  ] as [string, RegExp][]) {
+    assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
+  }
+  // The sanctioned labels, still on elements with nothing to hide.
+  assert.match(prompt, /<hr role="doc-pagebreak" aria-label="Page 5" id="page-5">/,
+    "the page-break marker's label is one of the exceptions the clause above names");
+  assert.match(prompt, /give it one the element already understands: <section aria-label="Footnotes">/,
+    "the footnote region's label is the other, and it names a region rather than replacing its contents");
+});
+
 // The heading-level rule (issue #82) came from user feedback on a page whose
 // subsection headings were set smaller than the section heading above them: the
 // extractor gave them the same <h2>, so a screen-reader user browsing by heading
