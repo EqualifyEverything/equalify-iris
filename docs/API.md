@@ -967,8 +967,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **113** event types and every one of them has a section
-below — **108** sections, because a few cover a pair of events that are only read together. So a
+**The index is the whole log.** `src/` emits **115** event types and every one of them has a section
+below — **110** sections, because a few cover a pair of events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1008,6 +1008,8 @@ emits fails it too.
 | [`page_links_unexpected`](#page_links_unexpected) | The page links to a URL **no annotation accounts for** |
 | [`page_links_correction_rejected`](#page_links_correction_rejected) | A correction bought for a page that had already passed was refused |
 | [`page_soft_hyphens`](#page_soft_hyphens) | Soft hyphens (U+00AD) were taken out of a reply before it became markup |
+| [`page_style_attributes`](#page_style_attributes) | `style` attributes were taken out of a reply, and what they were setting |
+| [`page_digit_groups`](#page_digit_groups) | A thousands separator split by the printer's alignment space was closed up |
 | [`page_split_words`](#page_split_words) | A page wrote one word two ways, `Compos-ite` here and `Composite` there |
 | [`page_split_words_unrecovered`](#page_split_words_unrecovered) | A correction bought for a word written two ways left both spellings there |
 | [`page_caption_claim`](#page_caption_claim) | A `<figcaption>` makes a claim about the picture its `alt` describes |
@@ -1970,6 +1972,59 @@ from the correction pass and from a specialist are three facts about three diffe
 written AFTER `agent_call`, so the reply on record in the round logs is still the model's own —
 the census behind this row was a $0 regrade of logs already on disk, and a strip applied before
 the log would have left no way to take that measurement or any future one.
+
+### `page_style_attributes`
+
+`style` attributes were taken out of a page reply before it became markup Iris keeps (`page`, `image`,
+`where` — the same four steps as above — `stripped`: how many attributes, `spans`: how many `<span>`
+elements this strip left with no attributes and no content and so removed whole, and `props`: the CSS
+property names those attributes set, deduped and sorted).
+
+`agents/page.md` forbids all styling in as many words — a `style` attribute is not announced, does not
+survive being read aloud, and is dropped by anything that reformats the document — and #374 measured 52
+of them shipped anyway on one 91-page arm. The strip cannot lose anything a reader was getting, which
+is what makes it a repair rather than a re-ask: whatever the declaration was doing, it was doing it
+only for someone who could see it.
+
+**`props` is the field to read.** 46 of those 52 are `padding-left`, 40 of them on a single page's row
+headings, and that is a table's row groups written in ink instead of in markup — information the page
+HAS and the delivered document does not. Removing the attribute does not lose that, but it does make
+the page look clean, so the properties are logged: a line saying `padding-left` names a page whose
+hierarchy needs the `<tbody>`/`scope="rowgroup"` treatment the prompt asks for, and one saying
+`background-color` names a legend swatch that painted nothing and announced nothing. Rebuilding either
+is a re-ask against the image and is not something the strip can do — the stated limit of the repair.
+
+`spans` is counted apart from `stripped` because it is a different edit: an element removed rather than
+an attribute. It covers only the residue THIS strip creates — a `<span>` whose attributes were all
+`style` and whose content was empty — so a `<span></span>` the model wrote empty of its own accord is
+left alone, and a `<span class="…" style="…">` keeps its element because it still has an attribute
+afterwards.
+
+Scoped to the extraction phase like the strip above, but WITHOUT that clause's argument, and the
+difference is worth stating. A soft hyphen is an artefact of reading a printing; a `style` attribute is
+a model reaching for CSS to hold a shape, which any agent writing markup can do, and the review-phase
+agents write markup. #374 measured the page agent because that is what #374 looked at, so what is known
+is that it happens there — not that it happens nowhere else. `where` is what would say otherwise.
+
+### `page_digit_groups`
+
+A thousands separator the page reply split with the printer's alignment space — `4, 271` — was closed
+up (`page`, `image`, `where`, and `tightened`: how many separators, not how many cells).
+
+The gap is the column being aligned rather than part of the figure, `agents/page.md` says so, and the
+models do it anyway: 549 separated groups on 6 pages of one arm, 166 on another, none on a third. What
+ships is a number no reader can find and no tool can add up — a search for `4,271` does not match `4,
+271`, and a total written that way is two numbers to anything that sums a column. `p028` and `p029` are
+the same table transcribed twice, 174 groups spaced on one page and 39 tight on the other, which is
+what says this is a per-cell coin flip rather than a page's considered style.
+
+**Scoped to a table cell whose whole content is one figure**, never to the document, and that scope is
+the difference between a repair and a corruption: the same pattern loose in prose turns `In 1954, 105
+cases were filed` into `In 1954,105 cases`. 546 of the 549 sit in such a cell. The other 3 have a
+footnote marker beside the figure, so the cell carries a tag, and they are left exactly as written —
+the stated limit, rather than a second looser pattern nothing has measured. A list of years (`1954,
+1955`) and a list of short numbers (`1, 2, 3`) are untouched inside a numeric cell too: the group after
+the separator has to be exactly three digits.
 
 ### `page_split_words`
 

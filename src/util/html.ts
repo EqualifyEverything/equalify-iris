@@ -60,6 +60,179 @@ export function stripSoftHyphens(html: string): { html: string; removed: number 
   return { html: out, removed };
 }
 
+// A space in the markup, in the spellings a model writes one that is not a plain U+0020. `\s` already
+// covers a raw U+00A0, so what this adds is the entity forms of it — included for the reason
+// `SOFT_HYPHEN` includes its own: they render identically and defeat a find-in-page identically, so a
+// repair that matched only the codepoint would fix a cell and leave its neighbour looking the same.
+const SPACE_SRC = "(?:\\s|&nbsp;|&#0*160;|&#x0*a0;)";
+
+// A cell whose whole content is one figure. `<` is not in the class, and that is the scope: a cell
+// carrying a tag — a <sup> footnote marker beside the number, an <abbr> — does not match at all, so
+// its digits are left exactly as written. On #374's census that is 3 of 549 separated groups, and
+// they stay as they are rather than being handled by a second, looser pattern nothing has measured.
+//
+// The bracketing characters are what a column of money and percentages prints around its figures: a
+// leading `$`, a `(` … `)` pair for a negative, a trailing `%`. They are allowed so that `$4, 271` and
+// `(1, 234)` are still recognised as a figure; nothing else is, because the point of the test is that
+// the cell holds no prose the gap could belong to.
+const NUMERIC_CELL = new RegExp(`^[$(]?-?(?:[\\d,.]|${SPACE_SRC})+[)%]?$`, "i");
+
+// One `<td>` or `<th>` with no tag inside it, quoted attribute regions consumed as units so an
+// attribute value containing `>` does not cut the tag short (the reason `hyphens.ts` writes its `TAG`
+// the same way). The closing tag is matched against the captured name, so a `<td>` closed by `</th>`
+// is not treated as a cell.
+const PLAIN_CELL = /<(td|th)((?:[^>"']|"[^"]*"|'[^']*')*)>([^<]*)<\/\1\s*>/gi;
+
+// The printer's alignment space, inside a thousands group. `(?!\d)` is the whole of the guard: the
+// group after the comma must be exactly three digits, so `1954, 1955` in a list of years does not
+// match (four digits) and `1, 2, 3` does not match (one), while `4, 271` does.
+const DIGIT_GROUP_GAP = new RegExp(`(\\d),${SPACE_SRC}+(?=\\d{3}(?!\\d))`, "gi");
+
+// Close up a thousands separator a page split with the printer's alignment space — `4, 271` back to
+// `4,271` — inside numeric table cells only, and say how many were closed.
+//
+// This is the same kind of repair as `stripSoftHyphens` and the same argument for doing it in code:
+// the gap is the column being aligned rather than part of the figure, `agents/page.md` says so ("a
+// figure keeps its digits and loses the printer's space"), and a model does it anyway — 549 separated
+// groups on 6 of 91 pages of one arm, 166 on another, none on a third (#374). What ships is worse than
+// it looks: a reader searching a delivered document for `4,271` does not match `4, 271`, and a total
+// written that way is two numbers to anything that adds a column up. `p028` and `p029` are the same
+// table transcribed twice, 174 groups spaced on one page and 39 tight on the other, which is what
+// makes this a per-cell coin flip rather than a page's considered style.
+//
+// Scoped to the cell and never applied to the document, because the same pattern loose in prose
+// changes text that is right: `In 1954, 105 cases were filed` becomes `In 1954,105 cases`. The `(?!\d)`
+// guard is not enough on its own for that one — `105` is three digits — so the guard that matters is
+// the enclosing cell holding nothing but a figure. 546 of #374's 549 groups sit in such a cell.
+//
+// One case the two guards together still cannot separate, stated because it is the shape a false
+// positive would take: a numeric cell holding a comma-separated LIST whose next element is exactly
+// three digits (`9, 100` meaning nine and one hundred) is written the same way as one split separator,
+// and this closes it up. Nothing distinguishes them inside the cell — only the column's other rows do,
+// which this does not read — and the census found none: 0 false positives over 91 pages, which is a
+// count on one corpus rather than a property of the rule.
+export function tightenDigitGroups(html: string): { html: string; tightened: number } {
+  let tightened = 0;
+  const out = html.replace(PLAIN_CELL, (whole, name: string, attrs: string, content: string) => {
+    if (!NUMERIC_CELL.test(content.trim())) return whole;
+    // The digit before the comma is put back from the capture rather than as `$1`: a replacer
+    // FUNCTION gets no substitution, so returning "$1," would write those two characters into the
+    // cell and delete the digit.
+    const fixed = content.replace(DIGIT_GROUP_GAP, (_m, digit: string) => {
+      tightened += 1;
+      return `${digit},`;
+    });
+    if (fixed === content) return whole;
+    return `<${name}${attrs}>${fixed}</${name}>`;
+  });
+  return { html: out, tightened };
+}
+
+// One `style` attribute, in every quoting a model writes. Unquoted values are matched too — legal
+// HTML for a value with no space in it, `style=color:red` — because the point is that none of these
+// reach the output.
+// The value is captured, because the properties it sets are half of what this reports.
+const STYLE_ATTR_SRC = `\\s+style\\s*=\\s*("[^"]*"|'[^']*'|[^\\s>]+)`;
+const STYLE_ATTR = new RegExp(STYLE_ATTR_SRC, "gi");
+
+// A `<span>` whose only attributes are `style`, with nothing inside it. Matched BEFORE the strip and
+// as a whole element, which is what scopes the removal to this strip's own residue: a `<span></span>`
+// the model wrote empty is not touched, and neither is `<span class="x" style="…">`, which still has
+// an attribute after the strip and so is still a span someone put there on purpose.
+const EMPTY_STYLED_SPAN = new RegExp(`<span(?:${STYLE_ATTR_SRC})+\\s*>\\s*</span\\s*>`, "gi");
+
+// One tag, with its name and its attribute region apart, so the strip runs on attributes and not on
+// prose. A page about HTML that prints `style="color:red"` in its text is transcribing what the paper
+// prints, and rewriting that would be the same fault as repairing a misspelling.
+const ANY_TAG = /<([a-z][a-z0-9-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
+
+// One attribute inside that region, name and value apart. The region is walked pair by pair rather
+// than searched for `style`, and that is not tidiness: an attribute VALUE can contain the text
+// `style="…"` — an alt describing a tag, a code sample the page prints — and a pattern that scans the
+// whole tag for a style attribute finds it there and cuts a hole in the alt. Walking pairs means the
+// name has to be in name position.
+const ATTR = /([^\s=/>]+)(\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*))?/g;
+
+// The CSS property names a declaration block sets, lowercased — `padding-left:2em;background:#ccc`
+// gives `padding-left` and `background`. Only the part before each colon, so a value containing a
+// colon (`background:url(http://…)`) does not add a property of its own.
+const DECLARATION = /(?:^|;)\s*([a-z-]+)\s*:/gi;
+
+// Take `style` attributes out of markup a model wrote, and say what was in them.
+//
+// `agents/page.md` forbids these outright — a style attribute is not announced, does not survive being
+// read aloud, and is dropped by anything that reformats the document — and #374 measured 52 of them
+// shipped anyway. The strip loses nothing a reader was getting, which is the argument for doing it in
+// code rather than asking again: whatever the declaration was carrying, it was already carrying it
+// only to someone who could see it.
+//
+// `props` is the part that is not bookkeeping, and the reason this returns more than a count. 46 of
+// those 52 are `padding-left`, 40 of them on one page's row headings, and that is a table's row groups
+// written in ink instead of in markup — information the page HAS and the document now does not.
+// Stripping the attribute does not lose that; it was never reaching a reader. But it does make the
+// page look clean, so the properties are handed back and logged: a run whose log says `padding-left`
+// names the pages whose hierarchy needs the <tbody>/scope="rowgroup" treatment the prompt asks for,
+// and one whose log says `background-color` names a legend swatch that painted nothing. Rebuilding
+// either is a re-ask against the image and not something this can do — the stated limit of the repair.
+//
+// `spans` is counted apart from `stripped` because it is a different edit: an element removed, not an
+// attribute. Both are reported; a style attribute on a span this drops still counts in `stripped`.
+export function stripStyleAttributes(html: string): {
+  html: string;
+  stripped: number;
+  spans: number;
+  props: string[];
+} {
+  let stripped = 0;
+  let spans = 0;
+  const props: string[] = [];
+  const seen = new Set<string>();
+  // One style attribute accounted for: counted, and its properties added to the set. The value arrives
+  // as it was written, quotes and all, so the quotes come off before the declarations are read — with
+  // them on, the first property is `"padding-left` and matches nothing.
+  const note = (value: string | undefined): void => {
+    stripped += 1;
+    const body = (value ?? "").replace(/^\s*=\s*/, "").replace(/^["']|["']$/g, "");
+    for (const [, prop] of body.matchAll(DECLARATION)) {
+      const key = prop.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      props.push(key);
+    }
+  };
+  let out = html.replace(EMPTY_STYLED_SPAN, (whole) => {
+    spans += 1;
+    for (const [, value] of whole.matchAll(STYLE_ATTR)) note(value);
+    return "";
+  });
+  out = out.replace(ANY_TAG, (tag, name: string, attrs: string) => {
+    if (!/\sstyle\s*=/i.test(attrs)) return tag;
+    const kept: string[] = [];
+    let found = false;
+    for (const [, key, value] of attrs.matchAll(ATTR)) {
+      if (key.toLowerCase() === "style") {
+        found = true;
+        note(value);
+        continue;
+      }
+      kept.push(`${key}${value ?? ""}`);
+    }
+    if (!found) return tag;
+    // Rebuilt rather than cut out, since the pairs were parsed rather than located: whitespace between
+    // attributes is normalized to one space on a tag this touched, which is why the guard above returns
+    // early on every tag that has no style attribute at all. A trailing slash is put back because
+    // `ATTR` cannot match one — its name class excludes `/` — and a self-closing tag that loses it
+    // still parses, but the markup a page wrote is not this function's to change.
+    const slash = /\/\s*$/.test(attrs) ? " /" : "";
+    return `<${name}${kept.length ? ` ${kept.join(" ")}` : ""}${slash}>`;
+  });
+  // Sorted, and NOT in the order the properties were met. Empty styled spans are removed in a pass of
+  // their own before the attributes are walked, so first-seen order is that pass and then the rest of
+  // the document — an order that reads like document order and is not one. Sorting says what the list
+  // actually is, a set of properties this page used, and makes two runs' lines comparable.
+  return { html: out, stripped, spans, props: props.sort() };
+}
+
 export function decodeEntities(s: string): string {
   return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, ref: string) => {
     const key = ref.toLowerCase();

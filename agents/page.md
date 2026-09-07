@@ -54,8 +54,9 @@ device is not case at all. Small capitals are a typeface: the first letter stand
 the rest are capital forms at x-height, so a line set that way prints "Table 11.", "Chapter 1." or a
 name like "Ecker-Racz" in title case however capital its letters look, and emitting TABLE, CHAPTER or
 ECKER-RACZ adds emphasis the page does not carry — a run of capitals is also what a screen reader may
-announce letter by letter as an initialism. Full capitals are the other device and there the case IS
-the text: every letter at one height, cap height, so PART I stays PART I. The two heights are what
+announce letter by letter as an initialism. Full capitals are the other device, every letter at one
+height with no x-height form among them, and there the case is not the text by itself: what it means
+depends on what the capitals are doing, which the display-capitals rule below decides. The two heights are what
 tell them apart, and a document commonly settles it itself — where the same words are set both ways,
 a chapter title in small capitals and the same chapter named in mixed case a few pages on, the
 mixed-case setting is what the small capitals mean. Where you cannot compare the two heights — a scan
@@ -68,6 +69,23 @@ typeface: a style attribute does not make small capitals reach a reader as small
 does not, and neither does retyping the line in a case the page did not set — which is why writing
 "Table 11." for a line set in small capitals is the transcription of that line and not a case change of
 your own. Typography you cannot transcribe is a note for the "log" field.
+
+Capitals the page sets for weight are transcribed in title case; capitals that are how a word is
+spelled are transcribed as printed. Those are the two things a run of full capitals can be, and the
+test is which of them the capitals carry — the word's own spelling, or emphasis the page has added to
+the line. ACIR, HEW and U.S. are spelled that way: they have no lower-case form anywhere, so Acir and
+Hew are text the page prints in no sense at all, and retyping them is the corruption this section
+exists to prevent arriving by way of the fix. A heading, a running title, a table's stub head, the
+name of a division — PART I over a part of the report, GENERAL PROVISIONS over a run of sections — is
+the other kind: its words are ordinary words, written in mixed case wherever they are not being
+emphasised, so emit Part I and General Provisions and record the printed casing in the "log" field.
+The reason to down-case rather than keep the ink is the one given above: a run of capitals is what a
+screen reader may announce letter by letter, which is right for ACIR and turns PART into P-A-R-T, and
+the emphasis cannot be carried instead, because a style attribute, a class and text-transform are all
+prohibited below and nothing you can write makes a line louder. Where the two cannot be told apart —
+a short run that may be an initialism you do not know, a line whose words appear nowhere else on the
+page to compare — the answer is the one an unidentified device gets: exactly as the page sets it,
+with a note in the "log" field saying the case could not be decided.
 
 No styling reaches the output at all: no style attribute, no class, no <style> element, no event
 handler. A style attribute carries nothing a reader hears — it is not announced, it does not survive
@@ -227,7 +245,7 @@ page number", "blank except for its printed folio" are each read as the blank pa
 and only because that number is the one thing on the paper this pipeline never delivers. Name
 anything else the page bears and the contradiction is what gets believed.
 
-Thirteen structures are easy to render as something that merely looks right, so be explicit:
+Fourteen structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
   smaller bold line that introduces a subsection of the section above it is an <h3> under that
@@ -591,6 +609,32 @@ Thirteen structures are easy to render as something that merely looks right, so 
   tells a reader that the others were checked and found sound. Never write such a note for a
   sequence that is in fact unbroken, and where the page prints its own note about the numbering,
   transcribe that rather than adding a second one beside it.
+- MARKS THE PRINTING USES: a page carries marks that are neither words nor numbers — the row of dots
+  that leads the eye from a table's stub across to its figure, the space a printer leaves inside a
+  thousands group so the digits line up down the column, a leading zero, a centred dot. Each of these
+  has one encoding, named here, and the reason to name it is not that any other encoding is
+  indefensible on its own: it is that a page left to choose picks a different one in every cell, and a
+  reader who learns in row 1 what a dotted cell means has learned nothing about row 20.
+  Never leave a cell empty for one. An empty <td> says the paper printed nothing there, which is a
+  different fact about the table from a leader, a dash or a withheld figure, and it is the one
+  encoding a reader cannot undo — the mark is gone, and the cell now claims a blank the page does not
+  have. Emptiness is never the transcription of a mark you saw.
+  A leader is transcribed by what the page uses it for and not by its dots. Where it does no more
+  than carry the eye across to the figure in the same row, it is layout: the row already says what it
+  joins, so the cell holds the figure and the dots are not written at all — a <th scope="row"> and
+  its <td> in one row ARE that joining. Where the page gives the dots a meaning of their own, in a
+  legend or a footnote — dots for "not available", for "not applicable", for a figure withheld — that
+  meaning goes in the cell, in the page's own words, by the abbreviation rule below. And where dots
+  stand in a cell with nothing on the page saying what they mean, transcribe them as printed, as that
+  cell's text, and say in the "log" field that the page leaves them unexplained. Whichever of the
+  three a table's dotted cells are, every dotted cell in that table is transcribed the same way.
+  A figure keeps its digits and loses the printer's space: 4,271 where the column prints 4, 271 with a
+  gap after the comma, because the gap is the column being aligned and not part of the number — a
+  reader searching a document for 4,271 does not match 4, 271, and a total that reads 4, 271 is two
+  numbers to anything that adds them up. A leading zero the page prints is kept, since it is a digit
+  the page shows. A centred dot is transcribed as the character the page means by it, a decimal point
+  where it sits between the digits of one figure and a multiplication sign where the page is
+  multiplying; where its use cannot be decided, as printed with a note in the "log" field.
 - A SYMBOL THE PAGE EXPLAINS AS A DEVICE: where the page states that a symbol means something
   navigational rather than something about the content — "see the pages indicated by •", a ► that
   stands for "turn to" — that symbol belongs to the page's apparatus and not to the item it is
@@ -604,7 +648,12 @@ Thirteen structures are easy to render as something that merely looks right, so 
 - ABBREVIATIONS AND KEYS: where the page itself says what a short form means — a legend under a
   table, a key beside a diagram, a footnote, a parenthetical on first use — carry that meaning
   into the markup in the page's own words: <abbr title="not shown">NS</abbr>. Never supply an
-  expansion the page does not state, however obvious it looks. Encode it ONCE, where the page
+  expansion the page does not state, however obvious it looks. That holds for every mark and not
+  only for short forms made of letters — a symbol in a table cell, a mark beside a figure, a glyph
+  on a diagram — and what decides it is whether the page prints the mark's meaning anywhere, never
+  what the mark is or what it does. So a mark this page never explains is transcribed as printed,
+  with no meaning attached to it in any attribute, and named in the "log" field as unexplained.
+  Encode it ONCE, where the page
   keeps it: transcribe the legend or key as the structure it is (a <dl> of symbol and meaning, or
   the footnote it is written as) and do NOT also put a paragraph above the table restating what
   the legend below it already says — read in order, that is the same sentence twice, and the

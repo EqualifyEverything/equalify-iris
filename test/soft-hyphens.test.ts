@@ -1,12 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { runExtraction } from "../src/pipeline/extraction.ts";
 import { stripSoftHyphens } from "../src/util/html.ts";
-import type { PipelineContext } from "../src/pipeline/context.ts";
-import type { Paths } from "../src/store/paths.ts";
+import { ev, makeCtx, ORDINARY, withTemp as inTemp } from "./extraction-seams.ts";
 
 // A word the printing broke across a column, carried into the markup as U+00AD (issue #334).
 // `agents/page.md` forbids it in as many words, with a worked example, and three models from three
@@ -84,113 +80,10 @@ test("the count is every occurrence, not every page that had one", () => {
 // model is handed its own soft hyphen back, together with an instruction to carry over everything the
 // problem list does not name exactly as it stands.
 
-interface Recorded {
-  events: { type: string; data: Record<string, unknown> }[];
-}
-
-interface Spec {
-  // The first render's fragment.
-  render: string;
-  // The reply's `log` and `blank` field, for the one test about a page the model says is empty.
-  log?: string;
-  blank?: boolean;
-  // Present means the fidelity check rejects the page, which buys the one correction pass.
-  problems?: string[];
-  // What that pass answers with.
-  correction?: string;
-  // Present means the render asks for the chart specialist, which buys a specialist call and a
-  // merge call.
-  specialist?: { fragment: string; merged: string };
-}
-
-const ORDINARY = `<h2>Page 1</h2><p>${"content ".repeat(20)}</p>`;
-const COMPANION = `<h2>Page 2</h2><p>${"other ".repeat(20)}</p>`;
-
-// Page 1 behaves as `spec` says. `companion` adds an ordinary second page, which the one test whose
-// page produces nothing needs: a run where NO page produced content throws by design rather than
-// containing the failure, so a lost page can only be observed next to a page that worked.
-//
-// `feedback.md` is written only when the spec needs a verdict: without it `verifyAgentOutput`
-// short-circuits to the unjudged verdict, no page is ever rejected, and no correction pass runs.
-function makeCtx(dir: string, spec: Spec, companion = false): { ctx: PipelineContext; rec: Recorded } {
-  const agentsDir = join(dir, "agents");
-  const fragDir = join(dir, "fragments");
-  const inputDir = join(dir, "input");
-  for (const d of [agentsDir, fragDir, inputDir]) mkdirSync(d, { recursive: true });
-  writeFileSync(join(agentsDir, "page.md"), "# Page Agent\n\n## Required capability\nvision\n");
-  writeFileSync(join(agentsDir, "chartDataAgent.md"), "# Chart Agent\n\n## Required capability\nvision\n");
-  if (spec.problems) writeFileSync(join(agentsDir, "feedback.md"), "# Feedback Agent\n\n## Required capability\nvision\n");
-  writeFileSync(join(inputDir, "page-001.png"), "not-a-real-png");
-  if (companion) writeFileSync(join(inputDir, "page-002.png"), "not-a-real-png");
-  const images = [{ name: "page-001.png", order: 1, path: join(inputDir, "page-001.png") }];
-  if (companion) images.push({ name: "page-002.png", order: 2, path: join(inputDir, "page-002.png") });
-
-  const rec: Recorded = { events: [] };
-  const ctx = {
-    sessionId: "ses_test",
-    images,
-    extractionConcurrency: 1,
-    recheckSampleSize: 1,
-    maxReviewIterations: 1,
-    paths: {
-      agentsDir,
-      tmpAgentsDir: () => join(dir, "tmp-agents"),
-      agentMemory: (agent: string) => join(dir, `mem-${agent.replace(/\.md$/, "")}.json`),
-      sessionFragments: () => fragDir,
-    } as unknown as Paths,
-    router: {
-      complete: async (
-        _agent: string,
-        _cap: string,
-        messages: { role: string; content: string }[],
-        opts?: { step?: string },
-      ) => {
-        const sys = messages.find((m) => m.role === "system")?.content ?? "";
-        const prompt = messages.map((m) => m.content).join("\n");
-        const step = opts?.step;
-        if (prompt.includes("filename: page-002.png")) return { text: JSON.stringify({ html: COMPANION, log: "" }) };
-        if (step === "verify" || step === "recheck_binding" || step === "recheck_sampled") {
-          const problems = step === "verify" ? (spec.problems ?? []) : [];
-          return { text: JSON.stringify({ faithful: problems.length === 0, accessible: true, problems }) };
-        }
-        if (step === "correct") return { text: JSON.stringify({ html: spec.correction ?? ORDINARY }) };
-        if (step === "specialist") {
-          return { text: JSON.stringify({ no_content: false, html: spec.specialist!.fragment }) };
-        }
-        if (sys.includes("You merge a higher-fidelity HTML fragment")) {
-          return { text: JSON.stringify({ html: spec.specialist!.merged }) };
-        }
-        return {
-          text: JSON.stringify({
-            html: spec.render,
-            log: spec.log ?? "",
-            ...(spec.blank === undefined ? {} : { blank: spec.blank }),
-            ...(spec.specialist ? { suggested_agent: { name: "chartDataAgent", reason: "a chart" } } : {}),
-          }),
-        };
-      },
-    },
-    log: {
-      event: (type: string, data: Record<string, unknown> = {}) => rec.events.push({ type, data }),
-      agentCall: () => {},
-    },
-  } as unknown as PipelineContext;
-  return { ctx, rec };
-}
-
-async function withTemp<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = mkdtempSync(join(tmpdir(), "iris-shy-"));
-  try {
-    return await fn(dir);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-const ev = (rec: Recorded, type: string) => rec.events.filter((e) => e.type === type);
+// The harness lives in `extraction-seams.ts`: #374's repairs test the same four seams.
 
 test("the first render's soft hyphens never reach the fragment, in text or in an attribute", async () => {
-  await withTemp(async (dir) => {
+  await inTemp("iris-shy-", async (dir) => {
     // The shape the census found: table column headings set in narrow columns, one of them broken
     // inside an `alt`. The attribute matters as much as the text — a soft hyphen there defeats the
     // same search, and it is announced by whatever the screen reader makes of it.
@@ -214,7 +107,7 @@ test("the first render's soft hyphens never reach the fragment, in text or in an
 });
 
 test("a page with none of them says nothing about it", async () => {
-  await withTemp(async (dir) => {
+  await inTemp("iris-shy-", async (dir) => {
     const { ctx, rec } = makeCtx(dir, { render: ORDINARY });
     const { fragments } = await runExtraction(ctx);
     assert.equal(fragments[0].innerHtml, ORDINARY);
@@ -225,7 +118,7 @@ test("a page with none of them says nothing about it", async () => {
 });
 
 test("the correction pass is stripped too, and the strip runs before its reply is compared", async () => {
-  await withTemp(async (dir) => {
+  await inTemp("iris-shy-", async (dir) => {
     // The correction reply is the page it was given, plus soft hyphens: a pass that repaired nothing
     // and re-typed two words on its way past. Adopted as a string, it would be `moved` — the
     // rejected page shipping with an invisible defect added, and #328's marker not fired, because
@@ -247,7 +140,7 @@ test("the correction pass is stripped too, and the strip runs before its reply i
 });
 
 test("both specialist seams are stripped", async () => {
-  await withTemp(async (dir) => {
+  await inTemp("iris-shy-", async (dir) => {
     // The specialist fragment is stripped where it is read, before it goes into the merge prompt, so
     // the merge agent is never shown one to copy — and the merge reply is stripped as well, because a
     // merge agent re-typing a word it is joining is the same transcription step that produces these.
@@ -272,7 +165,7 @@ test("both specialist seams are stripped", async () => {
 });
 
 test("a fragment whose only text is soft hyphens is a page with nothing on it", async () => {
-  await withTemp(async (dir) => {
+  await inTemp("iris-shy-", async (dir) => {
     // The reason the strip is ahead of the emptiness check rather than after it. U+00AD is not
     // whitespace to `visibleText`, so `<p>\u00ad</p>` reads as a page with content on it: without
     // the strip in front, this run reports a page delivered and the document carries an empty
@@ -289,7 +182,7 @@ test("a fragment whose only text is soft hyphens is a page with nothing on it", 
 });
 
 test("...unless the reply SAID the page is empty, in which case it is a blank page and not a lost one", async () => {
-  await withTemp(async (dir) => {
+  await inTemp("iris-shy-", async (dir) => {
     // The same reply as the test above plus a declaration, and the distinction the whole no-content
     // branch exists to keep: a failed page is work to redo, a blank page is nothing to do. The
     // emptiness gate reads the stripped markup and `blankDeclaration` re-derives the same reading

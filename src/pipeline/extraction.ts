@@ -1,7 +1,7 @@
 import { readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { extractJson } from "../util/json.ts";
-import { stripSoftHyphens } from "../util/html.ts";
+import { stripSoftHyphens, stripStyleAttributes, tightenDigitGroups } from "../util/html.ts";
 import { mapWithConcurrency } from "../util/concurrency.ts";
 import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
@@ -90,8 +90,9 @@ device is not case at all. Small capitals are a typeface: the first letter stand
 the rest are capital forms at x-height, so a line set that way prints "Table 11.", "Chapter 1." or a
 name like "Ecker-Racz" in title case however capital its letters look, and emitting TABLE, CHAPTER or
 ECKER-RACZ adds emphasis the page does not carry — a run of capitals is also what a screen reader may
-announce letter by letter as an initialism. Full capitals are the other device and there the case IS
-the text: every letter at one height, cap height, so PART I stays PART I. The two heights are what
+announce letter by letter as an initialism. Full capitals are the other device, every letter at one
+height with no x-height form among them, and there the case is not the text by itself: what it means
+depends on what the capitals are doing, which the display-capitals rule below decides. The two heights are what
 tell them apart, and a document commonly settles it itself — where the same words are set both ways,
 a chapter title in small capitals and the same chapter named in mixed case a few pages on, the
 mixed-case setting is what the small capitals mean. Where you cannot compare the two heights — a scan
@@ -104,6 +105,23 @@ typeface: a style attribute does not make small capitals reach a reader as small
 does not, and neither does retyping the line in a case the page did not set — which is why writing
 "Table 11." for a line set in small capitals is the transcription of that line and not a case change of
 your own. Typography you cannot transcribe is a note for the "log" field.
+
+Capitals the page sets for weight are transcribed in title case; capitals that are how a word is
+spelled are transcribed as printed. Those are the two things a run of full capitals can be, and the
+test is which of them the capitals carry — the word's own spelling, or emphasis the page has added to
+the line. ACIR, HEW and U.S. are spelled that way: they have no lower-case form anywhere, so Acir and
+Hew are text the page prints in no sense at all, and retyping them is the corruption this section
+exists to prevent arriving by way of the fix. A heading, a running title, a table's stub head, the
+name of a division — PART I over a part of the report, GENERAL PROVISIONS over a run of sections — is
+the other kind: its words are ordinary words, written in mixed case wherever they are not being
+emphasised, so emit Part I and General Provisions and record the printed casing in the "log" field.
+The reason to down-case rather than keep the ink is the one given above: a run of capitals is what a
+screen reader may announce letter by letter, which is right for ACIR and turns PART into P-A-R-T, and
+the emphasis cannot be carried instead, because a style attribute, a class and text-transform are all
+prohibited below and nothing you can write makes a line louder. Where the two cannot be told apart —
+a short run that may be an initialism you do not know, a line whose words appear nowhere else on the
+page to compare — the answer is the one an unidentified device gets: exactly as the page sets it,
+with a note in the "log" field saying the case could not be decided.
 
 No styling reaches the output at all: no style attribute, no class, no <style> element, no event
 handler. A style attribute carries nothing a reader hears — it is not announced, it does not survive
@@ -263,7 +281,7 @@ page number", "blank except for its printed folio" are each read as the blank pa
 and only because that number is the one thing on the paper this pipeline never delivers. Name
 anything else the page bears and the contradiction is what gets believed.
 
-Thirteen structures are easy to render as something that merely looks right, so be explicit:
+Fourteen structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
   smaller bold line that introduces a subsection of the section above it is an <h3> under that
@@ -627,6 +645,32 @@ Thirteen structures are easy to render as something that merely looks right, so 
   tells a reader that the others were checked and found sound. Never write such a note for a
   sequence that is in fact unbroken, and where the page prints its own note about the numbering,
   transcribe that rather than adding a second one beside it.
+- MARKS THE PRINTING USES: a page carries marks that are neither words nor numbers — the row of dots
+  that leads the eye from a table's stub across to its figure, the space a printer leaves inside a
+  thousands group so the digits line up down the column, a leading zero, a centred dot. Each of these
+  has one encoding, named here, and the reason to name it is not that any other encoding is
+  indefensible on its own: it is that a page left to choose picks a different one in every cell, and a
+  reader who learns in row 1 what a dotted cell means has learned nothing about row 20.
+  Never leave a cell empty for one. An empty <td> says the paper printed nothing there, which is a
+  different fact about the table from a leader, a dash or a withheld figure, and it is the one
+  encoding a reader cannot undo — the mark is gone, and the cell now claims a blank the page does not
+  have. Emptiness is never the transcription of a mark you saw.
+  A leader is transcribed by what the page uses it for and not by its dots. Where it does no more
+  than carry the eye across to the figure in the same row, it is layout: the row already says what it
+  joins, so the cell holds the figure and the dots are not written at all — a <th scope="row"> and
+  its <td> in one row ARE that joining. Where the page gives the dots a meaning of their own, in a
+  legend or a footnote — dots for "not available", for "not applicable", for a figure withheld — that
+  meaning goes in the cell, in the page's own words, by the abbreviation rule below. And where dots
+  stand in a cell with nothing on the page saying what they mean, transcribe them as printed, as that
+  cell's text, and say in the "log" field that the page leaves them unexplained. Whichever of the
+  three a table's dotted cells are, every dotted cell in that table is transcribed the same way.
+  A figure keeps its digits and loses the printer's space: 4,271 where the column prints 4, 271 with a
+  gap after the comma, because the gap is the column being aligned and not part of the number — a
+  reader searching a document for 4,271 does not match 4, 271, and a total that reads 4, 271 is two
+  numbers to anything that adds them up. A leading zero the page prints is kept, since it is a digit
+  the page shows. A centred dot is transcribed as the character the page means by it, a decimal point
+  where it sits between the digits of one figure and a multiplication sign where the page is
+  multiplying; where its use cannot be decided, as printed with a note in the "log" field.
 - A SYMBOL THE PAGE EXPLAINS AS A DEVICE: where the page states that a symbol means something
   navigational rather than something about the content — "see the pages indicated by •", a ► that
   stands for "turn to" — that symbol belongs to the page's apparatus and not to the item it is
@@ -640,7 +684,12 @@ Thirteen structures are easy to render as something that merely looks right, so 
 - ABBREVIATIONS AND KEYS: where the page itself says what a short form means — a legend under a
   table, a key beside a diagram, a footnote, a parenthetical on first use — carry that meaning
   into the markup in the page's own words: <abbr title="not shown">NS</abbr>. Never supply an
-  expansion the page does not state, however obvious it looks. Encode it ONCE, where the page
+  expansion the page does not state, however obvious it looks. That holds for every mark and not
+  only for short forms made of letters — a symbol in a table cell, a mark beside a figure, a glyph
+  on a diagram — and what decides it is whether the page prints the mark's meaning anywhere, never
+  what the mark is or what it does. So a mark this page never explains is transcribed as printed,
+  with no meaning attached to it in any attribute, and named in the "log" field as unexplained.
+  Encode it ONCE, where the page
   keeps it: transcribe the legend or key as the structure it is (a <dl> of symbol and meaning, or
   the footnote it is written as) and do NOT also put a paragraph above the table restating what
   the legend below it already says — read in order, that is the same sentence twice, and the
@@ -2473,18 +2522,35 @@ function pageSystem(agent: AgentSpec, lessons: string): string {
   return `${agent.content}\n\n${ACCESSIBILITY_REQUIREMENTS}${lessons}`;
 }
 
-// Soft hyphens out of a page reply, on the line where that reply becomes markup Iris keeps
-// (issue #334). `stripSoftHyphens` has the reasoning for why there is no output where one is the
-// right answer; this is about WHERE the strip goes, which is the part with alternatives.
+// Three repairs to a page reply, on the line where that reply becomes markup Iris keeps: soft
+// hyphens out of it (#334), `style` attributes out of it, and a thousands separator the printing
+// split with an alignment space closed back up (#374 item 7). `html.ts` has the argument for each —
+// what makes it a repair rather than a prompt clause, and what each one's limits are — and this is
+// about WHERE they go, which is the part with alternatives and the part all three share.
+//
+// What they have in common is the test that admits them: each is decidable on the reply alone, with
+// no image, no second model and no page-specific knowledge, and on each there is no page where the
+// thing being removed is the right answer. That is why they are here and not in the problem list the
+// correction pass is given. A split WORD (`hyphens.ts`) fails that test — Iris cannot know which
+// spelling the paper prints — so it stays a re-ask, and the boundary between the two files is that
+// sentence rather than which issue asked for the code.
+//
+// They run soft hyphens, then styling, then digit groups, and the last two are in that order for a
+// reason: `tightenDigitGroups` only touches a cell holding nothing but a figure, so a `<td>` whose
+// figure sits beside an empty styled `<span>` is out of its scope until the strip has removed the
+// span. Reversed, that cell keeps its printer's space and nothing says why.
 //
 // At every seam in this phase rather than once at its exit, because a page's own output is an
 // INPUT further along: `renderPage`'s fragment is what `correctPage` is shown as "your previous
 // output", what a re-extraction is shown as "your previous output for this page", and what
-// `mergeSpecialist` is shown as the current page. Strip only on the way out of extraction and the
-// model is handed its own soft hyphen back and told to carry over everything the problem list does
-// not name exactly as it stands — which is the instruction working correctly, on markup that
-// should not have reached it. Stripping where the reply is read means the character never enters
-// the pipeline's state at all, so it cannot be re-derived, quoted, or copied forward.
+// `mergeSpecialist` is shown as the current page. Repair only on the way out of extraction and the
+// model is handed its own soft hyphen — or its own `style` attribute — back and told to carry over
+// everything the problem list does not name exactly as it stands, which is the instruction working
+// correctly on markup that should not have reached it. Repairing where the reply is read means the
+// defect never enters the pipeline's state at all, so it cannot be re-derived, quoted, or copied
+// forward. Whether being handed one back is what makes a page repeat it is not measured — #374's 52
+// style attributes include 40 `padding-left` on a single page's row headings, which says the defect
+// comes in runs, not what a second pass shown the run would do with it.
 //
 // AFTER `ctx.log.agentCall` at every site, and that order is load-bearing rather than incidental.
 // `agent_call.output` is the raw reply and the only record of what the model actually wrote:
@@ -2495,12 +2561,21 @@ function pageSystem(agent: AgentSpec, lessons: string): string {
 // This phase and not the review phase, which is the scope worth stating because there are four
 // more seams where a model's HTML becomes markup: the Copy Editor's two contracts and
 // `edit_section` (review.ts), the table-join agent (tables.ts), and the regression fixture re-run
-// (feedback.ts). A soft hyphen is a TRANSCRIPTION artefact — it comes from an agent reading an
-// image of a printing that broke a word across a column and re-typing it — and every seam here is
-// such an agent, while the review-phase agents are handed markup this phase has already cleaned
-// and edit it as text. Their only route to one is invention, which nothing has measured. The
-// fixture path is out for a different reason: its HTML is scored against a stored fixture and
-// never delivered, so a strip there would move a comparison rather than repair a document.
+// (feedback.ts). Two of the three repairs answer that with the same argument. A soft hyphen and a
+// printer's alignment space are TRANSCRIPTION artefacts — they come from an agent reading an image
+// of a printing that broke a word across a column or spaced a figure to fit one, and re-typing it —
+// and every seam here is such an agent, while the review-phase agents are handed markup this phase
+// has already cleaned and edit it as text. Their only route to one is invention, which nothing has
+// measured. The fixture path is out for a different reason: its HTML is scored against a stored
+// fixture and never delivered, so a repair there would move a comparison rather than fix a document.
+//
+// The STYLE strip does not get that argument, and this is its stated limit rather than a claim about
+// it. A `style` attribute is not an artefact of reading a printing; it is a model reaching for CSS to
+// hold a shape, which any agent writing markup can do — and the review-phase agents write markup.
+// #374 measured styling on the page agent's output because that is what #374 looked at, so what is
+// known is that it happens here and not that it happens nowhere else. Covering those seams needs
+// their own census first: a strip on the Copy Editor's output would be moving a fix onto a step where
+// the rate is unmeasured, and `page_style_attributes` firing with `where` on it is what would say so.
 //
 // Of those four, the TABLE JOIN is the one to cover first should `page_soft_hyphens` ever fire after
 // a model swap. It is the closest thing outside this phase to a transcription step — its job is
@@ -2509,17 +2584,31 @@ function pageSystem(agent: AgentSpec, lessons: string): string {
 //
 // `correct` is the last of the four to run, not `specialist_merge`: dispatch happens inside the
 // render, and the correction pass runs after the fidelity verdict.
-type SoftHyphenSeam = "extract" | "correct" | "specialist" | "specialist_merge";
+type RepairSeam = "extract" | "correct" | "specialist" | "specialist_merge";
 
-function stripped(ctx: PipelineContext, where: SoftHyphenSeam, img: InputImage, html: string): string {
-  const { html: clean, removed } = stripSoftHyphens(html);
+function repaired(ctx: PipelineContext, where: RepairSeam, img: InputImage, html: string): string {
+  const at = { image: img.name, page: img.order, where };
+  const { html: noShy, removed } = stripSoftHyphens(html);
   // Only when it fired, so the line means "this page had them" and a run with none of these lines
   // is a run where no reply carried one. `where` is the step name the call was billed under, which
   // is what makes the count attributable: the same character from a first render, from the
   // correction pass and from a specialist are three facts about three different calls, and #334's
-  // census is per-agent.
+  // census is per-agent. The same holds for the two lines below.
   if (removed) {
-    ctx.log.event("page_soft_hyphens", { image: img.name, page: img.order, where, removed });
+    ctx.log.event("page_soft_hyphens", { ...at, removed });
+  }
+  const { html: noStyle, stripped, spans, props } = stripStyleAttributes(noShy);
+  // `props` is the field to read, and the reason this line carries three numbers and a list. The
+  // count says a page had styling; the properties say what the styling was DOING, which is the part
+  // that survives the strip as a question: `padding-left` names a page whose row-group hierarchy was
+  // in ink, `background-color` a legend swatch that painted nothing. Neither can be rebuilt from
+  // here — that is a re-ask against the image — so the log is what makes those pages findable.
+  if (stripped) {
+    ctx.log.event("page_style_attributes", { ...at, stripped, spans, props });
+  }
+  const { html: clean, tightened } = tightenDigitGroups(noStyle);
+  if (tightened) {
+    ctx.log.event("page_digit_groups", { ...at, tightened });
   }
   return clean;
 }
@@ -2571,7 +2660,7 @@ async function renderPage(
   // fragment whose only text is soft hyphens carries nothing, and should be treated as the page with
   // nothing on it that it is rather than as characters. `blankDeclaration` re-derives that same
   // reading from the reply, so it is handed this fragment too — see the call.
-  const html = raw == null ? raw : stripped(ctx, "extract", img, raw);
+  const html = raw == null ? raw : repaired(ctx, "extract", img, raw);
   // Nothing for a reader in this reply. Throwing hands the page to `failedPage`, which is what
   // every other unusable answer in this file already does: the page is lost, and the run
   // SAYS the page is lost (`page_extraction_failed`, `pages_failed`, a @page-failed
@@ -3024,7 +3113,7 @@ async function correctPage(
   );
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
   const parsed = extractJson<{ html?: string; declined?: unknown }>(res.text);
-  const corrected = stripped(ctx, "correct", img, (parsed?.html ?? bareHtml(res.text) ?? "").trim());
+  const corrected = repaired(ctx, "correct", img, (parsed?.html ?? bareHtml(res.text) ?? "").trim());
   // Read from the envelope only, never from `bareHtml`: a reply that came back as raw markup with no
   // JSON around it has no `declined` key to read, and inferring one from prose in the page would be
   // this file reading a disagreement into a document rather than out of a reply.
@@ -3081,7 +3170,7 @@ async function runSpecialist(ctx: PipelineContext, agent: AgentSpec, img: InputI
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
   const parsed = extractJson<{ no_content?: boolean; html?: string }>(res.text);
   if (!parsed || parsed.no_content || !parsed.html?.trim()) return null;
-  return stripped(ctx, "specialist", img, parsed.html.trim());
+  return repaired(ctx, "specialist", img, parsed.html.trim());
 }
 
 // Splice a specialist fragment into the page body, replacing the page's own
@@ -3122,7 +3211,7 @@ async function mergeSpecialist(
   // the one that does not: a merge agent re-typing a word it is joining is the same transcription step
   // that produces these in the first place. NOT the phase's last seam, which is `correct`: dispatch
   // runs inside the render, and the correction pass runs after the fidelity verdict.
-  return merged ? stripped(ctx, "specialist_merge", img, merged) : null;
+  return merged ? repaired(ctx, "specialist_merge", img, merged) : null;
 }
 
 // The agent names a suggestion could have resolved to, for the
