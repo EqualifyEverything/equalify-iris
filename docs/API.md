@@ -2909,11 +2909,19 @@ too and a field present on some declines only would have its denominator chosen 
   do not reach. A cell's own text can contain `|`, so these are not re-splittable into a cell count —
   that is what the counts above are for.
 
-All seven are **absent** when a half holds no `<table>` for this to read, which is the `unreadable`
-reason and not `read_failed`: a `read_failed` decline is `checkJoin` failing on the **merged**
-candidate, where both halves read fine and all seven fields are present. A half with a `<table>` but no
-header block is present too, with an empty signature and `0` for both of its counts. The per-round
-totals are folded into `tables` in the diagnostics payload (§7b).
+All seven are **absent** in two cases, and `reason` does not separate them — do not read absence as one
+reason, or one reason as absence:
+
+- `unreadable` — a half holding no `<table>` for these to be read from.
+- the `read_failed` that is the **join itself** throwing on a half no parser can read (a page nested
+  about 200,000 levels deep, which `anchors.ts` refuses to rewrite and delivers as written). These
+  fields are read from those same two halves, so they are absent here too. No document in this corpus
+  has produced it.
+
+The **other** `read_failed` — the verifier failing on the **merged** candidate — has both halves
+reading fine and all seven fields present. A half with a `<table>` but no header block is present too,
+with an empty signature and `0` for both of its counts. The per-round totals are folded into `tables` in
+the diagnostics payload (§7b).
 
 ### `table_join_failed`
 

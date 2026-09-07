@@ -632,6 +632,11 @@ test("a half the parser cannot read is the editor's rather than the document's p
   // `attempt` at the call site turns the throw into a decline; here it is the throw itself that is
   // pinned, so a future rewrite that swallowed it would still be seen to.
   assert.throws(() => joinInCode(asPair(deep, ok)));
+  // And the header fields are read off these same two halves, so they cannot be on that decline either.
+  // This is why absence of them does NOT identify the `unreadable` reason: `read_failed` has two
+  // producers, and this one — the join throwing — emits it with all seven fields missing, while the
+  // other — the verifier throwing on the merged candidate — emits it with all seven present.
+  assert.throws(() => headerSignatures(asPair(deep, ok)));
 });
 
 // --- what a decline says about the two headers (#326) ---

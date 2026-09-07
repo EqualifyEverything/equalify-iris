@@ -934,10 +934,15 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
     // evidence about a `columns_differ` decline too. Two, a field present on some declines and absent
     // on others cannot be counted: the denominator would be chosen by the reason.
     //
-    // Absent altogether when a half holds no `<table>` for `headerRead` to find, or when the parse
-    // throws. That is the `unreadable` reason and NOT the `read_failed` one, which is worth stating
-    // because the two look interchangeable on the line: `read_failed` here is `checkJoin` failing on
-    // the MERGED candidate, where both halves read fine and all seven fields are present.
+    // Absent altogether when a half holds no `<table>` for `headerRead` to find, or when parsing a half
+    // throws. Absence therefore does NOT mean the `unreadable` reason, and this comment said it did:
+    // `read_failed` has TWO producers below and they differ on exactly this. `coded === null` is
+    // `joinInCode` throwing on a half no parser can read (`attempt`'s 200,000-level case, which
+    // `anchors.ts` delivers as written), and `headerSignatures` reads those same two halves — so that
+    // line carries `read_failed` with all seven fields absent. The other one, `codeChecked === null`, is
+    // `checkJoin` throwing on the MERGED candidate, where both halves read fine and all seven fields are
+    // present. So neither direction of the shorthand holds: absence does not name a reason, and
+    // `read_failed` does not predict absence.
     //
     // `headers_identical` is string equality on the FULL signatures and is computed here rather than
     // left to a reader of the two capped strings, because a cap that cut both at the same prefix would
