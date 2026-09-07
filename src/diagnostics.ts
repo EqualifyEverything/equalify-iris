@@ -674,9 +674,14 @@ export interface Diagnostics {
     // and every attached page image — and only the remainder was asked for again.
     salvaged: number;
     // Of those, the ones whose edits list had finished before the cut (`closed: true`): a complete
-    // patch that hit the ceiling on its way out of the envelope, so there was no remainder to
-    // section and the round cost one call. The cheapest shape this can take, and the one worth
-    // telling from a partial rescue.
+    // patch that hit the ceiling on its way out of the envelope. The cheapest shape this can take,
+    // and the one worth telling from a partial rescue.
+    //
+    // It does NOT by itself mean the round cost one call, and this comment said it did until #423's
+    // second round. A closed list claims the whole document (`claimed = blocks.length`) but the claim
+    // is still cut back by a retreat (`reached = lostAt ?? claimed`, pipeline/review.ts), so a closed
+    // reply carrying a `lost_at` leaves a non-empty remainder and the sections are bought after all.
+    // Read against `retreated`, which is where that case is written up.
     salvaged_closed: number;
     // Of those, the retreats: a block before the cut gave content up, so the claim was cut back to
     // it and the edits behind it were dropped (`lost_at`). **This is the field #317 asked for**, and
