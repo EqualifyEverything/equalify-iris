@@ -358,7 +358,8 @@ test("models covers the whole session, not the current round, so a restart betwe
   // session's log is one append-only file across its feedback rounds (store/runlog.ts). Config is
   // read at boot, so a session extracted before a restart and given feedback after one really did
   // run on two models, and reporting one of them would be the lie. It is pinned because the
-  // docs turn this field into a verdict on a config edit (docs/models.md §1, docs/API.md §7b):
+  // docs turn this field into a verdict on a config edit (docs/models.md §1, docs/API.md
+  // "Diagnostics"):
   // that reading holds on a session that has only run since the edit, which is why both say so.
   const text = log(
     { ts: T(0), type: "run_start" },

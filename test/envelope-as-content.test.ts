@@ -1879,7 +1879,7 @@ test("a truncated envelope costs the page, and the run says which page", async (
     assert.doesNotMatch(page2.innerHtml, /"html"/, "the envelope did not reach the document");
     assert.doesNotMatch(page2.innerHtml, /Annual Report/, "nor did the fragment of a page inside it");
     // Both events: one says what the reply was, the other is the failure every consumer
-    // already reads (diagnostics `pages_failed`, docs/API.md §7c).
+    // already reads (diagnostics `pages_failed`, docs/API.md "Partial documents").
     const no = of(events, "page_no_output");
     assert.equal(no.length, 1);
     assert.equal(no[0].page, 2);
@@ -2338,7 +2338,7 @@ test("an unreadable correction keeps the page it could not correct", async () =>
     );
     assert.equal(of(blank, "page_correction_no_output")[0].shape, "empty_html");
     // The existing record of a correction that bought nothing still fires, so the rate in
-    // docs/API.md §0c does not move because of this event.
+    // docs/API.md "Quality tally" does not move because of this event.
     assert.equal(of(events, "page_corrected")[0].result, "empty");
   });
 });

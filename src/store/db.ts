@@ -88,8 +88,8 @@ export function encodeCursor(s: SessionCursor): string {
  *     tied on its timestamp, which is the very bug the compound cursor exists to
  *     fix. It is accepted anyway because the alternative is a 400 that breaks the
  *     client outright, and it is self-clearing: the cursor handed back is
- *     compound. Documented in docs/API.md §8 so a gap reported during an upgrade
- *     window is diagnosable rather than mysterious.
+ *     compound. Documented in docs/API.md "List sessions" so a gap reported
+ *     during an upgrade window is diagnosable rather than mysterious.
  *   * The timestamp half must be in EXACTLY the format the column stores —
  *     `Date#toISOString()`, UTC with milliseconds — not merely something
  *     `Date.parse` accepts. It is bound into a **string** comparison, so the only
@@ -913,8 +913,8 @@ export class Store {
    * `failStaleSessions` then marks it `failed` on that same boot — so it is
    * excluded permanently rather than until its re-run finishes. Widening the
    * filter to include in-flight sessions would be worse: it would count first
-   * runs that had never produced anything. Documented in docs/API.md §0b so the
-   * one-off gap is explicable rather than mysterious.
+   * runs that had never produced anything. Documented in docs/API.md "Public
+   * tally" so the one-off gap is explicable rather than mysterious.
    *
    * Unlike everything else in the constructor, `ALTER TABLE` is not idempotent,
    * so the check and the write are wrapped rather than trusted. Two processes
@@ -1390,7 +1390,7 @@ export class Store {
    * mean the same way a reviewer going blind would. That is the one reading the field exists
    * to prevent, arriving from the other direction. So the orchestrator carries this value
    * forward instead of recording the re-read's, and the row keeps meaning what
-   * `SIGNAL_FIRST_READ_ISSUES` and `docs/API.md` §0c say it means.
+   * `SIGNAL_FIRST_READ_ISSUES` and `docs/API.md` "Quality tally" say it means.
    *
    * `undefined` when there is none — a session delivered before this was recorded, or one
    * whose run never got a read. The caller records nothing in that case rather than

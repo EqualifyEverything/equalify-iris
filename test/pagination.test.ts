@@ -239,7 +239,7 @@ test("a legacy bare-timestamp cursor still pages, and does not skip rows", () =>
     // the old cursor did. Asserting the SKIP, not just that it returns something —
     // ses_b and ses_c are lost on this one request, which is the accepted cost of
     // honoring a pre-deploy cursor instead of 400ing it. It is self-clearing (the
-    // next cursor is compound) and it is in docs/API.md §8, so a gap reported
+    // next cursor is compound) and it is in docs/API.md "List sessions", so a gap reported
     // during an upgrade window is diagnosable. If someone "fixes" this by making a
     // bare cursor inclusive, this assertion is what tells them they have instead
     // made the endpoint repeat rows.

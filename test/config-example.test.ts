@@ -113,7 +113,7 @@ test("both provider blocks in the example name the same model", () => {
 // published. `GET /v1/limits` derives `max_long_edge_px` from the configured model, and
 // docs/API.md prints a sample response with the value spelled out — so a model change in the
 // example config silently makes the documented sample wrong, and a client that hardcoded it
-// from the docs (which §3.1 exists to talk them out of) downscales to the wrong edge.
+// from the docs (which "Upload limits" exists to talk them out of) downscales to the wrong edge.
 //
 // Asserted against the docs rather than against 1568, so this is a drift check and not a
 // second copy of the number: whoever changes the model has one file left to update and this

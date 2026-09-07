@@ -1173,24 +1173,24 @@ test("every relative link in the docs resolves, file and anchor", () => {
   );
 });
 
-// docs/API.md §7 was one table of 65 rows, and the largest cell in it ran to 9,176 characters — a
-// reference nobody could scan and nobody could read. It is now an index of one row per event and a
-// section per event, which introduces a way to be wrong that the single table did not have: the two
-// halves can disagree. A new event indexed and not written up is a row that scrolls nowhere, and one
-// written up and not indexed cannot be found from the top at all. The link check above catches the
-// first (a dead anchor) and is blind to the second.
+// docs/API.md's run log was one table of 65 rows, and the largest cell in it ran to 9,176
+// characters — a reference nobody could scan and nobody could read. It is now an index of one row per
+// event and a section per event, which introduces a way to be wrong that the single table did not
+// have: the two halves can disagree. A new event indexed and not written up is a row that scrolls
+// nowhere, and one written up and not indexed cannot be found from the top at all. The link check
+// above catches the first (a dead anchor) and is blind to the second.
 test("every run-log event in docs/API.md is both indexed and written up, once each", () => {
   const lines = readFileSync(join(ROOT, "docs/API.md"), "utf8").split("\n");
-  const from = lines.indexOf("## 7. Run log");
-  assert.notEqual(from, -1, "docs/API.md has no `## 7. Run log` heading any more");
+  const from = lines.indexOf("## Run log");
+  assert.notEqual(from, -1, "docs/API.md has no `## Run log` heading any more");
   const after = lines.findIndex((l, i) => i > from && l.startsWith("## "));
-  assert.ok(after > from, "`## 7. Run log` is the last section in the file, which it should not be");
+  assert.ok(after > from, "`## Run log` is the last section in the file, which it should not be");
   const body = lines.slice(from, after);
 
   // The index is everything before the first section, so a table inside a section body is not read
   // as a malformed index row — which is how this would have failed, naming the wrong file.
   const firstSection = body.findIndex((l) => l.startsWith("### "));
-  assert.ok(firstSection > 0, "§7 has no `### ` sections, so the restructure was undone");
+  assert.ok(firstSection > 0, "the run log has no `### ` sections, so the restructure was undone");
   const indexed = body.slice(0, firstSection)
     .filter((l) => l.startsWith("|") && l !== "| --- | --- |" && !l.startsWith("| `type`"))
     .map((l) => {
@@ -1198,7 +1198,7 @@ test("every run-log event in docs/API.md is both indexed and written up, once ea
       assert.ok(m, `an index row is not \`| [name](#anchor) | summary |\`:\n  ${l}`);
       return { name: m[1]!, anchor: m[2]! };
     });
-  assert.ok(indexed.length > 60, `only ${indexed.length} events indexed in §7`);
+  assert.ok(indexed.length > 60, `only ${indexed.length} events indexed in the run log`);
 
   const headings = body.filter((l) => l.startsWith("### ")).map((l) => l.slice(4));
   // "Once each" is not implied by the comparison below: two same-order lists are deepEqual with a
@@ -1209,12 +1209,12 @@ test("every run-log event in docs/API.md is both indexed and written up, once ea
   assert.equal(
     new Set(headings).size,
     headings.length,
-    "two §7 sections have the same heading; GitHub numbers the second anchor and links to it break",
+    "two run-log sections have the same heading; GitHub numbers the second anchor and links break",
   );
   assert.deepEqual(
     indexed.map((e) => e.name),
     headings,
-    "§7's index and its sections name different events, or name them in a different order",
+    "the run log's index and its sections name different events, or name them in a different order",
   );
   assert.deepEqual(
     indexed.map((e) => e.anchor),
@@ -1230,21 +1230,21 @@ test("every run-log event in docs/API.md is both indexed and written up, once ea
     while (j < body.length && !body[j]!.startsWith("### ") && body[j]!.trim() === "") j++;
     if (j >= body.length || body[j]!.startsWith("### ")) empty.push(line.slice(4));
   }
-  assert.deepEqual(empty, [], `§7 section(s) with no text under the heading: ${empty.join(", ")}`);
+  assert.deepEqual(empty, [], `run-log section(s) with no text under the heading: ${empty.join(", ")}`);
 });
 
-// §7 now claims to document EVERY event src/ emits, which is the claim this test exists because of:
+// The run log now claims to document EVERY event src/ emits, which is the claim this test exists for:
 // the sentence that first made it was wrong by 40 events, and a reader who greps a `run_start` line
 // would have concluded the log could not carry it. It was replaced by a paragraph that counted the
 // gap instead, and the gap has since been closed section by section. So the strong claim is back, and
 // this time nothing about it is maintained by hand — the numbers are read back out of that paragraph,
 // and the coverage itself is asserted rather than counted. A new event fails here until it is written
 // up.
-test("§7 documents every event src/ emits, and says so in numbers that are current", () => {
+test("docs/API.md's run log documents every event src/ emits, and says so in numbers that are current", () => {
   // THREE emit shapes reach the log, and each is invisible to a grep for the others:
   //   1. `ctx.log.event("name", …)` everywhere in the pipeline — 108 names.
   //   2. `this.onEvent?.("model_call_start", meta)` in src/providers — `model_call_start` and
-  //      `model_call`, the two §7 documents best.
+  //      `model_call`, the two the run log documents best.
   //   3. a RunLog method that skips event() and names its own type. `agentCall` does, on every one of
   //      13 call sites, so `agent_call` is one of the commonest lines in the log while its name
   //      appears nowhere either grep above can reach.
@@ -1256,9 +1256,9 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   // a claim about the rest of src/, so the claim is checked below rather than assumed.
   const RUNLOG = join(SRC, "store/runlog.ts");
   const emitted = new Set<string>();
-  // Where each name is emitted FROM, not just that it is. §7's coverage paragraph makes its claim
-  // about the undocumented events by file rather than by name — three of them are not named for the
-  // family they belong to — so the check needs the file, and the same loop already has it.
+  // Where each name is emitted FROM, not just that it is. The run log's coverage paragraph makes its
+  // claim about the undocumented events by file rather than by name — three of them are not named for
+  // the family they belong to — so the check needs the file, and the same loop already has it.
   const where = new Map<string, Set<string>>();
   const emit = (name: string, file: string) => {
     emitted.add(name);
@@ -1276,15 +1276,15 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   // alias — has none, so nothing that is not a call can reach it. That matters because an event this
   // search misses is an event the coverage claim below is never made over, and it goes missing with no
   // message at all: a receiverless `onEvent?.("new_event")` would leave `undocumented` empty and the
-  // suite green while §7 says it documents everything. Silent staleness is the exact failure the
-  // `agent_call` history left behind, so this half concedes nothing it does not have to.
+  // suite green while the run log says it documents everything. Silent staleness is the exact failure
+  // the `agent_call` history left behind, so this half concedes nothing it does not have to.
   //
   // EMIT_CALL requires a receiver. With no literal to anchor on it cannot tell a call from a
   // signature, and a match on a signature accuses a type-only change of emitting under a name the
   // test cannot read. What that narrowing gives up is a receiverless COMPUTED bridge, and losing that
   // costs a warning rather than a claim — the same one-directional standing as APPENDS above.
   const EMIT_NAMED = String.raw`(?:\.event|onEvent(?:\?\.)?)\(\s*`;
-  // The name class is `[^"]`, not `[a-z0-9_]`: a `log.event("foo-bar")` cannot have a §7 section,
+  // The name class is `[^"]`, not `[a-z0-9_]`: a `log.event("foo-bar")` cannot have a run-log section,
   // because every heading there is asserted to be snake_case — so it must fail as undocumented and be
   // renamed, rather than slip past the search and out of the claim.
   const EMIT_LITERAL = new RegExp(EMIT_NAMED + String.raw`"([^"]+)"`, "g");
@@ -1319,10 +1319,10 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   );
 
   // All three shapes above read a LITERAL name, so a call whose first argument is an expression is
-  // invisible to every one of them — and §7 now claims to document every event, which a name the grep
-  // cannot see would make quietly false. Two such call sites exist and both are the router's telemetry
-  // bridge, which forwards names that originate in a literal `this.onEvent?.("…")` in src/providers, so
-  // shape 2 still sees all of them.
+  // invisible to every one of them — and the run log now claims to document every event, which a name
+  // the grep cannot see would make quietly false. Two such call sites exist and both are the router's
+  // telemetry bridge, which forwards names that originate in a literal `this.onEvent?.("…")` in
+  // src/providers, so shape 2 still sees all of them.
   //
   // Same standing as APPENDS above, and the same reason: not an invariant (a name built from a literal
   // in a lookup table, or a bridge added inside a class, would each slip past), but the shape a caller
@@ -1343,7 +1343,7 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   assert.deepEqual(
     bridges,
     ["src/pipeline/orchestrator.ts type", "src/tools/calibrate.ts type"],
-    `an event is emitted under a name this test cannot read: ${bridges.join(", ")}. §7 claims to ` +
+    `an event is emitted under a name this test cannot read: ${bridges.join(", ")}. The run log claims to ` +
       "document every event src/ emits, and a computed name is documented or not without this test " +
       "being able to tell — give the new call site a literal name, or teach the searches above where " +
       "its names come from before the claim goes stale.",
@@ -1351,7 +1351,7 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
 
   assert.ok(emitted.size > 90, `only ${emitted.size} event names found in src/ — the grep missed`);
   // Losing shape 3 would SHRINK a count rather than fail anything, which is how `agent_call` went
-  // undocumented for as long as it did: an event with no §7 section just stops being counted, while
+  // undocumented for as long as it did: an event with no run-log section just stops being counted, while
   // a broken shape-2 pattern fails `ghosts` loudly because `model_call` has one. `agent_call` has a
   // section now, so a broken shape 3 would reach `ghosts` as well — this assertion stays because it
   // says WHICH of the two failures it is, and because the next event added this way will again have
@@ -1365,19 +1365,23 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
 
   const api = readFileSync(join(ROOT, "docs/API.md"), "utf8");
   const lines = api.split("\n");
-  const from = lines.indexOf("## 7. Run log");
+  const from = lines.indexOf("## Run log");
+  // Named, because the alternative is loud but wrong: a renamed heading leaves `from` at -1, the
+  // slice below empty, and every event in src/ reported as undocumented.
+  assert.notEqual(from, -1, "docs/API.md has no `## Run log` heading any more");
   const after = lines.findIndex((l, i) => i > from && l.startsWith("## "));
   const headings = lines.slice(from, after).filter((l) => l.startsWith("### ")).map((l) => l.slice(4));
 
-  // Every §7 heading is event names and nothing else, which is what makes reading its code spans as
+  // Every run-log heading is event names and nothing else, which is what makes reading its code spans as
   // event names safe. A heading that also named a field — `### `quality_report` (`score`)` — would
   // have to fail HERE, as a heading this test cannot parse, and not two lines down as an event src/
-  // no longer emits. If §7 ever needs such a heading, widen this shape and the extraction together.
+  // no longer emits. If the run log ever needs such a heading, widen this shape and the extraction
+  // together.
   for (const h of headings) {
     assert.match(
       h,
       /^`[a-z0-9_]+`( \/ `[a-z0-9_]+`)*$/,
-      `a §7 heading is not event names only: \`### ${h}\`. Every code span in a §7 heading is read ` +
+      `a run-log heading is not event names only: \`### ${h}\`. Every code span in a run-log heading is read ` +
         "below as an event name, so anything else in one is reported as a deleted event.",
     );
   }
@@ -1388,7 +1392,7 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
 
   // A section for an event nothing emits any more is dead documentation, and reads as current.
   const ghosts = [...documented].filter((n) => !emitted.has(n)).sort();
-  assert.deepEqual(ghosts, [], `§7 documents event(s) src/ no longer emits: ${ghosts.join(", ")}`);
+  assert.deepEqual(ghosts, [], `the run log documents event(s) src/ no longer emits: ${ghosts.join(", ")}`);
 
   // The whole claim, and the one assertion a new event fails. Everything below it is about the
   // paragraph that states it; this is the property. Kept as a list rather than a count so the failure
@@ -1397,7 +1401,7 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   assert.deepEqual(
     undocumented,
     [],
-    `§7 says it documents every event src/ emits, and these have no section: ${undocumented.join(", ")}. ` +
+    `the run log says it documents every event src/ emits, and these have no section: ${undocumented.join(", ")}. ` +
       "Write them up, or replace that claim with one that is true — a count of the gap is what this " +
       "paragraph used to carry, and it went stale every time the gap moved.",
   );
@@ -1410,9 +1414,9 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   // prose is two paragraphs, and the second is where the promise about what is checked is made.
   const opens = "**The index is the whole log.**";
   const paraStart = lines.findIndex((l) => l.startsWith(opens));
-  assert.ok(paraStart > 0, `§7 no longer opens its coverage paragraph with ${opens}`);
+  assert.ok(paraStart > 0, `the run log no longer opens its coverage paragraph with ${opens}`);
   const paraEnd = lines.findIndex((l, i) => i > paraStart && l.startsWith("| `type`"));
-  assert.ok(paraEnd > paraStart, "§7's coverage prose is no longer followed by the index table");
+  assert.ok(paraEnd > paraStart, "the run log's coverage prose is no longer followed by the index table");
   const para = lines.slice(paraStart, paraEnd).join(" ").replace(/\s+/g, " ");
 
   const stated =
@@ -1421,14 +1425,14 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
     );
   assert.ok(
     stated,
-    "§7's coverage paragraph was reworded, so its numbers are no longer checked. Keep the shape " +
+    "the run log's coverage paragraph was reworded, so its numbers are no longer checked. Keep the shape " +
       "`emits **N** event types and every one of them has a section below — **N** sections`, or move " +
       "the check with the words.",
   );
   assert.deepEqual(
     stated.slice(1, 3).map(Number),
     [emitted.size, headings.length],
-    `§7 says ${stated.slice(1, 3).join("/")} (emitted/sections) and src/ says ` +
+    `the run log says ${stated.slice(1, 3).join("/")} (emitted/sections) and src/ says ` +
       `${[emitted.size, headings.length].join("/")}`,
   );
 
@@ -1445,7 +1449,7 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   }
   const bodyOf = (name: string): string => {
     const found = sections.find((s) => s.names.includes(name));
-    assert.ok(found, `§7 has no section for \`${name}\`, so the claim below cannot be checked`);
+    assert.ok(found, `the run log has no section for \`${name}\`, so the claim below cannot be checked`);
     return found!.body.join(" ").replace(/\s+/g, " ");
   };
 
@@ -1459,9 +1463,9 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   for (const [name, file] of ATTRIBUTED) {
     assert.ok(
       bodyOf(name).includes(`\`${file}\``),
-      `§7's \`${name}\` section no longer names ${file} as where the line comes from`,
+      `the run log's \`${name}\` section no longer names ${file} as where the line comes from`,
     );
-    assert.deepEqual([...(where.get(name) ?? [])], [file], `§7 attributes \`${name}\` to ${file}`);
+    assert.deepEqual([...(where.get(name) ?? [])], [file], `the run log attributes \`${name}\` to ${file}`);
   }
 
   // "Calibration is a tool — `src/tools/calibrate.ts` — and not a phase of a run", which is what makes
@@ -1478,12 +1482,12 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   assert.deepEqual(
     importers,
     ["src/tools/calibrate.ts"],
-    `§7 says an ordinary run never writes \`calibrate_call_failed\` because calibration is a tool. ` +
+    `the run log says an ordinary run never writes \`calibrate_call_failed\` because calibration is a tool. ` +
       `These import it: ${importers.join(", ")}. If a run reaches it now, that sentence is wrong.`,
   );
   assert.ok(
     bodyOf("calibrate_call_failed").includes("`src/tools/calibrate.ts`"),
-    "§7's `calibrate_call_failed` section no longer names the tool that reaches calibration",
+    "the run log's `calibrate_call_failed` section no longer names the tool that reaches calibration",
   );
 
   // `agent_update_blocked` is documented as ONE line with two shapes, told apart by a `reason` only
@@ -1495,12 +1499,12 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   assert.equal(
     blocked.length,
     2,
-    `§7 documents \`agent_update_blocked\` as two shapes and feedback.ts emits it ${blocked.length} time(s)`,
+    `the run log documents \`agent_update_blocked\` as two shapes and feedback.ts emits it ${blocked.length} time(s)`,
   );
   assert.deepEqual(
     blocked.map((fields) => /\breason:/.test(fields)),
     [false, true],
-    "§7 says the regression-gate shape of `agent_update_blocked` carries no `reason` and the eval-gate " +
+    "the run log says the regression-gate shape of `agent_update_blocked` carries no `reason` and the eval-gate " +
       "one carries `reason: \"eval_regression\"`. The two emit sites no longer split that way.",
   );
 
@@ -1509,15 +1513,15 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   // written for the same blocked update.
   assert.ok(
     /\.event\("regression_gate",[^}]*failures: failures\.length/.test(feedbackSrc),
-    "§7 says `regression_gate`'s `failures` is a count; feedback.ts no longer logs `failures.length`",
+    "the run log says `regression_gate`'s `failures` is a count; feedback.ts no longer logs `failures.length`",
   );
   assert.ok(
     /failures: gate\.failures/.test(blocked[0]!),
-    "§7 says `agent_update_blocked`'s `failures` is the list of strings, not a count; the " +
+    "the run log says `agent_update_blocked`'s `failures` is the list of strings, not a count; the " +
       "regression-gate emit site no longer passes `gate.failures`",
   );
 
-  // §7's `agent_trained` section says a run reaches that branch only if something outside the
+  // The run log's `agent_trained` section says a run reaches that branch only if something outside the
   // pipeline seeds the session's tmp agents directory: the branch is behind `sessionBuilt`, which
   // `loadAgent` sets from a file existing there, and the one line that writes such a file is inside
   // the branch. Same shape of claim as APPENDS above and the same caveat — these are the write
@@ -1528,7 +1532,7 @@ test("§7 documents every event src/ emits, and says so in numbers that are curr
   assert.deepEqual(
     seeders,
     ["src/pipeline/feedback.ts"],
-    `§7 says the only line writing into tmp/<id>/agents is the training branch itself. These write ` +
+    `the run log says the only line writing into tmp/<id>/agents is the training branch itself. These write ` +
       `there: ${seeders.join(", ")}. If one of them seeds it, \`agent_trained\` is reachable and that ` +
       "paragraph is wrong.",
   );

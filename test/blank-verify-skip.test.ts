@@ -343,8 +343,8 @@ test("a stated blank its own log contradicts is judged, and the judge is shown t
     // The page is not a loss, and it is not a skip either: it is the one blank page that buys a verdict.
     assert.deepEqual(failedPages, []);
     assert.equal(rec.calls.includes("verify:2"), true);
-    // And the arithmetic docs/API.md §7b now states off these two counts: the declarations that cost a
-    // verify call are `pages_blank - pages_skipped_blank`, which is this page and only this page.
+    // And the arithmetic docs/API.md "Diagnostics" now states off these two counts: the declarations
+    // that cost a verify call are `pages_blank - pages_skipped_blank`, which is this page and only this page.
     const folded = fold(rec);
     assert.equal(folded.verification.pages_skipped_blank, 0, "a contradicted declaration is not a saving");
     assert.deepEqual(folded.pages_blank, [2], "it is still a blank page, and still counted as one");
@@ -380,7 +380,7 @@ test("a contradicted stated blank the verifier passes ships empty, and its line 
     // The other half of the branch above, and the case the change trades INTO: the verify call is
     // bought, the verifier looks at the image and the empty fragment and says the fragment is faithful.
     // Then the page ships empty and no marker in the document says a reader lost anything — the log's
-    // named heading is simply unresolved. It is the shape docs/API.md §7b states as the invariant (a
+    // named heading is simply unresolved. It is the shape docs/API.md "Diagnostics" states as the invariant (a
     // contradicted stated blank carries no `skipped` on its own line), and it is only reachable on a
     // PASSING verdict, so the failing-verdict test above cannot pin it: `page_verify_failed` has no
     // `skipped` field to omit.
@@ -398,7 +398,7 @@ test("a contradicted stated blank the verifier passes ships empty, and its line 
     assert.equal(of(rec, "page_verify_failed").length, 0);
     // Nothing was repaired, because nothing was found: the page is delivered as the empty fragment it
     // was declared as. This is the loss the design accepts in exchange for #194's page — stated on the
-    // PR and in docs/API.md §7 — and the only evidence it leaves is the `page_blank` line's own
+    // PR and in docs/API.md's run log — and the only evidence it leaves is the `page_blank` line's own
     // two fields.
     assert.equal(of(rec, "page_corrected").length, 0);
     assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "");

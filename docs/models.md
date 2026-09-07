@@ -163,22 +163,24 @@ price sheet its numbers came from.
 
 **How to tell afterwards whether the swap happened.** Diagnostics reports `models` per agent —
 `by_agent.<agent>.models` names the model ids that answered that agent's calls (`GET
-/v1/sessions/{id}/diagnostics`, docs/API.md §7b). A `page` row still naming the incumbent after an
-edit is a swap that did not take effect; the boot warning says which key is wrong beforehand, and
-this says what actually ran. One id is the ordinary case, and more than one is not a defect:
-resolution keys on capability too, so a provider's `per_capability` block can put one agent on two
-models deliberately — which is also how a swap reaches a call site no round has measured. **Read
-it on a session that has only run since the edit.** Like the seven numbers beside it, `models`
-folds every call in the session's log, and a session's log spans its feedback rounds as well as
-its first run. So a session extracted before the restart and given feedback after it holds both
-ids honestly, and that is the one case where two ids mean a change of config rather than a split
-by capability. A fresh document after the restart cannot be read either way.
+/v1/sessions/{id}/diagnostics`, [API.md's diagnostics](API.md#diagnostics-timing--hang-detection)).
+A `page` row still naming the incumbent after an edit is a swap that did not take effect; the boot
+warning says which key is wrong beforehand, and this says what actually ran. One id is the ordinary
+case, and more than one is not a defect: resolution keys on capability too, so a provider's
+`per_capability` block can put one agent on two models deliberately — which is also how a swap
+reaches a call site no round has measured. **Read it on a session that has only run since the
+edit.** Like the seven numbers beside it, `models` folds every call in the session's log, and a
+session's log spans its feedback rounds as well as its first run. So a session extracted before the
+restart and given feedback after it holds both ids honestly, and that is the one case where two ids
+mean a change of config rather than a split by capability. A fresh document after the restart cannot
+be read either way.
 
-The `page` entry moves all three of the call sites in the table above, and the round in §2 covers two
-of them. The specialist merge is a `text` call, and no round's corpus has produced a specialist call
-at all. **That third site is live on the reference deployment and still unfired**, for the structural
-reason in §4 rather than for want of a corpus. Note that `/v1/quality` cannot answer this — it
-carries no per-step breakdown, so `by_step` has to be read per session (docs/API.md §7b).
+The `page` entry moves all three of the call sites in the table above, and the round in §2 covers
+two of them. The specialist merge is a `text` call, and no round's corpus has produced a specialist
+call at all. **That third site is live on the reference deployment and still unfired**, for the
+structural reason in §4 rather than for want of a corpus. Note that `/v1/quality` cannot answer this
+— it carries no per-step breakdown, so `by_step` has to be read per session
+([API.md's diagnostics](API.md#diagnostics-timing--hang-detection)).
 
 ## 2. `page` — the largest line on the bill
 
@@ -377,18 +379,18 @@ other reason than this swap.
 **A cheaper reader makes the deployment's quality numbers improve, and that is the trap — it is why
 this swap needed a break-out by kind rather than a dashboard.** A third of the issues the incumbent
 would have raised are not raised, and an issue that is never raised is never left open. The document
-ships with an empty `@unresolved` list
-and a `clean` exit — the same reading a document gets when the editor fixed everything. So
-`unresolved_rate`, `unresolved_severity` and the `clean`/`converged` split all move in the direction
-`.github/workflows/quality-report.yml` treats as good, and #264 — an open issue about that rate
-being too high — would appear to have been answered by paying less. The number that does not move
-that way is `first_read.mean_issues` in `/v1/quality` (`docs/API.md` §0c, issue #313): issues
+ships with an empty `@unresolved` list and a `clean` exit — the same reading a document gets when
+the editor fixed everything. So `unresolved_rate`, `unresolved_severity` and the `clean`/`converged`
+split all move in the direction `.github/workflows/quality-report.yml` treats as good, and #264 — an
+open issue about that rate being too high — would appear to have been answered by paying less. The
+number that does not move that way is `first_read.mean_issues` in `/v1/quality`
+([API.md's quality tally](API.md#quality-tally-shared-secret-off-by-default), issue #313): issues
 raised by the review's first read, per document, recorded before any of them were fixed. Read it
 across any reader change, with `first_read.unread_documents` next to it. A fall in the mean with
-that count rising is a reviewer that could not answer; a fall with it flat is a reviewer that
-found less, which is the loss this table has priced. The bench figure and the deployment's figure are
-not the same measurement (20 stitched documents against a reference issue set, versus every document
-a deployment converts), so the check is a change of level across the config edit, not a number to
+that count rising is a reviewer that could not answer; a fall with it flat is a reviewer that found
+less, which is the loss this table has priced. The bench figure and the deployment's figure are not
+the same measurement (20 stitched documents against a reference issue set, versus every document a
+deployment converts), so the check is a change of level across the config edit, not a number to
 compare with 78%.
 
 **Kimi ×2 beats haiku ×2 on both axes at once** — more agreement for less money — so haiku is not

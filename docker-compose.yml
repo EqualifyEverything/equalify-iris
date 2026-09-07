@@ -24,7 +24,8 @@ services:
     volumes:
       # Persist sessions/, tmp/, and the SQLite DB across restarts.
       - ./data:/app/data
-      # The agent library is a git checkout modified only by `git pull` (§8.1).
+      # The agent library is a git checkout modified only by `git pull`
+      # (README.md "Configuration").
       - ./agents:/app/agents
       # Override the default env-driven config with your own if desired.
       # - ./config.yaml:/app/config.yaml:ro

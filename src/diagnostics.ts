@@ -647,7 +647,7 @@ export interface Diagnostics {
   // `pages_failed` because the remedy is opposite: a failed page is work to redo, and a
   // blank page is work already finished. Six pages across three of four bench documents
   // were reported as failures before this split, which made a document with a blank verso
-  // look partial to every client following docs/API.md §7c.
+  // look partial to every client following docs/API.md "Partial documents".
   //
   // Not subtracted from anything: `images` in `run_start` counts source images, blank
   // ones included, so `images - pages_blank.length` is the count that produced markup. The
