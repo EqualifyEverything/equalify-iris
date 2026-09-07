@@ -2597,14 +2597,21 @@ function repaired(ctx: PipelineContext, where: RepairSeam, img: InputImage, html
   if (removed) {
     ctx.log.event("page_soft_hyphens", { ...at, removed });
   }
-  const { html: noStyle, stripped, spans, props } = stripStyleAttributes(noShy);
-  // `props` is the field to read, and the reason this line carries three numbers and a list. The
-  // count says a page had styling; the properties say what the styling was DOING, which is the part
-  // that survives the strip as a question: `padding-left` names a page whose row-group hierarchy was
-  // in ink, `background-color` a legend swatch that painted nothing. Neither can be rebuilt from
-  // here — that is a re-ask against the image — so the log is what makes those pages findable.
+  const { html: noStyle, stripped, spans, cellsEmptied, props } = stripStyleAttributes(noShy);
+  // `props` is the field to read, and the reason this line carries numbers and a list. The count says
+  // a page had styling; the properties say what the styling was DOING, which is the part that
+  // survives the strip as a question: `padding-left` names a page whose row-group hierarchy was in
+  // ink, `background-color` a legend swatch that painted nothing. Neither can be rebuilt from here —
+  // that is a re-ask against the image — so the log is what makes those pages findable.
+  //
+  // `cells_emptied` is the same argument at its sharpest. A swatch inside a table cell leaves that
+  // cell holding nothing, and this file's own prompt asks a page never to deliver one, because an
+  // empty cell claims the paper was blank there. The strip did not put the defect in the reply, and
+  // a reader who could not see the colour was already getting an empty cell — but a page with this
+  // number above zero is a page where the mark is now unrecoverable without the image, so it is the
+  // one number here that names work rather than housekeeping.
   if (stripped) {
-    ctx.log.event("page_style_attributes", { ...at, stripped, spans, props });
+    ctx.log.event("page_style_attributes", { ...at, stripped, spans, cells_emptied: cellsEmptied, props });
   }
   const { html: clean, tightened } = tightenDigitGroups(noStyle);
   if (tightened) {

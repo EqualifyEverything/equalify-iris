@@ -1977,8 +1977,9 @@ the log would have left no way to take that measurement or any future one.
 
 `style` attributes were taken out of a page reply before it became markup Iris keeps (`page`, `image`,
 `where` — the same four steps as above — `stripped`: how many attributes, `spans`: how many `<span>`
-elements this strip left with no attributes and no content and so removed whole, and `props`: the CSS
-property names those attributes set, deduped and sorted).
+elements this strip left holding nothing but whitespace and so removed whole, `cells_emptied`: how many
+`<td>`/`<th>` cells were left holding nothing by those removals, and `props`: the CSS property names
+those attributes set, deduped and sorted).
 
 `agents/page.md` forbids all styling in as many words — a `style` attribute is not announced, does not
 survive being read aloud, and is dropped by anything that reformats the document — and #374 measured 52
@@ -1996,9 +1997,27 @@ is a re-ask against the image and is not something the strip can do — the stat
 
 `spans` is counted apart from `stripped` because it is a different edit: an element removed rather than
 an attribute. It covers only the residue THIS strip creates — a `<span>` whose attributes were all
-`style` and whose content was empty — so a `<span></span>` the model wrote empty of its own accord is
-left alone, and a `<span class="…" style="…">` keeps its element because it still has an attribute
-afterwards.
+`style` and whose content is nothing but whitespace — so a `<span></span>` the model wrote empty of its
+own accord is left alone, and a `<span class="…" style="…">` keeps its element because it still has an
+attribute afterwards. **What goes is the element, never content:** a span holding one space hands that
+space back, because the same markup is a legend swatch's width in one place and a word boundary in
+another, and only one of those two mistakes is visible in the delivered text (`Ohio<span
+style="…"> </span>5%` would otherwise be delivered as `Ohio5%`, which the page prints nowhere).
+
+**`cells_emptied` is the one number here that names work rather than housekeeping.** A legend swatch
+written as `<td><span style="background:#ccc"></span></td>` leaves `<td></td>`, and `agents/page.md`
+calls an empty cell the one encoding a reader cannot undo, because the cell then claims the paper printed
+nothing there. The strip does not create that defect — the cell held no text before it either, so a
+screen reader announced an empty cell both ways — but it removes the last trace that the page had a mark
+there, so a page with this above zero is a page whose mark is unrecoverable without the image. Cells that
+were already empty are not counted; the number is what these removals added.
+
+The strip does not read inside an element whose content the parser reads as text (`script`, `style`,
+`textarea`, `title`, `xmp`, `iframe`, `noembed`, `noframes`, `plaintext`), because a `<` in there opens
+nothing and a page transcribing a report on markup can print a tag's source unescaped. That list is
+narrower than `src/pipeline/anchors.ts`'s for the same shape of skip, on purpose: a `<template>` or a
+`<select>` interior IS parsed as markup, so a `style` attribute in one is a real attribute and skipping
+them would leave a hole rather than close a false positive.
 
 Scoped to the extraction phase like the strip above, but WITHOUT that clause's argument, and the
 difference is worth stating. A soft hyphen is an artefact of reading a printing; a `style` attribute is

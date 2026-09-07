@@ -119,6 +119,7 @@ test("a style attribute comes out, and its properties are reported", () => {
     html: `<th scope="row">Ohio</th>`,
     stripped: 1,
     spans: 0,
+    cellsEmptied: 0,
     props: ["padding-left"],
   });
   // Several declarations in one attribute, and a value with a colon in it, which must not be read as
@@ -126,7 +127,7 @@ test("a style attribute comes out, and its properties are reported", () => {
   // before the attribute walk, so first-seen order would look like document order without being it.
   assert.deepEqual(
     stripStyleAttributes(`<td style="padding-left:2em;background:url(http://x/y.png)">1</td>`),
-    { html: `<td>1</td>`, stripped: 1, spans: 0, props: ["background", "padding-left"] },
+    { html: `<td>1</td>`, stripped: 1, spans: 0, cellsEmptied: 0, props: ["background", "padding-left"] },
   );
   // Every quoting a model writes one in, including unquoted (legal for a value with no space) and a
   // shouted attribute name.
@@ -137,13 +138,13 @@ test("a style attribute comes out, and its properties are reported", () => {
     `<td STYLE="color:red">1</td>`,
     `<td style = "color:red">1</td>`,
   ]) {
-    assert.deepEqual(stripStyleAttributes(one), { html: `<td>1</td>`, stripped: 1, spans: 0, props: ["color"] }, one);
+    assert.deepEqual(stripStyleAttributes(one), { html: `<td>1</td>`, stripped: 1, spans: 0, cellsEmptied: 0, props: ["color"] }, one);
   }
   // Two on one page: counted twice, properties deduped, so the list says what the page was doing
   // rather than how many times it did it.
   assert.deepEqual(
     stripStyleAttributes(`<th style="padding-left:2em">A</th><th style="padding-left:4em">B</th>`),
-    { html: `<th>A</th><th>B</th>`, stripped: 2, spans: 0, props: ["padding-left"] },
+    { html: `<th>A</th><th>B</th>`, stripped: 2, spans: 0, cellsEmptied: 0, props: ["padding-left"] },
   );
 });
 
@@ -155,6 +156,7 @@ test("a span this strip empties goes with it, and one it did not empty stays", (
     html: `<p> under 5%</p>`,
     stripped: 1,
     spans: 1,
+    cellsEmptied: 0,
     props: ["background"],
   });
   // Scoped to the residue THIS strip creates, which is the whole of the rule. An empty span the model
@@ -163,6 +165,7 @@ test("a span this strip empties goes with it, and one it did not empty stays", (
     html: `<p><span></span>x</p>`,
     stripped: 0,
     spans: 0,
+    cellsEmptied: 0,
     props: [],
   });
   // A span with another attribute is still a span someone put there on purpose: the style goes, the
@@ -171,6 +174,7 @@ test("a span this strip empties goes with it, and one it did not empty stays", (
     html: `<span class="swatch"></span>`,
     stripped: 1,
     spans: 0,
+    cellsEmptied: 0,
     props: ["background"],
   });
   // A span with content is not empty, whatever the strip took off it.
@@ -178,15 +182,71 @@ test("a span this strip empties goes with it, and one it did not empty stays", (
     html: `<span>Southeast</span>`,
     stripped: 1,
     spans: 0,
+    cellsEmptied: 0,
     props: ["font-weight"],
   });
-  // A styled span emptied but for whitespace counts as emptied: the space is layout, not content.
-  assert.deepEqual(stripStyleAttributes(`<span style="background:#ccc"> </span>`), {
-    html: ``,
+});
+
+test("the element goes and the whitespace stays, because only one of those two errors is visible", () => {
+  // A styled span holding one space is removed AS AN ELEMENT and its space handed back. The two things
+  // that space can be are not distinguishable from the markup, so the side with the smaller error wins.
+  // Here it is layout inside a legend, and putting it back changes nothing a reader sees: HTML collapses
+  // it against the space already after the swatch.
+  assert.deepEqual(stripStyleAttributes(`<p><span style="background:#ccc"> </span> under 5%</p>`), {
+    html: `<p>  under 5%</p>`,
     stripped: 1,
     spans: 1,
+    cellsEmptied: 0,
     props: ["background"],
   });
+  // And here it is the word boundary. Taking it out delivers `Ohio5%` — text the page prints nowhere,
+  // produced BY the repair, which is the harm the whole printed-marks family exists to stop. This
+  // assertion is the one a future tidier has to argue with: an earlier draft of this file pinned the
+  // joining behaviour on the reasoning that the space is layout, which is true of the case above and
+  // false of this one.
+  assert.deepEqual(stripStyleAttributes(`<p>Ohio<span style="background:#ccc"> </span>5%</p>`).html, `<p>Ohio 5%</p>`);
+  assert.deepEqual(stripStyleAttributes(`<p>a<span style="color:red">\n</span>b</p>`).html, `<p>a\nb</p>`);
+});
+
+test("a cell the strip leaves empty is counted, because that is the encoding a reader cannot undo", () => {
+  // A legend swatch written as a cell rather than as a `<p>`. `agents/page.md` now says an empty cell
+  // claims the paper printed nothing there, so the one place this strip's residue is not neutral gets
+  // its own number. The delivered markup is unchanged by the counting — the cell held no text before
+  // the strip either, which is why this is a log line and not a refusal.
+  const cell = stripStyleAttributes(`<td><span style="background:#ccc"></span></td><td>under 5%</td>`);
+  assert.equal(cell.html, `<td></td><td>under 5%</td>`);
+  assert.equal(cell.cellsEmptied, 1);
+  assert.equal(cell.spans, 1);
+  // Whitespace inside the cell does not make it a cell with something in it, and the count says so —
+  // the space is handed back by the rule above, and the cell still asserts a blank.
+  assert.equal(stripStyleAttributes(`<th><span style="background:#ccc"> </span></th>`).cellsEmptied, 1);
+  // A cell that was ALREADY empty is not this strip's doing and is not counted.
+  assert.equal(stripStyleAttributes(`<td></td><td style="color:red">1</td>`).cellsEmptied, 0);
+  // Nor is a cell that still holds text, or one whose span survives with another attribute.
+  assert.equal(stripStyleAttributes(`<td><span style="background:#ccc">5%</span></td>`).cellsEmptied, 0);
+  assert.equal(stripStyleAttributes(`<td><span class="sw" style="background:#ccc"></span></td>`).cellsEmptied, 0);
+});
+
+test("inside an element whose content is text, a tag is not a tag", () => {
+  // The same case as the printed `style="…"` above, with the `<` left bare. A page transcribing a
+  // report on markup can put a tag's source in a `<textarea>`, and the parser reads every character of
+  // it as text — so a strip that rewrites it there is rewriting what the page says. `anchors.ts` skips
+  // the same family for its own reasons; the two lists differ on purpose, and this pins the difference.
+  for (const one of [
+    `<p>x <textarea readonly><td style="color:red"></textarea></p>`,
+    `<p>x <script>var a = "<td style='color:red'>";</script></p>`,
+    `<title><span style="color:red"></span></title>`,
+    // No close tag: the element runs to the end, which is the parser's rule and the safe direction here.
+    `<p>x <xmp><td style="color:red">`,
+  ]) {
+    assert.deepEqual(stripStyleAttributes(one), { html: one, stripped: 0, spans: 0, cellsEmptied: 0, props: [] }, one);
+  }
+  // The skip is the CONTENT, not the element: a style attribute on the raw-text element's own tag is a
+  // real attribute and goes. `<template>` and `<option>` interiors are parsed as markup, so they are
+  // not in the set at all — skipping them would leave the strip a hole rather than close a false one.
+  assert.equal(stripStyleAttributes(`<textarea style="color:red">x</textarea>`).html, `<textarea>x</textarea>`);
+  assert.equal(stripStyleAttributes(`<template><td style="color:red">1</td></template>`).stripped, 1);
+  assert.equal(stripStyleAttributes(`<select><option style="color:red">a</option></select>`).stripped, 1);
 });
 
 test("what the style strip must not touch", () => {
@@ -208,7 +268,7 @@ test("what the style strip must not touch", () => {
     `<td class="num">1</td>`,
     `plain text`,
   ]) {
-    assert.deepEqual(stripStyleAttributes(one), { html: one, stripped: 0, spans: 0, props: [] }, one);
+    assert.deepEqual(stripStyleAttributes(one), { html: one, stripped: 0, spans: 0, cellsEmptied: 0, props: [] }, one);
   }
 });
 
@@ -252,7 +312,15 @@ test("the first render's styling and split figures never reach the fragment", as
         `</table><p> under 5% ${"content ".repeat(20)}</p>`,
     );
     assert.deepEqual(ev(rec, "page_style_attributes").map((e) => e.data), [
-      { image: "page-001.png", page: 1, where: "extract", stripped: 2, spans: 1, props: ["background", "padding-left"] },
+      {
+        image: "page-001.png",
+        page: 1,
+        where: "extract",
+        stripped: 2,
+        spans: 1,
+        cells_emptied: 0,
+        props: ["background", "padding-left"],
+      },
     ]);
     assert.deepEqual(ev(rec, "page_digit_groups").map((e) => e.data), [
       { image: "page-001.png", page: 1, where: "extract", tightened: 3 },

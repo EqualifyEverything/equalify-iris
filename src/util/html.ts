@@ -135,11 +135,19 @@ export function tightenDigitGroups(html: string): { html: string; tightened: num
 const STYLE_ATTR_SRC = `\\s+style\\s*=\\s*("[^"]*"|'[^']*'|[^\\s>]+)`;
 const STYLE_ATTR = new RegExp(STYLE_ATTR_SRC, "gi");
 
-// A `<span>` whose only attributes are `style`, with nothing inside it. Matched BEFORE the strip and
-// as a whole element, which is what scopes the removal to this strip's own residue: a `<span></span>`
-// the model wrote empty is not touched, and neither is `<span class="x" style="…">`, which still has
-// an attribute after the strip and so is still a span someone put there on purpose.
-const EMPTY_STYLED_SPAN = new RegExp(`<span(?:${STYLE_ATTR_SRC})+\\s*>\\s*</span\\s*>`, "gi");
+// A `<span>` whose only attributes are `style`, holding nothing but whitespace. Matched BEFORE the
+// strip and as a whole element, which is what scopes the removal to this strip's own residue: a
+// `<span></span>` the model wrote empty is not touched, and neither is `<span class="x" style="…">`,
+// which still has an attribute after the strip and so is still a span someone put there on purpose.
+//
+// The gap between the tags is CAPTURED and handed back rather than removed with the element, because
+// the two things it can be are not distinguishable here and the errors are not the same size. A space
+// inside a legend swatch is layout, and putting it back costs nothing — HTML collapses it, so
+// `<span style="…"> </span> under 5%` renders the same either way. A space between two text runs
+// (`Ohio<span style="…"> </span>5%`) is the word boundary, and taking it out delivers `Ohio5%`: text
+// the page prints nowhere, produced by the repair, which is the harm this family exists to stop. So
+// the one-directional error licenses the one side, and what is removed is the element, never content.
+const EMPTY_STYLED_SPAN = new RegExp(`<span(?:${STYLE_ATTR_SRC})+\\s*>(\\s*)</span\\s*>`, "gi");
 
 // One tag, with its name and its attribute region apart, so the strip runs on attributes and not on
 // prose. A page about HTML that prints `style="color:red"` in its text is transcribing what the paper
@@ -157,6 +165,58 @@ const ATTR = /([^\s=/>]+)(\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*))?/g;
 // gives `padding-left` and `background`. Only the part before each colon, so a value containing a
 // colon (`background:url(http://…)`) does not add a property of its own.
 const DECLARATION = /(?:^|;)\s*([a-z-]+)\s*:/gi;
+
+// A `<td>` or `<th>` holding nothing but whitespace. Used to count what the strip left behind, never
+// to change anything: `agents/page.md` calls an empty cell the one encoding a reader cannot undo,
+// because the cell then asserts the paper printed nothing there.
+const EMPTY_CELL = /<(td|th)(?:[^>"']|"[^"]*"|'[^']*')*>\s*<\/\1\s*>/gi;
+
+// Elements the HTML parser reads as TEXT to their close tag, so a `<` inside one opens nothing. A page
+// transcribing a report about markup can put a tag's source inside `<textarea>` or `<script>` without
+// escaping it, and rewriting that is the same fault as rewriting `<code>style="color:red"</code>` —
+// the difference is only that the `<` is bare, so the tag walk below sees a tag where the browser sees
+// a string.
+//
+// `src/pipeline/anchors.ts` keeps a WIDER set for the same shape of skip, and the two are deliberately
+// not shared. Its question is whether a parser could attribute an `id` or a `for` to something in
+// there, which is also true of `<template>` and `<select>`, whose interiors ARE parsed as markup. This
+// one's question is whether a `style` attribute in there is an attribute at all — and inside a
+// `<template>` or an `<option>` it is, so skipping those would leave the strip a hole. `noscript` is
+// out for the same reason: with scripting off, which is how this HTML is read, its content is markup.
+//
+// `plaintext` never ends, which the scan below handles as "no close tag runs to the end of the page" —
+// the parser's own rule.
+const RAW_TEXT = new Set([
+  "script",
+  "style",
+  "textarea",
+  "title",
+  "xmp",
+  "iframe",
+  "noembed",
+  "noframes",
+  "plaintext",
+]);
+
+// The content spans of those elements, as [start, end) offsets — the opening tag itself is NOT in the
+// range, because a `style` attribute ON a `<textarea>` is a real attribute and is this strip's to take.
+// Not nesting-aware, matching the parser: raw text ends at the first close tag of that name.
+function rawTextRanges(html: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  // `ANY_TAG` is a shared global regex, so its `lastIndex` is reset before the walk and moved forward
+  // over each skipped region afterwards; a `<script>` inside a `<script>`'s text is not a tag either.
+  ANY_TAG.lastIndex = 0;
+  let tag: RegExpExecArray | null;
+  while ((tag = ANY_TAG.exec(html)) !== null) {
+    if (!RAW_TEXT.has(tag[1].toLowerCase())) continue;
+    const start = tag.index + tag[0].length;
+    const close = html.slice(start).search(new RegExp(`</${tag[1]}(?:\\s[^>]*)?>`, "i"));
+    const end = close === -1 ? html.length : start + close;
+    ranges.push([start, end]);
+    ANY_TAG.lastIndex = end;
+  }
+  return ranges;
+}
 
 // Take `style` attributes out of markup a model wrote, and say what was in them.
 //
@@ -177,10 +237,18 @@ const DECLARATION = /(?:^|;)\s*([a-z-]+)\s*:/gi;
 //
 // `spans` is counted apart from `stripped` because it is a different edit: an element removed, not an
 // attribute. Both are reported; a style attribute on a span this drops still counts in `stripped`.
+//
+// `cells_emptied` is the count that names the one place the residue is not neutral. A legend swatch
+// written as `<td><span style="background:#ccc"></span></td>` leaves `<td></td>`, and this commit's own
+// prompt clause calls an empty cell the encoding a reader cannot undo. The strip does not CREATE that —
+// the cell held no text before it either, so a screen reader announced an empty cell both ways — but it
+// removes the last trace that the page had a mark there, and a re-ask against the image is what would
+// recover it. So the trace moves to the log, for the same reason `props` does.
 export function stripStyleAttributes(html: string): {
   html: string;
   stripped: number;
   spans: number;
+  cellsEmptied: number;
   props: string[];
 } {
   let stripped = 0;
@@ -200,12 +268,21 @@ export function stripStyleAttributes(html: string): {
       props.push(key);
     }
   };
-  let out = html.replace(EMPTY_STYLED_SPAN, (whole) => {
+  // Both passes are offset-aware, and the ranges are recomputed between them because the first pass
+  // moves everything after its first edit.
+  let raw = rawTextRanges(html);
+  const inRawText = (at: number): boolean => raw.some(([from, to]) => at >= from && at < to);
+  // The replacer's arguments are (match, …groups, offset, whole string); `EMPTY_STYLED_SPAN` has two
+  // groups, the last style value and the gap, so the offset is the fourth.
+  let out = html.replace(EMPTY_STYLED_SPAN, (whole: string, _value: string, gap: string, at: number) => {
+    if (inRawText(at)) return whole;
     spans += 1;
     for (const [, value] of whole.matchAll(STYLE_ATTR)) note(value);
-    return "";
+    return gap;
   });
-  out = out.replace(ANY_TAG, (tag, name: string, attrs: string) => {
+  raw = rawTextRanges(out);
+  out = out.replace(ANY_TAG, (tag, name: string, attrs: string, at: number) => {
+    if (inRawText(at)) return tag;
     if (!/\sstyle\s*=/i.test(attrs)) return tag;
     const kept: string[] = [];
     let found = false;
@@ -226,11 +303,15 @@ export function stripStyleAttributes(html: string): {
     const slash = /\/\s*$/.test(attrs) ? " /" : "";
     return `<${name}${kept.length ? ` ${kept.join(" ")}` : ""}${slash}>`;
   });
+  // Counted on the finished output against the input, rather than inside the span pass, so that any
+  // route to an empty cell is counted and not only the one route in mind. The strip only ever removes,
+  // so this cannot go negative.
+  const cellsEmptied = (out.match(EMPTY_CELL) ?? []).length - (html.match(EMPTY_CELL) ?? []).length;
   // Sorted, and NOT in the order the properties were met. Empty styled spans are removed in a pass of
   // their own before the attributes are walked, so first-seen order is that pass and then the rest of
   // the document — an order that reads like document order and is not one. Sorting says what the list
   // actually is, a set of properties this page used, and makes two runs' lines comparable.
-  return { html: out, stripped, spans, props: props.sort() };
+  return { html: out, stripped, spans, cellsEmptied, props: props.sort() };
 }
 
 export function decodeEntities(s: string): string {
