@@ -1050,11 +1050,13 @@ test("the join tally splits free from paid, and counts the pairs that were bough
     { ts: T(0), type: "run_start" },
     { ts: T(1), type: "table_joined", by: "code", caption: "Table 1" },
     { ts: T(2), type: "table_join_code_declined", reason: "header_differs", caption: "Table 2—Continued",
-      headers_identical: false, header_shape_first: "1x3", header_shape_second: "1x3",
+      headers_identical: false, header_rows_first: 1, header_cells_first: 3,
+      header_rows_second: 1, header_cells_second: 3,
       header_first: "TH:1:Col 1", header_second: "TH:1:Column 1" },
     { ts: T(3), type: "table_joined", by: "editor", caption: "Table 2" },
     { ts: T(4), type: "table_join_code_declined", reason: "id_would_be_lost", caption: "Table 3—Continued",
-      headers_identical: true, header_shape_first: "2x8", header_shape_second: "2x8",
+      headers_identical: true, header_rows_first: 2, header_cells_first: 8,
+      header_rows_second: 2, header_cells_second: 8,
       header_first: "same", header_second: "same" },
     { ts: T(5), type: "table_join_failed", reason: "truncated", caption: "Table 3—Continued" },
     { ts: T(6), type: "run_complete" },
@@ -1068,7 +1070,32 @@ test("the join tally splits free from paid, and counts the pairs that were bough
     header_compared: 2,
     header_differs: 1,
     failed: 1,
+    body_unreadable: 0,
+    capped_pending: 0,
   });
+});
+
+test("the run-level unreadable body is not folded in with the pairs that were tried", () => {
+  // `table_join_failed` carries two different lines. A pair that lost carries no `stage`; ONE line per
+  // run carries `stage: "body"` and means the assembled body would not parse, so no pair was even
+  // attempted. Folding that into `failed` would report `failed: 1` for a document where every pair
+  // stayed split — the opposite of the truth. And a pair the cap never reached is a third thing again:
+  // its remedy is a higher `MAX_TABLE_JOINS`, where `failed`'s is a better join.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "table_join_failed", reason: "read_failed", stage: "body" },
+    { ts: T(2), type: "table_joins_capped", joined: 12, pending: 5, max: 12 },
+    { ts: T(3), type: "table_join_failed", reason: "truncated", caption: "Table 9—Continued" },
+    // A stage this build does not know lands in neither bucket, on the same rule as `by`: a total
+    // that is visibly short beats one filled by guesswork.
+    { ts: T(4), type: "table_join_failed", reason: "truncated", stage: "elsewhere" },
+    { ts: T(5), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(5))));
+
+  assert.equal(d.tables.failed, 1, "the one pair-level line, not the run-level one");
+  assert.equal(d.tables.body_unreadable, 1);
+  assert.equal(d.tables.capped_pending, 5);
 });
 
 test("a pair whose second half reprinted no header is not counted as an unstable one", () => {
@@ -1079,7 +1106,8 @@ test("a pair whose second half reprinted no header is not counted as an unstable
   const text = log(
     { ts: T(0), type: "run_start" },
     { ts: T(1), type: "table_join_code_declined", reason: "columns_differ", caption: "Table 4—Continued",
-      headers_identical: false, header_shape_first: "1x3", header_shape_second: "0x0",
+      headers_identical: false, header_rows_first: 1, header_cells_first: 3,
+      header_rows_second: 0, header_cells_second: 0,
       header_first: "TH:1:Col 1", header_second: "" },
     { ts: T(2), type: "run_complete" },
   );
@@ -1087,6 +1115,27 @@ test("a pair whose second half reprinted no header is not counted as an unstable
 
   assert.equal(d.tables.code_declined, 1);
   assert.equal(d.tables.header_compared, 0, "no pair could show this, which is not a stable header");
+  assert.equal(d.tables.header_differs, 0);
+});
+
+test("a header block whose rows hold no cells is still not a header this can compare", () => {
+  // The reason the gate is on the CELL count and not on the row count or on the signature text. A
+  // `<thead>` holding one empty `<tr>` reads as `rows: 1, cells: 0` with an empty signature, and two of
+  // them read as `rows: 2, cells: 0` with the signature ` // ` — which is not an empty string. So a
+  // rows-based test and an emptiness test both admit this pair, and it then reports as a disagreement,
+  // inflating the very denominator the gate exists to protect.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "table_join_code_declined", reason: "columns_differ", caption: "Table 5—Continued",
+      headers_identical: false, header_rows_first: 1, header_cells_first: 3,
+      header_rows_second: 2, header_cells_second: 0,
+      header_first: "TH:1:Col 1", header_second: " // " },
+    { ts: T(2), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(2))));
+
+  assert.equal(d.tables.code_declined, 1);
+  assert.equal(d.tables.header_compared, 0, "two empty rows are two rows and no header");
   assert.equal(d.tables.header_differs, 0);
 });
 
@@ -1123,5 +1172,7 @@ test("a run with no continued tables reports zeros rather than an absent section
     header_compared: 0,
     header_differs: 0,
     failed: 0,
+    body_unreadable: 0,
+    capped_pending: 0,
   });
 });

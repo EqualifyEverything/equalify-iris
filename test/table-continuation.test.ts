@@ -714,8 +714,10 @@ test("a joined pair becomes one table and the rest of the body is untouched", as
   // really describe different columns from a pair whose header was read twice and came out differently
   // (#326). A reason and a caption can count declines; only these can explain one.
   assert.equal(stood.data.headers_identical, false);
-  assert.equal(stood.data.header_shape_first, "1x3");
-  assert.equal(stood.data.header_shape_second, "1x3");
+  assert.equal(stood.data.header_rows_first, 1);
+  assert.equal(stood.data.header_cells_first, 3);
+  assert.equal(stood.data.header_rows_second, 1);
+  assert.equal(stood.data.header_cells_second, 3);
   assert.equal(stood.data.header_first, "TH:1:Col 1|TH:1:Col 2|TH:1:Col 3");
   assert.equal(stood.data.header_second, "TH:1:Column 1|TH:1:Column 2|TH:1:Column 3");
 });
@@ -762,8 +764,9 @@ test("a capped signature cannot be read as agreement, because the line already a
   assert.equal(stood.data.header_first, stood.data.header_second, "the capped strings are identical");
   assert.equal(String(stood.data.header_first).length, 1201, "1,200 characters and the marker");
   assert.ok(String(stood.data.header_first).endsWith("…"));
-  // The shapes are computed on the whole block too, so the cells past the cap are still counted.
-  assert.equal(stood.data.header_shape_first, "1x51");
+  // The counts are computed on the whole block too, so the cells past the cap are still counted.
+  assert.equal(stood.data.header_rows_first, 1);
+  assert.equal(stood.data.header_cells_first, 51);
 });
 
 test("a pair the code path can join costs no request and splices the same way", async () => {

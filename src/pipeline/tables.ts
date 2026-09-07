@@ -32,18 +32,26 @@
 //
 // Only three of the six rules the editor is given need a judgement at all, though, and two of them
 // are the bullets above. The other three are "move these bytes and change nothing", so `joinInCode`
-// tries the pair without a model first and stands down wherever the judgement is real. Measured on
-// 50 real pairs read out of already-delivered documents, that is 52% of them at no output tokens,
-// and `verifyJoin` refuses none of what it produces (#276).
+// tries the pair without a model first and stands down wherever the judgement is real.
 //
-// 52% and not the 62% #276 measured, and the difference is one rule: the filing's id check read the
-// second half's HEADER ROWS, and `querySelectorAll` cannot see an id on the `<table>` or `<caption>`
-// element it is called on. 17 of the 50 pairs carry an id there, 13 of those ids the target of a live
-// `href="#…"` or IDREF in the delivered document, and none of it visible to `verifyJoin`. 8 of the 17
-// join here anyway, because such an id has a surviving counterpart to move onto; the 5 that carry an
-// id on BOTH halves' same element are the whole of the gap between 31 pairs and 26, and they are not
-// a shortfall — two live targets cannot become one element, and the editor is asked because it can
-// renumber what points at them.
+// HOW MUCH of the pairs that takes is not a property of these rules, and this paragraph asserted that
+// it was until #326. It read "that is 52% of them at no output tokens, and `verifyJoin` refuses none
+// of what it produces" — both figures are one corpus's counts (26 of the 50 pairs of #276), and the
+// same code on three later rounds of a 100-page corpus took 53%, 24% and 31% with this file,
+// `agents/`, the prompt and the model all byte-identical. The share is a draw on how steadily the
+// extraction read a printed header rather than a structural figure, and `verifyJoin`'s clean sheet was
+// not re-derived on those rounds. `joinInCode`'s own comment carries the range with its corpus, the
+// price that did NOT move, and the reason.
+//
+// The 26 of 50 is still worth stating for what it is: one corpus's count, and one arithmetic
+// correction. It is 26 and not the 31 #276 first measured, and the difference is one rule — the
+// filing's id check read the second half's HEADER ROWS, and `querySelectorAll` cannot see an id on the
+// `<table>` or `<caption>` element it is called on. 17 of the 50 pairs carry an id there, 13 of those
+// ids the target of a live `href="#…"` or IDREF in the delivered document, and none of it visible to
+// `verifyJoin`. 8 of the 17 join here anyway, because such an id has a surviving counterpart to move
+// onto; the 5 that carry an id on BOTH halves' same element are the whole of the gap between 31 pairs
+// and 26, and they are not a shortfall — two live targets cannot become one element, and the editor is
+// asked because it can renumber what points at them.
 //
 // Nothing here reserializes the BODY. `roles.ts` and `anchors.ts` both refuse a whole-body
 // parse-and-reserialize on purpose, because a round trip moves content out of tables and
@@ -926,14 +934,25 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
     // evidence about a `columns_differ` decline too. Two, a field present on some declines and absent
     // on others cannot be counted: the denominator would be chosen by the reason.
     //
-    // Absent altogether only when a half is not readable as a table, which is `read_failed`'s own
-    // case. `headers_identical` is string equality on the FULL signatures and is computed here rather
-    // than left to a reader of the two capped strings, because a cap that cut both at the same prefix
-    // would read as agreement — the truncation would manufacture the stability this line exists to
-    // measure. It is not the same question rule 3 asked: rule 3 skips the comparison where the second
-    // half has no header block at all, and that pair reports `0x0` beside a `false` here, which is a
-    // page that reprinted no header rather than two readings disagreeing. The shapes are on the line
-    // so that case can be excluded by whoever counts.
+    // Absent altogether when a half holds no `<table>` for `headerRead` to find, or when the parse
+    // throws. That is the `unreadable` reason and NOT the `read_failed` one, which is worth stating
+    // because the two look interchangeable on the line: `read_failed` here is `checkJoin` failing on
+    // the MERGED candidate, where both halves read fine and all seven fields are present.
+    //
+    // `headers_identical` is string equality on the FULL signatures and is computed here rather than
+    // left to a reader of the two capped strings, because a cap that cut both at the same prefix would
+    // read as agreement — the truncation would manufacture the stability this line exists to measure.
+    // It is not the same question rule 3 asked: rule 3 skips the comparison where the second half has
+    // no header block at all, and that pair reports `false` here beside a zero cell count, which is a
+    // page that reprinted no header rather than two readings disagreeing.
+    //
+    // The four counts are what lets whoever counts exclude that case, and they are four NUMBERS rather
+    // than the two `rows x cells` strings this line carried first, because a consumer had to parse the
+    // rows back out of a string prefix to find it — and a header ROW holding no cells (`1x0`) has an
+    // empty signature while reading as a real row, so it slipped a `rows`-based test and inflated the
+    // very denominator the shapes were added to protect. `cells` is the field that answers "was there a
+    // header block here at all"; `rows` stays because it separates a page that reprinted nothing
+    // (`0`/`0`) from one that reprinted an empty row.
     const headers = attempt(() => headerSignatures(pair));
     ctx.log.event("table_join_code_declined", {
       reason:
@@ -949,8 +968,10 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
         ? {}
         : {
             headers_identical: headers.first.signature === headers.second.signature,
-            header_shape_first: `${headers.first.rows}x${headers.first.cells}`,
-            header_shape_second: `${headers.second.rows}x${headers.second.cells}`,
+            header_rows_first: headers.first.rows,
+            header_cells_first: headers.first.cells,
+            header_rows_second: headers.second.rows,
+            header_cells_second: headers.second.cells,
             header_first: capSignature(headers.first.signature),
             header_second: capSignature(headers.second.signature),
           }),

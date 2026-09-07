@@ -598,11 +598,12 @@ export interface Diagnostics {
     // per-reason split stays in log.jsonl, because the reasons are an open set — `verify:<reason>`
     // among them — and a fixed list here would silently stop summing the day a rule is added.
     code_declined: number;
-    // Of those declines, the ones where both halves actually declared a header block, and of THOSE
-    // the ones whose two signatures differ. Two numbers because the first is the denominator and it
-    // is not `code_declined`: a continued page that reprinted no header has nothing to compare, and
-    // counting it as agreement or as disagreement would both be inventions. `header_compared: 0` with
-    // declines above it therefore means "no pair could show this", not "every header was stable".
+    // Of those declines, the ones where both halves actually declared a header block WITH CELLS IN IT,
+    // and of THOSE the ones whose two signatures differ. Two numbers because the first is the
+    // denominator and it is not `code_declined`: a continued page that reprinted no header has nothing
+    // to compare, and counting it as agreement or as disagreement would both be inventions.
+    // `header_compared: 0` with declines above it therefore means "no pair could show this", not
+    // "every header was stable".
     //
     // This is the canary #326 asked for, and it is deliberately not `code_declined` filtered to
     // `header_differs`: that reason is one guard's verdict, while the instability behind it was
@@ -616,9 +617,22 @@ export interface Diagnostics {
     header_compared: number;
     header_differs: number;
     // Pairs left as two tables, from `table_join_failed` — the editor refused or could not be read,
-    // or the pair could not be located in the source bytes at all. The one count here that IS a
-    // shortfall in the output: the document ships both halves, so a reader meets a table cut in two.
+    // or the pair could not be located in the source bytes at all. A shortfall in the output: the
+    // document ships both halves, so a reader meets a table cut in two.
+    //
+    // Counted only for the lines of that type that are about a PAIR. `table_join_failed` also carries
+    // one run-level line, `stage: "body"`, for an assembled body no parser could read — that document
+    // joined nothing at all, so folding it in here would report `failed: 1` for a run where every pair
+    // stayed split. It gets its own count, and a `stage` this build does not recognize lands in
+    // neither, on the same reasoning as an unrecognized `by` above.
+    body_unreadable: number;
     failed: number;
+    // Pairs that ship as two tables having never been attempted, because the run hit
+    // `MAX_TABLE_JOINS` first (`table_joins_capped`, summing its `pending`). A second reason a reader
+    // meets a split table, and NOT part of `failed`, which counts pairs that were tried: the remedy is
+    // a higher cap, where `failed`'s is a better join. Both belong beside the other, so neither is read
+    // as the total.
+    capped_pending: number;
   };
   // Source pages whose own extraction threw, so the delivered document carries a
   // failure marker instead of that page's content (pipeline/extraction.ts
@@ -1160,7 +1174,9 @@ export function summarizeRun(
     code_declined: 0,
     header_compared: 0,
     header_differs: 0,
+    body_unreadable: 0,
     failed: 0,
+    capped_pending: 0,
   };
   for (const e of events) {
     if (e.type === "page_verify_ok") {
@@ -1405,24 +1421,36 @@ export function summarizeRun(
     } else if (e.type === "table_join_code_declined") {
       tables.code_declined += 1;
       // The comparison is only counted where the log line says one was possible: `headers_identical`
-      // is absent when a half did not parse as a table, and the shapes are absent with it. Read
-      // strictly as a boolean for the reason every flag here is, and gated on BOTH shapes declaring a
-      // header row, because a continued page that reprinted no header compares an empty signature
+      // is absent when a half held no `<table>` to read, and the counts are absent with it. Read
+      // strictly as a boolean for the reason every flag here is, and gated on both halves having
+      // header CELLS, because a continued page that reprinted no header compares an empty signature
       // against a real one and writes `false` — a fact about the printing, not two readings
-      // disagreeing (`0x…` is that shape). Counting it would put the commonest legitimate case into
-      // the instability number.
+      // disagreeing. Counting it would put the commonest legitimate case into the instability number.
+      //
+      // On `cells` and not on `rows`, and that is the whole of the difference between this and the
+      // first draft: an empty `<tr>` inside a `<thead>` is a header row by every test here, so it
+      // reported one row, no cells and an empty signature — unequal to a real header, and a
+      // `rows`-based gate let it through into both counts below.
       const compared =
         typeof e.headers_identical === "boolean" &&
-        typeof e.header_shape_first === "string" &&
-        typeof e.header_shape_second === "string" &&
-        !e.header_shape_first.startsWith("0x") &&
-        !e.header_shape_second.startsWith("0x");
+        typeof e.header_cells_first === "number" &&
+        typeof e.header_cells_second === "number" &&
+        e.header_cells_first > 0 &&
+        e.header_cells_second > 0;
       if (compared) {
         tables.header_compared += 1;
         if (e.headers_identical === false) tables.header_differs += 1;
       }
     } else if (e.type === "table_join_failed") {
-      tables.failed += 1;
+      // `stage` is what separates the run-level line from the per-pair ones, and it is matched against
+      // the value the emitter writes rather than tested for absence: a line naming a stage this build
+      // does not know is about something, and calling it a split table would be a guess.
+      if (e.stage === undefined) tables.failed += 1;
+      else if (e.stage === "body") tables.body_unreadable += 1;
+    } else if (e.type === "table_joins_capped") {
+      // Summed, not counted: the field is how many pairs were left, and one run leaving four is four
+      // tables a reader meets in halves.
+      tables.capped_pending += typeof e.pending === "number" ? e.pending : 0;
     }
   }
 

@@ -2892,22 +2892,28 @@ too and a field present on some declines only would have its denominator chosen 
   than left to a reader of the two capped strings below, because a cap that cut both at the same
   prefix would read as agreement and manufacture the stability this exists to measure. It is not the
   question rule 3 asked: that rule skips the comparison entirely where the second half declares no
-  header block, and such a pair reports `false` here with a `0x0` shape beside it — a page that
-  reprinted no header, not two readings disagreeing. Count with the shapes, not without them.
-- `header_shape_first` / `header_shape_second` — `<header rows>x<header cells>`, off the whole block,
-  so the structural disagreement that is the commonest kind (the same printed header coming out as a
-  different number of rows) is readable without the text. `cells` counts every child of a header row,
-  `<td>` included, because the signature does and because a header block returning as `<td>` is its
-  own defect (`header_cells_lost`).
+  header block, and such a pair reports `false` here with a zero cell count beside it — a page that
+  reprinted no header, not two readings disagreeing. Count with the cell counts, not without them.
+- `header_rows_first` / `header_cells_first` / `header_rows_second` / `header_cells_second` — the size
+  of each half's whole header block, so the structural disagreement that is the commonest kind (the
+  same printed header coming out as a different number of rows) is readable without the text.
+  `cells` counts every child of a header row, `<td>` included, because the signature does and because a
+  header block returning as `<td>` is its own defect (`header_cells_lost`). Four numbers rather than
+  two `rows x cells` strings, so that nothing has to parse a count back out of a string: **`cells` is
+  the field that says whether a half declared a header block at all**, and a header row holding no
+  cells reports `rows: 1, cells: 0` with an empty signature, which a rows-only test reads as a real
+  header and counts as a disagreement.
 - `header_first` / `header_second` — the signatures themselves, as rule 3 compares them: per header
   cell, tag name, `colspan` and normalized text, cells joined with `|` and rows with ` // `. Capped at
   1,200 characters with a trailing `…` when cut, which this corpus's widest real headers (about 750)
   do not reach. A cell's own text can contain `|`, so these are not re-splittable into a cell count —
-  that is what the shapes are for.
+  that is what the counts above are for.
 
-All five are **absent** when a half is not readable as a table at all, which is the `read_failed`
-case; a half with no header block is present with an empty signature and a `0` row count. The
-per-round totals are folded into `tables` in the diagnostics payload (§7b).
+All seven are **absent** when a half holds no `<table>` for this to read, which is the `unreadable`
+reason and not `read_failed`: a `read_failed` decline is `checkJoin` failing on the **merged**
+candidate, where both halves read fine and all seven fields are present. A half with a `<table>` but no
+header block is present too, with an empty signature and `0` for both of its counts. The per-round
+totals are folded into `tables` in the diagnostics payload (§7b).
 
 ### `table_join_failed`
 
@@ -4480,7 +4486,8 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
   },
   "tables": {
     "joined_in_code": 5, "joined_by_editor": 8, "code_declined": 11,
-    "header_compared": 9, "header_differs": 4, "failed": 3
+    "header_compared": 9, "header_differs": 4,
+    "failed": 3, "body_unreadable": 0, "capped_pending": 0
   },
   "fidelity_observed": {
     "observed": 3, "pages": [2, 5], "unattached_pages": [],
@@ -4926,8 +4933,23 @@ feedback round that re-extracts three pages adds three more verifications.
 [`table_join_failed`](#table_join_failed). `joined_in_code` is the pairs merged with no model call and
 `joined_by_editor` the pairs a Copy Editor call was bought for; `code_declined` is every pair the free
 path stood down on, each of which bought that call. A decline is **not** a failure — the pair goes to
-the editor exactly as it did before the free path existed — while `failed` is the count that does show
-in the output: those pairs ship as two tables, so a reader meets a table cut in two.
+the editor exactly as it did before the free path existed.
+
+Three separate counts say a reader met a table cut in two, and they are separate because their remedies
+are:
+
+- `failed` — pairs that were tried and lost. `table_join_failed` lines with no `stage`.
+- `capped_pending` — pairs never attempted, because `MAX_TABLE_JOINS` (12) was already spent on this
+  document. The remedy is a higher cap, where `failed`'s is a better join, so pooling them would hide
+  which one a round needs. Summed from `table_joins_capped`'s `pending`.
+- `body_unreadable` — the one **run-level** `table_join_failed` line, `stage: "body"`, meaning the
+  assembled body would not parse and so no pair was joined at all. It is one line however many pairs
+  the document had, which is exactly why it is not folded into `failed`: doing so would report
+  `failed: 1` for a run where every pair stayed split.
+
+A `table_join_failed` line whose `stage` is neither absent nor `"body"` lands in none of the three, on
+the same principle as `by` outside `code`/`editor` — a total that is visibly short beats a bucket
+filled by guesswork.
 
 Read the free share as a **range, not a rate**, which is why no share is published here. The same code
 on the same 100-page corpus took 9 of 17 pairs, then 4 of 17, then 5 of 16 — 53%, 24% and 31% — with
@@ -4938,8 +4960,11 @@ change credited with moving the free share by less than about 2x is inside that 
 
 `header_compared` and `header_differs` are that instability, read for free off the declines. The
 denominator is `header_compared` and **not** `code_declined`, because a continued page that reprinted
-no header has nothing to compare: such a line reports the two signatures as unequal — one of them is
-empty — and counting it either way would be an invention. So `header_compared: 0` under a run with
+no header has nothing to compare: such a line reports the two signatures as unequal — one of them holds
+no cells — and counting it either way would be an invention. The test is `header_cells_first > 0 &&
+header_cells_second > 0`, on the counts rather than on the signature text, because a header block of
+two empty rows renders as the signature `" // "`, which is not an empty string; only the cell count
+answers whether a half declared a header at all. So `header_compared: 0` under a run with
 declines means *no pair could show this*, not *every header was stable*. It is also deliberately not
 `code_declined` filtered to `header_differs`: that reason is one guard's verdict, and #326 watched the
 width check and the id rule stand down on pairs that had joined for free a round earlier, so a pair
