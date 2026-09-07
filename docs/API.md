@@ -3,34 +3,35 @@
 Every endpoint is under `/v1`. All responses are JSON unless noted. Every endpoint except
 `/v1/health`, `/v1/stats` and `/v1/auth/*` requires `Authorization: Bearer <github_token>`
 — with one exception, `/v1/quality`, which takes a bearer token that is **not** a
-GitHub token (§0c).
+GitHub token ([Quality tally](#quality-tally-shared-secret-off-by-default)).
 
 These commands are copy-pasteable. They are the same calls exercised by `test/e2e.sh`, which
 runs the whole lifecycle against mock GitHub + mock model services and asserts every response.
 
 Requests are rate limited per client, and every response says how much of the budget is left:
-§3.2 has the numbers, the headers, and what a `429` looks like.
+[Rate limits](#rate-limits-how-often-you-may-ask) has the numbers, the headers, and what a `429` looks like.
 
 `fragment`, `block`, `verdict`, `declaration` and `round` all mean something specific here, and
 [README § Terms](../README.md#terms) defines them. Two of them appear below in both of their senses.
 A `round` is either a round of the reader/editor loop or a captured run of a corpus, which the text
 calls a **bench round** or a **deployed round**. A `fragment` is either one page's extracted HTML or
-the `#id` part of a link — that second sense is what §3's `links_unresolved_rate` is about. A
-`declaration` is the page agent's claim that a page holds no content everywhere except one line of
-§7's `page_main_stripped`, where it is the `lang` declaration on the document's root element.
+the `#id` part of a link — that second sense is what `links_unresolved_rate` under
+[Create a session](#create-a-session-upload-images) is about. A `declaration` is the page agent's
+claim that a page holds no content everywhere except one line of the [run log](#run-log)'s
+`page_main_stripped`, where it is the `lang` declaration on the document's root element.
 
 ```bash
 export BASE=http://localhost:8080/v1
 ```
 
-## 0. Health (unauthenticated)
+## Health (unauthenticated)
 
 ```bash
 curl -s "$BASE/health"
 # {"status":"ok","service":"equalify-iris"}
 ```
 
-## 0b. Public tally (unauthenticated)
+## Public tally (unauthenticated)
 
 How much this deployment has actually made accessible. No token: the browser app shows it to
 visitors before anyone signs in, and it is the number the project celebrates with.
@@ -64,14 +65,16 @@ curl -s "$BASE/stats"
     Distinct from `documents_processed`, which is all-time.
   * `clean_rate` — share (0–1) of those documents the **reviewer** read in full and reported nothing
     left open on. Stated the positive way round because this one is read by someone deciding whether
-    to trust Iris with a file. It is 1 − (§0c's `unresolved_rate` ∪ `review_unread_rate`), not the
-    complement of the first alone: a document part of which the reviewer never answered about has
-    nothing open because nothing was looked for, and counting that as clean is what made this field
-    worth doubting (#186). Note also what it is *not*: it is the Reader Agent's remaining-issue list,
-    not the final axe result, so a document carrying a violation the reviewer never raised still
-    counts here. §0c can see that gap (its `rules` come from the final lint of the same run); this
-    field cannot, which is why the demo page's sentence credits the reviewer rather than saying the
-    document came out clean.
+    to trust Iris with a file. It is 1 − (the
+    [quality tally](#quality-tally-shared-secret-off-by-default)'s `unresolved_rate` ∪
+    `review_unread_rate`), not the complement of the first alone: a document part of which the
+    reviewer never answered about has nothing open because nothing was looked for, and counting that
+    as clean is what made this field worth doubting (#186). Note also what it is *not*: it is the
+    Reader Agent's remaining-issue list, not the final axe result, so a document carrying a
+    violation the reviewer never raised still counts here. The
+    [quality tally](#quality-tally-shared-secret-off-by-default) can see that gap (its `rules` come
+    from the final lint of the same run); this field cannot, which is why the demo page's sentence
+    credits the reviewer rather than saying the document came out clean.
   * `mean_rounds` — mean reader/editor passes per document. **0 is the good value:** the loop stops
     as soon as the Reader finds nothing, so a document that reads clean immediately contributes 0.
     It is not *only* a good value, though, and this number cannot tell the two apart: the loop also
@@ -103,8 +106,9 @@ keep the endpoint off the public internet.
 
 Volume is all-time while quality is windowed, which is deliberate rather than an inconsistency: an
 all-time rate converges and stops responding to a fix, while an all-time page count is the
-achievement being reported. No rule ids here, unlike §0c — a standing list of what Iris still fails
-at belongs in front of the people who would fix it, not on a public page.
+achievement being reported. No rule ids here, unlike the
+[quality tally](#quality-tally-shared-secret-off-by-default) — a standing list of what Iris still
+fails at belongs in front of the people who would fix it, not on a public page.
 
 The number only ever goes up. It is derived from a write-once `first_completed_at` stamp rather
 than from current `status`, precisely so that asking Iris to re-run a finished document — which
@@ -127,7 +131,7 @@ endpoint off the public internet. Responses are cached for 60 seconds
 (`Cache-Control: public, max-age=60`), which coarsens *when* a conversion shows up but not the page
 count — so a page you just converted may take up to a minute to appear.
 
-## 0c. Quality tally (shared secret, off by default)
+## Quality tally (shared secret, off by default)
 
 How *good* the output has been, as opposed to how much of it there was. Iris already measures
 itself on every run — how many reader/editor rounds a document needed, which axe-core rules its
@@ -234,21 +238,22 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   `unresolved_rate`. This is the one field that separates them.
   * `mean_issues` — mean issues raised by the **first** read of a document, averaged over the
     documents that recorded one. The first read specifically, and not a sum over rounds: every later
-    round reads a body the editor has already rewritten, so a total would measure how many rounds ran
-    as much as what the reviewer saw, and the first read is the only one taken on extraction's own
-    output. A document the reviewer cleared contributes `0` — that is the observation, not a missing
-    one — and the field is `null`, not `0`, when no document in the window recorded a read.
-    A feedback re-run (§5) does **not** replace it, unlike every other value in this tally: a
-    document-level re-run re-reviews the body already delivered, so its first read is on bytes
-    the copy editor has rewritten and would land here as a smaller number for a reason that is
-    not the reviewer's. A re-run that re-extracts does replace it, because that read *is* on
-    fresh extraction output. One consequence worth knowing when reading this across a model change,
-    which is its stated use: a carried-forward count is **re-dated** to the re-run, like every other
-    row for that session, so a document converted before the change and given document-level
-    feedback after it contributes the old reviewer's number to the new window. The alternative is
-    worse — keeping the original date would drop the row out of the window while the document itself
-    stays in it, and `first_read.documents` would fall short for a reason that is not a missing
-    measurement. `first_read_carried` in the run log (§5) names every document this happened to.
+    round reads a body the editor has already rewritten, so a total would measure how many rounds
+    ran as much as what the reviewer saw, and the first read is the only one taken on extraction's
+    own output. A document the reviewer cleared contributes `0` — that is the observation, not a
+    missing one — and the field is `null`, not `0`, when no document in the window recorded a read.
+    A feedback re-run ([Submit feedback](#submit-feedback-re-run)) does **not** replace it, unlike
+    every other value in this tally: a document-level re-run re-reviews the body already delivered,
+    so its first read is on bytes the copy editor has rewritten and would land here as a smaller
+    number for a reason that is not the reviewer's. A re-run that re-extracts does replace it,
+    because that read *is* on fresh extraction output. One consequence worth knowing when reading
+    this across a model change, which is its stated use: a carried-forward count is **re-dated** to
+    the re-run, like every other row for that session, so a document converted before the change and
+    given document-level feedback after it contributes the old reviewer's number to the new window.
+    The alternative is worse — keeping the original date would drop the row out of the window while
+    the document itself stays in it, and `first_read.documents` would fall short for a reason that
+    is not a missing measurement. [`first_read_carried`](#first_read_carried) in the run log names
+    every document this happened to.
   * `documents` — how many documents recorded a first read, which is the denominator `mean_issues`
     was divided by. Compare it with `documents` at the top of the response: it is the same on a
     window whose runs all pass through the review loop, and short of it otherwise.
@@ -454,39 +459,40 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   of its own words — a typo fixed in the same `<div>` — which is an ordinary round, moved nothing
   anywhere, and was refused entire. What is read now is where the words went, not whether they changed.
 
-  **What a 0 here does not mean.** It is not evidence that no round demotes a heading, so it is not on
-  its own a reason to retire the guard. The guard is on **one of the three paths a reply is applied
-  through** — the block patch, where a fall can be attributed to the block that dropped it and that
-  block alone handed back. The other two adopt a reply whole: the whole-body branch and each section of
-  a sectioned round (the loop's **last** round, so nothing looks at its output again). Both check only
-  the size floor, which a demotion cannot move — it keeps every word and grows the bytes — so a
-  demotion on either is applied and delivered, and this rate stays 0. That is still true and is now
-  **measurable rather than only stated** (#375): both paths compute the same reading and log it as
-  `editor_navigation` in §7, refusing nothing, with a line on every delivered reply so the denominator
-  is there too. So a 0 here paired with `editor_navigation` lines carrying no `headings` is a guard
-  that has nothing to fire on; a 0 here paired with `headings` falls on those lines is a guard looking
-  where the demotions are not. Which of the two it is is not answerable from this number, before #375
-  or after it — it is answerable from that line, which is the point of having it. **And only where
-  there are such lines**: a deployment whose rounds are all block patches writes none at all, and
-  their absence is an empty population rather than evidence about the guard — the same mistake as
-  reading a 0 here as evidence, one step along. What #375 changed is that the population can be
-  collected, not that it has been.
+  **What a 0 here does not mean.** It is not evidence that no round demotes a heading, so it is not
+  on its own a reason to retire the guard. The guard is on **one of the three paths a reply is
+  applied through** — the block patch, where a fall can be attributed to the block that dropped it
+  and that block alone handed back. The other two adopt a reply whole: the whole-body branch and
+  each section of a sectioned round (the loop's **last** round, so nothing looks at its output
+  again). Both check only the size floor, which a demotion cannot move — it keeps every word and
+  grows the bytes — so a demotion on either is applied and delivered, and this rate stays 0. That is
+  still true and is now **measurable rather than only stated** (#375): both paths compute the same
+  reading and log it as [`editor_navigation`](#editor_navigation) in the run log, refusing nothing,
+  with a line on every delivered reply so the denominator is there too. So a 0 here paired with
+  `editor_navigation` lines carrying no `headings` is a guard that has nothing to fire on; a 0 here
+  paired with `headings` falls on those lines is a guard looking where the demotions are not. Which
+  of the two it is is not answerable from this number, before #375 or after it — it is answerable
+  from that line, which is the point of having it. **And only where there are such lines**: a
+  deployment whose rounds are all block patches writes none at all, and their absence is an empty
+  population rather than evidence about the guard — the same mistake as reading a 0 here as
+  evidence, one step along. What #375 changed is that the population can be collected, not that it
+  has been.
 * `review_unread_rate` — share of documents where part of the reviewer's last read of them came back
-  **unusable**, so some of the document has no review verdict at all. The document is read in windows
-  (long ones in several), and a reply that carries no issue list this code can read — prose, an
-  apology, `{"issues": "none"}` — is a window nobody got an answer about. It is recorded because
+  **unusable**, so some of the document has no review verdict at all. The document is read in
+  windows (long ones in several), and a reply that carries no issue list this code can read — prose,
+  an apology, `{"issues": "none"}` — is a window nobody got an answer about. It is recorded because
   without it that outcome is invisible in every other number here *and reads as the best one*: no
   issues were found, so there is no `iris:unresolved` row, so the document was being counted clean.
   This is the same principle as `lint_error_rate` above — an absent verdict must not count as a good
-  one — and it is why `clean_rate` in §0b subtracts both. Not disjoint from `unresolved_rate`: the
-  windows that *did* answer may have found issues. The delivered document carries a `@review-unread`
-  comment saying how many windows of how many, and `reader_no_output` in the run log carries the
-  reply's size and which of the two ways it failed. A non-zero value is a statement about the reader
-  model or its prompt, and that call's [`agent_call`](#agent_call) `output` in the run log — the
-  reply itself — is where to start. The
+  one — and it is why `clean_rate` in the [public tally](#public-tally-unauthenticated) subtracts
+  both. Not disjoint from `unresolved_rate`: the windows that *did* answer may have found issues.
+  The delivered document carries a `@review-unread` comment saying how many windows of how many, and
+  `reader_no_output` in the run log carries the reply's size and which of the two ways it failed. A
+  non-zero value is a statement about the reader model or its prompt, and that call's
+  [`agent_call`](#agent_call) `output` in the run log — the reply itself — is where to start. The
   **last** read is the one this counts, because what ships is one reading of the body that shipped;
-  `first_read.unread_documents` above is the same failure on the first read, where it is an error bar
-  on that read's count rather than a gap in the delivered document's verdict.
+  `first_read.unread_documents` above is the same failure on the first read, where it is an error
+  bar on that read's count rather than a gap in the delivered document's verdict.
 * `unfinished_page_rate` — share of documents delivered with a `[page not fully transcribed]` marker
   still in the body, i.e. documents that **could not** have finished the review loop clean whatever
   budget they were given. Not a defect rate of its own: the Reader is instructed to report every one
@@ -527,7 +533,7 @@ token above. Verify the pair with `gh workflow run quality-report.yml -f dry_run
 waiting for the weekly schedule; [ci.md](ci.md)'s "Weekly quality report" section has the full procedure,
 including why a green run that declines to file is the expected result on a young deployment.
 
-## 1. Authenticate (get a token)
+## Authenticate (get a token)
 
 GitHub is the only auth mechanism, and a GitHub token is **required** on every API call —
 there is no anonymous mode, no API key and no second SSO provider. That is a design decision, not
@@ -585,7 +591,7 @@ GET  /v1/auth/github/callback   -> 200 {"access_token":"gho_...","token_type":"b
 `/start` issues a state value and redirects to GitHub; after the user approves, GitHub calls
 `/callback?code=...&state=...` and the service returns the access token.
 
-## 2. Current user
+## Current user
 
 ```bash
 curl -s -H "$AUTH" "$BASE/me"
@@ -601,14 +607,14 @@ curl -s -H "$AUTH" "$BASE/me"
 `upstream_repo` is where this deployment files your contributions. There is no `fork_repo` field:
 contributions are filed as issues, so no fork is ever created.
 
-## 3. Create a session (upload images)
+## Create a session (upload images)
 
 `multipart/form-data`. Repeat `images` once per file; **the order of the parts is the
 processing order** (not the filename). `images` is the only part the endpoint reads — there are
 no per-session options. (A `config` part used to override `max_review_iterations` for one
 session; it was removed, and sending one now is ignored rather than an error. The cap comes from
 your account default, seeded from the deployment's `defaults.max_review_iterations` — see
-[`GET /v1/me`](#2-current-user).)
+[`GET /v1/me`](#current-user).)
 
 ```bash
 create=$(curl -s -X POST -H "$AUTH" "$BASE/sessions" \
@@ -629,7 +635,7 @@ rather than accepted and failed later. The limit is not Iris's own: an uploaded 
 to the vision model byte for byte, so the model's per-image cap is the cap — currently **5 MB
 base64**, which is **3.75 MB on disk**, on Amazon Bedrock. Ask the deployment instead of
 assuming, since it moves with the configured model and provider:
-[`GET /v1/limits`](#31-upload-limits-unauthenticated). A **PDF** is not measured against that
+[`GET /v1/limits`](#upload-limits-unauthenticated). A **PDF** is not measured against that
 limit — the file you send is not what reaches the model, since Iris rasterizes its pages at its
 own resolution — but each *rendered page* is, and a page over it fails with a `400` naming the
 page and the PDF. That happens with large-format pages: rasterizing at a fixed DPI means the
@@ -650,9 +656,10 @@ runs. One that runs a vision model Iris has no published limits for gets the sam
 enforced the same way — they are the conservative end of what is known — but they are then
 stand-ins rather than facts about it: nothing promises that the model discards the pixels above
 the long edge, and the 8000 px ceiling is Iris's rule rather than a refusal it has seen. This is
-why `hint` is the thing to quote (§3.1): it is written from whichever of the two holds.
+why `hint` is the thing to quote ([Upload limits](#upload-limits-unauthenticated)): it is written
+from whichever of the two holds.
 
-### 3.1 Upload limits (unauthenticated)
+### Upload limits (unauthenticated)
 
 `GET /v1/limits` — unauthenticated. What this deployment accepts, resolved from the model and
 provider it is configured to use, so a client never has to hardcode numbers that change when
@@ -706,9 +713,9 @@ sentence from `max_long_edge_px` is what can go stale, and this is a second reas
 `max_request_bytes` across all of them. They are refused at different moments, which matters if you
 are streaming: the byte total is checked before the body is read (or counted as it arrives, when the
 request declares no length), while the part count is refused during parsing, once a part past
-`max_files` appears. `rate_limits`
-is how often you may ask (§3.2), and is `null` on a deployment that does not limit requests in the
-app — which means "not limiting", not "unknown".
+`max_files` appears. `rate_limits` is how often you may ask
+([Rate limits](#rate-limits-how-often-you-may-ask)), and is `null` on a deployment that does not
+limit requests in the app — which means "not limiting", not "unknown".
 
 A PDF's **links survive**, which rasterizing alone would not manage: a link is an annotation
 over the page rather than something drawn on it, so the page image carries the link text and
@@ -745,27 +752,27 @@ was the one defect class where the only thing watching was the most expensive mo
 deployment: the verifier catches a gutted alt 6 times out of 6, and the cheaper models it may be
 swapped for catch it 0–2 times out of 6.
 
-**One page's ids are its own, and a page that collides with itself is asked at the page step.**
-Ids arriving from independently extracted pages are made unique across the document by prefixing
-each page's (§7.7 v1.2 above) — but a page that used one id twice gets the same prefix on both
-copies and stays collided, which is the one case that pass declines. Its only other reporter is
-lint on the **assembled** document, after that page's last chance to be read against its image —
-and where a prefixed id no longer carries the name the page gave it, so the finding is on `p3-fn-1`.
-That last part holds only where the rename ran: prefixing touches ids more than one *page* claims,
-so a document whose sole defect is page 3 using `fn-1` twice, with no other page claiming `fn-1`,
-reaches lint with `fn-1` intact. Per-page footnote numbering usually does produce the cross-page
-collision that renames it, but the reason to ask at the page step does not depend on that.
-So the duplicate is checked in code on the page's own fragment, off the
-parsed tree, and handed to the same self-correction pass as a dropped link: `page_duplicate_ids` is
-the finding, `page_duplicate_ids_unrecovered` says the correction did not clear it, and
-`extraction_complete.ids_duplicated` is the count over the fragments the document is assembled
-*from*, beside `ids_checked` as its denominator. It is a correction rather than a rename in code
-because renaming one end of the pair is how this defect gets worse: `href="#fn-1"` currently
+**One page's ids are its own, and a page that collides with itself is asked at the page step.** Ids
+arriving from independently extracted pages are made unique across the document by prefixing each
+page's (`namespaceAnchors`, written up under [`page_duplicate_ids`](#page_duplicate_ids)) — but a
+page that used one id twice gets the same prefix on both copies and stays collided, which is the one
+case that pass declines. Its only other reporter is lint on the **assembled** document, after that
+page's last chance to be read against its image — and where a prefixed id no longer carries the name
+the page gave it, so the finding is on `p3-fn-1`. That last part holds only where the rename ran:
+prefixing touches ids more than one *page* claims, so a document whose sole defect is page 3 using
+`fn-1` twice, with no other page claiming `fn-1`, reaches lint with `fn-1` intact. Per-page footnote
+numbering usually does produce the cross-page collision that renames it, but the reason to ask at
+the page step does not depend on that. So the duplicate is checked in code on the page's own
+fragment, off the parsed tree, and handed to the same self-correction pass as a dropped link:
+`page_duplicate_ids` is the finding, `page_duplicate_ids_unrecovered` says the correction did not
+clear it, and `extraction_complete.ids_duplicated` is the count over the fragments the document is
+assembled *from*, beside `ids_checked` as its denominator. It is a correction rather than a rename
+in code because renaming one end of the pair is how this defect gets worse: `href="#fn-1"` currently
 reaches the first copy, and a rename that leaves the reference behind turns a wrong target into a
 dangling one — and only the agent that wrote the page knows which sentence meant which note.
-Measured over every page reply in 32 bench run directories (1,501 fragments, 1,421 of them
-carrying an id), 2 duplicate an id within themselves, both of them footnote ids, and 0 of the 328
-written by the model deployed today (issue #373).
+Measured over every page reply in 32 bench run directories (1,501 fragments, 1,421 of them carrying
+an id), 2 duplicate an id within themselves, both of them footnote ids, and 0 of the 328 written by
+the model deployed today (issue #373).
 
 Recovering a link never costs a page its structure, and neither does replacing a placeholder or
 renumbering an id. When a page passed its fidelity check and is re-rendered only to attach a link,
@@ -788,7 +795,7 @@ takes — rather than being rejected. Nothing is lost; the upload is already sto
 in `queued`, check its run log for `run_queued` / `run_dequeued` to see the wait rather than
 assuming a hang.
 
-### 3.2 Rate limits (how often you may ask)
+### Rate limits (how often you may ask)
 
 A deployment limits requests at the HTTP layer, because it is a single process whose reads hit
 SQLite synchronously — one client's runaway loop is felt by everyone, including the runs already
@@ -838,7 +845,7 @@ A token identifies you no matter which address you arrive from, so signing in is
 your own budget: unauthenticated requests, and any bearer token this deployment has not validated,
 count against your **address** — which you may be sharing with an entire campus.
 
-## 4. Poll status
+## Poll status
 
 The pipeline runs asynchronously; poll until `status` is `ready_for_review` (or `failed`).
 
@@ -876,43 +883,43 @@ until [ "$(curl -s -H "$AUTH" "$BASE/sessions/$SID" | jq -r .status)" = "ready_f
 done
 ```
 
-## 5. Fetch the HTML output
+## Fetch the HTML output
 
 ```bash
 curl -s -H "$AUTH" "$BASE/sessions/$SID/output" -o output.html
 ```
 `text/html` — clean, content-only accessible HTML. Provenance comments (`@source`, `@agent`,
-`@fragment`) are **not** included, deliberately; provenance lives in the
-run log instead (step 7). An `<!-- @unresolved -->` comment listing outstanding issues is
-appended if the review loop stopped with any still open — at its iteration cap, or on a round that
-changed nothing, which is how a document whose remaining issues the loop is designed not to fix
-ordinarily ends. A third stop reason adds a second comment: `<!-- @editor-truncated -->` says a
-correction round's response hit the model's output ceiling — read together with `@unresolved`,
-which on its own would say the editor tried and could not fix them (§0c
+`@fragment`) are **not** included, deliberately; provenance lives in the [run log](#run-log)
+instead. An `<!-- @unresolved -->` comment listing outstanding issues is appended if the review loop
+stopped with any still open — at its iteration cap, or on a round that changed nothing, which is how
+a document whose remaining issues the loop is designed not to fix ordinarily ends. A third stop
+reason adds a second comment: `<!-- @editor-truncated -->` says a correction round's response hit
+the model's output ceiling — read together with `@unresolved`, which on its own would say the editor
+tried and could not fix them (the [quality tally](#quality-tally-shared-secret-off-by-default)'s
 `editor_truncated_rate`). It comes in three forms, and the difference is what corrections the
-document in your hand contains, and which part of it has which kind.
-`@editor-truncated blocks B of T` is the commonest: the reply was read as far as it got, so the
-first `B` of the document's `T` top-level blocks carry that round's **own** corrections, made by a
-call that saw the whole document and the page images. The same comment then says what happened to
-the other `T − B` — asked for again a section at a time (`C of N sections`), or not divisible and so
-left as they were — and `B` equal to `T` means the reply named its last block before the ceiling cut
-it, so nothing was left to ask for at all. `B` is not always where the ceiling stopped the reply:
-where the reply's next change would have left a block holding less than it came in with, the claim
-stops **there** instead (§0c `editor_salvaged`, `lost_at`), and the comment says so in its own
-words — including that a passage moved backwards across that point may now be in the document twice,
-which is the trade that rule accepts and the one thing about it a person reading the document can
-act on.
-`@editor-truncated sections C of N` with no block count means no prefix could be used, so the
-**whole** body was re-made a section at a time and `C` of `N` came back corrected; each of those was
-made by a request that saw one section and not the rest of the document. Under both, the
-`@unresolved` list is the reading that preceded the corrections and was never taken again, so some
-of it may already be fixed. The bare `@editor-truncated` means nothing was rescued — the round was
-discarded and **none** of the issues below it were worked on. What
-`editor_truncated_lost_rate` counts deployment-wide is any part of the document that no editor pass
-reached: the bare form, `C` short of `N`, and blocks past `B` that no section covered. A third comment,
-`<!-- @lint-unavailable -->`, says axe-core could not run on this document at all, so **nothing**
-in it was checked for accessibility violations and an empty `@unresolved` is not a clean bill of
-health (§0c `lint_error_rate`). Returns `409` while the session is still running.
+document in your hand contains, and which part of it has which kind. `@editor-truncated blocks B of
+T` is the commonest: the reply was read as far as it got, so the first `B` of the document's `T`
+top-level blocks carry that round's **own** corrections, made by a call that saw the whole document
+and the page images. The same comment then says what happened to the other `T − B` — asked for again
+a section at a time (`C of N sections`), or not divisible and so left as they were — and `B` equal
+to `T` means the reply named its last block before the ceiling cut it, so nothing was left to ask
+for at all. `B` is not always where the ceiling stopped the reply: where the reply's next change
+would have left a block holding less than it came in with, the claim stops **there** instead (the
+[quality tally](#quality-tally-shared-secret-off-by-default)'s `editor_salvaged`, `lost_at`), and
+the comment says so in its own words — including that a passage moved backwards across that point
+may now be in the document twice, which is the trade that rule accepts and the one thing about it a
+person reading the document can act on. `@editor-truncated sections C of N` with no block count
+means no prefix could be used, so the **whole** body was re-made a section at a time and `C` of `N`
+came back corrected; each of those was made by a request that saw one section and not the rest of
+the document. Under both, the `@unresolved` list is the reading that preceded the corrections and
+was never taken again, so some of it may already be fixed. The bare `@editor-truncated` means
+nothing was rescued — the round was discarded and **none** of the issues below it were worked on.
+What `editor_truncated_lost_rate` counts deployment-wide is any part of the document that no editor
+pass reached: the bare form, `C` short of `N`, and blocks past `B` that no section covered. A third
+comment, `<!-- @lint-unavailable -->`, says axe-core could not run on this document at all, so
+**nothing** in it was checked for accessibility violations and an empty `@unresolved` is not a clean
+bill of health (the [quality tally](#quality-tally-shared-secret-off-by-default)'s
+`lint_error_rate`). Returns `409` while the session is still running.
 
 **Image references do not resolve, by design.** A graphic on the page — a logo, a diagram, a
 photograph — is emitted as an `<img>` with a description and a placeholder `src` naming the page
@@ -923,7 +930,7 @@ those references 404 until a consumer supplies the files. What a screen-reader u
 browser will show broken images, and one that rewrites the `src`s has the log and the fragment to
 match them against.
 
-## 6. Submit feedback (re-run)
+## Submit feedback (re-run)
 
 Triggers a new run within the same session, with the feedback injected as a top-level
 instruction to every agent. The prior output is snapshotted to
@@ -949,13 +956,13 @@ than regenerating it, and is routed by what the feedback is about (visible in th
 | `document` | Re-lint the saved body, then the feedback-aware review loop. No re-extraction. | tone, wording, ordering, an accessibility rule |
 | `extraction` | The named pages go back to the page agent **with their source image**, then reassemble + review. Other pages keep their prior fragments. | "the revenue figure on page 2 is wrong", missed or misread content |
 
-The second case exists because the **Reader** never sees the source images (by design, §7.8 — it
+The second case exists because the **Reader** never sees the source images (by design — it
 reads the way a screen-reader user does), so a misreading of the source is invisible to it: no
 issue is raised, and the loop has nothing to act on. Routing is biased toward the cheaper
 `document` path: if the pages can't be localized, or the feedback claims more than half the
 document, it falls back rather than re-extracting broadly.
 
-## 7. Run log
+## Run log
 
 ```bash
 curl -s -H "$AUTH" "$BASE/sessions/$SID/logs"
@@ -1117,11 +1124,11 @@ is not a first run. [`run_complete`](#run_complete) carries `mode` again.
 count of them present on **every** mode: `feedback_iterative` runs no extraction at all, so it has
 neither an `extraction_start` nor an `extraction_complete` line to read `pages` off.
 
-This is also where §7b cuts the log. A session's log accumulates across feedback rounds, so
-diagnostics slices at the **last** `run_start` and reports the run after it, ending at that run's
-`run_complete` or `run_failed`. One case straddles that cut: a client may POST feedback inside a
-round's post-delivery window, and with `max_concurrent_runs` above 1 the next round's `run_start` is
-then written before the previous round's completion line.
+This is also where [Diagnostics](#diagnostics-timing--hang-detection) cuts the log. A session's log
+accumulates across feedback rounds, so diagnostics slices at the **last** `run_start` and reports
+the run after it, ending at that run's `run_complete` or `run_failed`. One case straddles that cut:
+a client may POST feedback inside a round's post-delivery window, and with `max_concurrent_runs`
+above 1 the next round's `run_start` is then written before the previous round's completion line.
 
 **`phase_durations_ms` is not cut here, and cannot be.** It reads the whole log rather than the slice,
 and the `extraction` marker is written *before* this line on every mode, so on a first run the field
@@ -1131,13 +1138,16 @@ covers slightly more than the run and on a session with feedback rounds it mixes
 ### `phase`
 
 A phase marker for timing: `phase` is `extraction`, `assembly` or `review`, written as the session's
-own `phase` field is set (§4). §7b turns these into `phase_durations_ms` by measuring each to the
-next, and the last one to the run's terminal line — or to now, on a run still going.
+own `phase` field is set ([Poll status](#poll-status)).
+[Diagnostics](#diagnostics-timing--hang-detection) turns these into `phase_durations_ms` by
+measuring each to the next, and the last one to the run's terminal line — or to now, on a run still
+going.
 
-Three values here and four in §4: `done` is a phase the session record reaches and never a log line,
-so the last phase is measured to `run_complete`. A `feedback_iterative` round has no `assembly`
-marker, because it assembles nothing — it re-reviews the body already delivered. So a phase missing
-from a session's log is not always a phase that failed.
+Three values here and four in [Poll status](#poll-status): `done` is a phase the session record
+reaches and never a log line, so the last phase is measured to `run_complete`. A
+`feedback_iterative` round has no `assembly` marker, because it assembles nothing — it re-reviews
+the body already delivered. So a phase missing from a session's log is not always a phase that
+failed.
 
 The inverse holds too, and it is the one to watch: **an `extraction` marker is written on every mode,
 `feedback_iterative` included**, before [`run_start`](#run_start) and before the mode is even decided.
@@ -1159,20 +1169,21 @@ One completion, from the layer that resolved it: `agent`, `step`, `capability`, 
 
 `step` is the **job** the call was bought for, on both lines, and it is a different question from
 `agent`: an agent file is a contract and one contract serves several jobs — the Feedback Agent
-checks a freshly extracted page, re-checks a corrected one, routes a user's feedback and
-classifies a lesson from it — so the agent name alone cannot price a step, and reading
-extraction's cost off it understated the step by a third (§7b, which reads these back as `by_step`
-and lists the closed set of names). It is on the **start** line because that is what an in-flight
-or hung call is asked about, and on a **failed** line because a call that threw still spent — a
-truncated editor round paid for a full ceiling of output — and those are exactly the calls with no
-answer to attribute them by.
+checks a freshly extracted page, re-checks a corrected one, routes a user's feedback and classifies
+a lesson from it — so the agent name alone cannot price a step, and reading extraction's cost off it
+understated the step by a third ([Diagnostics](#diagnostics-timing--hang-detection), which reads
+these back as `by_step` and lists the closed set of names). It is on the **start** line because that
+is what an in-flight or hung call is asked about, and on a **failed** line because a call that threw
+still spent — a truncated editor round paid for a full ceiling of output — and those are exactly the
+calls with no answer to attribute them by.
 
-The start marker is written **before** the call, so a hung or in-flight call is a start with no
-end; the end line adds `duration_ms`, `ok`, an `error` when it failed, and the token counts flat
-(`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`) —
-taken from the result where there is one, and otherwise from what the adapter reported through a
-callback as the call ran, so a call that **threw** still says what it spent (§7b reads these back
-as `tokens`). One line per completion, not per HTTP request.
+The start marker is written **before** the call, so a hung or in-flight call is a start with no end;
+the end line adds `duration_ms`, `ok`, an `error` when it failed, and the token counts flat
+(`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`) — taken
+from the result where there is one, and otherwise from what the adapter reported through a callback
+as the call ran, so a call that **threw** still says what it spent
+([Diagnostics](#diagnostics-timing--hang-detection) reads these back as `tokens`). One line per
+completion, not per HTTP request.
 
 `output_ceiling_clamped: true` says this call ran below the output ceiling the deployment
 configured, with `output_ceiling_asked` (what `providers.<provider>.max_tokens` says) and
@@ -1322,8 +1333,8 @@ absence of this line means the pages were rendered with the shipped prompt.
 Feedback arrived, and the document it is about was copied aside before this round overwrote it:
 `feedback` is the text as submitted, and `prior_output` the path the previous `output.html` was
 snapshotted to, relative to the session directory (`history/output-<timestamp>.html`). That copy is
-the only record of the document as it was delivered before this round; nothing else keeps it, and §5
-serves what this round produces.
+the only record of the document as it was delivered before this round; nothing else keeps it, and
+[Fetch the HTML output](#fetch-the-html-output) serves what this round produces.
 
 `prior_output: null` means there was no delivered output to snapshot. Written for **every** re-run,
 including one that goes on to run `full` for want of saved state ([`run_start`](#run_start)) — so
@@ -1335,8 +1346,9 @@ How a feedback re-run was routed (`document` vs `extraction`, and which pages)
 
 ### `first_read_carried`
 
-A document-level feedback re-run kept the document's earlier first-read count for the quality
-tally instead of recording its own (§0c `first_read`, issue #313).
+A document-level feedback re-run kept the document's earlier first-read count for the quality tally
+instead of recording its own (the [quality tally](#quality-tally-shared-secret-off-by-default)'s
+`first_read`, issue #313).
 
 `carried` is the number kept, `unread` its window count, and `found` what this round's own first
 read came to — which is the one this round's `reader` events describe, so without this line a
@@ -1495,15 +1507,15 @@ the reply, not about the page (issue #349).
 
 ### `page_blank`
 
-The page agent read the page and reported it empty (`page`, `image`, and its own `log` line), so
-the page is delivered as an empty fragment because there was nothing on it to deliver. That is
-true of the page as this line records it and not always of the document: since issue #371 one kind
-of declaration — one **stated** in the `blank` field whose own log names something on the page —
-is delivered empty and then judged, and a correction it earns can put content back on that page
-while this line still counts it. The count is kept that way deliberately, because it is the
-declarations that were made and §7b reads the ones that cost a verify call off it as
-`pages_blank - pages_skipped_blank`; a page whose content came back that way is the
-`page_corrected` line beside it, with `trigger: "verify"`.
+The page agent read the page and reported it empty (`page`, `image`, and its own `log` line), so the
+page is delivered as an empty fragment because there was nothing on it to deliver. That is true of
+the page as this line records it and not always of the document: since issue #371 one kind of
+declaration — one **stated** in the `blank` field whose own log names something on the page — is
+delivered empty and then judged, and a correction it earns can put content back on that page while
+this line still counts it. The count is kept that way deliberately, because it is the declarations
+that were made and [Diagnostics](#diagnostics-timing--hang-detection) reads the ones that cost a
+verify call off it as `pages_blank - pages_skipped_blank`; a page whose content came back that way
+is the `page_corrected` line beside it, with `trigger: "verify"`.
 
 Not a failure and not in `pages_failed`: the remedies are opposite, since a failed page is work to
 redo and a blank page is work already finished. The reply that earns this is a complete envelope
@@ -1641,14 +1653,14 @@ a page whose log says it is blank three times, refused today by a misread first 
 A declaration made in prose alone is unchanged and still refused on a contradiction
 (`blank_contradicted` on `page_no_output`), because for a prose declaration refusing remains the
 cheaper of the two errors available ([`page_no_output`](#page_no_output) above,
-`pages_skipped_blank` in §7b). What still checks the claim are the checks that cost nothing, and
-they are the ones that can prove it wrong: the veto refuses a hedged declaration before it is ever
-accepted, whether the reply stated blankness or described it — a page the model says it could not
-read is not a page it can state anything about, including that it is empty — and the contradiction
-refuses a self-contradicting one that was described in prose, and a page reported blank whose
-**source file** carries link annotations for it is a page the document itself contradicts —
-`page_links_missing` fires on it as on any other page, buys a re-render against the image, and
-that fragment is verified in turn.
+`pages_skipped_blank` in [Diagnostics](#diagnostics-timing--hang-detection)). What still checks the
+claim are the checks that cost nothing, and they are the ones that can prove it wrong: the veto
+refuses a hedged declaration before it is ever accepted, whether the reply stated blankness or
+described it — a page the model says it could not read is not a page it can state anything about,
+including that it is empty — and the contradiction refuses a self-contradicting one that was
+described in prose, and a page reported blank whose **source file** carries link annotations for it
+is a page the document itself contradicts — `page_links_missing` fires on it as on any other page,
+buys a re-render against the image, and that fragment is verified in turn.
 
 What is no longer caught is a *confident* wrong declaration about a page whose file says nothing:
 it is delivered as an empty page, and this line is the whole of the evidence it leaves. Before
@@ -1694,12 +1706,12 @@ contradict.
 
 ### `page_extraction_failed`
 
-One page's own extraction threw (`page`, `image`, `error`). The rest of the document still ran —
-see §7c. `kept: "prior"` marks the feedback-re-extraction case, where the page keeps the content
-it already had and the document stays whole. A **truncation** carries three more fields (#293),
-the same three as `page_correction_failed` below and for a stronger reason: there the page
-survives the failure, while here its content is gone, so the excerpt is the only record of what
-the model had written when the ceiling cut it.
+One page's own extraction threw (`page`, `image`, `error`). The rest of the document still ran — see
+[Partial documents](#partial-documents). `kept: "prior"` marks the feedback-re-extraction case,
+where the page keeps the content it already had and the document stays whole. A **truncation**
+carries three more fields (#293), the same three as `page_correction_failed` below and for a
+stronger reason: there the page survives the failure, while here its content is gone, so the excerpt
+is the only record of what the model had written when the ceiling cut it.
 
 `reply_chars` is how far the reply reached, `reply_head` its first 240 characters and `reply_tail`
 its last 240 — one budget of the user's text, quoted **entire** under `reply_head` when the
@@ -1710,7 +1722,7 @@ only: like every excerpt of a document, it stays in the run log and never reache
 
 `truncated: true` with **no** `reply_head` at all is the shape worth watching: a call that spent a
 whole ceiling of output and never began the page, which is a reasoning model burning the budget
-before the answer, not a page that needed more room (see §9.3 and `EMPTY_REPLY` in
+before the answer, not a page that needed more room (see [Errors](#errors) and `EMPTY_REPLY` in
 `src/providers/types.ts`).
 
 ### `extraction_complete`
@@ -1720,16 +1732,17 @@ present, `[]` on a whole run).
 
 `uncorrected` is the other set, and the opposite failure: page numbers the fidelity check
 **rejected** whose one correction pass repaired nothing, so what the document carries for them is
-content Iris named a defect in and never fixed (§7c, `@page-uncorrected`, #328). Always present
-and `[]` where no page shipped that way, for the reason `failed` is — a field that only appears
-when it fires cannot tell "every rejected page was repaired" from "this run predates the count".
-Disjoint from `failed` by construction: a page whose render threw never reached a verdict, so it
-cannot be in this set, and the two counts add rather than overlap.
+content Iris named a defect in and never fixed ([Partial documents](#partial-documents),
+`@page-uncorrected`, #328). Always present and `[]` where no page shipped that way, for the reason
+`failed` is — a field that only appears when it fires cannot tell "every rejected page was repaired"
+from "this run predates the count". Disjoint from `failed` by construction: a page whose render
+threw never reached a verdict, so it cannot be in this set, and the two counts add rather than
+overlap.
 
-It is the roll-up of what `page_verify_failed` and then `page_correction_failed` or
-`page_corrected` already say a line at a time — worth having as one field because reading it off
-those needs a join per page, though the rule is one line: a page whose verdict failed is in this
-set exactly when its `page_corrected` `result` is **not** `kept` (§7c).
+It is the roll-up of what `page_verify_failed` and then `page_correction_failed` or `page_corrected`
+already say a line at a time — worth having as one field because reading it off those needs a join
+per page, though the rule is one line: a page whose verdict failed is in this set exactly when its
+`page_corrected` `result` is **not** `kept` ([Partial documents](#partial-documents)).
 
 `alts_checked` / `alts_generic` are the generic-alt rule over the fragments the document is built
 from — every non-empty `alt` on an `<img>`, and how many of them are a placeholder rather than a
@@ -2681,7 +2694,7 @@ no `reply_tail`, and deployment-only — never on `GET /v1/quality`.
 A tail mid-sentence in content the head has not reached is a page that needed the room; a tail
 repeating rows already in the head is a model looping. Absent on every other failure, which has no
 reply to quote, and absent on a truncation that returned nothing at all — `reply_chars: 0` is the
-zero-character shape §9.3 describes, where raising anything buys a larger burn. On this line
+zero-character shape [Errors](#errors) describes, where raising anything buys a larger burn. On this line
 uniquely it is `reply_chars` and not the missing `reply_head` that says so:
 
 `truncated` here is a predicate over the error's *message*, so it is also true of a truncation
@@ -2699,7 +2712,7 @@ Two more are reachable and worth expecting if the field is being counted:
 to, and `empty`, where the reply is whitespace only — that one is not the zero-character shape
 below, which carries no `shape` at all, and `reply_chars` tells them apart. Only `prose` settles
 the question by itself — a cap spent on something other than the page buys more of the same if it
-is raised (§9.3).
+is raised ([Errors](#errors)).
 
 `bare_html` says where the reply **began** and not where the output went: a correction that starts
 the page and then narrates at it carries the same value as one that transcribed to its last
@@ -2762,7 +2775,8 @@ verified there is that the page contains both spellings, and that is not arguabl
 right is, and the problem's own text says so — it ends by inviting the corrector to say the page
 really prints both and change nothing. So a decline citing `words` may be the licence working
 exactly as written, and folding it into the field that counts abuse of the licence would put
-compliance in the numerator. It gets its own `declined.words` count in §7b instead.
+compliance in the numerator. It gets its own `declined.words` count in
+[Diagnostics](#diagnostics-timing--hang-detection) instead.
 
 That asymmetry is in the request too, and it has to be, or the count above measures a channel the
 request closes. A split-word entry carries a **different** mark —
@@ -3000,11 +3014,12 @@ reason, or one reason as absence:
   fields are read from those same two halves, so they are absent here too. No document in this corpus
   has produced it.
 
-The **other** `read_failed` is the verification **throwing** while it parses the merged candidate, which
-is not the same event as the verification *refusing* it — a refusal is reported as `verify:<reason>`.
-Both halves read fine there, so all seven fields are present. A half with a `<table>` but no header block is present too,
-with an empty signature and `0` for both of its counts. The per-round totals are folded into `tables` in
-the diagnostics payload (§7b).
+The **other** `read_failed` is the verification **throwing** while it parses the merged candidate,
+which is not the same event as the verification *refusing* it — a refusal is reported as
+`verify:<reason>`. Both halves read fine there, so all seven fields are present. A half with a
+`<table>` but no header block is present too, with an empty signature and `0` for both of its
+counts. The per-round totals are folded into `tables` in the
+[diagnostics](#diagnostics-timing--hang-detection) payload.
 
 ### `table_join_failed`
 
@@ -3547,10 +3562,12 @@ none survive the shape check. Two different replies, which is why the reason is 
 bought and gave nothing to act on.
 
 One line per window that failed, because a document is read in windows and only one of them may
-have. An **empty** `issues` list is not this event — that is a verdict, and the one the whole loop is
-for. The delivered document carries a `@review-unread` comment saying how many windows of how many,
-and the tally counts the document (§0c `review_unread_rate`), because otherwise this outcome reads as
-the best one there is: no issues found, no `iris:unresolved` row, a document counted clean.
+have. An **empty** `issues` list is not this event — that is a verdict, and the one the whole loop
+is for. The delivered document carries a `@review-unread` comment saying how many windows of how
+many, and the tally counts the document (the
+[quality tally](#quality-tally-shared-secret-off-by-default)'s `review_unread_rate`), because
+otherwise this outcome reads as the best one there is: no issues found, no `iris:unresolved` row, a
+document counted clean.
 
 ### `lint_unavailable`
 
@@ -3700,8 +3717,9 @@ That is why what it costs had to come down to one block: the `<form>` block hold
 label is handed back with its `<h4>` intact and every other correction in the reply — an alt text,
 a table header, a split paragraph — is applied and delivered.
 
-`editor_headings_gated_rate` in §0c is what says how often it happens. `discarded` names the case
-where the reply is NOT applied in part, and which of the three it was:
+`editor_headings_gated_rate` in the [quality tally](#quality-tally-shared-secret-off-by-default) is
+what says how often it happens. `discarded` names the case where the reply is NOT applied in part,
+and which of the three it was:
 
 `all_refused` (edits were sent and not one could be used), `refusal_with_loss` (a refusal in the
 same reply as a block that gave content up — `deleted` or `shrunk`) or `headings_lost` (#331:
@@ -3915,7 +3933,8 @@ and joined, so no heading can move *between* them, and the reorder hazard that f
 `navigation_lost` to be read on a whole body does not exist. It is also cheaper in the one way the
 patch path's grain is expensive — there, one sanctioned deletion anywhere in a reply silences the
 reading for the whole round; here it silences that section, so a demotion in section 3 is still on
-the record. Not folded into `editor_headings_gated_rate` in §0c: that rate counts documents where
+the record. Not folded into `editor_headings_gated_rate` in the
+[quality tally](#quality-tally-shared-secret-off-by-default): that rate counts documents where
 something **was** handed back, and adding rounds where nothing was would make a signal about a
 working guard into a mixture of that and a reading nobody acted on.
 
@@ -4204,9 +4223,11 @@ a tally is not worth failing a document someone has already waited for.
 Logged loudly for the one reason the tally itself cannot show it: **fewer signals recorded looks
 exactly like fewer problems found**, so the silent version of this failure is a quality tally that
 reads better over time as recording breaks. The row that goes missing is `iris:rounds`, written for
-every delivered document including a flawless one because it is the document count §0b and §0c
-divide by — so a window with these lines under it is short by however many documents they cover,
-with those documents' defects gone from the numerators along with them.
+every delivered document including a flawless one because it is the document count the
+[public tally](#public-tally-unauthenticated) and the
+[quality tally](#quality-tally-shared-secret-off-by-default) divide by — so a window with these
+lines under it is short by however many documents they cover, with those documents' defects gone
+from the numerators along with them.
 
 ### `feedback_classified`
 
@@ -4424,14 +4445,16 @@ in the delivered document, and the `mode` it ran in ([`run_start`](#run_start)).
 []` on every successful run would read as a field about failure on the lines that have none. This
 line is also the only place either set can be read on **every** mode, since a feedback round that
 re-extracts nothing has no `extraction_complete` line to carry them. What the run **delivered** is
-the question, not what it attempted (#328). Neither set is what §7b reports: its `pages_failed` is
-folded from the per-page `page_extraction_failed` and `page_recovered` lines, and the uncorrected set
-has no diagnostics field at all — so this line is where a client reads it.
+the question, not what it attempted (#328). Neither set is what
+[Diagnostics](#diagnostics-timing--hang-detection) reports: its `pages_failed` is folded from the
+per-page `page_extraction_failed` and `page_recovered` lines, and the uncorrected set has no
+diagnostics field at all — so this line is where a client reads it.
 
 Written **after** the feedback-training step that follows delivery, even though the session has been
 `ready_for_review` since before it, because the run holds its `max_concurrent_runs` slot until it
 returns: a marker written before that training would report the run as shorter than the time it
-actually occupied the machine. §7b measures a finished run's duration up to this line.
+actually occupied the machine. [Diagnostics](#diagnostics-timing--hang-detection) measures a
+finished run's duration up to this line.
 
 There is no `pages` field here. The count of source pages is `images` on [`run_start`](#run_start),
 and `pages` on [`extraction_start`](#extraction_start).
@@ -4490,11 +4513,13 @@ document was delivered well before it; a second feedback round can have started 
 
 ### `run_failed`
 
-The run threw, so there is no document: `error` is the message, and §4 hands the client that same
-string in its own `error` field, which exists on a failed session and nowhere else.
+The run threw, so there is no document: `error` is the message, and [Poll status](#poll-status)
+hands the client that same string in its own `error` field, which exists on a failed session and
+nowhere else.
 
-A page that fails on its own does **not** reach here — the run finishes and delivers the rest (§7c),
-which is what `failed_pages` above is for — so a line here means nothing was delivered at all.
+A page that fails on its own does **not** reach here — the run finishes and delivers the rest
+([Partial documents](#partial-documents)), which is what `failed_pages` above is for — so a line
+here means nothing was delivered at all.
 
 Where a run does end in extraction, [`extraction_failed`](#extraction_failed) is the line that says
 which failure it was, and this `error` is written to match: with `blank: 0` it is the first page's own
@@ -4519,7 +4544,7 @@ verdict substituted for the dead call reads `ok: true`, and is not counted as a 
 line is for is telling a provider to retry apart from a verifier to fix, which is why an unparseable
 reply is counted separately from this.
 
-## 7b. Diagnostics (timing / hang detection)
+## Diagnostics (timing / hang detection)
 
 A machine-readable health summary distilled from the run log — built for maintainers, human
 or AI, to spot what's slow or stuck.
@@ -5094,7 +5119,7 @@ changes the delivered document — an observation is addressed to a person, and 
 mean re-extracting that page.
 
 `pages_failed` is the set of source pages the delivered document has no content for, because their
-own extraction threw (§7c). It has its own field
+own extraction threw ([Partial documents](#partial-documents)). It has its own field
 because a run that reaches `ready_for_review` without one of its pages is otherwise
 indistinguishable here from one that delivered the whole document: the failed model call
 underneath shows up in `errors` exactly as a retried-and-recovered one does, and `status` says the
@@ -5136,7 +5161,7 @@ subtract one from another: `page_bare_html` is emitted while the page is being r
 verify call that follows is unwrapped, so a bare page whose verifier takes a provider error is in
 `pages_bare_html` and `pages_failed` both. Nothing on file has done it.
 
-## 7c. Partial documents
+## Partial documents
 
 A page's extraction can fail on its own (a model call that hits the output ceiling, a stalled
 stream, a reply with no readable HTML in it — `page_no_output`). That page fails; the run does not. Every other page is still rendered, verified,
@@ -5183,8 +5208,8 @@ to the screen-reader flattening, and findable by tooling.
 
 Three places report it, in increasing order of convenience: `page_extraction_failed` in the run log
 per page, `failed_pages` on the `run_complete` line (present only when there were any), and
-`pages_failed` in diagnostics (§7b). A client that cares whether it received a whole document
-should check the last of those, not `status`.
+`pages_failed` in [diagnostics](#diagnostics-timing--hang-detection). A client that cares whether it
+received a whole document should check the last of those, not `status`.
 
 On a feedback re-extraction the same failure is non-destructive instead: the page keeps the content
 it already had, because a page Iris could not improve is not a page it lost. That case is
@@ -5232,20 +5257,22 @@ opens the file while a page whose statistical table lost its six aggregate rows 
 longer adds up.
 
 The correction ends without repairing the page in five ways, and for the delivered document they are
-one fact — the page the verifier named problems in — so the marker does not distinguish them. The log
-does: `page_correction_failed` is the call that threw, and `page_corrected`'s `result` is `empty` (it
-answered with no HTML), `identical` (it answered with the page it was given, **or** with a different
-string carrying the same page — re-indented, or `&` written `&amp;` — which is adopted and is the
-fifth way) or `rejected` (its answer came back at under a quarter of that page's size and was refused
-as a deletion). Which makes the rule readable off the log without a per-value table: a page whose
-verdict failed is in this set exactly when its `page_corrected` `result` is **not** `kept`.
-`page_verify_failed` on the same image says what was wrong. The set itself is on `extraction_complete.uncorrected` (or `reextract_complete.uncorrected`)
-and, present only when there were any, on `uncorrected_pages` on the `run_complete` line — which is
-the one place it can be read on **every** mode, because a feedback round that re-extracts nothing runs
-no extraction and so logs neither of the other two. There is no diagnostics list of these pages —
-`pages_failed` is the no-content set and these
-pages are deliberately not in it; §7b's `verification.results` and `verification.triggers` count how
-many corrections ended each way without naming pages, so the run log is where you go for the page.
+one fact — the page the verifier named problems in — so the marker does not distinguish them. The
+log does: `page_correction_failed` is the call that threw, and `page_corrected`'s `result` is
+`empty` (it answered with no HTML), `identical` (it answered with the page it was given, **or** with
+a different string carrying the same page — re-indented, or `&` written `&amp;` — which is adopted
+and is the fifth way) or `rejected` (its answer came back at under a quarter of that page's size and
+was refused as a deletion). Which makes the rule readable off the log without a per-value table: a
+page whose verdict failed is in this set exactly when its `page_corrected` `result` is **not**
+`kept`. `page_verify_failed` on the same image says what was wrong. The set itself is on
+`extraction_complete.uncorrected` (or `reextract_complete.uncorrected`) and, present only when there
+were any, on `uncorrected_pages` on the `run_complete` line — which is the one place it can be read
+on **every** mode, because a feedback round that re-extracts nothing runs no extraction and so logs
+neither of the other two. There is no diagnostics list of these pages — `pages_failed` is the
+no-content set and these pages are deliberately not in it;
+[Diagnostics](#diagnostics-timing--hang-detection)'s `verification.results` and
+`verification.triggers` count how many corrections ended each way without naming pages, so the run
+log is where you go for the page.
 
 It is **not** the claim "this page might be wrong". A correction the pass did adopt is not listed,
 even though replaying the check over 57 corrected pages put their pass rate at 26% (issue #288): that
@@ -5263,7 +5290,7 @@ of the regression fixtures captured on `POST .../close` — accepting a session 
 for its image, and filing it would gate every future page-agent update on reproducing markup this run
 had already declared wrong.
 
-## 8. List sessions
+## List sessions
 
 ```bash
 curl -s -H "$AUTH" "$BASE/sessions?limit=20"
@@ -5319,7 +5346,7 @@ while :; do
 done
 ```
 
-## 9. Close the session (finalize + clean up)
+## Close the session (finalize + clean up)
 
 Locks the output and deletes `tmp/<id>/`. Requires `status` = `ready_for_review` (else `409`).
 Contributions are handled automatically during the run (see below), so close does not open PRs.
@@ -5379,8 +5406,8 @@ All errors share one shape:
 { "error": { "code": "invalid_state", "message": "Human-readable description", "details": {} } }
 ```
 Common codes: `unauthorized` (401), `session_not_found` (404), `invalid_state` (409),
-`invalid_request` (400), `rate_limited` (429, carries `Retry-After` — see §3.2),
-`upload_too_large` (413).
+`invalid_request` (400), `rate_limited` (429, carries `Retry-After` — see
+[Rate limits](#rate-limits-how-often-you-may-ask)), `upload_too_large` (413).
 
 A run that fails reports why in the `error` field of `GET /v1/sessions/{id}`. One worth
 recognizing:
@@ -5391,11 +5418,12 @@ openrouter: response hit the 32000-token output ceiling and was truncated
 ```
 
 The model stopped at the output ceiling rather than at the end of its answer, so the HTML it
-returned is cut mid-tag. Iris never assembles such a fragment — a truncated page still parses, so
-it would otherwise be delivered as though the missing content were never in the source. Which
-page it costs and whether it costs the run is §7c: one page's failure costs that page, and the
-run only ends `failed` (with this as its `error`) when every page failed. Raise `max_tokens` on
-that provider block and re-run. Dense full-page tables and forms are the usual trigger.
+returned is cut mid-tag. Iris never assembles such a fragment — a truncated page still parses, so it
+would otherwise be delivered as though the missing content were never in the source. Which page it
+costs and whether it costs the run is [Partial documents](#partial-documents): one page's failure
+costs that page, and the run only ends `failed` (with this as its `error`) when every page failed.
+Raise `max_tokens` on that provider block and re-run. Dense full-page tables and forms are the usual
+trigger.
 
 Two ceilings are **not** that one, and both say so in the same message rather than leaving the
 advice above to be followed:
@@ -5447,10 +5475,10 @@ markup. It costs the same as the ceiling does (that page, not the run) and for t
 page whose content is a JSON envelope or an apology is a document that lies about being complete,
 which is worse than one page short and saying so.
 
-The same ceiling reached by a **correction** round is contained differently, because there the
-whole document is what did not fit: whatever the reply managed before the cut is applied and the
-part it never reached is re-made a section at a time, the loop then stops, and the delivered
-document says so in an `@editor-truncated` comment (§5, and
+The same ceiling reached by a **correction** round is contained differently, because there the whole
+document is what did not fit: whatever the reply managed before the cut is applied and the part it
+never reached is re-made a section at a time, the loop then stops, and the delivered document says
+so in an `@editor-truncated` comment ([Fetch the HTML output](#fetch-the-html-output), and
 [`editor_truncated`](#editor_truncated) / [`editor_salvaged`](#editor_salvaged) /
 [`editor_sections`](#editor_sections)). The remedy is the same knob.
 

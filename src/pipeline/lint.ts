@@ -638,10 +638,10 @@ export async function runAxe(html: string): Promise<LintResult> {
         // rather than replacing it.
         //
         // Iris's own quality reporting has used this rule as its worked example since
-        // the tally shipped (`Store.qualityStats` in store/db.ts, docs/API.md §0c) and
-        // could not once have reported it: every rule id in `run_signals` comes from
-        // this call, so a rule the tag filter drops is one the weekly report can never
-        // raise, however often the output breaks it.
+        // the tally shipped (`Store.qualityStats` in store/db.ts, docs/API.md "Quality
+        // tally") and could not once have reported it: every rule id in `run_signals`
+        // comes from this call, so a rule the tag filter drops is one the weekly report
+        // can never raise, however often the output breaks it.
         "heading-order": { enabled: true },
         // Enabled BY NAME on the same argument again, for the defect #251 measured: 18% of
         // page answers emit a `<main>` of their own, `wrapDocument` puts the assembled body

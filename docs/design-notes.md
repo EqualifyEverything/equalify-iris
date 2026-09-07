@@ -162,14 +162,16 @@ Places where a decision was left open, and where v1 intentionally stops:
   and nothing after extraction could see the result. The page prompt has forbidden skipping a level
   since #96 and #114 reported one shipped anyway.
 
-  The rule fires only where a level goes *down* by more than one, so it stays quiet on the two shapes
-  the page prompt asks for. One is a body that opens at `<h2>` or `<h3>`, because a page may be a
-  subsection of a heading the extractor was never shown. The other is a heading that returns to an
-  outer level after a run of subsections. It cannot see the other half of the bug — an `<h2>` that should
-  have been an `<h3>` is a level the page decided, not a gap — so it narrows the prompt's job rather
-  than replacing it. Two consequences are worth knowing. A document that used to pass may now spend
-  review iterations on heading levels. And `heading-order` can now appear in the quality tally,
-  where it has been the worked example in `docs/API.md` §0c all along without once being reportable.
+  The rule fires only where a level goes *down* by more than one, so it stays quiet on the two
+  shapes the page prompt asks for. One is a body that opens at `<h2>` or `<h3>`, because a page may
+  be a subsection of a heading the extractor was never shown. The other is a heading that returns to
+  an outer level after a run of subsections. It cannot see the other half of the bug — an `<h2>`
+  that should have been an `<h3>` is a level the page decided, not a gap — so it narrows the
+  prompt's job rather than replacing it. Two consequences are worth knowing. A document that used to
+  pass may now spend review iterations on heading levels. And `heading-order` can now appear in the
+  quality tally, where it has been the worked example in
+  [`docs/API.md`'s quality tally](API.md#quality-tally-shared-secret-off-by-default) all along
+  without once being reportable.
 - **A `<main>` inside the delivered `<main>` is linted for, and removed before it gets there.**
   `wrapDocument` puts the assembled body inside `<main>`, and 18% of page answers across a six-model
   bench lineup emitted one of their own. That ships a `main` inside a `main`, which takes away the
@@ -1141,10 +1143,10 @@ These are the rules both adapters enforce on a model call. The README states the
   refused, and none after that; a request Bedrock never read is not billed.
 
   Because the pages then arrive, the wrong setting has no other consequence anyone downstream can
-  see. So every clamped call also carries `output_ceiling_clamped` on its `model_call` line, with the
-  ceiling asked for and the one granted (§7 of [API.md](API.md)). The warning is once per process, the
-  log line is once per call: an aggregate over run logs is the only place a `max_tokens` nobody chose
-  shows up.
+  see. So every clamped call also carries `output_ceiling_clamped` on its `model_call` line, with
+  the ceiling asked for and the one granted ([API.md's run log](API.md#run-log)). The warning is
+  once per process, the log line is once per call: an aggregate over run logs is the only place a
+  `max_tokens` nobody chose shows up.
 - **The limits are about *silence*, not duration.** Both adapters **stream**, to tell a stalled call
   apart from a slow one. A single non-streaming request cannot: "no answer yet" describes a dead
   socket and a large document being correctly rewritten equally well, so a total-duration cap kills

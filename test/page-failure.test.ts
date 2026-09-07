@@ -591,7 +591,7 @@ test("a page that kept its prior content is not reported as missing", () => {
   // The feedback path logs the same event with `kept: "prior"`, and it means the
   // opposite: the re-extraction threw, so the page kept the content it already had and
   // the document is whole. Naming it here sends a client looking for a hole that is not
-  // there — docs/API.md §7c tells it to check this field for exactly that.
+  // there — docs/API.md "Partial documents" tells it to check this field for exactly that.
   const log = [
     { ts: "2026-08-24T00:00:00.000Z", type: "run_start", images: 3 },
     { ts: "2026-08-24T00:00:10.000Z", type: "page_extraction_failed", image: "page-002.png", page: 2, error: "x", kept: "prior" },
@@ -620,8 +620,8 @@ const diag = (events: Record<string, unknown>[]) =>
 
 test("a page a later round recovered is no longer reported as missing", () => {
   // Otherwise the field only ever grows, and the client Iris told to check it (docs/API.md
-  // §7c) is sent looking for a hole the round it just paid for filled — on a document that
-  // no longer carries any marker to corroborate it.
+  // "Partial documents") is sent looking for a hole the round it just paid for filled — on
+  // a document that no longer carries any marker to corroborate it.
   const d = diag([
     { type: "page_extraction_failed", image: "page-002.png", page: 2, error: "x" },
     { type: "page_extraction_failed", image: "page-003.png", page: 3, error: "x" },

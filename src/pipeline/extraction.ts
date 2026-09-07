@@ -4965,8 +4965,8 @@ export async function reExtractPages(
   // Pages left as they were because their re-extraction threw. NOT reported as
   // `failedPages`: that field means the document has no content for the page, and these
   // pages have their prior content — the document is whole, it is just not improved.
-  // Conflating the two tells a client following docs/API.md §7c that it received a
-  // partial document when it did not.
+  // Conflating the two tells a client following docs/API.md "Partial documents" that it
+  // received a partial document when it did not.
   const keptPrior = outcomes.filter((o) => o.failed).map((o) => o.fragment.order);
   // The pages this round got a fresh answer for: every page whose re-extraction ran without
   // throwing. Both sets below are keyed on it, for two different questions that have the same
