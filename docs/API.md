@@ -16,8 +16,8 @@ Requests are rate limited per client, and every response says how much of the bu
 A `round` is either a round of the reader/editor loop or a captured run of a corpus, which the text
 calls a **bench round** or a **deployed round**. A `fragment` is either one page's extracted HTML or
 the `#id` part of a link — that second sense is what `links_unresolved_rate` under
-[Create a session](#create-a-session-upload-images) is about. A `declaration` is the page agent's
-claim that a page holds no content everywhere except one line of the [run log](#run-log)'s
+[Quality tally](#quality-tally-shared-secret-off-by-default) is about. A `declaration` is the page
+agent's claim that a page holds no content everywhere except one line of the [run log](#run-log)'s
 `page_main_stripped`, where it is the `lang` declaration on the document's root element.
 
 ```bash
