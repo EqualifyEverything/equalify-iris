@@ -4605,6 +4605,13 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
     "header_compared": 9, "header_differs": 4,
     "failed": 3, "body_unreadable": 0, "capped_pending": 0
   },
+  "editor_ceiling": {
+    "truncated": 4, "salvaged": 1, "salvaged_closed": 1, "retreated": 0, "declined": 2,
+    "decline_reasons": {
+      "no_edits_list": 0, "no_complete_edit": 1, "unknown_block": 0, "unreadable_edit": 0,
+      "out_of_order": 0, "all_refused": 0, "loss_before_cut": 1, "unrecognized": 0
+    }
+  },
   "fidelity_observed": {
     "observed": 3, "pages": [2, 5], "unattached_pages": [],
     "kinds": { "content_missing": 2, "content_wrong": 0, "structure_wrong": 0,
@@ -5087,6 +5094,64 @@ width check and the id rule stand down on pairs that had joined for free a round
 declined for `id_would_be_lost` whose headers also disagree is evidence of the same thing. A non-zero
 `header_differs` is the expected state of a healthy run; what is worth reading is its direction across
 rounds of the same corpus.
+
+`editor_ceiling` is what happened to the correction rounds whose reply hit the model's output ceiling,
+folded from [`editor_truncated`](#editor_truncated), [`editor_salvaged`](#editor_salvaged) and
+[`editor_salvage_declined`](#editor_salvage_declined) (issue #317). It exists because that is the most
+expensive thing the pipeline does by accident: the Copy Editor is around a third of a round's model
+bill, and a truncated window costs about 5x one that fits — the discarded whole-document attempt is
+paid for in full, and then the remainder is asked for a section at a time. The salvage that recovers
+part of that money reported itself only on those three log lines, so its hit rate meant reading
+`log.jsonl` by hand.
+
+Counts of **rounds, not documents**, on the same denominator as `model_calls`: a document reviewed in
+three rounds can truncate three times, and the counts sum over every round the session has had. The
+per-document reading is the [quality tally](#quality-tally-shared-secret-off-by-default)'s
+(`editor_truncated_rate`, `editor_truncated_lost_rate`), and it is a different question — that pair is
+deployment-wide, and cannot say whether a truncation was rescued or refused, which reason refused it,
+or whether a retreat happened.
+
+- `truncated` — rounds whose whole-document reply hit the ceiling. Every one of them reached the
+  salvage, so it is the denominator for the rest.
+- `salvaged` — the reply was read as far as it got and that part **ships**. The prefix was corrected by
+  the call that saw every block and every attached page image, and only the remainder was re-asked.
+- `salvaged_closed` — of those, the ones whose edits list had already finished (`closed`): a complete
+  patch that hit the ceiling on its way out of the envelope. The cheapest shape this can take — **one
+  call and no sections, unless `retreated` also counted the same round**, where the claim was cut back
+  behind the end of the document and the remainder was sectioned after all. So `salvaged_closed` alone
+  does not say the round cost one call; read it against `retreated`, and see that field for why the two
+  are not disjoint.
+- `retreated` — of those, the ones where a block before the cut gave content up, so the claim was cut
+  back to it (`lost_at`). Not a cost signal: the retreat knowingly accepts a **duplicate**, because an
+  edit carrying content backwards across the cut leaves the landing edit applied and the source block
+  untouched, and a truncated round is the review loop's last round, so nothing downstream removes it.
+  The remedy is a feedback re-run, which is a person's action — which is what makes this the one field
+  here worth an alert. Not disjoint from `salvaged_closed`: a complete patch can still be cut back, and
+  then part of it is re-asked for anyway.
+- `declined` — the salvage kept nothing and the whole body went to the section fallback. Not a failure
+  of the salvage; every one of these is a reply it was right to refuse.
+
+`truncated - (salvaged + declined)` is **not always 0**, and the shortfall is real rather than an
+accounting error. The salvage answers nothing at all for a truncation that returned no text (the
+ceiling was spent before the reply began) or for an error that matched by message and lost its
+prototype on the way. Neither writes a line, because neither is a reply there is anything to say
+about, and a bucket filled from the absence of evidence would be worse than a visible gap.
+
+`decline_reasons` splits `declined` over the seven refusals, and these **sum to** `declined` — which is
+why `unrecognized` is there rather than a silently short total as under `tables`: there is a published
+total to check the split against, so a `reason` from a later build must be visible in it. The seven are
+not interchangeable and pooling them would send a reader to the wrong remedy. `loss_before_cut` and
+`all_refused` are the salvage working — a reply whose corrections cannot be kept. `no_complete_edit` is
+a document holding one block bigger than the ceiling, which is the case the section fallback exists
+for. `no_edits_list` is a prompt that was not followed, `out_of_order` a reply not written in one pass
+through the document, and `unknown_block` / `unreadable_edit` a reply that may not be about this
+document at all.
+
+Note `lost_at` appears on a `loss_before_cut` decline as well, and a decline is deliberately **not**
+counted in `retreated`: nothing was applied there, so no duplicate can have shipped. No share is
+published for any of this, for the reason `truncated` is small — and what the ceiling cost is already
+here rather than restated: `by_step.edit` is the whole-document attempts including the discarded one,
+and `by_step.edit_section` the fallback calls it bought.
 
 `fidelity_observed` sits outside `verification` because it is not part of that loop and does not
 gate anything: it is what the **Copy Editor** noticed about a page it happened to be looking at,
