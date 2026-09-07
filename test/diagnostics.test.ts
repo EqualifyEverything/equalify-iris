@@ -1296,6 +1296,37 @@ test("the decline reasons sum to the declines, including one this build has neve
   );
 });
 
+test("a reason naming the bucket object's prototype is counted, not turned into a key", () => {
+  // Why the guard is `hasOwnProperty` and not `in`. Under `in`, `reason: "toString"` passes as a known
+  // bucket and `decline_reasons["toString"] += 1` puts a fresh own property of NaN in the response —
+  // which breaks the published key set and the sum-to-`declined` invariant in one move, and does it on
+  // a response nobody would think to check. This test is what makes a later simplification to `in`
+  // fail rather than ship.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "editor_truncated", attached: 0, of: 2, chars: 27_000 },
+    { ts: T(2), type: "editor_salvage_declined", reason: "toString", chars: 27_000, of: 5 },
+    { ts: T(3), type: "editor_truncated", attached: 0, of: 2, chars: 27_001 },
+    { ts: T(4), type: "editor_salvage_declined", reason: "constructor", chars: 27_001, of: 5 },
+    { ts: T(5), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(5))));
+
+  const reasons = d.editor_ceiling.decline_reasons;
+  assert.equal(reasons.unrecognized, 2);
+  assert.deepEqual(
+    Object.keys(reasons).sort(),
+    ["all_refused", "loss_before_cut", "no_complete_edit", "no_edits_list", "out_of_order",
+      "unknown_block", "unreadable_edit", "unrecognized"],
+    "the key set is published and a log line must not be able to add to it",
+  );
+  assert.equal(
+    Object.values(reasons).reduce((a, b) => a + b, 0),
+    d.editor_ceiling.declined,
+    "still sums, which an added NaN key would not",
+  );
+});
+
 test("a truncation the salvage never answered leaves a visible shortfall rather than a guessed bucket", () => {
   // Two real shapes reach the salvage and come back without writing a line: a truncation that
   // returned no text at all (the ceiling was spent before the reply began) and an error that matched

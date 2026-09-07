@@ -1576,15 +1576,21 @@ export function summarizeRun(
       // The reasons are matched against the emitter's closed list and anything else is counted, not
       // dropped — the one place in this reader where an unrecognized value gets a bucket of its own.
       // These have to sum to `declined` for the split to be checkable, so a value from a build this
-      // one has not heard of must be visible in the total rather than absent from it. `in` on the
-      // initialized object, so a `reason` naming `decline_reasons`'s own prototype chain — or any
-      // string at all — cannot increment something that is not a counter here.
+      // one has not heard of must be visible in the total rather than absent from it.
+      //
+      // `hasOwnProperty` and deliberately NOT `in`, which is the operator this guard has to avoid:
+      // `in` walks the prototype chain, so `reason: "toString"` would pass it and
+      // `decline_reasons["toString"] += 1` would add a new own property of NaN to the response —
+      // breaking the published key set and the "these sum to `declined`" invariant in the same move.
+      // Called off `Object.prototype` rather than as a method, because the object being tested is one
+      // a log line names and a `decline_reasons` build that ever gained a key called `hasOwnProperty`
+      // would take its own guard away.
+      //
+      // No special case for a `reason` of literally `"unrecognized"`: it is an own key of the object
+      // below, so it takes the first branch and increments the same counter the second one would. A
+      // guard against it would be a branch that cannot change a count.
       const reason = e.reason;
-      if (
-        typeof reason === "string" &&
-        reason !== "unrecognized" &&
-        Object.prototype.hasOwnProperty.call(editorCeiling.decline_reasons, reason)
-      ) {
+      if (typeof reason === "string" && Object.prototype.hasOwnProperty.call(editorCeiling.decline_reasons, reason)) {
         editorCeiling.decline_reasons[reason as keyof Diagnostics["editor_ceiling"]["decline_reasons"]] += 1;
       } else editorCeiling.decline_reasons.unrecognized += 1;
     }

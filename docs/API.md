@@ -5116,14 +5116,18 @@ or whether a retreat happened.
 - `salvaged` — the reply was read as far as it got and that part **ships**. The prefix was corrected by
   the call that saw every block and every attached page image, and only the remainder was re-asked.
 - `salvaged_closed` — of those, the ones whose edits list had already finished (`closed`): a complete
-  patch that hit the ceiling on its way out of the envelope, so there was no remainder to section and
-  the round cost one call. The cheapest shape this can take.
+  patch that hit the ceiling on its way out of the envelope. The cheapest shape this can take — **one
+  call and no sections, unless `retreated` also counted the same round**, where the claim was cut back
+  behind the end of the document and the remainder was sectioned after all. So `salvaged_closed` alone
+  does not say the round cost one call; read it against `retreated`, and see that field for why the two
+  are not disjoint.
 - `retreated` — of those, the ones where a block before the cut gave content up, so the claim was cut
   back to it (`lost_at`). Not a cost signal: the retreat knowingly accepts a **duplicate**, because an
   edit carrying content backwards across the cut leaves the landing edit applied and the source block
   untouched, and a truncated round is the review loop's last round, so nothing downstream removes it.
   The remedy is a feedback re-run, which is a person's action — which is what makes this the one field
-  here worth an alert.
+  here worth an alert. Not disjoint from `salvaged_closed`: a complete patch can still be cut back, and
+  then part of it is re-asked for anyway.
 - `declined` — the salvage kept nothing and the whole body went to the section fallback. Not a failure
   of the salvage; every one of these is a reply it was right to refuse.
 
