@@ -2870,9 +2870,11 @@ parses to something beside its own table — the parser fosters a stray `<p>` ou
 the joined table's `outerHTML` would not carry it, which is the one way this path can lose content
 where a model reply cannot), `id_would_collide` (the join would print one id twice, a defect it
 would have introduced), `tfoot_no_tbody` (the first half has no `<tbody>` to append to and a
-`<tfoot>`, so the rows would land after the table's own summary), `unreadable` / `read_failed` (a
-half no parser could read), or `verify:<reason>` for a code merge the same verification as
-`table_join_failed` refused.
+`<tfoot>`, so the rows would land after the table's own summary), `unreadable` (a half holding no
+`<table>`), `read_failed` (a parse **threw** — on a half, or on the merged candidate; the two are
+told apart by whether the header fields below are present), or `verify:<reason>` for a code merge the
+same verification as `table_join_failed` refused. A refusal and a throw are different lines: only the
+throw is `read_failed`.
 
 Logged on every pair the code path did not take, because the share it takes is what a later round
 has to be able to re-measure and `table_joined` alone cannot tell a free join from a paid one. A
@@ -2918,8 +2920,9 @@ reason, or one reason as absence:
   fields are read from those same two halves, so they are absent here too. No document in this corpus
   has produced it.
 
-The **other** `read_failed` — the verifier failing on the **merged** candidate — has both halves
-reading fine and all seven fields present. A half with a `<table>` but no header block is present too,
+The **other** `read_failed` is the verification **throwing** while it parses the merged candidate, which
+is not the same event as the verification *refusing* it — a refusal is reported as `verify:<reason>`.
+Both halves read fine there, so all seven fields are present. A half with a `<table>` but no header block is present too,
 with an empty signature and `0` for both of its counts. The per-round totals are folded into `tables` in
 the diagnostics payload (§7b).
 
