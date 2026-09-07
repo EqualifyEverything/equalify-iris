@@ -119,8 +119,26 @@ test("the page agent reads small capitals as a typeface and not as letter case",
       /the mixed-case setting is what the small capitals mean/],
     // The measured alternative to shouting was reproducing the typeface in a style attribute, so
     // the clause closes both exits rather than the one it was written for.
+    //
+    // Worded so the sentence cannot be read as the imperative its colon used to set up. "no style
+    // attribute, no <span> and no case change of your own" reads as a list of things forbidden as
+    // easily as a compound subject of "makes", and the second reading forbids exactly the
+    // down-casing this clause demands eight lines earlier — in a file that is ALSO the rubric
+    // (`verifyBlocks` sends it verbatim as "Agent under test"), so a verifier taking it would flag a
+    // correctly title-cased line as an unauthorised case change: the false positive this clause
+    // exists to remove. Each technique is now the subject of its own verb.
     ["neither device is carried as markup, which is the other thing the arms did with it",
-      /no style attribute, no <span> and no case change of your own makes small capitals reach a reader as small capitals/],
+      /a style attribute does not make small capitals reach a reader as small capitals, a <span>\s+does not, and neither does retyping the line in a case the page did not set/],
+    ["and the title case this clause asks for is named as the transcription, not as a case change",
+      /writing\s+"Table 11\." for a line set in small capitals is the transcription of that line and not a case change of\s+your own/],
+    // The undecidable page, which clause 1 closes for itself ("that is the [not legible] case below
+    // and not this one") and this clause did not. The discriminator is a comparison of two heights,
+    // so a scan too coarse to resolve them — or a line with no letter of each kind in it — leaves
+    // the model with the question and no answer, and the direction it would guess in is down-casing
+    // display capitals: the call #374 item 2 reserves for the maintainer. As-printed plus a log note
+    // is the file's own standing answer for an uncertain reading, and it takes no part of that call.
+    ["an undecidable case is transcribed as printed rather than guessed",
+      /neither device has been identified, and an unidentified device is transcribed exactly as the page sets\s+it with a note in the "log" field/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
@@ -198,6 +216,21 @@ test("a naming attribute never replaces the words the page prints", () => {
       /a marker printed as a digit announces perfectly well as itself, so it takes none/],
     ["and the reason names the boundary rather than the element",
       /where the text CAN be announced a name stops being a fix and becomes an override/],
+    // The list after the imperative read as an allowlist, and a form control was not on it — while
+    // this pipeline's own code has treated `aria-label` as the correct name for a field since
+    // `flatten.ts`'s `ariaName` was added, because dropping it made the Reader report a phantom issue
+    // on axe-clean markup. Over-read, the list sends a fill-in line with no printed name beside it
+    // out unnamed, which axe's `label` rule then catches in the gate — so the cost was a round, not a
+    // shipped defect, and the fix is one clause. Stated as the reason the exceptions share rather
+    // than as a longer list, since a list is what got over-read.
+    ["the exceptions are held together by their reason and not by being enumerated",
+      /What the exceptions have in common is that reason and not membership of a list/],
+    ["a form control is named among them, because it has no words of its own to lose",
+      /and a form control — none of them has words of its own for a name to replace/],
+    ["a field's printed name is its label, and the block's words name a field the page leaves bare",
+      /an aria-label\s+carrying those printed words is correct markup rather than a breach of this rule/],
+    ["and neither an unnamed control nor an invented name is licensed by that",
+      /What is never\s+right is a control left unnamed, or one named with words the page does not print anywhere/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }

@@ -94,9 +94,16 @@ announce letter by letter as an initialism. Full capitals are the other device a
 the text: every letter at one height, cap height, so PART I stays PART I. The two heights are what
 tell them apart, and a document commonly settles it itself — where the same words are set both ways,
 a chapter title in small capitals and the same chapter named in mixed case a few pages on, the
-mixed-case setting is what the small capitals mean. Carry neither device as markup: no style
-attribute, no <span> and no case change of your own makes small capitals reach a reader as small
-capitals, and typography you cannot transcribe is a note for the "log" field.
+mixed-case setting is what the small capitals mean. Where you cannot compare the two heights — a scan
+too coarse to resolve them, or a line with no letter of each kind in it to hold against the other —
+neither device has been identified, and an unidentified device is transcribed exactly as the page sets
+it with a note in the "log" field saying the case could not be decided. That is the same answer the
+uncertain-reading rule above gives, and it leaves a line of capitals standing as printed rather than
+retyped on a guess. Neither device is carried as markup, because nothing you can write conveys a
+typeface: a style attribute does not make small capitals reach a reader as small capitals, a <span>
+does not, and neither does retyping the line in a case the page did not set — which is why writing
+"Table 11." for a line set in small capitals is the transcription of that line and not a case change of
+your own. Typography you cannot transcribe is a note for the "log" field.
 
 No styling reaches the output at all: no style attribute, no class, no <style> element, no event
 handler. A style attribute carries nothing a reader hears — it is not announced, it does not survive
@@ -665,9 +672,14 @@ Thirteen structures are easy to render as something that merely looks right, so 
   at all. So <span aria-label="Signed"> around a printed signature deletes a person's name from the
   document for the reader who cannot see it, and <a aria-label="Footnote 4"> around a printed 5
   announces a number the page does not print. Never put a naming attribute on an element that has
-  text of its own. The exceptions are the ones this prompt names, and each is named because it has
-  nothing to hide: a separator, a graphic, a region, and a marker whose visible text is a symbol a
-  screen reader cannot announce.
+  text of its own. What the exceptions have in common is that reason and not membership of a list: a
+  separator, a graphic, a region, a marker whose visible text is a symbol a screen reader cannot
+  announce, and a form control — none of them has words of its own for a name to replace. The control
+  is the case worth stating, because a field is the one thing here that can end up with no name at
+  all: where the page prints a field's name beside it that name is its <label>, and where the page
+  prints no name beside the field but the block it sits in says what the field is, an aria-label
+  carrying those printed words is correct markup rather than a breach of this rule. What is never
+  right is a control left unnamed, or one named with words the page does not print anywhere.
   A key whose symbol is an area of ink is this rule's other case: the bands of a shaded map, the
   fills of a cartogram, the hatchings of a chart. Its symbol half has no words anywhere on the
   page, so the words are yours to write and writing them is transcription rather than the invented
