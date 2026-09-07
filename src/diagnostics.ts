@@ -634,6 +634,97 @@ export interface Diagnostics {
     // as the total.
     capped_pending: number;
   };
+  // What happened to a Copy Editor round whose reply hit the output ceiling, and how much of it was
+  // kept (#317).
+  //
+  // Here because nothing counted it. The editor is the largest agent in the pipeline — 33.1% of a
+  // 100-page bench round's model bill — and a window that truncates costs 5.2x one that fits: the
+  // discarded whole-document attempt is paid for in full, and then the remainder is asked for a
+  // section at a time. The salvage that #295 and #319 built to recover that money records everything
+  // about itself on three log lines and nothing read them, so its hit rate meant parsing log.jsonl
+  // by hand. `editor_truncated_rate` and `editor_truncated_lost_rate` on `/v1/quality` are the only
+  // other numbers about this, and they are per DOCUMENT across a deployment: they cannot say whether
+  // a truncation was rescued or refused, which of the reasons refused it, or whether a retreat
+  // happened at all.
+  //
+  // Counts of ROUNDS, not of documents. A document reviewed in three rounds can truncate three
+  // times, and a session's log spans its feedback rounds, so these sum over every editor round the
+  // session has had — the same denominator as `model_calls` and the one the money is spent in. The
+  // per-document reading is the quality endpoint's and stays there.
+  //
+  // Deliberately no share, and deliberately no cost. `salvaged / truncated` is a number anyone can
+  // divide and it is not a rate: across every round on file the salvage has fired twice, declined
+  // twice on the same reason, and rescued nothing. What the money cost is already here and is not
+  // restated — `by_step.edit` is the whole-document attempts including the discarded one, and
+  // `by_step.edit_section` the fallback calls it bought.
+  editor_ceiling: {
+    // Rounds whose whole-document editor reply hit the ceiling (`editor_truncated`). Every one of
+    // them reached the salvage, so it is the denominator for the two counts below — with one
+    // shortfall that is real and worth naming rather than reconciling away.
+    //
+    // `truncated - (salvaged + declined)` is not always 0. The salvage answers nothing at all for a
+    // truncation that returned no text (`EMPTY_REPLY`: the ceiling was spent before the reply began)
+    // or for an error that matched by message and lost its prototype on the way (see
+    // `isTruncatedResponseError`, which is broader than the `instanceof` the salvage requires).
+    // Neither writes a line, because neither is a reply there is anything to say about. A visible
+    // shortfall here beats a third bucket filled from the absence of evidence.
+    truncated: number;
+    // Rounds where part of the reply was kept and SHIPS (`editor_salvaged`). The prefix of the
+    // document the reply reached was corrected by the whole-document call — which saw every block
+    // and every attached page image — and only the remainder was asked for again.
+    salvaged: number;
+    // Of those, the ones whose edits list had finished before the cut (`closed: true`): a complete
+    // patch that hit the ceiling on its way out of the envelope, so there was no remainder to
+    // section and the round cost one call. The cheapest shape this can take, and the one worth
+    // telling from a partial rescue.
+    salvaged_closed: number;
+    // Of those, the retreats: a block before the cut gave content up, so the claim was cut back to
+    // it and the edits behind it were dropped (`lost_at`). **This is the field #317 asked for**, and
+    // it is not a cost signal. The retreat knowingly accepts a duplicate — a move carrying content
+    // backwards across the cut leaves the landing edit applied and the source block untouched, so
+    // the content ships twice — and a truncated round is the review loop's last round, so nothing
+    // downstream removes it. The remedy is a feedback re-run, which is a person's action, which is
+    // why the rate is worth watching at all.
+    //
+    // Counted only on `editor_salvaged`. A `loss_before_cut` decline carries `lost_at` too and is
+    // NOT counted here: nothing was applied, so no duplicate can have shipped. That decline is the
+    // one shape the salvage has actually taken in every round on file, so folding the two together
+    // would report a duplicate risk of 2 where the observed risk is 0.
+    //
+    // `salvaged_closed` and this are not disjoint, and the combination reads oddly and is real: a
+    // complete patch, part of it re-asked for anyway.
+    retreated: number;
+    // Rounds where the salvage kept nothing and the whole body went to the section fallback
+    // (`editor_salvage_declined`). Not a failure of the salvage — every one of these is a reply it
+    // was right to refuse — but it is the count that says the recovery did not happen, and the
+    // sections were bought at the price they always were.
+    declined: number;
+    // Which of the salvage's seven refusals fired, off `reason`. These SUM to `declined`, which is
+    // why `unrecognized` exists: the reasons are a closed list in the emitter, and a bucket set that
+    // silently dropped a value this build has not heard of would stop summing without saying so
+    // (unlike `tables`'s `by`, where a visibly short total is the honest answer because there is no
+    // total to check it against). A reader can therefore check the split against `declined` and know
+    // the difference is 0 by construction.
+    //
+    // The seven are not interchangeable and the split is the point. `loss_before_cut` and
+    // `all_refused` are the salvage working — a reply whose corrections cannot be kept — and the
+    // only two the retreat can reach. `no_complete_edit` is a document holding one block bigger than
+    // the ceiling, which is the failure mode the section fallback exists for. `no_edits_list` is a
+    // prompt that was not followed, `out_of_order` a reply not written in one pass through the
+    // document, and `unknown_block`/`unreadable_edit` a reply that may not be about this document at
+    // all — three prompt-compliance findings sitting in the same total as two cost findings, and
+    // pooling them would send a reader to the wrong remedy.
+    decline_reasons: {
+      no_edits_list: number;
+      no_complete_edit: number;
+      unknown_block: number;
+      unreadable_edit: number;
+      out_of_order: number;
+      all_refused: number;
+      loss_before_cut: number;
+      unrecognized: number;
+    };
+  };
   // Source pages whose own extraction threw, so the delivered document carries a
   // failure marker instead of that page's content (pipeline/extraction.ts
   // `failedPage`). Its own field because a run that ends `ready_for_review` with a
@@ -1178,6 +1269,23 @@ export function summarizeRun(
     failed: 0,
     capped_pending: 0,
   };
+  const editorCeiling: Diagnostics["editor_ceiling"] = {
+    truncated: 0,
+    salvaged: 0,
+    salvaged_closed: 0,
+    retreated: 0,
+    declined: 0,
+    decline_reasons: {
+      no_edits_list: 0,
+      no_complete_edit: 0,
+      unknown_block: 0,
+      unreadable_edit: 0,
+      out_of_order: 0,
+      all_refused: 0,
+      loss_before_cut: 0,
+      unrecognized: 0,
+    },
+  };
   for (const e of events) {
     if (e.type === "page_verify_ok") {
       verification.pages_verified += 1;
@@ -1451,6 +1559,34 @@ export function summarizeRun(
       // Summed, not counted: the field is how many pairs were left, and one run leaving four is four
       // tables a reader meets in halves.
       tables.capped_pending += typeof e.pending === "number" ? e.pending : 0;
+    } else if (e.type === "editor_truncated") {
+      editorCeiling.truncated += 1;
+    } else if (e.type === "editor_salvaged") {
+      editorCeiling.salvaged += 1;
+      // Strictly `true`, for the reason every flag in this reader is: the emitter omits the field
+      // rather than writing `false`, so a line carrying some other value is not a claim this reader
+      // has to interpret.
+      if (e.closed === true) editorCeiling.salvaged_closed += 1;
+      // On the presence of `lost_at`, not on its truth: the emitter writes it only when a retreat
+      // happened, and block 0 is a legitimate value — `if (e.lost_at)` would drop the retreat that
+      // gave up the whole document, which is the worst one.
+      if (e.lost_at !== undefined && e.lost_at !== null) editorCeiling.retreated += 1;
+    } else if (e.type === "editor_salvage_declined") {
+      editorCeiling.declined += 1;
+      // The reasons are matched against the emitter's closed list and anything else is counted, not
+      // dropped — the one place in this reader where an unrecognized value gets a bucket of its own.
+      // These have to sum to `declined` for the split to be checkable, so a value from a build this
+      // one has not heard of must be visible in the total rather than absent from it. `in` on the
+      // initialized object, so a `reason` naming `decline_reasons`'s own prototype chain — or any
+      // string at all — cannot increment something that is not a counter here.
+      const reason = e.reason;
+      if (
+        typeof reason === "string" &&
+        reason !== "unrecognized" &&
+        Object.prototype.hasOwnProperty.call(editorCeiling.decline_reasons, reason)
+      ) {
+        editorCeiling.decline_reasons[reason as keyof Diagnostics["editor_ceiling"]["decline_reasons"]] += 1;
+      } else editorCeiling.decline_reasons.unrecognized += 1;
     }
   }
 
@@ -1595,6 +1731,7 @@ export function summarizeRun(
     errors,
     verification,
     tables,
+    editor_ceiling: editorCeiling,
     pages_failed: pagesFailed,
     pages_blank: pagesBlank,
     pages_bare_html: pagesBareHtml,

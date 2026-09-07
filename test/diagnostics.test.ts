@@ -1177,3 +1177,162 @@ test("a run with no continued tables reports zeros rather than an absent section
     capped_pending: 0,
   });
 });
+
+// --- what happened to the rounds that hit the output ceiling (#317) ---
+
+test("the ceiling tally counts the rescues, the refusals and the rounds behind both", () => {
+  // The editor is around a third of a round's model bill and a truncated window costs about 5x one
+  // that fits — the discarded whole-document attempt in full, then the remainder a section at a
+  // time. The salvage that recovers part of that reported itself on three log lines and nothing read
+  // them, so its hit rate meant parsing log.jsonl by hand. Counts of ROUNDS: two truncations here,
+  // one rescued and one refused, which is what the sum over a session's feedback rounds looks like.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "editor_truncated", attached: 2, of: 31, chars: 27_113 },
+    { ts: T(2), type: "editor_salvaged", edits: 6, applied: 5, reached: 14, of: 22, chars: 27_113, rest: 8_400 },
+    { ts: T(3), type: "editor_truncated", attached: 0, of: 31, chars: 26_990, after: "images_refused" },
+    { ts: T(4), type: "editor_salvage_declined", reason: "no_complete_edit", chars: 26_990, of: 22 },
+    { ts: T(5), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(5))));
+
+  assert.deepEqual(d.editor_ceiling, {
+    truncated: 2,
+    salvaged: 1,
+    // The reply's edits list did not finish, so the remainder was still sectioned.
+    salvaged_closed: 0,
+    retreated: 0,
+    declined: 1,
+    decline_reasons: {
+      no_edits_list: 0,
+      no_complete_edit: 1,
+      unknown_block: 0,
+      unreadable_edit: 0,
+      out_of_order: 0,
+      all_refused: 0,
+      loss_before_cut: 0,
+      unrecognized: 0,
+    },
+  });
+});
+
+test("a retreat is counted off the salvage that shipped, not off the decline that carries lost_at too", () => {
+  // The one distinction this whole field exists to make. `lost_at` is on BOTH lines — the salvage
+  // that cut its claim back to the block that gave content up, and the `loss_before_cut` decline
+  // where the loss was in the first block so there was nothing in front of it to keep — and only the
+  // first can ship a duplicate, because only the first applied anything. Folding the two together
+  // would report a duplicate risk of 2 on a run whose real risk is 1.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "editor_truncated", attached: 1, of: 12, chars: 27_004 },
+    { ts: T(2), type: "editor_salvaged", edits: 9, applied: 4, closed: true, lost_at: 7, dropped: 3,
+      reached: 7, of: 19, chars: 27_004, rest: 5_120 },
+    { ts: T(3), type: "editor_truncated", attached: 1, of: 12, chars: 26_880 },
+    { ts: T(4), type: "editor_salvage_declined", reason: "loss_before_cut", edits: 4, applied: 0,
+      shrunk: 1, lost_at: 0, reached: 3, of: 19, chars: 26_880 },
+    { ts: T(5), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(5))));
+
+  assert.equal(d.editor_ceiling.retreated, 1, "the decline applied nothing, so no duplicate shipped");
+  assert.equal(d.editor_ceiling.declined, 1);
+  assert.equal(d.editor_ceiling.decline_reasons.loss_before_cut, 1);
+  // A complete patch with a retreat in it is the combination that reads oddly and is real, so both
+  // counts hold at once rather than one of them excluding the other.
+  assert.equal(d.editor_ceiling.salvaged_closed, 1);
+  assert.equal(d.editor_ceiling.salvaged, 1);
+});
+
+test("the retreat that gave up the whole document is still a retreat", () => {
+  // `lost_at: 0` is a legitimate value and the worst one: the loss is in the reply's first claimed
+  // block, so a truthiness test would drop the largest retreat there is. Presence is the test,
+  // matching the emitter, which writes the field only when there was one.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "editor_truncated", attached: 0, of: 8, chars: 27_120 },
+    // `applied` non-zero with `lost_at: 0` is the shape the emitter produces when the retreat left a
+    // block 0 the reply had ALSO named later: nothing before the cut, something applied inside it.
+    { ts: T(2), type: "editor_salvaged", edits: 5, applied: 1, lost_at: 0, dropped: 4,
+      reached: 0, of: 11, chars: 27_120, rest: 19_000 },
+    { ts: T(3), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(3))));
+
+  assert.equal(d.editor_ceiling.retreated, 1);
+  assert.equal(d.editor_ceiling.salvaged, 1);
+});
+
+test("the decline reasons sum to the declines, including one this build has never heard of", () => {
+  // The one place in this reader with a catch-all bucket, and the reason is that there is a published
+  // total to check the split against. Under `tables` a `by` outside the closed list lands nowhere and
+  // the short total is the honest answer; here a `reason` from a later build would make
+  // `decline_reasons` stop summing to `declined` without saying so, which is a reader's arithmetic
+  // silently failing rather than a visible gap.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "editor_truncated", attached: 0, of: 4, chars: 27_000 },
+    { ts: T(2), type: "editor_salvage_declined", reason: "no_edits_list", chars: 27_000, of: 9 },
+    { ts: T(3), type: "editor_truncated", attached: 0, of: 4, chars: 27_001 },
+    { ts: T(4), type: "editor_salvage_declined", reason: "unknown_block", edits: 3, unknown: 1,
+      chars: 27_001, of: 9 },
+    { ts: T(5), type: "editor_truncated", attached: 0, of: 4, chars: 27_002 },
+    { ts: T(6), type: "editor_salvage_declined", reason: "invented_later", chars: 27_002, of: 9 },
+    { ts: T(7), type: "editor_truncated", attached: 0, of: 4, chars: 27_003 },
+    // A line with no reason at all — an older log, or a truncated write — is the same case.
+    { ts: T(8), type: "editor_salvage_declined", chars: 27_003, of: 9 },
+    { ts: T(9), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(9))));
+
+  const reasons = d.editor_ceiling.decline_reasons;
+  assert.equal(d.editor_ceiling.declined, 4);
+  assert.equal(reasons.no_edits_list, 1);
+  assert.equal(reasons.unknown_block, 1);
+  assert.equal(reasons.unrecognized, 2, "the invented reason and the missing one");
+  assert.equal(
+    Object.values(reasons).reduce((a, b) => a + b, 0),
+    d.editor_ceiling.declined,
+    "the split has to sum to the total it splits",
+  );
+});
+
+test("a truncation the salvage never answered leaves a visible shortfall rather than a guessed bucket", () => {
+  // Two real shapes reach the salvage and come back without writing a line: a truncation that
+  // returned no text at all (the ceiling was spent before the reply began) and an error that matched
+  // by message and lost its prototype on the way. Neither is a reply there is anything to say about,
+  // so `truncated` exceeds `salvaged + declined` — deliberately, and this test is what says so.
+  const text = log(
+    { ts: T(0), type: "run_start" },
+    { ts: T(1), type: "editor_truncated", attached: 0, of: 6, chars: 0, reply_chars: 0 },
+    { ts: T(2), type: "editor_sections", sections: 3, of: 3 },
+    { ts: T(3), type: "run_complete" },
+  );
+  const d = summarizeRun(text, done(Date.parse(T(3))));
+
+  assert.equal(d.editor_ceiling.truncated, 1);
+  assert.equal(d.editor_ceiling.salvaged, 0);
+  assert.equal(d.editor_ceiling.declined, 0);
+});
+
+test("a run whose editor never hit the ceiling reports zeros rather than an absent section", () => {
+  const text = log({ ts: T(0), type: "run_start" }, { ts: T(1), type: "run_complete" });
+  const d = summarizeRun(text, done(Date.parse(T(1))));
+
+  assert.deepEqual(d.editor_ceiling, {
+    truncated: 0,
+    salvaged: 0,
+    salvaged_closed: 0,
+    retreated: 0,
+    declined: 0,
+    decline_reasons: {
+      no_edits_list: 0,
+      no_complete_edit: 0,
+      unknown_block: 0,
+      unreadable_edit: 0,
+      out_of_order: 0,
+      all_refused: 0,
+      loss_before_cut: 0,
+      unrecognized: 0,
+    },
+  });
+});
