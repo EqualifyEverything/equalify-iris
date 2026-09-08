@@ -393,17 +393,23 @@ export async function verifyAgentOutput(
 
   const parsed = extractJson<VerifyOutput>(res.text);
   // Both flags, as booleans, or this is not a verdict. The contract asks for both and all 1,342
-  // readable verify replies in one round set answer both — but that is not free at every width, and
-  // the reason to keep it is not that the shape never occurs. Across every verify and recheck call in
-  // every round directory (3,897 readable, the corpus the ceiling comment above is priced on) EIGHT
-  // do not carry both flags, and in all eight both flags are IN THE REPLY TEXT, inside the first
-  // sixty bytes of the envelope: what breaks is further right — an unescaped `"` where the checker
-  // quotes the page's own row-group label (3 replies, all Sonnet, the model the reference deployment
-  // runs this agent on), decode garbage after a closed envelope (4, all Luna), a raw newline inside a
-  // string (1, Qwen3-VL). This check is still right on all eight, because the alternative reading is
-  // `faithful: undefined` — an accident, not a verdict — and it degrades to a counted `unjudged`
-  // page. #426 carries the eight and what each class would take to recover. What it buys besides is
-  // the failure mode #339's `notes` field opens. `extractJson`
+  // readable verify replies in one round set answer both — but the reason to keep the check is not
+  // that the shape never occurs, because at a wider width it does. Across every verify and recheck
+  // call in every round directory (3,897 readable, the corpus the ceiling comment above measures)
+  // EIGHT do not carry both flags, and in all eight both flags are IN THE REPLY TEXT, inside the
+  // first sixty bytes of the envelope: what breaks is further right — an unescaped `"` where the
+  // checker quotes the page's own row-group label (3 replies, all Sonnet, the model the reference
+  // deployment runs this agent on), decode garbage after a closed envelope (4, all Luna), a raw
+  // newline inside a string (1, Qwen3-VL). **Those eight still cost nothing here**, which is worth
+  // being exact about: an object carrying neither flag read `ok = undefined !== false && undefined
+  // !== false` — true — with `readProblems(undefined)` empty, so before this check they were silent
+  // passes buying no correction and after it they are `unjudgedVerdict()`, also `ok: true` and also
+  // empty. The page ships uncorrected either way and only the counter changes, to the better one.
+  // What the eight revise is the REASON, not the price. The direction that does cost something is
+  // still `faithful: false` without `accessible`, at 0 observed replies, which is what the test
+  // below means by "not free in one direction". #426 carries the eight and what each class would
+  // take to recover — and the loss there is the problems those replies named, never this check.
+  // What it buys besides is the failure mode #339's `notes` field opens. `extractJson`
   // returns the LAST readable object in a reply, and a `notes` string that quotes the contract back
   // ends with one: an unescaped `{ "faithful": true, "problems": [] }` inside the prose, which read
   // as a confident PASS on a page the verifier had just rejected for a missing table row — `ok`

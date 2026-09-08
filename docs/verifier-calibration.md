@@ -230,17 +230,20 @@ Discarding the reading costs nothing: it answers with the walk's result, which i
 of this. And because a fenced reply is beyond any one-pass reader,
 `verifyAgentOutput` now refuses to read anything carrying fewer than both boolean flags as a verdict:
 1,342 of 1,342 readable verify replies in those logs carry both, and it converts a silent pass into a
-counted `unjudged` page. **That count is one round set's, and the check is not free at every width:**
-across every verify and recheck call in every round directory — 3,897 readable replies, the corpus the
-ceiling paragraph above is priced on — **eight do not carry both flags, and in all eight both flags are
-in the reply text**, inside the first sixty bytes of the envelope. What breaks is further right: an
-unescaped `"` where the checker quotes the page's own row-group label (3 replies, all Sonnet), decode
-garbage appended after a closed envelope (4, all Luna), a raw newline inside a string (1, Qwen3-VL).
-The check is still the right answer on all eight, because the alternative reading is `faithful:
-undefined`, which is an accident rather than a verdict — but the reason is *that*, not that the shape
-never occurs. #426 carries the eight and what each class would take to recover. What the check does
-cost besides is the opposite shape — a `faithful: false` reply that omits `accessible` no longer buys
-a correction — and that page is counted rather than corrected, which is the trade made knowingly.
+counted `unjudged` page. **That count is one round set's, and the reason to keep the check is not that
+the shape never occurs — at a wider width it does.** Across every verify and recheck call in every
+round directory — 3,897 readable replies, the corpus the ceiling paragraph above measures — **eight do
+not carry both flags, and in all eight both flags are in the reply text**, inside the first sixty bytes
+of the envelope. What breaks is further right: an unescaped `"` where the checker quotes the page's own
+row-group label (3 replies, all Sonnet), decode garbage appended after a closed envelope (4, all Luna),
+a raw newline inside a string (1, Qwen3-VL). **Those eight cost this check nothing**, and being exact
+about that matters: an object carrying neither flag read `ok = undefined !== false && undefined !==
+false`, which is `true`, with an empty `problems` — so before the check they were silent passes buying
+no correction, and after it they are `unjudged` pages, also passing and also buying none. The page ships
+uncorrected either way and only the counter changes, to the better one. #426 carries the eight, and what
+is lost there is the problems those replies named, never this check. The direction that *does* cost
+something is the opposite shape — a `faithful: false` reply that omits `accessible` no longer buys a
+correction — and that page is counted rather than corrected, which is the trade made knowingly.
 
 A whole class of decoy defeats both, and it is named here at its real width because it is the class the
 new field most invites: **a quoted decoy containing any string value at all**. Every reading here treats
