@@ -1429,10 +1429,21 @@ more than one log's word: every extraction reply on disk for those two images de
 so redrawing them buys a second copy of the same sentence at a full page's price. The declaration test
 refuses both and admits the other three, which is 5 of 5 where a character floor is right about 3.
 
-What it does not cover: a blank page declared **only in markup**. `<!-- blank page -->` is #219's own
-spelling, there is no envelope to read a declaration out of, and such a page is redrawn once — one
-call, and no change in outcome, since the second draw declares the page blank too. Nothing on disk
-has produced that shape.
+What it does not cover, in two spellings: a blank page whose declaration `blankDeclaration` cannot
+see. One is **markup-only** — `<!-- blank page -->` is #219's own spelling, and with no envelope there
+is no `blank` field or `log` to read. The other is an envelope whose `html` is **not a string**, so
+`{"html": null, "log": "This page is blank.", "blank": true}` answers the question and is redrawn
+anyway. Each costs one call and changes no outcome: the second draw declares the page blank the same
+way, and the page is refused exactly as it is today. Nothing on disk has produced either shape —
+every one of the 15 honoured declarations sent `html` as a string. Believing a declaration whose
+`html` is null would change the **blank routing** (it would deliver such a page rather than refuse
+it), which is a separate question from this branch.
+
+A redrawn page's second draw re-runs the four repair seams, so `page_soft_hyphens`,
+`page_style_attributes`, `page_digit_groups` and `page_links` can fire twice for one page. The second
+draw's lines carry **`redrawn: true`**, because `where` attributes a count to the call it was billed
+under and a redraw makes two calls at the same seam: an offline per-occurrence census discounts the
+flagged lines rather than counting a discarded draw's markup as page content.
 
 A provider failure never reaches this line: a throttle, a stall and a refusal all throw before a
 reply exists to read, and that boundary is deliberate.
@@ -2029,7 +2040,10 @@ image, no word list and no second model — and it covers the entity spellings (
 
 **Logged only where it fired**, so a run with none of these lines is a run in which no reply
 carried one. `where` is what makes the count attributable: the same character from a first render,
-from the correction pass and from a specialist are three facts about three different calls. It is
+from the correction pass and from a specialist are three facts about three different calls — and
+`redrawn: true` is present when the reply was a page's [second draw](#page_redrawn), whose markup Iris
+discarded, because a redraw makes two `extract` calls for one page. The same flag appears for the same
+reason on `page_style_attributes`, `page_digit_groups` and `page_links`. It is
 written AFTER `agent_call`, so the reply on record in the round logs is still the model's own —
 the census behind this row was a $0 regrade of logs already on disk, and a strip applied before
 the log would have left no way to take that measurement or any future one.

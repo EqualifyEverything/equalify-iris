@@ -182,8 +182,18 @@ test("a fragment whose only text is soft hyphens is a page with nothing on it", 
     assert.equal(ev(rec, "page_no_output").length, 1);
     assert.deepEqual(ev(rec, "page_redrawn").map((e) => e.data.shape), ["empty_html"]);
     // Counted before it was discarded, so a page lost this way is still attributable — once per draw,
-    // because the strip runs on each reply and the second one carried the same two hyphens.
-    assert.deepEqual(ev(rec, "page_soft_hyphens").map((e) => e.data.removed), [2, 2]);
+    // because the strip runs on each reply and the second one carried the same two hyphens. `redrawn`
+    // is what keeps that pair readable: `where` attributes a count to the call it was billed under, a
+    // redraw makes two `extract` calls for one page, and a per-occurrence census (#334's is offline and
+    // by hand) would otherwise read four hyphens off one page's markup. Absent on the first draw, so a
+    // run with no redraw has exactly the lines it had before.
+    assert.deepEqual(
+      ev(rec, "page_soft_hyphens").map((e) => [e.data.removed, e.data.redrawn]),
+      [
+        [2, undefined],
+        [2, true],
+      ],
+    );
   });
 });
 

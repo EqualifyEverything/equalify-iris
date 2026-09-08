@@ -2447,6 +2447,63 @@ test("a declaration a guard refused is not redrawn either — it is the guard's 
   });
 });
 
+test("a blank page whose `html` is not a string is redrawn, and the second draw changes nothing", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const draws: number[] = [];
+    // The stated limit of the gate, pinned so it cannot be discovered later as a surprise.
+    // `blankDeclaration` requires `typeof parsed.html === "string"`, so this reply ANSWERS the question
+    // and `asserted` is false anyway: it is redrawn once. Nothing on disk sends it — all 15 honoured
+    // declarations in the corpus spell `html` as a string — and it costs one call and no outcome,
+    // which is what this asserts. Believing it would change the blank routing (the page would be
+    // DELIVERED as blank rather than refused), and that is #219's argument, not this branch's.
+    const { failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) => {
+          draws.push(o);
+          return o === 2 ? '{"html": null, "log": "Page 2 is blank.", "blank": true}' : good(o);
+        },
+      }),
+    );
+    assert.equal(draws.filter((d) => d === 2).length, 2, "redrawn, and only once");
+    assert.equal(of(events, "page_redrawn").length, 1);
+    assert.equal(of(events, "page_blank").length, 0, "not believed before this change either");
+    assert.deepEqual(failedPages, [2], "the outcome is the one it already was");
+  });
+});
+
+test("a redrawn page's repair lines say which draw they counted", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const draws: number[] = [];
+    // `where` attributes a repair count to the call it was billed under, and a redraw makes two
+    // `extract` calls for one page. Both draws here carry a `style` attribute, so without the flag an
+    // offline census reads two styled pages, or one page styled twice, off a page that was styled once
+    // and delivered on its second draw. Nothing in src/ reads these lines, so the flag is for the
+    // census, and it is absent on a first draw so a run with no redraw is unchanged.
+    const styled = (o: number) => JSON.stringify({ html: `<p style="color:red">page ${o}</p>`, log: "" });
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) => {
+          draws.push(o);
+          return o === 2 && draws.filter((d) => d === 2).length === 1 ? '{"html": "", "log": ""}' : styled(o);
+        },
+      }),
+    );
+    assert.deepEqual(failedPages, []);
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "<p>page 2</p>");
+    // Page 2's second draw is flagged; pages 1 and 3 were never redrawn and carry no flag at all.
+    assert.deepEqual(
+      of(events, "page_style_attributes").map((e) => [e.page, e.where, e.redrawn]),
+      [
+        [1, "extract", undefined],
+        [3, "extract", undefined],
+        [2, "extract", true],
+      ],
+    );
+  });
+});
+
 test("a page that loses two draws in a row is given up on, in that order", async () => {
   await withTemp(async (dir) => {
     const events: Event[] = [];

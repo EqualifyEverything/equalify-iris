@@ -2601,8 +2601,19 @@ function pageSystem(agent: AgentSpec, lessons: string): string {
 // render, and the correction pass runs after the fidelity verdict.
 type RepairSeam = "extract" | "correct" | "specialist" | "specialist_merge";
 
-function repaired(ctx: PipelineContext, where: RepairSeam, img: InputImage, html: string): string {
-  const at = { image: img.name, page: img.order, where };
+function repaired(
+  ctx: PipelineContext,
+  where: RepairSeam,
+  img: InputImage,
+  html: string,
+  // The reply this ran on was a second draw of the page, and its counts are counts of markup Iris
+  // DISCARDED (#365 directive 5, `page_redrawn`). Without it two `extract` lines for one page read as
+  // one page's markup counted twice: `where` makes a count attributable to the call it was billed
+  // under, and a redraw makes two calls at the same seam. An offline census like #334's is what this
+  // is for — nothing in `src/` reads these lines — so it discounts rather than filters.
+  redrawn = false,
+): string {
+  const at = { image: img.name, page: img.order, where, ...(redrawn ? { redrawn: true } : {}) };
   const { html: noShy, removed } = stripSoftHyphens(html);
   // Only when it fired, so the line means "this page had them" and a run with none of these lines
   // is a run where no reply carried one. `where` is the step name the call was billed under, which
@@ -2656,10 +2667,17 @@ async function renderPage(
       `Apply the user feedback above to this page. Keep everything the feedback does NOT ` +
       `concern exactly as it was, and re-check the affected content against the source image.\n`
     : "";
-  // The page's own link targets, which the image cannot show (pipeline/links.ts).
+  // The page's own link targets, which the image cannot show (pipeline/links.ts). `redrawn` for the
+  // same reason the repair lines carry it: this is the same page's links offered a second time, and a
+  // count of pages whose links were shown would otherwise count this page twice.
   const links = pageLinkContext(img.links);
   if (links.shown.length) {
-    ctx.log.event("page_links", { image: img.name, links: links.shown.length, dropped: links.dropped });
+    ctx.log.event("page_links", {
+      image: img.name,
+      links: links.shown.length,
+      dropped: links.dropped,
+      ...(redrawn ? { redrawn: true } : {}),
+    });
   }
   const user =
     `Convert this document page image (filename: ${img.name}, page ${img.order} of ${ctx.images.length}) ` +
@@ -2688,7 +2706,7 @@ async function renderPage(
   // fragment whose only text is soft hyphens carries nothing, and should be treated as the page with
   // nothing on it that it is rather than as characters. `blankDeclaration` re-derives that same
   // reading from the reply, so it is handed this fragment too — see the call.
-  const html = raw == null ? raw : repaired(ctx, "extract", img, raw);
+  const html = raw == null ? raw : repaired(ctx, "extract", img, raw, redrawn);
   // Nothing for a reader in this reply. Throwing hands the page to `failedPage`, which is what
   // every other unusable answer in this file already does: the page is lost, and the run
   // SAYS the page is lost (`page_extraction_failed`, `pages_failed`, a @page-failed
@@ -2835,12 +2853,18 @@ async function renderPage(
     // So `asserted` is correct on 5 of 5 where a character floor is correct on 3, and the two it
     // saves are the two where the model answered the question and a guard disbelieved it.
     //
-    // What it does NOT cover, because the corpus contains none of it: a blank page declared only in
-    // MARKUP. `<!-- blank page -->` is #219's own spelling and `blankDeclaration` cannot see it —
-    // there is no envelope to read `blank` or `log` out of — so `asserted` is false and such a page is
-    // redrawn once. 1 of the 20 replies carried any markup at all (the 47-character one, which is not
-    // a declaration), so this is a shape nothing on disk has produced rather than a share of the rate;
-    // it costs one call and changes no outcome, since the second draw declares the page blank too.
+    // What it does NOT cover, in two spellings, because the corpus contains neither: a blank page
+    // whose declaration `blankDeclaration` cannot see. One is markup-only — `<!-- blank page -->` is
+    // #219's own spelling, and with no envelope there is no `blank` or `log` to read. The other is an
+    // envelope whose `html` is not a STRING: `asserted` requires `typeof parsed.html === "string"`, so
+    // `{"html": null, "log": "This page is blank.", "blank": true}` answers the question and is
+    // redrawn anyway. Both cost one call and change no outcome — the second draw declares the page
+    // blank the same way and the page is refused as it is today — and neither is a share of the rate:
+    // 1 of the 20 replies carried any markup at all (the 47-character one, which is not a
+    // declaration), and every one of the 15 honoured declarations sent `html` as a string. Believing a
+    // declaration whose `html` is null is a change to the BLANK routing, not to this branch: it would
+    // deliver such a page instead of refusing it, which is #219's argument to reopen and not this
+    // one's to settle.
     //
     // A provider failure never reaches here — a throttle, a stall and a refusal all throw out of
     // `router.complete` above — which is the line this change deliberately does not cross. The
