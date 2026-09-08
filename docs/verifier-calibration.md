@@ -153,6 +153,13 @@ quietly falsify. What it costs is 1,279 characters of prompt on every verify cal
 shipped it and 26 more from #365's reword, which is confined to that clause and its schema line — on
 top of which #365 adds a further 181 for the three ported sentences. What it buys is
 **not** measured — the behaviour was counted and the fix was not — and `pages_unjudged` is the number
+to read beside any re-count — and #365 gave it a SECOND reason to move, in the opposite direction:
+`agents/page.md` now ends in a second-person imperative rather than a schema, and `verifyAgentOutput`
+quotes that whole file into the verify message, so a model reading the contract it is judging as
+addressed to itself answers `html` instead of both decision flags. That degrades to
+`unjudgedVerdict()` and never to a false pass (`src/pipeline/feedback.ts`), so the two pressures are
+a longer reply stopping mid-object and a reply answering the wrong schema, and a flat `pages_unjudged`
+across this change is two effects cancelling rather than neither happening. It is the number
 to read beside any re-count, because an invited free-text field makes a reply longer and a verify
 reply that stops mid-object is a page nothing judged, shipping under a `page_verify_ok` line.
 

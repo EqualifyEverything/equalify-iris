@@ -838,6 +838,6 @@ Respond with ONLY this JSON (no code fences):
 than sending false, and never send it for a page you could not read.
 
 Your entire reply must be the JSON object and nothing else. Do not write any reasoning, preamble,
-commentary or summary before or after it. Everything you have to say about this page goes in the
-fields above — the transcription in "html" and the notes this prompt asks for in "log" — and
-nothing goes outside them.
+commentary or summary before or after it. Everything you have to say about this page goes inside the
+fields the schema above lists, the notes this prompt asks you for included, and nothing goes outside
+them.

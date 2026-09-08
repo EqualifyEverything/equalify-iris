@@ -284,11 +284,27 @@ export async function verifyAgentOutput(
   //
   // It stays in the USER message, in the position it was already in, rather than moving
   // into the system prompt to ride the breakpoint already there. The system prompt is
-  // where the Feedback Agent's OWN instructions live, and an agent's contract is
-  // quoted material to be judged against — `page.md` ends "Respond with ONLY this JSON:
-  // { "html": ... }", which is the wrong answer to this task and is exactly what putting
-  // it in the verifier's own role invites. `user` below is still the complete message and
-  // still starts with this text; the split changes what is billed, not what is said.
+  // where the Feedback Agent's OWN instructions live, and an agent's contract is quoted
+  // material to be judged against — `page.md` ends "Your entire reply must be the JSON
+  // object and nothing else. Do not write any reasoning, preamble, commentary or summary
+  // before or after it. Everything you have to say about this page goes inside the fields
+  // the schema above lists", above a schema of `{ "html", "log", "blank",
+  // "suggested_agent" }`. That is the wrong answer to THIS task and is exactly what
+  // putting it in the verifier's own role invites. `user` below is still the complete
+  // message and still starts with this text; the split changes what is billed, not what
+  // is said.
+  //
+  // #365 made that hazard sharper rather than milder, which is worth stating because the
+  // sentences above were written when `page.md` merely ended in a schema. It now ends in a
+  // second-person imperative that is a near-copy of the clause the checker's own prompt
+  // carries, naming a different set of fields — so a model that reads the quoted contract
+  // as addressed to itself is being instructed, not just shown. The role split is the
+  // whole mitigation and the guard below is the backstop: a reply that answers `html`
+  // instead of both decision flags degrades to `unjudgedVerdict()`, so the failure is a
+  // page nothing judged and never a page falsely passed. Read `pages_unjudged` beside any
+  // re-count of this change, and note it now has two reasons to move in opposite
+  // directions — `docs/verifier-calibration.md` names the other one, a longer reply
+  // stopping mid-object.
   const contract =
     `TASK: verify\n\n` +
     `## Agent under test: ${agent.file}\n\`\`\`markdown\n${agent.content}\n\`\`\`\n\n`;

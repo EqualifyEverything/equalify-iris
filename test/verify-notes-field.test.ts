@@ -239,6 +239,20 @@ test("the Reader's no-prose clause reaches the checker whole and the corrector o
     pagePrompt.indexOf('"log": "notes, e.g. content cut off at an edge"') < pagePrompt.indexOf(outsideOnly),
     "the corrector's clause follows its schema too",
   );
+  // And it names NO field of the schema it points at. The first draft of it glossed "the fields
+  // above" as "the transcription in "html" and the notes this prompt asks for in "log"", which is
+  // two of the four — `"suggested_agent"` is parsed and acted on (src/pipeline/extraction.ts), so a
+  // model reading the gloss as the definition had been told twice that only two fields were wanted.
+  // An enumeration here is a subset waiting to go stale; the clause says "the fields the schema
+  // above lists" and leaves the schema to list them. #424's review caught the draft.
+  const clause = pagePrompt.slice(pagePrompt.indexOf(outsideOnly));
+  for (const field of ["html", "log", "blank", "suggested_agent"]) {
+    assert.equal(
+      clause.includes(`"${field}"`),
+      false,
+      `agents/page.md's no-prose clause names "${field}", which makes "the fields above" a subset`,
+    );
+  }
 });
 
 test("`notes` reaches nothing: a reply with it verdicts identically to the same reply without", async () => {
