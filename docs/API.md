@@ -1419,7 +1419,7 @@ The gate is that the reply asserted nothing, not that it was short (issue #365, 
 asked for a floor of HTML characters). A floor reads what the parse produced, and a reply Iris
 refused whole is 0 characters of HTML however much page it was carrying. Over every bench run log on
 disk — 2,639 files in the 80 round directories — 20 replies reach this branch, landing on **20 distinct
-round-and-page pairs**: **1.04% of the 1,913 pages drawn at least once**, and at least 0.48% of
+round-and-page pairs**: **1.05% of the 1,913 pages drawn at least once**, and at least 0.48% of
 individual draws. The distinctness is counted rather than assumed, because those pairs average 2.2
 page-agent calls each. The 20 are `page_no_output` events, and can only be: nothing on disk logs
 [`page_redrawn`](#page_redrawn), because every round predates this branch.
@@ -1428,8 +1428,9 @@ A repo-wide `find` counts 2,657 `*.jsonl`, and the 18 not counted here are two d
 corpus manifests in the bench root, holding no extraction call, and 7 `*-dry.jsonl` probe logs under
 `bench-data/`, which *do* carry extraction calls — 12 draws and 12 checks on 3 pages — and which any
 walker descending every top-level directory folds in silently. That is where an earlier version of this
-section got 4,159 calls and 1,916 pages. Every count below is the round directories alone; no rate moves
-at the precision published.
+section got 4,159 calls and 1,916 pages. Every count below is the round directories alone, and it moves
+the headline: 20/1,913 is 1.045%, where 20/1,916 rounded to 1.04%. The 0.48% and the 0.248% below are
+unchanged.
 
 The per-draw rate is a lower bound rather than a figure, and the reason is worth stating because two
 shipped versions of this paragraph got it wrong. `phase: "extraction"` carries 8,049 `agent_call`s, of

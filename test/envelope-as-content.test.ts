@@ -2364,7 +2364,7 @@ test("a correction that answered in bare HTML is still a correction", async () =
 // #365 directive 5. The gate is `blankDeclaration`'s `asserted` and not a floor of characters, and
 // these four tests are the difference: a reply that ANSWERED the question is never redrawn however
 // few characters it carries, and a reply that answered nothing is redrawn once whatever its shape.
-// The measurement is in the comment at the branch — 20 replies on 20 distinct pages, 1.04% of the 1,913
+// The measurement is in the comment at the branch — 20 replies on 20 distinct pages, 1.05% of the 1,913
 // pages drawn at least once and at least 0.48% of individual draws (a bound: `agent_call` carries no
 // `step`, so the 4,147 page-agent calls in the phase include corrections). Five survive today's parser, and
 // `asserted` is right about 5 of 5 where a length is right about 3.

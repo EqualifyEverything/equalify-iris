@@ -2824,7 +2824,7 @@ async function renderPage(
     // separate the cases: it reads what the PARSE produced, and a reply Iris refused whole is 0
     // characters of HTML however much page it was carrying. Over every bench run log on disk — 2,639
     // files in the 80 round directories — 20 replies reach this branch, and they land on 20 DISTINCT
-    // round-and-page pairs, so 1.04% of the 1,913 pages drawn at least once is a share of pages rather
+    // round-and-page pairs, so 1.05% of the 1,913 pages drawn at least once is a share of pages rather
     // than an average over repeats (those pairs carry 2.2 page-agent calls each, so it had to be
     // counted, not assumed). Per individual draw the rate is AT LEAST 0.48%. The 20 are `page_no_output`
     // events, and they have to be: nothing on disk logs `page_redrawn`, because every round predates
@@ -2835,7 +2835,8 @@ async function renderPage(
     // under `bench-data/`, which DO carry extraction calls — 12 draws and 12 checks on 3 pages — and
     // which any walker that descends every top-level directory folds in silently. That is where an
     // earlier version of this comment got 4,159 calls and 1,916 pages. Every count below is the round
-    // directories alone; no rate moves at the precision published.
+    // directories alone, and it moves the headline: 20/1,913 is 1.045%, where 20/1,916 rounded to 1.04%.
+    // 0.48% and the 0.248% named at the end are unchanged.
     //
     // The per-draw rate is a bound and not a figure, said out loud because two shipped versions of this
     // comment stated it as one. `phase: "extraction"` logs 8,049 `agent_call`s, 4,147 of them naming
