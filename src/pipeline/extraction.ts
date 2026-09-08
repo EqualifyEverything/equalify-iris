@@ -2832,8 +2832,12 @@ async function renderPage(
     //
     // A repo-wide `find` counts 2,657 `*.jsonl`, and the 18 left out here are two different things: 11
     // corpus manifests in the bench root, with no extraction call in them, and 7 `*-dry.jsonl` probe logs
-    // under `bench-data/`, which DO carry extraction calls — 12 draws and 12 checks on 3 pages — and
-    // which any walker that descends every top-level directory folds in silently. That is where an
+    // under `bench-data/`, which DO carry extraction calls — 12 page-agent calls and 12 checks on 3 pages
+    // — and which any walker that descends every top-level directory folds in silently. PAGE-AGENT CALLS,
+    // not draws: they are `agent_call`s, and the paragraph below is about exactly why that word cannot be
+    // narrowed. Nor could it be here — those 7 files log 0 page `model_call`s at all, so none of them is
+    // among the 60 that carry `step`, which is why 60 / 954 / 604 / 1,558 are the only figures the
+    // exclusion leaves alone. That is where an
     // earlier version of this comment got 4,159 calls and 1,916 pages. Every count below is the round
     // directories alone, and it moves the headline: 20/1,913 is 1.045%, where 20/1,916 rounded to 1.04%.
     // 0.48% and the 0.248% named at the end are unchanged.
