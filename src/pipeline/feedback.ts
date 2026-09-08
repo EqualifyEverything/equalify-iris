@@ -333,8 +333,10 @@ export async function verifyAgentOutput(
   // NO `maxOutputTokens`, and #365 directive 2 asked for one "copying the corrector's". The
   // corrector's shape does not transfer, and what stops it is a property of the reply rather than a
   // preference: a ceiling cuts the END of a reply, and on this agent the end is the verdict.
-  // Across every verify and recheck call in the bench logs — 3,908 attempted, 3,902 returned a
-  // reply, five models — the 19 replies of 8,000 output tokens or more ALL parsed to a usable
+  // Across every verify and recheck call the Feedback Agent made in every bench round directory on
+  // disk — 3,908 attempted, 3,902 returned a reply, 3,897 of those readable, five models, a WIDER
+  // corpus than the 1,342 the both-flags comment below counts — the 19 replies of 8,000 output
+  // tokens or more ALL parsed to a usable
   // verdict, naming 95 problems between them, and the envelope's own text begins at 86.3%–99.8% of
   // the reply (median 94.2%). The narration comes first and the answer last. So a cap here does not
   // trim the narration the issue is about: it removes the answer and bills for the narration anyway,
@@ -344,17 +346,25 @@ export async function verifyAgentOutput(
   // there and not here.
   //
   // Priced on the 2,511 replies whose page's own first pass is in the same log, so a
-  // page-proportional rule and a flat one are scored on the same members: at 17 verdicts lost a
-  // flat 8,000 saves $0.0711 per 100 verify calls where `max(4000, 2x the page's own output
-  // tokens)` saves $0.0565, and a flat 12,000 loses FEWER verdicts than `max(4000, 3x)` — 8 against
-  // 12 — while saving more, $0.0419 against $0.0293. The flat rule dominates the corrector's shape
-  // at every matched point, because a runaway is not a big page: the longest reply in the corpus is
-  // 4.6x its own page's output tokens and the two quantities correlate at r = 0.42, so scaling by
-  // the page is loosest where the pages are largest and tightest where the narration is. The best
-  // exchange rate on offer is about 7 cents per 100 verify calls against the $4.50 #365 §1 measured
-  // for checking 100 pages, bought with 0.68% of pages losing their verdict — while the narration
-  // itself is $1.99 per 100 pages, and the only mechanism that reaches text billed per token
-  // emitted is not writing it, which is what #424 put beside the verify schema.
+  // page-proportional rule and a flat one are scored on the same members, in verdicts lost /
+  // problems lost / dollars saved per 100 verify calls:
+  //
+  //     flat 8,000                17    91    $0.0711
+  //     max(4000, 2x page)        17    83    $0.0565
+  //     flat 12,000                8    58    $0.0419
+  //     max(4000, 3x page)        12    67    $0.0293
+  //
+  // The flat rule is the better shape on verdicts and dollars, which is where the decision sits, and
+  // it is NOT dominant: at the tighter point it names eight more problems lost than `max(4000, 2x)`
+  // for the same 17 verdicts. It wins on all three columns at the looser point. Either way the shapes
+  // differ because a runaway is not a big page: the longest reply in the corpus is 4.6x its own
+  // page's output tokens and the two quantities correlate at r = 0.42, so scaling by the page is
+  // loosest where the pages are largest and tightest where the narration is. No rule that keeps
+  // verdict loss under 1% saves more than about 7 cents per 100 verify calls against the $4.50 #365
+  // §1 measured for checking 100 pages — a flat 4,000 saves the most of any rule measured, 14 cents,
+  // and loses 53 of 2,511 verdicts, which is buying money with verdicts rather than with narration.
+  // The narration itself is $1.99 per 100 pages, and the only mechanism that reaches text billed per
+  // token emitted is not writing it, which is what #424 put beside the verify schema.
   //
   // The checker is not unbounded, which the issue's opening paragraph implies and its own caveats
   // correct: `DEFAULT_MAX_TOKENS` is 32,000, both adapters take the smaller of that and a caller's
@@ -382,9 +392,18 @@ export async function verifyAgentOutput(
   ctx.log.agentCall({ agent: fb, phase: "extraction", image: img.name, output: res.text });
 
   const parsed = extractJson<VerifyOutput>(res.text);
-  // Both flags, as booleans, or this is not a verdict. The contract asks for both and every one of
-  // the 1,342 readable verify replies in the bench logs answers both — so the check costs nothing
-  // measurable, and what it buys is the failure mode #339's `notes` field opens. `extractJson`
+  // Both flags, as booleans, or this is not a verdict. The contract asks for both and all 1,342
+  // readable verify replies in one round set answer both — but that is not free at every width, and
+  // the reason to keep it is not that the shape never occurs. Across every verify and recheck call in
+  // every round directory (3,897 readable, the corpus the ceiling comment above is priced on) EIGHT
+  // do not carry both flags, and in all eight both flags are IN THE REPLY TEXT, inside the first
+  // sixty bytes of the envelope: what breaks is further right — an unescaped `"` where the checker
+  // quotes the page's own row-group label (3 replies, all Sonnet, the model the reference deployment
+  // runs this agent on), decode garbage after a closed envelope (4, all Luna), a raw newline inside a
+  // string (1, Qwen3-VL). This check is still right on all eight, because the alternative reading is
+  // `faithful: undefined` — an accident, not a verdict — and it degrades to a counted `unjudged`
+  // page. #426 carries the eight and what each class would take to recover. What it buys besides is
+  // the failure mode #339's `notes` field opens. `extractJson`
   // returns the LAST readable object in a reply, and a `notes` string that quotes the contract back
   // ends with one: an unescaped `{ "faithful": true, "problems": [] }` inside the prose, which read
   // as a confident PASS on a page the verifier had just rejected for a missing table row — `ok`

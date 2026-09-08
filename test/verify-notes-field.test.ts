@@ -338,7 +338,9 @@ test("a reply carrying only one decision flag is not a verdict, and does not bec
   // The half the parser cannot reach. Wrap that unescaped verdict in a fence or a sentence and the
   // decoy is the last readable object again — one pass cannot tell it from a page printing
   // `She said "hello", he replied` (see `repairedSpan`). So the shape is refused HERE instead: a
-  // verdict answers both flags, and all 1,342 readable verify replies in the bench logs do. What
+  // verdict answers both flags, and all 1,342 readable verify replies in one round set do — though
+  // eight in the wider corpus do not, and the `neither` case below is the exact shape all eight take
+  // (see #426 and the comment at `verifyAgentOutput`). What
   // arrives from a swallowed envelope answers one, and the difference between reading it and
   // refusing it is the difference between `page_verify_ok` on a page with a missing table row and
   // a page counted in `pages_unjudged`.
@@ -365,8 +367,10 @@ test("a reply carrying only one decision flag is not a verdict, and does not bec
 test("the flags check is not free in one direction, and this is the direction", async () => {
   // What the check costs, pinned rather than left as a footnote. A rejection that names its problems
   // but omits `accessible` used to buy a correction pass; it is now a page nothing judged, so the
-  // defect ships — counted in `pages_unjudged`, and not fixed. No reply in the bench logs does this
-  // (1,342 of 1,342 answer both flags) and the trade is deliberate: the shape it refuses is the
+  // defect ships — counted in `pages_unjudged`, and not fixed. No reply measured does this: 1,342 of
+  // 1,342 answer both flags in one round set, and of the eight replies in the wider corpus that do
+  // NOT (#426), every one loses both flags together rather than one. The trade is deliberate: the
+  // shape it refuses is the
   // swallowed envelope of #339, where reading one flag turns a rejection into a confident PASS on a
   // page with a missing table row. A pass that never happens is visible; a pass that did is not.
   const v = await verdict('{ "faithful": false, "problems": [{ "kind": "content_missing", "problem": "the third data row is absent" }] }');

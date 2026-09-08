@@ -2474,9 +2474,10 @@ interface PageRender {
 // scaling term has a page to scale by. The checker's output is a list of problems and its verdict
 // sits at the very end of the reply — in all 19 bench replies of 8,000 output tokens or more the
 // envelope begins past 86% of the reply — so the same cap removes the answer and keeps the
-// narration. It is also the worse of the two shapes on the checker's own numbers, and for a reason
-// visible from here: a runaway there is not a big page, so scaling by the page is tightest where
-// the narration is. `verifyAgentOutput` in feedback.ts carries the measurement and the prices.
+// narration. It is also the worse shape there on the two columns the decision turns on, verdicts
+// kept and dollars saved — though not on every column, and `verifyAgentOutput` carries the row where
+// it wins — for a reason visible from here: a runaway there is not a big page, so scaling by the page
+// is tightest where the narration is. That function has the measurement and the prices.
 export const CORRECTION_CEILING_MULTIPLE = 2;
 export const CORRECTION_CEILING_FLOOR = 4000;
 // One object and one number rather than three numbers: `outputTokens`, `chars` and
