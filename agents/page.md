@@ -836,3 +836,8 @@ Respond with ONLY this JSON (no code fences):
 
 "blank" belongs on a page with nothing on it and on no other page: omit it everywhere else rather
 than sending false, and never send it for a page you could not read.
+
+Your entire reply must be the JSON object and nothing else. Do not write any reasoning, preamble,
+commentary or summary before or after it. Everything you have to say about this page goes in the
+fields above — the transcription in "html" and the notes this prompt asks for in "log" — and
+nothing goes outside them.

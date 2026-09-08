@@ -270,18 +270,21 @@ means. An item you conclude is NOT a problem must therefore be OMITTED from
 "problems" rather than reported and then withdrawn inside its own text: "on
 closer inspection this is correct, disregard" arrives at that pass as work to do
 on output you have just confirmed was right. Each "problem" is the conclusion
-only. Working-out goes in "notes" instead — a reading you checked and ruled out,
-a rule you had to re-read, anything you decided was fine. "notes" is read by
-nothing: no correction pass, no other agent, no part of the delivered document.
-It is ONE string for the whole reply, never a field on a problem, and every
-entry of "problems" still needs its "problem" text. Write no JSON, no braces
-and no quoted field names inside it: a `{ "faithful": ... }` quoted in "notes"
-can be read as the reply instead of the reply. Use it only for text you would
-otherwise have written into a problem, and leave the field out when you have
-none. Respond with ONLY:
+only. Working-out is not written down at all; where ruling a reading out is
+worth one line, "notes" takes that conclusion, never the reasoning that reached
+it. "notes" is read by nothing: no correction pass, no other agent, no part of
+the delivered document. It is ONE string for the whole reply, never a field on
+a problem, and every entry of "problems" still needs its "problem" text. Write
+no JSON, no braces and no quoted field names inside it: a `{ "faithful": ... }`
+quoted in "notes" can be read as the reply instead of the reply. Use it only
+for a conclusion you would otherwise have written into a problem, and leave the
+field out when you have none. Respond with ONLY:
 { "faithful": true|false, "accessible": true|false,
   "problems": [{ "kind": "content_missing", "problem": "..." }],
-  "notes": "working-out, read by nothing — omit when you have none" }
+  "notes": "one line, read by nothing — omit when you have none" }
+Your entire reply must be the JSON object and nothing else. Do not write any
+reasoning, preamble, commentary or summary before or after it. Do the thinking
+without writing it down.
 
 TASK: scope
 You are given a user-feedback message and a list of the document's pages (page
