@@ -1055,6 +1055,18 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. Only faint, symbol dots are visible.",
     "Page is blank. Only faint, lettering specks are visible.",
     "Page is blank. Only faint, alphanumeric dots are visible.",
+    // ...and the list is boundary-tested rather than anchored, because anchored it could not see a
+    // hyphenated compound of a word it already carries — `stamped`, `written`, `lettered`, `annotated`
+    // were all in it while these four walked through, found by the third review of #430. That gap is not
+    // a missing word and the "add the word when a round writes one" policy cannot close it: `hand-`,
+    // `pen-` and `rubber-` are how a log names the instrument, so the compounds are unbounded. The
+    // suffixed form is the opposite case and IS a missing word, since one stem has finitely many:
+    // `italicised` slipped through a list holding `italic` until the gerunds went in beside it.
+    "Page is blank. Only faint, rubber-stamped smudges are visible.",
+    "Page is blank. Only faint, pen-written smudges are visible.",
+    "Page is blank. Only faint, hand-lettered smudges are visible.",
+    "Page is blank. Only faint, hand-annotated smudges are visible.",
+    "Page is blank. Only faint, italicised specks are visible, no text.",
     // A hyphen puts the slot's word mid-token: `dark` is the stack and `streaked` is the slot, so a check
     // reading whole words would answer that base had stripped `streaked` — base strips neither half — and
     // would take the span with base's `dark` veto in it. Both spellings refuse.

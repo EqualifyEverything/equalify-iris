@@ -1510,11 +1510,25 @@ const NAMES_TEXT = new RegExp(String.raw`\b(?:${TEXT_NOUN})\b`, "i");
 //      plus the instrument participles of that shape (`penned`, `inked`);
 //   3. the other form of a word already here, which is this list disagreeing with itself: `drawing`
 //      beside `drawn`, `sketch` beside `sketched`, `doodle` beside `doodled`, `annotation` beside
-//      `annotated`, `inscription` beside `inscribed`.
+//      `annotated`, `inscription` beside `inscribed`, and the gerund of every participle listed
+//      (`stamping` beside `stamped`, `italicised` beside `italic`) — those last came out of the probe
+//      for the boundary fix below, which rescued `italicised` while refusing `italic`. Unlike the
+//      hyphenated compounds, a suffixed form of a listed stem IS closeable by the policy above, because
+//      the forms of one word are finite where the prefixes a log can write are not.
 // Beyond those, the file's own policy for `TEXT_NOUN` applies unchanged — if a round ever writes one,
 // the word goes in the list — and it is cheap to apply here precisely because the fallback is base.
+//
+// BOUNDARY-TESTED, not anchored, and that is a fix rather than a convenience. Anchored, this list could
+// not see a hyphenated compound of a word it already carries: `rubber-stamped`, `pen-written`,
+// `hand-lettered` and `hand-annotated` all escaped a list holding `stamped`, `written`, `lettered` and
+// `annotated`, found by the third review of #429's fix. The policy above cannot close that, because the
+// gap is not a missing word — `hand-`, `pen-` and `rubber-` are how a log names the instrument, so the
+// compounds are unbounded while the words behind them are already here. `NAMES_TEXT` is `\b`-tested for
+// the same reason one line up, which is why `machine-printed` was caught and `pen-written` was not. `\b`
+// cannot match inside a word (`written` does not match in `rewritten`, `italic` not in `italicised`),
+// so what this admits is exactly the compound.
 const NAMES_TEXT_FORM =
-  /^(?:hand-?written|handwrote|written|typed|typewritten|typeset|stamped|signed|initial(?:l)?ed|lettered|numbered|captioned|labell?ed|annotated|inscribed|embossed|engraved|watermarks?|watermarked|drawn|sketched|scrawled|scribbled|doodled|underlined|highlighted|illustrated|cursive|pencill?ed|penned|inked|hand-?printed|lettering|barcodes?|drawings?|sketch(?:es)?|doodles?|annotations?|inscriptions?|footnotes?|notations?|monograms?|letterheads?|logotypes?|punctuation|diacritics?|symbols?|italics?|boldface|typographic|textual|alphanumeric|numeric)$/i;
+  /\b(?:hand-?written|handwrote|written|typed|typewritten|typeset|stamped|signed|initial(?:l)?ed|lettered|numbered|captioned|labell?ed|annotated|inscribed|embossed|engraved|watermarks?|watermarked|drawn|sketched|scrawled|scribbled|doodled|underlined|highlighted|illustrated|cursive|pencill?ed|penned|inked|hand-?printed|lettering|barcodes?|drawings?|sketch(?:es)?|doodles?|annotations?|inscriptions?|footnotes?|notations?|monograms?|letterheads?|logotypes?|punctuation|diacritics?|symbols?|italics?|boldface|typographic|textual|alphanumeric|numeric|numbering|stamping|signing|captioning|labell?ing|embossing|engraving|underlining|highlighting|scribbling|scrawling|watermarking|doodling|sketching|italici[sz](?:ed|ing))\b/i;
 // A name for text only affirms it where it is not NEGATED, which is the difference between "the
 // printed text does not resolve" and "no printed text". The prompt asks the agent for both halves of
 // the observation in one breath — name the marks, deny the text — so without this the more explicit
