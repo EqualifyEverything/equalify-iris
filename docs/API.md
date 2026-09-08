@@ -1726,12 +1726,16 @@ blank page (issue #429). `noise` belongs to the paper only where the capture tha
 entire vocabulary for it — four wordings across the 205 replies on disk that carried no page — while
 bare `noise`, `image noise` and `the scan is noisy` describe the image and stay doubt. And one word
 Iris has no list for may sit **immediately** before the marks noun, so "only faint, indistinct specks
-are visible" declares. It is one word, in that one position, and it may not be a name for what a page
-bears, a doubt word, or a determiner, preposition, conjunction, copula or negator — any of those would
-mean the sentence had been parsed wrong rather than spelled unusually, and one of them would strip an
-affirmation out of reach of the contradiction check. That slot moves no reply on disk: it is there
-because the words it admits appear in none of the 3,935 replies that did carry a page, so admitting
-one cannot let content through as a blank declaration.
+are visible" declares. It is one word, in that one position, in a clause with no copula, colon or dash
+in front of it — "the scan is noisy with artifacts" and "the image is grainy background specks" are
+still failed pages, because a stack behind `is` describes something the sentence has already named and
+the marks are not it. The word itself is put **back** into the text the doubt and contradiction checks
+read rather than removed with the phrase, so a doubt word or a name for what the page bears goes on
+being one without this rule holding a list of them; the exceptions are a function word, which dresses
+nothing, and a name for what a page bears in a form Iris reads only as a subject (`handwritten`,
+`stamped`), and both of those fall back to the reading that has no slot in it. That slot moves no
+reply on disk: it is there because the words it admits appear in none of the 3,935 replies that did
+carry a page, so admitting one cannot let content through as a blank declaration.
 
 And a log that says *where* something illegible sits ("not legible printing in the margin") is
 naming what the page bears rather than denying it, while naming the substrate ("not legible text

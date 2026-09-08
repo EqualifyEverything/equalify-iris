@@ -1313,7 +1313,7 @@ const NOT_CLAUSE_HEAD = String.raw`(?<!(?:\b(?:is|are|was|were|be|been|being|app
 // has — and there is no end to them, which is why this is a slot rather than five more entries: adding
 // words to a list is what produced the cliff (#220's `SPARSE`, #371's objection).
 //
-// Bounded three ways, and each bound is what keeps the widening from reaching a doubt word it could not
+// Bounded four ways, and each bound is what keeps the widening from reaching a doubt word it could not
 // reach before:
 //
 //   POSITION. The slot sits IMMEDIATELY before the marks noun and nowhere else, so a veto word can only
@@ -1324,62 +1324,120 @@ const NOT_CLAUSE_HEAD = String.raw`(?<!(?:\b(?:is|are|was|were|be|been|being|app
 //
 //   COUNT. One, because a second would be the same reach again: the guarantee above is per word.
 //
-//   WHAT IT MAY NOT BE, checked in `vetoScope` where the lists it is checked against are in scope
-//   rather than compiled into this pattern. A doubt word is refused, so `faint, streaked specks` keeps
-//   its `streak` and goes on refusing as `DEGRADED_IMAGE_LOG` intends; a name for text is refused, which
-//   is what makes this incapable of removing an affirmation from the scope the contradiction check reads
-//   (that check runs over the same stripped text, so a slot that could eat `handwriting` could ship a
-//   page with writing on it in silence — the #194 defect); and a determiner, a preposition, a
-//   conjunction, a copula or a negator is refused, because each of those opens a phrase of its own
-//   instead of dressing the noun.
+//   CLAUSE. The slot is available only where `NOT_CLAUSE_HEAD` holds — no copula, colon or dash to the
+//   left within the clause — in the plain form as well as the comma'd one, which is the guard #220 wrote
+//   for the same reason: a stack behind `is` describes something the sentence already named, and the
+//   marks are not it. Without this bound the one extra word of reach is enough to cross that boundary in
+//   any sentence that puts a word between the two, since `<doubt> <any word> <marks noun>` is what "the
+//   scan is noisy with artifacts" and "the image is grainy background specks" both are: the whole doubt
+//   leaves with the phrase and a page with a bad capture is delivered blank. Only the slotted form is
+//   guarded — base's own reach is not what this widens, and #220's plain form stays as it was.
 //
-// A refused slot falls back to the phrase WITHOUT the slot, over the same span, and that is not a detail:
-// leaving the span alone instead — the obviously conservative move — takes back strips that were never in
-// question. The slot matches `and` in "(specks and scanning noise)", so refusing the whole match there
-// kept `noise` in scope and #220's own wording started refusing, with fix A above broken by it. The
-// widening may only ever ADD to what is stripped, so where it cannot, base's pattern runs.
+//   WHAT BECOMES OF IT: the slot's word is handed BACK into the stripped scope instead of being removed
+//   with the phrase around it, so every rule that reads that scope still reads the word. That is the
+//   third bound, and it holds by construction rather than by enumeration: `faint, streaked specks` loses
+//   `faint … specks` and keeps `streaked`, so `DEGRADED_IMAGE_LOG` goes on refusing it without this
+//   function naming that list; and a name for text is still in the scope the contradiction check reads,
+//   so this cannot silence an affirmation (that check runs over the same stripped text, so a slot that
+//   ATE `handwriting` could ship a page with writing on it in silence — the #194 defect).
+//
+//   Handing back is not enough where the word is not dressing ANYTHING, though, because what leaves with
+//   the phrase can be the whole doubt: in "the scan is noisy with artifacts" the slot holds `with`, and
+//   handing `with` back keeps a preposition while `noisy` — the only word in the log that doubts anything
+//   — goes. So a determiner, preposition, conjunction, copula or negator falls back instead, and that
+//   class is where POSITION alone stops being the argument: `with` DOES stand immediately before the
+//   marks noun here, where in "The page is dark, with faint specks" it stands before `faint`.
+//
+//   An earlier revision asked instead whether the word was a doubt word or a name for text, and that
+//   pair of enumerations was wrong twice over on first review — both times by naming a list too narrow
+//   for the question. It asked `DEGRADED_IMAGE_LOG` where the vetoes are `UNREADABLE_LOG` UNION
+//   `DEGRADED_IMAGE_LOG` (see the caller of `vetoScope`), so "Only a few faint, partial specks are
+//   visible" lost its `partial` and became a declaration; and it read names for text off `TEXT_NOUN`, a
+//   NOUN vocabulary, in the one position where a log writes the participle, so `handwritten smudges`,
+//   `stamped dots` and `typed specks` walked through the check meant for exactly them. Handing the word
+//   back cannot go wrong in that direction, because it decides nothing about the word.
+//
+// SO THREE WORDS ARE NOT HANDED BACK, and all three so that the widening may only ever ADD to what base
+// stripped:
+//
+//   - a word base ITSELF removed from this span, which is asked of base's output and not of a list, for
+//     the reason the notes below the function give: the routes by which the slot can capture a word base
+//     was already stripping are not enumerable, and one of them is a page on the corpus.
+//
+//   - a function word, per the paragraph above.
+//
+//   - a name for text in a form `contentAffirmed` cannot read: the participles and attributives that
+//     `NAMES_TEXT_FORM` carries, which handing back would leave in a scope with nothing to affirm off
+//     them. Those fall back to the phrase WITHOUT the slot, over the same span.
+//
+// That fallback is the slot-less phrase and never the span left alone, which is not a detail: leaving the
+// span alone — the obviously conservative move — takes back strips that were never in question. The slot
+// matches `and` in "(specks and scanning noise)", so returning that whole match unchanged kept `noise` in
+// scope and #220's own wording started refusing, with fix A above broken by it.
 //
 // Measured against every no-content reply on disk, this slot moves NOTHING: the one
 // log that contains `indistinct` writes it in front of bare `marks`, which is not a marks noun for the
 // reason #193 gave, so it goes on refusing. It is here for the wording, not for a rescue — same standing
 // as `INPUT_SUBSTRATE` below, and stated the same way rather than left to look like a fix that paid.
 const MARK_ADJECTIVE = String.raw`[A-Za-z][A-Za-z'-]*`;
-function marksPhrase(slot: string): RegExp {
+const MARK_SLOT = String.raw`(${MARK_ADJECTIVE})[\s/-]+`;
+function marksPhrase(slotted: boolean): RegExp {
+  const commad = (slot: string) =>
+    String.raw`${MARK_QUANTIFIER}${NOT_CLAUSE_HEAD}(?:${MARK_MODIFIER}),[\s/-]+(?:(?:${MARK_MODIFIER}),?[\s/-]+){0,2}${slot}`;
+  const plain = (slot: string, guard: string) =>
+    String.raw`${MARK_QUANTIFIER}${guard}(?:(?:${MARK_MODIFIER})[\s/-]+){0,3}${slot}`;
+  // The plain form appears TWICE in the slotted pattern — once with a mandatory slot and the clause guard,
+  // once as base wrote it with neither — rather than once with an optional slot, because the guard belongs
+  // to the widening and not to base's reach. Written as an optional slot, `NOT_CLAUSE_HEAD` would sit in
+  // front of matches base makes with no slot in them at all, and #220's comment above says why the plain
+  // form is deliberately unguarded. Two alternatives, tried in this order, give the guard exactly the span
+  // it is about: where it fails, the slot is simply not available and base's branch matches.
+  const branches = slotted
+    ? [commad(String.raw`(?:${MARK_SLOT})?`), plain(String.raw`(?:${MARK_SLOT})`, NOT_CLAUSE_HEAD), plain("", "")]
+    : [commad(""), plain("", "")];
   return new RegExp(
-    String.raw`\b(?:` +
-      String.raw`${MARK_QUANTIFIER}${NOT_CLAUSE_HEAD}(?:${MARK_MODIFIER}),[\s/-]+(?:(?:${MARK_MODIFIER}),?[\s/-]+){0,2}${slot}` +
-      "|" +
-      String.raw`${MARK_QUANTIFIER}(?:(?:${MARK_MODIFIER})[\s/-]+){0,3}${slot}` +
-      ")" +
-      `(?:${MARK})(?:\\s*[/,&]\\s*(?:${MARK}|noise))*`,
+    String.raw`\b(?:` + branches.join("|") + ")" + `(?:${MARK})(?:\\s*[/,&]\\s*(?:${MARK}|noise))*`,
     "gi",
   );
 }
-const MARKS_PHRASE = marksPhrase(String.raw`(?:(${MARK_ADJECTIVE})[\s/-]+)?`);
+const MARKS_PHRASE = marksPhrase(true);
 // The same phrase with no slot in it: what a refused slot falls back to, and what this file matched
 // before the slot existed.
-const MARKS_PHRASE_LISTED = marksPhrase("");
-// What the slot may not hold, asked of the lists that already decide these questions so that a word
-// cannot mean one thing here and another twenty lines down. Read here rather than compiled into the
-// pattern because every one of these lists is declared further down the file, and because the reason each
-// is consulted is worth reading in words. `with` and `without` are the two entries of their own: they are
-// the prepositions these logs put in front of the marks ("The page is dark, with faint specks") and no
-// list below carries them.
+const MARKS_PHRASE_LISTED = marksPhrase(false);
 function marksPhraseStrip(match: string, ...groups: unknown[]): string {
   const adjective = (groups[0] ?? groups[1]) as string | undefined;
   if (adjective === undefined) return " ";
   const word = adjective.toLowerCase();
-  const listedOnly = () => match.replace(MARKS_PHRASE_LISTED, " ");
-  // Opens a phrase of its own instead of dressing the noun.
-  if (DETERMINER.has(word) || LOCATIVE.has(word) || CONJUNCTION.has(word) || COPULA.has(word)) return listedOnly();
-  if (NEGATOR.has(word) || word === "with" || word === "without") return listedOnly();
-  // A name for text, which this may not remove from the scope the contradiction check reads. Read with
-  // word boundaries and not `AFFIRMED_NOUN`, which is anchored: `text-like` is one token to the slot and
-  // `^text$` does not see the name inside it.
-  if (NAMES_TEXT.test(word)) return listedOnly();
-  // A doubt word, which stays in scope for `DEGRADED_IMAGE_LOG` and `HARD_DOUBT` to find.
-  if (DEGRADED_IMAGE_LOG.test(word)) return listedOnly();
-  return " ";
+  // What base does to this same span, which is both the fallback and the test below.
+  const listed = match.replace(MARKS_PHRASE_LISTED, " ");
+  // A word base itself removed here is not handed back — that would take a strip away rather than add
+  // one. Asked of base's own output rather than of a list of words base might have matched, because the
+  // ways the slot can capture something base was already stripping are not enumerable: a fourth listed
+  // adjective pushes the fourth into the slot (`light pale grey` fills the stack, `dark` lands here), and
+  // so does the head of a compound marks noun in a joined tail (`scanner noise/speckles` — base takes
+  // `noise` as part of `scanner noise`, the slot takes it as an adjective of `speckles`). That second one
+  // is a page on the corpus, honoured on base, and an earlier revision of this function lost it.
+  //
+  // Asked at the grain the PATTERN matches rather than at the grain of a word, because `MARK_ADJECTIVE`
+  // can begin inside a hyphenated spelling: the slot's word in `dark-streaked specks` is `streaked`, with
+  // `dark` read as the stack. Comparing whole tokens there answers that base stripped `streaked` — base
+  // stripped neither half — and stripping the span on that answer drops a `streak\w*` veto base raised.
+  if (!new RegExp(String.raw`(?<![A-Za-z])${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z])`, "i").test(listed))
+    return " ";
+  // A word that does not dress a noun at all: it opens a phrase of its own, and the stack in FRONT of it
+  // then belongs to whatever that phrase is about rather than to the marks. "the scan is noisy with
+  // artifacts" is the case, and handing `with` back is not enough to save it — the word stays in the
+  // scope, but `noisy` leaves with the phrase, and `noisy` is the whole doubt. So these fall back to base.
+  // A closed grammatical class, and the one enumeration here that the first review of #430 did not find
+  // wrong: `with` and `without` are its own two entries, being the prepositions these logs put in front
+  // of the marks, and no list below carries them.
+  if (DETERMINER.has(word) || LOCATIVE.has(word) || CONJUNCTION.has(word) || COPULA.has(word)) return listed;
+  if (NEGATOR.has(word) || word === "with" || word === "without") return listed;
+  // A name for text goes back into the scope like anything else, but only `contentAffirmed` can act on
+  // it, and it reads NOUNS. So the forms it cannot read fall back to base instead of being handed to a
+  // check that will not see them.
+  if (NAMES_TEXT.test(word) || NAMES_TEXT_FORM.test(word)) return listed;
+  return ` ${adjective} `;
 }
 // Two constructions that say the marks are not text, and so are the declaration rather than a
 // failure to read. Both are anchored to a marks noun earlier in the sentence with NO NAME FOR TEXT
@@ -1421,6 +1479,18 @@ const TEXT_NOUN = String.raw`text|texts|content|print(?:s|ing|ed)?|lines?|words?
 // statement: `marksPhraseStrip` above, where a slot holding `text-like` has to read as a name for text
 // (`AFFIRMED_NOUN` is anchored and would not).
 const NAMES_TEXT = new RegExp(String.raw`\b(?:${TEXT_NOUN})\b`, "i");
+// The names for text that the list above is the wrong PART OF SPEECH for. `TEXT_NOUN` is a list of
+// subjects, because everything else reading it wants the thing a sentence is about; the marks-phrase slot
+// is the one position in this file that holds an attributive, and an attributive is how a log names what
+// made a mark: `handwritten smudges`, `stamped dots`, `typed specks`, `watermark dots`. `TEXT_NOUN` has
+// `handwriting`, `stamps?` and `typing`, so the noun form of each of those was already refused while its
+// participle went through — found by the first review of #429's fix, and the reason this is a separate
+// list rather than more alternatives inside that one: nothing else in the file wants a participle, and
+// putting one in `TEXT_NOUN` would let `stamped` stand as a SUBJECT wherever that list is read as one.
+// Wider than the participles of `TEXT_NOUN`'s own entries on purpose: a word here costs base's verdict
+// and nothing more, since the fallback IS base.
+const NAMES_TEXT_FORM =
+  /^(?:hand-?written|handwrote|written|typed|typewritten|typeset|stamped|signed|initial(?:l)?ed|lettered|numbered|captioned|labell?ed|annotated|inscribed|embossed|engraved|watermarks?|watermarked|drawn|sketched|scrawled|scribbled|doodled|underlined|highlighted|illustrated)$/i;
 // A name for text only affirms it where it is not NEGATED, which is the difference between "the
 // printed text does not resolve" and "no printed text". The prompt asks the agent for both halves of
 // the observation in one breath — name the marks, deny the text — so without this the more explicit

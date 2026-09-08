@@ -770,6 +770,15 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. Only faint, indistinct specks are visible.",
     "Page is blank. Only faint indistinct specks are visible.",
     "Page is blank. Only a few faint, irregular dots are visible, no text.",
+    // A joined tail, and the reason the slot asks base what IT stripped rather than asking a list what
+    // base might have stripped: the slot reads `noise` here as an adjective of `speckles`, where base
+    // reads it as the second word of the `scanner noise` marks noun. A revision that answered from a list
+    // of words the stack carries handed `noise` back into the scope and lost this page, which is a real
+    // reply — `runs-bystep-now`, honoured before #429 went near it.
+    "Page is blank. No printed content or page number visible; only minor scanner noise/speckles present.",
+    // The unlisted word may be plain dressing spelled with a hyphen behind a listed one, which base
+    // honours unhyphenated (`Only dark specks are visible`) and refused here for the hyphen alone.
+    "Page is blank. Only dark-shaded specks are visible.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -1008,15 +1017,41 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // `marks` is not one. This is #429's own fifth reply, which is why that one is not rescued by the
     // slot written for its wording — the fault it names is real and the noun under it is #193's.
     "Page is blank. Only faint, indistinct marks are visible, no text.",
-    // What the slot may not hold, each refused for its own reason and each falling back to the phrase
-    // without it: a doubt word (`DEGRADED_IMAGE_LOG` and `HARD_DOUBT` must still find it), a name for
-    // text (removing one could take an affirmation out of the scope the contradiction check reads —
-    // `text-like` is one token, so the test is a boundary test and not `^text$`), and a word that opens a
-    // phrase of its own rather than dressing the noun.
+    // The slot hands its word BACK into the scope instead of removing it, so a doubt word in it goes on
+    // vetoing without the slot knowing which list carries it. That is the fix for both notes the first
+    // review of #430 raised: the earlier version asked `DEGRADED_IMAGE_LOG` by name when the vetoes are
+    // that list UNION `UNREADABLE_LOG`, so `partial` here became a declaration; and it asked `TEXT_NOUN`,
+    // a list of SUBJECTS, in the one position where a log writes the participle, so `handwritten` walked
+    // through the check meant for `handwriting`.
     "Page is blank. Only faint, streaked specks are visible, no text.",
     "Page is blank. Only faint, illegible specks are visible, no text.",
+    "Page is blank. Only a few faint, partial specks are visible.",
+    "Page is blank. Only faint, truncated specks are visible.",
+    // A name for text is refused whichever part of speech names it, because only the participle can stand
+    // here and only the noun is a subject `contentAffirmed` can read: these fall back to the phrase
+    // WITHOUT the slot, which is what this file did before the slot existed. `text-like` is one token to
+    // the slot, so its test is a boundary test and not `^text$`.
     "Page is blank. Only faint, text-like specks are visible, no text.",
     "Page is blank. Only faint, handwriting specks are visible, no text.",
+    "Page is blank. Only faint, handwritten smudges are visible, no text.",
+    "Page is blank. Only faint, stamped dots are visible, no text.",
+    "Page is blank. Only faint, typed dots are visible.",
+    "Page is blank. Only faint, signed smudges are visible.",
+    "Page is blank. Only faint, watermark dots are visible.",
+    // A hyphen puts the slot's word mid-token: `dark` is the stack and `streaked` is the slot, so a check
+    // reading whole words would answer that base had stripped `streaked` — base strips neither half — and
+    // would take the span with base's `dark` veto in it. Both spellings refuse.
+    "Page is blank. Only dark-streaked specks are visible.",
+    "Page is blank. Only a few dark-handwritten dots are visible.",
+    // The slot's extra word of reach may not begin behind a clause head, which is `NOT_CLAUSE_HEAD` — the
+    // guard the comma'd form has carried since #220 — applied to the slotted plain form as well. Without
+    // it, ANY word between a doubt word and a marks noun pulls the doubt word into the marks phrase and
+    // the log's only doubt leaves with it: `with` is the wording a test above pins, and these are the same
+    // sentence with the preposition replaced by a word no list could hold. Base's own reach stays
+    // unguarded, so the phrases #220 exempts are untouched — three of them are in the delivered list.
+    "Page is blank. The scan is noisy overall artifacts, no text.",
+    "The page is blank. The image is grainy background specks, no text.",
+    "Page is blank. The scan is dark uneven specks, no legible text.",
     // `as` between `not legible` and the noun is still anchored to a marks noun, so a log that names
     // none says its heading could not be read.
     "Page is blank. The heading is not legible as printed text.",
