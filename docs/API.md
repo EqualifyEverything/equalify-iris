@@ -974,8 +974,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **115** event types and every one of them has a section
-below — **110** sections, because a few cover a pair of events that are only read together. So a
+**The index is the whole log.** `src/` emits **116** event types and every one of them has a section
+below — **111** sections, because a few cover a pair of events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -999,6 +999,7 @@ emits fails it too.
 | [`first_read_carried`](#first_read_carried) | A feedback re-run kept the document's earlier first-read count |
 | [`reextract_start` / `reextract_complete`](#reextract_start--reextract_complete) | Which pages went back to the page agent |
 | [`reextract_skipped`](#reextract_skipped) | Pages a re-extraction could not attempt, for want of an input |
+| [`page_redrawn`](#page_redrawn) | A draw that carried no page and claimed nothing about it, asked once more |
 | [`page_no_output`](#page_no_output) | The page agent answered, and no HTML could be read out of the answer |
 | [`page_bare_html`](#page_bare_html) | The reply was **markup rather than the envelope**, so the page was rescued as it stood |
 | [`page_blank`](#page_blank) | The page agent read the page and reported it empty |
@@ -1400,10 +1401,56 @@ line is the remainder, and the two are disjoint — together they are the set fe
 line is written **above** `reextract_start`, so a reader scanning a round from its start finds the
 skips first.
 
+### `page_redrawn`
+
+A draw carried no page **and claimed nothing about the page**, so the same call was made once more
+(`page`, `image`, `chars` of the discarded reply, its `shape`, `dropped` where markup arrived, and
+`reextract: true` on a feedback round). The fields are `page_no_output`'s, because the triage
+question does not change — the draw that lost is the one worth reading — and this line is where a
+recovered page's losing draw is recorded. **A page that recovers has this line and no
+`page_no_output`; a page that loses twice has this line and then that one.** So every count taken
+off `page_no_output`, here and in `pages_failed`, still counts pages given up on rather than draws
+discarded.
+
+**Once, and never twice.** The failure this is for is a draw the model can lose, and a page that
+loses two in a row is not that page.
+
+The gate is that the reply asserted nothing, not that it was short (issue #365, directive 5, which
+asked for a floor of HTML characters). A floor reads what the parse produced, and a reply Iris
+refused whole is 0 characters of HTML however much page it was carrying. Over every extraction call
+in every bench round directory on disk — 7,843 calls — 20 replies reach this branch, 0.255%, and
+replaying all 20 through today's parser leaves **five**: the other 15 are blank pages whose
+declaration [`page_blank`](#page_blank) now honours, and a floor would have redrawn every one of
+them. Of the five, two are blank pages whose declaration a guard refused — one on the doubt word
+`noise`, for a log reading *"blank apart from minor scanning artifacts (specks and compression
+noise)"*, one as self-contradicting for a log naming the **image filename** — and in 5 and 1 later
+rounds on those same images the page is `page_blank` and never content, so redrawing them buys a
+second copy of the same sentence at a full page's price. The declaration test refuses both and
+admits the other three, which is 5 of 5 where a character floor is right about 3.
+
+What it does not cover: a blank page declared **only in markup**. `<!-- blank page -->` is #219's own
+spelling, there is no envelope to read a declaration out of, and such a page is redrawn once — one
+call, and no change in outcome, since the second draw declares the page blank too. Nothing on disk
+has produced that shape.
+
+A provider failure never reaches this line: a throttle, a stall and a refusal all throw before a
+reply exists to read, and that boundary is deliberate.
+
+A reply the model itself cut short does reach it, as `truncated_envelope`, and is redrawn. The
+argument against retrying a truncated **correction** — it will truncate again, and the retry buys a
+second full ceiling to prove it (`correctPage`'s error containment in `src/pipeline/extraction.ts`) —
+turns the other way here, because a correction's page survives its failure and a first render's does
+not. The choice is one more call or a hole in the document, and the one instance on disk is not a
+ceiling at all but an envelope one `}` short of a 3,437-character table of contents. A page that
+genuinely exceeds the ceiling loses the second draw as well, and its remedy is still
+`providers.*.max_tokens`.
+
 ### `page_no_output`
 
 The page agent answered, and no HTML could be read out of the answer (`page`, `image`, `chars` of
-text, and the `shape` it was in). The page is then lost the way any failed page is lost — the
+text, and the `shape` it was in). A reply that claimed nothing about the page has already been
+[redrawn once](#page_redrawn) by the time this line is written, so this is the second draw's
+failure and the page is now given up on. The page is then lost the way any failed page is lost — the
 `page_extraction_failed` line below follows it — because "the reply could not be read" and "this
 text is the page" are different claims, and a reply delivered as content puts a JSON envelope, or
 an apology, into the document while the run reports every page delivered.

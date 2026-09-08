@@ -2358,3 +2358,119 @@ test("a correction that answered in bare HTML is still a correction", async () =
     assert.equal(of(events, "page_corrected")[0].result, "kept");
   });
 });
+
+// --- one more draw of a reply that claimed nothing -------------------------------------------
+//
+// #365 directive 5. The gate is `blankDeclaration`'s `asserted` and not a floor of characters, and
+// these four tests are the difference: a reply that ANSWERED the question is never redrawn however
+// few characters it carries, and a reply that answered nothing is redrawn once whatever its shape.
+// The measurement is in the comment at the branch — 20 of 7,843 calls reach it, five survive today's
+// parser, and `asserted` is right about 5 of 5 where a length is right about 3.
+
+test("a draw that carried no page is asked once more, and the second draw is the page", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    // `render` is a function of the page order rather than a queue, so a redraw that has to SUCCEED
+    // has to count its own calls. Page 2 loses the first draw and delivers the second, which is the
+    // 47-character `<h1><cite role="doc-bibliography"></cite></h1>` case from the corpus: a page the
+    // same model rendered as 7.6-9.8 KB in three other draws.
+    const draws: number[] = [];
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) => {
+          draws.push(o);
+          return o === 2 && draws.filter((d) => d === 2).length === 1 ? '{"html": "", "log": ""}' : good(o);
+        },
+      }),
+    );
+    assert.deepEqual(failedPages, [], "the page is not lost, which is the whole point");
+    assert.equal(fragments.find((f) => f.order === 2)!.innerHtml, "<p>page 2</p>");
+    const again = of(events, "page_redrawn");
+    assert.equal(again.length, 1);
+    assert.equal(again[0].page, 2);
+    assert.equal(again[0].shape, "empty_html", "the draw that lost is on the line, for triage");
+    assert.equal(again[0].reextract, undefined, "a first pass, not a feedback re-extraction");
+    // The invariant every existing count depends on: `page_no_output` still means "this page was
+    // given up on", so nothing that reads it (diagnostics `pages_failed`, `@page-failed`, docs/API.md
+    // "Partial documents") starts counting discarded draws.
+    assert.equal(of(events, "page_no_output").length, 0);
+    assert.equal(of(events, "page_extraction_failed").length, 0);
+    assert.equal(draws.filter((d) => d === 2).length, 2, "one extra call, and only one");
+  });
+});
+
+test("a reply that said the page is blank is not redrawn", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const draws: number[] = [];
+    await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) => {
+          draws.push(o);
+          return o === 2 ? '{"html": "", "log": "Page 2 is blank."}' : good(o);
+        },
+      }),
+    );
+    // Fifteen of the twenty replies that reach the branch are this: a floor of characters redraws
+    // every one of them at a full page's price, and each second draw says the same thing again.
+    assert.deepEqual(of(events, "page_blank").map((e) => e.page), [2]);
+    assert.equal(of(events, "page_redrawn").length, 0);
+    assert.equal(draws.filter((d) => d === 2).length, 1);
+  });
+});
+
+test("a declaration a guard refused is not redrawn either — it is the guard's wording that is wrong", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const draws: number[] = [];
+    const { failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) => {
+          draws.push(o);
+          return o === 2
+            ? '{"html": "<!-- blank page -->", "log": "Page 2 is blank, but the scan is too dark to be sure."}'
+            : good(o);
+        },
+      }),
+    );
+    // The two of five a character floor gets wrong, and the reason this gate cannot be "simplified"
+    // into one later. The model answered the question — `asserted` is true — and a doubt word stopped
+    // Iris believing the answer. Two corpus pages are exactly this shape ("blank apart from minor
+    // scanning artifacts (specks and compression noise)" and a log naming the image filename), and in
+    // 5 and 1 later rounds on those same images the page is `page_blank` and never content. A redraw
+    // buys a second copy of the same sentence; what they want is the veto's wording (#220, #343).
+    assert.equal(of(events, "page_redrawn").length, 0, "asserted, so nothing here is unanswered");
+    assert.equal(draws.filter((d) => d === 2).length, 1);
+    assert.deepEqual(failedPages, [2], "and the page is refused exactly as it was before");
+    assert.deepEqual(of(events, "page_no_output").map((e) => e.blank_vetoed), [["too dark to", "dark"]]);
+  });
+});
+
+test("a page that loses two draws in a row is given up on, in that order", async () => {
+  await withTemp(async (dir) => {
+    const events: Event[] = [];
+    const draws: number[] = [];
+    // A reply the model cut short, twice: the class where a second call can buy nothing but the page
+    // is lost either way, so it is spent once and not again.
+    const { fragments, failedPages } = await runExtraction(
+      makeCtx(dir, events, {
+        render: (o) => {
+          draws.push(o);
+          return o === 2 ? TRUNCATED : good(o);
+        },
+      }),
+    );
+    assert.equal(draws.filter((d) => d === 2).length, 2, "never a third");
+    assert.deepEqual(failedPages, [2]);
+    assert.deepEqual(
+      events.filter((e) => e.type === "page_redrawn" || e.type === "page_no_output").map((e) => e.type),
+      ["page_redrawn", "page_no_output"],
+      "the losing draw is recorded before the page is given up on, not instead of it",
+    );
+    // Both lines describe the same reply, because both draws were the same reply — and the shape is
+    // the one that names the remedy, on the give-up line where every consumer already reads it.
+    assert.deepEqual(of(events, "page_redrawn").map((e) => e.shape), ["truncated_envelope"]);
+    assert.deepEqual(of(events, "page_no_output").map((e) => e.shape), ["truncated_envelope"]);
+    assert.match(fragments.find((f) => f.order === 2)!.innerHtml, /@page-failed 2:/);
+  });
+});
