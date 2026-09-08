@@ -27,6 +27,42 @@
 //    prompt is left telling the model its working-out is discarded while it is being acted on.
 //    So it is asserted behaviourally, through `verifyAgentOutput`, and not by grepping.
 //
+// #365 narrowed the first of those halves and this file's assertions with it, so read that bullet
+// as the DESTINATION surviving rather than its wording. The checker's prompt has said "no prose, no
+// code fences" through both measured bench rounds, 61 lines below the verify schema, and 71% then
+// 69% of its billed output CHARACTERS still fell outside the structured list — list-only replies 58
+// of 104 then 28 of 90, $1.99 per 100 pages for text the parser discards. Numbered working-out is
+// not "prose" as a model reads the word, so the Reader's three-sentence clause (`READER_JSON_ONLY`,
+// src/pipeline/review.ts) is ported here verbatim and put where the schema is. Its third sentence,
+// "Do the thinking without writing it down", is why `notes` could not be left as it stood: a field
+// advertised as the home for working-out contradicts that four lines above it. Deleting the field is
+// NOT the resolution — that is #303 again, a prohibition with nowhere for the reasoning to go, and
+// the paragraphs above are the measurement of what fills the vacuum. `notes` now asks for the
+// CONCLUSION of a reading you ruled out, in one line, which is not thinking written down, so both
+// clauses stand. What #339 needs is somewhere that is not `problems`; it never needed that somewhere
+// to be roomy.
+//
+// One correction to the bullet above while narrowing it, because it leans on the Reader for a claim
+// the Reader is CONTESTED on. "The Reader was told to write no reasoning at all and some of it came
+// back as issues asking for no change" is the relocation claim, and the same body of runs has been
+// read at two resolutions. #307's filing counted DOCUMENTS with at least one self-cancelling issue,
+// matched 40-vs-40: 1 -> 7 on the incumbent, p = 0.028, Haiku unmoved as the control. The comment on
+// `READER_JSON_ONLY` counts self-cancelling issues PER DOCUMENT over two runs at each prompt —
+// 1.10/0.70 -> 1.25/0.75 on kimi-k2.5, 0.00/0.05 -> 0.30/0.05 on the incumbent, DOWN on Haiku, flat
+// at zero on Luna — notes that the incumbent's rise is 6 issues in one run against 1 in the other,
+// and concludes the behaviour is real, model-specific, and not caused by the append. Neither refutes
+// the other, and the second pair of runs is what the comment has and the filing did not. So the case
+// for keeping a destination rests on #339's own numbers — 32 of 244, 14 of 71, three models — which
+// are direct and uncontested, and not on borrowed evidence that argues with itself.
+//
+// The corrector half of #365 gets sentences one and two and NOT the third, and that asymmetry is
+// pinned below rather than left to be tidied up. `agents/page.md`'s "log" is not working-out:
+// `verifyAgentOutput` carries it into the judgement of the page it came from (src/pipeline/feedback.ts
+// — 35 problems on 26 of 311 verify replies demanded something of a log, 26 of them about one that
+// existed and was withheld), and the prompt places obligations there in some forty places. Told not
+// to write the thinking down, the page agent would stop answering a contract it is graded against.
+// A later sweep "completing" the port has to argue with this comment instead of shipping it.
+//
 // And a third the first draft of this file got wrong, which is why the last two tests exist. A
 // field invited to hold prose is a field that quotes the contract back, `extractJson` returns the
 // LAST readable object in a reply, and an unescaped `{ "faithful": true, "problems": [] }` inside
@@ -52,10 +88,13 @@ import { verifyAgentOutput, type VerifyVerdict } from "../src/pipeline/feedback.
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 import { loadAgent } from "../src/agents/loader.ts";
+import { READER_JSON_ONLY } from "../src/pipeline/review.ts";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const feedbackMd = readFileSync(join(repoRoot, "agents", "feedback.md"), "utf8");
 const prompt = feedbackMd.replace(/\s+/g, " ");
+const pageMd = readFileSync(join(repoRoot, "agents", "page.md"), "utf8");
+const pagePrompt = pageMd.replace(/\s+/g, " ");
 
 // One VERIFY call against a canned reply — the same harness `verify-kinds.test.ts` uses, and for
 // the same reason: the shapes worth testing are raw model text no typed helper would let a test
@@ -108,7 +147,11 @@ test("the working-out has a named destination, and the reply shape it is named i
   // #303's lesson is that suppressing the behaviour relocates it, so the prohibition above is
   // worth nothing on its own: the clause must name somewhere for the reasoning to go, and the
   // schema must show the field, or "notes" is a destination with no referent in the reply.
-  assert.match(prompt, /Working-out goes in "notes" instead/, "the destination is named");
+  assert.match(
+    prompt,
+    /Working-out is not written down at all; where ruling a reading out is worth one line, "notes" takes that conclusion, never the reasoning that reached it/,
+    "the destination is named, and named as taking a conclusion rather than the working-out",
+  );
   assert.match(
     prompt,
     /"notes" is read by nothing: no correction pass, no other agent, no part of the delivered document/,
@@ -134,13 +177,13 @@ test("the working-out has a named destination, and the reply shape it is named i
   );
   assert.match(
     prompt,
-    /"notes": "working-out, read by nothing — omit when you have none" \}/,
+    /"notes": "one line, read by nothing — omit when you have none" \}/,
     "the schema the model is told to answer with carries the field",
   );
   // Position: the clause explains the schema, so it comes before it. Read the other way round
   // the model meets `"notes"` in the JSON with nothing yet said about what it is for.
-  const clause = feedbackMd.indexOf('Working-out goes in "notes"');
-  const schema = feedbackMd.indexOf('"notes": "working-out');
+  const clause = feedbackMd.indexOf("Working-out is not written down at all");
+  const schema = feedbackMd.indexOf('"notes": "one line, read by nothing');
   assert.ok(clause > 0 && schema > 0 && clause < schema, "the clause introduces the field, not the reverse");
   // And both sit in TASK: verify, not in one of the other three tasks, which have no
   // `problems` array and no correction pass reading their replies. The task SECTION heads, not
@@ -153,6 +196,63 @@ test("the working-out has a named destination, and the reply shape it is named i
   };
   assert.ok(head("verify") < clause, "the clause is inside TASK: verify");
   assert.ok(schema < head("scope"), "the field is inside TASK: verify, which TASK: scope ends");
+});
+
+test("the Reader's no-prose clause reaches the checker whole and the corrector one sentence short", () => {
+  // #365: the DISTANCE was the defect, not the absence. `## Output contract` has said "no prose, no
+  // code fences" all along, 61 lines below the verify schema, and 71% then 69% of verify replies
+  // narrated across two bench rounds anyway — numbered working-out is not "prose" as a model reads
+  // the word. So the clause moves to where the schema is, and moves VERBATIM: the only wording
+  // measured at 0% prose is the Reader's, and asserting against the exported constant rather than a
+  // copy of its text is what stops the three sites drifting apart one reword at a time.
+  assert.ok(
+    prompt.includes(READER_JSON_ONLY),
+    "agents/feedback.md no longer carries READER_JSON_ONLY's three sentences as written",
+  );
+  // Position, which the Reader treats as load-bearing — `READER_SYSTEM` ENDS with this clause, after
+  // its schema (test/reader-json-only.test.ts pins that), so the checker's copy goes last too.
+  const schema = prompt.indexOf('"notes": "one line, read by nothing');
+  assert.ok(schema > 0, "the verify schema is still there to place the clause against");
+  assert.ok(schema < prompt.indexOf(READER_JSON_ONLY), "the clause follows the schema, not the reverse");
+  // And it sits in TASK: verify, four lines under that schema. Appended to the file instead it would
+  // be 100 lines away in the other direction, which is the distance this change is about.
+  const opener = feedbackMd.indexOf("Your entire reply must be the JSON object");
+  const scopeHead = feedbackMd.search(/^TASK: scope$/m);
+  assert.ok(opener > 0 && scopeHead > 0 && opener < scopeHead, "the clause is inside TASK: verify");
+
+  // The corrector gets sentences one and two only. `agents/page.md`'s "log" is read — carried into
+  // the verify judgement by `verifyAgentOutput` — and some forty clauses of that prompt place
+  // obligations there, so "Do the thinking without writing it down" would tell the page agent to
+  // stop answering a contract it is graded against. Prefix-checked rather than split on the third
+  // sentence's words, so rewording sentence three fails here loudly instead of quietly passing.
+  const outsideOnly =
+    "Your entire reply must be the JSON object and nothing else. Do not write any reasoning, " +
+    "preamble, commentary or summary before or after it.";
+  assert.ok(READER_JSON_ONLY.startsWith(outsideOnly), "the two ported sentences still open the constant");
+  assert.ok(pagePrompt.includes(outsideOnly), "agents/page.md does not forbid text outside its JSON object");
+  assert.equal(
+    pagePrompt.includes("without writing it down"),
+    false,
+    'agents/page.md was told not to write its thinking down, which contradicts the "log" field it is graded on',
+  );
+  assert.ok(
+    pagePrompt.indexOf('"log": "notes, e.g. content cut off at an edge"') < pagePrompt.indexOf(outsideOnly),
+    "the corrector's clause follows its schema too",
+  );
+  // And it names NO field of the schema it points at. The first draft of it glossed "the fields
+  // above" as "the transcription in "html" and the notes this prompt asks for in "log"", which is
+  // two of the four — `"suggested_agent"` is parsed and acted on (src/pipeline/extraction.ts), so a
+  // model reading the gloss as the definition had been told twice that only two fields were wanted.
+  // An enumeration here is a subset waiting to go stale; the clause says "the fields the schema
+  // above lists" and leaves the schema to list them. #424's review caught the draft.
+  const clause = pagePrompt.slice(pagePrompt.indexOf(outsideOnly));
+  for (const field of ["html", "log", "blank", "suggested_agent"]) {
+    assert.equal(
+      clause.includes(`"${field}"`),
+      false,
+      `agents/page.md's no-prose clause names "${field}", which makes "the fields above" a subset`,
+    );
+  }
 });
 
 test("`notes` reaches nothing: a reply with it verdicts identically to the same reply without", async () => {

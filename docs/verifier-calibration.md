@@ -118,21 +118,52 @@ does as it is told, including replacing words that were already right.
 The cause is the reply shape rather than the model: `{ faithful, accessible, problems }` left nowhere
 to think, so the thinking went to the only free-text field there was, and that field is the one that
 drives the corrector. `agents/feedback.md` now defines `problem` as the conclusion only, says an item
-concluded **not** to be a problem is omitted rather than narrated, and gives the working-out a
+concluded **not** to be a problem is omitted rather than narrated, and gives a ruled-out reading a
 destination — `notes`, read by nothing: not `readProblems`, not the correction prompt, not the
-delivered document. Naming a destination rather than only forbidding the narration is issue #303's
-lesson read the other way round, since what the Reader stopped writing as prose partly came back as
-issues asking for no change. That every model does it on real pages is the strongest form of the
+delivered document. Issue #365 narrowed that field from the working-out to one line carrying its
+**conclusion**, because the same task now ends with the Reader's `READER_JSON_ONLY` clause and its
+third sentence is "Do the thinking without writing it down", which a field advertised as the home
+for working-out contradicts four lines above. Narrowing it rather than deleting it is the whole of
+the point below: a destination read by nothing is what #339 needs, and one line of it is as
+unreadable as ten. Naming a destination rather than only forbidding the narration was argued from
+issue #303, on the grounds that what the Reader stopped writing as prose partly came back as issues
+asking for no change — and that borrowed argument is **contested at two resolutions by the same runs**,
+so it should not be leaned on. #307's filing counted documents with at least one self-cancelling issue
+in a matched 40-vs-40 design and got 1 → 7 on the incumbent at p = 0.028, with Haiku unmoved as the
+control. The comment on `READER_JSON_ONLY` counts self-cancelling issues *per document* over two runs
+at each prompt — 1.10/0.70 → 1.25/0.75 on kimi-k2.5, 0.00/0.05 → 0.30/0.05 on the incumbent, DOWN on
+Haiku, flat at zero on Luna — observes that the incumbent's rise is 6 issues in one run against 1 in
+the other, and concludes the behaviour is real, model-specific, and not caused by the clause. Neither
+statistic refutes the other; the second pair of runs is what the comment has and the filing did not.
+The destination is therefore kept on #339's own numbers below, which are direct and uncontested, and
+not on the Reader's. That every model does it on real pages is the strongest form of the
 schema argument — one of the specimens declares the entry "excluded from problems count" from inside
 the problems array, which is the case for a destination made by the model itself. It also means the
 **instruction** half has no proof of sufficiency: no model has been shown going to zero by instruction
 alone, so the omit-rather-than-narrate sentence is shipped as cheap and plausible, not as demonstrated.
+#365's ported clause ships on the same footing and no better: what was measured is the Reader's
+prose share going 40% → 0% with output tokens −29% and $/document −13%, on a different agent with a
+different schema, and the checker's own share is 69% of billed characters and $1.99 per 100 pages
+with the clause absent from where the schema is. Nobody has run the checker with it there. The
+comment on `READER_JSON_ONLY` is explicit that its effect is a per-model rate a single pair of runs
+cannot resolve, so treat the port as the cheapest thing to try and not as a number.
 `test/verify-notes-field.test.ts` pins both halves — the clause, and the
 promise the clause makes to the model about where `notes` goes, which is the half a later change could
-quietly falsify. What it costs is 1,253 characters of prompt on every verify call; what it buys is
+quietly falsify. What it costs is 1,279 characters of prompt on every verify call — 1,253 as #339
+shipped it and 26 more from #365's reword, which is confined to that clause and its schema line — on
+top of which #365 adds a further 181 for the three ported sentences. What it buys is
 **not** measured — the behaviour was counted and the fix was not — and `pages_unjudged` is the number
 to read beside any re-count, because an invited free-text field makes a reply longer and a verify
 reply that stops mid-object is a page nothing judged, shipping under a `page_verify_ok` line.
+
+#365 gave that counter a **second** reason to move, and the two push opposite ways, so read it as a
+pair of effects and not as one. `agents/page.md` now ends in a second-person imperative rather than a
+schema, and `verifyAgentOutput` quotes that whole file into the verify message, so a model reading
+the contract it is judging as addressed to itself answers `html` instead of both decision flags —
+which degrades to `unjudgedVerdict()` and never to a false pass (`src/pipeline/feedback.ts`), landing
+in this same count. Meanwhile `notes` narrowing from the working-out to one line makes replies
+shorter, which relieves the mid-object pressure above. A flat `pages_unjudged` across this change is
+therefore two effects cancelling rather than neither happening.
 
 Inviting prose also invites a reply that quotes the contract back, and `extractJson` returns the LAST
 readable object in a reply. So an unescaped `{ "faithful": true, "problems": [] }` inside `notes` ends
