@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { flatten } from "../src/pipeline/flatten.ts";
 import { contentCoverage, MIN_CONTENT_COVERAGE } from "../src/pipeline/feedback.ts";
-import { READER_SYSTEM } from "../src/pipeline/review.ts";
+import { EDITOR_SYSTEM, READER_SYSTEM } from "../src/pipeline/review.ts";
 
 // `flatten` has one invariant: it may reorganize text, but it may not LOSE any.
 // Both of its consumers fail silently when it does.
@@ -635,8 +635,57 @@ test("every marker the Reader prompt advertises is one flatten emits", () => {
     !/carries the number it is announced with/.test(READER_SYSTEM),
     "the prompt still tells the Reader an ordered item's marker is a number",
   );
+  // A report the Reader can act on has to say WHICH of the two copies goes, because both
+  // resolutions clear a double marker and one of them is wrong: deleting the list's `type` also
+  // clears `[List item a] (a)`, and leaves a list that prints 1, 2, 3 where the page printed
+  // letters — a loss no gate here can see, since the marker is inside brackets. Pinned on the
+  // direction rather than the sentence: reword it freely, but it must still name the text.
+  assert.ok(
+    /say which copy goes: the TEXT's/.test(READER_SYSTEM),
+    "the double-marker report does not say which of the two copies goes",
+  );
+  assert.ok(
+    !/worth reporting whichever of the two the page printed/.test(READER_SYSTEM),
+    "the double-marker report still leaves the two copies interchangeable",
+  );
   // Options are still content, and are separated so they cannot run together.
   assertNoTextLost(`<select><option>Platform</option><option>Design</option></select>`, "select options");
+});
+
+test("every attribute flatten reads a marker from is one the editor is told to carry", () => {
+  // #432's review, note 1. Moving a lettered list's letters out of the item text and into
+  // `type` moved them out of the one place EDITOR_SYSTEM protects: it returns whole replacement
+  // blocks, and the only attribute it names is `href`. A copy-edit round that rewrites a block
+  // for an unrelated issue can hand back a bare <ol>, and there is nothing left in the text to
+  // recover the letters from.
+  //
+  // An attribute belongs in this list because dropping it CHANGES the marker a reader hears —
+  // which is what makes losing it a content loss rather than a tidy-up — and `reversed` is here
+  // although the review named three, because the mechanism has four and a list stated one member
+  // short reads as complete.
+  //
+  // The pairs carry a paragraph of real prose because `contentCoverage` returns null below
+  // MIN_COVERAGE_WORDS distinct words, and a null would make the coverage rows below vacuous
+  // rather than a measurement of the blindness they are here to show.
+  const lead = `<p>Estimating the annual cost of intergovernmental grant programs</p>`;
+  const items = `<li>Direct federal outlays</li><li>Reimbursed state administration</li>`;
+  const marking: ReadonlyArray<readonly [string, string, string]> = [
+    ["type", `${lead}<ol type="a">${items}</ol>`, `${lead}<ol>${items}</ol>`],
+    ["start", `${lead}<ol start="7">${items}</ol>`, `${lead}<ol>${items}</ol>`],
+    ["value", `${lead}<ol><li value="7">Direct federal outlays</li></ol>`, `${lead}<ol><li>Direct federal outlays</li></ol>`],
+    ["reversed", `${lead}<ol reversed>${items}</ol>`, `${lead}<ol>${items}</ol>`],
+  ];
+  for (const [attr, marked, bare] of marking) {
+    assert.notEqual(flatten(marked), flatten(bare), `dropping ${attr} leaves the announced marker unchanged`);
+    assert.ok(
+      new RegExp(`\\b${attr}\\b`).test(EDITOR_SYSTEM),
+      `flatten announces a marker from ${attr} and EDITOR_SYSTEM never names it`,
+    );
+    // And why the prompt has to carry it: the marker is inside brackets, so the gate that would
+    // otherwise notice content going missing reads the two documents as identical.
+    assert.equal(contentCoverage(marked, bare), 1);
+    assert.equal(contentCoverage(bare, marked), 1);
+  }
 });
 
 test("a page too deep for the recursive walk keeps its text instead of throwing", () => {

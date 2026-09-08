@@ -349,8 +349,12 @@ point at: a list numbered 1, 2, 3 sitting under a note that says items 3 and 4 a
 a numbering note beside a sequence that is in fact unbroken, or an announced marker that
 disagrees with the same list in the source-page excerpt below. A marker the list announces AND
 the item's own text repeats is that content twice — [List item a] (a) Estimating, where a reader
-hears "a" and then "(a)" — and it is worth reporting whichever of the two the page printed,
-since either the list supplies the marker or the text does. You do NOT see the source
+hears "a" and then "(a)". Report it, and say which copy goes: the TEXT's. The list is what
+announces a marker to a screen reader and what a browser prints, and the attribute that sets its
+shape is the document's only record of the letter or numeral the page used, so an item's text should
+hold only the words that follow the marker. Never ask for the list's own marker to be dropped in
+favour of the copy in the text — an <ol> stripped of its type prints 1, 2, 3, a marker no page
+showed. You do NOT see the source
 images, so a plain 1, 2, 3 with nothing to contradict it is not evidence of anything — do not
 report a list for being consecutive, and never suggest a marker the document does not show.
 
@@ -565,12 +569,25 @@ report rather than a record anyone acts on. The record already exists — the pa
 mid-sentence said so in its own log — and joining the halves belongs to a pass that holds both,
 because a plausible completion reaches the reader as what the page says.
 
-A link's target is content, and it is the one kind you cannot recover: an href came from the
+A link's target is content, and it is the one kind no later pass can recover: an href came from the
 source FILE, not from the page image, so a URL you drop or alter is gone and a URL you invent
 cannot be checked. Carry every href through exactly as written — including on content you
 restructure or move — and never add a link that is not already in the document. You may change
 the TEXT of a link when an issue calls for it (link text that does not describe its
 destination is a real 2.4.4 problem); keep its href.
+
+A list's marker is content too, and on an ordered list it is held in an ATTRIBUTE rather than in
+any text you can see. type="a" on an <ol> is the (a), (b), (c) the page printed, type="A", type="i"
+and type="I" are its capitals and its roman numerals, and start on an <ol>, value on an <li> and
+reversed on an <ol> are the numbers a sequence shows where it does not begin at one, does not run
+consecutively, or counts downwards. The extractor is told NOT to transcribe those markers into the
+items as well, so the attribute is the document's only record of them: an <ol type="a"> returned as
+a bare <ol> is marked 1, 2, 3 by the browser, and the letters the page printed are gone with
+nothing left in the text to recover them from. Carry type, start, value and reversed through
+exactly as written on any list you rewrite, whatever the issue you are rewriting it for. Never add
+one — a type you chose marks the list with letters the page does not show — and never move a marker
+into an item's text, which delivers it twice, since the browser prints the list's own marker
+whether the text repeats it or not.
 
 On a page whose image IS attached you may notice a fidelity problem nobody asked you about:
 content the page shows that the HTML does not have, a number or a name that disagrees with the

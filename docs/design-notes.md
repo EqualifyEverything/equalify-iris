@@ -1076,6 +1076,27 @@ Places where a decision was left open, and where v1 intentionally stops:
   `agents/page.md` now asks for the attribute by name, so the view had to be able to see it before
   the rule asking for it could be checked at all.
 
+  **A marker that lives in an attribute has to be named to the pass that rewrites blocks.** Asking
+  the extractor to put the letters in `type` and *not* in the item's text moves them out of the one
+  thing `EDITOR_SYSTEM` protects: that pass returns whole replacement blocks, and until now the only
+  attribute it was told to carry through by name was `href` — "the one kind no later pass can
+  recover". A copy-edit round rewriting a block for an unrelated issue could hand back a bare `<ol>`,
+  and nothing would notice: the marker sits inside brackets, which `contentCoverage` strips before
+  comparing words, and the editor path's other loss checks watch links (`droppedHrefs`) and the body
+  markers (`markerCounts`) only. So `EDITOR_SYSTEM` names `type`, `start`, `value` and `reversed` the
+  way it names `href` — all four, because `flatten` announces a different marker without any one of
+  them, and a list stated one member short reads as complete. That gap pre-dated `type`: a dropped
+  `start` was already unrecoverable and already unmeasured. It stays a rule rather than a check for
+  the reason the double marker stayed one: `editor_links_dropped` has fired once in the 151 logs on
+  disk that ran the copy editor, and `editor_markers_changed` never, so the instrument this would add
+  is one whose whole class shows up about as often as the defect it is watching for.
+
+  The Reader's side of the same asymmetry is that a double marker has two resolutions and only one is
+  right. `[List item a] (a) Estimating` clears if the text drops its copy, and it also clears if the
+  `<ol>` loses its `type` — which leaves a list printing 1, 2, 3 where the page printed letters, and
+  no gate can see that either. `READER_SYSTEM` therefore says which copy goes (the text's) rather
+  than reporting the duplication and leaving the direction to whoever fixes it.
+
   And every annotation that explains *correct* markup — `[spans N columns]`,
   `[spans N rows]`, `[decorative, alt empty]` — exists because the prompt tells the Reader that an
   unexplained mismatch is a defect, and the Copy Editor is licensed to restructure tables. Adding a
