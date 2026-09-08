@@ -1489,8 +1489,32 @@ const NAMES_TEXT = new RegExp(String.raw`\b(?:${TEXT_NOUN})\b`, "i");
 // putting one in `TEXT_NOUN` would let `stamped` stand as a SUBJECT wherever that list is read as one.
 // Wider than the participles of `TEXT_NOUN`'s own entries on purpose: a word here costs base's verdict
 // and nothing more, since the fallback IS base.
+//
+// WHAT THIS LIST IS NOT. It does not make an attributive naming writing safe, and the second review of
+// #429's fix read it as doing that. Measured against base: of 27 words already here, base declares
+// "Page is blank. Only <w> smudges are visible." blank for 27 — and for 16 the review named as missing,
+// 16. The contradiction check fires on 14 of 14 wordings that put the same name in SUBJECT position
+// ("Only handwriting smudges are visible" is a contradiction on base) and on 0 of 32 that put one in
+// this one, listed or not. So an attributive naming writing already loses its page on base, and this
+// list changes that for nothing. What it does is narrower and is the only reason it exists: it keeps the
+// slot from making base WORSE, by giving up the one extra word of reach wherever a doubt word is the
+// thing standing between this vocabulary and a declaration. base's own gap is filed as its own issue,
+// because the fix for it is in the noun list and it costs pages in wordings this slot never sees.
+//
+// WHICH WORDS, then, since the vocabulary is open and 40 of 48 attributives I could invent are admitted.
+// Three sources, each checkable, and nothing beyond them:
+//   1. a word the corpus writes in a page log — 22 of these, `footnote` 2,215 times, `italic` 403,
+//      `cursive` once, and NONE of the 22 in any of the 204 logs that assert blankness, which is why
+//      widening moves no page on the corpus;
+//   2. a word the second review named (`cursive`, `pencilled`, `handprinted`, `barcode`, `drawing`),
+//      plus the instrument participles of that shape (`penned`, `inked`);
+//   3. the other form of a word already here, which is this list disagreeing with itself: `drawing`
+//      beside `drawn`, `sketch` beside `sketched`, `doodle` beside `doodled`, `annotation` beside
+//      `annotated`, `inscription` beside `inscribed`.
+// Beyond those, the file's own policy for `TEXT_NOUN` applies unchanged — if a round ever writes one,
+// the word goes in the list — and it is cheap to apply here precisely because the fallback is base.
 const NAMES_TEXT_FORM =
-  /^(?:hand-?written|handwrote|written|typed|typewritten|typeset|stamped|signed|initial(?:l)?ed|lettered|numbered|captioned|labell?ed|annotated|inscribed|embossed|engraved|watermarks?|watermarked|drawn|sketched|scrawled|scribbled|doodled|underlined|highlighted|illustrated)$/i;
+  /^(?:hand-?written|handwrote|written|typed|typewritten|typeset|stamped|signed|initial(?:l)?ed|lettered|numbered|captioned|labell?ed|annotated|inscribed|embossed|engraved|watermarks?|watermarked|drawn|sketched|scrawled|scribbled|doodled|underlined|highlighted|illustrated|cursive|pencill?ed|penned|inked|hand-?printed|lettering|barcodes?|drawings?|sketch(?:es)?|doodles?|annotations?|inscriptions?|footnotes?|notations?|monograms?|letterheads?|logotypes?|punctuation|diacritics?|symbols?|italics?|boldface|typographic|textual|alphanumeric|numeric)$/i;
 // A name for text only affirms it where it is not NEGATED, which is the difference between "the
 // printed text does not resolve" and "no printed text". The prompt asks the agent for both halves of
 // the observation in one breath — name the marks, deny the text — so without this the more explicit

@@ -1731,9 +1731,13 @@ in front of it — "the scan is noisy with artifacts" and "the image is grainy b
 still failed pages, because a stack behind `is` describes something the sentence has already named and
 the marks are not it. The word itself is put **back** into the text the doubt and contradiction checks
 read rather than removed with the phrase, so a doubt word or a name for what the page bears goes on
-being one without this rule holding a list of them; the exceptions are a function word, which dresses
-nothing, and a name for what a page bears in a form Iris reads only as a subject (`handwritten`,
-`stamped`), and both of those fall back to the reading that has no slot in it. That slot moves no
+being one without this rule holding a list of them. Three words are not put back, and each falls back
+to the reading that has no slot in it: a word the slot-less reading had already removed, so that the
+slot can only ever strip more and never less; a function word, which dresses nothing (handing `with`
+back keeps the preposition while `noisy`, the whole doubt, leaves with the phrase); and a name for what
+a page bears written as an **attributive** — `handwritten`, `stamped`, `cursive` — which is the form
+Iris reads only as a modifier, where the subject form of the same word (`handwriting`) is the one the
+contradiction check can see. That slot moves no
 reply on disk: it is there because the words it admits appear in none of the 3,935 replies that did
 carry a page, so admitting one cannot let content through as a blank declaration.
 

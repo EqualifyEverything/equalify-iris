@@ -1038,6 +1038,23 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     "Page is blank. Only faint, typed dots are visible.",
     "Page is blank. Only faint, signed smudges are visible.",
     "Page is blank. Only faint, watermark dots are visible.",
+    // The second review of #430 read `NAMES_TEXT_FORM` as the only thing between an attributive naming
+    // writing and a silent blank, and named five words it did not carry. It is not that — base declares
+    // "Only <w> smudges are visible" blank for every one of these whether the word is listed or not, and
+    // its contradiction check fires on 0 of 32 attributive wordings against 14 of 14 subject ones. What
+    // the list does is keep this slot from making base worse, so the class is covered anyway: it costs
+    // base's verdict and nothing else. The first five are the review's; the rest are words the corpus
+    // writes in a page log (`footnote` 2,215 times, `italic` 403) and never in one asserting blankness.
+    "Page is blank. Only faint, cursive smudges are visible.",
+    "Page is blank. Only faint, pencilled smudges are visible, no text.",
+    "Page is blank. Only faint, handprinted dots are visible.",
+    "Page is blank. Only faint, barcode dots are visible.",
+    "Page is blank. Only faint, drawing specks are visible.",
+    "Page is blank. Only faint, footnote specks are visible.",
+    "Page is blank. Only faint, italic smudges are visible, no text.",
+    "Page is blank. Only faint, symbol dots are visible.",
+    "Page is blank. Only faint, lettering specks are visible.",
+    "Page is blank. Only faint, alphanumeric dots are visible.",
     // A hyphen puts the slot's word mid-token: `dark` is the stack and `streaked` is the slot, so a check
     // reading whole words would answer that base had stripped `streaked` — base strips neither half — and
     // would take the span with base's `dark` veto in it. Both spellings refuse.
