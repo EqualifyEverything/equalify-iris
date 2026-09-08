@@ -2436,9 +2436,10 @@ test("a declaration a guard refused is not redrawn either — it is the guard's 
     // The two of five a character floor gets wrong, and the reason this gate cannot be "simplified"
     // into one later. The model answered the question — `asserted` is true — and a doubt word stopped
     // Iris believing the answer. Two corpus pages are exactly this shape ("blank apart from minor
-    // scanning artifacts (specks and compression noise)" and a log naming the image filename), and in
-    // 5 and 1 later rounds on those same images the page is `page_blank` and never content. A redraw
-    // buys a second copy of the same sentence; what they want is the veto's wording (#220, #343).
+    // scanning artifacts (specks and compression noise)" and a log naming the image filename), and
+    // every extraction reply on disk for those two images declares the page blank — 14 replies on one,
+    // 8 on the other from three models, none of the 22 carrying content. A redraw buys a second copy
+    // of the same sentence; what they want is the veto's wording (#220, #343).
     assert.equal(of(events, "page_redrawn").length, 0, "asserted, so nothing here is unanswered");
     assert.equal(draws.filter((d) => d === 2).length, 1);
     assert.deepEqual(failedPages, [2], "and the page is refused exactly as it was before");

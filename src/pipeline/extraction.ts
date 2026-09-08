@@ -2813,10 +2813,11 @@ async function renderPage(
     //   - two are blank pages whose declaration a guard REFUSED, and `asserted` is true on both: one
     //     vetoed on the word "noise" for a log reading "blank apart from minor scanning artifacts
     //     (specks and compression noise)", one refused as self-contradicting for a log that named the
-    //     IMAGE FILENAME ("image filename indicates this is page 14 of 25"). Both pages are blank —
-    //     in 5 and 1 later rounds on the same image the page is `page_blank` and never content — so a
-    //     redraw would buy a second copy of the same sentence at a full page's price. `asserted`
-    //     refuses them here, and what they actually want is a wording fix in the guard.
+    //     IMAGE FILENAME ("image filename indicates this is page 14 of 25"). Both pages ARE blank, and
+    //     not on one log's word: every extraction reply on disk for those two images declares the page
+    //     blank — 14 replies on one, 8 on the other from three different models — and none of the 22
+    //     carries content. So a redraw buys a second copy of the same sentence at a full page's price.
+    //     `asserted` refuses them here, and what they want is a wording fix in the guard.
     //   - one is a 47-character reply, `<h1><cite role="doc-bibliography"></cite></h1>`, on a page the
     //     same model rendered as 7.6-9.8 KB in three independent redraws and delivered in another
     //     round. That is a draw the model can lose, which is what this exists for.

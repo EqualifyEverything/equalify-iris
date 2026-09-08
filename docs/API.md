@@ -1423,10 +1423,11 @@ replaying all 20 through today's parser leaves **five**: the other 15 are blank 
 declaration [`page_blank`](#page_blank) now honours, and a floor would have redrawn every one of
 them. Of the five, two are blank pages whose declaration a guard refused — one on the doubt word
 `noise`, for a log reading *"blank apart from minor scanning artifacts (specks and compression
-noise)"*, one as self-contradicting for a log naming the **image filename** — and in 5 and 1 later
-rounds on those same images the page is `page_blank` and never content, so redrawing them buys a
-second copy of the same sentence at a full page's price. The declaration test refuses both and
-admits the other three, which is 5 of 5 where a character floor is right about 3.
+noise)"*, one as self-contradicting for a log naming the **image filename**. Both pages are blank on
+more than one log's word: every extraction reply on disk for those two images declares the page blank
+— 14 replies on one, 8 on the other from three different models — and none of the 22 carries content,
+so redrawing them buys a second copy of the same sentence at a full page's price. The declaration test
+refuses both and admits the other three, which is 5 of 5 where a character floor is right about 3.
 
 What it does not cover: a blank page declared **only in markup**. `<!-- blank page -->` is #219's own
 spelling, there is no envelope to read a declaration out of, and such a page is redrawn once — one
