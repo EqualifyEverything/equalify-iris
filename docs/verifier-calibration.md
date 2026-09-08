@@ -165,6 +165,36 @@ in this same count. Meanwhile `notes` narrowing from the working-out to one line
 shorter, which relieves the mid-object pressure above. A flat `pages_unjudged` across this change is
 therefore two effects cancelling rather than neither happening.
 
+**The verify call is deliberately uncapped, and that is a measurement rather than an omission.**
+#365 asked for an output ceiling on the checker "copying the corrector's", and the corrector's shape
+does not transfer, because a ceiling cuts the end of a reply and on this agent the end is the
+verdict. Over every verify and recheck call in the bench logs — 3,908 attempted, 3,902 returned a
+reply, five models — the pooled median is **637 output tokens** and p99 is **5,623**, but the largest
+returned reply is **30,267** and three calls hit the 32,000 deployment ceiling outright. In all
+**19 replies of 8,000 output tokens or more** the JSON envelope's own text begins at **86.3%–99.8%**
+of the reply (median 94.2%), and every one of the 19 parsed to a usable verdict, **95 problems**
+between them. The narration comes first and the answer last, so a cap does not trim the narration:
+it removes the answer and bills for the narration anyway, since output is billed per token emitted
+and not per token allowed. `correctPage` caps for the opposite reason — its output *is* the payload,
+so a cut tail leaves a usable head, which is what `correctionCeiling` bounds.
+Priced on the 2,511 replies whose page's own first pass is in the same log, so that a
+page-proportional rule and a flat one are scored on the same members, a flat ceiling **dominates**
+the corrector's shape at every matched point: at 17 verdicts lost a flat 8,000 saves $0.0711 per 100
+verify calls against `max(4000, 2x the page's own output tokens)` at $0.0565, and a flat 12,000 loses
+fewer verdicts than `max(4000, 3x)` — 8 against 12 — while saving more. A runaway is not a big page;
+the longest reply is 4.6x its own page's output tokens and the two correlate at r = 0.42, so scaling
+by the page is loosest where the pages are largest and tightest where the narration is. The best
+exchange rate available is about **7 cents per 100 verify calls** against the $4.50 #365 measured for
+checking 100 pages, bought with **0.68% of pages losing their verdict** — while the narration itself
+is $1.99 per 100 pages, and the only mechanism that reaches text billed per token emitted is not
+writing it. The tail is model-specific and its two halves rank differently: the largest returned
+reply is Sonnet's and every other arm's is under 4,300 tokens, yet two of the three ceiling
+truncations are Qwen3-VL's, 2 of its 127 calls against 1 of Sonnet's 3,120. What none of this
+measures is the distribution *after* the clause above, since every reply counted was written without
+it; if it works the tail shrinks and a cap has even less to cut. `test/correction-ceiling.test.ts`
+pins the absence on the call itself, and the figures are re-derivable for free from the `model_call`
+and `agent_call` events Iris already writes.
+
 Inviting prose also invites a reply that quotes the contract back, and `extractJson` returns the LAST
 readable object in a reply. So an unescaped `{ "faithful": true, "problems": [] }` inside `notes` ends
 the reply with a second object that carries the decision flag, and reading it turns a page the

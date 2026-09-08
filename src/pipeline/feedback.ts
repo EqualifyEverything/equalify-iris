@@ -330,6 +330,46 @@ export async function verifyAgentOutput(
       : "") +
     `Compare the output against the attached source image.`;
 
+  // NO `maxOutputTokens`, and #365 directive 2 asked for one "copying the corrector's". The
+  // corrector's shape does not transfer, and what stops it is a property of the reply rather than a
+  // preference: a ceiling cuts the END of a reply, and on this agent the end is the verdict.
+  // Across every verify and recheck call in the bench logs — 3,908 attempted, 3,902 returned a
+  // reply, five models — the 19 replies of 8,000 output tokens or more ALL parsed to a usable
+  // verdict, naming 95 problems between them, and the envelope's own text begins at 86.3%–99.8% of
+  // the reply (median 94.2%). The narration comes first and the answer last. So a cap here does not
+  // trim the narration the issue is about: it removes the answer and bills for the narration anyway,
+  // because output is billed per token emitted and not per token allowed (`DEFAULT_MAX_TOKENS`'s own
+  // comment says so). `correctPage` caps for the opposite reason — its output IS the payload, so a
+  // cut tail leaves a usable head — which is what `correctionCeiling` bounds and why it is coherent
+  // there and not here.
+  //
+  // Priced on the 2,511 replies whose page's own first pass is in the same log, so a
+  // page-proportional rule and a flat one are scored on the same members: at 17 verdicts lost a
+  // flat 8,000 saves $0.0711 per 100 verify calls where `max(4000, 2x the page's own output
+  // tokens)` saves $0.0565, and a flat 12,000 loses FEWER verdicts than `max(4000, 3x)` — 8 against
+  // 12 — while saving more, $0.0419 against $0.0293. The flat rule dominates the corrector's shape
+  // at every matched point, because a runaway is not a big page: the longest reply in the corpus is
+  // 4.6x its own page's output tokens and the two quantities correlate at r = 0.42, so scaling by
+  // the page is loosest where the pages are largest and tightest where the narration is. The best
+  // exchange rate on offer is about 7 cents per 100 verify calls against the $4.50 #365 §1 measured
+  // for checking 100 pages, bought with 0.68% of pages losing their verdict — while the narration
+  // itself is $1.99 per 100 pages, and the only mechanism that reaches text billed per token
+  // emitted is not writing it, which is what #424 put beside the verify schema.
+  //
+  // The checker is not unbounded, which the issue's opening paragraph implies and its own caveats
+  // correct: `DEFAULT_MAX_TOKENS` is 32,000, both adapters take the smaller of that and a caller's
+  // cap, and it has fired three times in this history — one Sonnet reply of 93,072 characters and
+  // two Qwen3-VL replies of 137,465 and 145,384, each billed in full and each returning no verdict.
+  // That bound already exists on this call; every value below it trades verdicts for cents. The tail
+  // is also model-specific and the ranking inverts between the two halves of it: Sonnet's largest
+  // returned reply is 30,267 tokens and every other arm's is under 4,300, yet two of the three
+  // ceiling truncations are Qwen3-VL's — 2 of its 127 calls against 1 of Sonnet's 3,120.
+  //
+  // What none of this says is what the distribution looks like AFTER #424, since every reply counted
+  // above was written without that clause. If it works the tail shrinks and a cap has even less to
+  // cut; if it does not, these figures stand. Either way they are re-derivable for free from the
+  // `model_call` and `agent_call` events Iris already writes, which is where they came from — this
+  // needed no new instrument, so a later attempt at the same question does not need a paid round.
   const res = await ctx.router.complete(
     FEEDBACK_AGENT,
     "vision",

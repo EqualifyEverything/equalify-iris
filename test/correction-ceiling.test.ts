@@ -278,9 +278,20 @@ test("the correction call carries a ceiling and the first pass does not", async 
     const asked: Asked[] = [];
     const events: { type: string; fields: Record<string, unknown> }[] = [];
     await runExtraction(ctxWith(dir, asked, events, { outputTokens: 6233 }));
-    // Only the correction. The first pass has nothing to estimate from — it is the estimate —
-    // and the fidelity check's own reply is short by construction, so capping either would be
-    // bounding a call this issue measured nothing about.
+    // Only the correction. The first pass has nothing to estimate from — it is the estimate.
+    //
+    // The fidelity check is uncapped for a different reason, and the one written here before was
+    // wrong: "the check's own reply is short by construction". It is short in the middle and not at
+    // the end. Pooled over every verify and recheck call in the bench logs (3,902 replies, five
+    // models) the median is 637 output tokens and p99 is 5,623, but the largest returned reply is
+    // 30,267 and three calls hit the 32,000 deployment ceiling outright. What actually rules a cap
+    // out is where the answer sits: in all 19 replies of 8,000 tokens or more the JSON envelope
+    // begins at 86.3%–99.8% of the reply (median 94.2%) and all 19 carry a usable verdict, 95
+    // problems between them. A ceiling cuts the end, so on this agent it takes the verdict and
+    // leaves the narration — the reverse of the correction call, whose output is the payload. The
+    // measurement, the price of every candidate ceiling and what it cannot say are in
+    // `verifyAgentOutput`'s own comment (#365 directive 2); this assertion is what would have to
+    // change to ship one, so the reason lives beside the number rather than only in an issue.
     assert.deepEqual(
       asked.map((a) => [a.step, a.maxOutputTokens]),
       [
