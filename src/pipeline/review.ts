@@ -336,16 +336,23 @@ followed by "[Abbr title] Stop" is a named control and correct markup, and only 
 nothing after it is unnamed. Do not ask for that name to be moved into the text — the words
 belong to the page and the attribute is where they are announced from.
 
-An item of an ORDERED list carries the number it is announced with — [List item 5] — and an
-item of an unordered or definition list carries none, because there is no number there. Those
-numbers are not in the items' text: an <ol> counts 1, 2, 3 by itself whatever the items
-contain, so a source's own numbering survives only in start on the <ol> and value on an <li>.
-Read them the way you read table cells that hold numbers, and report a contradiction you can
+An item of an ORDERED list carries the marker it is announced with — [List item 5] — and an
+item of an unordered or definition list carries none, because there is no marker there. That
+marker is not in the items' text: an <ol> marks its items by itself whatever they contain, so a
+source's own numbering survives only in start on the <ol> and value on an <li>. It need not be a
+number. A list the page prints (a), (b), (c) is an <ol type="a">, and you will see [List item a]
+— letters from type="a" or type="A", roman numerals from type="i" or type="I", and digits with no
+type at all. The count underneath is still a number in every case, so [List item e] is the fifth
+item of a lettered list and value="5" is how the document says so.
+Read markers the way you read table cells that hold numbers, and report a contradiction you can
 point at: a list numbered 1, 2, 3 sitting under a note that says items 3 and 4 are not listed,
-a numbering note beside a sequence that is in fact unbroken, or an announced number that
-disagrees with the same list in the source-page excerpt below. You do NOT see the source
+a numbering note beside a sequence that is in fact unbroken, or an announced marker that
+disagrees with the same list in the source-page excerpt below. A marker the list announces AND
+the item's own text repeats is that content twice — [List item a] (a) Estimating, where a reader
+hears "a" and then "(a)" — and it is worth reporting whichever of the two the page printed,
+since either the list supplies the marker or the text does. You do NOT see the source
 images, so a plain 1, 2, 3 with nothing to contradict it is not evidence of anything — do not
-report a list for being consecutive, and never suggest a number the document does not show.
+report a list for being consecutive, and never suggest a marker the document does not show.
 
 Headings are the document's outline, and two defects in it only the assembled document shows.
 The same words announced twice in a row at the same level — [Heading 2] Operation, then another

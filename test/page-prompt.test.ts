@@ -941,6 +941,29 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     // its own gap and the only markup that shows the page's numbers is value.
     ["a list keeps the page's numbers with value, since an <ol> counts for itself",
       /an <ol> counts 1, 2, 3 by itself whatever you put in it — so set value on any <li> whose number differs from the count/],
+    // #334. The clause above is digit-shaped, and a list the page marks (a), (b), (c) cannot obey
+    // it: a bare <ol> renders 1, 2, 3, so following it loses the letters, and keeping them in the
+    // text gives a reader both markers at once — which is what sonnet and kimi both did on p063.
+    // `type` is the only markup that says a marker is a letter, so the rule has to name it, and
+    // it has to say the marker is then the list's rather than the item's text as well.
+    ["a printed letter or roman marker is carried by type on the <ol>",
+      /\(a\), \(b\), \(c\) is <ol type="a">, \(A\), \(B\) is <ol type="A">, \(i\), \(ii\) is <ol type="i">, and \(I\), \(II\) is <ol type="I">/],
+    ["with the type set, the marker is not transcribed in the item as well",
+      /With the type set, the marker belongs to the list and is NOT also transcribed inside the <li>, exactly as a printed digit is not/],
+    ["what a bare <ol> does to a lettered list is named, not asserted",
+      /a lettered list emitted as a bare <ol> is marked 1, 2, 3 by the browser.*"1\. \(a\)" announced for one item/],
+    // value is the count under the letter, so an irregular LETTERED sequence is expressible by
+    // the same attribute as an irregular numbered one. Without this the rule above would read as
+    // unavailable to a lettered list, which is how a model justifies transcribing the marker.
+    ["an irregular lettered sequence uses value, which is still a number",
+      /<li value="5"> inside an <ol type="a"> is announced "e"/],
+    // The two guards. The parentheses genuinely do not survive, and saying so is what stops that
+    // being discovered as a reason to transcribe the marker anyway; and a type must never be
+    // chosen to make a sequence tidier than the page printed it.
+    ["the parentheses are not reproduced, and that is stated rather than left to be found",
+      /The parentheses are not reproduced — a browser marks the item "a\." in its own punctuation/],
+    ["type states the printed shape and is never chosen to tidy a sequence",
+      /never pick one to tidy a sequence into letters the page does not show, and a list the page marks with no markers at all takes no type/],
     ["an irregularity is annotated in the document, immediately after the element",
       /say so once in a <p> immediately after that list or table/],
     // Adjacency is linear-reading-order only. A reader moving between tables lands on
@@ -1386,10 +1409,12 @@ test("the page agent's list rule keeps the clauses that make it a rule", () => {
     // Re-cutting a "first… then… finally" paragraph into <li>s is the one clause here that
     // asks for prose to be broken up, and every neighbouring rule says words leave the page
     // only under a named exception — so it has to say what happens to the connectives, or a
-    // model tidies them away as an unlogged omission. They stay; the printed DIGIT does not,
-    // and the difference is stated because the rule directly below says digits are not text.
-    ["the ordering words stay in the item, unlike a printed digit",
-      /Re-cutting prose into items moves no words: "First, remove the cover" is one <li> transcribed as printed, ordering word and all\. A printed digit is the list's marker and is carried by the count instead/],
+    // model tidies them away as an unlogged omission. They stay; the printed MARKER does not,
+    // and the difference is stated because the rule directly below says markers are not text.
+    // "digit, letter or roman numeral" since #334: the rule below covers all three, and this
+    // cross-reference naming only digits was how a lettered list arrived with both markers.
+    ["the ordering words stay in the item, unlike a printed marker",
+      /Re-cutting prose into items moves no words: "First, remove the cover" is one <li> transcribed as printed, ordering word and all\. A printed digit, letter or roman numeral is the list's marker and is carried by the list instead/],
     // #130, #131: the Ingredients and Directions columns of a recipe table. Reported twice
     // from one session, the second time after a round that changed nothing.
     ["a table cell holding several items or steps contains the list, not <br>-separated text",

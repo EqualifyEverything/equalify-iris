@@ -68,12 +68,14 @@ const norm = (s: string): string => s.replace(/\s+/g, " ").trim();
 // stripping them there would discard genuine content from both sides — trading
 // this bug for a quieter version of the one this file exists to prevent.
 //
-// `ordinal` is the number an ordered list's item is announced with, and it goes
-// inside the brackets for exactly the reason above: it is an annotation, not a word
-// the agent transcribed, and outside the brackets every candidate that emits a list
-// at all would reproduce the digits for free. Inside them the Reader can see the
-// number while the coverage comparison is unchanged.
-function blockMarker(tag: string, ordinal?: number): string | null {
+// `ordinal` is the MARKER an ordered list's item is announced with, already rendered
+// in the list's own style, and it goes inside the brackets for exactly the reason
+// above: it is an annotation, not a word the agent transcribed, and outside the
+// brackets every candidate that emits a list at all would reproduce the markers for
+// free. Inside them the Reader can see the marker while the coverage comparison is
+// unchanged. A string rather than a number because a list's marker need not be one:
+// see `markerStyle`.
+function blockMarker(tag: string, ordinal?: string): string | null {
   const h = HEADING.exec(tag);
   if (h) return `[Heading ${h[1]}]`;
   switch (tag) {
@@ -162,6 +164,66 @@ function listStart(el: El): number {
   if (Number.isInteger(s)) return s;
   if (el.getAttribute("reversed") === null) return 1;
   return Array.from(el.children).filter((c) => tagOf(c) === "li").length;
+}
+
+// HOW that number is announced. The ordinal an item carries is always a number — that
+// is what `start`, `value` and `reversed` compute — but the marker a reader HEARS is
+// that number rendered in the list's own style, and `type` is where an `<ol>` states
+// the style. A list the page prints (a), (b), (c) is `<ol type="a">`, and reading only
+// the number announced it as 1, 2, 3: a marker the delivered document does not render
+// anywhere, in the one view the Reader has for checking markers against the page. On the
+// bench corpus that is 31 of the 3,591 parseable page replies, and those same 31 are
+// exactly the replies whose view this change moves — no other reply's view differs.
+//
+// The number stays the ordinal and only its rendering moves, because that is what the
+// two attributes mean together: `<li value="5">` inside `<ol type="a">` is announced
+// "e", not "5" and not the fifth letter of some separate count. Getting this wrong in
+// the other direction is what the old code did — it reported "5", a marker no reader of
+// that document ever hears.
+type MarkerStyle = "1" | "a" | "A" | "i" | "I";
+const STYLES = new Set<string>(["1", "a", "A", "i", "I"]);
+function markerStyle(el: El): MarkerStyle {
+  const t = el.getAttribute("type") ?? "";
+  return STYLES.has(t) ? (t as MarkerStyle) : "1";
+}
+
+// The letters are bijective base-26 (z, then aa, ab), which is what CSS lower-alpha
+// counts and therefore what a browser renders and a screen reader announces.
+function alpha(n: number): string {
+  let out = "";
+  for (let i = n; i > 0; i = Math.floor((i - 1) / 26)) {
+    out = String.fromCharCode(97 + ((i - 1) % 26)) + out;
+  }
+  return out;
+}
+
+const ROMAN: ReadonlyArray<readonly [number, string]> = [
+  [1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"],
+  [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"],
+];
+function roman(n: number): string {
+  let rest = n;
+  let out = "";
+  for (const [v, s] of ROMAN) {
+    while (rest >= v) {
+      out += s;
+      rest -= v;
+    }
+  }
+  return out;
+}
+
+// A style that cannot represent this ordinal falls back to the decimal it was, which is
+// what CSS does rather than an approximation of it: `lower-alpha` and `lower-roman` have
+// no rendering for zero or a negative, and roman numerals stop at 3999. A `reversed`
+// list counting past its own start, or a `value="0"` the page prints, reaches all three.
+function renderMarker(n: number, style: MarkerStyle): string {
+  if (style === "1") return String(n);
+  if (n < 1) return String(n);
+  if (style === "a") return alpha(n);
+  if (style === "A") return alpha(n).toUpperCase();
+  if (n > 3999) return String(n);
+  return style === "i" ? roman(n) : roman(n).toUpperCase();
 }
 
 export function flatten(html: string): string {
@@ -320,15 +382,18 @@ export function flatten(html: string): string {
     const ordered = tagOf(parent) === "ol";
     const step = ordered && parent.getAttribute("reversed") !== null ? -1 : 1;
     let counter = ordered ? listStart(parent) : 0;
+    // Read once per list, not per item: `type` is the list's property, and an `<li>`
+    // has no say in how the list it sits in is marked.
+    const style = ordered ? markerStyle(parent) : "1";
     // The number this item is announced with, consuming one step of the counter. A
     // `value` on the item both sets its own number and moves the count for the rest,
     // as the HTML ordinal algorithm has it — so 1, <li value="5">, 6.
-    const nextOrdinal = (el: El): number => {
+    const nextOrdinal = (el: El): string => {
       const v = parseInt(el.getAttribute("value") ?? "", 10);
       if (Number.isInteger(v)) counter = v;
       const n = counter;
       counter += step;
-      return n;
+      return renderMarker(n, style);
     };
     const flush = (): void => {
       const text = norm(run.join(" "));

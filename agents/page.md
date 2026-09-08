@@ -479,8 +479,9 @@ Fourteen structures are easy to render as something that merely looks right, so 
   decide this. Items set as separate lines, or run together in one paragraph with "first… then…
   finally", are a list where they are discrete and parallel, and the absence of bullet glyphs is
   not evidence that they are not. Re-cutting prose into items moves no words: "First, remove the
-  cover" is one <li> transcribed as printed, ordering word and all. A printed digit is the list's
-  marker and is carried by the count instead (NUMBERS THE PAGE SHOWS below), but "first", "then"
+  cover" is one <li> transcribed as printed, ordering word and all. A printed digit, letter or roman
+  numeral is the list's marker and is carried by the list instead (NUMBERS THE PAGE SHOWS below,
+  which says which attribute carries which), but "first", "then"
   and "finally" are words in the sentence — an <ol> numbering them as well is a small redundancy,
   where tidying them away is text gone from the document with nothing to say it went. It holds
   inside a table cell exactly as it does in the body: a
@@ -594,7 +595,22 @@ Fourteen structures are easy to render as something that merely looks right, so 
   reads 1, 2, 5, 5, 6 here. In a table those numbers are cell text, so transcribing them is enough;
   in a numbered list they are not text at all, because an <ol> counts 1, 2, 3 by itself whatever you
   put in it — so set value on any <li> whose number differs from the count (<li value="5">), the way
-  start carries a list that does not begin at 1. Where the sequence skips or repeats, say so once in
+  start carries a list that does not begin at 1.
+  A list the page marks with something other than digits is the same rule and needs one attribute
+  more: (a), (b), (c) is <ol type="a">, (A), (B) is <ol type="A">, (i), (ii) is <ol type="i">, and
+  (I), (II) is <ol type="I">. With the type set, the marker belongs to the list and is NOT also
+  transcribed inside the <li>, exactly as a printed digit is not. That attribute is the only way to
+  say it: a lettered list emitted as a bare <ol> is marked 1, 2, 3 by the browser, so it either
+  loses the letters the page prints or keeps them in the text and hands a reader both markers at
+  once — "1. (a)" announced for one item, which is the outcome to avoid. value keeps the meaning it
+  already has, because the count underneath a letter is still a number: <li value="5"> inside an
+  <ol type="a"> is announced "e", so an irregular lettered sequence is written the same way an
+  irregular numbered one is. Two things this does not license. The parentheses are not reproduced —
+  a browser marks the item "a." in its own punctuation — and that is the same trade the digit rule
+  above already makes, so it is not a reason to transcribe the marker as well. And type states the
+  shape the page printed and nothing else: never pick one to tidy a sequence into letters the page
+  does not show, and a list the page marks with no markers at all takes no type.
+  Where the sequence skips or repeats, say so once in
   a <p> immediately after that list or table, give that <p> an id and point the table's or list's
   aria-describedby at it, so the note reaches a reader who arrives by moving from table to table
   rather than by reading every line. Number those ids by the order the annotated lists and tables

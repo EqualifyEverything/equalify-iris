@@ -537,6 +537,40 @@ test("an ordered list's items are announced with their numbers", () => {
   assert.ok(!/\[List item \d/.test(ul), `an unordered list was numbered:\n${ul}`);
 });
 
+test("a list marked with letters or roman numerals is announced with the marker it renders", () => {
+  // #334. The count is a number in every case, but the marker a reader HEARS is that number
+  // rendered in the list's own style, and reading only the number announced `<ol type="a">` as
+  // 1, 2, 3 — a marker the delivered document renders nowhere. 31 of the corpus's 3,591 parseable
+  // page replies carry `<ol type=…>`, and the page agent is now asked for it by name, so a view
+  // that cannot see the attribute is a view that cannot check the rule.
+  assert.match(flatten(`<ol type="a"><li>Alpha</li><li>Beta</li></ol>`), /\[List item a\] Alpha\n\[List item b\] Beta/);
+  assert.match(flatten(`<ol type="A"><li>Alpha</li></ol>`), /\[List item A\] Alpha/);
+  assert.match(flatten(`<ol type="i"><li>One</li><li>Two</li><li>Three</li><li>Four</li></ol>`),
+    /\[List item i\] One\n\[List item ii\] Two\n\[List item iii\] Three\n\[List item iv\] Four/);
+  assert.match(flatten(`<ol type="I"><li>One</li></ol>`), /\[List item I\] One/);
+  // `type` is the list's, so it decides how EVERY count under it is rendered — including one
+  // `value` sets. A browser marks this item "e", and announcing "5" would be the same defect
+  // pointing the other way: a marker no reader of that document hears.
+  assert.match(flatten(`<ol type="a"><li>First</li><li value="5">Fifth</li></ol>`),
+    /\[List item a\] First\n\[List item e\] Fifth/);
+  assert.match(flatten(`<ol type="i" start="4"><li>Fourth</li></ol>`), /\[List item iv\] Fourth/);
+  // Letters are bijective base-26, which is what CSS lower-alpha counts: z, then aa.
+  assert.match(flatten(`<ol type="a" start="26"><li>Z</li><li>AA</li></ol>`), /\[List item z\] Z\n\[List item aa\] AA/);
+  // A style that cannot represent the ordinal falls back to the decimal it was, as CSS does:
+  // neither letters nor roman numerals have a rendering for zero or a negative, and roman
+  // numerals stop at 3999. A `reversed` list counting past its start reaches the first case.
+  assert.match(flatten(`<ol type="a" reversed start="1"><li>One</li><li>Zero</li></ol>`),
+    /\[List item a\] One\n\[List item 0\] Zero/);
+  assert.match(flatten(`<ol type="i" start="4000"><li>Past</li></ol>`), /\[List item 4000\] Past/);
+  // An unknown type is ignored, the way the browser ignores it, rather than announced.
+  assert.match(flatten(`<ol type="x"><li>Alpha</li></ol>`), /\[List item 1\] Alpha/);
+  // `type` on a <ul> marks nothing here: an unordered list has no marker to lose, so the
+  // attribute must not turn one on.
+  const ul = flatten(`<ul type="a"><li>Alpha</li></ul>`);
+  assert.match(ul, /\[List item\] Alpha/);
+  assert.ok(!/\[List item \S/.test(ul), `an unordered list was marked:\n${ul}`);
+});
+
 test("a list item's number reaches it however the item is announced", () => {
   // The marker travels down to a block child (`<li><p>x</p></li>`) and combines with
   // that child's own marker, so the number has to survive both paths — a `[List item]`
@@ -588,6 +622,19 @@ test("every marker the Reader prompt advertises is one flatten emits", () => {
   // include this one.
   assert.match(flatten(`<ol><li>Alpha</li></ol>`), /\[List item 1\]/);
   assert.ok(READER_SYSTEM.includes("[List item N]"), "flatten emits a marker the prompt does not name");
+  // And the same mirror for #334's markers. A digit in that bracket is what the prompt used to
+  // promise exclusively — "the number it is announced with" — so a view that now emits a letter
+  // needs the prompt to have said a letter can appear, or the Reader reads `[List item a]` as a
+  // marker it was told is always a number and reports the document for it.
+  assert.match(flatten(`<ol type="a"><li>Alpha</li></ol>`), /\[List item a\]/);
+  assert.ok(READER_SYSTEM.includes("[List item a]"), "flatten emits a letter marker the prompt does not name");
+  assert.ok(/roman numerals from type="i"/.test(READER_SYSTEM), "the prompt does not name the roman markers flatten emits");
+  assert.match(flatten(`<ol type="i"><li>Alpha</li></ol>`), /\[List item i\]/);
+  // The prompt must not promise the number is the marker any more, since it is not.
+  assert.ok(
+    !/carries the number it is announced with/.test(READER_SYSTEM),
+    "the prompt still tells the Reader an ordered item's marker is a number",
+  );
   // Options are still content, and are separated so they cannot run together.
   assertNoTextLost(`<select><option>Platform</option><option>Design</option></select>`, "select options");
 });

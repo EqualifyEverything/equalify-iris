@@ -1058,7 +1058,25 @@ Places where a decision was left open, and where v1 intentionally stops:
 
   The prompt and the markers are one contract in the other direction too. `test/flatten.test.ts`
   asserts `READER_SYSTEM` advertises no marker `flatten` never emits (`[Option]` was documented and
-  unreachable). And every annotation that explains *correct* markup — `[spans N columns]`,
+  unreachable).
+
+  **An ordered item's marker is the number rendered in the list's style, not the number.** The
+  ordinal an `<li>` carries is always a number — that is what `start`, `value` and `reversed`
+  compute — but what a reader hears is that number rendered through `type`, and reading only the
+  number announced `<ol type="a">` as `[List item 1]`: a marker the delivered document renders
+  nowhere, in the one view the Reader has for checking markers against a page. It is the wrong
+  marker rather than a missing one, which is the same trade `reversed` was already honoured for.
+  `<li value="5">` inside `<ol type="a">` is `[List item e]`, because the two attributes mean the
+  count and its rendering and not two competing markers. A style that cannot represent the ordinal
+  falls back to the decimal — zero, a negative, a roman numeral past 3999 — because that is what
+  CSS does, and an approximation of it would put a third marker in the view that no reader hears.
+  On the bench corpus 31 of the 3,591 parseable page replies use `<ol type=…>`, every one of them a
+  style HTML renders, and those 31 are exactly the replies whose view this changes — with no text
+  outside the brackets moving on any of them, so `contentCoverage` cannot move either.
+  `agents/page.md` now asks for the attribute by name, so the view had to be able to see it before
+  the rule asking for it could be checked at all.
+
+  And every annotation that explains *correct* markup — `[spans N columns]`,
   `[spans N rows]`, `[decorative, alt empty]` — exists because the prompt tells the Reader that an
   unexplained mismatch is a defect, and the Copy Editor is licensed to restructure tables. Adding a
   check to that prompt without the annotation that reconciles it turns the review loop into a
