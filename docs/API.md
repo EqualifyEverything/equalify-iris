@@ -1418,17 +1418,23 @@ loses two in a row is not that page.
 The gate is that the reply asserted nothing, not that it was short (issue #365, directive 5, which
 asked for a floor of HTML characters). A floor reads what the parse produced, and a reply Iris
 refused whole is 0 characters of HTML however much page it was carrying. Over every bench run log on
-disk — 2,646 files across the round directories — 20 replies reach this branch: **1.04% of the 1,916
-pages drawn at least once**, and at least 0.48% of individual draws.
+disk — 2,646 files across the round directories, where a repo-wide `find` says 2,657 and the other 11
+are corpus manifests in the bench root with no extraction call in them — 20 replies reach this branch:
+**1.04% of the 1,916 pages drawn at least once**, and at least 0.48% of individual draws.
 
 The per-draw rate is a lower bound rather than a figure, and the reason is worth stating because two
 shipped versions of this paragraph got it wrong. `phase: "extraction"` carries 8,073 `agent_call`s, of
 which 4,159 name the page agent and 3,914 the fidelity check on the same pages — but `agent_call`
 records no `step` (`src/store/runlog.ts`), and **three** call sites log under that agent and that
 phase: the draw, the correction pass, and the specialist merge. So 4,159 bounds the draws from above
-and does not count them. `model_call` does carry `step`, and only recent rounds emit it: in the 60 log
-files that have it, 954 of 1,558 page-agent calls are draws and 604 are corrections, which puts the
-rate nearer 0.8% if that mix holds. The **1,916 is exact** — distinct round-and-page pairs counted off
+and does not count them. **In this corpus the third site contributes nothing and the inflation is
+corrections alone:** `4,159 + 3,914` is the whole phase, so no specialist agent ever logged a row here,
+and `mergeSpecialist` runs only after one returns a fragment — which 0 `specialist_merge` `model_call`s
+on disk says independently. `model_call` does carry `step`, and only recent rounds emit it: in the 60
+log files that have it, 954 of 1,558 page-agent calls are draws and 604 are corrections, which puts the
+rate nearer 0.8% if that mix holds. A correction always follows a draw of the same page in the same run
+(`correctPage`'s only caller is inside `extractPage`), which is what makes *pages drawn at least once* a
+sound reading of a population that counts corrections. The **1,916 is exact** — distinct round-and-page pairs counted off
 page-agent calls alone, where a mixed count gives 2,045, because 129 pairs carry a checker call and no
 draw. The 0.255% this section first shipped was wrong twice over: 20/7,843 off a corpus missing the
 round directory named `runs`, where the phase-wide figure on the whole corpus is 20/8,073 = 0.248%.
