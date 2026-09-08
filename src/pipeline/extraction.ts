@@ -1206,11 +1206,31 @@ const DEGRADED_IMAGE_LOG =
 // marks` and `blurry marks` are the content-bearing pages #193 kept them for.
 const SPARSE = String.raw`stray|scattered|isolated|random|residual`;
 // `noise` is a veto word and standing alone it is a claim about the image, but named for the thing
-// that made it — `scanning noise`, `scanner noise`, `scan noise` — it names the marks instead: it is
-// the class the specks belong to, which is what "consistent with scanning noise" says about them.
-// `the scan is noisy` and `there is noise in the scan` have no such word in front of the noun and go
-// on refusing (#220).
-const MARK = String.raw`specks?|speckles?|speckling|flecks?|dots?|dust|debris|smudges?|blemishes?|artifacts?|(?:${SPARSE})\s+mark(?:s|ings?)?|(?:scan|scanner|scanning)[\s/-]?noise`;
+// that made it — `scanning noise`, `scanner noise`, `scan noise`, `compression noise` — it names the
+// marks instead: it is the class the specks belong to, which is what "consistent with scanning noise"
+// says about them. `the scan is noisy` and `there is noise in the scan` have no such word in front of
+// the noun and go on refusing (#220).
+//
+// `compression` is here because #220's three words are the CAPTURE and a log names the PROCESS just as
+// readily: "Page is blank apart from minor scanning artifacts (specks and compression noise)" was a page
+// lost for real — `blank_vetoed: ["noise"]`, `page_no_output`, `page_extraction_failed` — in `runs-231`
+// on 2026-08-27 (#429). What decided it was the head word and nothing else: the same reply with
+// `scanning noise`, with `dust` in place of the noise, or with the noise dropped to `compression
+// artifacts` is honoured today, so the licence is attached to a word rather than to the list or the
+// punctuation around it.
+//
+// Which words those are is a measurement, not a guess. Over the 205 replies on disk whose HTML carries
+// no content, every `noise` in the log has a head word in front of it and there are four of them:
+// `scanner` (2), `dust` (2, in the joined tail below), `scanning` (1) and `compression` (1). So this list
+// now covers all four wordings the corpus contains and `noise` never appears bare in a blank page's log.
+// The 3,935 replies that DO carry content use the word ten times and never about an image — `screen-reader
+// noise`, `presentational noise`, `avoid noise` — which is why no reading of `noise` here can reach them.
+//
+// `image noise`, `sensor noise` and `jpeg noise` are deliberately NOT here, and the reason is the one
+// above rather than their absence from the corpus: `image` names the thing whose quality is in question,
+// so `image noise` is the claim #220 kept refusing, and the other two would be a list extended by
+// imagination past the wordings that exist.
+const MARK = String.raw`specks?|speckles?|speckling|flecks?|dots?|dust|debris|smudges?|blemishes?|artifacts?|(?:${SPARSE})\s+mark(?:s|ings?)?|(?:scan|scanner|scanning|compression)[\s/-]?noise`;
 // What may stand between a quantifier and that noun. The veto words are here on purpose — `faint
 // specks` is the paper and `faint scan` is the image — alongside the words that are not veto words
 // at all, because the run has to reach the noun in one piece to match ("a few scattered
@@ -1284,15 +1304,83 @@ const MARK_QUANTIFIER = String.raw`(?:(?:a|an|the|only|just|some|few|several|cou
 // exemption exists for, and no wording in the sentence says the model meant the capture. Closing it
 // would cost #220 its wordings to catch a sentence nobody has written yet.
 const NOT_CLAUSE_HEAD = String.raw`(?<!(?:\b(?:is|are|was|were|be|been|being|appears?|appeared|seems?|seemed|looks?|looked|shows?|showed|showing|remains?|has|have|had)\b|[:—–]|\s-)[^.!?;\n]{0,200})`;
-const MARKS_PHRASE = new RegExp(
-  String.raw`\b(?:` +
-    String.raw`${MARK_QUANTIFIER}${NOT_CLAUSE_HEAD}(?:${MARK_MODIFIER}),[\s/-]+(?:(?:${MARK_MODIFIER}),?[\s/-]+){0,2}` +
-    "|" +
-    String.raw`${MARK_QUANTIFIER}(?:(?:${MARK_MODIFIER})[\s/-]+){0,3}` +
-    ")" +
-    `(?:${MARK})(?:\\s*[/,&]\\s*(?:${MARK}|noise))*`,
-  "gi",
-);
+// ONE word that is on none of these lists may stand between the run and its noun, and it is the one
+// place in this phrase where an unlisted word is allowed. `MARK_MODIFIER` is a hand-written list, so a
+// stack breaks on the first adjective nobody thought of and puts the doubt word back in the veto's
+// scope: "Only faint, indistinct specks are visible" is refused today where "Only faint specks are
+// visible" is honoured, and the difference is one word the list happens not to carry (#429). The words
+// in that position are adjectives of indistinctness, size and shape — `indistinct` is the one the corpus
+// has — and there is no end to them, which is why this is a slot rather than five more entries: adding
+// words to a list is what produced the cliff (#220's `SPARSE`, #371's objection).
+//
+// Bounded three ways, and each bound is what keeps the widening from reaching a doubt word it could not
+// reach before:
+//
+//   POSITION. The slot sits IMMEDIATELY before the marks noun and nowhere else, so a veto word can only
+//   be reached across it when the log wrote `<veto> <word> <marks noun>` with nothing else between. That
+//   is what keeps "The page is dark, with faint specks" refusing on `dark` — `with` stands before
+//   `faint`, not before `specks`, and only one slot exists — which is the case pinned above and the one
+//   an unlisted word ANYWHERE in the stack would have taken.
+//
+//   COUNT. One, because a second would be the same reach again: the guarantee above is per word.
+//
+//   WHAT IT MAY NOT BE, checked in `vetoScope` where the lists it is checked against are in scope
+//   rather than compiled into this pattern. A doubt word is refused, so `faint, streaked specks` keeps
+//   its `streak` and goes on refusing as `DEGRADED_IMAGE_LOG` intends; a name for text is refused, which
+//   is what makes this incapable of removing an affirmation from the scope the contradiction check reads
+//   (that check runs over the same stripped text, so a slot that could eat `handwriting` could ship a
+//   page with writing on it in silence — the #194 defect); and a determiner, a preposition, a
+//   conjunction, a copula or a negator is refused, because each of those opens a phrase of its own
+//   instead of dressing the noun.
+//
+// A refused slot falls back to the phrase WITHOUT the slot, over the same span, and that is not a detail:
+// leaving the span alone instead — the obviously conservative move — takes back strips that were never in
+// question. The slot matches `and` in "(specks and scanning noise)", so refusing the whole match there
+// kept `noise` in scope and #220's own wording started refusing, with fix A above broken by it. The
+// widening may only ever ADD to what is stripped, so where it cannot, base's pattern runs.
+//
+// Measured against every no-content reply on disk, this slot moves NOTHING: the one
+// log that contains `indistinct` writes it in front of bare `marks`, which is not a marks noun for the
+// reason #193 gave, so it goes on refusing. It is here for the wording, not for a rescue — same standing
+// as `INPUT_SUBSTRATE` below, and stated the same way rather than left to look like a fix that paid.
+const MARK_ADJECTIVE = String.raw`[A-Za-z][A-Za-z'-]*`;
+function marksPhrase(slot: string): RegExp {
+  return new RegExp(
+    String.raw`\b(?:` +
+      String.raw`${MARK_QUANTIFIER}${NOT_CLAUSE_HEAD}(?:${MARK_MODIFIER}),[\s/-]+(?:(?:${MARK_MODIFIER}),?[\s/-]+){0,2}${slot}` +
+      "|" +
+      String.raw`${MARK_QUANTIFIER}(?:(?:${MARK_MODIFIER})[\s/-]+){0,3}${slot}` +
+      ")" +
+      `(?:${MARK})(?:\\s*[/,&]\\s*(?:${MARK}|noise))*`,
+    "gi",
+  );
+}
+const MARKS_PHRASE = marksPhrase(String.raw`(?:(${MARK_ADJECTIVE})[\s/-]+)?`);
+// The same phrase with no slot in it: what a refused slot falls back to, and what this file matched
+// before the slot existed.
+const MARKS_PHRASE_LISTED = marksPhrase("");
+// What the slot may not hold, asked of the lists that already decide these questions so that a word
+// cannot mean one thing here and another twenty lines down. Read here rather than compiled into the
+// pattern because every one of these lists is declared further down the file, and because the reason each
+// is consulted is worth reading in words. `with` and `without` are the two entries of their own: they are
+// the prepositions these logs put in front of the marks ("The page is dark, with faint specks") and no
+// list below carries them.
+function marksPhraseStrip(match: string, ...groups: unknown[]): string {
+  const adjective = (groups[0] ?? groups[1]) as string | undefined;
+  if (adjective === undefined) return " ";
+  const word = adjective.toLowerCase();
+  const listedOnly = () => match.replace(MARKS_PHRASE_LISTED, " ");
+  // Opens a phrase of its own instead of dressing the noun.
+  if (DETERMINER.has(word) || LOCATIVE.has(word) || CONJUNCTION.has(word) || COPULA.has(word)) return listedOnly();
+  if (NEGATOR.has(word) || word === "with" || word === "without") return listedOnly();
+  // A name for text, which this may not remove from the scope the contradiction check reads. Read with
+  // word boundaries and not `AFFIRMED_NOUN`, which is anchored: `text-like` is one token to the slot and
+  // `^text$` does not see the name inside it.
+  if (NAMES_TEXT.test(word)) return listedOnly();
+  // A doubt word, which stays in scope for `DEGRADED_IMAGE_LOG` and `HARD_DOUBT` to find.
+  if (DEGRADED_IMAGE_LOG.test(word)) return listedOnly();
+  return " ";
+}
 // Two constructions that say the marks are not text, and so are the declaration rather than a
 // failure to read. Both are anchored to a marks noun earlier in the sentence with NO NAME FOR TEXT
 // in between, which is what makes the marks the thing being denied. Without the anchor they read as
@@ -1329,6 +1417,10 @@ const MARKS_PHRASE = new RegExp(
 // `NEGATED` reads that correctly — with no doubt word anywhere in the log, which nothing in nine
 // bench rounds has produced. If a round ever produces one, the noun goes in the list.
 const TEXT_NOUN = String.raw`text|texts|content|print(?:s|ing|ed)?|lines?|words?|characters?|letters?|glyphs?|digits?|numerals?|handwriting|writing|typing|paragraphs?|sentences?|headings?|captions?|figures?|images?|illustrations?|diagrams?|tables?|stamps?|signatures?|labels?|logos?|seals?`;
+// The same list as a word-boundary test, for the one caller that has a single token in hand rather than a
+// statement: `marksPhraseStrip` above, where a slot holding `text-like` has to read as a name for text
+// (`AFFIRMED_NOUN` is anchored and would not).
+const NAMES_TEXT = new RegExp(String.raw`\b(?:${TEXT_NOUN})\b`, "i");
 // A name for text only affirms it where it is not NEGATED, which is the difference between "the
 // printed text does not resolve" and "no printed text". The prompt asks the agent for both halves of
 // the observation in one breath — name the marks, deny the text — so without this the more explicit
@@ -1683,7 +1775,7 @@ function vetoScope(log: string): string {
     .replace(NOT_LEGIBLE_TEXT, (match, offset: number, whole: string) =>
       deniesToStatementEnd(whole, offset + match.length) ? " " : match,
     )
-    .replace(MARKS_PHRASE, " ");
+    .replace(MARKS_PHRASE, marksPhraseStrip);
 }
 
 // The other question, and the one nothing above asks: does the log CONTRADICT its own declaration?
@@ -1836,6 +1928,32 @@ function folioAt(tokens: Word[], i: number): boolean {
   if (word === undefined) return false;
   if (FOLIO_HEAD.has(word)) return true;
   return (word === "page" || word === "pages") && FOLIO_COUNT.has(tokens[i + 1]?.word ?? "");
+}
+
+// The name of the FILE is not a thing on the page, and #343's page was lost to a sentence about it. The
+// reply ends "Image filename indicates this is page 14 of 25 in document acir.", and `image` — a name for
+// text by `TEXT_NOUN`, since a picture on the paper is one — reached five words along for the `is` in
+// `this is page 14` and reported a correctly read blank page as failed (`affirmed: "image filename
+// indicates this is page"`, `runs-extract-kimi100`, kimi-k2.5, 2026-09-03). The other half of that same
+// reply, a `resolve` veto, is what `MARKS_NOT_TEXT` fixed; this half survived it (#429).
+//
+// The substrate skip below already covers every wording with a determiner in front — "The image filename
+// indicates…", "The file name shows…" — because `definiteBefore` reads `the` and stops there. So which
+// wordings lose a page was decided by the article the model happened to omit, which is the thing #190
+// named and #371 restated: a fix worth making removes the wording from the question rather than adding
+// the one that was reported. What makes the file's name recognisable is the noun after it and not the
+// determiner before it, so that is what this asks for.
+//
+// Two words, both closed: `filename` as one token, and `file name` as two. `name` alone is NOT enough —
+// "Image name is printed at the top" is a page with something on it, and a log that means the file says
+// so with `file` or with `filename`. Nothing is skipped but the subject: the loop reads on, so "Image
+// filename indicates page 14, and a heading is visible." still affirms through `heading` — the same
+// guarantee `folioAt` above is written to keep.
+const FILE_NAME = new Set("filename filenames".split(" "));
+function fileNameAt(tokens: Word[], i: number): boolean {
+  const next = tokens[i + 1]?.word;
+  if (next === undefined) return false;
+  return FILE_NAME.has(next) || (next === "file" && tokens[i + 2]?.word === "name");
 }
 
 function negatedBefore(tokens: Word[], i: number): boolean {
@@ -2239,7 +2357,7 @@ export function contentAffirmed(scope: string): string | null {
         continue;
       }
       if (!AFFIRMED_NOUN.test(word) || negatedInList(tokens, i) || participleAfterCopula(tokens, i)) continue;
-      if (LOCATIVE_SUBSTRATE.has(word) && definiteBefore(tokens, i)) continue;
+      if (LOCATIVE_SUBSTRATE.has(word) && (definiteBefore(tokens, i) || fileNameAt(tokens, i))) continue;
       // `printed page number`, `printed folio` — a name for text dressing the one thing on the paper
       // this pipeline never delivers (`folioAt`).
       if (QUALIFIER.has(word) && folioAt(tokens, i + 1)) continue;
@@ -2861,19 +2979,21 @@ async function renderPage(
     // pairs off page-agent calls alone, against 2,042 for a mixed count, the difference being 129 pairs
     // that carry a checker call and no draw. The 0.255% this comment first shipped was wrong twice:
     // 20/7,843 off a corpus that missed the round directory named `runs`, where the phase-wide rate on
-    // the whole corpus is 20/8,049 = 0.248%. Replaying all 20 through today's parser leaves FIVE: the other
-    // 15 are blank pages whose declaration `blankDeclaration` now honours, so they never get here and
-    // a floor would have redrawn every one of them. The five, and what each one wanted:
+    // the whole corpus is 20/8,049 = 0.248%. Replaying all 20 through today's parser leaves THREE: the
+    // other 17 are blank pages whose declaration `blankDeclaration` honours, so they never get here and
+    // a floor would have redrawn every one of them. Two of those 17 were REFUSALS until #429, and are
+    // why that issue was filed: one vetoed on the word "noise" for a log reading "blank apart from
+    // minor scanning artifacts (specks and compression noise)", one refused as self-contradicting for a
+    // log that named the IMAGE FILENAME ("image filename indicates this is page 14 of 25"). Both pages
+    // ARE blank, and not on one log's word: every PAGE-AGENT reply on disk for those two images
+    // declares the page blank — 14 replies on one, 8 on the other from three different models — and
+    // none of the 22 carries content. (Page-agent, for the reason the rate above states: count every
+    // reply in the phase instead and the checker's verdicts on the same pages inflate both figures.) So
+    // the redraw those two used to get bought a second copy of the same sentence at a full page's price.
     //
-    //   - two are blank pages whose declaration a guard REFUSED, and `asserted` is true on both: one
-    //     vetoed on the word "noise" for a log reading "blank apart from minor scanning artifacts
-    //     (specks and compression noise)", one refused as self-contradicting for a log that named the
-    //     IMAGE FILENAME ("image filename indicates this is page 14 of 25"). Both pages ARE blank, and
-    //     not on one log's word: every PAGE-AGENT reply on disk for those two images declares the page
-    //     blank — 14 replies on one, 8 on the other from three different models — and none of the 22
-    //     carries content. (Page-agent, for the reason the rate above states: count every reply in the
-    //     phase instead and the checker's verdicts on the same pages inflate both figures.) So a redraw buys a second copy of the same sentence at a full page's price.
-    //     `asserted` refuses them here, and what they want is a wording fix in the guard.
+    // The three that still arrive carry no declaration for `asserted` to read at all — no envelope
+    // survives the parse, so there is no `log` — and each of the three wanted the redraw:
+    //
     //   - one is a 47-character reply, `<h1><cite role="doc-bibliography"></cite></h1>`, on a page the
     //     same model rendered as 7.6-9.8 KB in three independent redraws and delivered in another
     //     round. That is a draw the model can lose, which is what this exists for.
@@ -2888,8 +3008,9 @@ async function renderPage(
     //     them. Refusing it is right — the delivered document's contract is that every word in it is a
     //     word on the page — and the model asked for the redraw in as many words.
     //
-    // So `asserted` is correct on 5 of 5 where a character floor is correct on 3, and the two it
-    // saves are the two where the model answered the question and a guard disbelieved it.
+    // So `asserted` is correct on all 20 — it honours the 17 and admits these 3 — where a character
+    // floor redraws all 20 and is right about 3 of them. Mind the denominators: the 3 is the same three
+    // replies both times, and it was 3 of 5 before #429 moved two of the five out of this branch.
     //
     // What it does NOT cover, in two spellings, because the corpus contains neither: a blank page
     // whose declaration `blankDeclaration` cannot see. One is markup-only — `<!-- blank page -->` is
@@ -2899,7 +3020,7 @@ async function renderPage(
     // redrawn anyway. Both cost one call and change no outcome — the second draw declares the page
     // blank the same way and the page is refused as it is today — and neither is a share of the rate:
     // 1 of the 20 replies carried any markup at all (the 47-character one, which is not a
-    // declaration), and every one of the 15 honoured declarations sent `html` as a string. Believing a
+    // declaration), and every one of the 17 honoured declarations sent `html` as a string. Believing a
     // declaration whose `html` is null is a change to the BLANK routing, not to this branch: it would
     // deliver such a page instead of refusing it, which is #219's argument to reopen and not this
     // one's to settle.
