@@ -1417,14 +1417,18 @@ loses two in a row is not that page.
 
 The gate is that the reply asserted nothing, not that it was short (issue #365, directive 5, which
 asked for a floor of HTML characters). A floor reads what the parse produced, and a reply Iris
-refused whole is 0 characters of HTML however much page it was carrying. Over every extraction call
-in every bench round directory on disk — 7,843 calls — 20 replies reach this branch, 0.255%, and
-replaying all 20 through today's parser leaves **five**: the other 15 are blank pages whose
+refused whole is 0 characters of HTML however much page it was carrying. Over every bench log on disk
+— 2,657 files in every round directory — 20 replies reach this branch: **0.48% of page draws**, or
+1.04% of the 1,916 distinct round-and-page pairs. The denominator is draws, which the phase name does
+not give you: `phase: "extraction"` carries 8,073 `agent_call`s and only 4,159 are the page agent's,
+the rest being the fidelity check on the same pages — counting the phase gives 0.255%, half the true
+rate, and that is the figure this section first shipped with. Replaying all 20 through today's parser
+leaves **five**: the other 15 are blank pages whose
 declaration [`page_blank`](#page_blank) now honours, and a floor would have redrawn every one of
 them. Of the five, two are blank pages whose declaration a guard refused — one on the doubt word
 `noise`, for a log reading *"blank apart from minor scanning artifacts (specks and compression
 noise)"*, one as self-contradicting for a log naming the **image filename**. Both pages are blank on
-more than one log's word: every extraction reply on disk for those two images declares the page blank
+more than one log's word: every page-agent reply on disk for those two images declares the page blank
 — 14 replies on one, 8 on the other from three different models — and none of the 22 carries content,
 so redrawing them buys a second copy of the same sentence at a full page's price. The declaration test
 refuses both and admits the other three, which is 5 of 5 where a character floor is right about 3.

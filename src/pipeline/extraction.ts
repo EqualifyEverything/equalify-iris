@@ -2822,9 +2822,13 @@ async function renderPage(
     // The gate is `asserted` and not a length, and the difference is the whole change. Directive 5
     // asks for a re-extraction "when the reply is under some floor of HTML", and a floor cannot
     // separate the cases: it reads what the PARSE produced, and a reply Iris refused whole is 0
-    // characters of HTML however much page it was carrying. Over every extraction call in every bench
-    // round directory on disk — 7,843 calls, 3,807 distinct (round, log, image) triples — 20 replies
-    // reach this branch, 0.255%, and replaying all 20 through today's parser leaves FIVE: the other
+    // characters of HTML however much page it was carrying. Over every bench log on disk — 2,657 log
+    // files in every round directory — 20 replies reach this branch. The denominator is DRAWS, and it
+    // is worth saying which, because the phase name does not give it: `phase: "extraction"` logs 8,073
+    // `agent_call`s and only 4,159 are the page agent's, the rest being the fidelity check run on the
+    // same pages. So the rate is 0.48% of draws, or 1.04% of the 1,916 distinct round-and-page pairs —
+    // not the 0.255% a phase-wide count gives, which is the figure this comment first shipped with and
+    // which understated it by half. Replaying all 20 through today's parser leaves FIVE: the other
     // 15 are blank pages whose declaration `blankDeclaration` now honours, so they never get here and
     // a floor would have redrawn every one of them. The five, and what each one wanted:
     //
@@ -2832,9 +2836,10 @@ async function renderPage(
     //     vetoed on the word "noise" for a log reading "blank apart from minor scanning artifacts
     //     (specks and compression noise)", one refused as self-contradicting for a log that named the
     //     IMAGE FILENAME ("image filename indicates this is page 14 of 25"). Both pages ARE blank, and
-    //     not on one log's word: every extraction reply on disk for those two images declares the page
+    //     not on one log's word: every PAGE-AGENT reply on disk for those two images declares the page
     //     blank — 14 replies on one, 8 on the other from three different models — and none of the 22
-    //     carries content. So a redraw buys a second copy of the same sentence at a full page's price.
+    //     carries content. (Page-agent, for the reason the rate above states: count every reply in the
+    //     phase instead and the checker's verdicts on the same pages inflate both figures.) So a redraw buys a second copy of the same sentence at a full page's price.
     //     `asserted` refuses them here, and what they want is a wording fix in the guard.
     //   - one is a 47-character reply, `<h1><cite role="doc-bibliography"></cite></h1>`, on a page the
     //     same model rendered as 7.6-9.8 KB in three independent redraws and delivered in another
