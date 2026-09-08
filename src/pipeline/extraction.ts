@@ -2822,9 +2822,46 @@ async function renderPage(
     // The gate is `asserted` and not a length, and the difference is the whole change. Directive 5
     // asks for a re-extraction "when the reply is under some floor of HTML", and a floor cannot
     // separate the cases: it reads what the PARSE produced, and a reply Iris refused whole is 0
-    // characters of HTML however much page it was carrying. Over every extraction call in every bench
-    // round directory on disk — 7,843 calls, 3,807 distinct (round, log, image) triples — 20 replies
-    // reach this branch, 0.255%, and replaying all 20 through today's parser leaves FIVE: the other
+    // characters of HTML however much page it was carrying. Over every bench run log on disk — 2,639
+    // files in the 80 round directories — 20 replies reach this branch, and they land on 20 DISTINCT
+    // round-and-page pairs, so 1.05% of the 1,913 pages drawn at least once is a share of pages rather
+    // than an average over repeats (those pairs carry 2.2 page-agent calls each, so it had to be
+    // counted, not assumed). Per individual draw the rate is AT LEAST 0.48%. The 20 are `page_no_output`
+    // events, and they have to be: nothing on disk logs `page_redrawn`, because every round predates
+    // this branch.
+    //
+    // A repo-wide `find` counts 2,657 `*.jsonl`, and the 18 left out here are two different things: 11
+    // corpus manifests in the bench root, with no extraction call in them, and 7 `*-dry.jsonl` probe logs
+    // under `bench-data/`, which DO carry extraction calls — 12 page-agent calls and 12 checks on 3 pages
+    // — and which any walker that descends every top-level directory folds in silently. PAGE-AGENT CALLS,
+    // not draws: they are `agent_call`s, and the paragraph below is about exactly why that word cannot be
+    // narrowed. Nor could it be here — those 7 files log 0 page `model_call`s at all, so none of them is
+    // among the 60 that carry `step`, which is why 60 / 954 / 604 / 1,558 are the only figures the
+    // exclusion leaves alone. That is where an
+    // earlier version of this comment got 4,159 calls and 1,916 pages. Every count below is the round
+    // directories alone, and it moves the headline: 20/1,913 is 1.0455%, where 20/1,916 was 1.0438% and
+    // rounded to 1.04%. Four digits because three would be 1.045, the half that cannot decide itself.
+    // 0.48% and the 0.248% named at the end are unchanged.
+    //
+    // The per-draw rate is a bound and not a figure, said out loud because two shipped versions of this
+    // comment stated it as one. `phase: "extraction"` logs 8,049 `agent_call`s, 4,147 of them naming
+    // the page agent and 3,902 the fidelity check on the same pages — but `agent_call` records no
+    // `step` (`src/store/runlog.ts`) and THREE sites log under that agent and phase: this draw,
+    // `correctPage` below, and `mergeSpecialist`. 4,147 therefore bounds the draws from above rather
+    // than counting them. In THIS corpus the third site contributes nothing and the inflation is
+    // corrections alone: `4,147 + 3,902` is the whole phase, so no specialist agent ever logged a row
+    // here, and `mergeSpecialist` only runs after one returns a fragment. That sum carries the claim by
+    // itself: 0 `specialist_merge` `model_call`s is a fact about the 60 files that emit `step`, and says
+    // nothing about the other 2,579. `model_call` does carry `step`, and only recent
+    // rounds emit it: across those 60 log files, 954 of 1,558 page-agent calls are draws and
+    // 604 are corrections, so the rate is nearer 0.8% if that mix holds corpus-wide — and a correction
+    // always follows a draw of the same page in the same run (`correctPage`'s only caller is inside
+    // `extractPage`), which is what makes "pages drawn at least once" a sound reading of a population
+    // that counts corrections. The 1,913 IS exact — distinct round-and-page
+    // pairs off page-agent calls alone, against 2,042 for a mixed count, the difference being 129 pairs
+    // that carry a checker call and no draw. The 0.255% this comment first shipped was wrong twice:
+    // 20/7,843 off a corpus that missed the round directory named `runs`, where the phase-wide rate on
+    // the whole corpus is 20/8,049 = 0.248%. Replaying all 20 through today's parser leaves FIVE: the other
     // 15 are blank pages whose declaration `blankDeclaration` now honours, so they never get here and
     // a floor would have redrawn every one of them. The five, and what each one wanted:
     //
@@ -2832,9 +2869,10 @@ async function renderPage(
     //     vetoed on the word "noise" for a log reading "blank apart from minor scanning artifacts
     //     (specks and compression noise)", one refused as self-contradicting for a log that named the
     //     IMAGE FILENAME ("image filename indicates this is page 14 of 25"). Both pages ARE blank, and
-    //     not on one log's word: every extraction reply on disk for those two images declares the page
+    //     not on one log's word: every PAGE-AGENT reply on disk for those two images declares the page
     //     blank — 14 replies on one, 8 on the other from three different models — and none of the 22
-    //     carries content. So a redraw buys a second copy of the same sentence at a full page's price.
+    //     carries content. (Page-agent, for the reason the rate above states: count every reply in the
+    //     phase instead and the checker's verdicts on the same pages inflate both figures.) So a redraw buys a second copy of the same sentence at a full page's price.
     //     `asserted` refuses them here, and what they want is a wording fix in the guard.
     //   - one is a 47-character reply, `<h1><cite role="doc-bibliography"></cite></h1>`, on a page the
     //     same model rendered as 7.6-9.8 KB in three independent redraws and delivered in another
