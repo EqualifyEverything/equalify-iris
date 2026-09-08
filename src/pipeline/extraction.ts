@@ -2822,13 +2822,22 @@ async function renderPage(
     // The gate is `asserted` and not a length, and the difference is the whole change. Directive 5
     // asks for a re-extraction "when the reply is under some floor of HTML", and a floor cannot
     // separate the cases: it reads what the PARSE produced, and a reply Iris refused whole is 0
-    // characters of HTML however much page it was carrying. Over every bench log on disk — 2,657 log
-    // files in every round directory — 20 replies reach this branch. The denominator is DRAWS, and it
-    // is worth saying which, because the phase name does not give it: `phase: "extraction"` logs 8,073
-    // `agent_call`s and only 4,159 are the page agent's, the rest being the fidelity check run on the
-    // same pages. So the rate is 0.48% of draws, or 1.04% of the 1,916 distinct round-and-page pairs —
-    // not the 0.255% a phase-wide count gives, which is the figure this comment first shipped with and
-    // which understated it by half. Replaying all 20 through today's parser leaves FIVE: the other
+    // characters of HTML however much page it was carrying. Over every bench run log on disk — 2,646
+    // files across the round directories — 20 replies reach this branch: 1.04% of the 1,916 pages drawn
+    // at least once, and AT LEAST 0.48% of individual draws.
+    //
+    // The per-draw rate is a bound and not a figure, said out loud because two shipped versions of this
+    // comment stated it as one. `phase: "extraction"` logs 8,073 `agent_call`s, 4,159 of them naming
+    // the page agent and 3,914 the fidelity check on the same pages — but `agent_call` records no
+    // `step` (`src/store/runlog.ts`) and THREE sites log under that agent and phase: this draw,
+    // `correctPage` below, and `mergeSpecialist`. 4,159 therefore bounds the draws from above rather
+    // than counting them. `model_call` does carry `step`, and only recent rounds emit it: across the 60
+    // log files that have it, 954 of 1,558 page-agent calls are draws and 604 are corrections, so the
+    // rate is nearer 0.8% if that mix holds corpus-wide. The 1,916 IS exact — distinct round-and-page
+    // pairs off page-agent calls alone, against 2,045 for a mixed count, the difference being 129 pairs
+    // that carry a checker call and no draw. The 0.255% this comment first shipped was wrong twice:
+    // 20/7,843 off a corpus that missed the round directory named `runs`, where the phase-wide rate on
+    // the whole corpus is 20/8,073 = 0.248%. Replaying all 20 through today's parser leaves FIVE: the other
     // 15 are blank pages whose declaration `blankDeclaration` now honours, so they never get here and
     // a floor would have redrawn every one of them. The five, and what each one wanted:
     //

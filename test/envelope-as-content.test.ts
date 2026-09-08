@@ -2364,8 +2364,10 @@ test("a correction that answered in bare HTML is still a correction", async () =
 // #365 directive 5. The gate is `blankDeclaration`'s `asserted` and not a floor of characters, and
 // these four tests are the difference: a reply that ANSWERED the question is never redrawn however
 // few characters it carries, and a reply that answered nothing is redrawn once whatever its shape.
-// The measurement is in the comment at the branch — 20 of 4,159 page draws reach it (0.48%), five
-// survive today's parser, and `asserted` is right about 5 of 5 where a length is right about 3.
+// The measurement is in the comment at the branch — 20 replies reach it, 1.04% of the 1,916 pages
+// drawn at least once and at least 0.48% of individual draws (a bound: `agent_call` carries no `step`,
+// so the 4,159 page-agent calls in the phase include corrections). Five survive today's parser, and
+// `asserted` is right about 5 of 5 where a length is right about 3.
 
 test("a draw that carried no page is asked once more, and the second draw is the page", async () => {
   await withTemp(async (dir) => {
