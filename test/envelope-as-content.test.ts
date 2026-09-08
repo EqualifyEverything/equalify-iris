@@ -717,6 +717,14 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     //
     // `scanning noise` names the class the specks belong to rather than the state of the capture.
     "Page 8 of 25 appears to be blank or nearly blank. Only a few scattered specks/artifacts are visible, consistent with scanning noise. No legible text, images, tables, or other content could be identified.",
+    // …and so does `compression noise`, which names the process instead of the capture. Verbatim from
+    // `runs-231` (2026-08-27), where it is one of the two pages the guard is on record for LOSING:
+    // `blank_vetoed: ["noise"]`, `page_no_output`, `page_extraction_failed` (#429). #220 licensed the
+    // three words for the scan and the head word was what decided the page — the same reply with
+    // `scanning noise` in it was delivered.
+    "Page is blank apart from minor scanning artifacts (specks and compression noise). No printed text, images, or other content is present.",
+    "Page is blank apart from compression noise, no text.",
+    "Page is blank. Only specks/compression noise is visible, no text.",
     // A stack of modifiers written as a list, with `isolated` letting bare `marks` be the marks.
     "Page 14 of 25 appears to be blank or nearly blank. Only faint, isolated marks are visible (a small dot near the upper-left area and a few very faint specks elsewhere) that do not resolve into any characters, words, diagrams, or other content. No text, images, tables, or other elements were transcribed.",
     // `do not resolve into` with more nouns conjoined onto the object than the tail read would follow:
@@ -753,6 +761,24 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // `smudges` is a mark left on the paper and stays exempt, which is the line the three nouns #226
     // added are measured against: this is delivered, and `an ink smear in the lower corner` is not.
     "Page is blank. A few faint smudges on the paper, no text.",
+    // One word from OUTSIDE `MARK_MODIFIER` may stand between the stack and its noun, which is what
+    // `faint specks` being delivered and `faint, indistinct specks` being refused was: a hand-written
+    // list of adjectives, and the model reaching for one that is not on it (#429). The slot is one word
+    // wide and sits immediately in front of the marks noun, so it widens which phrases are the marks and
+    // never how far the run reaches for a doubt word — `The page is dark, with faint specks` above still
+    // keeps its `dark`, because `with` is not where the slot is.
+    "Page is blank. Only faint, indistinct specks are visible.",
+    "Page is blank. Only faint indistinct specks are visible.",
+    "Page is blank. Only a few faint, irregular dots are visible, no text.",
+    // A joined tail, and the reason the slot asks base what IT stripped rather than asking a list what
+    // base might have stripped: the slot reads `noise` here as an adjective of `speckles`, where base
+    // reads it as the second word of the `scanner noise` marks noun. A revision that answered from a list
+    // of words the stack carries handed `noise` back into the scope and lost this page, which is a real
+    // reply — `runs-bystep-now`, honoured before #429 went near it.
+    "Page is blank. No printed content or page number visible; only minor scanner noise/speckles present.",
+    // The unlisted word may be plain dressing spelled with a hyphen behind a listed one, which base
+    // honours unhyphenated (`Only dark specks are visible`) and refused here for the hyphen alone.
+    "Page is blank. Only dark-shaded specks are visible.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
@@ -940,6 +966,11 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // only where a word in front of it says what made them: the scan being noisy is the scan.
     "Page is blank. The scan is noisy.",
     "Page appears blank. There is noise in the scan.",
+    // `compression noise` is licensed above and `image noise` is not, and the reason is the same one:
+    // `image` names the thing whose quality is in question, so this is the claim about the capture that
+    // #220's three controls are. A licence attaches to a head word, so which words are on it is the whole
+    // of the rule — and this is the boundary of the four the corpus contains (#429).
+    "Page is blank. There is image noise.",
     // A comma may join two modifiers of a marks noun, and a description of the capture is not one:
     // the phrase starts after `with`, so both doubt words stay.
     "Page is blank. The scan is dark, blurry, with a few specks and no text.",
@@ -982,6 +1013,74 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
     // uses the bare noun for a page that HAS content nobody could read, which is what these are.
     "Page is blank. Only faint marks are visible, no text.",
     "Page is blank. Handwritten marks are visible; they are not legible as content.",
+    // …and the adjective slot does not change that: it decides what may DRESS a marks noun, and bare
+    // `marks` is not one. This is #429's own fifth reply, which is why that one is not rescued by the
+    // slot written for its wording — the fault it names is real and the noun under it is #193's.
+    "Page is blank. Only faint, indistinct marks are visible, no text.",
+    // The slot hands its word BACK into the scope instead of removing it, so a doubt word in it goes on
+    // vetoing without the slot knowing which list carries it. That is the fix for both notes the first
+    // review of #430 raised: the earlier version asked `DEGRADED_IMAGE_LOG` by name when the vetoes are
+    // that list UNION `UNREADABLE_LOG`, so `partial` here became a declaration; and it asked `TEXT_NOUN`,
+    // a list of SUBJECTS, in the one position where a log writes the participle, so `handwritten` walked
+    // through the check meant for `handwriting`.
+    "Page is blank. Only faint, streaked specks are visible, no text.",
+    "Page is blank. Only faint, illegible specks are visible, no text.",
+    "Page is blank. Only a few faint, partial specks are visible.",
+    "Page is blank. Only faint, truncated specks are visible.",
+    // A name for text is refused whichever part of speech names it, because only the participle can stand
+    // here and only the noun is a subject `contentAffirmed` can read: these fall back to the phrase
+    // WITHOUT the slot, which is what this file did before the slot existed. `text-like` is one token to
+    // the slot, so its test is a boundary test and not `^text$`.
+    "Page is blank. Only faint, text-like specks are visible, no text.",
+    "Page is blank. Only faint, handwriting specks are visible, no text.",
+    "Page is blank. Only faint, handwritten smudges are visible, no text.",
+    "Page is blank. Only faint, stamped dots are visible, no text.",
+    "Page is blank. Only faint, typed dots are visible.",
+    "Page is blank. Only faint, signed smudges are visible.",
+    "Page is blank. Only faint, watermark dots are visible.",
+    // The second review of #430 read `NAMES_TEXT_FORM` as the only thing between an attributive naming
+    // writing and a silent blank, and named five words it did not carry. It is not that — base declares
+    // "Only <w> smudges are visible" blank for every one of these whether the word is listed or not, and
+    // its contradiction check fires on 0 of 32 attributive wordings against 14 of 14 subject ones. What
+    // the list does is keep this slot from making base worse, so the class is covered anyway: it costs
+    // base's verdict and nothing else. The first five are the review's; the rest are words the corpus
+    // writes in a page log (`footnote` 2,215 times, `italic` 403) and never in one asserting blankness.
+    "Page is blank. Only faint, cursive smudges are visible.",
+    "Page is blank. Only faint, pencilled smudges are visible, no text.",
+    "Page is blank. Only faint, handprinted dots are visible.",
+    "Page is blank. Only faint, barcode dots are visible.",
+    "Page is blank. Only faint, drawing specks are visible.",
+    "Page is blank. Only faint, footnote specks are visible.",
+    "Page is blank. Only faint, italic smudges are visible, no text.",
+    "Page is blank. Only faint, symbol dots are visible.",
+    "Page is blank. Only faint, lettering specks are visible.",
+    "Page is blank. Only faint, alphanumeric dots are visible.",
+    // ...and the list is boundary-tested rather than anchored, because anchored it could not see a
+    // hyphenated compound of a word it already carries — `stamped`, `written`, `lettered`, `annotated`
+    // were all in it while these four walked through, found by the third review of #430. That gap is not
+    // a missing word and the "add the word when a round writes one" policy cannot close it: `hand-`,
+    // `pen-` and `rubber-` are how a log names the instrument, so the compounds are unbounded. The
+    // suffixed form is the opposite case and IS a missing word, since one stem has finitely many:
+    // `italicised` slipped through a list holding `italic` until the gerunds went in beside it.
+    "Page is blank. Only faint, rubber-stamped smudges are visible.",
+    "Page is blank. Only faint, pen-written smudges are visible.",
+    "Page is blank. Only faint, hand-lettered smudges are visible.",
+    "Page is blank. Only faint, hand-annotated smudges are visible.",
+    "Page is blank. Only faint, italicised specks are visible, no text.",
+    // A hyphen puts the slot's word mid-token: `dark` is the stack and `streaked` is the slot, so a check
+    // reading whole words would answer that base had stripped `streaked` — base strips neither half — and
+    // would take the span with base's `dark` veto in it. Both spellings refuse.
+    "Page is blank. Only dark-streaked specks are visible.",
+    "Page is blank. Only a few dark-handwritten dots are visible.",
+    // The slot's extra word of reach may not begin behind a clause head, which is `NOT_CLAUSE_HEAD` — the
+    // guard the comma'd form has carried since #220 — applied to the slotted plain form as well. Without
+    // it, ANY word between a doubt word and a marks noun pulls the doubt word into the marks phrase and
+    // the log's only doubt leaves with it: `with` is the wording a test above pins, and these are the same
+    // sentence with the preposition replaced by a word no list could hold. Base's own reach stays
+    // unguarded, so the phrases #220 exempts are untouched — three of them are in the delivered list.
+    "Page is blank. The scan is noisy overall artifacts, no text.",
+    "The page is blank. The image is grainy background specks, no text.",
+    "Page is blank. The scan is dark uneven specks, no legible text.",
     // `as` between `not legible` and the noun is still anchored to a marks noun, so a log that names
     // none says its heading could not be read.
     "Page is blank. The heading is not legible as printed text.",
@@ -1540,20 +1639,18 @@ test("a contradicted blank declaration says what the log claimed was there", () 
 // instead, which is the one change that is not about a word — the tests here are what that field is and
 // is not allowed to do.
 test("a reply that states blankness in a field does not have to say it in a sentence", () => {
-  // Two of the three logs measured on this branch, verbatim: one from the issue that reported it and one
-  // from the bench corpus, where it is the single declaration of 125 that base refuses. Both are logs
-  // about a page that is empty, and both are read as saying something is on it.
+  // A log about a page that is empty, read as saying something is on it, verbatim from the bench corpus:
+  // `Source image is entirely` affirms because the exemption for naming the substrate wants a determiner
+  // DIRECTLY beside `image`, and one word in between stops it applying (#429's fault C, which is a reach
+  // measured in tokens and is deliberately not fixed by adding a word to a list).
   //
-  // The third was #367's, and it is not here any more: `document` is read as a modifier now, so that log
-  // is delivered by the prose read with no field at all (#379, and the test below it). That is the
-  // relationship between the two fixes rather than a redundancy — the field carries the replies that
-  // send it and the walk carries the ones that do not, which is every reply sent before the field
-  // existed and every model that ignores it.
+  // Two other logs stood here and neither does now, which is the relationship between the field and the
+  // prose read rather than a redundancy. #367's went when `document` became a modifier (#379, and the test
+  // below it); #343's went when a sentence about the file's NAME stopped affirming (#429, and the test
+  // beside the substrate read). The field carries the replies that send it, the walk carries the ones that
+  // do not — every reply sent before the field existed, and every model that ignores it — and each fix to
+  // the walk takes a row off this list rather than making the field matter less.
   const lost: [string, string][] = [
-    [
-      "#343, and the `affirmed` is its filename sentence",
-      "Page 14 is blank. Contains only minimal dust/specks visible in the image; no printed content, no page number, no marks that resolve into characters. Image filename indicates this is page 14 of 25 in document acir.",
-    ],
     [
       "the bench corpus's one refused declaration, which says the page is blank three times",
       "Source image is entirely blank/white with no visible content, text, graphics, or printed page number. No page-break marker can be emitted because no folio number is visible on the page. No content to transcribe.",
@@ -1788,6 +1885,45 @@ test("the scan the model was handed is not a thing on the page, whichever word n
   ]);
   assert.deepEqual(blankDeclaration({ html: "", log: "Page is blank. The text in the image is blurry." }).vetoes, [
     "blurry",
+  ]);
+});
+
+test("the name of the file is not a thing on the page, and it takes no determiner to say so", () => {
+  // The other half of #343's reply, and the half that outlived the fix above. Its `resolve` veto is gone
+  // — the test before this one is why — and the sentence it ends with went on refusing it: `Image filename
+  // indicates this is page 14 of 25 in document acir.` reads `image` as a name for text, finds the `is` in
+  // `this is page 14` five words along, and reports a page the model read correctly as a page that failed
+  // (`affirmed: "image filename indicates this is page"`, `runs-extract-kimi100`, kimi-k2.5, 2026-09-03,
+  // #429). Two independent faults on one reply, fixed one issue apart.
+  //
+  // What decided it was the determiner the model happened to omit: every wording with `The` in front was
+  // already delivered, because `definiteBefore` reads it. So the fix asks for the noun AFTER the name for
+  // the input rather than the word before it — which is the whole shape of #190, #220 and #371's
+  // objection, a page lost to a wording rather than to a reading.
+  for (const log of [
+    "Page 14 is blank. Contains only minimal dust/specks visible in the image; no printed content, no page number, no marks that resolve into characters. Image filename indicates this is page 14 of 25 in document acir.",
+    "Page is blank. Image filename indicates this is page 14 of 25.",
+    "Page is blank. Image file name indicates this is page 14 of 25.",
+    // The wordings that were already delivered, pinned beside them: with a determiner the substrate read
+    // above does this, and with no name for the input at all there is no subject here to affirm anything.
+    "Page is blank. The image filename indicates this is page 14 of 25.",
+    "Page is blank. Filename indicates this is page 14 of 25.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+  // `name` alone is not the file's name: "Image name is printed at the top" is a page with something on
+  // it, and a log that means the file says `file` or `filename`. Two words, both closed, for that reason.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Image name is printed at the top of the sheet." }), false);
+  // And only the SUBJECT is skipped. The loop reads on, so a second noun in the same sentence still
+  // contradicts the declaration — which is the guarantee `folioAt` is written to keep, and the one that
+  // makes this incapable of buying #194's defect.
+  const affirming = "Page is blank. Image filename indicates page 14, and a heading is visible.";
+  assert.equal(declaredBlank({ html: "", log: affirming }), false);
+  assert.equal(blankDeclaration({ html: "", log: affirming }).affirmed, "heading is visible");
+  // A doubt word in the same sentence is untouched by any of this: the skip is about which subject
+  // affirms, and a page the model could not read is not a page it can call empty.
+  assert.deepEqual(blankDeclaration({ html: "", log: "Page is blank. The image filename is illegible." }).vetoes, [
+    "illegible",
   ]);
 });
 
@@ -2366,8 +2502,9 @@ test("a correction that answered in bare HTML is still a correction", async () =
 // few characters it carries, and a reply that answered nothing is redrawn once whatever its shape.
 // The measurement is in the comment at the branch — 20 replies on 20 distinct pages, 1.05% of the 1,913
 // pages drawn at least once and at least 0.48% of individual draws (a bound: `agent_call` carries no
-// `step`, so the 4,147 page-agent calls in the phase include corrections). Five survive today's parser, and
-// `asserted` is right about 5 of 5 where a length is right about 3.
+// `step`, so the 4,147 page-agent calls in the phase include corrections). Three survive today's parser
+// — five did until #429 widened two of the guard's wordings — and `asserted` is right about all 20 where
+// a length redraws all 20 and is right about those same 3.
 
 test("a draw that carried no page is asked once more, and the second draw is the page", async () => {
   await withTemp(async (dir) => {
@@ -2435,13 +2572,15 @@ test("a declaration a guard refused is not redrawn either — it is the guard's 
         },
       }),
     );
-    // The two of five a character floor gets wrong, and the reason this gate cannot be "simplified"
-    // into one later. The model answered the question — `asserted` is true — and a doubt word stopped
-    // Iris believing the answer. Two corpus pages are exactly this shape ("blank apart from minor
-    // scanning artifacts (specks and compression noise)" and a log naming the image filename), and
-    // every extraction reply on disk for those two images declares the page blank — 14 replies on one,
-    // 8 on the other from three models, none of the 22 carrying content. A redraw buys a second copy
-    // of the same sentence; what they want is the veto's wording (#220, #343).
+    // The shape a character floor gets wrong, and the reason this gate cannot be "simplified" into one
+    // later. The model answered the question — `asserted` is true — and a doubt word stopped Iris
+    // believing the answer, so a redraw would buy a second copy of the same sentence. Two corpus pages
+    // used to sit here ("blank apart from minor scanning artifacts (specks and compression noise)" and a
+    // log naming the image filename): #429 measured them, every extraction reply on disk for those two
+    // images declaring the page blank — 14 on one, 8 on the other from three models, none of the 22
+    // carrying content — and widened the guard's wording, which is what a refusal of this shape wants.
+    // This test's own wording is one the guard still keeps: "too dark to be sure" is doubt about the
+    // reading, not a named mark, and no widening in #220 or #429 reaches it.
     assert.equal(of(events, "page_redrawn").length, 0, "asserted, so nothing here is unanswered");
     assert.equal(draws.filter((d) => d === 2).length, 1);
     assert.deepEqual(failedPages, [2], "and the page is refused exactly as it was before");
@@ -2455,7 +2594,7 @@ test("a blank page whose `html` is not a string is redrawn, and the second draw 
     const draws: number[] = [];
     // The stated limit of the gate, pinned so it cannot be discovered later as a surprise.
     // `blankDeclaration` requires `typeof parsed.html === "string"`, so this reply ANSWERS the question
-    // and `asserted` is false anyway: it is redrawn once. Nothing on disk sends it — all 15 honoured
+    // and `asserted` is false anyway: it is redrawn once. Nothing on disk sends it — all 17 honoured
     // declarations in the corpus spell `html` as a string — and it costs one call and no outcome,
     // which is what this asserts. Believing it would change the blank routing (the page would be
     // DELIVERED as blank rather than refused), and that is #219's argument, not this branch's.

@@ -1455,15 +1455,18 @@ page-agent calls alone, where a mixed count gives 2,042, because 129 pairs carry
 draw. The 0.255% this section first shipped was wrong twice over: 20/7,843 off a corpus missing the
 round directory named `runs`, where the phase-wide figure on the whole corpus is 20/8,049 = 0.248%.
 Replaying all 20 through today's parser
-leaves **five**: the other 15 are blank pages whose
-declaration [`page_blank`](#page_blank) now honours, and a floor would have redrawn every one of
-them. Of the five, two are blank pages whose declaration a guard refused — one on the doubt word
+leaves **three**: the other 17 are blank pages whose
+declaration [`page_blank`](#page_blank) honours, and a floor would have redrawn every one of
+them. Two of those 17 were refusals until issue #429 — one on the doubt word
 `noise`, for a log reading *"blank apart from minor scanning artifacts (specks and compression
 noise)"*, one as self-contradicting for a log naming the **image filename**. Both pages are blank on
 more than one log's word: every page-agent reply on disk for those two images declares the page blank
 — 14 replies on one, 8 on the other from three different models — and none of the 22 carries content,
-so redrawing them buys a second copy of the same sentence at a full page's price. The declaration test
-refuses both and admits the other three, which is 5 of 5 where a character floor is right about 3.
+so the redraw they used to get bought a second copy of the same sentence at a full page's price. The
+three that still arrive carry no declaration to read at all: no envelope survives the parse, so there
+is no `log`, and each of the three wanted the redraw. That makes the declaration test right about all
+20 where a character floor redraws all 20 and is right about 3 — the same three replies, counted
+against a different denominator than the 3 of 5 that held before #429.
 
 What it does not cover, in two spellings: a blank page whose declaration `blankDeclaration` cannot
 see. One is **markup-only** — `<!-- blank page -->` is #219's own spelling, and with no envelope there
@@ -1471,7 +1474,7 @@ is no `blank` field or `log` to read. The other is an envelope whose `html` is *
 `{"html": null, "log": "This page is blank.", "blank": true}` answers the question and is redrawn
 anyway. Each costs one call and changes no outcome: the second draw declares the page blank the same
 way, and the page is refused exactly as it is today. Nothing on disk has produced either shape —
-every one of the 15 honoured declarations sent `html` as a string. Believing a declaration whose
+every one of the 17 honoured declarations sent `html` as a string. Believing a declaration whose
 `html` is null would change the **blank routing** (it would deliver such a page rather than refuse
 it), which is a separate question from this branch.
 
@@ -1554,11 +1557,19 @@ hand (issue #190).
 STATED in its `blank` field is not refused for this, and lands on [`page_blank`](#page_blank) with
 the same field name and a verify call instead (issue #371), and a different finding: the log
 declared the page empty and then said something was on it, and the field carries the words that
-said so (issue #194). The page's own printed number is the one thing a log may name without
-contradicting itself (issue #222): a folio is not content that page could have delivered, so
+said so (issue #194). Two things a log may name without contradicting itself. The first is the page's
+own printed number (issue #222): a folio is not content that page could have delivered, so
 `blank apart from the printed page number` and `blank except for its printed folio` are
 declarations rather than refusals, while `the printed page number and a heading are visible` still
 refuses — through the heading, which is what a reader would have got nothing of.
+
+The second is the **name of the image file** (issue #429): in `Image filename indicates this is page
+14 of 25` the word `image` names the file Iris handed the model, not imagery on the paper, and the
+sentence is where a model that was told to read the folio and could not goes looking for the page
+number instead. That exemption needs no determiner in front of it — `Image filename`, `Filename`,
+`Image file name` and `The image filename` all declare — and it reaches no further than the two words:
+`Image name is printed at the top of the sheet` refuses, so does `Image filename indicates page 14, and
+a heading is visible`, and `The image filename is illegible` is still a doubt word.
 
 They are two findings with two remedies — a doubt word means the page could not be read and wants
 a better scan, a contradiction means the agent answered with no page for a page it says has
@@ -1708,6 +1719,29 @@ content. It reaches across one sentence or semicolon boundary only where the nex
 the same observation — the marks referred back to, no subject at all, or a denial — so "a few
 specks of dust are visible. The handwritten note in the corner does not resolve into words" is
 still a failed page.
+
+Two edges of that phrase are worth spelling out, because a wording just outside either one costs a
+blank page (issue #429). `noise` belongs to the paper only where the capture that made it is named:
+`scan`, `scanner`, `scanning` and `compression noise` are marks on the sheet, which is the corpus's
+entire vocabulary for it — four wordings across the 205 replies on disk that carried no page — while
+bare `noise`, `image noise` and `the scan is noisy` describe the image and stay doubt. And one word
+Iris has no list for may sit **immediately** before the marks noun, so "only faint, indistinct specks
+are visible" declares. It is one word, in that one position, in a clause with no copula, colon or dash
+in front of it — "the scan is noisy with artifacts" and "the image is grainy background specks" are
+still failed pages, because a stack behind `is` describes something the sentence has already named and
+the marks are not it. The word itself is put **back** into the text the doubt and contradiction checks
+read rather than removed with the phrase, so a doubt word or a name for what the page bears goes on
+being one without this rule holding a list of them. Three words are not put back. Two of them fall back
+to the reading that has no slot in it: a function word, which dresses nothing (handing `with` back keeps
+the preposition while `noisy`, the whole doubt, leaves with the phrase); and a name for what a page bears
+written as an **attributive** — `handwritten`, `stamped`, `cursive`, and their hyphenated compounds —
+which is the form Iris reads only as a modifier, where the subject form of the same word (`handwriting`)
+is the one the contradiction check can see. The third is a word the slot-less reading had already
+removed, and there the phrase goes in full, slot included: nothing is handed back because base kept
+nothing to hand back, which is what makes this rule able only ever to strip **more** than the slot-less
+reading and never less. That slot moves no
+reply on disk: it is there because the words it admits appear in none of the 3,935 replies that did
+carry a page, so admitting one cannot let content through as a blank declaration.
 
 And a log that says *where* something illegible sits ("not legible printing in the margin") is
 naming what the page bears rather than denying it, while naming the substrate ("not legible text
