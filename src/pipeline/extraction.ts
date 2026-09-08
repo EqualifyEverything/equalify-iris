@@ -2839,7 +2839,8 @@ async function renderPage(
     // among the 60 that carry `step`, which is why 60 / 954 / 604 / 1,558 are the only figures the
     // exclusion leaves alone. That is where an
     // earlier version of this comment got 4,159 calls and 1,916 pages. Every count below is the round
-    // directories alone, and it moves the headline: 20/1,913 is 1.045%, where 20/1,916 rounded to 1.04%.
+    // directories alone, and it moves the headline: 20/1,913 is 1.0455%, where 20/1,916 was 1.0438% and
+    // rounded to 1.04%. Four digits because three would be 1.045, the half that cannot decide itself.
     // 0.48% and the 0.248% named at the end are unchanged.
     //
     // The per-draw rate is a bound and not a figure, said out loud because two shipped versions of this
