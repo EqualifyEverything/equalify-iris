@@ -42,15 +42,18 @@
 // clauses stand. What #339 needs is somewhere that is not `problems`; it never needed that somewhere
 // to be roomy.
 //
-// One correction to the bullet above while narrowing it, because it cites the Reader for something
-// the Reader does not show. "The Reader was told to write no reasoning at all and some of it came
-// back as issues asking for no change" is the relocation claim, and the comment on
-// `READER_JSON_ONLY` reports the measurement that was taken of it: self-cancelling issues per
-// document, two runs at each prompt, moved 1.10/0.70 -> 1.25/0.75 on kimi-k2.5, 0.00/0.05 ->
-// 0.30/0.05 on the incumbent, DOWN on Haiku and flat at zero on Luna. The behaviour is real and
-// model-specific and the append is not what causes it. So the case for keeping a destination rests
-// on #339's own numbers — 32 of 244, 14 of 71, on all three models — and not on the Reader, which is
-// borrowed evidence that does not survive its own check.
+// One correction to the bullet above while narrowing it, because it leans on the Reader for a claim
+// the Reader is CONTESTED on. "The Reader was told to write no reasoning at all and some of it came
+// back as issues asking for no change" is the relocation claim, and the same body of runs has been
+// read at two resolutions. #307's filing counted DOCUMENTS with at least one self-cancelling issue,
+// matched 40-vs-40: 1 -> 7 on the incumbent, p = 0.028, Haiku unmoved as the control. The comment on
+// `READER_JSON_ONLY` counts self-cancelling issues PER DOCUMENT over two runs at each prompt —
+// 1.10/0.70 -> 1.25/0.75 on kimi-k2.5, 0.00/0.05 -> 0.30/0.05 on the incumbent, DOWN on Haiku, flat
+// at zero on Luna — notes that the incumbent's rise is 6 issues in one run against 1 in the other,
+// and concludes the behaviour is real, model-specific, and not caused by the append. Neither refutes
+// the other, and the second pair of runs is what the comment has and the filing did not. So the case
+// for keeping a destination rests on #339's own numbers — 32 of 244, 14 of 71, three models — which
+// are direct and uncontested, and not on borrowed evidence that argues with itself.
 //
 // The corrector half of #365 gets sentences one and two and NOT the third, and that asymmetry is
 // pinned below rather than left to be tidied up. `agents/page.md`'s "log" is not working-out:

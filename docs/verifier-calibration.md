@@ -127,13 +127,16 @@ for working-out contradicts four lines above. Narrowing it rather than deleting 
 the point below: a destination read by nothing is what #339 needs, and one line of it is as
 unreadable as ten. Naming a destination rather than only forbidding the narration was argued from
 issue #303, on the grounds that what the Reader stopped writing as prose partly came back as issues
-asking for no change — and that argument does not survive its own source. The comment on
-`READER_JSON_ONLY` reports the measurement: self-cancelling issues per document, two runs at each
-prompt, went 1.10/0.70 → 1.25/0.75 on kimi-k2.5 and 0.00/0.05 → 0.30/0.05 on the incumbent, but DOWN
-on Haiku and flat at zero on Luna, each shift the size of that model's spread between identical runs.
-The behaviour is real and model-specific and appending the clause is not what causes it. So the
-destination is kept on #339's own numbers below, which are direct, and not on the Reader's, which are
-borrowed and do not show it. That every model does it on real pages is the strongest form of the
+asking for no change — and that borrowed argument is **contested at two resolutions by the same runs**,
+so it should not be leaned on. #307's filing counted documents with at least one self-cancelling issue
+in a matched 40-vs-40 design and got 1 → 7 on the incumbent at p = 0.028, with Haiku unmoved as the
+control. The comment on `READER_JSON_ONLY` counts self-cancelling issues *per document* over two runs
+at each prompt — 1.10/0.70 → 1.25/0.75 on kimi-k2.5, 0.00/0.05 → 0.30/0.05 on the incumbent, DOWN on
+Haiku, flat at zero on Luna — observes that the incumbent's rise is 6 issues in one run against 1 in
+the other, and concludes the behaviour is real, model-specific, and not caused by the clause. Neither
+statistic refutes the other; the second pair of runs is what the comment has and the filing did not.
+The destination is therefore kept on #339's own numbers below, which are direct and uncontested, and
+not on the Reader's. That every model does it on real pages is the strongest form of the
 schema argument — one of the specimens declares the entry "excluded from problems count" from inside
 the problems array, which is the case for a destination made by the model itself. It also means the
 **instruction** half has no proof of sufficiency: no model has been shown going to zero by instruction
