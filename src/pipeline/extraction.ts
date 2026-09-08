@@ -2834,9 +2834,10 @@ async function renderPage(
     // `correctPage` below, and `mergeSpecialist`. 4,159 therefore bounds the draws from above rather
     // than counting them. In THIS corpus the third site contributes nothing and the inflation is
     // corrections alone: `4,159 + 3,914` is the whole phase, so no specialist agent ever logged a row
-    // here, and `mergeSpecialist` only runs after one returns a fragment (0 `specialist_merge`
-    // `model_call`s on disk says it independently). `model_call` does carry `step`, and only recent
-    // rounds emit it: across the 60 log files that have it, 954 of 1,558 page-agent calls are draws and
+    // here, and `mergeSpecialist` only runs after one returns a fragment. That sum carries the claim by
+    // itself: 0 `specialist_merge` `model_call`s is a fact about the 60 files that emit `step`, and says
+    // nothing about the other 2,586. `model_call` does carry `step`, and only recent
+    // rounds emit it: across those 60 log files, 954 of 1,558 page-agent calls are draws and
     // 604 are corrections, so the rate is nearer 0.8% if that mix holds corpus-wide — and a correction
     // always follows a draw of the same page in the same run (`correctPage`'s only caller is inside
     // `extractPage`), which is what makes "pages drawn at least once" a sound reading of a population

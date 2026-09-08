@@ -1429,9 +1429,10 @@ records no `step` (`src/store/runlog.ts`), and **three** call sites log under th
 phase: the draw, the correction pass, and the specialist merge. So 4,159 bounds the draws from above
 and does not count them. **In this corpus the third site contributes nothing and the inflation is
 corrections alone:** `4,159 + 3,914` is the whole phase, so no specialist agent ever logged a row here,
-and `mergeSpecialist` runs only after one returns a fragment — which 0 `specialist_merge` `model_call`s
-on disk says independently. `model_call` does carry `step`, and only recent rounds emit it: in the 60
-log files that have it, 954 of 1,558 page-agent calls are draws and 604 are corrections, which puts the
+and `mergeSpecialist` runs only after one returns a fragment. That sum carries the claim by itself —
+0 `specialist_merge` `model_call`s is a fact about the 60 files that emit `step`, and says nothing about
+the other 2,586. `model_call` does carry `step`, and only recent rounds emit it: in those 60
+log files, 954 of 1,558 page-agent calls are draws and 604 are corrections, which puts the
 rate nearer 0.8% if that mix holds. A correction always follows a draw of the same page in the same run
 (`correctPage`'s only caller is inside `extractPage`), which is what makes *pages drawn at least once* a
 sound reading of a population that counts corrections. The **1,916 is exact** — distinct round-and-page pairs counted off
